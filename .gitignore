@@ -15,11 +15,11 @@ build/
 !flux.spec
 
 # Flux runtime files — never commit these
-DOSSIER_PROJETS/
-USER/
-CONFIG/
-FLUX_UPDATE/*.exe
-.flux
+#DOSSIER_PROJETS/
+#USER/
+#CONFIG/
+#FLUX_UPDATE/*.exe
+#.flux
 
 # IDE
 .vscode/
