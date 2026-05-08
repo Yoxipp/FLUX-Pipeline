@@ -14,13 +14,6 @@ build/
 # keep flux.spec tracked — only ignore generated specs
 !flux.spec
 
-# Flux runtime files — never commit these
-#DOSSIER_PROJETS/
-#USER/
-#CONFIG/
-#FLUX_UPDATE/*.exe
-#.flux
-
 # IDE
 .vscode/
 .idea/
