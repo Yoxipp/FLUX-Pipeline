@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# PyInstaller output
+*.spec
+dist/
+build/
+
+# Flux runtime files — never commit these
+DOSSIER_PROJETS/
+USER/
+CONFIG/
+FLUX_UPDATE/*.exe
+.flux
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
