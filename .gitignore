@@ -19,6 +19,14 @@ build/
 .idea/
 *.swp
 
+# Flux runtime — never commit these (generated at launch)
+USER/
+CONFIG/
+DOSSIER_PROJETS/
+FLUX_UPDATE/*.exe
+TEST/
+.flux
+
 # OS
 .DS_Store
 Thumbs.db
