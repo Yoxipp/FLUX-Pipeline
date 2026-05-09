@@ -20,6 +20,7 @@ build/
 *.swp
 
 # Flux runtime — never commit these (generated at launch)
+config.json
 USER/
 CONFIG/
 DOSSIER_PROJETS/
