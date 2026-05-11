@@ -12,8 +12,18 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Cascadia Code', 'monospace'],
+      },
+      borderRadius: {
+        'flux-sm': '4px',
+        'flux':    '6px',
+        'flux-lg': '8px',
+      },
+      boxShadow: {
+        'flux-xs': 'var(--shadow-xs)',
+        'flux-sm': 'var(--shadow-sm)',
+        'flux-md': 'var(--shadow-md)',
       },
     },
   },
