@@ -6,7 +6,7 @@
     "skipLibCheck": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "outDir": "electron",
+    "outDir": "dist-electron",
     "rootDir": "electron",
     "strict": true,
     "esModuleInterop": true

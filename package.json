@@ -2,9 +2,9 @@
   "name": "flux-pipeline",
   "version": "0.1.0",
   "description": "FLUX Pipeline Hub",
-  "main": "electron/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"electron .\"",
+    "dev": "tsc -p tsconfig.electron.json && concurrently \"vite\" \"electron .\"",
     "build:frontend": "vite build",
     "build:backend": "pyinstaller backend.spec",
     "build:electron": "tsc -p tsconfig.electron.json",
