@@ -63,6 +63,10 @@ async def init_first_launch(req: InitRequest) -> dict:
         for d in FLUX_ROOT_DIRS:
             ensure_dir(root / d)
         (root / FLUX_MARKER_FILENAME).touch()
+        # Écrire workspace dans les deux emplacements :
+        # - config.json (next to exe, lu par get_flux_root())
+        # - prefs.json  (AppData, lu par config._load())
+        set_flux_root(root)
         config.create_user(req.username, req.workspace)
 
     loop = asyncio.get_event_loop()
