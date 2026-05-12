@@ -13,6 +13,8 @@ dist/
 build/
 # keep flux.spec tracked — only ignore generated specs
 !flux.spec
+# keep electron-builder icon tracked — required on every dev machine to build the MSI
+!build/icon.ico
 
 # IDE
 .vscode/
