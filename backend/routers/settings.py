@@ -7,9 +7,12 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from pathlib import Path
+
 from core import config
+from core.constants import FLUX_MARKER_FILENAME, FLUX_ROOT_DIRS
 from core.logger import get_logger
-from core.paths import get_flux_root, set_config_username, set_flux_root
+from core.paths import ensure_dir, get_flux_root, set_config_username, set_flux_root
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -50,9 +53,16 @@ async def get_settings() -> dict:
 
 @router.post("/init")
 async def init_first_launch(req: InitRequest) -> dict:
-    """First-launch setup: persist workspace + username."""
+    """First-launch setup: scaffold FLUX root structure, persist workspace + username."""
+    def _scaffold():
+        root = Path(req.workspace)
+        for d in FLUX_ROOT_DIRS:
+            ensure_dir(root / d)
+        (root / FLUX_MARKER_FILENAME).touch()
+        config.create_user(req.username, req.workspace)
+
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: config.create_user(req.username, req.workspace))
+    await loop.run_in_executor(None, _scaffold)
     return {"success": True, "workspace": req.workspace, "username": req.username}
 
 

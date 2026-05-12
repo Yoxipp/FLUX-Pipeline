@@ -125,10 +125,13 @@ def publish_file(
 
     ensure_dir(dest_folder)
 
-    base_name  = get_base_name(filename)
-    next_ver   = get_next_version(dest_folder, base_name)
+    base_name = get_base_name(filename)
+    next_ver  = get_next_version(dest_folder, base_name)
 
-    rename_last_to_versioned(dest_folder, base_name, next_ver)
+    # If a LAST file exists, it gets archived as v{next_ver}; the new LAST is v{next_ver+1}.
+    # If no LAST exists (first publish ever), the new LAST is v{next_ver} = v001.
+    had_last = rename_last_to_versioned(dest_folder, base_name, next_ver) is not None
+    new_ver  = next_ver + 1 if had_last else next_ver
 
     dest_name = f"{base_name}_{ACTIVE_VERSION_LABEL}{source_path.suffix}"
     dest_path = dest_folder / dest_name
@@ -139,7 +142,7 @@ def publish_file(
         log.error("File copy failed: %s", e)
         return None
 
-    append_log(dest_folder, base_name, format_version(next_ver), description, user)
+    append_log(dest_folder, base_name, format_version(new_ver), description, user)
     log_publish(user, dest_name, project_name or project_path.name)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, next_ver)

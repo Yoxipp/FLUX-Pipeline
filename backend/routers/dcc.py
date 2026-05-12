@@ -32,21 +32,28 @@ class LaunchRequest(BaseModel):
     exe_path: str | None = None
 
 
-@router.get("/status")
-async def get_dcc_status() -> dict:
-    """Return reachability state for every known DCC."""
+async def _probe_all_dccs() -> dict:
+    """Probe all DCC ports in parallel. Returns status dict."""
     loop = asyncio.get_event_loop()
-    status = {}
-    for name, port in DCC_PORTS.items():
-        reachable = await loop.run_in_executor(
-            None, lambda p=port: socket_manager.probe_port(p)
-        )
-        status[name] = {
+    names = list(DCC_PORTS.keys())
+    ports = list(DCC_PORTS.values())
+    results = await asyncio.gather(
+        *[loop.run_in_executor(None, lambda p=port: socket_manager.probe_port(p)) for port in ports]
+    )
+    return {
+        name: {
             "connected": reachable,
             "port":      port,
             "color":     DCC_COLORS.get(name, DCC_COLORS["disconnected"]),
         }
-    return status
+        for name, port, reachable in zip(names, ports, results)
+    }
+
+
+@router.get("/status")
+async def get_dcc_status() -> dict:
+    """Return reachability state for every known DCC."""
+    return await _probe_all_dccs()
 
 
 @router.post("/execute", response_model=CommandResult)
@@ -107,20 +114,11 @@ async def launch(req: LaunchRequest) -> dict:
 
 @router.websocket("/ws/status")
 async def dcc_status_websocket(websocket: WebSocket):
-    """Push DCC status every 2 seconds via WebSocket."""
+    """Push DCC status every 2 seconds via WebSocket (probes run in parallel)."""
     await websocket.accept()
     try:
         while True:
-            loop = asyncio.get_event_loop()
-            status: dict = {}
-            for name, port in DCC_PORTS.items():
-                reachable = await loop.run_in_executor(
-                    None, lambda p=port: socket_manager.probe_port(p)
-                )
-                status[name] = {
-                    "connected": reachable,
-                    "color":     DCC_COLORS.get(name, DCC_COLORS["disconnected"]),
-                }
+            status = await _probe_all_dccs()
             await websocket.send_json(status)
             await asyncio.sleep(2)
     except (WebSocketDisconnect, RuntimeError):

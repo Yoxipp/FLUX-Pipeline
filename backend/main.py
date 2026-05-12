@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Ensure backend/ is on sys.path when run directly
 sys.path.insert(0, os.path.dirname(__file__))
 
+from core import config
 from core.logger import get_logger
 from routers import activity, dcc, files, folder_manager, importer, publish, settings, shelf
 
@@ -25,6 +26,10 @@ PORT = int(os.environ.get("FLUX_PORT", 8765))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("[FLUX] Backend starting on port %d", PORT)
+    saved_user = config.get("username")
+    if saved_user:
+        config.set_current_user(saved_user)
+        log.info("[FLUX] Active user: %s", saved_user)
     yield
     log.info("[FLUX] Backend shutting down")
 

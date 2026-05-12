@@ -41,14 +41,14 @@ def log_event(
     """
     date, time = _now()
     entry = {
-        "id":       _make_id(user),
-        "user":     user,
-        "action":   action,
-        "project":  project,
-        "filename": filename or "",
-        "date":     date,
-        "time":     time,
-        "read":     False,
+        "id":      _make_id(user),
+        "user":    user,
+        "action":  action,
+        "project": project,
+        "file":    filename or "",
+        "date":    date,
+        "time":    time,
+        "read":    False,
     }
 
     act_path = path or get_activity_path()
