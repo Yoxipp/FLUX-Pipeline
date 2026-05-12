@@ -30,6 +30,7 @@ class SettingsUpdate(BaseModel):
     theme_accent: str | None = None
     last_project: str | None = None
     dcc_path: dict | None = None   # {"Maya": "C:/path/maya.exe", ...}
+    username: str | None = None
 
 
 @router.get("")
@@ -42,12 +43,15 @@ async def get_settings() -> dict:
     theme = await loop.run_in_executor(None, config.get_theme)
     last_proj = await loop.run_in_executor(None, config.get_last_project)
 
+    dcc_paths = await loop.run_in_executor(None, lambda: config.get("dcc_paths", {}))
+
     return {
         "first_launch": is_first,
         "workspace":    str(root) if root else None,
         "username":     user,
         "theme":        theme,
         "last_project": last_proj,
+        "dcc_paths":    dcc_paths,
     }
 
 
@@ -89,6 +93,11 @@ async def update_settings(req: SettingsUpdate) -> dict:
     if req.dcc_path:
         for dcc_name, path in req.dcc_path.items():
             await loop.run_in_executor(None, lambda d=dcc_name, p=path: config.set_dcc_exe(d, p))
+
+    if req.username:
+        await loop.run_in_executor(None, lambda: set_config_username(req.username))
+        config.set_current_user(req.username)
+        log.info("User switched to '%s'", req.username)
 
     return {"success": True}
 

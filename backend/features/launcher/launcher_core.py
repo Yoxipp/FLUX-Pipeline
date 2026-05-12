@@ -15,6 +15,18 @@ log = get_logger(__name__)
 # Windows DETACHED_PROCESS flag — process keeps running after hub closes
 _DETACHED_PROCESS = 0x00000008
 
+# Map frontend lowercase keys → DCC_EXE_PATTERNS keys
+_FRONTEND_KEY_MAP: dict[str, str] = {
+    "maya":               "Maya",
+    "houdini":            "Houdini",
+    "nuke":               "Nuke",
+    "substance_painter":  "SubstanceP",
+    "substance_designer": "SubstanceD",
+    "zbrush":             "ZBrush",
+    "marvelous":          "Marvelous",
+    "photoshop":          "Photoshop",
+}
+
 
 # ── public API ────────────────────────────────────────────────────────────────
 
@@ -66,6 +78,28 @@ def set_custom_exe_path(dcc_name: str, path: str) -> None:
     """Persist a custom exe path for *dcc_name* in user settings."""
     config.set_dcc_exe(dcc_name, path)
     log.info("Custom exe set for %s: %s", dcc_name, path)
+
+
+def find_dcc_exe(dcc_key: str) -> str | None:
+    """Glob-scan default install dirs for *dcc_key*, save to config if found.
+
+    *dcc_key* is the frontend lowercase key (e.g. 'maya', 'substance_painter').
+    Returns the found path, or None if nothing matches.
+    """
+    internal = _FRONTEND_KEY_MAP.get(dcc_key)
+    if not internal:
+        log.warning("find_dcc_exe: unknown key '%s'", dcc_key)
+        return None
+    patterns = DCC_EXE_PATTERNS.get(internal, [])
+    for pattern in patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            path = sorted(matches)[-1]
+            config.set_dcc_exe(dcc_key, path)
+            log.info("Auto-found %s → %s", dcc_key, path)
+            return path
+    log.info("Auto-find: no exe found for '%s'", dcc_key)
+    return None
 
 
 # ── private ───────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from core.constants import DCC_COLORS, DCC_PORTS
 from core.logger import get_logger
 from core.socket_manager import socket_manager
-from features.launcher.launcher_core import get_installed_dccs, launch_dcc
+from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -91,6 +91,14 @@ async def disconnect_dcc(dcc_name: str) -> dict:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, lambda: socket_manager.disconnect(dcc_name))
     return {"dcc": dcc_name, "connected": False}
+
+
+@router.get("/find/{dcc_key}")
+async def auto_find_dcc(dcc_key: str) -> dict:
+    """Glob-scan default install paths for dcc_key, save if found."""
+    loop = asyncio.get_event_loop()
+    path = await loop.run_in_executor(None, lambda: find_dcc_exe(dcc_key))
+    return {"dcc": dcc_key, "path": path, "found": path is not None}
 
 
 @router.get("/installed")
