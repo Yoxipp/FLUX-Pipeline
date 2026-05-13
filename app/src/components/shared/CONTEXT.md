@@ -2,7 +2,7 @@
 
 > Domain: frontend  
 > Path: app/src/components/shared/  
-> Last updated: 2026-05-13  
+> Last updated: 2026-05-14  
 > Key internal dependencies: react, lucide-react, api.client, types
 
 ## 1. Module Role
@@ -36,7 +36,7 @@ TitleBar uses Avatar from ui.tsx. Sidebar and StatusBar both consume `DccStatusM
 ## 6. Per-File Detail
 
 ### `TitleBar.tsx`
-**Role:** Frameless window chrome. Exports TitleBar component with window minimize/maximize/close controls (via window.electronAPI), app logo, notification badge, settings gear with inline popover, and user pill trigger.
+**Role:** Frameless window chrome. Exports TitleBar component with window minimize/maximize/close controls (via window.electronAPI), app logo, notification badge, settings gear with inline popover, and user pill trigger. SettingsPopover (internal sub-component) includes a "Changer de répertoire…" button in the WORKSPACE section that triggers handleChangeWorkspace to open a native directory picker, update app settings, and reload.
 
 ### `Sidebar.tsx`
 **Role:** Primary navigation and DCC launcher. Manages local state for launching DCCs, auto-finding paths, and picking paths via file dialog. Calls api.launchDcc, api.findDccExe, api.updateSettings, and api.getSettings on mount.
@@ -53,7 +53,7 @@ TitleBar uses Avatar from ui.tsx. Sidebar and StatusBar both consume `DccStatusM
 ## 7. Maintenance Notes
 - **Window Controls**: TitleBar traffic-light buttons call window.electronAPI methods; ensure Electron preload exposes windowMinimize, windowMaximize, windowClose.
 - **DCC Status**: Both Sidebar and StatusBar consume the same DccStatusMap; keep key names consistent (e.g., 'maya', 'houdini', 'nuke', etc.).
-- **Settings Popover**: Located inline in TitleBar, positioned absolutely; ensure it doesn't overflow on small windows.
+- **Settings Popover**: Located inline in TitleBar, positioned absolutely; ensure it doesn't overflow on small windows. Includes workspace change feature with RefreshCw animation during directory picker and settings update.
 - **Sidebar DCC Launcher**: Software list (SOFTWARE const) must match backend DCC_PORTS keys exactly; mismatch breaks launch/find/status.
 - **Avatar Usage**: Two instances in TitleBar (in settings popover and user pill); both use first character of username, uppercased.
 - **StatusBar Filtering**: Only displays items with a dot (entry in dccStatus); remove entry keys to hide DCC from status bar.

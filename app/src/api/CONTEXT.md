@@ -2,7 +2,7 @@
 
 > Domain: frontend
 > Path: app/src/api/
-> Last updated: 2026-05-13
+> Last updated: 2026-05-14
 > Key internal dependencies: types.ts (from parent), backend at http://127.0.0.1:8765
 
 ## 1. Module Role
@@ -31,7 +31,7 @@ When calling backend endpoints from hooks or pages. When adding new backend rout
 **client.ts**
 Singleton HTTP client wrapping fetch API. Base URL fixed to `http://127.0.0.1:8765`. Exports single `api` object grouped by domain:
 
-Settings: `getSettings()`, `initFirstLaunch(workspace, username)`, `updateSettings(patch)`, `listUsers()`. Manages app config and user identity setup.
+Settings: `getSettings()`, `initFirstLaunch(workspace, username)`, `updateSettings(patch)`, `listUsers()`. Manages app config and user identity setup. `updateSettings(patch)` accepts configuration changes including theme fields, last_project, dcc_path, username, and workspace (triggers workspace/pipeline root directory change on the backend).
 
 DCC: `getDccStatus()`, `connectDcc(dcc)`, `disconnectDcc(dcc)`, `executeCommand(dcc, command)`, `findDccExe(dcc)`, `getInstalledDccs()`, `launchDcc(dcc, exe_path?)`. Controls 3D software (Maya, Houdini, Blender) connections and command execution.
 

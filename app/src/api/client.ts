@@ -49,7 +49,7 @@ export const api = {
   updateSettings: (patch: Partial<{
     theme_bg: string; theme_surface: string; theme_fg: string; theme_accent: string
     last_project: string; dcc_path: Record<string, string>
-    username: string
+    username: string; workspace: string
   }>) => apiCall<{ success: boolean }>('PUT', '/settings', patch),
 
   listUsers: () =>

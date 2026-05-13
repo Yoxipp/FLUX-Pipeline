@@ -2,7 +2,7 @@
 
 > Domain: backend
 > Path: backend/routers/
-> Last updated: 2026-05-13
+> Last updated: 2026-05-14
 > Key internal dependencies: features/*, main.py
 
 ## 1. Module Role
@@ -19,7 +19,7 @@ When adding new endpoints, modifying request/response contracts, or tracing how 
 | importer.py | Router | Import commands & file browser. Calls import_core and file_browser. | POST /import, GET /browse |
 | activity.py | Router | Event log & team chat. Read/write activity.json and teamChat.json. | GET /activity, POST /activity/read, POST /activity/read-all, GET /activity/chat, POST /activity/chat |
 | files.py | Router | File system navigation & activity logs. Exposes browse and modif_logs.json. | GET /files/projects/{project}/browse, GET /files/projects/{project}/logs |
-| settings.py | Router | App configuration. Full settings CRUD + first-launch detection. | GET /settings, POST /settings/init, PUT /settings, GET /settings/users |
+| settings.py | Router | App configuration. Full settings CRUD + first-launch detection. Supports username and workspace changes. | GET /settings, POST /settings/init, PUT /settings, GET /settings/users |
 | folder_manager.py | Router | Project/asset/sequence/shot CRUD. Manages folder structure & tokens.json. | GET /folder/projects, POST /folder/projects, GET /folder/projects/{project}/assets, POST /folder/assets, GET /folder/projects/{project}/sequences, POST /folder/sequences, GET /folder/projects/{project}/sequences/{seq}/shots, POST /folder/shots |
 | shelf.py | Router | Shelf install/remove. Manages Flux shelf in DCC user directories. | GET /shelf, POST /shelf/install, DELETE /shelf |
 
@@ -121,8 +121,8 @@ First-launch scaffold. Creates default settings, project folders, tokens.json, e
 → used by: Frontend onboarding flow.
 
 #### `PUT /settings`
-Patch any settings field. Accepts partial updates (e.g., only update theme, leave other fields untouched).
-→ used by: Frontend settings page, theme toggle, etc.
+Patch any settings field. Accepts partial updates (e.g., only update theme, leave other fields untouched). When username changes, creates FLUX_ROOT/USER/<name>/ directory. When workspace changes, scaffolds FLUX dirs in new workspace and updates config.json + prefs.json.
+→ used by: Frontend settings page, theme toggle, workspace/user switching, etc.
 
 #### `GET /settings/users`
 Return list of users from settings (pipeline team members).

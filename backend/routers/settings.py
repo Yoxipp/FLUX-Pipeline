@@ -13,6 +13,7 @@ from core import config
 from core.constants import FLUX_MARKER_FILENAME, FLUX_ROOT_DIRS
 from core.logger import get_logger
 from core.paths import ensure_dir, get_flux_root, set_config_username, set_flux_root
+from utils import user_utils
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -31,6 +32,7 @@ class SettingsUpdate(BaseModel):
     last_project: str | None = None
     dcc_path: dict | None = None   # {"Maya": "C:/path/maya.exe", ...}
     username: str | None = None
+    workspace: str | None = None   # change le répertoire du pipe
 
 
 @router.get("")
@@ -103,9 +105,21 @@ async def update_settings(req: SettingsUpdate) -> dict:
             await loop.run_in_executor(None, lambda d=dcc_name, p=path: config.set_dcc_exe(d, p))
 
     if req.username:
+        # set_current_user crée le dossier FLUX_ROOT/USER/<name>/ en plus de persister
+        await loop.run_in_executor(None, lambda: user_utils.set_current_user(req.username))
         await loop.run_in_executor(None, lambda: set_config_username(req.username))
-        config.set_current_user(req.username)
         log.info("User switched to '%s'", req.username)
+
+    if req.workspace:
+        def _update_workspace():
+            ws = Path(req.workspace)
+            for d in FLUX_ROOT_DIRS:
+                ensure_dir(ws / d)
+            (ws / FLUX_MARKER_FILENAME).touch(exist_ok=True)
+            set_flux_root(ws)
+            config.set("workspace", str(ws))
+        await loop.run_in_executor(None, _update_workspace)
+        log.info("Workspace changed to '%s'", req.workspace)
 
     return {"success": True}
 

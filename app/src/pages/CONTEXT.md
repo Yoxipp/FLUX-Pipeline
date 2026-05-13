@@ -2,7 +2,7 @@
 
 > Domain: frontend
 > Path: app/src/pages/
-> Last updated: 2026-05-13
+> Last updated: 2026-05-14
 > Key internal dependencies: useActivity hook, api module (publish, browseImport, importFiles, getActivity, getShelves, installShelf, removeShelf, listUsers, updateSettings, initFirstLaunch), electronAPI.openFolder
 
 ## 1. Module Role
@@ -20,8 +20,8 @@ When navigating the FLUX application structure, understanding how pages integrat
 | Activity.tsx | .tsx | Filterable activity feed with mark-as-read | Activity (named export) |
 | Projects.tsx | .tsx | Project/folder manager with asset/seq/shot creators | Projects (named export) |
 | ShelfManager.tsx | .tsx | DCC shelf install/remove interface | ShelfManager (named export) |
-| FirstLaunch.tsx | .tsx | Multi-step onboarding wizard (workspace, username) | FirstLaunch (named export) |
-| Login.tsx | .tsx | User switch modal overlay | Login (named export) |
+| FirstLaunch.tsx | .tsx | Multi-step onboarding with workspace path and username selection (avatar list + text input) | FirstLaunch (named export) |
+| Login.tsx | .tsx | Compact user switch popover (below TitleBar, right-aligned) | Login (named export) |
 
 ## 4. Useful Relations
 - Hub: consumes ActivityFeed, ChatBox, QuickShortcuts components; reads useActivity hook
@@ -30,7 +30,7 @@ When navigating the FLUX application structure, understanding how pages integrat
 - Projects: folder tree and asset creators; depends on folder manager API
 - ShelfManager: reads DCC list from api.getShelves(); toggles install/remove
 - FirstLaunch: first-run only; workspace path via electronAPI; username from api.listUsers()
-- Login: user modal; calls api.updateSettings(); triggers reload on switch
+- Login: user popover; calls api.updateSettings(); triggers reload on switch
 
 ## 5. Module Entry Points
 - Hub → default home view on app load
@@ -40,7 +40,7 @@ When navigating the FLUX application structure, understanding how pages integrat
 - Projects → click "Projects" in main nav
 - ShelfManager → click "Shelf Manager" in main nav
 - FirstLaunch → on first launch (workspace + user setup)
-- Login → user avatar click or user switch overlay
+- Login → user avatar click or user switch popover
 
 ## 6. Per-File Detail
 
@@ -83,17 +83,18 @@ DCC selector (Maya, Houdini). Version list from api.getShelves(). Install/remove
 ### `FirstLaunch.tsx`
 **Role:** Multi-step onboarding wizard for initial FLUX setup.
 #### FirstLaunch
-Step 1: workspace path (electronAPI.openFolder). Step 2: username with api.listUsers() suggestions. Calls api.initFirstLaunch on complete.
+Step 1: workspace path (electronAPI.openFolder with FolderOpen icon on browse button). Step 2: existing users displayed as clickable avatar list + text input for new username simultaneously (no mode toggle). Uses new design system (CSS variables: var(--paper), var(--ink), var(--accent-*)) with inline styles matching Login.tsx. Calls api.initFirstLaunch on complete.
 → used by: main router / shown once on first launch
 
 ### `Login.tsx`
-**Role:** User switch overlay modal. Lists and selects between workspace users.
+**Role:** Compact user switch popover positioned below TitleBar.
 #### Login
-User list from api.listUsers(). Calls api.updateSettings({username}). Triggers app reload on selection.
+Redesigned from full-screen overlay to popover at top: 48px, right: 10px (aligned with user pill). Width: 280px. Combined view: existing user list (max-height 160px, scrollable) + "Nouvel artiste" text input always visible (no mode toggle). Transparent backdrop div closes on click. Uses new design system (CSS variables: var(--paper), var(--ink), var(--accent-*)) with inline styles. Calls api.updateSettings({username}). Triggers app reload on selection.
 → used by: user avatar click or manual switch overlay
 
 ## 7. Maintenance Notes
 - All pages are named .tsx and use TypeScript. Keep API calls consistent with shared api module.
 - FirstLaunch and Login interact with Electron IPC via window.electronAPI; ensure electronAPI contract is stable.
+- FirstLaunch and Login use new design system (CSS variables) — maintain consistency with var(--paper), var(--ink), var(--accent-*) tokens.
 - Pages rely on context/hooks (useActivity, etc) — verify hooks are exported from their modules.
 - Each page should handle loading/error states for API calls; no assumed fast responses.

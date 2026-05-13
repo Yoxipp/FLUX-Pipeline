@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar } from './ui'
 import { api } from '../../api/client'
@@ -37,13 +37,26 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
 
 /* ── popover paramètres ── */
 function SettingsPopover({ username, onClose }: { username: string; onClose: () => void }) {
-  const [workspace, setWorkspace] = useState('')
-  const [version, setVersion]     = useState('')
+  const [workspace, setWorkspace]   = useState('')
+  const [version, setVersion]       = useState('')
+  const [changing, setChanging]     = useState(false)
 
   useEffect(() => {
     api.getSettings().then(s => setWorkspace(s.workspace ?? '')).catch(() => {})
     window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
   }, [])
+
+  const handleChangeWorkspace = async () => {
+    const path = await window.electronAPI?.openFolder()
+    if (!path) return
+    setChanging(true)
+    try {
+      await api.updateSettings({ workspace: path })
+      window.location.reload()
+    } catch {
+      setChanging(false)
+    }
+  }
 
   return (
     <div style={{
@@ -59,7 +72,12 @@ function SettingsPopover({ username, onClose }: { username: string; onClose: () 
         <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--ink-2)' }}>
           Paramètres
         </div>
-        <div onClick={onClose} style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
+        <div
+          onClick={onClose}
+          style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--paper)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+        >
           <X size={12} strokeWidth={2} />
         </div>
       </div>
@@ -75,14 +93,35 @@ function SettingsPopover({ username, onClose }: { username: string; onClose: () 
 
       {/* workspace */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 4 }}>WORKSPACE</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>WORKSPACE</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
           <FolderOpen size={12} strokeWidth={1.75} color="var(--ink-4)" />
           <span style={{
-            fontSize: 10, fontFamily: 'var(--mono)', color: workspace ? 'var(--ink-2)' : 'var(--ink-4)',
+            flex: 1, fontSize: 10, fontFamily: 'var(--mono)', color: workspace ? 'var(--ink-2)' : 'var(--ink-4)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             fontStyle: workspace ? 'normal' : 'italic',
           }}>{workspace || '—'}</span>
+        </div>
+        <div
+          onClick={() => !changing && void handleChangeWorkspace()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 10px', borderRadius: 7,
+            border: '1px solid var(--rule-2)',
+            background: 'var(--paper)',
+            fontSize: 11, color: 'var(--ink-3)',
+            cursor: changing ? 'default' : 'pointer',
+            opacity: changing ? 0.5 : 1,
+            transition: 'border-color 0.12s, color 0.12s',
+          }}
+          onMouseEnter={e => { if (!changing) { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--accent)'; el.style.color = 'var(--accent-hi)' } }}
+          onMouseLeave={e => { if (!changing) { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.color = 'var(--ink-3)' } }}
+        >
+          {changing
+            ? <RefreshCw size={11} strokeWidth={1.75} style={{ animation: 'spin 1s linear infinite' }} />
+            : <FolderOpen size={11} strokeWidth={1.75} />
+          }
+          {changing ? 'Changement…' : 'Changer de répertoire…'}
         </div>
       </div>
 
