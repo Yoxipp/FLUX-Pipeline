@@ -1,0 +1,34 @@
+appId: com.flux.pipeline
+productName: FLUX
+copyright: "© 2025 FLUX Pipeline"
+
+# Inclure le backend Python buildé par PyInstaller
+extraResources:
+  - from: backend/dist/flux_backend
+    to: backend
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: msi
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker   # Pas de droits admin requis
+  signAndEditExecutable: false          # Désactiver pour builds sans cert (re-activer pour release finale)
+
+msi:
+  oneClick: false                      # Wizard d'installation
+  perMachine: false                    # Installation par utilisateur (sans admin)
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+directories:
+  output: C:/Temp/flux-release
+  buildResources: build/
+
+
+files:
+  - dist/**
+  - dist-electron/**
+  - "!**/{.git,.github,node_modules/__tests__}"
