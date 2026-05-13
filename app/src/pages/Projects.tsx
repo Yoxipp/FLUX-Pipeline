@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
-  HardDrive, Plus, Minus, ChevronDown,
+  HardDrive, Plus, Minus, ChevronDown, X,
 } from 'lucide-react'
 import { FolderIcon } from '../components/shared/ui'
 import { api } from '../api/client'
@@ -15,6 +15,16 @@ type NavLevel =
 
 interface ExplorerItem { name: string; isDir: boolean }
 
+interface FindResult {
+  label:   string
+  pathStr: string      // chemin lisible pour l'affichage
+  project: string
+  subpath: string[]
+  isDir:   boolean
+}
+
+interface TokenSel { class: string; type: string; name: string; instance: string; iter: string }
+
 type Tab = 'project' | 'asset' | 'shot' | 'directory'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'project',   label: 'Projet' },
@@ -23,8 +33,20 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'directory', label: 'Dossier' },
 ]
 
-const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
-const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'SEQ', 'SHOT', 'custom']
+const ASSET_TOKENS   = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
+const TOKEN_TYPES    = ['CLASS', 'TYPE', 'NAME', 'SEQ', 'SHOT', 'custom']
+const FINDER_CLASSES = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
+const FINDER_TYPES   = ['SCULPT', 'BLOCK', 'TOPO', 'RIG', 'TEX', 'LDEV', 'FUR', 'HAIR', 'FEATHERS', 'SK', 'WGHT']
+const FINDER_ITERS   = ['LAST', 'V001', 'V002', 'V003', 'V004', 'V005']
+
+// Mapping token CLASS → sous-dossier dans le projet
+const CLASS_TO_PATH: Record<string, string[]> = {
+  CHAR:   ['assets', 'chara'],
+  PROPS:  ['assets', 'props'],
+  ENV:    ['assets', 'enviros'],
+  CFXRIG: ['assets', 'cfx_rig'],
+  FXRIG:  ['assets', 'fx_rig'],
+}
 
 const SIDEBAR_ITEMS = [
   { ic: Star,       label: 'Favoris' },
@@ -33,9 +55,7 @@ const SIDEBAR_ITEMS = [
   { ic: Archive,    label: 'Archivés' },
 ]
 
-// ── Icônes SVG — couleur plate, réactive à la sélection ──────────────────────
-// Pas de linearGradient → pas de collision d'IDs entre instances.
-// Quand selected=true, l'icône vire à var(--accent) pour le feedback visuel.
+// ── Icônes SVG ────────────────────────────────────────────────────────────────
 
 function FolderSvg({ size = 40, selected = false }: { size?: number; selected?: boolean }) {
   const body = selected ? 'var(--accent)'    : '#F5A623'
@@ -56,6 +76,114 @@ function FileSvg({ size = 36, selected = false }: { size?: number; selected?: bo
       <path d="M2 0 L20 0 L30 10 L30 35 Q30 37 28 37 L2 37 Q0 37 0 35 L0 2 Q0 0 2 0Z" fill={body} />
       <path d="M20 0 L20 10 L30 10Z" fill={corner} />
     </svg>
+  )
+}
+
+// ── Token Finder ──────────────────────────────────────────────────────────────
+
+function TokenFinder({ project, onChange }: {
+  project:  string
+  onChange: (sel: TokenSel) => void
+}) {
+  const [sel, setSel]     = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
+  const [open, setOpen]   = useState<number | null>(null)
+  const [names, setNames] = useState<string[]>([])
+  const rootRef           = useRef<HTMLDivElement>(null)
+
+  // NAME = project-only, toutes les classes en parallèle
+  useEffect(() => {
+    if (!project) { setNames([]); return }
+    Promise.all(
+      FINDER_CLASSES.map(cls =>
+        api.getAssets(project, cls).then(d => d.assets).catch(() => [] as string[])
+      )
+    ).then(arrays => setNames([...new Set(arrays.flat())]))
+  }, [project])
+
+  // Fermer dropdown sur clic extérieur
+  useEffect(() => {
+    if (open === null) return
+    const h = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(null)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  const update = (key: keyof TokenSel, value: string) => {
+    const next = { ...sel, [key]: value }
+    setSel(next)
+    onChange(next)
+    setOpen(null)
+  }
+
+  const clear = (key: keyof TokenSel) => {
+    const next = { ...sel, [key]: '' }
+    setSel(next)
+    onChange(next)
+    setOpen(null)
+  }
+
+  const MODULES: { key: keyof TokenSel; label: string; opts: string[] }[] = [
+    { key: 'class',    label: 'CLASS',    opts: FINDER_CLASSES },
+    { key: 'type',     label: 'TYPE',     opts: FINDER_TYPES },
+    { key: 'name',     label: 'NAME',     opts: names },
+    { key: 'instance', label: 'INSTANCE', opts: ['null'] },
+    { key: 'iter',     label: 'ITER',     opts: FINDER_ITERS },
+  ]
+
+  return (
+    <div
+      ref={rootRef}
+      style={{ flex: 1, display: 'flex', border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', position: 'relative', overflow: 'visible' }}
+    >
+      {MODULES.map(({ key, label, opts }, i) => {
+        const value  = sel[key]
+        const isOpen = open === i
+        return (
+          <div
+            key={i}
+            style={{ flex: 1, position: 'relative', borderLeft: i > 0 ? '1px solid var(--rule-2)' : 'none' }}
+          >
+            <div
+              onClick={() => setOpen(isOpen ? null : i)}
+              style={{ height: 30, padding: '0 6px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1, cursor: 'pointer', background: value ? 'var(--accent-soft)' : 'transparent', transition: 'background 0.08s', borderRadius: i === 0 ? '4px 0 0 4px' : i === MODULES.length - 1 ? '0 4px 4px 0' : 0 }}
+            >
+              <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
+              <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+                {value || '—'}
+              </span>
+            </div>
+
+            {isOpen && (
+              <div style={{ position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: 110, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
+                {value && (
+                  <div
+                    onClick={() => clear(key)}
+                    style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
+                  >
+                    — effacer
+                  </div>
+                )}
+                {opts.length === 0 ? (
+                  <div style={{ padding: '6px 8px', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+                    {project ? 'Vide' : 'Projet requis'}
+                  </div>
+                ) : opts.map(o => (
+                  <div
+                    key={o}
+                    onClick={() => update(key, o)}
+                    style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)', background: o === value ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {o}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -117,11 +245,9 @@ function PanelBtn({ primary, children, onClick, disabled }: { primary?: boolean;
   )
 }
 
-// ── Contexte projet actuel ────────────────────────────────────────────────────
-
 function NavContext({ project }: { project: string }) {
   if (!project) return (
-    <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
       Naviguez dans un projet
     </div>
   )
@@ -135,10 +261,7 @@ function NavContext({ project }: { project: string }) {
 
 // ── Onglets panneau droit ─────────────────────────────────────────────────────
 
-// "Create Project" uniquement — Set Project est sorti dans le bas du panneau
-function TabProject({ onCreateProject }: {
-  onCreateProject: (name: string) => Promise<void>
-}) {
+function TabProject({ onCreateProject }: { onCreateProject: (name: string) => Promise<void> }) {
   const [name, setName]     = useState('')
   const [status, setStatus] = useState('')
 
@@ -159,20 +282,13 @@ function TabProject({ onCreateProject }: {
         <div className="cap" style={{ marginBottom: 4 }}>NOM</div>
         <InputField value={name} onChange={setName} placeholder="ex: NEW_PROJECT" />
       </div>
-      {status && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>
-          {status}
-        </div>
-      )}
+      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
       <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleCreate()} disabled={!name.trim()}>
-        Create Project
-      </PanelBtn>
+      <PanelBtn primary onClick={() => void handleCreate()} disabled={!name.trim()}>Create Project</PanelBtn>
     </div>
   )
 }
 
-// Création relative au projet courant dans l'explorer
 function TabAsset({ currentProject, onCreateAsset }: {
   currentProject: string
   onCreateAsset: (project: string, cls: string, name: string) => Promise<void>
@@ -203,22 +319,15 @@ function TabAsset({ currentProject, onCreateAsset }: {
         <div className="cap" style={{ marginBottom: 4 }}>NAME</div>
         <InputField value={name} onChange={setName} placeholder="ex: HorseRig" />
       </div>
-      {status && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>
-          {status}
-        </div>
-      )}
+      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
       <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleCreate()} disabled={!currentProject || !name.trim()}>
-        Create Asset
-      </PanelBtn>
+      <PanelBtn primary onClick={() => void handleCreate()} disabled={!currentProject || !name.trim()}>Create Asset</PanelBtn>
     </div>
   )
 }
 
 function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, onRefreshSequences }: {
-  currentProject: string
-  sequences: string[]
+  currentProject: string; sequences: string[]
   onCreateSequence: (project: string, seqN: number) => Promise<void>
   onCreateShot: (project: string, seqN: number, shotN: number) => Promise<void>
   onRefreshSequences: () => void
@@ -284,7 +393,6 @@ function TabDirectory({ currentProject }: { currentProject: string }) {
   const [name, setName]           = useState('')
   const [token, setToken]         = useState('')
   const [tokenType, setTokenType] = useState('CLASS')
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
       <NavContext project={currentProject} />
@@ -309,23 +417,24 @@ function TabDirectory({ currentProject }: { currentProject: string }) {
 // ── Composant principal ───────────────────────────────────────────────────────
 
 export function Projects() {
-  // Navigation
   const [navStack, setNavStack] = useState<NavLevel[]>([{ kind: 'root' }])
   const [navIdx, setNavIdx]     = useState(0)
   const nav = navStack[navIdx]
 
-  // Explorer
   const [items, setItems]               = useState<ExplorerItem[]>([])
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [loading, setLoading]           = useState(false)
 
-  // Projets
   const [projects, setProjects]           = useState<string[]>([])
   const [activeProject, setActiveProject] = useState('')
   const [sequences, setSequences]         = useState<string[]>([])
 
-  // Panneau droit
   const [tab, setTab] = useState<Tab>('project')
+
+  // Token Finder
+  const [tokenSel, setTokenSel]       = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
+  const [searchResults, setSearchResults] = useState<FindResult[] | null>(null)
+  const [findLoading, setFindLoading]     = useState(false)
 
   // ── Dérivés ────────────────────────────────────────────────────────────────
 
@@ -333,10 +442,7 @@ export function Projects() {
     ? ['PROJETS']
     : ['PROJETS', nav.project, ...nav.subpath]
 
-  // Projet du contexte de navigation — utilisé pour création et "Set Project"
   const navProject: string = nav.kind === 'inside' ? nav.project : ''
-
-  // Projet à définir via "Set Project" : priorité à la nav, sinon item sélectionné
   const contextProject: string | null =
     navProject !== '' ? navProject
     : (selectedName !== null && projects.includes(selectedName)) ? selectedName
@@ -351,25 +457,24 @@ export function Projects() {
     setNavStack(prev => [...prev.slice(0, navIdx + 1), level])
     setNavIdx(i => i + 1)
     setSelectedName(null)
+    setSearchResults(null)
   }, [navIdx])
 
   const goBack = useCallback(() => {
-    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedName(null) }
+    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedName(null); setSearchResults(null) }
   }, [navIdx])
 
   const goForward = useCallback(() => {
-    if (navIdx < navStack.length - 1) { setNavIdx(i => i + 1); setSelectedName(null) }
+    if (navIdx < navStack.length - 1) { setNavIdx(i => i + 1); setSelectedName(null); setSearchResults(null) }
   }, [navIdx, navStack.length])
 
   const navigateToBreadcrumb = useCallback((segIdx: number) => {
-    if (segIdx === 0) {
-      navigateTo({ kind: 'root' })
-    } else if (nav.kind === 'inside') {
+    if (segIdx === 0) navigateTo({ kind: 'root' })
+    else if (nav.kind === 'inside')
       navigateTo({ kind: 'inside', project: nav.project, subpath: nav.subpath.slice(0, segIdx - 1) })
-    }
   }, [nav, navigateTo])
 
-  // ── Chargement ─────────────────────────────────────────────────────────────
+  // ── Chargement items ───────────────────────────────────────────────────────
 
   const loadItems = useCallback(async () => {
     setLoading(true)
@@ -386,34 +491,89 @@ export function Projects() {
           ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
         ])
       }
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
+    } catch { setItems([]) }
+    finally { setLoading(false) }
   }, [nav])
 
   useEffect(() => { void loadItems() }, [loadItems])
 
   const loadSequences = useCallback(async () => {
     if (!activeProject) return
-    try {
-      const d = await api.getSequences(activeProject)
-      setSequences(d.sequences)
-    } catch {}
+    try { const d = await api.getSequences(activeProject); setSequences(d.sequences) }
+    catch {}
   }, [activeProject])
 
   useEffect(() => { void loadSequences() }, [activeProject])
+
+  // ── Find logic ─────────────────────────────────────────────────────────────
+
+  const handleFind = useCallback(async () => {
+    const proj = navProject || activeProject
+    if (!proj) return
+
+    setFindLoading(true)
+    setSearchResults([])
+
+    const results: FindResult[] = []
+    const classes = tokenSel.class ? [tokenSel.class] : FINDER_CLASSES
+    const nameLow = tokenSel.name.toLowerCase()
+    const typeLow = tokenSel.type.toLowerCase()
+
+    for (const cls of classes) {
+      const basePath = CLASS_TO_PATH[cls]
+      if (!basePath) continue
+
+      let folders: { name: string }[] = []
+      try {
+        const d = await api.browseProject(proj, basePath.join('/'))
+        folders = d.folders
+      } catch { continue }
+
+      // Filtrer par NAME (match partiel insensible à la casse)
+      const matching = nameLow
+        ? folders.filter(f => f.name.toLowerCase().includes(nameLow))
+        : folders
+
+      for (const folder of matching) {
+        const folderPath = [...basePath, folder.name]
+
+        if (typeLow) {
+          // Chercher le dossier de type à l'intérieur
+          let found = false
+          try {
+            const d2 = await api.browseProject(proj, folderPath.join('/'))
+            for (const sub of d2.folders) {
+              if (sub.name.toLowerCase().includes(typeLow)) {
+                results.push({
+                  label:   `${folder.name} / ${sub.name}`,
+                  pathStr: [...folderPath, sub.name].join(' / '),
+                  project: proj,
+                  subpath: [...folderPath, sub.name],
+                  isDir:   true,
+                })
+                found = true
+              }
+            }
+          } catch {}
+          if (!found) {
+            results.push({ label: folder.name, pathStr: folderPath.join(' / '), project: proj, subpath: folderPath, isDir: true })
+          }
+        } else {
+          results.push({ label: folder.name, pathStr: folderPath.join(' / '), project: proj, subpath: folderPath, isDir: true })
+        }
+      }
+    }
+
+    setSearchResults(results)
+    setFindLoading(false)
+  }, [tokenSel, navProject, activeProject])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleDoubleClick = useCallback((item: ExplorerItem) => {
     if (!item.isDir) return
-    if (nav.kind === 'root') {
-      navigateTo({ kind: 'inside', project: item.name, subpath: [] })
-    } else {
-      navigateTo({ kind: 'inside', project: nav.project, subpath: [...nav.subpath, item.name] })
-    }
+    if (nav.kind === 'root') navigateTo({ kind: 'inside', project: item.name, subpath: [] })
+    else navigateTo({ kind: 'inside', project: nav.project, subpath: [...nav.subpath, item.name] })
   }, [nav, navigateTo])
 
   const handleSetProject = useCallback((name: string) => {
@@ -452,10 +612,11 @@ export function Projects() {
         <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Projets</div>
       </div>
 
-      {/* Barre de navigation */}
-      <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 26 }}>
+      {/* Barre de navigation — 2 lignes */}
+      <div style={{ padding: '6px 10px 7px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
 
+        {/* Ligne 1 : back/fwd + breadcrumb (tronqué) + search */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {[
             { Icon: ChevronLeft,  action: goBack,    ok: canBack },
             { Icon: ChevronRight, action: goForward, ok: canForward },
@@ -463,22 +624,22 @@ export function Projects() {
             <div
               key={i}
               onClick={ok ? action : undefined}
-              style={{ width: 24, height: 24, border: '1px solid var(--rule-2)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? 'var(--ink-2)' : 'var(--ink-4)', boxShadow: 'var(--shadow-xs)', cursor: ok ? 'pointer' : 'default', opacity: ok ? 1 : 0.4 }}
+              style={{ width: 24, height: 24, border: '1px solid var(--rule-2)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? 'var(--ink-2)' : 'var(--ink-4)', boxShadow: 'var(--shadow-xs)', cursor: ok ? 'pointer' : 'default', opacity: ok ? 1 : 0.4, flexShrink: 0 }}
             >
               <Icon size={13} strokeWidth={2} />
             </div>
           ))}
 
-          {/* Breadcrumb */}
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 2, fontFamily: 'var(--mono)', fontSize: 10, height: 24, border: '1px solid var(--rule)', padding: '0 10px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', overflow: 'hidden' }}>
+          {/* Breadcrumb tronqué */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, fontFamily: 'var(--mono)', fontSize: 10, height: 24, border: '1px solid var(--rule)', padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', overflow: 'hidden' }}>
             {breadcrumb.map((seg, i) => {
               const isLast = i === breadcrumb.length - 1
               return (
-                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: isLast ? 1 : 0, minWidth: 0 }}>
+                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: isLast ? 0 : 1, minWidth: isLast ? 'auto' : 0 }}>
                   {i > 0 && <ChevronRight size={9} strokeWidth={1.5} color="var(--ink-4)" style={{ flexShrink: 0 }} />}
                   <span
                     onClick={!isLast ? () => navigateToBreadcrumb(i) : undefined}
-                    style={{ color: isLast ? 'var(--ink)' : 'var(--ink-3)', fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'default', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    style={{ color: isLast ? 'var(--ink)' : 'var(--ink-3)', fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'default', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
                   >
                     {seg}
                   </span>
@@ -487,11 +648,25 @@ export function Projects() {
             })}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--rule)', padding: '0 8px', height: 24, width: 150, background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)' }}>
-            <Search size={11} strokeWidth={2} color="var(--ink-4)" />
+          {/* Search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, border: '1px solid var(--rule-2)', padding: '0 8px', height: 24, width: 130, background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', flexShrink: 0 }}>
+            <Search size={10} strokeWidth={2} color="var(--ink-4)" />
             <span style={{ fontSize: 10, color: 'var(--ink-4)', fontStyle: 'italic' }}>Rechercher…</span>
           </div>
         </div>
+
+        {/* Ligne 2 : Token Finder + bouton Find */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <TokenFinder project={navProject || activeProject} onChange={setTokenSel} />
+          <div
+            onClick={() => void handleFind()}
+            className="btn primary"
+            style={{ height: 30, padding: '0 14px', flexShrink: 0, display: 'flex', alignItems: 'center', fontSize: 10, cursor: findLoading ? 'wait' : 'pointer' }}
+          >
+            {findLoading ? '…' : 'Find'}
+          </div>
+        </div>
+
       </div>
 
       {/* Corps */}
@@ -540,49 +715,92 @@ export function Projects() {
           </div>
         </div>
 
-        {/* Grille explorateur */}
+        {/* Grille / Résultats de recherche */}
         <div
           style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--rule)', overflow: 'hidden' }}
-          onClick={() => setSelectedName(null)}
+          onClick={() => { if (searchResults === null) setSelectedName(null) }}
         >
-          {loading ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
-              Chargement…
-            </div>
-          ) : items.length === 0 ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
-              Vide
-            </div>
-          ) : (
-            <div style={{ flex: 1, padding: '10px 12px', overflowY: 'auto', minHeight: 0 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '4px', alignContent: 'start' }}>
-                {items.map((item, i) => {
-                  const isSel = item.name === selectedName
-                  return (
-                    <div
-                      key={i}
-                      onClick={e => { e.stopPropagation(); setSelectedName(item.name) }}
-                      onDoubleClick={e => { e.stopPropagation(); handleDoubleClick(item) }}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent', gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s' }}
-                    >
-                      {item.isDir
-                        ? <FolderSvg size={40} selected={isSel} />
-                        : <FileSvg   size={34} selected={isSel} />}
-                      <div style={{ fontSize: 10, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
-                        {item.name}
-                      </div>
-                    </div>
-                  )
-                })}
+          {/* ── Page de résultats temporaire ── */}
+          {searchResults !== null ? (
+            <>
+              {/* Header résultats */}
+              <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--paper-2)' }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', flex: 1 }}>
+                  <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS — </span>
+                  {findLoading ? 'Recherche…' : searchResults.length === 0 ? 'Aucun résultat' : `${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`}
+                </div>
+                <div
+                  onClick={e => { e.stopPropagation(); setSearchResults(null) }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--ink-4)', fontSize: 9, fontFamily: 'var(--mono)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--rule-2)' }}
+                >
+                  <X size={9} strokeWidth={2} />
+                  Fermer
+                </div>
               </div>
-            </div>
+
+              {/* Liste des résultats */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
+                {searchResults.length === 0 && !findLoading ? (
+                  <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
+                    Aucun dossier correspondant
+                  </div>
+                ) : searchResults.map((r, i) => (
+                  <div
+                    key={i}
+                    onClick={e => { e.stopPropagation(); navigateTo({ kind: 'inside', project: r.project, subpath: r.subpath }) }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', borderRadius: 6, cursor: 'pointer', marginBottom: 2, border: '1px solid transparent', transition: 'background 0.08s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <FolderSvg size={24} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
+                      <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.project} / {r.pathStr}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            /* ── Vue explorer normale ── */
+            loading ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
+                Chargement…
+              </div>
+            ) : items.length === 0 ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
+                Vide
+              </div>
+            ) : (
+              <div style={{ flex: 1, padding: '10px 12px', overflowY: 'auto', minHeight: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '4px', alignContent: 'start' }}>
+                  {items.map((item, i) => {
+                    const isSel = item.name === selectedName
+                    return (
+                      <div
+                        key={i}
+                        onClick={e => { e.stopPropagation(); setSelectedName(item.name) }}
+                        onDoubleClick={e => { e.stopPropagation(); handleDoubleClick(item) }}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent', gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s' }}
+                      >
+                        {item.isDir
+                          ? <FolderSvg size={40} selected={isSel} />
+                          : <FileSvg   size={34} selected={isSel} />}
+                        <div style={{ fontSize: 10, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                          {item.name}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
           )}
         </div>
 
         {/* Panneau droit */}
         <div style={{ width: 200, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
 
-          {/* Onglets */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)' }}>
             {TABS.map(t => (
               <div
@@ -595,14 +813,9 @@ export function Projects() {
             ))}
           </div>
 
-          {/* Contenu de l'onglet — scrollable */}
           <div style={{ flex: 1, padding: '12px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
-            {tab === 'project' && (
-              <TabProject onCreateProject={handleCreateProject} />
-            )}
-            {tab === 'asset' && (
-              <TabAsset currentProject={navProject} onCreateAsset={handleCreateAsset} />
-            )}
+            {tab === 'project' && <TabProject onCreateProject={handleCreateProject} />}
+            {tab === 'asset' && <TabAsset currentProject={navProject} onCreateAsset={handleCreateAsset} />}
             {tab === 'shot' && (
               <TabShot
                 currentProject={navProject}
@@ -615,7 +828,7 @@ export function Projects() {
             {tab === 'directory' && <TabDirectory currentProject={navProject} />}
           </div>
 
-          {/* Projet actif + Set Project — toujours visible en bas */}
+          {/* Projet actif + Set Project — fixe en bas */}
           <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
             <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
             <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
@@ -631,10 +844,7 @@ export function Projects() {
                 → {contextProject}
               </div>
             )}
-            <PanelBtn
-              onClick={() => contextProject && handleSetProject(contextProject)}
-              disabled={!contextProject}
-            >
+            <PanelBtn primary onClick={() => contextProject && handleSetProject(contextProject)} disabled={!contextProject}>
               Set Project
             </PanelBtn>
           </div>
