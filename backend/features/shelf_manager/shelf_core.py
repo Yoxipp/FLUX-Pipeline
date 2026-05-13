@@ -39,7 +39,7 @@ _SHELF_FILENAME: dict[str, str] = {
 
 # Resources root resolved at import time (package root / resources / shelves)
 _RESOURCES_ROOT: Path = (
-    Path(__file__).parent.parent.parent.parent / "resources" / "shelves"
+    Path(__file__).parent.parent.parent / "resources" / "shelves"
 )
 
 

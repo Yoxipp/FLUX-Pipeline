@@ -18,7 +18,7 @@ a = Analysis(
     pathex=["backend"],
     binaries=[],
     datas=[
-        ("resources", "resources"),
+        ("backend/resources", "resources"),
     ],
     hiddenimports=hidden,
     hookspath=[],

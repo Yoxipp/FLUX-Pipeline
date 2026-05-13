@@ -6,11 +6,9 @@ __pycache__/
 venv/
 *.egg-info/
 
-# PyInstaller output
+# PyInstaller output (build/ = cache intermédiaire PyInstaller)
 dist/
 build/
-# keep electron-builder icon tracked — required on every dev machine to build the MSI
-!build/icon.ico
 
 # Electron / TypeScript build artifacts
 dist-electron/

@@ -25,7 +25,7 @@ msi:
 
 directories:
   output: C:/Temp/flux-release
-  buildResources: build/
+  buildResources: scripts/
 
 
 files:
