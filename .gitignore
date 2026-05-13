@@ -5,16 +5,22 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
-dist/
-build/
 
 # PyInstaller output
 dist/
 build/
-# keep flux.spec tracked — only ignore generated specs
-!flux.spec
 # keep electron-builder icon tracked — required on every dev machine to build the MSI
 !build/icon.ico
+
+# Electron / TypeScript build artifacts
+dist-electron/
+tsconfig.electron.tsbuildinfo
+
+# electron-builder output
+release/
+
+# Node
+node_modules/
 
 # IDE
 .vscode/
@@ -34,4 +40,4 @@ TEST/
 .DS_Store
 Thumbs.db
 desktop.ini
-INSTALLEURS/Flux_Installer_v0.1.0.exe
+INSTALLEURS/
