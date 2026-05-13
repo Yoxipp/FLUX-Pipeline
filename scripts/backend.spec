@@ -1,9 +1,13 @@
 # backend.spec — PyInstaller spec for flux_backend.exe (FastAPI sidecar).
 # Build: pyinstaller backend.spec
 
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
+
+# SPECPATH est le dossier du .spec (scripts/) — ROOT est la racine du projet
+ROOT = Path(SPECPATH).parent
 
 hidden = (
     collect_submodules("uvicorn")
@@ -14,11 +18,11 @@ hidden = (
 )
 
 a = Analysis(
-    ["backend/main.py"],
-    pathex=["backend"],
+    [str(ROOT / "backend/main.py")],
+    pathex=[str(ROOT / "backend")],
     binaries=[],
     datas=[
-        ("backend/resources", "resources"),
+        (str(ROOT / "backend/resources"), "resources"),
     ],
     hiddenimports=hidden,
     hookspath=[],
