@@ -34,12 +34,18 @@ async def get_activity(
     action: str | None = None,
     project: str | None = None,
 ) -> dict:
-    """Return activity events with optional filters."""
+    """Return activity events with optional filters.
+
+    Returns empty results (not 500) when FLUX_ROOT is not yet set (first-launch state).
+    """
     loop = asyncio.get_event_loop()
-    events = await loop.run_in_executor(
-        None, lambda: get_all_events(limit=limit, user=user, action=action, project=project)
-    )
-    unread = await loop.run_in_executor(None, get_unread_count)
+    try:
+        events = await loop.run_in_executor(
+            None, lambda: get_all_events(limit=limit, user=user, action=action, project=project)
+        )
+        unread = await loop.run_in_executor(None, get_unread_count)
+    except RuntimeError:
+        return {"events": [], "unread_count": 0}
     return {"events": events, "unread_count": unread}
 
 

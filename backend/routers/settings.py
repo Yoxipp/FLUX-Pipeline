@@ -70,7 +70,11 @@ async def init_first_launch(req: InitRequest) -> dict:
         config.create_user(req.username, req.workspace)
 
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _scaffold)
+    try:
+        await loop.run_in_executor(None, _scaffold)
+    except Exception as exc:
+        log.error("init_first_launch failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
     return {"success": True, "workspace": req.workspace, "username": req.username}
 
 

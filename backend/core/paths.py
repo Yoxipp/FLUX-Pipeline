@@ -36,6 +36,14 @@ def _get_exe_dir() -> Path:
 
 
 def get_config_json_path() -> Path:
+    """Return the config.json path.
+
+    Prod (frozen exe): %APPDATA%/FluxPipeline/config.json — user-writable even when
+    the app is installed in Program Files (which is read-only without admin rights).
+    Dev (non-frozen):  project root / config.json (existing behaviour).
+    """
+    if getattr(sys, "frozen", False):
+        return _get_installer_paths().get_appdata_dir() / "config.json"
     return _get_exe_dir() / "config.json"
 
 
@@ -62,6 +70,7 @@ def _read_config_json() -> dict:
 
 def _write_config_json(data: dict) -> None:
     p = get_config_json_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

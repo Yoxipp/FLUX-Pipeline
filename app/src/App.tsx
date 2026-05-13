@@ -16,13 +16,52 @@ import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
+import type { Settings } from './types'
 
-export function App() {
+// Inner shell — only mounted after first-launch wizard completes.
+// Hooks that poll the backend (useActivity, useDccStatus) live here so they
+// never fire while FLUX_ROOT is unset, which would cause backend 500s.
+function AppShell({ settings }: { settings: Settings }) {
   const dccStatus          = useDccStatus()
   const { unreadCount }    = useActivity()
-  const { settings, loading } = useSettings()
   const [_showSettings, setShowSettings] = useState(false)
   const [showLogin, setShowLogin]         = useState(false)
+
+  return (
+    <HashRouter>
+      <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
+        {showLogin && <Login onDone={() => setShowLogin(false)} />}
+
+        <TitleBar
+          username={settings?.username ?? null}
+          unreadCount={unreadCount}
+          onSettings={() => setShowSettings(true)}
+          onUserChange={() => setShowLogin(true)}
+        />
+
+        <div className="flex flex-1 min-h-0">
+          <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />
+
+          <main className="flex-1 min-h-0 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
+            <Routes>
+              <Route path="/"          element={<Hub />} />
+              <Route path="/publisher" element={<Publisher />} />
+              <Route path="/importer"  element={<Importer />} />
+              <Route path="/activity"  element={<Activity />} />
+              <Route path="/projects"  element={<Projects />} />
+              <Route path="/shelf"     element={<ShelfManager />} />
+            </Routes>
+          </main>
+        </div>
+
+        <StatusBar dccStatus={dccStatus} />
+      </div>
+    </HashRouter>
+  )
+}
+
+export function App() {
+  const { settings, loading } = useSettings()
 
   // Apply theme CSS vars from settings
   useEffect(() => {
@@ -58,35 +97,5 @@ export function App() {
     return <FirstLaunch />
   }
 
-  return (
-    <HashRouter>
-      <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
-        {showLogin && <Login onDone={() => setShowLogin(false)} />}
-
-        <TitleBar
-          username={settings?.username ?? null}
-          unreadCount={unreadCount}
-          onSettings={() => setShowSettings(true)}
-          onUserChange={() => setShowLogin(true)}
-        />
-
-        <div className="flex flex-1 min-h-0">
-          <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />
-
-          <main className="flex-1 min-h-0 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
-            <Routes>
-              <Route path="/"          element={<Hub />} />
-              <Route path="/publisher" element={<Publisher />} />
-              <Route path="/importer"  element={<Importer />} />
-              <Route path="/activity"  element={<Activity />} />
-              <Route path="/projects"  element={<Projects />} />
-              <Route path="/shelf"     element={<ShelfManager />} />
-            </Routes>
-          </main>
-        </div>
-
-        <StatusBar dccStatus={dccStatus} />
-      </div>
-    </HashRouter>
-  )
+  return <AppShell settings={settings} />
 }
