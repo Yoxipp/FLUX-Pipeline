@@ -211,6 +211,57 @@ async def post_directory(req: DirectoryCreate) -> dict:
     return {"name": req.name, "path": str(dir_path), "rel_path": rel_created}
 
 
+# ── Rename / Move ─────────────────────────────────────────────────────────────
+
+class ItemPatch(BaseModel):
+    project:     str
+    subpath:     str   # current parent, relative from project root
+    name:        str   # current item name
+    new_name:    str = ""   # desired new name  (empty = keep)
+    new_subpath: str = ""   # desired new parent (empty = keep)
+
+
+@router.patch("/items")
+async def patch_item(req: ItemPatch) -> dict:
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+
+    src_path = (project_path / req.subpath / req.name) if req.subpath else (project_path / req.name)
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")
+
+    new_name    = req.new_name.strip()    or req.name
+    new_subpath = req.new_subpath.strip() if req.new_subpath.strip() != "" else req.subpath
+    dst_path    = (project_path / new_subpath / new_name) if new_subpath else (project_path / new_name)
+
+    if src_path.resolve() == dst_path.resolve():
+        raise HTTPException(status_code=400, detail="Source et destination identiques")
+
+    if not is_subpath(dst_path.resolve().parent, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+
+    if src_path.is_dir():
+        try:
+            dst_path.resolve().relative_to(src_path.resolve())
+            raise HTTPException(status_code=400, detail="Impossible de déplacer un dossier dans lui-même")
+        except ValueError:
+            pass
+
+    if dst_path.exists():
+        raise HTTPException(status_code=409, detail=f"'{new_name}' existe déjà à destination")
+
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, lambda: shutil.move(str(src_path), str(dst_path)))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    log.info("Moved/renamed %s → %s", src_path, dst_path)
+    return {"name": new_name, "path": str(dst_path)}
+
+
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 class ItemDelete(BaseModel):

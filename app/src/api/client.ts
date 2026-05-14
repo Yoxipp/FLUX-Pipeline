@@ -14,7 +14,7 @@ import type {
 const BASE_URL = 'http://127.0.0.1:8765'
 
 async function apiCall<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   endpoint: string,
   body?: unknown,
 ): Promise<T> {
@@ -150,6 +150,12 @@ export const api = {
 
   deleteItem: (project: string, subpath: string[], name: string) =>
     apiCall<{ deleted: string }>('DELETE', '/folder/items', { project, subpath: subpath.join('/'), name }),
+
+  patchItem: (project: string, subpath: string[], name: string, newName?: string, newSubpath?: string[]) =>
+    apiCall<{ name: string; path: string }>('PATCH', '/folder/items', {
+      project, subpath: subpath.join('/'), name,
+      new_name: newName ?? '', new_subpath: newSubpath !== undefined ? newSubpath.join('/') : '',
+    }),
 
   // Shelf
   getShelves: () =>

@@ -34,7 +34,7 @@ interface FindResult {
 
 interface TokenSel { class: string; type: string; name: string; instance: string; iter: string }
 
-interface CtxMenu { x: number; y: number; item: ExplorerItem }
+interface CtxMenu { x: number; y: number; items: ExplorerItem[] }
 
 type Tab = 'project' | 'asset' | 'shot' | 'directory'
 const TABS: { id: Tab; label: string }[] = [
@@ -487,13 +487,177 @@ function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
 
 // ── Context Menu ──────────────────────────────────────────────────────────────
 
-function ContextMenu({ x, y, isFavorited, isArchived, canDelete, onFavorite, onArchive, onDelete, onClose }: {
+function RenameModal({ item, onConfirm, onCancel }: {
+  item: ExplorerItem
+  onConfirm: (newName: string) => Promise<void>
+  onCancel: () => void
+}) {
+  const [name, setName]   = useState(item.name)
+  const [busy, setBusy]   = useState(false)
+  const [error, setError] = useState('')
+  const inputRef          = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select() }, [])
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onCancel])
+
+  const canConfirm = name.trim() !== '' && name.trim() !== item.name && !busy
+
+  const handleConfirm = async () => {
+    if (!canConfirm) return
+    setBusy(true); setError('')
+    try { await onConfirm(name.trim()) }
+    catch (e) { setError(e instanceof Error ? e.message : 'Erreur'); setBusy(false) }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '20px 22px', width: 320, boxShadow: 'var(--shadow)' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 14, color: 'var(--ink)' }}>Renommer "{item.name}"</div>
+        <input
+          ref={inputRef}
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') void handleConfirm() }}
+          style={{ width: '100%', height: 32, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 11, padding: '0 10px', outline: 'none', boxSizing: 'border-box' }}
+        />
+        {error && <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)', marginTop: 6 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn primary" onClick={() => void handleConfirm()} style={{ cursor: canConfirm ? 'pointer' : 'default', opacity: canConfirm ? 1 : 0.5 }}>
+            {busy ? '…' : 'Renommer'}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
+  items: ExplorerItem[]
+  project: string
+  currentSubpath: string[]
+  onConfirm: (newSubpath: string[]) => Promise<void>
+  onCancel: () => void
+}) {
+  const [browsePath, setBrowsePath] = useState<string[]>(currentSubpath)
+  const [folders, setFolders]       = useState<string[]>([])
+  const [loading, setLoading]       = useState(false)
+  const [busy, setBusy]             = useState(false)
+  const [error, setError]           = useState('')
+  const itemNames = new Set(items.map(i => i.name))
+
+  useEffect(() => {
+    setLoading(true)
+    api.browseProject(project, browsePath.join('/') || undefined)
+      .then(d => {
+        const all = d.folders.map(f => f.name)
+        const isCurrentParent = browsePath.join('/') === currentSubpath.join('/')
+        setFolders(isCurrentParent ? all.filter(n => !itemNames.has(n)) : all)
+      })
+      .catch(() => setFolders([]))
+      .finally(() => setLoading(false))
+  }, [project, browsePath, currentSubpath])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onCancel])
+
+  const isSameLocation  = browsePath.join('/') === currentSubpath.join('/')
+  const isInsideItself  = items.some(it => it.isDir &&
+    browsePath.length > currentSubpath.length &&
+    browsePath.slice(0, currentSubpath.length + 1).join('/') === [...currentSubpath, it.name].join('/'))
+  const canConfirm = !isSameLocation && !isInsideItself && !busy
+
+  const handleConfirm = async () => {
+    if (!canConfirm) return
+    setBusy(true); setError('')
+    try { await onConfirm(browsePath) }
+    catch (e) { setError(e instanceof Error ? e.message : 'Erreur'); setBusy(false) }
+  }
+
+  const breadcrumb = [project, ...browsePath]
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '20px 22px', width: 360, boxShadow: 'var(--shadow)' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: 'var(--ink)' }}>
+          {items.length === 1 ? `Déplacer "${items[0].name}"` : `Déplacer ${items.length} éléments`}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 12 }}>Double-clic pour naviguer dans un dossier</div>
+
+        {/* Breadcrumb */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'var(--mono)', fontSize: 9, marginBottom: 8, flexWrap: 'wrap' }}>
+          {breadcrumb.map((seg, i) => (
+            <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              {i > 0 && <ChevronRight size={8} strokeWidth={1.5} color="var(--ink-4)" />}
+              <span
+                onClick={() => setBrowsePath(browsePath.slice(0, i))}
+                style={{ color: i === breadcrumb.length - 1 ? 'var(--ink)' : 'var(--accent-hi)', fontWeight: i === breadcrumb.length - 1 ? 600 : 400, cursor: i === breadcrumb.length - 1 ? 'default' : 'pointer' }}
+              >
+                {seg}
+              </span>
+            </span>
+          ))}
+        </div>
+
+        {/* Folder list */}
+        <div style={{ height: 180, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--bg-deep)', overflowY: 'auto', marginBottom: 10 }}>
+          {loading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }}>Chargement…</div>
+          ) : folders.length === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }}>Aucun sous-dossier</div>
+          ) : folders.map((f, i) => (
+            <div
+              key={i}
+              onDoubleClick={() => setBrowsePath([...browsePath, f])}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: 'default', borderBottom: '1px solid var(--rule)', fontSize: 11, color: 'var(--ink-2)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <FolderSvg size={18} />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, flex: 1 }}>{f}</span>
+              <ChevronRight size={9} strokeWidth={1.5} color="var(--ink-4)" />
+            </div>
+          ))}
+        </div>
+
+        {/* Destination */}
+        <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, marginBottom: 10 }}>
+          <span style={{ color: 'var(--ink-4)' }}>Destination : </span>
+          <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{breadcrumb.join(' / ')}</span>
+          {isSameLocation && <span style={{ color: 'var(--err)', marginLeft: 6 }}>= emplacement actuel</span>}
+          {isInsideItself && <span style={{ color: 'var(--err)', marginLeft: 6 }}>dossier enfant interdit</span>}
+        </div>
+
+        {error && <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)', marginBottom: 8 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn primary" onClick={() => void handleConfirm()} style={{ cursor: canConfirm ? 'pointer' : 'default', opacity: canConfirm ? 1 : 0.5 }}>
+            {busy ? '…' : 'Déplacer ici'}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
+  canEdit: boolean
   canDelete: boolean
+  count: number
   onFavorite: () => void
   onArchive:  () => void
+  onRename:   () => void
+  onMove:     () => void
   onDelete:   () => void
   onClose:    () => void
 }) {
@@ -546,10 +710,17 @@ function ContextMenu({ x, y, isFavorited, isArchived, canDelete, onFavorite, onA
         false,
         () => { onArchive(); onClose() },
       )}
+      {canEdit && (
+        <>
+          <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
+          {count === 1 && row('Renommer', false, () => { onRename(); onClose() })}
+          {row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
+        </>
+      )}
       {canDelete && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-          {row('Supprimer', true, () => { onDelete(); onClose() })}
+          {row(count > 1 ? `Supprimer (${count})` : 'Supprimer', true, () => { onDelete(); onClose() })}
         </>
       )}
     </div>
@@ -558,29 +729,37 @@ function ContextMenu({ x, y, isFavorited, isArchived, canDelete, onFavorite, onA
 
 // ── Delete Confirm Modal ───────────────────────────────────────────────────────
 
-function DeleteModal({ item, onConfirm, onCancel }: {
-  item: ExplorerItem
+function DeleteModal({ items, onConfirm, onCancel }: {
+  items: ExplorerItem[]
   onConfirm: () => void
   onCancel:  () => void
 }) {
-  // Fermer sur Echap
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
   }, [onCancel])
 
+  const single = items.length === 1
+  const allDirs = items.every(i => i.isDir)
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '22px 24px', minWidth: 300, maxWidth: 380, boxShadow: 'var(--shadow)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <Trash2 size={16} strokeWidth={1.75} color="var(--err)" />
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Supprimer "{item.name}" ?</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+            {single ? `Supprimer "${items[0].name}" ?` : `Supprimer ${items.length} éléments ?`}
+          </div>
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 20, lineHeight: 1.5 }}>
-          {item.isDir
-            ? 'Ce dossier et tout son contenu seront supprimés définitivement.'
-            : 'Ce fichier sera supprimé définitivement.'}
+          {single
+            ? items[0].isDir
+              ? 'Ce dossier et tout son contenu seront supprimés définitivement.'
+              : 'Ce fichier sera supprimé définitivement.'
+            : allDirs
+              ? 'Ces dossiers et tout leur contenu seront supprimés définitivement.'
+              : 'Ces éléments seront supprimés définitivement.'}
           {' '}Cette action est irréversible.
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -689,9 +868,10 @@ export function Projects() {
   const [navIdx, setNavIdx]     = useState(0)
   const nav = navStack[navIdx]
 
-  const [items, setItems]               = useState<ExplorerItem[]>([])
-  const [selectedName, setSelectedName] = useState<string | null>(null)
-  const [loading, setLoading]           = useState(false)
+  const [items, setItems]                   = useState<ExplorerItem[]>([])
+  const [selectedNames, setSelectedNames]   = useState<Set<string>>(new Set())
+  const [hoveredName,   setHoveredName]     = useState<string | null>(null)
+  const [loading, setLoading]               = useState(false)
 
   const [projects, setProjects]           = useState<string[]>([])
   const [activeProject, setActiveProject] = useState('')
@@ -707,8 +887,10 @@ export function Projects() {
 
   // Context menu & delete confirm
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null)
-  const [deleteConfirm,  setDeleteConfirm]  = useState<ExplorerItem | null>(null)
+  const [deleteConfirm,  setDeleteConfirm]  = useState<ExplorerItem[] | null>(null)
   const [deleteError,    setDeleteError]    = useState('')
+  const [renameTarget,   setRenameTarget]   = useState<ExplorerItem | null>(null)
+  const [moveTarget,     setMoveTarget]     = useState<ExplorerItem[] | null>(null)
 
   // Token Finder & Search
   const [tokenSel, setTokenSel]           = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
@@ -740,14 +922,14 @@ export function Projects() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedName && !deleteConfirm && nav.kind === 'inside') {
-        const item = items.find(it => it.name === selectedName)
-        if (item) setDeleteConfirm(item)
+      if (e.key === 'Delete' && selectedNames.size > 0 && !deleteConfirm && nav.kind === 'inside') {
+        const targets = items.filter(it => selectedNames.has(it.name))
+        if (targets.length > 0) setDeleteConfirm(targets)
       }
     }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
-  }, [selectedName, items, deleteConfirm, nav])
+  }, [selectedNames, items, deleteConfirm, nav])
 
   // ── Dérivés ────────────────────────────────────────────────────────────────
 
@@ -758,7 +940,7 @@ export function Projects() {
   const navProject: string = nav.kind === 'inside' ? nav.project : ''
   const contextProject: string | null =
     navProject !== '' ? navProject
-    : (selectedName !== null && projects.includes(selectedName)) ? selectedName
+    : (selectedNames.size === 1 && projects.includes([...selectedNames][0])) ? [...selectedNames][0]
     : null
 
   const canBack    = navIdx > 0
@@ -769,17 +951,17 @@ export function Projects() {
   const navigateTo = useCallback((level: NavLevel) => {
     setNavStack(prev => [...prev.slice(0, navIdx + 1), level])
     setNavIdx(i => i + 1)
-    setSelectedName(null)
+    setSelectedNames(new Set())
     setSearchResults(null)
     setSearchQuery('')
   }, [navIdx])
 
   const goBack = useCallback(() => {
-    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedName(null); setSearchResults(null); setSearchQuery('') }
+    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedNames(new Set()); setSearchResults(null); setSearchQuery('') }
   }, [navIdx])
 
   const goForward = useCallback(() => {
-    if (navIdx < navStack.length - 1) { setNavIdx(i => i + 1); setSelectedName(null); setSearchResults(null); setSearchQuery('') }
+    if (navIdx < navStack.length - 1) { setNavIdx(i => i + 1); setSelectedNames(new Set()); setSearchResults(null); setSearchQuery('') }
   }, [navIdx, navStack.length])
 
   const navigateToBreadcrumb = useCallback((segIdx: number) => {
@@ -971,9 +1153,14 @@ export function Projects() {
   const handleRightClick = useCallback((e: React.MouseEvent, item: ExplorerItem) => {
     e.preventDefault()
     e.stopPropagation()
-    setSelectedName(item.name)
-    setCtxMenu({ x: e.clientX, y: e.clientY, item })
-  }, [])
+    // If item already in multi-selection → ctx applies to all selected; else single
+    const newSel = selectedNames.has(item.name) && selectedNames.size > 1
+      ? selectedNames
+      : new Set([item.name])
+    setSelectedNames(newSel)
+    const ctxItems = items.filter(it => newSel.has(it.name))
+    setCtxMenu({ x: e.clientX, y: e.clientY, items: ctxItems })
+  }, [selectedNames, items])
 
   const handleSetProject = useCallback((name: string) => {
     setActiveProject(name)
@@ -1001,18 +1188,42 @@ export function Projects() {
     await loadItems()
   }, [loadItems])
 
-  const handleDelete = useCallback(async (item: ExplorerItem) => {
+  const handleRename = useCallback(async (item: ExplorerItem, newName: string) => {
+    if (nav.kind !== 'inside') return
+    await api.patchItem(nav.project, nav.subpath, item.name, newName)
+    const oldKey = currentItemKey(item, nav)
+    setFavorites(prev => prev.map(s => savedKey(s) === oldKey ? { ...s, label: newName } : s))
+    setRecents(prev   => prev.map(s => savedKey(s) === oldKey ? { ...s, label: newName } : s))
+    setRenameTarget(null)
+    await loadItems()
+  }, [nav, loadItems])
+
+  const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
+    if (nav.kind !== 'inside') return
+    for (const item of targets) {
+      await api.patchItem(nav.project, nav.subpath, item.name, undefined, newSubpath)
+      const k = currentItemKey(item, nav)
+      setFavorites(prev => prev.filter(s => savedKey(s) !== k))
+      setRecents(prev   => prev.filter(s => savedKey(s) !== k))
+    }
+    setMoveTarget(null)
+    setSelectedNames(new Set())
+    await loadItems()
+  }, [nav, loadItems])
+
+  const handleDelete = useCallback(async (targets: ExplorerItem[]) => {
     if (nav.kind !== 'inside') return
     setDeleteConfirm(null)
     setDeleteError('')
     try {
-      await api.deleteItem(nav.project, nav.subpath, item.name)
-      // Retire des listes sauvegardées
-      const k = currentItemKey(item, nav)
-      setFavorites(prev => prev.filter(s => savedKey(s) !== k))
-      setArchived(prev  => prev.filter(s => savedKey(s) !== k))
-      setRecents(prev   => prev.filter(s => savedKey(s) !== k))
-      setSelectedName(null)
+      for (const item of targets) {
+        await api.deleteItem(nav.project, nav.subpath, item.name)
+        const k = currentItemKey(item, nav)
+        setFavorites(prev => prev.filter(s => savedKey(s) !== k))
+        setArchived(prev  => prev.filter(s => savedKey(s) !== k))
+        setRecents(prev   => prev.filter(s => savedKey(s) !== k))
+      }
+      setSelectedNames(new Set())
       await loadItems()
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : 'Erreur lors de la suppression')
@@ -1162,7 +1373,7 @@ export function Projects() {
         {/* Zone centrale */}
         <div
           style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--rule)', overflow: 'hidden' }}
-          onClick={() => { if (searchResults === null && sidebarTab === 'tous') setSelectedName(null) }}
+          onClick={() => { if (searchResults === null && sidebarTab === 'tous') setSelectedNames(new Set()) }}
         >
 
           {/* Listes sauvegardées (Favoris / Récents / Archivés) */}
@@ -1249,15 +1460,35 @@ export function Projects() {
                   )}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '4px', alignContent: 'start' }}>
                     {items.filter(item => !isItemArchived(item)).map((item, i) => {
-                      const isSel = item.name === selectedName
+                      const isSel     = selectedNames.has(item.name)
+                      const isHovered = hoveredName === item.name
                       return (
                         <div
                           key={i}
-                          onClick={e => { e.stopPropagation(); setSelectedName(item.name) }}
+                          onClick={e => { e.stopPropagation(); setSelectedNames(new Set([item.name])) }}
                           onDoubleClick={e => { e.stopPropagation(); handleDoubleClick(item) }}
                           onContextMenu={e => handleRightClick(e, item)}
-                          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent', gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s' }}
+                          onMouseEnter={() => setHoveredName(item.name)}
+                          onMouseLeave={() => setHoveredName(null)}
+                          style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent', gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s' }}
                         >
+                          {/* Checkbox multi-sélection */}
+                          {(isHovered || isSel) && (
+                            <div
+                              onClick={e => {
+                                e.stopPropagation()
+                                setSelectedNames(prev => {
+                                  const next = new Set(prev)
+                                  if (next.has(item.name)) next.delete(item.name)
+                                  else next.add(item.name)
+                                  return next
+                                })
+                              }}
+                              style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSel ? 'var(--accent)' : 'var(--ink-4)'}`, background: isSel ? 'var(--accent)' : 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
+                            >
+                              {isSel && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            </div>
+                          )}
                           {item.isDir
                             ? <FolderSvg size={40} selected={isSel} />
                             : <FileSvg   size={34} selected={isSel} />}
@@ -1337,22 +1568,43 @@ export function Projects() {
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
-          isFavorited={isItemFavorited(ctxMenu.item)}
-          isArchived={isItemArchived(ctxMenu.item)}
+          isFavorited={isItemFavorited(ctxMenu.items[0])}
+          isArchived={isItemArchived(ctxMenu.items[0])}
+          canEdit={nav.kind === 'inside'}
           canDelete={nav.kind === 'inside'}
-          onFavorite={() => toggleFavorite(ctxMenu.item)}
-          onArchive={() => toggleArchived(ctxMenu.item)}
-          onDelete={() => setDeleteConfirm(ctxMenu.item)}
+          count={ctxMenu.items.length}
+          onFavorite={() => ctxMenu.items.forEach(toggleFavorite)}
+          onArchive={() => ctxMenu.items.forEach(toggleArchived)}
+          onRename={() => setRenameTarget(ctxMenu.items[0])}
+          onMove={() => setMoveTarget(ctxMenu.items)}
+          onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onClose={() => setCtxMenu(null)}
         />
       )}
 
-      {/* Modal de confirmation de suppression */}
       {deleteConfirm && (
         <DeleteModal
-          item={deleteConfirm}
+          items={deleteConfirm}
           onConfirm={() => void handleDelete(deleteConfirm)}
           onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameModal
+          item={renameTarget}
+          onConfirm={newName => handleRename(renameTarget, newName)}
+          onCancel={() => setRenameTarget(null)}
+        />
+      )}
+
+      {moveTarget && nav.kind === 'inside' && (
+        <MoveModal
+          items={moveTarget}
+          project={nav.project}
+          currentSubpath={nav.subpath}
+          onConfirm={newSubpath => handleMove(moveTarget, newSubpath)}
+          onCancel={() => setMoveTarget(null)}
         />
       )}
     </div>
