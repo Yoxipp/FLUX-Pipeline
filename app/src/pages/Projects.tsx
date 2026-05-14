@@ -431,10 +431,12 @@ export function Projects() {
 
   const [tab, setTab] = useState<Tab>('project')
 
-  // Token Finder
-  const [tokenSel, setTokenSel]       = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
+  // Token Finder & Search
+  const [tokenSel, setTokenSel]           = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
+  const [searchQuery, setSearchQuery]     = useState('')
   const [searchResults, setSearchResults] = useState<FindResult[] | null>(null)
   const [findLoading, setFindLoading]     = useState(false)
+  const [resultLabel, setResultLabel]     = useState('')
 
   // ── Dérivés ────────────────────────────────────────────────────────────────
 
@@ -458,14 +460,15 @@ export function Projects() {
     setNavIdx(i => i + 1)
     setSelectedName(null)
     setSearchResults(null)
+    setSearchQuery('')
   }, [navIdx])
 
   const goBack = useCallback(() => {
-    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedName(null); setSearchResults(null) }
+    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedName(null); setSearchResults(null); setSearchQuery('') }
   }, [navIdx])
 
   const goForward = useCallback(() => {
-    if (navIdx < navStack.length - 1) { setNavIdx(i => i + 1); setSelectedName(null); setSearchResults(null) }
+    if (navIdx < navStack.length - 1) { setNavIdx(i => i + 1); setSelectedName(null); setSearchResults(null); setSearchQuery('') }
   }, [navIdx, navStack.length])
 
   const navigateToBreadcrumb = useCallback((segIdx: number) => {
@@ -513,6 +516,7 @@ export function Projects() {
 
     setFindLoading(true)
     setSearchResults([])
+    setResultLabel('Finder')
 
     const results: FindResult[] = []
     const classes = tokenSel.class ? [tokenSel.class] : FINDER_CLASSES
@@ -567,6 +571,63 @@ export function Projects() {
     setSearchResults(results)
     setFindLoading(false)
   }, [tokenSel, navProject, activeProject])
+
+  // Recherche textuelle — browse les chemins clés du projet et filtre par nom
+  const handleSearch = useCallback(async (query: string) => {
+    if (!query.trim()) { setSearchResults(null); return }
+    const proj = navProject || activeProject
+    if (!proj) return
+
+    setFindLoading(true)
+    setSearchResults([])
+    setResultLabel(`«${query}»`)
+
+    const results: FindResult[] = []
+    const q = query.toLowerCase()
+
+    // Chemins à parcourir (root + dossiers de premier niveau + chaque classe)
+    const pathsToSearch: string[][] = [
+      [],
+      ['assets'], ['shot'], ['comp'], ['lighting'],
+      ...Object.values(CLASS_TO_PATH),
+    ]
+
+    const pushIfUnique = (r: FindResult) => {
+      if (!results.some(x => x.subpath.join('/') === r.subpath.join('/'))) results.push(r)
+    }
+
+    for (const basePath of pathsToSearch) {
+      try {
+        const d = await api.browseProject(proj, basePath.join('/') || undefined)
+
+        for (const folder of d.folders) {
+          if (folder.name.toLowerCase().includes(q)) {
+            const subpath = [...basePath, folder.name]
+            pushIfUnique({ label: folder.name, pathStr: subpath.join(' / '), project: proj, subpath, isDir: true })
+          }
+        }
+        for (const file of d.files ?? []) {
+          if (file.name.toLowerCase().includes(q)) {
+            const subpath = [...basePath, file.name]
+            pushIfUnique({ label: file.name, pathStr: subpath.join(' / '), project: proj, subpath, isDir: false })
+          }
+        }
+      } catch {}
+    }
+
+    // Tri : exact > starts-with > contains
+    results.sort((a, b) => {
+      const aL = a.label.toLowerCase(), bL = b.label.toLowerCase()
+      if (aL === q && bL !== q) return -1
+      if (bL === q && aL !== q) return 1
+      if (aL.startsWith(q) && !bL.startsWith(q)) return -1
+      if (bL.startsWith(q) && !aL.startsWith(q)) return 1
+      return aL.localeCompare(bL)
+    })
+
+    setSearchResults(results)
+    setFindLoading(false)
+  }, [navProject, activeProject])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -649,9 +710,27 @@ export function Projects() {
           </div>
 
           {/* Search */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, border: '1px solid var(--rule-2)', padding: '0 8px', height: 24, width: 130, background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', flexShrink: 0 }}>
-            <Search size={10} strokeWidth={2} color="var(--ink-4)" />
-            <span style={{ fontSize: 10, color: 'var(--ink-4)', fontStyle: 'italic' }}>Rechercher…</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, border: '1px solid var(--rule-2)', padding: '0 6px', height: 24, width: 150, background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', flexShrink: 0 }}>
+            <Search size={10} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0 }} />
+            <input
+              value={searchQuery}
+              onChange={e => {
+                setSearchQuery(e.target.value)
+                if (!e.target.value) setSearchResults(null)
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') void handleSearch(searchQuery) }}
+              placeholder="Rechercher…"
+              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 10, color: 'var(--ink)', fontFamily: 'var(--mono)' }}
+            />
+            {searchQuery && (
+              <X
+                size={9}
+                strokeWidth={2}
+                color="var(--ink-4)"
+                style={{ flexShrink: 0, cursor: 'pointer' }}
+                onClick={() => { setSearchQuery(''); setSearchResults(null) }}
+              />
+            )}
           </div>
         </div>
 
@@ -727,6 +806,7 @@ export function Projects() {
               <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--paper-2)' }}>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', flex: 1 }}>
                   <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS — </span>
+                  {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} — </span>}
                   {findLoading ? 'Recherche…' : searchResults.length === 0 ? 'Aucun résultat' : `${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`}
                 </div>
                 <div

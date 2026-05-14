@@ -18,7 +18,7 @@ When navigating the FLUX application structure, understanding how pages integrat
 | Publisher.tsx | .tsx | DCC publish interface with history | Publisher (named export) |
 | Importer.tsx | .tsx | File import with browser and history | Importer (named export) |
 | Activity.tsx | .tsx | Filterable activity feed with mark-as-read | Activity (named export) |
-| Projects.tsx | .tsx | Project/folder manager with asset/seq/shot creators | Projects (named export) |
+| Projects.tsx | .tsx | Project explorer with breadcrumb nav, token-based asset/sequence/shot creation, and find/search | Projects (named export) |
 | ShelfManager.tsx | .tsx | DCC shelf install/remove interface | ShelfManager (named export) |
 | FirstLaunch.tsx | .tsx | Multi-step onboarding with workspace path and username selection (avatar list + text input) | FirstLaunch (named export) |
 | Login.tsx | .tsx | Compact user switch popover (below TitleBar, right-aligned) | Login (named export) |
@@ -27,7 +27,7 @@ When navigating the FLUX application structure, understanding how pages integrat
 - Hub: consumes ActivityFeed, ChatBox, QuickShortcuts components; reads useActivity hook
 - Publisher/Importer: call api.publish and api.importFiles; display file history panels
 - Activity: extends Hub's feed with filtering; pairs with ChatPanel
-- Projects: folder tree and asset creators; depends on folder manager API
+- Projects: explores project folder structure via api.browseProject; creates assets/sequences/shots with CLASS/TYPE/NAME/INSTANCE/ITER tokens via TokenFinder; depends on api.getAssets, api.updateSettings for last_project persistence
 - ShelfManager: reads DCC list from api.getShelves(); toggles install/remove
 - FirstLaunch: first-run only; workspace path via electronAPI; username from api.listUsers()
 - Login: user popover; calls api.updateSettings(); triggers reload on switch
@@ -69,9 +69,18 @@ Filterable event list from api.getActivity. ChatPanel section. Mark-as-read cont
 → used by: main router / activity route
 
 ### `Projects.tsx`
-**Role:** Project and asset management interface. Create/edit folders, assets, sequences, shots.
+**Role:** Project explorer with breadcrumb navigation, folder/file browsing, token-based creation (assets, sequences, shots), and search/find utilities.
+#### Internal Components
+- `FolderSvg`, `FileSvg`: SVG icons for folders (amber, highlight on select) and files (grey, highlight on select).
+- `TokenFinder`: 5-module token selector bar (CLASS / TYPE / NAME / INSTANCE / ITER). CLASS and TYPE are static dropdowns. NAME populates dynamically via api.getAssets(). INSTANCE defaults to ['null']. ITER loads version list. Fires onChange with TokenSel on each selection.
+- `NavContext`: Small badge showing current navigation project context, displayed in creation tabs.
+- `TabProject`: Right panel tab for creating projects.
+- `TabAsset`: Right panel tab for creating assets, reads currentProject from nav context.
+- `TabShot`: Right panel tab for creating sequences and shots, reads currentProject from nav context.
+- `TabDirectory`: Right panel stub for creating folders with token assignment.
+
 #### Projects
-Folder tree view with create actions. Asset creator by CLASS token. Sequence/shot creator. Calls folder manager APIs.
+Left explorer grid: double-click folders to navigate (history stack with back/forward), single-click to select. Breadcrumb row 1: back/fwd buttons + truncated path + live search input (Enter triggers search). Row 2: TokenFinder bar + Find button (primary). Find button browses project using CLASS_TO_PATH mapping, filters by NAME (partial match), digs into TYPE subfolder. Search input browses root + key subpaths, filters folders/files by name. Both show temporary results page (list of FindResult items with paths; click to navigate). Displays "× Fermer" to close results. Set Project button fixed at bottom of right panel (primary style), persists via api.updateSettings. All creation tabs (Asset, Shot, Directory, Project) use currentProject from nav context. Explorer refreshes after every creation.
 → used by: main router / projects route
 
 ### `ShelfManager.tsx`
