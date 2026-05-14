@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.logger import get_logger
-from core.paths import get_project_path
+from core.paths import get_project_path, is_subpath
 from features.folder_manager.asset_creator import create_asset, list_assets
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
 )
+from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -153,3 +155,92 @@ async def post_shot(req: ShotCreate) -> dict:
     except (ValueError, FileExistsError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"seq_number": req.seq_number, "shot_number": req.shot_number, "path": str(path)}
+
+
+# ── Directory ─────────────────────────────────────────────────────────────────
+
+class DirectoryCreate(BaseModel):
+    project:    str
+    subpath:    str   # chemin actuel relatif depuis la racine projet (peut être "")
+    name:       str   # nom du dossier à créer
+    token:      str = ""   # token optionnel (ex: "SLA")
+    token_type: str = ""   # type du token (CLASS / TYPE / NAME / …)
+
+
+@router.post("/directory")
+async def post_directory(req: DirectoryCreate) -> dict:
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Le nom du dossier est requis")
+
+    loop = asyncio.get_event_loop()
+
+    if req.token and req.token_type:
+        tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
+        existing_rel = get_path_for_token(tokens, req.token_type, req.token)
+
+        if existing_rel:
+            # Token déjà mappé → créer le dossier à l'emplacement du token
+            dir_path = project_path / existing_rel / req.name
+            rel_created = f"{existing_rel}/{req.name}"
+        else:
+            # Token inconnu → créer au chemin courant + enregistrer le token
+            rel_created = f"{req.subpath}/{req.name}".lstrip("/") if req.subpath else req.name
+            dir_path = project_path / rel_created
+            await loop.run_in_executor(
+                None, lambda: add_token(project_path, req.token_type, req.token, rel_created)
+            )
+    else:
+        rel_created = f"{req.subpath}/{req.name}".lstrip("/") if req.subpath else req.name
+        dir_path = project_path / rel_created
+
+    if not is_subpath(dir_path.resolve(), project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+
+    try:
+        await loop.run_in_executor(None, lambda: dir_path.mkdir(parents=True, exist_ok=False))
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail=f"'{req.name}' existe déjà")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    log.info("Created directory %s", dir_path)
+    return {"name": req.name, "path": str(dir_path), "rel_path": rel_created}
+
+
+# ── Delete ────────────────────────────────────────────────────────────────────
+
+class ItemDelete(BaseModel):
+    project: str
+    subpath: str   # relative path from project root, NOT including item name; "" = project root
+    name: str
+
+
+@router.delete("/items")
+async def delete_item(req: ItemDelete) -> dict:
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+
+    item_path = (project_path / req.subpath / req.name) if req.subpath else (project_path / req.name)
+
+    if not is_subpath(item_path.resolve(), project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+
+    if not item_path.exists():
+        raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")
+
+    loop = asyncio.get_event_loop()
+    try:
+        if item_path.is_dir():
+            await loop.run_in_executor(None, lambda: shutil.rmtree(item_path))
+        else:
+            await loop.run_in_executor(None, item_path.unlink)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    log.info("Deleted %s", item_path)
+    return {"deleted": req.name}

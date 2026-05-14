@@ -142,6 +142,15 @@ export const api = {
   createShot: (project: string, seq_number: number, shot_number: number) =>
     apiCall<{ seq_number: number; shot_number: number; path: string }>('POST', '/folder/shots', { project, seq_number, shot_number }),
 
+  createDirectory: (project: string, subpath: string[], name: string, token?: string, token_type?: string) =>
+    apiCall<{ name: string; path: string; rel_path: string }>('POST', '/folder/directory', {
+      project, subpath: subpath.join('/'), name,
+      token: token ?? '', token_type: token_type ?? '',
+    }),
+
+  deleteItem: (project: string, subpath: string[], name: string) =>
+    apiCall<{ deleted: string }>('DELETE', '/folder/items', { project, subpath: subpath.join('/'), name }),
+
   // Shelf
   getShelves: () =>
     apiCall<Record<string, { versions: string[]; installed: Record<string, boolean> }>>('GET', '/shelf'),

@@ -69,18 +69,26 @@ Filterable event list from api.getActivity. ChatPanel section. Mark-as-read cont
 → used by: main router / activity route
 
 ### `Projects.tsx`
-**Role:** Project explorer with breadcrumb navigation, folder/file browsing, token-based creation (assets, sequences, shots), and search/find utilities.
+**Role:** Project explorer with breadcrumb navigation, folder/file browsing, token-based creation (assets, sequences, shots), search/find utilities, sidebar tabs (Favoris/Tous/Récents/Archivés), context menu, and item deletion.
 #### Internal Components
 - `FolderSvg`, `FileSvg`: SVG icons for folders (amber, highlight on select) and files (grey, highlight on select).
-- `TokenFinder`: 5-module token selector bar (CLASS / TYPE / NAME / INSTANCE / ITER). CLASS and TYPE are static dropdowns. NAME populates dynamically via api.getAssets(). INSTANCE defaults to ['null']. ITER loads version list. Fires onChange with TokenSel on each selection.
-- `NavContext`: Small badge showing current navigation project context, displayed in creation tabs.
-- `TabProject`: Right panel tab for creating projects.
-- `TabAsset`: Right panel tab for creating assets, reads currentProject from nav context.
-- `TabShot`: Right panel tab for creating sequences and shots, reads currentProject from nav context.
-- `TabDirectory`: Right panel stub for creating folders with token assignment.
+- `TokenFinder`: 5-module token selector bar (CLASS / TYPE / NAME / INSTANCE / ITER). NAME populates dynamically via api.getAssets(). Fires onChange with TokenSel.
+- `NavContext`: Small badge showing current navigation project context.
+- `TabProject`, `TabAsset`, `TabShot`, `TabDirectory`: Right panel creation tabs.
+- `ContextMenu`: Fixed-position right-click menu. Options: Ajouter/Retirer Favoris, Archiver/Désarchiver, Supprimer (inside project only). Auto-adjusts to stay in viewport. Closes on outside click or Escape.
+- `DeleteModal`: Confirmation modal for deletion (also triggered by Delete key). Closes on Escape. Calls api.deleteItem then reloads items.
+- `SavedList`: Reusable list view for Favoris/Récents/Archivés tabs — shows SavedItem[] with path info; click navigates, × removes from list.
 
 #### Projects
-Left explorer grid: double-click folders to navigate (history stack with back/forward), single-click to select. Breadcrumb row 1: back/fwd buttons + truncated path + live search input (Enter triggers search). Row 2: TokenFinder bar + Find button (primary). Find button browses project using CLASS_TO_PATH mapping, filters by NAME (partial match), digs into TYPE subfolder. Search input browses root + key subpaths, filters folders/files by name. Both show temporary results page (list of FindResult items with paths; click to navigate). Displays "× Fermer" to close results. Set Project button fixed at bottom of right panel (primary style), persists via api.updateSettings. All creation tabs (Asset, Shot, Directory, Project) use currentProject from nav context. Explorer refreshes after every creation.
+**Sidebar tabs (SidebarTab):** Favoris / Tous / Récents / Archivés. Clicking changes sidebarTab state. Favoris and Archivés show badge count. When tab ≠ 'tous', central area shows SavedList instead of the explorer grid. RÉCENTS sidebar section (bottom) shows last 5 recently navigated folders.
+
+**Saved lists (localStorage):** `flux_favorites`, `flux_archived`, `flux_recents`. Each stores SavedItem[] with { label, project, subpath, isDir }. Recents auto-updated on double-click navigation (max 20, deduplicated). Favorites and archived toggled from context menu.
+
+**Context menu (clic droit):** right-click any grid item → ContextMenu overlay at cursor position. Favorite toggle, archive toggle, and delete option (only when nav.kind === 'inside').
+
+**Delete:** Delete key (when item selected + inside project) or context menu → DeleteModal → api.deleteItem(project, subpath, name). Also cleans deleted item from all saved lists.
+
+**Explorer grid (sidebarTab === 'tous'):** double-click folders to navigate (history stack + back/forward), single-click to select. Breadcrumb cliquable. Row 2: TokenFinder + Find button. Search (Enter) browses root + key subpaths. Set Project fixed at bottom of right panel.
 → used by: main router / projects route
 
 ### `ShelfManager.tsx`
