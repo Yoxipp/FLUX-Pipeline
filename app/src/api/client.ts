@@ -77,6 +77,18 @@ export const api = {
   launchDcc: (dcc: string, exe_path?: string) =>
     apiCall<{ dcc: string; launched: boolean }>('POST', '/dcc/launch', { dcc, exe_path }),
 
+  pingDcc: (dcc: string) =>
+    apiCall<{ connected: boolean; version: string | null }>('GET', `/dcc/${dcc}/ping`),
+
+  getDccAutostart: (dcc: string) =>
+    apiCall<{ installed: boolean; startup_file: string | null }>('GET', `/dcc/${dcc}/autostart`),
+
+  installDccAutostart: (dcc: string) =>
+    apiCall<{ success: boolean; message: string; path: string | null }>('POST', `/dcc/${dcc}/autostart`),
+
+  removeDccAutostart: (dcc: string) =>
+    apiCall<{ success: boolean; message: string }>('DELETE', `/dcc/${dcc}/autostart`),
+
   // Publisher
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),

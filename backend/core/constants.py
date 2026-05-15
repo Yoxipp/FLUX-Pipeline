@@ -3,7 +3,7 @@
 # ── DCC local ports ───────────────────────────────────────────────────────────
 DCC_PORTS: dict[str, int] = {
     "Maya":        7001,
-    "Houdini":     7002,
+    "Houdini":     48884,  # flux_houdini_server HTTP port
     "Nuke":        7003,
     "SubstanceP":  7004,
     "SubstanceD":  7005,

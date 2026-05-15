@@ -14,7 +14,18 @@ interface Props {
   unreadCount: number
 }
 
-// Clés correspondant exactement aux DCC_PORTS du backend
+// Mapping frontend key → backend DCC_PORTS key (backend uses capitalized/abbreviated names)
+const DCC_STATUS_KEYS: Record<string, string> = {
+  maya:               'Maya',
+  houdini:            'Houdini',
+  nuke:               'Nuke',
+  substance_painter:  'SubstanceP',
+  substance_designer: 'SubstanceD',
+  zbrush:             'ZBrush',
+  marvelous:          'Marvelous',
+  photoshop:          'Photoshop',
+}
+
 const SOFTWARE = [
   { name: 'Maya',               key: 'maya' },
   { name: 'Houdini',            key: 'houdini' },
@@ -27,7 +38,7 @@ const SOFTWARE = [
 ]
 
 function dccDot(status: DccStatusMap, key: string): string {
-  const entry = status[key]
+  const entry = status[DCC_STATUS_KEYS[key] ?? key]
   if (!entry) return ''
   return entry.connected ? 'ok' : ''
 }
@@ -78,14 +89,18 @@ function NavGroup({ title, children, open = true }: {
 export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const [launching, setLaunching]       = useState<Set<string>>(new Set())
-  const [launchResult, setLaunchResult] = useState<Record<string, boolean>>({})
-  const [dccPaths, setDccPaths]         = useState<Record<string, string>>({})
-  const [findingAll, setFindingAll]     = useState(false)
-  const [findResult, setFindResult]     = useState<Record<string, boolean | null>>({})
+  const [launching, setLaunching]             = useState<Set<string>>(new Set())
+  const [launchResult, setLaunchResult]       = useState<Record<string, boolean>>({})
+  const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
+  const [findingAll, setFindingAll]           = useState(false)
+  const [findResult, setFindResult]           = useState<Record<string, boolean | null>>({})
+  const [autostartInstalled, setAutostartInstalled] = useState<Record<string, boolean>>({})
+  const [autostartLoading, setAutostartLoading]     = useState<Set<string>>(new Set())
+  const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
+    api.getDccAutostart('houdini').then(r => setAutostartInstalled(prev => ({ ...prev, houdini: r.installed }))).catch(() => {})
   }, [])
 
   const handleAutoFindAll = async () => {
@@ -107,6 +122,35 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     )
     setFindingAll(false)
     setTimeout(() => setFindResult({}), 3000)
+  }
+
+  const handleToggleAutostart = async (key: string) => {
+    if (key !== 'houdini') return
+    setAutostartLoading(prev => new Set(prev).add(key))
+    try {
+      if (autostartInstalled[key]) {
+        await api.removeDccAutostart(key)
+        setAutostartInstalled(prev => ({ ...prev, [key]: false }))
+      } else {
+        await api.installDccAutostart(key)
+        setAutostartInstalled(prev => ({ ...prev, [key]: true }))
+        // Ping HTTP pour confirmer que flux_houdini_server tourne vraiment
+        try {
+          const pong = await api.pingDcc(key)
+          const label = pong.connected
+            ? (pong.version ? `v${pong.version}` : '✓')
+            : '✗'
+          setPingResult(prev => ({ ...prev, [key]: label }))
+          setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
+        } catch {
+          setPingResult(prev => ({ ...prev, [key]: '✗' }))
+          setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
+        }
+      }
+    } catch {}
+    finally {
+      setAutostartLoading(prev => { const n = new Set(prev); n.delete(key); return n })
+    }
   }
 
   const handlePickPath = async (key: string) => {
@@ -156,8 +200,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const dot       = dccDot(dccStatus, s.key)
           const connected = dot === 'ok'
           const isLoading = launching.has(s.key)
-          const hasPath   = !!dccPaths[s.key]
-          const findOk    = findResult[s.key]
+          const hasPath        = !!dccPaths[s.key]
+          const findOk         = findResult[s.key]
+          const isHoudini      = s.key === 'houdini'
+          const autoInstalled  = !!autostartInstalled[s.key]
+          const autoLoading    = autostartLoading.has(s.key)
 
           return (
             <div key={s.key} style={{
@@ -172,9 +219,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               />
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
 
-              {/* feedback auto-find */}
-              {findOk === true  && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--ok)' }}>✓</span>}
-              {findOk === false && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--err)' }}>✗</span>}
+              {/* feedback badge — auto-find ou ping */}
+              {findOk === true
+                ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--ok)' }}>✓</span>
+                : findOk === false
+                  ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--err)' }}>✗</span>
+                  : pingResult[s.key]
+                    ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: pingResult[s.key] === '✗' ? 'var(--err)' : 'var(--ok)' }}>
+                        {pingResult[s.key]}
+                      </span>
+                    : null
+              }
 
               {/* path picker — indicateur visuel : accent = path défini */}
               <div
@@ -194,21 +249,31 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <FolderOpen size={8} strokeWidth={2} />
               </div>
 
-              {/* port local — placeholder connexion (à implémenter) */}
+              {/* port local — autostart toggle (Houdini) ou placeholder */}
               <div
-                title={connected ? 'Connecté au port local' : 'Connexion port local — prochainement'}
+                onClick={() => { if (isHoudini && !autoLoading) void handleToggleAutostart(s.key) }}
+                title={
+                  !isHoudini    ? 'Connexion port local — prochainement' :
+                  autoLoading   ? '…' :
+                  autoInstalled ? 'Autostart installé — clic pour désinstaller' :
+                                  'Installer l\'autostart dans 123.py'
+                }
                 style={{
                   width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (connected ? 'var(--ok)' : 'var(--rule-2)'),
+                  border: '1px solid ' + (isHoudini && autoInstalled ? 'var(--accent)' : 'var(--rule-2)'),
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
-                  background: connected ? 'color-mix(in oklch, var(--ok) 10%, transparent)' : 'transparent',
-                  color: connected ? 'var(--ok)' : 'var(--ink-4)',
-                  cursor: 'not-allowed',
-                  opacity: connected ? 1 : 0.4,
+                  background: isHoudini && autoInstalled ? 'var(--accent-soft)' : 'transparent',
+                  color: isHoudini && autoInstalled ? 'var(--accent-hi)' : 'var(--ink-4)',
+                  cursor: isHoudini ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
+                  opacity: isHoudini ? 1 : 0.4,
+                  transition: 'background 0.12s, border-color 0.12s, color 0.12s',
                 }}
               >
-                <Plug size={8} strokeWidth={2} />
+                {autoLoading
+                  ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <Plug size={8} strokeWidth={2} />
+                }
               </div>
 
               {/* launch */}

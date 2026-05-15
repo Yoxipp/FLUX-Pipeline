@@ -67,10 +67,16 @@ async def mark_all_read() -> dict:
 
 @router.get("/chat")
 async def get_chat(limit: int = 100) -> dict:
-    """Return the last *limit* chat messages."""
+    """Return the last *limit* chat messages.
+
+    Returns empty results (not 500) when FLUX_ROOT is not yet set.
+    """
     loop = asyncio.get_event_loop()
-    messages = await loop.run_in_executor(None, lambda: get_messages(limit=limit))
-    users = await loop.run_in_executor(None, get_user_list)
+    try:
+        messages = await loop.run_in_executor(None, lambda: get_messages(limit=limit))
+        users = await loop.run_in_executor(None, get_user_list)
+    except RuntimeError:
+        return {"messages": [], "users": []}
     return {"messages": messages, "users": users}
 
 

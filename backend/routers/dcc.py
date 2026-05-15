@@ -7,10 +7,17 @@ import asyncio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from core import config as _config
 from core.constants import DCC_COLORS, DCC_PORTS
 from core.logger import get_logger
 from core.socket_manager import socket_manager
+from dcc.houdini import autostart as _houdini_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
+
+# Maps dcc_key (lowercase) → autostart module. Extend here when adding new DCCs.
+_AUTOSTART_MODULES: dict = {
+    "houdini": _houdini_autostart,
+}
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -118,6 +125,58 @@ async def launch(req: LaunchRequest) -> dict:
         await loop.run_in_executor(None, lambda: set_custom_exe_path(req.dcc, req.exe_path))
     ok = await loop.run_in_executor(None, lambda: launch_dcc(req.dcc))
     return {"dcc": req.dcc, "launched": ok}
+
+
+@router.get("/{dcc_key}/ping")
+async def ping_dcc(dcc_key: str) -> dict:
+    """HTTP-level ping — confirms the DCC server module is actually running."""
+    if dcc_key == "houdini":
+        from dcc.houdini.client import houdini_client
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, houdini_client.ping)
+        return {"connected": result.get("ok", False), "version": result.get("version")}
+    raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
+
+
+@router.get("/{dcc_key}/autostart")
+async def get_autostart(dcc_key: str) -> dict:
+    """Check whether the FLUX autostart block is installed for a DCC."""
+    mod = _AUTOSTART_MODULES.get(dcc_key)
+    if mod is None:
+        raise HTTPException(status_code=400, detail=f"Autostart not supported for: {dcc_key}")
+    loop = asyncio.get_event_loop()
+    exe = await loop.run_in_executor(None, lambda: _config.get("dcc_paths", {}).get(dcc_key))
+    installed = await loop.run_in_executor(None, lambda: mod.is_installed(exe))
+    startup = await loop.run_in_executor(None, lambda: mod.get_startup_file(exe))
+    return {"installed": installed, "startup_file": str(startup) if startup else None}
+
+
+@router.post("/{dcc_key}/autostart")
+async def install_autostart(dcc_key: str) -> dict:
+    """Install FLUX autostart block in a DCC's startup script."""
+    mod = _AUTOSTART_MODULES.get(dcc_key)
+    if mod is None:
+        raise HTTPException(status_code=400, detail=f"Autostart not supported for: {dcc_key}")
+    loop = asyncio.get_event_loop()
+    exe = await loop.run_in_executor(None, lambda: _config.get("dcc_paths", {}).get(dcc_key))
+    result = await loop.run_in_executor(None, lambda: mod.install(exe))
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
+
+
+@router.delete("/{dcc_key}/autostart")
+async def remove_autostart(dcc_key: str) -> dict:
+    """Remove FLUX autostart block from a DCC's startup script."""
+    mod = _AUTOSTART_MODULES.get(dcc_key)
+    if mod is None:
+        raise HTTPException(status_code=400, detail=f"Autostart not supported for: {dcc_key}")
+    loop = asyncio.get_event_loop()
+    exe = await loop.run_in_executor(None, lambda: _config.get("dcc_paths", {}).get(dcc_key))
+    result = await loop.run_in_executor(None, lambda: mod.uninstall(exe))
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
 
 
 @router.websocket("/ws/status")
