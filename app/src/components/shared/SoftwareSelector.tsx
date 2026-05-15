@@ -1,6 +1,6 @@
 import { Pill } from './ui'
 
-const SW = [
+const SW_DCC = [
   { name: 'Maya',         v: '2025.3' },
   { name: 'Houdini',      v: '20.5' },
   { name: 'Nuke',         v: '15.0' },
@@ -24,16 +24,16 @@ export function SoftwareSelector({ active = 'Maya', onChange }: Props) {
     }}>
       <div className="cap">LOGICIEL</div>
       <div style={{ width: 1, height: 12, background: 'var(--rule-2)' }} />
-      <div style={{ display: 'flex', gap: 4, overflowX: 'auto' }}>
-        {SW.map(s => (
-          <Pill
-            key={s.name}
-            active={s.name === active}
-            style={{ cursor: 'pointer' }}
-          >
+      <div style={{ display: 'flex', gap: 4, overflowX: 'auto', alignItems: 'center' }}>
+        {SW_DCC.map(s => (
+          <Pill key={s.name} active={s.name === active} style={{ cursor: 'pointer' }}>
             <span onClick={() => onChange?.(s.name)}>{s.name}</span>
           </Pill>
         ))}
+        <div style={{ width: 1, height: 12, background: 'var(--rule-2)', margin: '0 4px', flexShrink: 0 }} />
+        <Pill active={'Fichier local' === active} style={{ cursor: 'pointer' }}>
+          <span onClick={() => onChange?.('Fichier local')}>Fichier local</span>
+        </Pill>
       </div>
     </div>
   )

@@ -193,7 +193,7 @@ export function Publisher() {
           user:          settings?.username ?? undefined,
         })
         setResult({ ok: true, msg: `v${res.version_str} → ${res.rop_node}` })
-      } else {
+      } else if (dcc === 'Fichier local') {
         if (!sourcePath.trim()) {
           setResult({ ok: false, msg: 'Indique le fichier source' })
           setPublishing(false)
@@ -206,6 +206,10 @@ export function Publisher() {
           user:         settings?.username ?? undefined,
         })
         setResult({ ok: res.success, msg: res.message })
+      } else {
+        setResult({ ok: false, msg: `Publication depuis ${dcc} non encore disponible` })
+        setPublishing(false)
+        return
       }
     } catch (e) {
       setResult({ ok: false, msg: e instanceof Error ? e.message : 'Erreur inconnue' })
@@ -313,13 +317,13 @@ export function Publisher() {
                   }}
                 />
               </div>
-            ) : (
+            ) : dcc === 'Fichier local' ? (
               <div>
                 <div className="cap" style={{ marginBottom: 6 }}>FICHIER SOURCE</div>
                 <input
                   value={sourcePath}
                   onChange={e => setSourcePath(e.target.value)}
-                  placeholder="Colle le chemin du fichier à publier…"
+                  placeholder="Chemin absolu vers le fichier à publier…"
                   style={{
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
@@ -328,6 +332,13 @@ export function Publisher() {
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ink-4)', flexShrink: 0 }} />
+                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                  La publication depuis <span style={{ color: 'var(--ink-2)' }}>{dcc}</span> se déclenche directement depuis le logiciel
+                </div>
               </div>
             )}
           </div>
