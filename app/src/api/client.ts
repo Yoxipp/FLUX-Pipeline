@@ -5,6 +5,9 @@ import type {
   ChatMessage,
   DccStatusMap,
   FileEntry,
+  HoudiniPublishPayload,
+  HoudiniPublishResult,
+  HoudiniState,
   ModifLog,
   PublishPayload,
   PublishResult,
@@ -92,6 +95,12 @@ export const api = {
   // Publisher
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
+
+  getHoudiniState: () =>
+    apiCall<HoudiniState>('GET', '/dcc/houdini/state'),
+
+  publishHoudiniRop: (payload: HoudiniPublishPayload) =>
+    apiCall<HoudiniPublishResult>('POST', '/dcc/houdini/publish', payload),
 
   // Importer
   importFiles: (dcc: string, file_paths: string[], project_name?: string) =>

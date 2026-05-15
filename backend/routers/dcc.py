@@ -127,6 +127,17 @@ async def launch(req: LaunchRequest) -> dict:
     return {"dcc": req.dcc, "launched": ok}
 
 
+@router.get("/houdini/state")
+async def houdini_state() -> dict:
+    """Return current Houdini state: selected nodes, frame, path, hip file."""
+    from dcc.houdini.client import houdini_client
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, houdini_client.state)
+    if "error" in result:
+        raise HTTPException(status_code=503, detail=result["error"])
+    return result
+
+
 @router.get("/{dcc_key}/ping")
 async def ping_dcc(dcc_key: str) -> dict:
     """HTTP-level ping — confirms the DCC server module is actually running."""
@@ -176,6 +187,148 @@ async def remove_autostart(dcc_key: str) -> dict:
     result = await loop.run_in_executor(None, lambda: mod.uninstall(exe))
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
+    return result
+
+
+class HoudiniImportCreateRequest(BaseModel):
+    network_path: str
+    file_path: str
+
+
+class HoudiniImportSetPathRequest(BaseModel):
+    node_path: str
+    file_path: str
+
+
+class HoudiniMoveToLocalRequest(BaseModel):
+    file_path: str
+
+
+@router.post("/houdini/import/create")
+async def houdini_import_create(req: HoudiniImportCreateRequest) -> dict:
+    """Create a Houdini import node (type auto-detected from extension)."""
+    from dcc.houdini.houdini_import import create_import_node
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, lambda: create_import_node(req.network_path, req.file_path)
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Import failed"))
+    return result
+
+
+@router.post("/houdini/import/set_path")
+async def houdini_import_set_path(req: HoudiniImportSetPathRequest) -> dict:
+    """Update the file path parameter on an existing Houdini import node."""
+    from dcc.houdini.houdini_import import set_import_path
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, lambda: set_import_path(req.node_path, req.file_path)
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Set path failed"))
+    return result
+
+
+@router.post("/houdini/import/move_to_local")
+async def houdini_import_move_to_local(req: HoudiniMoveToLocalRequest) -> dict:
+    """Copy a pipeline file into $HIP/sourceimages/ of the current Houdini project."""
+    from dcc.houdini.houdini_import import move_to_local
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, lambda: move_to_local(req.file_path)
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Move to local failed"))
+    return result
+
+
+class HoudiniGeoExportRequest(BaseModel):
+    node_path: str
+    file_path: str
+    extension: str = ".bgeo"
+
+
+class HoudiniSceneExportRequest(BaseModel):
+    file_path: str
+    extension: str = ".hip"
+
+
+class HoudiniPublishRequest(BaseModel):
+    project_name: str
+    filename: str               # base name without version/ext, e.g. "CHAR_RIG_HorseBody_adam"
+    extension: str              # e.g. ".abc"
+    rop_node_path: str | None = None  # uses Houdini selection when None
+    is_sequence: bool = False
+    frame_range: list[int] | None = None   # [start, end, step]
+    frame_padding: int = 4
+    description: str = ""
+    user: str | None = None
+
+
+@router.post("/houdini/export/geo")
+async def houdini_export_geo(req: HoudiniGeoExportRequest) -> dict:
+    """Export geometry from a Houdini SOP node. Requires Houdini to be running with FLUX server."""
+    from dcc.houdini.houdini_export import export_geo
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, lambda: export_geo(req.node_path, req.file_path, req.extension)
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Export failed"))
+    return result
+
+
+@router.post("/houdini/export/scene")
+async def houdini_export_scene(req: HoudiniSceneExportRequest) -> dict:
+    """Save the current Houdini scene to disk. Requires Houdini to be running with FLUX server."""
+    from dcc.houdini.houdini_export import export_scene
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, lambda: export_scene(req.file_path, req.extension)
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Export failed"))
+    return result
+
+
+@router.post("/houdini/publish")
+async def houdini_publish(req: HoudiniPublishRequest) -> dict:
+    """Houdini ROP publish workflow.
+
+    Builds a versioned pipeline path from tokens, sets it on the selected (or given)
+    ROP node, triggers the cook, then archives the previous version.
+    Sequence mode creates a versioned subfolder with $F4 frame tokens.
+    """
+    from core import config
+    from core.paths import get_project_path
+    from dcc.houdini.houdini_export import publish_houdini_rop
+
+    user = req.user or config.get_current_user() or "unknown"
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    frame_range = tuple(req.frame_range) if req.frame_range and len(req.frame_range) == 3 else None  # type: ignore[arg-type]
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_houdini_rop(
+            project_path=project_path,
+            filename=req.filename,
+            extension=req.extension,
+            rop_node_path=req.rop_node_path,
+            is_sequence=req.is_sequence,
+            frame_range=frame_range,
+            frame_padding=req.frame_padding,
+            description=req.description,
+            user=user,
+        ),
+    )
+
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
     return result
 
 

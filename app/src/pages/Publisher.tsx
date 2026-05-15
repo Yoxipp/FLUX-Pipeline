@@ -6,8 +6,8 @@ import { api } from '../api/client'
 import { useSettings } from '../hooks/useSettings'
 
 // ── FileBadge : affiche les tokens du fichier en cours ───────────────────────
-const FileBadge = ({ classToken, typeName, assetName }: {
-  classToken: string; typeName: string; assetName: string
+const FileBadge = ({ classToken, typeName, assetName, instance }: {
+  classToken: string; typeName: string; assetName: string; instance: string
 }) => (
   <div style={{
     display: 'flex', width: '100%',
@@ -18,7 +18,7 @@ const FileBadge = ({ classToken, typeName, assetName }: {
       { label: 'CLASS',    value: classToken || 'CHAR', tinted: true },
       { label: 'TYPE',     value: typeName   || '—' },
       { label: 'NAME',     value: assetName  || '—' },
-      { label: 'INSTANCE', value: '—' },
+      { label: 'INSTANCE', value: instance   || '—' },
       { label: 'LAST',     value: 'LAST',  accent: true },
     ].map((seg, i) => (
       <div key={i} style={{
@@ -108,10 +108,21 @@ export function Publisher() {
   const [classToken, setClassToken] = useState('CHAR')
   const [typeName, setTypeName]     = useState('')
   const [assetName, setAssetName]   = useState('')
+  const [instance, setInstance]     = useState('')
   const [sourcePath, setSourcePath] = useState('')
   const [description, setDescription] = useState('')
   const [publishing, setPublishing] = useState(false)
   const [result, setResult]         = useState<{ ok: boolean; msg: string } | null>(null)
+
+  // Houdini mode state
+  const [ropNodePath, setRopNodePath]   = useState('')
+  const [houdiniExt, setHoudiniExt]     = useState('.abc')
+  const [isSequence, setIsSequence]     = useState(false)
+  const [frameStart, setFrameStart]     = useState(1)
+  const [frameEnd, setFrameEnd]         = useState(100)
+  const [frameStep, setFrameStep]       = useState(1)
+  const [houdiniConnected, setHoudiniConnected]   = useState(false)
+  const [houdiniVersion, setHoudiniVersion]       = useState<string | null>(null)
 
   useEffect(() => {
     api.getProjects()
@@ -122,10 +133,33 @@ export function Publisher() {
       .catch(() => {})
   }, [])
 
+  // Poll Houdini state when in Houdini mode
+  useEffect(() => {
+    if (dcc !== 'Houdini') return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const ping = await api.pingDcc('houdini')
+        if (cancelled) return
+        setHoudiniConnected(ping.connected)
+        setHoudiniVersion(ping.version)
+        if (ping.connected) {
+          const state = await api.getHoudiniState()
+          if (!cancelled && state.selected_nodes?.length > 0)
+            setRopNodePath(state.selected_nodes[0])
+        }
+      } catch { /* Houdini offline */ }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dcc])
+
   const reset = useCallback(() => {
     setClassToken('CHAR')
     setTypeName('')
     setAssetName('')
+    setInstance('')
     setSourcePath('')
     setDescription('')
     setResult(null)
@@ -133,23 +167,53 @@ export function Publisher() {
 
   const handlePublish = useCallback(async () => {
     if (!project) { setResult({ ok: false, msg: 'Sélectionne un projet' }); return }
-    if (!sourcePath.trim()) { setResult({ ok: false, msg: 'Indique le fichier source' }); return }
+
     setPublishing(true)
     setResult(null)
+
+    // filename = CLASS_TYPE_NAME[_instance] — instance optional
+    const instancePart = instance.trim() ? `_${instance.trim()}` : ''
+    const filename = `${classToken}_${typeName}_${assetName}${instancePart}`
+
     try {
-      const res = await api.publish({
-        source_path: sourcePath,
-        project_name: project,
-        description: description || undefined,
-        user: settings?.username ?? undefined,
-      })
-      setResult({ ok: res.success, msg: res.message })
+      if (dcc === 'Houdini') {
+        if (!typeName || !assetName) {
+          setResult({ ok: false, msg: 'Remplis Type et Name' })
+          setPublishing(false)
+          return
+        }
+        const res = await api.publishHoudiniRop({
+          project_name:  project,
+          filename,
+          extension:     houdiniExt,
+          rop_node_path: ropNodePath || undefined,
+          is_sequence:   isSequence,
+          frame_range:   isSequence ? [frameStart, frameEnd, frameStep] : undefined,
+          description:   description || undefined,
+          user:          settings?.username ?? undefined,
+        })
+        setResult({ ok: true, msg: `v${res.version_str} → ${res.rop_node}` })
+      } else {
+        if (!sourcePath.trim()) {
+          setResult({ ok: false, msg: 'Indique le fichier source' })
+          setPublishing(false)
+          return
+        }
+        const res = await api.publish({
+          source_path:  sourcePath,
+          project_name: project,
+          description:  description || undefined,
+          user:         settings?.username ?? undefined,
+        })
+        setResult({ ok: res.success, msg: res.message })
+      }
     } catch (e) {
       setResult({ ok: false, msg: e instanceof Error ? e.message : 'Erreur inconnue' })
     } finally {
       setPublishing(false)
     }
-  }, [project, sourcePath, description, settings?.username])
+  }, [dcc, project, sourcePath, description, settings?.username, classToken, typeName, assetName,
+      instance, houdiniExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep])
 
   const selectStyle: React.CSSProperties = {
     height: 28, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
@@ -197,7 +261,7 @@ export function Publisher() {
               </div>
             </div>
 
-            <FileBadge classToken={classToken} typeName={typeName} assetName={assetName} />
+            <FileBadge classToken={classToken} typeName={typeName} assetName={assetName} instance={instance} />
 
             <div style={{ marginTop: 4 }}>
               {/* Class */}
@@ -210,27 +274,62 @@ export function Publisher() {
                   <ChevronDown size={11} strokeWidth={2} color="var(--ink-3)" style={{ position: 'absolute', right: 7, pointerEvents: 'none' }} />
                 </div>
               </div>
-              <InputRow label="Type :"     value={typeName}   onChange={setTypeName}   placeholder="ex: HorseRig" />
-              <InputRow label="Name :"     value={assetName}  onChange={setAssetName}  placeholder="ex: v001.usda" />
-              <InputRow label="Instance :" value={settings?.username ?? ''} readOnly placeholder="utilisateur" />
+              <InputRow label="Type :"     value={typeName}  onChange={setTypeName}  placeholder="ex: Rig" />
+              <InputRow label="Name :"     value={assetName} onChange={setAssetName} placeholder="ex: HorseBody" />
+              <InputRow label="Instance :" value={instance}  onChange={setInstance}  placeholder="ex: moustache  (optionnel)" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <div style={{ width: 96, textAlign: 'right', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>PUBLIÉ PAR</div>
+                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                  {settings?.username ?? '—'}
+                </div>
+              </div>
             </div>
 
-            {/* fichier source */}
-            <div>
-              <div className="cap" style={{ marginBottom: 6 }}>FICHIER SOURCE</div>
-              <input
-                value={sourcePath}
-                onChange={e => setSourcePath(e.target.value)}
-                placeholder="Colle le chemin du fichier à publier…"
-                style={{
-                  width: '100%', height: 28,
-                  background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                  borderRadius: 5, padding: '0 8px',
-                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
-                  boxShadow: 'var(--shadow-inset)', outline: 'none',
-                }}
-              />
-            </div>
+            {/* source / ROP — conditionnel selon DCC */}
+            {dcc === 'Houdini' ? (
+              <div>
+                <div className="cap" style={{ marginBottom: 6 }}>NODE ROP</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
+                  <div style={{
+                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                    background: houdiniConnected ? 'var(--ok)' : 'var(--err)',
+                  }} />
+                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                    {houdiniConnected
+                      ? `Connecté${houdiniVersion ? ` — Houdini ${houdiniVersion}` : ''}`
+                      : 'Houdini non connecté — lance le serveur FLUX dans Houdini'}
+                  </div>
+                </div>
+                <input
+                  value={ropNodePath}
+                  onChange={e => setRopNodePath(e.target.value)}
+                  placeholder="/out/rop_alembic1  (auto-rempli depuis la sélection)"
+                  style={{
+                    width: '100%', height: 28,
+                    background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                    borderRadius: 5, padding: '0 8px',
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                    boxShadow: 'var(--shadow-inset)', outline: 'none',
+                  }}
+                />
+              </div>
+            ) : (
+              <div>
+                <div className="cap" style={{ marginBottom: 6 }}>FICHIER SOURCE</div>
+                <input
+                  value={sourcePath}
+                  onChange={e => setSourcePath(e.target.value)}
+                  placeholder="Colle le chemin du fichier à publier…"
+                  style={{
+                    width: '100%', height: 28,
+                    background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                    borderRadius: 5, padding: '0 8px',
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                    boxShadow: 'var(--shadow-inset)', outline: 'none',
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* description + résultat */}
@@ -257,34 +356,116 @@ export function Publisher() {
           </div>
         </div>
 
-        {/* ── droite : presets + USD preview ── */}
+        {/* ── droite : presets / houdini format ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
-          <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
-            <SecTitle>PRESET D'EXPORT</SecTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
-              {PRESETS.map(p => (
-                <PresetBtn key={p.id} title={p.title} sub={p.sub} active={preset === p.id} onClick={() => setPreset(p.id)} />
-              ))}
-            </div>
-          </div>
-
-          <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <SecTitle>APERÇU USD</SecTitle>
-            <div className="subcard" style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
-              <UsdTreeRow depth={0} glyph="◈" label={assetName || 'Asset'} color="var(--ink)" />
-              <UsdTreeRow depth={1} glyph="◇" label="Geo" last={false} />
-              <UsdTreeRow depth={2} glyph="·" label="Body_Mesh" last />
-              <UsdTreeRow depth={1} glyph="◇" label="SkelRoot" last={false} />
-              <UsdTreeRow depth={2} glyph="·" label="Skeleton" last />
-              <UsdTreeRow depth={1} glyph="◇" label="Materials" last />
-              <div style={{ flex: 1 }} />
-              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--rule)', display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-                <div className="lbl">Format : USDA</div>
-                <div className="lbl">Preset : <span style={{ color: 'var(--accent-hi)' }}>{preset}</span></div>
+          {dcc === 'Houdini' ? (<>
+            {/* FORMAT */}
+            <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
+              <SecTitle>FORMAT</SecTitle>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['.abc', '.bgeo', '.usd', '.obj', '.hip'].map(ext => (
+                  <div key={ext} onClick={() => setHoudiniExt(ext)} style={{
+                    padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                    fontFamily: 'var(--mono)', fontWeight: houdiniExt === ext ? 600 : 400,
+                    border: houdiniExt === ext ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                    background: houdiniExt === ext ? 'var(--accent-soft)' : 'var(--paper-2)',
+                    color: houdiniExt === ext ? 'var(--accent-hi)' : 'var(--ink-3)',
+                    transition: 'all 0.1s',
+                  }}>{ext}</div>
+                ))}
               </div>
             </div>
-          </div>
+
+            {/* SEQUENCE */}
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>SÉQUENCE ANIMÉE</SecTitle>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSequence ? 10 : 0 }}>
+                <div onClick={() => setIsSequence(v => !v)} style={{
+                  width: 32, height: 18, borderRadius: 9, cursor: 'pointer', flexShrink: 0,
+                  background: isSequence ? 'var(--accent)' : 'var(--rule-2)',
+                  position: 'relative', transition: 'background 0.15s',
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 2, left: isSequence ? 16 : 2,
+                    width: 14, height: 14, borderRadius: '50%', background: 'white',
+                    transition: 'left 0.15s', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+                  }} />
+                </div>
+                <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                  {isSequence ? 'Activé — dossier versionné + $F4' : 'Désactivé — fichier unique LAST'}
+                </div>
+              </div>
+              {isSequence && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {([['Start', frameStart, setFrameStart], ['End', frameEnd, setFrameEnd], ['Step', frameStep, setFrameStep]] as const).map(([lbl, val, set]) => (
+                    <div key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
+                      <input type="number" value={val} onChange={e => set(Number(e.target.value))} style={{
+                        width: 56, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                        borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
+                        color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* OUTPUT PREVIEW */}
+            <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <SecTitle>APERÇU OUTPUT</SecTitle>
+              <div className="subcard" style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0, overflowY: 'auto' }}>
+                {(() => {
+                  const parts = [classToken, typeName || '…', assetName || '…']
+                  if (instance.trim()) parts.push(instance.trim())
+                  const base = parts.join('_')
+                  if (isSequence) return (<>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{base}_v001/</div>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)', paddingLeft: 12 }}>
+                      {base}_v001.$F4{houdiniExt}
+                    </div>
+                  </>)
+                  return (
+                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)' }}>
+                      {base}_LAST{houdiniExt}
+                    </div>
+                  )
+                })()}
+                {ropNodePath && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                    ROP : {ropNodePath}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>) : (<>
+            <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
+              <SecTitle>PRESET D'EXPORT</SecTitle>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
+                {PRESETS.map(p => (
+                  <PresetBtn key={p.id} title={p.title} sub={p.sub} active={preset === p.id} onClick={() => setPreset(p.id)} />
+                ))}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <SecTitle>APERÇU USD</SecTitle>
+              <div className="subcard" style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
+                <UsdTreeRow depth={0} glyph="◈" label={assetName || 'Asset'} color="var(--ink)" />
+                <UsdTreeRow depth={1} glyph="◇" label="Geo" last={false} />
+                <UsdTreeRow depth={2} glyph="·" label="Body_Mesh" last />
+                <UsdTreeRow depth={1} glyph="◇" label="SkelRoot" last={false} />
+                <UsdTreeRow depth={2} glyph="·" label="Skeleton" last />
+                <UsdTreeRow depth={1} glyph="◇" label="Materials" last />
+                <div style={{ flex: 1 }} />
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--rule)', display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="lbl">Format : USDA</div>
+                  <div className="lbl">Preset : <span style={{ color: 'var(--accent-hi)' }}>{preset}</span></div>
+                </div>
+              </div>
+            </div>
+          </>)}
         </div>
       </div>
 
