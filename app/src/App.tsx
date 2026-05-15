@@ -17,6 +17,7 @@ import { ShelfManager }  from './pages/ShelfManager'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
+import { applyAccentPreset } from './lib/accentPresets'
 
 // Inner shell — only mounted after first-launch wizard completes.
 // Hooks that poll the backend (useActivity, useDccStatus) live here so they
@@ -71,6 +72,8 @@ export function App() {
     root.style.setProperty('--color-surface', settings.theme.surface)
     root.style.setProperty('--color-fg',      settings.theme.fg)
     root.style.setProperty('--color-accent',  settings.theme.accent)
+    // Restore accent preset (stored as preset key, e.g. "blue")
+    applyAccentPreset(settings.theme.accent)
   }, [settings])
 
   if (loading) {

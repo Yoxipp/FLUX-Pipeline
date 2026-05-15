@@ -3,6 +3,7 @@ import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshC
 import type { LucideIcon } from 'lucide-react'
 import { Avatar } from './ui'
 import { api } from '../../api/client'
+import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
 
 interface Props {
   username: string | null
@@ -40,11 +41,23 @@ function SettingsPopover({ username, onClose }: { username: string; onClose: () 
   const [workspace, setWorkspace]   = useState('')
   const [version, setVersion]       = useState('')
   const [changing, setChanging]     = useState(false)
+  const [accentKey, setAccentKey]   = useState('orange')
 
   useEffect(() => {
-    api.getSettings().then(s => setWorkspace(s.workspace ?? '')).catch(() => {})
+    api.getSettings().then(s => {
+      setWorkspace(s.workspace ?? '')
+      const stored = s.theme?.accent ?? 'orange'
+      const key = ACCENT_PRESETS.some(p => p.key === stored) ? stored : 'orange'
+      setAccentKey(key)
+    }).catch(() => {})
     window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
   }, [])
+
+  const handleAccent = (key: string) => {
+    setAccentKey(key)
+    applyAccentPreset(key)
+    void api.updateSettings({ theme_accent: key })
+  }
 
   const handleChangeWorkspace = async () => {
     const path = await window.electronAPI?.openFolder()
@@ -122,6 +135,36 @@ function SettingsPopover({ username, onClose }: { username: string; onClose: () 
             : <FolderOpen size={11} strokeWidth={1.75} />
           }
           {changing ? 'Changement…' : 'Changer de répertoire…'}
+        </div>
+      </div>
+
+      {/* accent color */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 8 }}>COULEUR D'ACCENT</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {ACCENT_PRESETS.map(p => {
+            const active = accentKey === p.key
+            return (
+              <div
+                key={p.key}
+                title={p.label}
+                onClick={() => handleAccent(p.key)}
+                style={{
+                  flex: 1,
+                  height: 22,
+                  borderRadius: 5,
+                  background: p.accent,
+                  border: active ? '2px solid var(--ink)' : '2px solid transparent',
+                  outline: active ? '1px solid ' + p.accent : 'none',
+                  outlineOffset: 1,
+                  cursor: 'pointer',
+                  transition: 'border-color 0.12s, transform 0.08s',
+                  transform: active ? 'scaleY(1.12)' : 'scaleY(1)',
+                  boxShadow: active ? '0 2px 8px rgba(0,0,0,0.4)' : 'none',
+                }}
+              />
+            )
+          })}
         </div>
       </div>
 
