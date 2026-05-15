@@ -108,13 +108,40 @@ function FolderSvg({ size = 40, selected = false }: { size?: number; selected?: 
   )
 }
 
-function FileSvg({ size = 36, selected = false }: { size?: number; selected?: boolean }) {
+const EXT_BADGE: Record<string, { bg: string; fg: string }> = {
+  usd:  { bg: '#E07820', fg: '#fff' },
+  usda: { bg: '#E07820', fg: '#fff' },
+  usdc: { bg: '#E07820', fg: '#fff' },
+  usdz: { bg: '#E07820', fg: '#fff' },
+  abc:  { bg: '#1A9E6E', fg: '#fff' },
+  gbx:  { bg: '#5A8A2E', fg: '#fff' },
+  obj:  { bg: '#7B6FAA', fg: '#fff' },
+  ma:   { bg: '#1E88C8', fg: '#fff' },
+  mb:   { bg: '#1565A8', fg: '#fff' },
+  ztl:  { bg: '#D03030', fg: '#fff' },
+}
+
+function getExt(filename: string): string {
+  return filename.split('.').pop()?.toLowerCase() ?? ''
+}
+
+function FileSvg({ size = 36, selected = false, ext = '' }: { size?: number; selected?: boolean; ext?: string }) {
   const body   = selected ? 'var(--accent)'    : 'var(--ink-2)'
   const corner = selected ? 'var(--accent-hi)' : 'var(--ink-3)'
+  const badge  = EXT_BADGE[ext]
   return (
     <svg width={size} height={Math.round(size * 1.22)} viewBox="0 0 30 37" fill="none">
       <path d="M2 0 L20 0 L30 10 L30 35 Q30 37 28 37 L2 37 Q0 37 0 35 L0 2 Q0 0 2 0Z" fill={body} />
       <path d="M20 0 L20 10 L30 10Z" fill={corner} />
+      {badge && (
+        <>
+          <rect x="2" y="25" width="26" height="10" rx="2" fill={badge.bg} />
+          <text x="15" y="33" textAnchor="middle" fontSize="6.5" fontWeight="700"
+            fontFamily="monospace" fill={badge.fg} letterSpacing="0.3">
+            {ext.toUpperCase()}
+          </text>
+        </>
+      )}
     </svg>
   )
 }
@@ -883,7 +910,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
-              {s.isDir ? <FolderSvg size={24} /> : <FileSvg size={20} />}
+              {s.isDir ? <FolderSvg size={24} /> : <FileSvg size={20} ext={getExt(s.label)} />}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
                 <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1648,7 +1675,7 @@ export function Projects() {
                           )}
                           {item.isDir
                             ? <FolderSvg size={40} selected={isSel} />
-                            : <FileSvg   size={34} selected={isSel} />}
+                            : <FileSvg   size={34} selected={isSel} ext={getExt(item.name)} />}
                           <div style={{ fontSize: 10, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
                             {item.name}
                           </div>
