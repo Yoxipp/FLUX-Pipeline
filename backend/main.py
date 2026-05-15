@@ -22,6 +22,15 @@ log = get_logger("main")
 
 PORT = int(os.environ.get("FLUX_PORT", 8765))
 
+# Persist port so Houdini HDAs can discover it without importing backend modules
+try:
+    import pathlib as _pl
+    _port_file = _pl.Path(os.environ.get("APPDATA", ""), "FLUX", "backend_port")
+    _port_file.parent.mkdir(parents=True, exist_ok=True)
+    _port_file.write_text(str(PORT))
+except Exception:
+    pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

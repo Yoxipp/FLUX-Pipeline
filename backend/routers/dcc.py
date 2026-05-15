@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from core import config as _config
@@ -330,6 +330,141 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
     return result
+
+
+# ── Houdini Importer HDA endpoints ───────────────────────────────────────────
+
+
+class HoudiniBuildHdaRequest(BaseModel):
+    hda_path: str
+
+
+@router.get("/houdini/importer/tokens")
+async def houdini_importer_tokens(project: str = "") -> dict:
+    """Return project list and token map for populating the HDA dropdowns.
+
+    When *project* is provided, tokens for that project are included.
+    Always returns the full list of known projects.
+    """
+    from core.paths import get_project_path
+    from features.importer.importer_resolve import get_import_tokens, get_project_list
+
+    loop = asyncio.get_event_loop()
+    projects = await loop.run_in_executor(None, get_project_list)
+    tokens: dict = {}
+    if project:
+        project_path = get_project_path(project)
+        if project_path.exists():
+            tokens = await loop.run_in_executor(None, lambda: get_import_tokens(project_path))
+    return {"projects": projects, "tokens": tokens}
+
+
+@router.get("/houdini/importer/resolve")
+async def houdini_importer_resolve(
+    project: str,
+    class_tok: str = Query("", alias="class"),
+    type: str = "",
+    name: str = "",
+    instance: str = "null",
+    iter: str = "LAST",
+) -> dict:
+    """Resolve token parameters to an absolute file path on disk."""
+    from core.paths import get_project_path
+    from features.importer.importer_resolve import resolve_import_path
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: resolve_import_path(project_path, class_tok, type, name, instance, iter),
+    )
+    return result
+
+
+@router.get("/houdini/importer/iters")
+async def houdini_importer_iters(
+    project: str,
+    class_tok: str = Query("", alias="class"),
+    type: str = "",
+    name: str = "",
+    instance: str = "null",
+) -> dict:
+    """Return sorted iteration labels available on disk for the given tokens."""
+    from core.paths import get_project_path
+    from features.importer.importer_resolve import get_available_iters
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+    loop = asyncio.get_event_loop()
+    iters = await loop.run_in_executor(
+        None,
+        lambda: get_available_iters(project_path, class_tok, type, name, instance),
+    )
+    return {"iters": iters}
+
+
+class HoudiniInjectModuleRequest(BaseModel):
+    hda_name: str = "flux_importer"
+
+
+@router.post("/houdini/importer/inject_module")
+async def houdini_importer_inject_module(req: HoudiniInjectModuleRequest) -> dict:
+    """Inject the FLUX PythonModule into an already-loaded HDA definition.
+
+    Use when the HDA was created manually and its Python module section is empty.
+    Houdini must be running with the FLUX server active.
+    All existing node instances in the scene are reloaded automatically.
+    """
+    from dcc.houdini.hda.flux_importer_hda import inject_module
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: inject_module(req.hda_name))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Inject failed"))
+    return result
+
+
+@router.post("/houdini/importer/build_hda")
+async def houdini_importer_build_hda(req: HoudiniBuildHdaRequest) -> dict:
+    """Build the FLUX Importer HDA in the running Houdini instance.
+
+    Saves the .hda file to *hda_path*. Houdini must be running with the
+    FLUX server active (port 48884).
+    """
+    from dcc.houdini.hda.flux_importer_hda import build_hda
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: build_hda(req.hda_path))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "HDA build failed"))
+    return result
+
+
+@router.get("/houdini/importer/module")
+async def houdini_importer_module() -> dict:
+    """Serve the HDA PythonModule implementation for the bootstrap to exec().
+
+    The HDA contains only a 15-line bootstrap that fetches and exec()s this
+    response at load time. Updating _MODULE_FUNCTIONS here updates all HDA
+    instances automatically — no re-injection required.
+    """
+    from dcc.houdini.hda.flux_importer_hda import _MODULE_FUNCTIONS
+    return {"code": _MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/importer/open_hub")
+async def houdini_importer_open_hub() -> dict:
+    """Best-effort stub — signal to open/focus the FLUX Hub.
+
+    Full integration with the Importer page is pending.
+    Returns ok=True unconditionally so the HDA callback never errors out.
+    """
+    return {"ok": True, "message": "Hub open requested (stub)"}
 
 
 @router.websocket("/ws/status")
