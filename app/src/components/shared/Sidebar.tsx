@@ -4,7 +4,7 @@ import {
   Home, Upload, Download, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Settings2, Loader, Search,
+  Play, Settings2, Loader, Search, Plug,
 } from 'lucide-react'
 import type { DccStatusMap } from '../../types'
 import { api } from '../../api/client'
@@ -16,14 +16,14 @@ interface Props {
 
 // Clés correspondant exactement aux DCC_PORTS du backend
 const SOFTWARE = [
-  { name: 'Maya',               v: '2025.3', key: 'maya' },
-  { name: 'Houdini',            v: '20.5',   key: 'houdini' },
-  { name: 'Nuke',               v: '15.0',   key: 'nuke' },
-  { name: 'Substance Painter',  v: '10.1',   key: 'substance_painter' },
-  { name: 'Substance Designer', v: '13.1',   key: 'substance_designer' },
-  { name: 'ZBrush',             v: '2024.0', key: 'zbrush' },
-  { name: 'Marvelous Designer', v: '12.2',   key: 'marvelous' },
-  { name: 'Photoshop',          v: '2025',   key: 'photoshop' },
+  { name: 'Maya',               key: 'maya' },
+  { name: 'Houdini',            key: 'houdini' },
+  { name: 'Nuke',               key: 'nuke' },
+  { name: 'Substance Painter',  key: 'substance_painter' },
+  { name: 'Substance Designer', key: 'substance_designer' },
+  { name: 'ZBrush',             key: 'zbrush' },
+  { name: 'Marvelous Designer', key: 'marvelous' },
+  { name: 'Photoshop',          key: 'photoshop' },
 ]
 
 function dccDot(status: DccStatusMap, key: string): string {
@@ -78,32 +78,35 @@ function NavGroup({ title, children, open = true }: {
 export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const [launching, setLaunching]     = useState<Set<string>>(new Set())
+  const [launching, setLaunching]       = useState<Set<string>>(new Set())
   const [launchResult, setLaunchResult] = useState<Record<string, boolean>>({})
-  const [dccPaths, setDccPaths]       = useState<Record<string, string>>({})
-  const [finding, setFinding]         = useState<Set<string>>(new Set())
-  const [findResult, setFindResult]   = useState<Record<string, boolean | null>>({})
+  const [dccPaths, setDccPaths]         = useState<Record<string, string>>({})
+  const [findingAll, setFindingAll]     = useState(false)
+  const [findResult, setFindResult]     = useState<Record<string, boolean | null>>({})
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
   }, [])
 
-  const handleAutoFind = async (key: string) => {
-    setFinding(prev => new Set(prev).add(key))
-    try {
-      const res = await api.findDccExe(key)
-      if (res.found && res.path) {
-        setDccPaths(prev => ({ ...prev, [key]: res.path! }))
-        setFindResult(prev => ({ ...prev, [key]: true }))
-      } else {
-        setFindResult(prev => ({ ...prev, [key]: false }))
-      }
-    } catch {
-      setFindResult(prev => ({ ...prev, [key]: false }))
-    } finally {
-      setFinding(prev => { const next = new Set(prev); next.delete(key); return next })
-      setTimeout(() => setFindResult(prev => { const n = { ...prev }; delete n[key]; return n }), 2500)
-    }
+  const handleAutoFindAll = async () => {
+    setFindingAll(true)
+    await Promise.allSettled(
+      SOFTWARE.map(async s => {
+        try {
+          const res = await api.findDccExe(s.key)
+          if (res.found && res.path) {
+            setDccPaths(prev => ({ ...prev, [s.key]: res.path! }))
+            setFindResult(prev => ({ ...prev, [s.key]: true }))
+          } else {
+            setFindResult(prev => ({ ...prev, [s.key]: false }))
+          }
+        } catch {
+          setFindResult(prev => ({ ...prev, [s.key]: false }))
+        }
+      })
+    )
+    setFindingAll(false)
+    setTimeout(() => setFindResult({}), 3000)
   }
 
   const handlePickPath = async (key: string) => {
@@ -153,10 +156,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const dot       = dccDot(dccStatus, s.key)
           const connected = dot === 'ok'
           const isLoading = launching.has(s.key)
-
-          const hasPath    = !!dccPaths[s.key]
-          const isFinding  = finding.has(s.key)
-          const findOk     = findResult[s.key]
+          const hasPath   = !!dccPaths[s.key]
+          const findOk    = findResult[s.key]
 
           return (
             <div key={s.key} style={{
@@ -164,38 +165,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               padding: '5px 10px 5px 18px',
               fontSize: 11, color: connected ? 'var(--ink-2)' : 'var(--ink-4)',
             }}>
-              <span className={`dot${connected ? ' ok' : ''}`} style={{ width: 5, height: 5, flexShrink: 0 }} />
+              <span
+                className={`dot${connected ? ' ok' : ''}`}
+                title={connected ? 'Port local connecté' : 'Port local inactif'}
+                style={{ width: 5, height: 5, flexShrink: 0 }}
+              />
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
 
-              {/* auto-find feedback badge — replaces version when active */}
+              {/* feedback auto-find */}
               {findOk === true  && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--ok)' }}>✓</span>}
               {findOk === false && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--err)' }}>✗</span>}
-              {findOk === undefined && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>{s.v}</span>}
 
-              {/* auto-find */}
-              <div
-                onClick={() => { if (!isFinding) void handleAutoFind(s.key) }}
-                title="Auto-détecter le chemin"
-                style={{
-                  width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid var(--rule-2)',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                  background: 'transparent',
-                  color: 'var(--ink-4)',
-                  cursor: isFinding ? 'default' : 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s, color 0.12s',
-                }}
-                onMouseEnter={e => { if (!isFinding) { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.background = 'var(--paper-2)'; el.style.color = 'var(--ink-2)' } }}
-                onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.background = 'transparent'; el.style.color = 'var(--ink-4)' }}
-              >
-                {isFinding
-                  ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                  : <Search size={8} strokeWidth={2} />
-                }
-              </div>
-
-              {/* path picker */}
+              {/* path picker — indicateur visuel : accent = path défini */}
               <div
                 onClick={() => void handlePickPath(s.key)}
                 title={hasPath ? dccPaths[s.key] : 'Définir le chemin…'}
@@ -211,6 +192,23 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 }}
               >
                 <FolderOpen size={8} strokeWidth={2} />
+              </div>
+
+              {/* port local — placeholder connexion (à implémenter) */}
+              <div
+                title={connected ? 'Connecté au port local' : 'Connexion port local — prochainement'}
+                style={{
+                  width: 16, height: 16, borderRadius: 4,
+                  border: '1px solid ' + (connected ? 'var(--ok)' : 'var(--rule-2)'),
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                  background: connected ? 'color-mix(in oklch, var(--ok) 10%, transparent)' : 'transparent',
+                  color: connected ? 'var(--ok)' : 'var(--ink-4)',
+                  cursor: 'not-allowed',
+                  opacity: connected ? 1 : 0.4,
+                }}
+              >
+                <Plug size={8} strokeWidth={2} />
               </div>
 
               {/* launch */}
@@ -239,6 +237,31 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             </div>
           )
         })}
+
+        {/* Bouton global auto-détection des chemins */}
+        <div style={{ padding: '5px 10px 6px' }}>
+          <div
+            onClick={() => { if (!findingAll) void handleAutoFindAll() }}
+            title="Détecter automatiquement tous les chemins .exe"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 8px',
+              borderRadius: 5,
+              border: '1px solid var(--rule-2)',
+              background: 'var(--paper-2)',
+              color: findingAll ? 'var(--ink-3)' : 'var(--ink-2)',
+              cursor: findingAll ? 'default' : 'pointer',
+              fontSize: 10, fontFamily: 'var(--mono)',
+              transition: 'background 0.12s, border-color 0.12s',
+            }}
+          >
+            {findingAll
+              ? <Loader size={9} strokeWidth={2} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+              : <Search size={9} strokeWidth={2} style={{ flexShrink: 0 }} />
+            }
+            <span>{findingAll ? 'Détection en cours…' : 'Auto-détecter les chemins'}</span>
+          </div>
+        </div>
       </NavGroup>
 
       <div style={{ flex: 1 }} />
