@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { FolderIcon } from '../components/shared/ui'
 import { api } from '../api/client'
+import { useSettings } from '../hooks/useSettings'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -108,8 +109,8 @@ function FolderSvg({ size = 40, selected = false }: { size?: number; selected?: 
 }
 
 function FileSvg({ size = 36, selected = false }: { size?: number; selected?: boolean }) {
-  const body   = selected ? 'var(--accent)'    : 'var(--ink-3)'
-  const corner = selected ? 'var(--accent-hi)' : 'var(--ink-4)'
+  const body   = selected ? 'var(--accent)'    : 'var(--ink-2)'
+  const corner = selected ? 'var(--accent-hi)' : 'var(--ink-3)'
   return (
     <svg width={size} height={Math.round(size * 1.22)} viewBox="0 0 30 37" fill="none">
       <path d="M2 0 L20 0 L30 10 L30 35 Q30 37 28 37 L2 37 Q0 37 0 35 L0 2 Q0 0 2 0Z" fill={body} />
@@ -932,6 +933,11 @@ export function Projects() {
   const [activeProject, setActiveProject] = useState('')
   const [sequences, setSequences]         = useState<string[]>([])
 
+  const { settings } = useSettings()
+  useEffect(() => {
+    if (settings?.last_project) setActiveProject(settings.last_project)
+  }, [settings?.last_project])
+
   const [tab, setTab]             = useState<Tab>('project')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
 
@@ -955,6 +961,8 @@ export function Projects() {
   const [searchResults, setSearchResults] = useState<FindResult[] | null>(null)
   const [findLoading, setFindLoading]     = useState(false)
   const [resultLabel, setResultLabel]     = useState('')
+
+  const lastClickedRef = useRef<string | null>(null)
 
   // ── Persist saved lists ────────────────────────────────────────────────────
 
@@ -1011,10 +1019,11 @@ export function Projects() {
     setSelectedNames(new Set())
     setSearchResults(null)
     setSearchQuery('')
+    lastClickedRef.current = null
   }, [navIdx])
 
   const goBack = useCallback(() => {
-    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedNames(new Set()); setSearchResults(null); setSearchQuery('') }
+    if (navIdx > 0) { setNavIdx(i => i - 1); setSelectedNames(new Set()); setSearchResults(null); setSearchQuery(''); lastClickedRef.current = null }
   }, [navIdx])
 
   const goForward = useCallback(() => {
@@ -1588,7 +1597,32 @@ export function Projects() {
                       return (
                         <div
                           key={i}
-                          onClick={e => { e.stopPropagation(); setSelectedNames(new Set([item.name])) }}
+                          onClick={e => {
+                            e.stopPropagation()
+                            if (e.shiftKey && lastClickedRef.current) {
+                              const names   = items.map(it => it.name)
+                              const lastIdx = names.indexOf(lastClickedRef.current)
+                              const curIdx  = names.indexOf(item.name)
+                              if (lastIdx !== -1 && curIdx !== -1) {
+                                const lo = Math.min(lastIdx, curIdx)
+                                const hi = Math.max(lastIdx, curIdx)
+                                setSelectedNames(new Set(names.slice(lo, hi + 1)))
+                                return
+                              }
+                            }
+                            if (e.ctrlKey || e.metaKey) {
+                              setSelectedNames(prev => {
+                                const next = new Set(prev)
+                                if (next.has(item.name)) next.delete(item.name)
+                                else next.add(item.name)
+                                return next
+                              })
+                              lastClickedRef.current = item.name
+                              return
+                            }
+                            lastClickedRef.current = item.name
+                            setSelectedNames(new Set([item.name]))
+                          }}
                           onDoubleClick={e => { e.stopPropagation(); handleDoubleClick(item) }}
                           onContextMenu={e => handleRightClick(e, item)}
                           onMouseEnter={() => setHoveredName(item.name)}

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from core.logger import get_logger
 from core.paths import get_project_path
-from features.importer.file_browser import get_file_info, list_files, list_folders
+from features.importer.file_browser import get_file_info, list_files_immediate, list_folders
 from features.publisher.modif_log import read_logs
 
 log = get_logger(__name__)
@@ -28,7 +28,7 @@ async def browse_project(project_name: str, subpath: str = "") -> dict:
     folder_names = await loop.run_in_executor(
         None, lambda: list_folders(project_path, subpath)
     )
-    all_files = await loop.run_in_executor(None, lambda: list_files(target))
+    all_files = await loop.run_in_executor(None, lambda: list_files_immediate(target))
     files_info = [get_file_info(f, target) for f in all_files]
 
     return {
