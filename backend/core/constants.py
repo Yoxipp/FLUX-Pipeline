@@ -64,6 +64,24 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "COMP":   "comp/{seq}/{shot}",
 }
 
+# Default TYPE token map (TYPE → asset-relative sub-folder path)
+DEFAULT_TYPE_TOKENS: dict[str, str] = {
+    "SCULPT":    "model/sculpt",
+    "BLOCK":     "model/block_sculpt",
+    "TOPO":      "model/topo",
+    "TEX":       "shading/textures",
+    "LDEV":      "shading/lookdev",
+    "FUR":       "groom/fur",
+    "HAIR":      "groom/hair",
+    "FEATHERS":  "groom/feathers",
+    "SK":        "rig/skeleton",
+    "WGHT":      "rig/weight",
+    "RIG":       "rig/rig",
+    "CLOTH":     "cloth",
+    "MUSCLE":    "muscle",
+    "GBL":       "global",
+}
+
 # Predefined anim instances (sub-folders inside /anim/)
 ANIM_INSTANCES: tuple[str, ...] = ("block", "spline", "polish")
 

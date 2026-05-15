@@ -32,7 +32,9 @@ interface FindResult {
   isDir:   boolean
 }
 
-interface TokenSel { class: string; type: string; name: string; instance: string; iter: string }
+type FinderMode = 'asset' | 'shot'
+
+interface TokenSel { class: string; type: string; name: string; instance: string; iter: string; mode: FinderMode }
 
 interface CtxMenu { x: number; y: number; items: ExplorerItem[] }
 
@@ -44,19 +46,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'directory', label: 'Dossier' },
 ]
 
-const ASSET_TOKENS   = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
-const TOKEN_TYPES    = ['CLASS', 'TYPE', 'NAME', 'SEQ', 'SHOT', 'custom']
-const FINDER_CLASSES = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
-const FINDER_TYPES   = ['SCULPT', 'BLOCK', 'TOPO', 'RIG', 'TEX', 'LDEV', 'FUR', 'HAIR', 'FEATHERS', 'SK', 'WGHT']
-const FINDER_ITERS   = ['LAST', 'V001', 'V002', 'V003', 'V004', 'V005']
-
-const CLASS_TO_PATH: Record<string, string[]> = {
-  CHAR:   ['assets', 'chara'],
-  PROPS:  ['assets', 'props'],
-  ENV:    ['assets', 'enviros'],
-  CFXRIG: ['assets', 'cfx_rig'],
-  FXRIG:  ['assets', 'fx_rig'],
-}
+const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
+const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custom']
+const FINDER_ITERS = ['LAST', 'V001', 'V002', 'V003', 'V004', 'V005']
 
 const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: typeof Star }[] = [
   { id: 'favoris',  label: 'Favoris',  icon: Star },
@@ -128,23 +120,40 @@ function FileSvg({ size = 36, selected = false }: { size?: number; selected?: bo
 
 // ── Token Finder ──────────────────────────────────────────────────────────────
 
-function TokenFinder({ project, onChange }: {
+function TokenFinder({ project, tokens, onChange }: {
   project:  string
+  tokens:   Record<string, Record<string, string>>
   onChange: (sel: TokenSel) => void
 }) {
-  const [sel, setSel]     = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
-  const [open, setOpen]   = useState<number | null>(null)
-  const [names, setNames] = useState<string[]>([])
+  const [mode, setMode] = useState<FinderMode>('asset')
+  const [sel, setSel]   = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '', mode: 'asset' })
+  const [open, setOpen] = useState<number | null>(null)
+  const [seqs,  setSeqs]  = useState<string[]>([])
+  const [shots, setShots] = useState<string[]>([])
   const rootRef           = useRef<HTMLDivElement>(null)
 
+  // Derive options from tokens.json — no hardcoded arrays
+  const assetClasses = Object.keys(tokens.CLASS ?? {}).filter(k => !(tokens.CLASS?.[k] ?? '').includes('{seq}'))
+  const shotClasses  = Object.keys(tokens.CLASS ?? {}).filter(k =>  (tokens.CLASS?.[k] ?? '').includes('{seq}'))
+  const typeKeys     = Object.keys(tokens.TYPE ?? {})
+  const nameKeys     = Object.keys(tokens.NAME ?? {})
+  const instanceKeys = ['null', ...Object.keys(tokens.INSTANCE ?? {})]
+
+  // SHOT mode: fetch sequences
   useEffect(() => {
-    if (!project) { setNames([]); return }
-    Promise.all(
-      FINDER_CLASSES.map(cls =>
-        api.getAssets(project, cls).then(d => d.assets).catch(() => [] as string[])
-      )
-    ).then(arrays => setNames([...new Set(arrays.flat())]))
-  }, [project])
+    if (!project || mode !== 'shot') { setSeqs([]); return }
+    setSeqs([])
+    api.getSequences(project).then(d => setSeqs(d.sequences)).catch(() => setSeqs([]))
+  }, [project, mode])
+
+  // SHOT mode: fetch shots for selected SEQ
+  useEffect(() => {
+    if (!project || mode !== 'shot' || !sel.class) { setShots([]); return }
+    setShots([])
+    api.getShots(project, sel.class)
+      .then(d => setShots(d.shots.map(s => s.split('/')[1] ?? s)))
+      .catch(() => setShots([]))
+  }, [project, mode, sel.class])
 
   useEffect(() => {
     if (open === null) return
@@ -156,30 +165,59 @@ function TokenFinder({ project, onChange }: {
   }, [open])
 
   const update = (key: keyof TokenSel, value: string) => {
-    const next = { ...sel, [key]: value }; setSel(next); onChange(next); setOpen(null)
+    const next: TokenSel = { ...sel, [key]: value, mode }
+    if (key === 'class') { next.type = ''; next.name = '' }
+    if (key === 'type')  { next.name = '' }
+    setSel(next); onChange(next); setOpen(null)
   }
   const clear = (key: keyof TokenSel) => {
-    const next = { ...sel, [key]: '' }; setSel(next); onChange(next); setOpen(null)
+    const next: TokenSel = { ...sel, [key]: '', mode }
+    if (key === 'class') { next.type = ''; next.name = '' }
+    if (key === 'type')  { next.name = '' }
+    setSel(next); onChange(next); setOpen(null)
   }
 
-  const MODULES: { key: keyof TokenSel; label: string; opts: string[] }[] = [
-    { key: 'class',    label: 'CLASS',    opts: FINDER_CLASSES },
-    { key: 'type',     label: 'TYPE',     opts: FINDER_TYPES },
-    { key: 'name',     label: 'NAME',     opts: names },
-    { key: 'instance', label: 'INSTANCE', opts: ['null'] },
-    { key: 'iter',     label: 'ITER',     opts: FINDER_ITERS },
-  ]
+  const switchMode = () => {
+    const newMode: FinderMode = mode === 'asset' ? 'shot' : 'asset'
+    const reset: TokenSel = { class: '', type: '', name: '', instance: '', iter: '', mode: newMode }
+    setMode(newMode); setSel(reset); onChange(reset); setOpen(null)
+  }
+
+  const MODULES: { key: keyof TokenSel; label: string; opts: string[] }[] = mode === 'asset'
+    ? [
+        { key: 'class',    label: 'CLASS',    opts: assetClasses },
+        { key: 'type',     label: 'TYPE',     opts: typeKeys },
+        { key: 'name',     label: 'NAME',     opts: nameKeys },
+        { key: 'instance', label: 'INSTANCE', opts: instanceKeys },
+        { key: 'iter',     label: 'ITER',     opts: FINDER_ITERS },
+      ]
+    : [
+        { key: 'class',    label: 'SEQ',      opts: seqs },
+        { key: 'type',     label: 'SHOT',     opts: shots },
+        { key: 'name',     label: 'NAME',     opts: shotClasses },
+        { key: 'instance', label: 'INSTANCE', opts: instanceKeys },
+        { key: 'iter',     label: 'ITER',     opts: FINDER_ITERS },
+      ]
 
   return (
-    <div
-      ref={rootRef}
-      style={{ flex: 1, display: 'flex', border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', position: 'relative', overflow: 'visible' }}
-    >
+    <div style={{ flex: 1, display: 'flex', alignItems: 'stretch', gap: 4, position: 'relative', overflow: 'visible' }}>
+      {/* Mode toggle ASSET / SHOT */}
+      <div
+        onClick={switchMode}
+        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 9, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
+      >
+        {mode === 'asset' ? 'ASSET' : 'SHOT'}
+      </div>
+
+      <div
+        ref={rootRef}
+        style={{ flex: 1, display: 'flex', border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', position: 'relative', overflow: 'visible' }}
+      >
       {MODULES.map(({ key, label, opts }, i) => {
         const value  = sel[key]
         const isOpen = open === i
         return (
-          <div key={i} style={{ flex: 1, position: 'relative', borderLeft: i > 0 ? '1px solid var(--rule-2)' : 'none' }}>
+          <div key={`${mode}-${i}`} style={{ flex: 1, position: 'relative', borderLeft: i > 0 ? '1px solid var(--rule-2)' : 'none' }}>
             <div
               onClick={() => setOpen(isOpen ? null : i)}
               style={{ height: 30, padding: '0 6px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1, cursor: 'pointer', background: value ? 'var(--accent-soft)' : 'transparent', transition: 'background 0.08s', borderRadius: i === 0 ? '4px 0 0 4px' : i === MODULES.length - 1 ? '0 4px 4px 0' : 0 }}
@@ -198,7 +236,7 @@ function TokenFinder({ project, onChange }: {
                 )}
                 {opts.length === 0 ? (
                   <div style={{ padding: '6px 8px', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-                    {project ? 'Vide' : 'Projet requis'}
+                    {project ? (key === 'type' && mode === 'asset' && sel.class ? 'Pas de type' : 'Vide') : 'Projet requis'}
                   </div>
                 ) : opts.map(o => (
                   <div
@@ -214,6 +252,7 @@ function TokenFinder({ project, onChange }: {
           </div>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -221,14 +260,30 @@ function TokenFinder({ project, onChange }: {
 // ── Sous-composants partagés ──────────────────────────────────────────────────
 
 function Spinner({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [draft, setDraft] = useState(String(value).padStart(3, '0'))
+
+  useEffect(() => { setDraft(String(value).padStart(3, '0')) }, [value])
+
+  const commit = () => {
+    const n = parseInt(draft, 10)
+    if (!isNaN(n) && n >= 1) { onChange(n); setDraft(String(n).padStart(3, '0')) }
+    else setDraft(String(value).padStart(3, '0'))
+  }
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, overflow: 'hidden', background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)' }}>
-      <div onClick={() => onChange(Math.max(0, value - 1))} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
+      <div onClick={() => onChange(Math.max(1, value - 1))} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
         <Minus size={10} strokeWidth={2} />
       </div>
-      <div style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)' }}>
-        {String(value).padStart(3, '0')}
-      </div>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit() }}
+        style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
+      />
       <div onClick={() => onChange(value + 1)} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
         <Plus size={10} strokeWidth={2} />
       </div>
@@ -363,8 +418,8 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
   onCreateShot: (project: string, seqN: number, shotN: number) => Promise<void>
   onRefreshSequences: () => void
 }) {
-  const [seqN, setSeqN]             = useState(10)
-  const [shotN, setShotN]           = useState(10)
+  const [seqN, setSeqN]             = useState(1)
+  const [shotN, setShotN]           = useState(1)
   const [seq, setSeq]               = useState('')
   const [statusSeq, setStatusSeq]   = useState('')
   const [statusShot, setStatusShot] = useState('')
@@ -384,7 +439,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
 
   const handleCreateShot = async () => {
     if (!currentProject || !seq) return
-    const seqNum = parseInt(seq.replace(/^SQ0*/, ''), 10) || seqN
+    const seqNum = parseInt(seq.replace(/\D/g, ''), 10) || seqN
     try {
       await onCreateShot(currentProject, seqNum, shotN)
       setStatusShot(`✓ SQ${String(seqNum).padStart(3, '0')}_SH${String(shotN).padStart(3, '0')}`)
@@ -893,7 +948,9 @@ export function Projects() {
   const [moveTarget,     setMoveTarget]     = useState<ExplorerItem[] | null>(null)
 
   // Token Finder & Search
-  const [tokenSel, setTokenSel]           = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '' })
+  const [tokenSel, setTokenSel]           = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '', mode: 'asset' })
+  const [projectTokens, setProjectTokens] = useState<Record<string, Record<string, string>>>({})
+  const [tokenRefreshTick, setTokenRefreshTick] = useState(0)
   const [searchQuery, setSearchQuery]     = useState('')
   const [searchResults, setSearchResults] = useState<FindResult[] | null>(null)
   const [findLoading, setFindLoading]     = useState(false)
@@ -1054,6 +1111,13 @@ export function Projects() {
 
   useEffect(() => { void loadSequences() }, [activeProject])
 
+  // Fetch tokens.json for the active/nav project whenever project or tick changes
+  const tokensProject = navProject || activeProject
+  useEffect(() => {
+    if (!tokensProject) { setProjectTokens({}); return }
+    api.getTokens(tokensProject).then(d => setProjectTokens(d.tokens)).catch(() => setProjectTokens({}))
+  }, [tokensProject, tokenRefreshTick])
+
   // ── Find / Search ──────────────────────────────────────────────────────────
 
   const handleFind = useCallback(async () => {
@@ -1061,43 +1125,99 @@ export function Projects() {
     if (!proj) return
     setFindLoading(true)
     setSearchResults([])
-    setResultLabel('Finder')
     const results: FindResult[] = []
-    const classes = tokenSel.class ? [tokenSel.class] : FINDER_CLASSES
-    const nameLow = tokenSel.name.toLowerCase()
-    const typeLow = tokenSel.type.toLowerCase()
 
-    for (const cls of classes) {
-      const basePath = CLASS_TO_PATH[cls]
-      if (!basePath) continue
-      let folders: { name: string }[] = []
-      try {
-        const d = await api.browseProject(proj, basePath.join('/'))
-        folders = d.folders
-      } catch { continue }
-      const matching = nameLow ? folders.filter(f => f.name.toLowerCase().includes(nameLow)) : folders
-      for (const folder of matching) {
-        const folderPath = [...basePath, folder.name]
-        if (typeLow) {
-          let found = false
-          try {
-            const d2 = await api.browseProject(proj, folderPath.join('/'))
-            for (const sub of d2.folders) {
-              if (sub.name.toLowerCase().includes(typeLow)) {
-                results.push({ label: `${folder.name} / ${sub.name}`, pathStr: [...folderPath, sub.name].join(' / '), project: proj, subpath: [...folderPath, sub.name], isDir: true })
-                found = true
-              }
-            }
-          } catch {}
-          if (!found) results.push({ label: folder.name, pathStr: folderPath.join(' / '), project: proj, subpath: folderPath, isDir: true })
+    const classTokens    = projectTokens.CLASS    ?? {}
+    const typeTokens     = projectTokens.TYPE      ?? {}
+
+    if (tokenSel.mode === 'shot') {
+      setResultLabel('Shot Finder')
+
+      let seqList: string[]
+      if (tokenSel.class) {
+        seqList = [tokenSel.class]
+      } else {
+        try { seqList = (await api.getSequences(proj)).sequences } catch { seqList = [] }
+      }
+
+      for (const seq of seqList) {
+        let shotList: string[]
+        if (tokenSel.type) {
+          shotList = [tokenSel.type]
         } else {
-          results.push({ label: folder.name, pathStr: folderPath.join(' / '), project: proj, subpath: folderPath, isDir: true })
+          try {
+            const d = await api.getShots(proj, seq)
+            shotList = d.shots.map(s => s.split('/')[1] ?? s)
+          } catch { shotList = [] }
+        }
+        for (const shot of shotList) {
+          const base = ['shot', seq, shot]
+          if (tokenSel.name) {
+            // Resolve via CLASS token template (e.g. "shot/{seq}/{shot}/anim")
+            const template = classTokens[tokenSel.name]
+            if (template) {
+              const resolved = template.replace('{seq}', seq).replace('{shot}', shot)
+              const subpath = resolved.split('/')
+              results.push({ label: `${seq} / ${shot} / ${tokenSel.name}`, pathStr: subpath.join(' / '), project: proj, subpath, isDir: true })
+            } else {
+              const sub = tokenSel.name.toLowerCase()
+              results.push({ label: `${seq} / ${shot} / ${sub}`, pathStr: [...base, sub].join(' / '), project: proj, subpath: [...base, sub], isDir: true })
+            }
+          } else {
+            results.push({ label: `${seq} / ${shot}`, pathStr: base.join(' / '), project: proj, subpath: base, isDir: true })
+          }
+        }
+      }
+    } else {
+      setResultLabel('Finder')
+      // Asset classes = CLASS tokens whose path doesn't contain {seq}
+      const assetClassKeys = Object.keys(classTokens).filter(k => !classTokens[k].includes('{seq}'))
+      const classes = tokenSel.class ? [tokenSel.class] : assetClassKeys
+      const nameLow = tokenSel.name.toLowerCase()
+
+      for (const cls of classes) {
+        const classRelPath = classTokens[cls]
+        if (!classRelPath) continue
+        const basePath = classRelPath.split('/')
+        let folders: { name: string }[] = []
+        try {
+          const d = await api.browseProject(proj, basePath.join('/'))
+          folders = d.folders
+        } catch { continue }
+
+        const matching = nameLow ? folders.filter(f => f.name.toLowerCase().includes(nameLow)) : folders
+
+        for (const folder of matching) {
+          const assetPath = [...basePath, folder.name]
+          if (tokenSel.type) {
+            // Look up subfolder from TYPE tokens in tokens.json
+            const subfolder = typeTokens[tokenSel.type]
+            if (subfolder) {
+              const fullPath = [...assetPath, ...subfolder.split('/')]
+              results.push({ label: `${folder.name} / ${tokenSel.type}`, pathStr: fullPath.join(' / '), project: proj, subpath: fullPath, isDir: true })
+            } else {
+              // Unknown type — fall back to text match one level down
+              try {
+                const d2 = await api.browseProject(proj, assetPath.join('/'))
+                const typeLow = tokenSel.type.toLowerCase()
+                for (const sub of d2.folders) {
+                  if (sub.name.toLowerCase().includes(typeLow)) {
+                    const subPath = [...assetPath, sub.name]
+                    results.push({ label: `${folder.name} / ${sub.name}`, pathStr: subPath.join(' / '), project: proj, subpath: subPath, isDir: true })
+                  }
+                }
+              } catch {}
+            }
+          } else {
+            results.push({ label: folder.name, pathStr: assetPath.join(' / '), project: proj, subpath: assetPath, isDir: true })
+          }
         }
       }
     }
+
     setSearchResults(results)
     setFindLoading(false)
-  }, [tokenSel, navProject, activeProject])
+  }, [tokenSel, navProject, activeProject, projectTokens])
 
   const handleSearch = useCallback(async (query: string) => {
     if (!query.trim()) { setSearchResults(null); return }
@@ -1108,7 +1228,10 @@ export function Projects() {
     setResultLabel(`«${query}»`)
     const results: FindResult[] = []
     const q = query.toLowerCase()
-    const pathsToSearch: string[][] = [[], ['assets'], ['shot'], ['comp'], ['lighting'], ...Object.values(CLASS_TO_PATH)]
+    const classBasePaths = Object.values(projectTokens.CLASS ?? {})
+      .filter(p => !p.includes('{seq}'))
+      .map(p => p.split('/'))
+    const pathsToSearch: string[][] = [[], ['assets'], ['shot'], ['comp'], ['lighting'], ...classBasePaths]
     const pushIfUnique = (r: FindResult) => {
       if (!results.some(x => x.subpath.join('/') === r.subpath.join('/'))) results.push(r)
     }
@@ -1296,7 +1419,7 @@ export function Projects() {
 
         {/* Ligne 2 : Token Finder + Find */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <TokenFinder project={navProject || activeProject} onChange={setTokenSel} />
+          <TokenFinder project={navProject || activeProject} tokens={projectTokens} onChange={setTokenSel} />
           <div
             onClick={() => void handleFind()}
             className="btn primary"
@@ -1535,7 +1658,7 @@ export function Projects() {
               <TabDirectory
                 currentProject={navProject}
                 currentSubpath={nav.kind === 'inside' ? nav.subpath : []}
-                onSuccess={() => void loadItems()}
+                onSuccess={() => { void loadItems(); setTokenRefreshTick(t => t + 1) }}
               />
             )}
           </div>

@@ -17,6 +17,7 @@ from features.folder_manager.project_init import create_project, list_projects, 
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
 )
+from core.constants import DEFAULT_TYPE_TOKENS
 from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
 
 log = get_logger(__name__)
@@ -37,6 +38,19 @@ def _parse_int(label: str) -> int:
 
 class ProjectCreate(BaseModel):
     name: str
+
+
+@router.get("/projects/{project_name}/tokens")
+async def get_project_tokens(project_name: str) -> dict:
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_event_loop()
+    tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
+    # Backfill default TYPE tokens for old projects that pre-date the TYPE section
+    if not tokens.get("TYPE"):
+        tokens["TYPE"] = dict(DEFAULT_TYPE_TOKENS)
+    return {"tokens": tokens}
 
 
 @router.get("/projects")

@@ -118,6 +118,9 @@ export const api = {
     apiCall<{ logs: ModifLog[] }>('GET', `/files/projects/${project_name}/logs${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
 
   // Folder Manager
+  getTokens: (project: string) =>
+    apiCall<{ tokens: Record<string, Record<string, string>> }>('GET', `/folder/projects/${encodeURIComponent(project)}/tokens`),
+
   getProjects: () =>
     apiCall<{ projects: string[] }>('GET', '/folder/projects'),
 

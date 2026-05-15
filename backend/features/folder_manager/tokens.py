@@ -9,14 +9,14 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from core.constants import DEFAULT_CLASS_TOKENS, JSON_TOKENS
+from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS, JSON_TOKENS
 from core.json_manager import read_json, write_json
 from core.logger import get_logger
 
 log = get_logger(__name__)
 
 # All recognised token-type section keys in tokens.json
-_TOKEN_SECTIONS = ("CLASS", "TYPE", "NAME", "SEQ", "SHOT", "custom")
+_TOKEN_SECTIONS = ("CLASS", "TYPE", "NAME", "INSTANCE", "SEQ", "SHOT", "custom")
 
 
 def _tokens_path(project_path: Path) -> Path:
@@ -26,14 +26,15 @@ def _tokens_path(project_path: Path) -> Path:
 # ── bootstrap ─────────────────────────────────────────────────────────────────
 
 def build_default_tokens() -> dict:
-    """Return a fresh tokens dict seeded with the default CLASS entries."""
+    """Return a fresh tokens dict seeded with the default CLASS and TYPE entries."""
     return {
-        "CLASS":  dict(DEFAULT_CLASS_TOKENS),
-        "TYPE":   {},
-        "NAME":   {},
-        "SEQ":    {},
-        "SHOT":   {},
-        "custom": {},
+        "CLASS":    dict(DEFAULT_CLASS_TOKENS),
+        "TYPE":     dict(DEFAULT_TYPE_TOKENS),
+        "NAME":     {},
+        "INSTANCE": {},
+        "SEQ":      {},
+        "SHOT":     {},
+        "custom":   {},
     }
 
 
