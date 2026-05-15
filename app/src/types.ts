@@ -94,6 +94,7 @@ export interface HoudiniPublishResult {
 
 export interface HoudiniState {
   selected_nodes: string[]
+  selected_node_types?: Record<string, string>
   current_path: string
   frame: number
   fps: number

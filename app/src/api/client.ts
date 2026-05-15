@@ -148,6 +148,9 @@ export const api = {
   createProject: (name: string) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name }),
 
+  getTypesForClass: (project: string, class_token?: string) =>
+    apiCall<{ types: string[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/types${class_token ? `?class_token=${encodeURIComponent(class_token)}` : ''}`),
+
   getAssets: (project: string, class_token?: string) =>
     apiCall<{ assets: string[] }>('GET', `/folder/projects/${project}/assets${class_token ? `?class_token=${class_token}` : ''}`),
 
@@ -165,6 +168,9 @@ export const api = {
 
   createShot: (project: string, seq_number: number, shot_number: number) =>
     apiCall<{ seq_number: number; shot_number: number; path: string }>('POST', '/folder/shots', { project, seq_number, shot_number }),
+
+  addToken: (payload: { project: string; token_type: string; token_value: string; rel_path?: string }) =>
+    apiCall<{ success: boolean; token_type: string; token_value: string }>('POST', '/folder/tokens', payload),
 
   createDirectory: (project: string, subpath: string[], name: string, token?: string, token_type?: string) =>
     apiCall<{ name: string; path: string; rel_path: string }>('POST', '/folder/directory', {

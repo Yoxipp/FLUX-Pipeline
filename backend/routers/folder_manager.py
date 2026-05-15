@@ -17,7 +17,6 @@ from features.folder_manager.project_init import create_project, list_projects, 
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
 )
-from core.constants import DEFAULT_TYPE_TOKENS
 from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
 
 log = get_logger(__name__)
@@ -47,9 +46,6 @@ async def get_project_tokens(project_name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_event_loop()
     tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
-    # Backfill default TYPE tokens for old projects that pre-date the TYPE section
-    if not tokens.get("TYPE"):
-        tokens["TYPE"] = dict(DEFAULT_TYPE_TOKENS)
     return {"tokens": tokens}
 
 
@@ -78,6 +74,51 @@ class AssetCreate(BaseModel):
     project: str
     class_token: str
     name: str
+
+
+@router.get("/projects/{project_name}/types")
+async def get_types_for_class(project_name: str, class_token: str | None = None) -> dict:
+    """Return TYPE token keys that have at least one matching subfolder under the given CLASS.
+
+    Scans project/<class_path>/<any_asset>/ for immediate subdirectories, then maps
+    found folder names back to TYPE token keys (by lowercased key comparison).
+    Falls back to all TYPE tokens when class_token is absent or the class path is missing.
+    """
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_event_loop()
+    tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
+    type_tokens: dict[str, str] = tokens.get("TYPE", {})
+    all_type_keys = list(type_tokens.keys())
+
+    if not class_token:
+        return {"types": all_type_keys}
+
+    class_rel = get_path_for_token(tokens, "CLASS", class_token)
+    if not class_rel:
+        return {"types": all_type_keys}
+
+    class_path = project_path / class_rel.replace("/", "\\")
+
+    def _scan() -> list[str]:
+        if not class_path.exists():
+            return all_type_keys
+        found_dirs: set[str] = set()
+        try:
+            for asset_dir in class_path.iterdir():
+                if not asset_dir.is_dir():
+                    continue
+                for type_dir in asset_dir.iterdir():
+                    if type_dir.is_dir():
+                        found_dirs.add(type_dir.name.lower())
+        except OSError:
+            pass
+        matched = [k for k in all_type_keys if k.lower() in found_dirs]
+        return matched if matched else all_type_keys
+
+    types = await loop.run_in_executor(None, _scan)
+    return {"types": types}
 
 
 @router.get("/projects/{project_name}/assets")
@@ -223,6 +264,31 @@ async def post_directory(req: DirectoryCreate) -> dict:
 
     log.info("Created directory %s", dir_path)
     return {"name": req.name, "path": str(dir_path), "rel_path": rel_created}
+
+
+# ── Tokens ────────────────────────────────────────────────────────────────────
+
+class TokenAdd(BaseModel):
+    project:     str
+    token_type:  str   # CLASS / TYPE / NAME / INSTANCE / custom
+    token_value: str   # formatted token key (e.g. "FX", "HERO")
+    rel_path:    str = ""   # relative path inside project; defaults to token_value.lower()
+
+
+@router.post("/tokens")
+async def post_token(req: TokenAdd) -> dict:
+    """Register a token entry in tokens.json without touching the filesystem."""
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    if not req.token_value.strip():
+        raise HTTPException(status_code=400, detail="token_value est requis")
+    rel = req.rel_path.strip() or req.token_value.lower()
+    loop = asyncio.get_event_loop()
+    ok = await loop.run_in_executor(
+        None, lambda: add_token(project_path, req.token_type, req.token_value, rel)
+    )
+    return {"success": ok, "token_type": req.token_type, "token_value": req.token_value}
 
 
 # ── Rename / Move ─────────────────────────────────────────────────────────────

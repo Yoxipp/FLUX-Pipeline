@@ -45,10 +45,20 @@ class HoudiniClient:
 
     def state(self) -> dict:
         """
-        Return current Houdini state:
-            selected_nodes / current_path / frame / fps / hip_file
+        Return current Houdini state.
+        Falls back to /run for selected_node_types when the deployed server
+        pre-dates that field — /run has always existed in all server versions.
         """
-        return self._get("/state")
+        result = self._get("/state")
+        if "error" in result:
+            return result
+        if "selected_node_types" not in result and result.get("selected_nodes"):
+            r = self.run(
+                "result = {n.path(): n.type().name() for n in hou.selectedNodes()}"
+            )
+            if r.get("ok") and isinstance(r.get("result"), dict):
+                result["selected_node_types"] = r["result"]
+        return result
 
     def run(self, code: str) -> dict:
         """

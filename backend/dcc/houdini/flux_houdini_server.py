@@ -151,12 +151,14 @@ def _process_queue() -> None:
 
 
 def _snapshot() -> dict:
+    nodes = hou.selectedNodes()
     return {
-        "selected_nodes": [n.path() for n in hou.selectedNodes()],
-        "current_path":   hou.pwd().path(),
-        "frame":          hou.frame(),
-        "fps":            hou.fps(),
-        "hip_file":       hou.hipFile.path(),
+        "selected_nodes":      [n.path() for n in nodes],
+        "selected_node_types": {n.path(): n.type().name() for n in nodes},
+        "current_path":        hou.pwd().path(),
+        "frame":               hou.frame(),
+        "fps":                 hou.fps(),
+        "hip_file":            hou.hipFile.path(),
     }
 
 

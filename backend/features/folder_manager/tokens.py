@@ -54,7 +54,12 @@ def load_tokens(project_path: Path) -> dict:
 
     defaults = build_default_tokens()
     for section in _TOKEN_SECTIONS:
-        raw.setdefault(section, defaults.get(section, {}))
+        default_section = defaults.get(section, {})
+        if section in ("CLASS", "TYPE") and default_section:
+            # Always ensure built-in tokens exist; custom entries take priority on key collision
+            raw[section] = {**default_section, **raw.get(section, {})}
+        else:
+            raw.setdefault(section, default_section)
     return raw
 
 
