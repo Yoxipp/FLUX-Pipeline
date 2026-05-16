@@ -29,11 +29,17 @@ def _try_hconfig(houdini_exe_path: str | None = None) -> Path | None:
         hconfig_candidates.append(Path(houdini_exe_path).parent / "hconfig.exe")
     hconfig_candidates.append("hconfig")  # Houdini Shell PATH fallback
 
+    # CREATE_NO_WINDOW — évite une console visible sur Windows (meilleure pratique)
+    extra: dict = {}
+    if platform.system() == "Windows":
+        extra["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+
     for hconfig in hconfig_candidates:
         try:
             result = subprocess.run(
                 [str(hconfig), "-ap"],
                 capture_output=True, text=True, timeout=10,
+                **extra,
             )
             for line in result.stdout.splitlines():
                 if "HOUDINI_USER_PREF_DIR" in line:
@@ -120,11 +126,14 @@ def get_prefs_dir(houdini_exe_path: str | None = None) -> Path | None:
         if p.exists():
             return p
 
-    result = _try_hconfig(houdini_exe_path)
-    if result:
-        return result
+    # Chemins par défaut OS — couvre les installations standard, aucun subprocess
+    default = _default_prefs_path(houdini_exe_path)
+    if default:
+        return default
 
-    return _default_prefs_path(houdini_exe_path)
+    # Dernier recours : hconfig (installations non-standard, redirections GPO…)
+    # Déclenche une création de processus — peut alerter certains antivirus.
+    return _try_hconfig(houdini_exe_path)
 
 
 def get_startup_file(houdini_exe_path: str | None = None) -> Path | None:
