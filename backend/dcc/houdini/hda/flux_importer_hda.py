@@ -45,12 +45,26 @@ try:
     with urllib.request.urlopen(_url, timeout=3) as _r:
         exec(json.loads(_r.read())["code"], globals())
 except Exception as _offline_err:
-    # Safe stubs so the HDA never hard-errors when FLUX is not running
-    def _dead_menu(*a, **kw): return ["", f"FLUX offline"]
+    # Safe stubs so the HDA never hard-errors when FLUX is not running.
+    # resolve_path tente une reconnexion à chaque appel (bouton ↺ Resolve).
+    def _try_reconnect():
+        try:
+            with urllib.request.urlopen(
+                f"http://localhost:{_flux_port()}/dcc/houdini/importer/module", timeout=3
+            ) as _r:
+                exec(json.loads(_r.read())["code"], globals())
+            return True
+        except Exception:
+            return False
+    def _dead_menu(*a, **kw): return ["", "FLUX offline"]
     def _noop(*a, **kw): pass
     for _n in ("menu_project","menu_class","menu_type","menu_name","menu_instance","menu_iter"):
         globals()[_n] = _dead_menu
-    def resolve_path(node): node.parm("status_msg").set(f"FLUX offline: {_offline_err}")
+    def resolve_path(node):
+        if _try_reconnect():
+            globals()["resolve_path"](node)
+            return
+        node.parm("status_msg").set("FLUX offline — démarre le backend puis clique ↺ Resolve")
     move_to_local = use_hub = on_created = on_loaded = _noop
 '''
 
