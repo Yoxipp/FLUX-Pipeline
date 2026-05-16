@@ -60,26 +60,38 @@ except Exception as _offline_err:
 # exec()'d by the bootstrap above — functions land directly in hou.phm() globals.
 
 _MODULE_FUNCTIONS: str = '''
-import json, os, urllib.request
+import json, os, threading, time, urllib.request
 
 
 # ── port & HTTP ───────────────────────────────────────────────────────────────
 
-def _flux_port():
-    try:
-        return int(os.environ.get("FLUX_PORT") or
-                   open(os.path.join(os.environ.get("APPDATA",""), "FLUX", "backend_port")).read())
-    except Exception:
-        return 8765
+_PORT = None  # cached once per Houdini session
 
-def _api(): return f"http://localhost:{_flux_port()}"
+def _flux_port():
+    global _PORT
+    if _PORT:
+        return _PORT
+    try:
+        _PORT = int(os.environ.get("FLUX_PORT") or
+                    open(os.path.join(os.environ.get("APPDATA",""), "FLUX", "backend_port")).read())
+    except Exception:
+        _PORT = 8765
+    return _PORT
+
+_API_BASE = None  # cached alongside port
+
+def _api():
+    global _API_BASE
+    if not _API_BASE:
+        _API_BASE = f"http://localhost:{_flux_port()}"
+    return _API_BASE
 
 def _get(path, **params):
     url = _api() + path
     if params:
         url += "?" + "&".join(f"{k}={v}" for k, v in params.items() if v)
     try:
-        with urllib.request.urlopen(url, timeout=4) as r:
+        with urllib.request.urlopen(url, timeout=1.5) as r:
             return json.loads(r.read())
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -116,13 +128,31 @@ def _pval(node, name):
     p = node.parm(name)
     return p.eval() if p is not None else ""
 
+# ── cache ─────────────────────────────────────────────────────────────────────
+# Responses cached for _TTL seconds so menu opens never block the UI thread.
+_TTL: float = 60.0
+_cache: dict = {}
+
+def _cached(key, fetch_fn):
+    now = time.monotonic()
+    if key in _cache:
+        exp, data = _cache[key]
+        if now < exp:
+            return data
+    data = fetch_fn()
+    _cache[key] = (now + _TTL, data)
+    return data
+
 def _tokens(node):
     project = _pval(node, "project")
     if not project: return {}
-    return _get("/dcc/houdini/importer/tokens", project=project).get("tokens", {})
+    return _cached(
+        f"tokens:{project}",
+        lambda: _get("/dcc/houdini/importer/tokens", project=project).get("tokens", {}),
+    )
 
 def menu_project(node):
-    projects = _get("/dcc/houdini/importer/tokens").get("projects", [])
+    projects = _cached("projects", lambda: _get("/dcc/houdini/importer/tokens").get("projects", []))
     return _flat(projects) if projects else ["", "— no projects —"]
 
 def menu_class(node):
@@ -153,14 +183,17 @@ def menu_instance(node):
 def menu_iter(node):
     project = _pval(node, "project")
     if not project: return _flat(["LAST"])
-    r = _get(
+    cls  = _pval(node, "flux_class")
+    typ  = _pval(node, "flux_type")
+    name = _pval(node, "flux_name")
+    inst = _pval(node, "flux_instance")
+    key  = f"iters:{project}:{cls}:{typ}:{name}:{inst}"
+    r = _cached(key, lambda: _get(
         "/dcc/houdini/importer/iters",
         project=project,
-        **{"class": _pval(node, "flux_class")},
-        type=_pval(node, "flux_type"),
-        name=_pval(node, "flux_name"),
-        instance=_pval(node, "flux_instance"),
-    )
+        **{"class": cls},
+        type=typ, name=name, instance=inst,
+    ))
     return _flat(r.get("iters", ["LAST"]))
 
 
@@ -213,8 +246,22 @@ def use_hub(node):
 
 # ── lifecycle ─────────────────────────────────────────────────────────────────
 
-def on_created(node): resolve_path(node)
-def on_loaded(node):  resolve_path(node)
+def _prefetch(node):
+    """Warm the cache in a background thread so menus are instant on first open."""
+    project = _pval(node, "project")
+    def _work():
+        _cached("projects", lambda: _get("/dcc/houdini/importer/tokens").get("projects", []))
+        if project:
+            _cached(f"tokens:{project}",
+                    lambda: _get("/dcc/houdini/importer/tokens", project=project).get("tokens", {}))
+    threading.Thread(target=_work, daemon=True).start()
+
+def on_created(node):
+    _prefetch(node)
+
+def on_loaded(node):
+    _prefetch(node)
+    resolve_path(node)
 '''
 
 
@@ -258,9 +305,6 @@ def _menu_str(name, label, default, menu_fn, help_txt):
     )
     t.setItemGeneratorScript(f"return hou.phm().{menu_fn}(kwargs[\\'node\\'])")
     t.setItemGeneratorScriptLanguage(_PY)
-    # Trigger resolve when the value changes
-    t.setScriptCallback(f"hou.phm().resolve_path(kwargs[\\'node\\'])")
-    t.setScriptCallbackLanguage(_PY)
     return t
 
 _ptg.append(hou.SeparatorParmTemplate("sep_pipeline"))
