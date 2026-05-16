@@ -95,6 +95,55 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
     return resp
 
 
+def create_flux_importer_node(
+    project: str = "",
+    flux_class: str = "",
+    flux_type: str = "",
+    flux_name: str = "",
+    flux_instance: str = "",
+    flux_iter: str = "LAST",
+) -> dict:
+    """Create a flux_importer HDA node in the active Houdini network pane.
+
+    Uses the current NetworkEditor pwd(). If that's an OBJ context, wraps inside
+    a new Geometry node. Returns {"ok": True, "node_path": "..."}.
+    """
+    code = textwrap.dedent(f"""\
+        import hou
+        try:
+            _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            _pwd  = _pane.pwd() if _pane else hou.node("/obj")
+        except Exception:
+            _pwd = hou.node("/obj")
+        if _pwd is None:
+            _pwd = hou.node("/obj")
+        _cat = _pwd.childTypeCategory()
+        if _cat == hou.objNodeTypeCategory():
+            _geo = _pwd.createNode("geo", node_name="flux_geo")
+            _target = _geo
+        elif _cat == hou.sopNodeTypeCategory():
+            _target = _pwd
+        else:
+            _geo = hou.node("/obj").createNode("geo", node_name="flux_geo")
+            _target = _geo
+        _node = _target.createNode("flux_importer", node_name="flux_import")
+        if {project!r}:       _node.parm("project").set({project!r})
+        if {flux_class!r}:    _node.parm("flux_class").set({flux_class!r})
+        if {flux_type!r}:     _node.parm("flux_type").set({flux_type!r})
+        if {flux_name!r}:     _node.parm("flux_name").set({flux_name!r})
+        if {flux_instance!r}: _node.parm("flux_instance").set({flux_instance!r})
+        _node.parm("flux_iter").set({flux_iter!r})
+        _node.setSelected(True, clear_all_selected=True)
+        result = {{"ok": True, "node_path": _node.path()}}
+    """)
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        log.info("Created flux_importer node at %s", resp.get("result", {}).get("node_path"))
+    else:
+        log.error("create_flux_importer_node failed: %s", resp.get("error"))
+    return resp
+
+
 def set_import_path(node_path: str, file_path: str | Path) -> dict:
     """Update the file path parameter on an existing Houdini import node.
 

@@ -187,6 +187,18 @@ export const api = {
       new_name: newName ?? '', new_subpath: newSubpath !== undefined ? newSubpath.join('/') : '',
     }),
 
+  // DCC
+  getFluxTokensFromPath: (project: string, rel_path: string) =>
+    apiCall<{ CLASS: string; TYPE: string; NAME: string; INSTANCE: string }>(
+      'GET', `/dcc/houdini/importer/path_to_tokens?project=${encodeURIComponent(project)}&rel_path=${encodeURIComponent(rel_path)}`,
+    ),
+
+  createFluxImporterNode: (params: {
+    project?: string; flux_class?: string; flux_type?: string;
+    flux_name?: string; flux_instance?: string; flux_iter?: string;
+  }) =>
+    apiCall<{ ok: boolean; node_path?: string }>('POST', '/dcc/houdini/importer/create_node', params),
+
   // Shelf
   getShelves: () =>
     apiCall<Record<string, { versions: string[]; installed: Record<string, boolean> }>>('GET', '/shelf'),

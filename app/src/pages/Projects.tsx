@@ -730,21 +730,23 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onOpenInHoudini, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
   canEdit: boolean
   canDelete: boolean
   count: number
-  onFavorite: () => void
-  onArchive:  () => void
-  onRename:   () => void
-  onMove:     () => void
-  onDelete:   () => void
-  onClose:    () => void
+  onFavorite:       () => void
+  onArchive:        () => void
+  onRename:         () => void
+  onMove:           () => void
+  onDelete:         () => void
+  onOpenInHoudini?: () => void
+  onClose:          () => void
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
+  const [openInHovered, setOpenInHovered] = useState(false)
 
   // Ajuste la position pour rester dans la fenêtre
   const [pos, setPos] = useState({ x, y })
@@ -780,7 +782,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
         position: 'fixed', top: pos.y, left: pos.x, zIndex: 1000,
         background: 'var(--paper)', border: '1px solid var(--rule-2)',
         borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 180,
-        overflow: 'hidden', paddingBlock: 4,
+        paddingBlock: 4,
       }}
     >
       {row(
@@ -798,6 +800,48 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           {count === 1 && row('Renommer', false, () => { onRename(); onClose() })}
           {row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
+        </>
+      )}
+      {onOpenInHoudini && (
+        <>
+          <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
+          <div
+            style={{ position: 'relative' }}
+            onMouseEnter={() => setOpenInHovered(true)}
+            onMouseLeave={() => setOpenInHovered(false)}
+          >
+            <div style={{
+              padding: '6px 12px', fontSize: 11, cursor: 'pointer',
+              color: 'var(--ink-2)', display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', gap: 7,
+              background: openInHovered ? 'var(--accent-soft)' : 'transparent',
+              transition: 'background 0.06s',
+            }}>
+              <span>Open in</span>
+              <ChevronRight size={11} strokeWidth={2} />
+            </div>
+            {openInHovered && (
+              <div style={{
+                position: 'absolute', top: 0, left: '100%',
+                background: 'var(--paper)', border: '1px solid var(--rule-2)',
+                borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 140,
+                overflow: 'hidden', paddingBlock: 4, zIndex: 1001,
+              }}>
+                <div
+                  onClick={() => { onOpenInHoudini(); onClose() }}
+                  style={{
+                    padding: '6px 12px', fontSize: 11, cursor: 'pointer',
+                    color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
+                    transition: 'background 0.06s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  Houdini
+                </div>
+              </div>
+            )}
+          </div>
         </>
       )}
       {canDelete && (
@@ -1357,6 +1401,20 @@ export function Projects() {
     await loadItems()
   }, [nav, loadItems])
 
+  const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
+    await api.createFluxImporterNode({
+      project:       nav.project,
+      flux_class:    tok.CLASS,
+      flux_type:     tok.TYPE,
+      flux_name:     tok.NAME,
+      flux_instance: tok.INSTANCE,
+      flux_iter:     'LAST',
+    })
+  }, [nav])
+
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
     for (const item of targets) {
@@ -1762,6 +1820,9 @@ export function Projects() {
           onRename={() => setRenameTarget(ctxMenu.items[0])}
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
+          onOpenInHoudini={nav.kind === 'inside' && ctxMenu.items.length === 1
+            ? () => void handleOpenInHoudini(ctxMenu.items[0])
+            : undefined}
           onClose={() => setCtxMenu(null)}
         />
       )}

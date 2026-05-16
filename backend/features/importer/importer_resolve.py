@@ -10,7 +10,7 @@ import re
 import time
 from pathlib import Path
 
-from core.constants import ACTIVE_VERSION_LABEL
+from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_INSTANCE, DEFAULT_TYPE_TOKENS
 from core.logger import get_logger
 from core.paths import get_projects_dir
 from features.folder_manager.naming_validator import build_asset_filename
@@ -186,7 +186,8 @@ def resolve_import_path(
         return {"ok": False, "path": None, "ext": "", "exists": False,
                 "error": f"Pipeline folder does not exist: {folder}"}
 
-    target_stem = f"{class_tok}_{type_tok}_{name_tok}_{instance}_{iter_val}".upper()
+    effective_instance = instance.strip() if instance.strip() else DEFAULT_INSTANCE
+    target_stem = f"{class_tok}_{type_tok}_{name_tok}_{effective_instance}_{iter_val}".upper()
 
     for p in folder.iterdir():
         if not p.is_file():
@@ -203,6 +204,92 @@ def resolve_import_path(
 
     return {"ok": False, "path": None, "ext": "", "exists": False,
             "error": f"File not found: {target_stem}.*"}
+
+
+# ── path → token reverse lookup ───────────────────────────────────────────────
+
+def path_to_tokens(project_path: Path, rel_parts: list[str]) -> dict:
+    """Reverse-map filesystem path segments (relative to project root) to FLUX tokens.
+
+    Args:
+        rel_parts: path segments, e.g. ['assets', 'chara', 'MECHANT', 'rig']
+                   The last segment is the clicked item (folder or file).
+
+    Returns a dict with keys CLASS, TYPE, NAME, INSTANCE (empty string when not found).
+    Longest-match wins so that a deep NAME path beats a shallow CLASS path.
+    """
+    tokens = load_tokens(project_path)
+
+    # Build reverse maps path_str → token_key (skip templates containing '{')
+    name_map: dict[str, str] = {
+        v: k for k, v in tokens.get("NAME", {}).items() if "{" not in v
+    }
+    class_map: dict[str, str] = {
+        v: k for k, v in tokens.get("CLASS", {}).items() if "{" not in v
+    }
+
+    # Reverse-map TYPE subpaths: "model/sculpt" → "SCULPT", "rig/rig" → "RIG", …
+    type_by_subpath: dict[str, str] = {v: k for k, v in DEFAULT_TYPE_TOKENS.items()}
+
+    result = {"CLASS": "", "TYPE": "", "NAME": "", "INSTANCE": ""}
+    if not rel_parts:
+        return result
+
+    # Try NAME match first (more specific — includes the class subfolder)
+    for name_path, name_tok in sorted(name_map.items(), key=lambda kv: -len(kv[0])):
+        parts = [p for p in name_path.replace("\\", "/").split("/") if p]
+        if rel_parts[: len(parts)] == parts:
+            result["NAME"] = name_tok
+            # Derive CLASS from the name_path prefix
+            for cls_path, cls_tok in class_map.items():
+                cp = [p for p in cls_path.replace("\\", "/").split("/") if p]
+                if parts[: len(cp)] == cp:
+                    result["CLASS"] = cls_tok
+                    break
+            result["TYPE"], result["INSTANCE"] = _extract_type_instance(
+                rel_parts[len(parts):], type_by_subpath
+            )
+            return result
+
+    # Fallback: CLASS match only
+    for cls_path, cls_tok in sorted(class_map.items(), key=lambda kv: -len(kv[0])):
+        parts = [p for p in cls_path.replace("\\", "/").split("/") if p]
+        if rel_parts[: len(parts)] == parts:
+            result["CLASS"] = cls_tok
+            remaining = rel_parts[len(parts):]
+            if remaining:
+                result["NAME"] = remaining[0].upper()
+            result["TYPE"], result["INSTANCE"] = _extract_type_instance(
+                remaining[1:], type_by_subpath
+            )
+            return result
+
+    return result
+
+
+def _extract_type_instance(segs: list[str], type_by_subpath: dict[str, str]) -> tuple[str, str]:
+    """Resolve (TYPE, INSTANCE) from path segments after the NAME root.
+
+    Tries 2-segment match first (e.g. 'model'+'sculpt' → SCULPT),
+    then 1-segment match (e.g. 'cloth' → CLOTH), then plain uppercase fallback.
+    File-like segments (containing a dot) are never treated as instance or type.
+    """
+    if not segs:
+        return "", ""
+
+    if len(segs) >= 2:
+        two = f"{segs[0]}/{segs[1]}"
+        if two in type_by_subpath:
+            # segs[2] is instance only if it looks like a folder (no extension)
+            inst = segs[2].upper() if len(segs) > 2 and "." not in segs[2] else ""
+            return type_by_subpath[two], inst
+
+    one = segs[0]
+    if "." in one:
+        return "", ""
+    type_tok = type_by_subpath.get(one, one.upper())
+    inst = segs[1].upper() if len(segs) > 1 and "." not in segs[1] else ""
+    return type_tok, inst
 
 
 # ── file listing ──────────────────────────────────────────────────────────────

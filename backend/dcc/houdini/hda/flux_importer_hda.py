@@ -159,9 +159,12 @@ def menu_class(node):
     keys = list(_tokens(node).get("CLASS", {}).keys())
     return _flat(keys) if keys else ["", "— no project —"]
 
+_DEFAULT_TYPES = ["SCULPT","BLOCK","TOPO","TEX","LDEV","FUR","HAIR","FEATHERS","SK","WGHT","RIG","CLOTH","MUSCLE","GBL"]
+
 def menu_type(node):
-    keys = list(_tokens(node).get("TYPE", {}).keys())
-    return _flat(keys) if keys else ["", "— no project —"]
+    project_keys = list(_tokens(node).get("TYPE", {}).keys())
+    all_types = sorted(set(project_keys + _DEFAULT_TYPES))
+    return _flat(all_types)
 
 def menu_name(node):
     toks  = _tokens(node)
@@ -393,7 +396,7 @@ else:
     _ext = os.path.splitext(_ext)[1]
 return {{"usd":0,"usda":0,"usdc":0,"usdz":0,".usd":0,".usda":0,".usdc":0,".usdz":0,
          "abc":1,".abc":1,
-         "bgeo":2,".bgeo":2,".bgeo.sc":2,"geo":2,".geo":2,"obj":2,".obj":2}}.get(_ext, 0)
+         "bgeo":2,".bgeo":2,".bgeo.sc":2,"geo":2,".geo":2,"obj":2,".obj":2,"fbx":2,".fbx":2}}.get(_ext, 0)
 """.strip(), hou.exprLanguage.Python)
 
 # Output connector — expose the switch output

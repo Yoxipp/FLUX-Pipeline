@@ -243,6 +243,32 @@ async def houdini_import_move_to_local(req: HoudiniMoveToLocalRequest) -> dict:
     return result
 
 
+class HoudiniFluxImporterCreateRequest(BaseModel):
+    project:       str = ""
+    flux_class:    str = ""
+    flux_type:     str = ""
+    flux_name:     str = ""
+    flux_instance: str = ""
+    flux_iter:     str = "LAST"
+
+
+@router.post("/houdini/importer/create_node")
+async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) -> dict:
+    """Create a flux_importer HDA node in the active Houdini network."""
+    from dcc.houdini.houdini_import import create_flux_importer_node
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: create_flux_importer_node(
+            req.project, req.flux_class, req.flux_type,
+            req.flux_name, req.flux_instance, req.flux_iter,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Create node failed"))
+    return result
+
+
 class HoudiniGeoExportRequest(BaseModel):
     node_path: str
     file_path: str
@@ -443,6 +469,19 @@ async def houdini_importer_build_hda(req: HoudiniBuildHdaRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "HDA build failed"))
     return result
+
+
+@router.get("/houdini/importer/path_to_tokens")
+async def houdini_importer_path_to_tokens(project: str, rel_path: str) -> dict:
+    """Reverse-map a project-relative filesystem path to FLUX tokens.
+
+    Returns {CLASS, TYPE, NAME, INSTANCE} — empty strings for unresolved tokens.
+    """
+    from core.paths import get_project_path
+    from features.importer.importer_resolve import path_to_tokens as _path_to_tokens
+    project_path = get_project_path(project)
+    rel_parts = [p for p in rel_path.replace("\\", "/").split("/") if p]
+    return _path_to_tokens(project_path, rel_parts)
 
 
 @router.get("/houdini/importer/module")
