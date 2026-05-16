@@ -7,8 +7,10 @@ Works without Houdini being open.
 from __future__ import annotations
 
 import os
+import platform
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 # Markers used to locate the FLUX block in 123.py — never change these.
@@ -20,38 +22,109 @@ _BLOCK_END   = "# <<< FLUX autostart"
 # Prefs / startup file location
 # ---------------------------------------------------------------------------
 
+def _try_hconfig(houdini_exe_path: str | None = None) -> Path | None:
+    """Run hconfig -ap to resolve HOUDINI_USER_PREF_DIR via Houdini's own env resolution."""
+    hconfig_candidates: list[str | Path] = []
+    if houdini_exe_path:
+        hconfig_candidates.append(Path(houdini_exe_path).parent / "hconfig.exe")
+    hconfig_candidates.append("hconfig")  # Houdini Shell PATH fallback
+
+    for hconfig in hconfig_candidates:
+        try:
+            result = subprocess.run(
+                [str(hconfig), "-ap"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.splitlines():
+                if "HOUDINI_USER_PREF_DIR" in line:
+                    parts = line.split(":=", 1)
+                    if len(parts) == 2:
+                        p = Path(parts[1].strip())
+                        if p.exists():
+                            return p
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    return None
+
+
+def _default_prefs_path(houdini_exe_path: str | None = None) -> Path | None:
+    """OS-specific default prefs path. Version extracted from exe path via regex."""
+    version: str | None = None
+    if houdini_exe_path:
+        m = re.search(r"[Hh]oudini[\ ]?(\d+\.\d+)", str(houdini_exe_path))
+        if m:
+            version = m.group(1)
+
+    system = platform.system()
+
+    if system == "Windows":
+        home = Path.home()
+        # Prefs can be in Documents OR directly in home (non-standard but documented by SideFX)
+        if version:
+            for base in (home / "Documents", home):
+                p = base / f"houdini{version}"
+                if p.exists():
+                    return p
+        candidates: list[Path] = []
+        for base in (home / "Documents", home):
+            try:
+                candidates.extend(
+                    d for d in base.glob("houdini*")
+                    if d.is_dir() and re.match(r"houdini\d+\.\d+$", d.name)
+                )
+            except OSError:
+                pass
+        candidates.sort(key=lambda d: d.name, reverse=True)
+        return candidates[0] if candidates else None
+
+    elif system == "Darwin":
+        prefs = Path.home() / "Library" / "Preferences" / "houdini"
+        if version:
+            p = prefs / version
+            if p.exists():
+                return p
+        if prefs.exists():
+            mac_candidates = sorted(
+                [d for d in prefs.iterdir() if d.is_dir() and re.match(r"\d+\.\d+$", d.name)],
+                key=lambda d: d.name, reverse=True,
+            )
+            return mac_candidates[0] if mac_candidates else None
+        return None
+
+    else:  # Linux
+        home = Path.home()
+        if version:
+            p = home / f"houdini{version}"
+            if p.exists():
+                return p
+        linux_candidates = sorted(
+            [d for d in home.glob("houdini*") if d.is_dir() and re.match(r"houdini\d+\.\d+$", d.name)],
+            key=lambda d: d.name, reverse=True,
+        )
+        return linux_candidates[0] if linux_candidates else None
+
+
 def get_prefs_dir(houdini_exe_path: str | None = None) -> Path | None:
     """
     Locate Houdini's user prefs directory without running Houdini.
 
     Search order:
-      1. HOUDINI_USER_PREF_DIR environment variable
-      2. %USERPROFILE%/Documents/houdiniX.Y  (version from exe path)
-      3. Newest houdiniX.Y folder found in %USERPROFILE%/Documents
+      1. HOUDINI_USER_PREF_DIR env var
+      2. hconfig -ap  (official SideFX utility — handles GPO-redirected paths and custom installs)
+      3. OS-default paths (Windows ~/Documents/houdiniX.Y or ~/houdiniX.Y,
+                           macOS ~/Library/Preferences/houdini/X.Y, Linux ~/houdiniX.Y)
     """
-    # 1. Explicit env override
     env = os.environ.get("HOUDINI_USER_PREF_DIR")
     if env:
         p = Path(env)
         if p.exists():
             return p
 
-    # 2. Derive version from exe path — e.g. "Houdini 20.5.410\bin\houdinifx.exe" → "20.5"
-    if houdini_exe_path:
-        m = re.search(r"[Hh]oudini[\ ]?(\d+\.\d+)", str(houdini_exe_path))
-        if m:
-            p = Path.home() / "Documents" / f"houdini{m.group(1)}"
-            if p.exists():
-                return p
+    result = _try_hconfig(houdini_exe_path)
+    if result:
+        return result
 
-    # 3. Scan Documents for the newest houdiniX.Y directory
-    docs = Path.home() / "Documents"
-    candidates = sorted(
-        [d for d in docs.glob("houdini*") if d.is_dir() and re.match(r"houdini\d+\.\d+$", d.name)],
-        key=lambda d: d.name,
-        reverse=True,
-    )
-    return candidates[0] if candidates else None
+    return _default_prefs_path(houdini_exe_path)
 
 
 def get_startup_file(houdini_exe_path: str | None = None) -> Path | None:

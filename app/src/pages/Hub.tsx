@@ -30,11 +30,15 @@ const SHORTCUTS: { ic: LucideIcon; t: string; s: string; path: string; active?: 
   { ic: Activity,   t: 'Activité',       s: 'Historique équipe',  path: '/activity' },
 ]
 
-const DCC_STATUS_MOCK = [
-  { name: 'Maya 2025.3',    key: 'maya' },
-  { name: 'Houdini 20.5',   key: 'houdini' },
-  { name: 'Nuke 15.0',      key: 'nuke' },
-  { name: 'Substance 10.1', key: 'substance_painter' },
+const DCC_STATUS_ITEMS = [
+  { name: 'Maya',               key: 'Maya' },
+  { name: 'Houdini',            key: 'Houdini' },
+  { name: 'Nuke',               key: 'Nuke' },
+  { name: 'Substance Painter',  key: 'SubstanceP' },
+  { name: 'Substance Designer', key: 'SubstanceD' },
+  { name: 'ZBrush',             key: 'ZBrush' },
+  { name: 'Marvelous Designer', key: 'Marvelous' },
+  { name: 'Photoshop',          key: 'Photoshop' },
 ]
 
 export function Hub() {
@@ -80,10 +84,9 @@ export function Hub() {
   const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
   const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 
-  const dccItems = DCC_STATUS_MOCK.map(d => ({
-    name: d.name,
-    connected: dccStatus[d.key]?.connected ?? false,
-  }))
+  const dccItems = DCC_STATUS_ITEMS
+    .map(d => ({ name: d.name, connected: dccStatus[d.key]?.connected ?? false }))
+    .filter(d => d.connected)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -214,19 +217,22 @@ export function Hub() {
           <div style={{ padding: '10px 16px 16px', flexShrink: 0 }}>
             <div style={{ marginBottom: 8 }}><div className="cap">CONNEXION DCC</div></div>
             <div className="card" style={{ padding: '4px 0' }}>
-              {dccItems.map((d, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '7px 12px',
-                  borderBottom: i < dccItems.length - 1 ? '1px solid var(--rule)' : 'none',
-                }}>
-                  <span className={`dot${d.connected ? ' ok' : ''}`} style={{ width: 6, height: 6, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 11, color: d.connected ? 'var(--ink)' : 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{d.name}</span>
-                  <span style={{ fontSize: 10, color: d.connected ? 'var(--ok)' : 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                    {d.connected ? 'connecté' : 'inactif'}
-                  </span>
-                </div>
-              ))}
+              {dccItems.length === 0
+                ? <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                    Aucun DCC connecté
+                  </div>
+                : dccItems.map((d, i) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '7px 12px',
+                      borderBottom: i < dccItems.length - 1 ? '1px solid var(--rule)' : 'none',
+                    }}>
+                      <span className="dot ok" style={{ width: 6, height: 6, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 11, color: 'var(--ink)', fontFamily: 'var(--mono)' }}>{d.name}</span>
+                      <span style={{ fontSize: 10, color: 'var(--ok)', fontFamily: 'var(--mono)' }}>connecté</span>
+                    </div>
+                  ))
+              }
             </div>
           </div>
         </div>

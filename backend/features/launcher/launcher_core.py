@@ -31,21 +31,21 @@ _FRONTEND_KEY_MAP: dict[str, str] = {
 # ── public API ────────────────────────────────────────────────────────────────
 
 def get_installed_dccs() -> dict[str, str]:
-    """Return {dcc_name: exe_path} for all DCCs detected on this machine.
+    """Return {frontend_key: exe_path} — keys are lowercase (e.g. 'houdini', 'maya').
 
     Checks user-configured custom paths first, then glob-scans default install dirs.
     """
     found: dict[str, str] = {}
-    for dcc_name, patterns in DCC_EXE_PATTERNS.items():
-        custom = config.get_dcc_exe(dcc_name)
+    for frontend_key, internal_key in _FRONTEND_KEY_MAP.items():
+        patterns = DCC_EXE_PATTERNS.get(internal_key, [])
+        custom = config.get_dcc_exe(frontend_key)
         if custom and Path(custom).is_file():
-            found[dcc_name] = custom
+            found[frontend_key] = custom
             continue
         for pattern in patterns:
             matches = glob.glob(pattern)
             if matches:
-                # sort to pick the highest version number when multiple are installed
-                found[dcc_name] = sorted(matches)[-1]
+                found[frontend_key] = sorted(matches)[-1]
                 break
     return found
 

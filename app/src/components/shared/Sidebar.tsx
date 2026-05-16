@@ -96,6 +96,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [findResult, setFindResult]           = useState<Record<string, boolean | null>>({})
   const [autostartInstalled, setAutostartInstalled] = useState<Record<string, boolean>>({})
   const [autostartLoading, setAutostartLoading]     = useState<Set<string>>(new Set())
+  const [autostartError, setAutostartError]         = useState<string | null>(null)
   const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
 
   useEffect(() => {
@@ -147,8 +148,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         }
       }
-    } catch {}
-    finally {
+    } catch (e) {
+      setAutostartError(e instanceof Error ? e.message : String(e))
+      setTimeout(() => setAutostartError(null), 5000)
+    } finally {
       setAutostartLoading(prev => { const n = new Set(prev); n.delete(key); return n })
     }
   }
@@ -219,8 +222,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               />
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
 
-              {/* feedback badge — auto-find ou ping */}
-              {findOk === true
+              {/* feedback badge — hasPath permanent, puis find/ping éphémères */}
+              {hasPath
                 ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--ok)' }}>✓</span>
                 : findOk === false
                   ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--err)' }}>✗</span>
@@ -276,19 +279,19 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 }
               </div>
 
-              {/* launch */}
+              {/* launch — toujours actif, relance une nouvelle instance si déjà connecté */}
               <div
-                onClick={() => { if (!connected && !isLoading) void handleLaunch(s.key) }}
-                title={connected ? 'Connecté' : isLoading ? 'Lancement…' : 'Lancer'}
+                onClick={() => { if (!isLoading) void handleLaunch(s.key) }}
+                title={isLoading ? 'Lancement…' : connected ? 'Nouvelle instance' : 'Lancer'}
                 style={{
                   width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (connected ? 'var(--rule-2)' : isLoading ? 'var(--rule-2)' : 'var(--accent)'),
+                  border: '1px solid ' + (isLoading ? 'var(--rule-2)' : 'var(--accent)'),
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
-                  background: connected ? 'var(--paper-2)' : isLoading ? 'var(--paper-2)' : 'var(--accent-soft)',
-                  color: connected ? 'var(--ink-3)' : isLoading ? 'var(--ink-4)' : 'var(--accent-hi)',
+                  background: isLoading ? 'var(--paper-2)' : 'var(--accent-soft)',
+                  color: isLoading ? 'var(--ink-4)' : 'var(--accent-hi)',
                   boxShadow: 'var(--shadow-xs)',
-                  cursor: connected || isLoading ? 'default' : 'pointer',
+                  cursor: isLoading ? 'default' : 'pointer',
                   transition: 'background 0.12s, border-color 0.12s',
                 }}
               >
@@ -330,6 +333,25 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </NavGroup>
 
       <div style={{ flex: 1 }} />
+
+      {/* Toast erreur autostart */}
+      {autostartError && (
+        <div
+          onClick={() => setAutostartError(null)}
+          style={{
+            margin: '0 8px 6px',
+            padding: '5px 8px',
+            borderRadius: 5,
+            border: '1px solid var(--err)',
+            background: 'color-mix(in oklch, var(--err) 8%, transparent)',
+            fontSize: 10, fontFamily: 'var(--mono)',
+            color: 'var(--err)',
+            cursor: 'pointer',
+          }}
+        >
+          {`✗ Autostart — ${autostartError}`}
+        </div>
+      )}
 
       {/* Résultat de lancement — mini toast en bas */}
       {Object.entries(launchResult).map(([key, ok]) => {

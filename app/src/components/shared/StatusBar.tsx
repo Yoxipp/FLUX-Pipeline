@@ -4,21 +4,10 @@ interface Props {
   dccStatus: DccStatusMap
 }
 
-const STATUS_ITEMS = [
-  { key: 'Maya',      label: 'Maya 2025' },
-  { key: 'Houdini',   label: 'Houdini 20.5' },
-  { key: 'Nuke',      label: 'Nuke 15.0' },
-  { key: 'Substance', label: 'Substance 10.1' },
-]
-
 export function StatusBar({ dccStatus }: Props) {
-  const items = STATUS_ITEMS
-    .map(it => {
-      const entry = dccStatus[it.key]
-      const dot = entry ? (entry.connected ? 'ok' : 'warn') : ''
-      return { ...it, dot }
-    })
-    .filter(it => it.dot)
+  const items = Object.entries(dccStatus)
+    .filter(([, entry]) => entry?.connected)
+    .map(([key]) => ({ key, label: key }))
 
   return (
     <div style={{
@@ -32,8 +21,8 @@ export function StatusBar({ dccStatus }: Props) {
       {items.map((it, i) => (
         <span key={it.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {i > 0 && <span style={{ width: 1, height: 12, background: 'var(--rule-2)', display: 'inline-block', marginRight: 8 }} />}
-          <span className={`dot ${it.dot}`} style={{ width: 5, height: 5 }} />
-          <span style={{ color: it.dot === 'ok' ? 'var(--ink-2)' : 'var(--ink-3)' }}>{it.label}</span>
+          <span className="dot ok" style={{ width: 5, height: 5 }} />
+          <span style={{ color: 'var(--ink-2)' }}>{it.label}</span>
         </span>
       ))}
       <span style={{ flex: 1 }} />

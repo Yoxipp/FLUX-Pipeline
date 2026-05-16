@@ -1,5 +1,7 @@
 # constants.py — all Flux-wide constants. No imports from other flux modules.
 
+import os as _os
+
 # ── DCC local ports ───────────────────────────────────────────────────────────
 DCC_PORTS: dict[str, int] = {
     "Maya":        7001,
@@ -26,16 +28,25 @@ DCC_COLORS: dict[str, str] = {
 }
 
 # ── DCC display names + default exe search patterns ──────────────────────────
-DCC_EXE_PATTERNS: dict[str, list[str]] = {
-    "Maya":       [r"C:\Program Files\Autodesk\Maya*\bin\maya.exe"],
-    "Houdini":    [r"C:\Program Files\Side Effects Software\Houdini*\bin\houdinifx.exe"],
-    "Nuke":       [r"C:\Program Files\Nuke*\Nuke*.exe"],
-    "SubstanceP": [r"C:\Program Files\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"],
-    "SubstanceD": [r"C:\Program Files\Adobe\Adobe Substance 3D Designer\Adobe Substance 3D Designer.exe"],
-    "ZBrush":     [r"C:\Program Files\Maxon ZBrush*\ZBrush.exe"],
-    "Marvelous":  [r"C:\Program Files\CLO-SET\MarvelousDesigner*\MarvelousDesigner.exe"],
-    "Photoshop":  [r"C:\Program Files\Adobe\Adobe Photoshop*\Photoshop.exe"],
-}
+
+def _build_dcc_patterns() -> dict[str, list[str]]:
+    pf   = _os.environ.get("PROGRAMFILES",      r"C:\Program Files")
+    pf86 = _os.environ.get("PROGRAMFILES(X86)", rf"{pf} (x86)")
+    lad  = _os.environ.get("LOCALAPPDATA",       _os.path.expanduser(r"~\AppData\Local"))
+    return {
+        "Maya":       [rf"{pf}\Autodesk\Maya*\bin\maya.exe"],
+        "Houdini":    [rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe"],
+        "Nuke":       [rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"],   # [0-9] exclut CrashFeedback
+        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"],
+        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer\Adobe Substance 3D Designer.exe"],
+        "ZBrush":     [rf"{pf}\Maxon ZBrush*\ZBrush.exe",
+                       rf"{pf86}\Maxon ZBrush*\ZBrush.exe"],
+        "Marvelous":  [rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner.exe"],
+        "Photoshop":  [rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
+                       rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"],
+    }
+
+DCC_EXE_PATTERNS: dict[str, list[str]] = _build_dcc_patterns()
 
 # ── Naming / token system ─────────────────────────────────────────────────────
 TOKEN_TYPES: tuple[str, ...] = ("CLASS", "TYPE", "NAME", "INSTANCE", "ITER")
