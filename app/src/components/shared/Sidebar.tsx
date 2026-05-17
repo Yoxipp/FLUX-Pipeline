@@ -246,6 +246,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
               <div
                 onClick={() => void handlePickPath(s.key)}
+                className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (hasPath ? 'var(--accent)' : 'var(--rule-2)'),
@@ -254,7 +255,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   background: hasPath ? 'var(--accent-soft)' : 'transparent',
                   color: hasPath ? 'var(--accent-hi)' : 'var(--ink-4)',
                   cursor: 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s',
+                  transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
                 }}
               >
                 <FolderOpen size={8} strokeWidth={2} />
@@ -270,6 +271,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
               <div
                 onClick={() => { if (isHoudini && !autoLoading) void handleToggleAutostart(s.key) }}
+                className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (isHoudini && autoInstalled ? 'var(--accent)' : 'var(--rule-2)'),
@@ -279,7 +281,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   color: isHoudini && autoInstalled ? 'var(--accent-hi)' : 'var(--ink-4)',
                   cursor: isHoudini ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
                   opacity: isHoudini ? 1 : 0.4,
-                  transition: 'background 0.12s, border-color 0.12s, color 0.12s',
+                  transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
                 }}
               >
                 {autoLoading
@@ -301,6 +303,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
               <div
                 onClick={() => { if (!isLoading) void handleLaunch(s.key) }}
+                className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (isLoading ? 'var(--rule-2)' : 'var(--accent)'),
@@ -310,7 +313,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   color: isLoading ? 'var(--ink-4)' : 'var(--accent-hi)',
                   boxShadow: 'var(--shadow-xs)',
                   cursor: isLoading ? 'default' : 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s',
+                  transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
                 }}
               >
                 {isLoading
@@ -335,6 +338,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             <TooltipTrigger asChild>
           <div
             onClick={() => { if (!findingAll) void handleAutoFindAll() }}
+            className="scale-hover"
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '5px 8px',
@@ -344,7 +348,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               color: findingAll ? 'var(--ink-3)' : 'var(--ink-2)',
               cursor: findingAll ? 'default' : 'pointer',
               fontSize: 10, fontFamily: 'var(--mono)',
-              transition: 'background 0.12s, border-color 0.12s',
+              transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
             }}
           >
             {findingAll

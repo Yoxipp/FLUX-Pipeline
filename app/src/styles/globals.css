@@ -97,8 +97,9 @@ body {
   font-family: var(--mono);
   white-space: nowrap;
   box-shadow: var(--shadow-xs);
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s;
 }
+.pill:hover { transform: scale(1.04); }
 .pill.active {
   border-color: var(--accent);
   color: var(--accent-hi);
@@ -126,12 +127,13 @@ body {
   font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em;
   cursor: pointer; white-space: nowrap;
   box-shadow: var(--shadow-xs);
-  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s, transform 0.12s;
 }
 .btn:hover {
   background: var(--ink-4);
   border-color: var(--ink-3);
   box-shadow: var(--shadow-sm);
+  transform: scale(1.03);
 }
 .btn.primary {
   background: var(--accent-soft);
@@ -216,7 +218,7 @@ body {
   border-left: 2px solid transparent;
   border-radius: 0 7px 7px 0;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  transition: background 0.1s, color 0.1s, transform 0.1s;
 }
 .nav .glyph {
   width: 16px; height: 16px;
@@ -225,7 +227,7 @@ body {
   transition: color 0.1s;
   flex-shrink: 0;
 }
-.nav:hover { background: var(--paper-2); color: var(--ink); }
+.nav:hover { background: var(--paper-2); color: var(--ink); transform: scale(1.02); }
 .nav:hover .glyph { color: var(--ink-2); }
 .nav.active {
   color: var(--ink);
@@ -242,6 +244,12 @@ body {
 
 /* ─── animations ── */
 @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+
+/* ── scale hover utility ── */
+.scale-hover { transition: transform 0.12s; }
+.scale-hover:hover { transform: scale(1.03); }
+.scale-hover-lg { transition: transform 0.12s; }
+.scale-hover-lg:hover { transform: scale(1.2); }
 
 /* ── select ── */
 .select-trigger {

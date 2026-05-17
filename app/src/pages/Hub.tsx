@@ -160,11 +160,12 @@ export function Hub() {
               />
               <div
                 onClick={() => void sendChat()}
+                className="scale-hover"
                 style={{
                   width: 28, height: 28, borderRadius: 7,
                   border: '1px solid var(--accent)', background: 'var(--accent-soft)',
                   color: 'var(--accent-hi)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', boxShadow: 'var(--shadow-xs)', transition: 'background 0.12s',
+                  cursor: 'pointer', boxShadow: 'var(--shadow-xs)', transition: 'background 0.12s, transform 0.12s',
                 }}>
                 <SendHorizonal size={13} strokeWidth={2} />
               </div>
@@ -185,6 +186,7 @@ export function Hub() {
                   <div
                     key={i}
                     onClick={() => navigate(c.path)}
+                    className="scale-hover"
                     style={{
                       border: c.active ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
                       padding: '14px 12px', minHeight: 88,
@@ -192,7 +194,7 @@ export function Hub() {
                       display: 'flex', flexDirection: 'column', gap: 8,
                       borderRadius: 8, cursor: 'pointer',
                       boxShadow: c.active ? 'var(--shadow-sm), 0 0 10px color-mix(in oklch, var(--accent) 12%, transparent)' : 'var(--shadow-sm)',
-                      transition: 'border-color 0.12s, background 0.12s',
+                      transition: 'border-color 0.12s, background 0.12s, transform 0.12s',
                     }}
                   >
                     <div style={{

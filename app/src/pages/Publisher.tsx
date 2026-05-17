@@ -185,6 +185,7 @@ function PublishComposer({
         {/* Asset / Shot toggle */}
         <div
           onClick={onModeSwitch}
+          className="scale-hover"
           style={{
             width: 52, flexShrink: 0, height: 34,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -247,12 +248,13 @@ function PublishComposer({
                 ) : (
                   <div
                     onClick={() => setOpen(isOpen ? null : key)}
+                    className="scale-hover"
                     style={{
                       height: 34, padding: '0 6px',
                       display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1,
                       cursor: 'pointer',
                       background: filled ? 'var(--accent-soft)' : 'transparent',
-                      transition: 'background 0.08s', borderRadius: radius,
+                      transition: 'background 0.08s, transform 0.08s', borderRadius: radius,
                     }}
                   >
                     <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>
@@ -730,7 +732,7 @@ export function Publisher() {
             <SecTitle>FORMAT</SecTitle>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {EXPORT_FORMATS.map(ext => (
-                <div key={ext} onClick={() => setExportExt(ext)} style={{
+                <div key={ext} onClick={() => setExportExt(ext)} className="scale-hover" style={{
                   padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
                   fontFamily: 'var(--mono)', fontWeight: exportExt === ext ? 600 : 400,
                   border: exportExt === ext ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
