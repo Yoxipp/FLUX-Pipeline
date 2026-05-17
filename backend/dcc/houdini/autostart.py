@@ -53,6 +53,26 @@ def _try_hconfig(houdini_exe_path: str | None = None) -> Path | None:
     return None
 
 
+def _get_documents_dir() -> Path:
+    """
+    Return the real Windows Documents folder, following GPO/OneDrive redirects.
+    Falls back to ~/Documents if winreg is unavailable or the key is missing.
+    """
+    if platform.system() != "Windows":
+        return Path.home() / "Documents"
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        )
+        val, _ = winreg.QueryValueEx(key, "Personal")
+        winreg.CloseKey(key)
+        return Path(val)
+    except Exception:
+        return Path.home() / "Documents"
+
+
 def _default_prefs_path(houdini_exe_path: str | None = None) -> Path | None:
     """OS-specific default prefs path. Version extracted from exe path via regex."""
     version: str | None = None
@@ -65,14 +85,17 @@ def _default_prefs_path(houdini_exe_path: str | None = None) -> Path | None:
 
     if system == "Windows":
         home = Path.home()
-        # Prefs can be in Documents OR directly in home (non-standard but documented by SideFX)
+        docs = _get_documents_dir()
+        # Priority: real Documents (registry, handles GPO/OneDrive) then home directly
+        bases = [docs] if docs != home / "Documents" else []
+        bases += [home / "Documents", home]
         if version:
-            for base in (home / "Documents", home):
+            for base in bases:
                 p = base / f"houdini{version}"
                 if p.exists():
                     return p
         candidates: list[Path] = []
-        for base in (home / "Documents", home):
+        for base in bases:
             try:
                 candidates.extend(
                     d for d in base.glob("houdini*")
@@ -146,23 +169,15 @@ def get_startup_file(houdini_exe_path: str | None = None) -> Path | None:
 # Server script deployment
 # ---------------------------------------------------------------------------
 
-def _get_deploy_dir() -> Path:
-    """%APPDATA%/FLUX/dcc/houdini/ — created on first call."""
-    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    deploy = Path(appdata) / "FLUX" / "dcc" / "houdini"
-    deploy.mkdir(parents=True, exist_ok=True)
-    return deploy
-
-
-def _deploy_server() -> Path:
+def _deploy_server(scripts_dir: Path) -> None:
     """
-    Copy flux_houdini_server.py to AppData so Houdini can always find it,
-    even if the FLUX install directory changes. Returns the deploy dir.
+    Copy flux_houdini_server.py into Houdini's scripts/ directory (next to 123.py).
+    Any user sharing that prefs directory gets the server automatically — no
+    per-user path hardcoding needed.
     """
     src = Path(__file__).parent / "flux_houdini_server.py"
-    deploy_dir = _get_deploy_dir()
-    shutil.copy2(src, deploy_dir / "flux_houdini_server.py")
-    return deploy_dir
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, scripts_dir / "flux_houdini_server.py")
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +196,8 @@ def is_installed(houdini_exe_path: str | None = None) -> bool:
 
 def install(houdini_exe_path: str | None = None) -> dict:
     """
-    Deploy flux_houdini_server.py to AppData and append autostart block to 123.py.
-    Idempotent — safe to call multiple times.
+    Deploy flux_houdini_server.py next to 123.py and append/upgrade the autostart
+    block in 123.py. Idempotent — safe to call multiple times.
 
     Returns {"success": bool, "message": str, "path": str | None}
     """
@@ -190,52 +205,45 @@ def install(houdini_exe_path: str | None = None) -> dict:
     if startup is None:
         return {"success": False, "message": "Houdini prefs directory not found", "path": None}
 
-    # Deploy server to a stable AppData path
+    # Deploy server next to 123.py — works for every user sharing this prefs dir
     try:
-        deploy_dir = _deploy_server()
+        _deploy_server(startup.parent)
     except Exception as exc:
         return {"success": False, "message": f"Failed to deploy server: {exc}", "path": None}
-
-    # Use forward slashes — safe on Windows in Python code strings
-    server_dir = str(deploy_dir).replace("\\", "/")
 
     # Ensure scripts/ dir exists
     startup.parent.mkdir(parents=True, exist_ok=True)
 
+    _NEW_BLOCK = (
+        f"{_BLOCK_BEGIN}\n"
+        f"try:\n"
+        f"    import sys as _flux_sys, os as _flux_os, hou as _flux_hou\n"
+        f"    _flux_sys.path.insert(0, _flux_os.path.join(_flux_hou.homeHoudiniDirectory(), 'scripts'))\n"
+        f"    import flux_houdini_server\n"
+        f"except Exception as _flux_exc:\n"
+        f"    print(f'[FLUX] Autostart error (Houdini continues normally): {{_flux_exc}}')\n"
+        f"{_BLOCK_END}"
+    )
+
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
-        # Auto-upgrade: si l'ancien bloc n'a pas le try/except de sécurité, le remplacer
         b_start = existing.find(_BLOCK_BEGIN)
         b_end   = existing.find(_BLOCK_END, b_start)
         old_fragment = existing[b_start : b_end + len(_BLOCK_END)] if b_end > b_start else ""
-        if "try:" not in old_fragment:
-            new_fragment = (
-                f"{_BLOCK_BEGIN}\n"
-                f"try:\n"
-                f"    import sys as _flux_sys\n"
-                f"    _flux_sys.path.insert(0, {repr(server_dir)})\n"
-                f"    import flux_houdini_server\n"
-                f"except Exception as _flux_exc:\n"
-                f"    print(f'[FLUX] Autostart error (Houdini continues normally): {{_flux_exc}}')\n"
-                f"{_BLOCK_END}"
-            )
+        # Upgrade if missing try/except, using hardcoded path, or using __file__ (unavailable in Houdini exec)
+        needs_upgrade = (
+            "try:" not in old_fragment
+            or "homeHoudiniDirectory" not in old_fragment
+        )
+        if needs_upgrade:
             try:
-                startup.write_text(existing.replace(old_fragment, new_fragment), encoding="utf-8")
+                startup.write_text(existing.replace(old_fragment, _NEW_BLOCK), encoding="utf-8")
             except OSError as exc:
                 return {"success": False, "message": f"Cannot upgrade 123.py: {exc}", "path": str(startup)}
             return {"success": True, "message": f"upgraded: {startup}", "path": str(startup)}
         return {"success": True, "message": "already_installed", "path": str(startup)}
 
-    block = (
-        f"\n{_BLOCK_BEGIN}\n"
-        f"try:\n"
-        f"    import sys as _flux_sys\n"
-        f"    _flux_sys.path.insert(0, {repr(server_dir)})\n"
-        f"    import flux_houdini_server\n"
-        f"except Exception as _flux_exc:\n"
-        f"    print(f'[FLUX] Autostart error (Houdini continues normally): {{_flux_exc}}')\n"
-        f"{_BLOCK_END}\n"
-    )
+    block = f"\n{_NEW_BLOCK}\n"
     try:
         with open(startup, "a", encoding="utf-8") as fh:
             fh.write(block)
