@@ -100,6 +100,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [autostartError, setAutostartError]         = useState<string | null>(null)
   const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
   const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
+  const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
@@ -107,6 +108,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       setAutostartInstalled(prev => ({ ...prev, houdini: r.installed }))
       if (r.installed) {
         api.pingDcc('houdini').then(p => setHoudiniServerOk(p.connected)).catch(() => setHoudiniServerOk(false))
+      }
+    }).catch(() => {})
+    api.getDccAutostart('zbrush').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, zbrush: r.installed }))
+      if (r.installed) {
+        api.pingDcc('zbrush').then(p => setZbrushServerOk(p.connected)).catch(() => setZbrushServerOk(false))
       }
     }).catch(() => {})
   }, [])
@@ -119,6 +126,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.houdini])
+
+  // Poll ZBrush bridge every 5 s when plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.zbrush) { setZbrushServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('zbrush').then(p => setZbrushServerOk(p.connected)).catch(() => setZbrushServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.zbrush])
 
   const handleAutoFindAll = async () => {
     setFindingAll(true)
@@ -141,28 +157,33 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     setTimeout(() => setFindResult({}), 3000)
   }
 
+  const _setServerOk = (key: string, value: boolean | null) => {
+    if (key === 'houdini') setHoudiniServerOk(value)
+    if (key === 'zbrush')  setZbrushServerOk(value)
+  }
+
   const handleToggleAutostart = async (key: string) => {
-    if (key !== 'houdini') return
+    if (key !== 'houdini' && key !== 'zbrush') return
     setAutostartLoading(prev => new Set(prev).add(key))
     try {
       if (autostartInstalled[key]) {
         await api.removeDccAutostart(key)
         setAutostartInstalled(prev => ({ ...prev, [key]: false }))
-        if (key === 'houdini') setHoudiniServerOk(null)
+        _setServerOk(key, null)
       } else {
         await api.installDccAutostart(key)
         setAutostartInstalled(prev => ({ ...prev, [key]: true }))
-        // Ping HTTP pour confirmer que flux_houdini_server tourne vraiment
+        // Ping pour confirmer que le bridge tourne déjà (ZBrush peut-être déjà ouvert)
         try {
           const pong = await api.pingDcc(key)
-          if (key === 'houdini') setHoudiniServerOk(pong.connected)
+          _setServerOk(key, pong.connected)
           const label = pong.connected
             ? (pong.version ? `v${pong.version}` : '✓')
             : '✗'
           setPingResult(prev => ({ ...prev, [key]: label }))
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         } catch {
-          if (key === 'houdini') setHoudiniServerOk(false)
+          _setServerOk(key, false)
           setPingResult(prev => ({ ...prev, [key]: '✗' }))
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         }
@@ -225,10 +246,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const hasPath        = !!dccPaths[s.key]
           const findOk         = findResult[s.key]
           const isHoudini      = s.key === 'houdini'
+          const isZBrush       = s.key === 'zbrush'
+          const hasPlug        = isHoudini || isZBrush
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const plugOk         = isHoudini && autoInstalled && houdiniServerOk === true
-          const plugFailed     = isHoudini && autoInstalled && houdiniServerOk === false
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : null
+          const plugOk         = hasPlug && autoInstalled && serverOk === true
+          const plugFailed     = hasPlug && autoInstalled && serverOk === false
 
           return (
             <div key={s.key} style={{
@@ -286,11 +310,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 </TooltipContent>
               </Tooltip>
 
-              {/* port local — autostart toggle (Houdini) ou placeholder */}
+              {/* port local — plugin/autostart toggle (Houdini + ZBrush) ou placeholder */}
               <Tooltip>
                 <TooltipTrigger asChild>
               <div
-                onClick={() => { if (isHoudini && !autoLoading) void handleToggleAutostart(s.key) }}
+                onClick={() => { if (hasPlug && !autoLoading) void handleToggleAutostart(s.key) }}
                 className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
@@ -299,8 +323,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   flexShrink: 0,
                   background: plugOk ? 'var(--accent-soft)' : plugFailed ? 'color-mix(in oklch, var(--err) 8%, transparent)' : 'transparent',
                   color: plugOk ? 'var(--accent-hi)' : plugFailed ? 'var(--err)' : 'var(--ink-4)',
-                  cursor: isHoudini ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
-                  opacity: isHoudini ? 1 : 0.4,
+                  cursor: hasPlug ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
+                  opacity: hasPlug ? 1 : 0.4,
                   transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
                 }}
               >
@@ -311,10 +335,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </div>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {!isHoudini ? 'Connexion port local — prochainement' :
+                  {!hasPlug ? 'Connexion port local — prochainement' :
                    autoLoading ? '…' :
-                   autoInstalled ? 'Autostart installé — clic pour désinstaller' :
-                   "Installer l'autostart dans 123.py"}
+                   isHoudini
+                     ? (autoInstalled ? 'Autostart installé — clic pour désinstaller' : "Installer l'autostart dans 123.py")
+                     : (autoInstalled
+                         ? (serverOk ? 'Plugin connecté — clic pour désinstaller' : 'Plugin installé — ouvre ZBrush')
+                         : 'Installer le plugin dans ZBrush')}
                 </TooltipContent>
               </Tooltip>
 
@@ -399,6 +426,21 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           color: 'var(--err)',
         }}>
           ✗ Houdini — serveur non connecté. Rouvrir Houdini pour l'activer.
+        </div>
+      )}
+
+      {/* Toast bridge ZBrush non connecté */}
+      {autostartInstalled.zbrush && zbrushServerOk === false && !autostartError && (
+        <div style={{
+          margin: '0 8px 6px',
+          padding: '5px 8px',
+          borderRadius: 5,
+          border: '1px solid var(--err)',
+          background: 'color-mix(in oklch, var(--err) 8%, transparent)',
+          fontSize: 10, fontFamily: 'var(--mono)',
+          color: 'var(--err)',
+        }}>
+          ✗ ZBrush — bridge non connecté. Ouvre ZBrush pour l'activer.
         </div>
       )}
 

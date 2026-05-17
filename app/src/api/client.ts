@@ -12,6 +12,8 @@ import type {
   PublishPayload,
   PublishResult,
   Settings,
+  ZBrushPublishPayload,
+  ZBrushPublishResult,
 } from '../types'
 
 const BASE_URL = 'http://127.0.0.1:8765'
@@ -101,6 +103,10 @@ export const api = {
 
   publishHoudiniRop: (payload: HoudiniPublishPayload) =>
     apiCall<HoudiniPublishResult>('POST', '/dcc/houdini/publish', payload),
+
+  // ZBrush
+  publishZBrush: (payload: ZBrushPublishPayload) =>
+    apiCall<ZBrushPublishResult>('POST', '/dcc/zbrush/publish', payload),
 
   // Importer
   importFiles: (dcc: string, file_paths: string[], project_name?: string) =>

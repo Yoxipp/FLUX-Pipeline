@@ -12,11 +12,13 @@ from core.constants import DCC_COLORS, DCC_PORTS
 from core.logger import get_logger
 from core.socket_manager import socket_manager
 from dcc.houdini import autostart as _houdini_autostart
+from dcc.zbrush  import autostart as _zbrush_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 
 # Maps dcc_key (lowercase) → autostart module. Extend here when adding new DCCs.
 _AUTOSTART_MODULES: dict = {
     "houdini": _houdini_autostart,
+    "zbrush":  _zbrush_autostart,
 }
 
 log = get_logger(__name__)
@@ -145,6 +147,11 @@ async def ping_dcc(dcc_key: str) -> dict:
         from dcc.houdini.client import houdini_client
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, houdini_client.ping)
+        return {"connected": result.get("ok", False), "version": result.get("version")}
+    if dcc_key == "zbrush":
+        from dcc.zbrush.client import zbrush_client
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, zbrush_client.ping)
         return {"connected": result.get("ok", False), "version": result.get("version")}
     raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
 
@@ -350,6 +357,59 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
             frame_padding=req.frame_padding,
             description=req.description,
             user=user,
+        ),
+    )
+
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
+    return result
+
+
+# ── ZBrush endpoints ──────────────────────────────────────────────────────────
+
+
+
+class ZBrushPublishRequest(BaseModel):
+    project_name:   str
+    filename:       str
+    extension:      str
+    export_options: dict  = {}
+    keep_local:     bool  = False
+    local_dir:      str | None = None
+    description:    str | None = None
+    user:           str | None = None
+
+
+@router.post("/zbrush/publish")
+async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
+    """ZBrush publish workflow.
+
+    Resolves the pipeline path from tokens, sends the export command to ZBrush
+    (which writes the file directly), then archives the previous version.
+    Optionally copies the output to a local directory (keep_local).
+    """
+    from core import config
+    from core.paths import get_project_path
+    from dcc.zbrush.zbrush_export import publish_zbrush
+
+    user = req.user or config.get_current_user() or "unknown"
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_zbrush(
+            project_path=project_path,
+            filename=req.filename,
+            extension=req.extension,
+            export_options=req.export_options,
+            description=req.description or "",
+            user=user,
+            project_name=req.project_name,
+            keep_local=req.keep_local,
+            local_dir=req.local_dir,
         ),
     )
 

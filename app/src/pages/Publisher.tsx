@@ -65,7 +65,15 @@ function resolveNodeExt(rawType: string): string | undefined {
   return NODE_TYPE_TO_EXT[normalised]
 }
 
-const EXPORT_FORMATS = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx', '.mb', '.ma']
+const EXPORT_FORMATS         = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx', '.mb', '.ma']
+const ZBRUSH_EXPORT_FORMATS  = ['.ztl', '.obj', '.fbx']
+const HOUDINI_EXPORT_FORMATS = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx']
+
+function formatsForDcc(dcc: string): string[] {
+  if (dcc === 'ZBrush')  return ZBRUSH_EXPORT_FORMATS
+  if (dcc === 'Houdini') return HOUDINI_EXPORT_FORMATS
+  return EXPORT_FORMATS
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -346,6 +354,20 @@ export function Publisher() {
   const [description, setDescription] = useState('')
   const [publishing, setPublishing]   = useState(false)
 
+  // ZBrush-specific
+  const [zbrushConnected, setZbrushConnected] = useState(false)
+  const [zbrushVersion, setZbrushVersion]     = useState<string | null>(null)
+  const [zbObjOptions, setZbObjOptions] = useState({
+    uvs: true, normals: true, flip_v: false, groups: false, materials: false,
+  })
+  const [zbFbxOptions, setZbFbxOptions] = useState({
+    fbx_version: '2019', animation: false, materials: true,
+  })
+
+  // Keep Local (functional for ZBrush, placeholder for others)
+  const [keepLocal, setKeepLocal]   = useState(false)
+  const [localDir, setLocalDir]     = useState('')
+
   // Houdini-specific
   const [ropNodePath, setRopNodePath]             = useState('')
   const [houdiniConnected, setHoudiniConnected]   = useState(false)
@@ -381,6 +403,33 @@ export function Publisher() {
       .then(d => setShots(d.shots.map(s => s.split('/')[1] ?? s)))
       .catch(() => setShots([]))
   }, [project, mode, sel.seq])
+
+  // ZBrush — connection polling
+  useEffect(() => {
+    if (dcc !== 'ZBrush') return
+    let cancelled = false
+
+    const poll = async () => {
+      try {
+        const ping = await api.pingDcc('zbrush')
+        if (cancelled) return
+        setZbrushConnected(ping.connected)
+        setZbrushVersion(ping.version ?? null)
+      } catch {
+        if (!cancelled) setZbrushConnected(false)
+      }
+    }
+
+    void poll()
+    const id = setInterval(() => void poll(), 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dcc])
+
+  // Reset exportExt when switching DCC if current format isn't in the new list
+  useEffect(() => {
+    const formats = formatsForDcc(dcc)
+    if (!formats.includes(exportExt)) setExportExt(formats[0])
+  }, [dcc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Houdini polling — connection + selected node + auto-format
   useEffect(() => {
@@ -522,6 +571,8 @@ export function Publisher() {
     setNewVals(EMPTY_NEW_VALS)
     setSourcePath('')
     setDescription('')
+    setKeepLocal(false)
+    setLocalDir('')
   }, [])
 
   const handlePublish = useCallback(async () => {
@@ -551,6 +602,25 @@ export function Publisher() {
           user:          settings?.username ?? undefined,
         })
         toast.success(`v${res.version_str} → ${res.rop_node}`)
+      } else if (dcc === 'ZBrush') {
+        if (!zbrushConnected) {
+          toast.error('ZBrush non connecté — active le bridge FLUX dans ZBrush')
+          return
+        }
+        const exportOptions =
+          exportExt === '.obj' ? zbObjOptions :
+          exportExt === '.fbx' ? zbFbxOptions : {}
+        const res = await api.publishZBrush({
+          project_name:   project,
+          filename,
+          extension:      exportExt,
+          export_options: exportOptions,
+          keep_local:     keepLocal && !!localDir,
+          local_dir:      localDir || undefined,
+          description:    description || undefined,
+          user:           settings?.username ?? undefined,
+        })
+        toast.success(`v${res.version_str} → ZBrush`)
       } else if (dcc === 'Fichier local') {
         if (!sourcePath.trim()) {
           toast.error('Indique le fichier source')
@@ -577,6 +647,7 @@ export function Publisher() {
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
+    zbrushConnected, zbObjOptions, zbFbxOptions, keepLocal, localDir,
   ])
 
   const filename = buildFilename()
@@ -638,7 +709,95 @@ export function Publisher() {
             />
 
             {/* Source / DCC info */}
-            {dcc === 'Houdini' ? (
+            {dcc === 'ZBrush' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Connection status */}
+                <div>
+                  <div className="cap" style={{ marginBottom: 6 }}>CONNEXION ZBRUSH</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{
+                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                      background: zbrushConnected ? 'var(--ok)' : 'var(--err)',
+                    }} />
+                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                      {zbrushConnected
+                        ? `Connecté${zbrushVersion ? ` — ${zbrushVersion}` : ''}`
+                        : 'Non connecté — installe le plugin via le bouton Plug dans la sidebar'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* OBJ options */}
+                {exportExt === '.obj' && (
+                  <div>
+                    <div className="cap" style={{ marginBottom: 6 }}>OPTIONS OBJ</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
+                      {([
+                        ['uvs',       'UVs'],
+                        ['normals',   'Normales'],
+                        ['flip_v',    'Flip V'],
+                        ['groups',    'Groupes subtools'],
+                        ['materials', 'Matériaux (.mtl)'],
+                      ] as [keyof typeof zbObjOptions, string][]).map(([key, label]) => (
+                        <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={zbObjOptions[key]}
+                            onChange={e => setZbObjOptions(prev => ({ ...prev, [key]: e.target.checked }))}
+                            style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
+                          />
+                          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* FBX options */}
+                {exportExt === '.fbx' && (
+                  <div>
+                    <div className="cap" style={{ marginBottom: 6 }}>OPTIONS FBX</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>VERSION</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {(['2019', '2020', '2022'] as const).map(v => (
+                            <div
+                              key={v}
+                              onClick={() => setZbFbxOptions(prev => ({ ...prev, fbx_version: v }))}
+                              style={{
+                                padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
+                                fontFamily: 'var(--mono)', fontSize: 9, fontWeight: zbFbxOptions.fbx_version === v ? 600 : 400,
+                                border: zbFbxOptions.fbx_version === v ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                                background: zbFbxOptions.fbx_version === v ? 'var(--accent-soft)' : 'transparent',
+                                color: zbFbxOptions.fbx_version === v ? 'var(--accent-hi)' : 'var(--ink-3)',
+                                transition: 'all 0.1s',
+                              }}
+                            >{v}</div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 14 }}>
+                        {([
+                          ['animation', 'Animation'],
+                          ['materials', 'Matériaux'],
+                        ] as [keyof typeof zbFbxOptions, string][]).filter(([k]) => typeof zbFbxOptions[k] === 'boolean').map(([key, label]) => (
+                          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={zbFbxOptions[key] as boolean}
+                              onChange={e => setZbFbxOptions(prev => ({ ...prev, [key]: e.target.checked }))}
+                              style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : dcc === 'Houdini' ? (
               <div>
                 <div className="cap" style={{ marginBottom: 6 }}>NODE ROP</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
@@ -697,6 +856,81 @@ export function Publisher() {
               </div>
             )}
 
+            {/* Keep Local collapsible */}
+            <div style={{ borderRadius: 6, border: '1px solid var(--rule-2)', overflow: 'hidden' }}>
+              {/* Header */}
+              <div
+                onClick={() => { if (dcc === 'ZBrush') setKeepLocal(v => !v) }}
+                style={{
+                  padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8,
+                  cursor: dcc === 'ZBrush' ? 'pointer' : 'default',
+                  background: keepLocal && dcc === 'ZBrush' ? 'var(--accent-soft)' : 'var(--paper-2)',
+                  userSelect: 'none',
+                }}
+              >
+                {/* Toggle pill */}
+                <div style={{
+                  width: 28, height: 16, borderRadius: 8, flexShrink: 0,
+                  background: (keepLocal && dcc === 'ZBrush') ? 'var(--accent)' : 'var(--rule-2)',
+                  position: 'relative', transition: 'background 0.15s',
+                  opacity: dcc === 'ZBrush' ? 1 : 0.4,
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 2,
+                    left: (keepLocal && dcc === 'ZBrush') ? 14 : 2,
+                    width: 12, height: 12, borderRadius: '50%', background: 'white',
+                    transition: 'left 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,.25)',
+                  }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, letterSpacing: '0.08em', color: (keepLocal && dcc === 'ZBrush') ? 'var(--accent-hi)' : 'var(--ink-3)', textTransform: 'uppercase' }}>
+                    Keep Local
+                  </span>
+                  {dcc !== 'ZBrush' && (
+                    <span style={{ marginLeft: 6, fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                      (bientôt disponible)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Body — visible when toggled on ZBrush */}
+              {keepLocal && dcc === 'ZBrush' && (
+                <div style={{ padding: '8px 10px', borderTop: '1px solid var(--rule-2)', background: 'var(--bg-deep)', display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    value={localDir}
+                    onChange={e => setLocalDir(e.target.value)}
+                    placeholder="Dossier local de sauvegarde…"
+                    style={{
+                      flex: 1, height: 28,
+                      background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
+                      borderRadius: 5, padding: '0 8px',
+                      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                      boxShadow: 'var(--shadow-inset)', outline: 'none',
+                    }}
+                  />
+                  <div
+                    title="Sélectionner un dossier"
+                    onClick={async () => {
+                      try {
+                        // Electron IPC for native folder dialog
+                        const win = window as unknown as { electron?: { selectDirectory?: () => Promise<string | null> } }
+                        const dir = await win.electron?.selectDirectory?.()
+                        if (dir) setLocalDir(dir)
+                      } catch { /* no electron bridge — user types manually */ }
+                    }}
+                    style={{
+                      width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
+                      cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >
+                    <FolderIcon color="var(--accent)" />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Published by */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>PUBLIÉ PAR</div>
@@ -731,7 +965,7 @@ export function Publisher() {
           <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
             <SecTitle>FORMAT</SecTitle>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {EXPORT_FORMATS.map(ext => (
+              {formatsForDcc(dcc).map(ext => (
                 <div key={ext} onClick={() => setExportExt(ext)} className="scale-hover" style={{
                   padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
                   fontFamily: 'var(--mono)', fontWeight: exportExt === ext ? 600 : 400,
@@ -744,8 +978,8 @@ export function Publisher() {
             </div>
           </div>
 
-          {/* SÉQUENCE ANIMÉE */}
-          <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+          {/* SÉQUENCE ANIMÉE — not available for ZBrush */}
+          <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: dcc === 'ZBrush' ? 0.35 : 1, pointerEvents: dcc === 'ZBrush' ? 'none' : undefined }}>
             <SecTitle>SÉQUENCE ANIMÉE</SecTitle>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSequence ? 10 : 0 }}>
               <div onClick={() => setIsSequence(v => !v)} style={{
@@ -796,6 +1030,16 @@ export function Publisher() {
               {dcc === 'Houdini' && ropNodePath && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
                   ROP : {ropNodePath}
+                </div>
+              )}
+              {dcc === 'ZBrush' && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : 'var(--err)' }}>
+                  {zbrushConnected ? `● ZBrush connecté${zbrushVersion ? ` — ${zbrushVersion}` : ''}` : '✕ ZBrush non connecté'}
+                </div>
+              )}
+              {keepLocal && localDir && dcc === 'ZBrush' && (
+                <div style={{ marginTop: 4, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                  ↳ Copie locale : {localDir}
                 </div>
               )}
             </div>

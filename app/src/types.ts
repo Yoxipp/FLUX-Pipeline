@@ -100,3 +100,22 @@ export interface HoudiniState {
   fps: number
   hip_file: string
 }
+
+export interface ZBrushPublishPayload {
+  project_name:   string
+  filename:       string
+  extension:      string
+  export_options?: Record<string, unknown>
+  keep_local?:    boolean
+  local_dir?:     string
+  description?:   string
+  user?:          string
+}
+
+export interface ZBrushPublishResult {
+  ok:          boolean
+  path:        string
+  version:     number
+  version_str: string
+}
+

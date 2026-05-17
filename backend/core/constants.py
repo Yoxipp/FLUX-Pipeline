@@ -9,7 +9,7 @@ DCC_PORTS: dict[str, int] = {
     "Nuke":        7003,
     "SubstanceP":  7004,
     "SubstanceD":  7005,
-    "ZBrush":      7006,
+    "ZBrush":      9876,  # flux ZBrush bridge plugin port
     "Marvelous":   7007,
     "Photoshop":   7008,
 }
