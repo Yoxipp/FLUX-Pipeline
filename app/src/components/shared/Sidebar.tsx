@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import type { DccStatusMap } from '../../types'
 import { api } from '../../api/client'
+import { Tooltip, TooltipTrigger, TooltipContent } from './ui'
 
 interface Props {
   dccStatus: DccStatusMap
@@ -215,11 +216,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               padding: '5px 10px 5px 18px',
               fontSize: 11, color: connected ? 'var(--ink-2)' : 'var(--ink-4)',
             }}>
-              <span
-                className={`dot${connected ? ' ok' : ''}`}
-                title={connected ? 'Port local connecté' : 'Port local inactif'}
-                style={{ width: 5, height: 5, flexShrink: 0 }}
-              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={`dot${connected ? ' ok' : ''}`}
+                    style={{ width: 5, height: 5, flexShrink: 0 }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {connected ? 'Port local connecté' : 'Port local inactif'}
+                </TooltipContent>
+              </Tooltip>
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
 
               {/* feedback badge — hasPath permanent, puis find/ping éphémères */}
@@ -235,9 +242,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               }
 
               {/* path picker — indicateur visuel : accent = path défini */}
+              <Tooltip>
+                <TooltipTrigger asChild>
               <div
                 onClick={() => void handlePickPath(s.key)}
-                title={hasPath ? dccPaths[s.key] : 'Définir le chemin…'}
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (hasPath ? 'var(--accent)' : 'var(--rule-2)'),
@@ -251,16 +259,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               >
                 <FolderOpen size={8} strokeWidth={2} />
               </div>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {hasPath ? dccPaths[s.key] : 'Définir le chemin…'}
+                </TooltipContent>
+              </Tooltip>
 
               {/* port local — autostart toggle (Houdini) ou placeholder */}
+              <Tooltip>
+                <TooltipTrigger asChild>
               <div
                 onClick={() => { if (isHoudini && !autoLoading) void handleToggleAutostart(s.key) }}
-                title={
-                  !isHoudini    ? 'Connexion port local — prochainement' :
-                  autoLoading   ? '…' :
-                  autoInstalled ? 'Autostart installé — clic pour désinstaller' :
-                                  'Installer l\'autostart dans 123.py'
-                }
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (isHoudini && autoInstalled ? 'var(--accent)' : 'var(--rule-2)'),
@@ -278,11 +287,20 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   : <Plug size={8} strokeWidth={2} />
                 }
               </div>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {!isHoudini ? 'Connexion port local — prochainement' :
+                   autoLoading ? '…' :
+                   autoInstalled ? 'Autostart installé — clic pour désinstaller' :
+                   "Installer l'autostart dans 123.py"}
+                </TooltipContent>
+              </Tooltip>
 
               {/* launch — toujours actif, relance une nouvelle instance si déjà connecté */}
+              <Tooltip>
+                <TooltipTrigger asChild>
               <div
                 onClick={() => { if (!isLoading) void handleLaunch(s.key) }}
-                title={isLoading ? 'Lancement…' : connected ? 'Nouvelle instance' : 'Lancer'}
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (isLoading ? 'var(--rule-2)' : 'var(--accent)'),
@@ -302,15 +320,21 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                     : <Play size={8} strokeWidth={2} />
                 }
               </div>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {isLoading ? 'Lancement…' : connected ? 'Nouvelle instance' : 'Lancer'}
+                </TooltipContent>
+              </Tooltip>
             </div>
           )
         })}
 
         {/* Bouton global auto-détection des chemins */}
         <div style={{ padding: '5px 10px 6px' }}>
+          <Tooltip>
+            <TooltipTrigger asChild>
           <div
             onClick={() => { if (!findingAll) void handleAutoFindAll() }}
-            title="Détecter automatiquement tous les chemins .exe"
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '5px 8px',
@@ -329,6 +353,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             }
             <span>{findingAll ? 'Détection en cours…' : 'Auto-détecter les chemins'}</span>
           </div>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              Détecter automatiquement tous les chemins .exe
+            </TooltipContent>
+          </Tooltip>
         </div>
       </NavGroup>
 
