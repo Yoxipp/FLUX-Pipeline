@@ -1,6 +1,8 @@
 import React, { type CSSProperties } from 'react'
-import { Check as CheckIcon } from 'lucide-react'
+import { Check as CheckIcon, ChevronDown } from 'lucide-react'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
+import * as PopoverPrimitive from '@radix-ui/react-popover'
+import * as SelectPrimitive from '@radix-ui/react-select'
 
 export const Avatar = ({ ch, size = 20 }: { ch: string; size?: number }) => (
   <div style={{
@@ -100,6 +102,87 @@ export const FolderIcon = ({ size = 12, color = 'currentColor' }: { size?: numbe
     <path d="M0.6 2.8h4.8l1.4 1.4h6.6v6.4H0.6z" />
   </svg>
 )
+
+// ── Select ───────────────────────────────────────────────────────────────────
+
+export function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  return <SelectPrimitive.Root {...props} />
+}
+
+export function SelectTrigger({
+  className, style, ...props
+}: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
+  return (
+    <SelectPrimitive.Trigger
+      className={['select-trigger', className].filter(Boolean).join(' ')}
+      style={style}
+      {...props}
+    >
+      <SelectPrimitive.Value />
+      <SelectPrimitive.Icon style={{ position: 'absolute', right: 7, pointerEvents: 'none', display: 'flex' }}>
+        <ChevronDown size={11} strokeWidth={2} color="var(--ink-3)" />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  )
+}
+
+export function SelectContent({
+  children, ...props
+}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  return (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        className="select-content"
+        position="popper"
+        sideOffset={4}
+        {...props}
+      >
+        <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  )
+}
+
+export function SelectItem({
+  children, value, ...props
+}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+  return (
+    <SelectPrimitive.Item value={value} className="select-item" {...props}>
+      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    </SelectPrimitive.Item>
+  )
+}
+
+// ── Popover ──────────────────────────────────────────────────────────────────
+
+export function Popover(props: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  return <PopoverPrimitive.Root {...props} />
+}
+
+export function PopoverTrigger(props: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
+  return <PopoverPrimitive.Trigger {...props} />
+}
+
+export function PopoverContent({
+  className, sideOffset = 6, align = 'end' as const, children, ...props
+}: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+  return (
+    <PopoverPrimitive.Portal>
+      <PopoverPrimitive.Content
+        sideOffset={sideOffset}
+        align={align}
+        className={['popover-content', className].filter(Boolean).join(' ')}
+        {...props}
+      >
+        {children}
+      </PopoverPrimitive.Content>
+    </PopoverPrimitive.Portal>
+  )
+}
+
+export function PopoverClose(props: React.ComponentProps<typeof PopoverPrimitive.Close>) {
+  return <PopoverPrimitive.Close {...props} />
+}
 
 // ── Tooltip ──────────────────────────────────────────────────────────────────
 

@@ -18,6 +18,7 @@ import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
 import { applyAccentPreset } from './lib/accentPresets'
+import { Toaster } from 'sonner'
 
 // Inner shell — only mounted after first-launch wizard completes.
 // Hooks that poll the backend (useActivity, useDccStatus) live here so they
@@ -57,6 +58,20 @@ function AppShell({ settings }: { settings: Settings }) {
 
         <StatusBar dccStatus={dccStatus} />
       </div>
+      <Toaster
+        position="bottom-right"
+        theme="dark"
+        toastOptions={{
+          style: {
+            background: 'var(--paper-2)',
+            color: 'var(--ink)',
+            border: '1px solid var(--rule-2)',
+            fontFamily: 'var(--sans)',
+            fontSize: 11,
+            boxShadow: 'var(--shadow-md)',
+          },
+        }}
+      />
     </HashRouter>
   )
 }

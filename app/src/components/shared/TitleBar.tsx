@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { Avatar } from './ui'
+import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
 import { api } from '../../api/client'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
 
@@ -37,7 +37,7 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
 
 
 /* ── popover paramètres ── */
-function SettingsPopover({ username, onClose }: { username: string; onClose: () => void }) {
+function SettingsPopover({ username }: { username: string }) {
   const [workspace, setWorkspace]   = useState('')
   const [version, setVersion]       = useState('')
   const [changing, setChanging]     = useState(false)
@@ -72,27 +72,18 @@ function SettingsPopover({ username, onClose }: { username: string; onClose: () 
   }
 
   return (
-    <div style={{
-      position: 'absolute', top: 46, right: 70, zIndex: 20,
-      width: 280, padding: 14,
-      background: 'var(--paper-2)',
-      border: '1px solid var(--rule-2)',
-      borderRadius: 10,
-      boxShadow: 'var(--shadow-md)',
-      display: 'flex', flexDirection: 'column', gap: 10,
-    }}>
+    <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--ink-2)' }}>
           Paramètres
         </div>
-        <div
-          onClick={onClose}
-          style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}
+        <PopoverClose
+          style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', background: 'transparent', border: 'none' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--paper)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
         >
           <X size={12} strokeWidth={2} />
-        </div>
+        </PopoverClose>
       </div>
 
       {/* utilisateur courant */}
@@ -183,8 +174,6 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
   const [settingsOpen, setSettingsOpen] = useState(false)
   const user = username ?? 'User'
 
-  const closeAll = () => { setSettingsOpen(false) }
-
   return (
     <div className="drag-region" style={{
       height: 42, padding: '0 14px',
@@ -239,29 +228,32 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
       </div>
 
       {/* settings gear */}
-      <div
-        className="no-drag"
-        onClick={() => { const next = !settingsOpen; closeAll(); setSettingsOpen(next); onSettings() }}
-        style={{
-          width: 28, height: 28,
-          border: '1px solid ' + (settingsOpen ? 'var(--rule-2)' : 'transparent'),
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: settingsOpen ? 'var(--ink)' : 'var(--ink-3)',
-          background: settingsOpen ? 'var(--paper-2)' : 'transparent',
-          borderRadius: 7, cursor: 'pointer',
-          transition: 'background 0.12s, color 0.12s',
-        }}
-      >
-        <Settings2 size={14} strokeWidth={1.75} />
-      </div>
-      {settingsOpen && (
-        <SettingsPopover username={user} onClose={() => setSettingsOpen(false)} />
-      )}
+      <Popover onOpenChange={open => { setSettingsOpen(open); if (open) onSettings() }}>
+        <PopoverTrigger asChild>
+          <div
+            className="no-drag"
+            style={{
+              width: 28, height: 28,
+              border: '1px solid ' + (settingsOpen ? 'var(--rule-2)' : 'transparent'),
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: settingsOpen ? 'var(--ink)' : 'var(--ink-3)',
+              background: settingsOpen ? 'var(--paper-2)' : 'transparent',
+              borderRadius: 7, cursor: 'pointer',
+              transition: 'background 0.12s, color 0.12s',
+            }}
+          >
+            <Settings2 size={14} strokeWidth={1.75} />
+          </div>
+        </PopoverTrigger>
+        <PopoverContent side="bottom" align="end" sideOffset={6} style={{ width: 'auto' }}>
+          <SettingsPopover username={user} />
+        </PopoverContent>
+      </Popover>
 
       {/* user pill */}
       <div
         className="no-drag"
-        onClick={() => { closeAll(); onUserChange() }}
+        onClick={() => onUserChange()}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '3px 10px 3px 4px',

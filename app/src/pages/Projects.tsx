@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
-  HardDrive, Plus, Minus, ChevronDown, X, Trash2,
+  HardDrive, Plus, Minus, X, Trash2,
 } from 'lucide-react'
-import { FolderIcon } from '../components/shared/ui'
+import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
 import { useSettings } from '../hooks/useSettings'
 
@@ -321,18 +321,14 @@ function Spinner({ value, onChange }: { value: number; onChange: (v: number) => 
 
 function SelectEl({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
   return (
-    <div style={{ position: 'relative', height: 28 }}>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{ width: '100%', height: '100%', border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 10, padding: '0 24px 0 8px', appearance: 'none', cursor: 'pointer', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
-      >
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger style={{ width: '100%' }} />
+      <SelectContent>
         {options.length === 0
-          ? <option value="">—</option>
-          : options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <ChevronDown size={10} strokeWidth={2} color="var(--ink-3)" style={{ position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-    </div>
+          ? <SelectItem value="__empty__">—</SelectItem>
+          : options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+      </SelectContent>
+    </Select>
   )
 }
 

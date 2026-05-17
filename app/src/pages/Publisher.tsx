@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon } from '../components/shared/ui'
+import { Btn, SecTitle, FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
 import { useSettings } from '../hooks/useSettings'
+import { toast } from 'sonner'
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -343,7 +343,6 @@ export function Publisher() {
   const [sourcePath, setSourcePath]   = useState('')
   const [description, setDescription] = useState('')
   const [publishing, setPublishing]   = useState(false)
-  const [result, setResult]           = useState<{ ok: boolean; msg: string } | null>(null)
 
   // Houdini-specific
   const [ropNodePath, setRopNodePath]             = useState('')
@@ -521,21 +520,19 @@ export function Publisher() {
     setNewVals(EMPTY_NEW_VALS)
     setSourcePath('')
     setDescription('')
-    setResult(null)
   }, [])
 
   const handlePublish = useCallback(async () => {
-    if (!project) { setResult({ ok: false, msg: 'Sélectionne un projet' }); return }
+    if (!project) { toast.error('Sélectionne un projet'); return }
 
     const filename = buildFilename()
     const parts = filename.split('_').filter(Boolean)
     if (parts.length < 4) {
-      setResult({ ok: false, msg: mode === 'asset' ? 'Complète CLASS, TYPE et NAME' : 'Complète SEQ, SHOT et le type' })
+      toast.error(mode === 'asset' ? 'Complète CLASS, TYPE et NAME' : 'Complète SEQ, SHOT et le type')
       return
     }
 
     setPublishing(true)
-    setResult(null)
 
     try {
       await createNewTokens()
@@ -551,10 +548,10 @@ export function Publisher() {
           description:   description || undefined,
           user:          settings?.username ?? undefined,
         })
-        setResult({ ok: true, msg: `v${res.version_str} → ${res.rop_node}` })
+        toast.success(`v${res.version_str} → ${res.rop_node}`)
       } else if (dcc === 'Fichier local') {
         if (!sourcePath.trim()) {
-          setResult({ ok: false, msg: 'Indique le fichier source' })
+          toast.error('Indique le fichier source')
           return
         }
         const res = await api.publish({
@@ -563,13 +560,14 @@ export function Publisher() {
           description:  description || undefined,
           user:         settings?.username ?? undefined,
         })
-        setResult({ ok: res.success, msg: res.message })
+        if (res.success) toast.success(res.message)
+        else toast.error(res.message)
       } else {
-        setResult({ ok: false, msg: `Publication depuis ${dcc} non encore disponible` })
+        toast.error(`Publication depuis ${dcc} non encore disponible`)
         return
       }
     } catch (e) {
-      setResult({ ok: false, msg: e instanceof Error ? e.message : 'Erreur inconnue' })
+      toast.error(e instanceof Error ? e.message : 'Erreur inconnue')
     } finally {
       setPublishing(false)
     }
@@ -578,15 +576,6 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
   ])
-
-  // ── Select style ────────────────────────────────────────────────────────────
-
-  const selectStyle: React.CSSProperties = {
-    height: 28, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-    borderRadius: 5, padding: '0 24px 0 8px',
-    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)',
-    boxShadow: 'var(--shadow-inset)', appearance: 'none', cursor: 'pointer', outline: 'none',
-  }
 
   const filename = buildFilename()
 
@@ -615,16 +604,18 @@ export function Publisher() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div className="cap">PROJET</div>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex' }}>
+                <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex', zIndex: 1 }}>
                   <FolderIcon color="var(--accent)" />
                 </span>
-                <select value={project} onChange={e => setProject(e.target.value)} style={{ ...selectStyle, width: 200, paddingLeft: 26 }}>
-                  {projects.length === 0
-                    ? <option value="">Aucun projet</option>
-                    : projects.map(p => <option key={p} value={p}>{p}</option>)
-                  }
-                </select>
-                <ChevronDown size={11} strokeWidth={2} color="var(--ink-3)" style={{ position: 'absolute', right: 7, pointerEvents: 'none' }} />
+                <Select value={project} onValueChange={setProject}>
+                  <SelectTrigger style={{ width: 200, paddingLeft: 26 }} />
+                  <SelectContent>
+                    {projects.length === 0
+                      ? <SelectItem value="__none__">Aucun projet</SelectItem>
+                      : projects.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)
+                    }
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -728,11 +719,6 @@ export function Publisher() {
                 fontStyle: 'italic', outline: 'none', boxShadow: 'var(--shadow-inset)',
               }}
             />
-            {result && (
-              <div style={{ marginTop: 6, fontSize: 11, fontFamily: 'var(--mono)', color: result.ok ? 'var(--ok)' : 'var(--err)' }}>
-                {result.ok ? '✓ ' : '✗ '}{result.msg}
-              </div>
-            )}
           </div>
         </div>
 
