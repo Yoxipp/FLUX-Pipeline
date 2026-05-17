@@ -99,11 +99,26 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [autostartLoading, setAutostartLoading]     = useState<Set<string>>(new Set())
   const [autostartError, setAutostartError]         = useState<string | null>(null)
   const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
+  const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
-    api.getDccAutostart('houdini').then(r => setAutostartInstalled(prev => ({ ...prev, houdini: r.installed }))).catch(() => {})
+    api.getDccAutostart('houdini').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, houdini: r.installed }))
+      if (r.installed) {
+        api.pingDcc('houdini').then(p => setHoudiniServerOk(p.connected)).catch(() => setHoudiniServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
+
+  // Poll Houdini server every 5 s when autostart is installed
+  useEffect(() => {
+    if (!autostartInstalled.houdini) { setHoudiniServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('houdini').then(p => setHoudiniServerOk(p.connected)).catch(() => setHoudiniServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.houdini])
 
   const handleAutoFindAll = async () => {
     setFindingAll(true)
@@ -133,18 +148,21 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       if (autostartInstalled[key]) {
         await api.removeDccAutostart(key)
         setAutostartInstalled(prev => ({ ...prev, [key]: false }))
+        if (key === 'houdini') setHoudiniServerOk(null)
       } else {
         await api.installDccAutostart(key)
         setAutostartInstalled(prev => ({ ...prev, [key]: true }))
         // Ping HTTP pour confirmer que flux_houdini_server tourne vraiment
         try {
           const pong = await api.pingDcc(key)
+          if (key === 'houdini') setHoudiniServerOk(pong.connected)
           const label = pong.connected
             ? (pong.version ? `v${pong.version}` : '✓')
             : '✗'
           setPingResult(prev => ({ ...prev, [key]: label }))
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         } catch {
+          if (key === 'houdini') setHoudiniServerOk(false)
           setPingResult(prev => ({ ...prev, [key]: '✗' }))
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         }
@@ -209,6 +227,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const isHoudini      = s.key === 'houdini'
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
+          const plugOk         = isHoudini && autoInstalled && houdiniServerOk === true
+          const plugFailed     = isHoudini && autoInstalled && houdiniServerOk === false
 
           return (
             <div key={s.key} style={{
@@ -274,11 +294,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (isHoudini && autoInstalled ? 'var(--accent)' : 'var(--rule-2)'),
+                  border: '1px solid ' + (plugOk ? 'var(--accent)' : plugFailed ? 'var(--err)' : 'var(--rule-2)'),
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
-                  background: isHoudini && autoInstalled ? 'var(--accent-soft)' : 'transparent',
-                  color: isHoudini && autoInstalled ? 'var(--accent-hi)' : 'var(--ink-4)',
+                  background: plugOk ? 'var(--accent-soft)' : plugFailed ? 'color-mix(in oklch, var(--err) 8%, transparent)' : 'transparent',
+                  color: plugOk ? 'var(--accent-hi)' : plugFailed ? 'var(--err)' : 'var(--ink-4)',
                   cursor: isHoudini ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
                   opacity: isHoudini ? 1 : 0.4,
                   transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
@@ -366,6 +386,21 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </NavGroup>
 
       <div style={{ flex: 1 }} />
+
+      {/* Toast serveur Houdini non connecté */}
+      {autostartInstalled.houdini && houdiniServerOk === false && !autostartError && (
+        <div style={{
+          margin: '0 8px 6px',
+          padding: '5px 8px',
+          borderRadius: 5,
+          border: '1px solid var(--err)',
+          background: 'color-mix(in oklch, var(--err) 8%, transparent)',
+          fontSize: 10, fontFamily: 'var(--mono)',
+          color: 'var(--err)',
+        }}>
+          ✗ Houdini — serveur non connecté. Rouvrir Houdini pour l'activer.
+        </div>
+      )}
 
       {/* Toast erreur autostart */}
       {autostartError && (
