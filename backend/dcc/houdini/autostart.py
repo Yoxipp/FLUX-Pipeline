@@ -57,7 +57,7 @@ def _default_prefs_path(houdini_exe_path: str | None = None) -> Path | None:
     """OS-specific default prefs path. Version extracted from exe path via regex."""
     version: str | None = None
     if houdini_exe_path:
-        m = re.search(r"[Hh]oudini[\ ]?(\d+\.\d+)", str(houdini_exe_path))
+        m = re.search(r"[Hh]oudini(?:\s+(?:FX|Core|Indie|Apprentice))?\s+(\d+\.\d+)", str(houdini_exe_path))
         if m:
             version = m.group(1)
 

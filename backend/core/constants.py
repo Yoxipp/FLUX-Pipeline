@@ -35,7 +35,12 @@ def _build_dcc_patterns() -> dict[str, list[str]]:
     lad  = _os.environ.get("LOCALAPPDATA",       _os.path.expanduser(r"~\AppData\Local"))
     return {
         "Maya":       [rf"{pf}\Autodesk\Maya*\bin\maya.exe"],
-        "Houdini":    [rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe"],
+        "Houdini":    [
+            # houdini.exe est le launcher générique SideFX (adapte la licence automatiquement)
+            # houdinifx.exe en fallback pour les installs qui n'ont pas houdini.exe
+            rf"{pf}\Side Effects Software\Houdini*\bin\houdini.exe",
+            rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe",
+        ],
         "Nuke":       [rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"],   # [0-9] exclut CrashFeedback
         "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"],
         "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer\Adobe Substance 3D Designer.exe"],
