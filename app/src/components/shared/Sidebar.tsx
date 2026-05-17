@@ -223,7 +223,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                     style={{ width: 5, height: 5, flexShrink: 0 }}
                   />
                 </TooltipTrigger>
-                <TooltipContent side="right">
+                <TooltipContent side="top">
                   {connected ? 'Port local connecté' : 'Port local inactif'}
                 </TooltipContent>
               </Tooltip>
@@ -260,7 +260,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <FolderOpen size={8} strokeWidth={2} />
               </div>
                 </TooltipTrigger>
-                <TooltipContent side="right">
+                <TooltipContent side="top">
                   {hasPath ? dccPaths[s.key] : 'Définir le chemin…'}
                 </TooltipContent>
               </Tooltip>
@@ -288,7 +288,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 }
               </div>
                 </TooltipTrigger>
-                <TooltipContent side="right">
+                <TooltipContent side="top">
                   {!isHoudini ? 'Connexion port local — prochainement' :
                    autoLoading ? '…' :
                    autoInstalled ? 'Autostart installé — clic pour désinstaller' :
@@ -321,7 +321,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 }
               </div>
                 </TooltipTrigger>
-                <TooltipContent side="right">
+                <TooltipContent side="top">
                   {isLoading ? 'Lancement…' : connected ? 'Nouvelle instance' : 'Lancer'}
                 </TooltipContent>
               </Tooltip>
@@ -354,7 +354,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             <span>{findingAll ? 'Détection en cours…' : 'Auto-détecter les chemins'}</span>
           </div>
             </TooltipTrigger>
-            <TooltipContent side="right">
+            <TooltipContent side="top">
               Détecter automatiquement tous les chemins .exe
             </TooltipContent>
           </Tooltip>
