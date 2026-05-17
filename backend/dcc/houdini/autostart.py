@@ -204,13 +204,36 @@ def install(houdini_exe_path: str | None = None) -> dict:
 
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
+        # Auto-upgrade: si l'ancien bloc n'a pas le try/except de sécurité, le remplacer
+        b_start = existing.find(_BLOCK_BEGIN)
+        b_end   = existing.find(_BLOCK_END, b_start)
+        old_fragment = existing[b_start : b_end + len(_BLOCK_END)] if b_end > b_start else ""
+        if "try:" not in old_fragment:
+            new_fragment = (
+                f"{_BLOCK_BEGIN}\n"
+                f"try:\n"
+                f"    import sys as _flux_sys\n"
+                f"    _flux_sys.path.insert(0, {repr(server_dir)})\n"
+                f"    import flux_houdini_server\n"
+                f"except Exception as _flux_exc:\n"
+                f"    print(f'[FLUX] Autostart error (Houdini continues normally): {{_flux_exc}}')\n"
+                f"{_BLOCK_END}"
+            )
+            try:
+                startup.write_text(existing.replace(old_fragment, new_fragment), encoding="utf-8")
+            except OSError as exc:
+                return {"success": False, "message": f"Cannot upgrade 123.py: {exc}", "path": str(startup)}
+            return {"success": True, "message": f"upgraded: {startup}", "path": str(startup)}
         return {"success": True, "message": "already_installed", "path": str(startup)}
 
     block = (
         f"\n{_BLOCK_BEGIN}\n"
-        f"import sys as _flux_sys\n"
-        f"_flux_sys.path.insert(0, {repr(server_dir)})\n"
-        f"import flux_houdini_server\n"
+        f"try:\n"
+        f"    import sys as _flux_sys\n"
+        f"    _flux_sys.path.insert(0, {repr(server_dir)})\n"
+        f"    import flux_houdini_server\n"
+        f"except Exception as _flux_exc:\n"
+        f"    print(f'[FLUX] Autostart error (Houdini continues normally): {{_flux_exc}}')\n"
         f"{_BLOCK_END}\n"
     )
     try:
