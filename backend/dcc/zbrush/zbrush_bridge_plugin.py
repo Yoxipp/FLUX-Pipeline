@@ -232,8 +232,8 @@ class _FluxBridge:
             _log(f"[main] step 2: socket created fileno={self._sock.fileno()}")
             _log(f"[main] step 3: about to bind({HOST!r}, {PORT})")
             self._sock.bind((HOST, PORT))
-            _log("[main] step 4: bind OK, about to listen(5)")
-            self._sock.listen(5)
+            _log("[main] step 4: bind OK, about to listen(32)")
+            self._sock.listen(32)
             _log("[main] step 5: listen OK, settimeout(1.0)")
             self._sock.settimeout(1.0)
             _log(f"[main] step 6: Listening on {HOST}:{PORT}  fileno={self._sock.fileno()}")
@@ -264,13 +264,21 @@ class _FluxBridge:
     def _handle_one(self, conn: socket.socket) -> None:
         """Receive one newline-framed JSON command, dispatch, send response.
         SO_LINGER {1, 0} forces RST on close so the connection dies immediately
-        with no FIN handshake → no CLOSE_WAIT zombies."""
+        with no FIN handshake → no CLOSE_WAIT zombies.
+
+        Struct layout differs per OS:
+          Windows : u_short l_onoff + u_short l_linger = 4 bytes → "HH"
+          Linux   : int     l_onoff + int     l_linger = 8 bytes → "ii"
+        Using "ii" on Windows produces 8 bytes → WSAEINVAL → OSError silently
+        swallowed → SO_LINGER never set → CLOSE_WAIT accumulates → backlog fills.
+        """
         import struct as _struct
+        _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
         try:
-            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
-                            _struct.pack("ii", 1, 0))
-        except OSError:
-            pass
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
+            _log("SO_LINGER set OK (RST on close)")
+        except OSError as _le:
+            _log(f"SO_LINGER failed: {_le!r}")
         conn.settimeout(3.0)
         buf = b""
         try:
