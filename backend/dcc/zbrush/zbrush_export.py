@@ -91,6 +91,12 @@ def publish_zbrush(
         log.error("ZBrush export failed: %s", err)
         return {"ok": False, "error": err}
 
+    # Release ZBrush from freeze before keep_local (which can take time)
+    try:
+        zbrush_client.stop()
+    except Exception:
+        pass
+
     # ── 4. Keep Local ─────────────────────────────────────────────────────────
     if keep_local and local_dir:
         local_path = Path(local_dir)

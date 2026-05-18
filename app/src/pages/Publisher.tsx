@@ -621,6 +621,7 @@ export function Publisher() {
           user:           settings?.username ?? undefined,
         })
         toast.success(`v${res.version_str} → ZBrush`)
+        window.electronAPI?.windowMinimize()
       } else if (dcc === 'Fichier local') {
         if (!sourcePath.trim()) {
           toast.error('Indique le fichier source')

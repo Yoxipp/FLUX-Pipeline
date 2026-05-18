@@ -35,7 +35,7 @@ class ZBrushClient:
 
     def ping(self) -> dict:
         """Alive check. Returns {"ok": True, "version": "ZBrush 2026"} or {"error": ...}."""
-        return self._send({"action": "ping"})
+        return self._send({"action": "ping"}, timeout=2.0)
 
     def is_connected(self) -> bool:
         return self.ping().get("ok", False) is True
@@ -63,6 +63,10 @@ class ZBrushClient:
     def export_fbx(self, path: str, options: dict[str, Any] | None = None) -> dict:
         """Export active tool as FBX to *path* with optional export options."""
         return self._send({"action": "export_fbx", "path": path, "options": options or {}})
+
+    def stop(self) -> dict:
+        """Send stop command to release ZBrush from the freeze loop."""
+        return self._send({"action": "stop"})
 
     # ------------------------------------------------------------------
     # Low-level

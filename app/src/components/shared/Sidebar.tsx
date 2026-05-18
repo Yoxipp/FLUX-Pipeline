@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Home, Upload, Download, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Settings2, Loader, Search, Plug,
+  Play, Settings2, Loader, Search, Plug, ArrowDownToLine,
 } from 'lucide-react'
 import type { DccStatusMap } from '../../types'
 import { api } from '../../api/client'
@@ -127,14 +127,38 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     return () => clearInterval(id)
   }, [autostartInstalled.houdini])
 
-  // Poll ZBrush bridge every 5 s when plugin is installed
+  // Poll ZBrush bridge when plugin is installed.
+  // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
+  // 8s while connected (avoid spamming ZBrush during freeze).
+  const zbrushOkRef = useRef(zbrushServerOk)
+  useEffect(() => { zbrushOkRef.current = zbrushServerOk }, [zbrushServerOk])
   useEffect(() => {
     if (!autostartInstalled.zbrush) { setZbrushServerOk(null); return }
-    const poll = () =>
-      api.pingDcc('zbrush').then(p => setZbrushServerOk(p.connected)).catch(() => setZbrushServerOk(false))
-    const id = setInterval(poll, 5000)
-    return () => clearInterval(id)
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const poll = () => {
+      api.pingDcc('zbrush')
+        .then(p  => { if (!cancelled) setZbrushServerOk(p.connected) })
+        .catch(() => { if (!cancelled) setZbrushServerOk(false) })
+        .finally(() => {
+          if (!cancelled) {
+            const delay = zbrushOkRef.current === true ? 8000 : 1500
+            timer = setTimeout(poll, delay)
+          }
+        })
+    }
+    poll()
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [autostartInstalled.zbrush])
+
+  // Auto-navigate to Publisher on ZBrush freeze detected (null/false → true transition)
+  const prevZbrushOk = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (zbrushServerOk === true && prevZbrushOk.current !== true) {
+      if (pathname !== '/publisher') navigate('/publisher')
+    }
+    prevZbrushOk.current = zbrushServerOk
+  }, [zbrushServerOk, navigate, pathname])
 
   const handleAutoFindAll = async () => {
     setFindingAll(true)
@@ -251,8 +275,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
           const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : null
-          const plugOk         = hasPlug && autoInstalled && serverOk === true
-          const plugFailed     = hasPlug && autoInstalled && serverOk === false
+          // ZBrush: freeze-based, server only responds during publish → always accent when installed
+          // Houdini: always-on server → red when installed but unreachable
+          const plugOk         = hasPlug && autoInstalled && (isZBrush || serverOk === true)
+          const plugFailed     = hasPlug && autoInstalled && !isZBrush && serverOk === false
 
           return (
             <div key={s.key} style={{
@@ -330,7 +356,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               >
                 {autoLoading
                   ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                  : <Plug size={8} strokeWidth={2} />
+                  : isZBrush
+                    ? <ArrowDownToLine size={8} strokeWidth={2} />
+                    : <Plug size={8} strokeWidth={2} />
                 }
               </div>
                 </TooltipTrigger>
@@ -340,8 +368,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                    isHoudini
                      ? (autoInstalled ? 'Autostart installé — clic pour désinstaller' : "Installer l'autostart dans 123.py")
                      : (autoInstalled
-                         ? (serverOk ? 'Plugin connecté — clic pour désinstaller' : 'Plugin installé — ouvre ZBrush')
-                         : 'Installer le plugin dans ZBrush')}
+                         ? (serverOk === true ? 'Freeze actif — publication en cours' : 'Plugin installé — clic pour désinstaller')
+                         : 'Installer le plugin ZBrush')}
                 </TooltipContent>
               </Tooltip>
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import socket
 import sys
 import threading
@@ -206,174 +207,231 @@ def _dispatch(cmd: dict) -> dict:
     return {"status": "error", "msg": f"Unknown action: {action}"}
 
 
-# ── Bridge class ─────────────────────────────────────────────────────────────
+# ── Server socket singleton ───────────────────────────────────────────────────
+# Bound once on the main thread at plugin init. Reused across ZBrush sessions
+# without rebinding (prevents WSAEADDRINUSE / CLOSE_WAIT accumulation).
 
-class _FluxBridge:
-    def __init__(self) -> None:
-        self._running  = False
-        self._sock: socket.socket | None = None
-        self._thread: threading.Thread | None = None
+_server_sock: "socket.socket | None" = None
+FREEZE_TIMEOUT = int(os.environ.get("FLUX_ZBRUSH_TIMEOUT", "300"))  # 5 min default
 
-    def start(self) -> None:
-        _log(f"start() called  current _running={self._running}")
-        if self._running:
-            _log("start() returning early (already running)")
-            return
 
-        # CRITICAL: bind/listen on the MAIN thread during plugin init.
-        # ZBrush's embedded Python seems to freeze background threads after
-        # plugin init completes — so setting up the socket inside a thread
-        # gets stuck mid-call. Doing it on the main thread (which is ZBrush's
-        # actual main thread, kept alive forever) guarantees the port is
-        # LISTENING before init returns.
+def _init_server_socket() -> bool:
+    """Bind and listen on the main thread. Reuse existing socket if alive."""
+    global _server_sock
+    existing: "socket.socket | None" = getattr(sys, "_flux_zbrush_sock", None)
+    if existing is not None:
         try:
-            _log("[main] step 1: socket.socket()")
-            self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            _log(f"[main] step 2: socket created fileno={self._sock.fileno()}")
-            _log(f"[main] step 3: about to bind({HOST!r}, {PORT})")
-            self._sock.bind((HOST, PORT))
-            _log("[main] step 4: bind OK, about to listen(32)")
-            self._sock.listen(32)
-            _log("[main] step 5: listen OK, settimeout(1.0)")
-            self._sock.settimeout(1.0)
-            _log(f"[main] step 6: Listening on {HOST}:{PORT}  fileno={self._sock.fileno()}")
-        except Exception as exc:
-            _log(f"!!! BIND/LISTEN FAILED on main thread: {exc!r}")
-            _log(traceback.format_exc())
-            self._running = False
-            if self._sock is not None:
-                try: self._sock.close()
-                except OSError: pass
-            return
+            existing.fileno()  # raises OSError if socket is closed
+            _server_sock = existing
+            _log(f"Reusing existing socket fileno={existing.fileno()}")
+            return True
+        except OSError:
+            _log("Existing socket dead — recreating")
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((HOST, PORT))
+        sock.listen(32)
+        sock.setblocking(False)  # required for select.select(timeout=0)
+        sys._flux_zbrush_sock = sock
+        _server_sock = sock
+        _log(f"Socket bound and listening on {HOST}:{PORT}")
+        return True
+    except OSError as exc:
+        _log(f"Bind failed: {exc!r}")
+        return False
 
-        self._running = True
-        # daemon=True: non-daemon threads observed to freeze in ZBrush's
-        # embedded Python after plugin init completes.
-        self._thread = threading.Thread(target=self._server_loop, daemon=True,
-                                        name="flux-zbrush-bridge")
-        _log(f"thread created daemon={self._thread.daemon}, calling thread.start()")
-        try:
-            self._thread.start()
-        except Exception as exc:
-            _log(f"!!! thread.start() failed: {exc!r}")
-            _log(traceback.format_exc())
-            self._running = False
-            return
-        _log(f"Server started on {HOST}:{PORT}  thread.is_alive()={self._thread.is_alive()}")
 
-    def _handle_one(self, conn: socket.socket) -> None:
-        """Receive one newline-framed JSON command, dispatch, send response.
-        SO_LINGER {1, 0} forces RST on close so the connection dies immediately
-        with no FIN handshake → no CLOSE_WAIT zombies.
+# ── Connection handler ────────────────────────────────────────────────────────
 
-        Struct layout differs per OS:
-          Windows : u_short l_onoff + u_short l_linger = 4 bytes → "HH"
-          Linux   : int     l_onoff + int     l_linger = 8 bytes → "ii"
-        Using "ii" on Windows produces 8 bytes → WSAEINVAL → OSError silently
-        swallowed → SO_LINGER never set → CLOSE_WAIT accumulates → backlog fills.
-        """
-        import struct as _struct
-        _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
+def _recv_and_dispatch(conn: socket.socket) -> bool:
+    """Read one JSON command, dispatch it, send response.
+
+    Returns True if the action was 'stop' (caller should break the freeze loop).
+    SO_LINGER {1,0} forces RST on close to avoid CLOSE_WAIT zombies.
+
+    Struct layout differs per OS:
+      Windows : u_short l_onoff + u_short l_linger = 4 bytes → "HH"
+      Linux   : int     l_onoff + int     l_linger = 8 bytes → "ii"
+    """
+    import struct as _struct
+    _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
+    except OSError as _le:
+        _log(f"SO_LINGER failed: {_le!r}")
+    conn.settimeout(3.0)
+    buf = b""
+    try:
+        while b"\n" not in buf:
+            chunk = conn.recv(4096)
+            if not chunk:
+                return False  # probe-only connection (connected then immediately closed)
+            buf += chunk
+        cmd = json.loads(buf.split(b"\n")[0].decode("utf-8"))
+        if cmd.get("action") == "stop":
+            conn.sendall(b'{"status":"ok"}\n')
+            conn.close()
+            return True
+        resp = _dispatch(cmd)
+        conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         try:
-            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
-            _log("SO_LINGER set OK (RST on close)")
-        except OSError as _le:
-            _log(f"SO_LINGER failed: {_le!r}")
-        conn.settimeout(3.0)
-        buf = b""
-        try:
-            while b"\n" not in buf:
-                chunk = conn.recv(4096)
-                if not chunk:
-                    return   # probe-only connection (backend just connected then closed)
-                buf += chunk
-            line     = buf.split(b"\n")[0]
-            cmd      = json.loads(line.decode("utf-8"))
-            response = _dispatch(cmd)
-            conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            try:
-                conn.sendall((json.dumps({"status": "error", "msg": str(exc)}) + "\n").encode("utf-8"))
-            except OSError:
-                pass
+            conn.sendall((json.dumps({"status": "error", "msg": str(exc)}) + "\n").encode("utf-8"))
         except OSError:
             pass
-        finally:
-            conn.close()   # SO_LINGER {1,0} above triggers immediate RST
-
-    def _server_loop(self) -> None:
-        # Socket already bound + listening (done on main thread in start()).
-        # This thread only runs the accept loop.
-        _log(f"_server_loop ENTERED (thread={threading.current_thread().name})")
-        _log(f"socket fileno={self._sock.fileno() if self._sock else 'None'}")
-        _log("Entering accept loop")
-        _conn_count = 0
-        while self._running:
-            try:
-                conn, addr = self._sock.accept()
-                _conn_count += 1
-                _log(f"accept #{_conn_count} from {addr}")
-            except socket.timeout:
-                continue
-            except OSError as exc:
-                if self._running:
-                    _log(f"Socket error — server stopping: {exc!r}")
-                break
-            except Exception as exc:
-                _log(f"Unexpected error in accept loop: {exc!r}")
-                _log(traceback.format_exc())
-                break
-            self._handle_one(conn)
-            _log(f"handled #{_conn_count} OK")
-
-        _log("Server loop exited.")
-
-    def stop(self) -> None:
-        self._running = False
-        if self._sock:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
+    except OSError:
+        pass
+    finally:
+        conn.close()
+    return False
 
 
-# ── Module-level singleton ────────────────────────────────────────────────────
-# ZBrush loads this file via BOTH mechanisms (PYTHONPATH+init.py AND
-# ZPlugs64/*.py) and may also reload it via the Python console. The singleton
-# guard prevents double-binding port 9876 (which causes Windows to refuse all
-# incoming connections even though the port shows LISTENING in netstat).
+# ── Freeze loop (T3) ──────────────────────────────────────────────────────────
 
-def _get_or_start_bridge() -> "_FluxBridge":
-    _log("_get_or_start_bridge() entered")
-    existing = getattr(sys, "_flux_zbrush_bridge_ref", None)
-    _log(f"existing bridge ref = {existing!r}")
-    if existing is not None:
-        alive = (getattr(existing, "_running", False)
-                 and existing._thread is not None
-                 and existing._thread.is_alive())
-        _log(f"existing alive check = {alive}")
-        if alive:
-            _log(f"Already running on {HOST}:{PORT} — skipping duplicate load")
-            return existing
-        _log("existing bridge is dead — cleaning up old socket")
-        existing._running = False
-        if existing._sock is not None:
-            try:
-                existing._sock.close()
-            except OSError as exc:
-                _log(f"old socket close failed: {exc!r}")
-    _log("creating new _FluxBridge instance")
-    b = _FluxBridge()
-    sys._flux_zbrush_bridge_ref = b
-    _log("calling b.start()")
-    b.start()
-    _log("_get_or_start_bridge() returning")
-    return b
+def _listen_loop() -> None:
+    """Runs on ZBrush main thread inside zbc.freeze().
 
+    Uses select.select(timeout=0) — non-blocking poll — so ZBrush's event loop
+    stays responsive between iterations. Exits on 'stop' command or global timeout.
+    """
+    _log("Freeze loop started")
+    deadline = time.time() + FREEZE_TIMEOUT
+    while time.time() < deadline:
+        try:
+            ready, _, _ = select.select([_server_sock], [], [], 0)
+            if ready:
+                conn, addr = _server_sock.accept()
+                _log(f"Connection from {addr}")
+                if _recv_and_dispatch(conn):
+                    _log("Stop received — exiting freeze loop")
+                    break
+        except Exception as exc:
+            _log(f"Freeze loop error: {exc!r}")
+            _log(traceback.format_exc())
+        time.sleep(0.05)
+    _log("Freeze loop exited")
+
+
+# ── ZBrush UI (T2) ───────────────────────────────────────────────────────────
+
+_in_freeze = False
+
+
+def _focus_flux_window() -> None:
+    """Bring the FLUX Electron window to the foreground (Windows only).
+
+    Matches windows with "FLUX" in the title, then filters by process name so that
+    VSCode (which shows the repo folder "Flux_Pipeline_dev" in its title) is excluded.
+    Prefers windows owned by electron.exe or any process name containing "flux".
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes as _wt
+        _u32 = ctypes.windll.user32
+        _k32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+        candidates: list[tuple[int, int, str, str]] = []  # (score, hwnd, title, proc_path)
+
+        @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+        def _enum(hwnd: int, _: int) -> bool:
+            if not _u32.IsWindowVisible(hwnd):
+                return True
+            title_buf = ctypes.create_unicode_buffer(512)
+            _u32.GetWindowTextW(hwnd, title_buf, 512)
+            title = title_buf.value
+            if not title or "FLUX" not in title.upper():
+                return True
+            # Get owner process path to distinguish Electron from Code.exe
+            pid = _wt.DWORD(0)
+            _u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            proc_path = ""
+            hproc = _k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+            if hproc:
+                pbuf  = ctypes.create_unicode_buffer(1024)
+                psize = _wt.DWORD(1024)
+                _k32.QueryFullProcessImageNameW(hproc, 0, pbuf, ctypes.byref(psize))
+                _k32.CloseHandle(hproc)
+                proc_path = pbuf.value
+            proc_upper = proc_path.upper()
+            # Skip known non-targets (editors whose titles show the repo folder name)
+            if any(x in proc_upper for x in ("CODE.EXE", "DEVENV.EXE", "RIDER64.EXE")):
+                return True
+            score = 10 if ("ELECTRON" in proc_upper or "FLUX" in proc_upper) else 0
+            candidates.append((score, hwnd, title, proc_path))
+            return True
+
+        _u32.EnumWindows(_enum, 0)
+        if candidates:
+            candidates.sort(reverse=True)
+            _, hwnd, title, proc_path = candidates[0]
+            _u32.ShowWindow(hwnd, 9)        # SW_RESTORE
+            _u32.SetForegroundWindow(hwnd)
+            _log(f"FLUX window focused hwnd={hwnd} title={title!r} proc={proc_path!r}")
+        else:
+            _log("FLUX window not found — is FLUX running?")
+    except Exception as exc:
+        _log(f"_focus_flux_window error: {exc!r}")
+
+
+def _on_publish_click(*args: object, **kwargs: object) -> None:
+    """Callback for the 'Publish to FLUX' button in ZPlugin:FLUX.
+    *args/**kwargs accepted — ZBrush may pass positional arguments to button callbacks."""
+    global _in_freeze
+    # Direct write bypasses _log() threading guard — confirms callback fires
+    try:
+        with open(_LOG_FILE, "a", encoding="utf-8") as _f:
+            _f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] _on_publish_click ENTERED args={args!r}\n")
+    except Exception:
+        pass
+    if _in_freeze:
+        if _ZBRUSH_AVAILABLE:
+            zbc.show_note("Publication en cours — FLUX est en train de publier.")
+        return
+    if _server_sock is None:
+        if _ZBRUSH_AVAILABLE:
+            zbc.show_note("Erreur : bridge FLUX non initialisé.\nRedémarre ZBrush.")
+        return
+    _in_freeze = True
+    _focus_flux_window()
+    _log("Entering zbc.freeze()")
+    try:
+        zbc.freeze(_listen_loop)
+    finally:
+        _in_freeze = False
+        _log("zbc.freeze() returned — ZBrush UI restored")
+
+
+def _register_zbrush_ui() -> None:
+    """Register 'Publish to FLUX' button in ZPlugin:FLUX Bridge (2026.1+ API)."""
+    if not _ZBRUSH_AVAILABLE:
+        _log("ZBrush module not available — skipping UI registration")
+        return
+    try:
+        ok1 = zbc.add_subpalette("ZPlugin:FLUX Bridge", title_mode=0)
+        _log(f"add_subpalette → {ok1}")
+        ok2 = zbc.add_button(
+            "ZPlugin:FLUX Bridge:Publish to FLUX",
+            "Publier le tool actif via FLUX Pipeline",
+            _on_publish_click,
+        )
+        _log(f"add_button → {ok2}")
+    except Exception as exc:
+        _log(f"UI registration failed (non-critical): {exc!r}")
+
+
+# ── Module-level init ─────────────────────────────────────────────────────────
+# This block runs once at plugin load (ZBrush main thread).
+# Singleton guards prevent double-bind if the plugin is reloaded.
 
 try:
-    _bridge = _get_or_start_bridge()
-    _log("=== PLUGIN INIT COMPLETE ===")
+    if _init_server_socket():
+        _register_zbrush_ui()
+        _log("=== PLUGIN INIT COMPLETE ===")
+    else:
+        _log("=== SOCKET INIT FAILED — plugin disabled ===")
 except Exception as _e:
     _log(f"!!! PLUGIN INIT FAILED: {_e!r}")
     _log(traceback.format_exc())

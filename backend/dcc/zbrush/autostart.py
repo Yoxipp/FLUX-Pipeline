@@ -47,27 +47,32 @@ def _get_documents_dir() -> Path:
 def _find_zbrush_data_dirs() -> list[Path]:
     """
     Return all ZBrush user-data root directories found on this machine.
-    Sorted newest first (highest version number / most recent hash).
+    Sorted newest first. Handles both directory naming schemes:
 
-    ZBrush 2024+ (Maxon): %APPDATA%\\Maxon\\Maxon ZBrush YYYY_HASH\\
-    Classic             : %USERPROFILE%\\Documents\\ZBrushData*\\
+    ZBrush 2026.1+  : %APPDATA%\\Maxon\\ZBrush_[HASH]\\
+    ZBrush ≤2026.0  : %APPDATA%\\Maxon\\Maxon ZBrush YYYY_[HASH]\\
+    Classic         : %USERPROFILE%\\Documents\\ZBrushData*\\
     """
     roots: list[Path] = []
     system = platform.system()
 
     if system == "Windows":
-        # ZBrush 2024+ (Maxon) — primary location
         appdata = Path(os.environ.get("APPDATA", ""))
         maxon_dir = appdata / "Maxon"
         if maxon_dir.exists():
             try:
+                # ZBrush 2026.1+ — new user-based asset dir (ZBrush_HASH)
+                for d in sorted(maxon_dir.glob("ZBrush_*"), reverse=True):
+                    if d.is_dir():
+                        roots.append(d)
+                # ZBrush ≤2026.0 — old format (Maxon ZBrush YYYY_HASH)
                 for d in sorted(maxon_dir.glob("Maxon ZBrush*"), reverse=True):
                     if d.is_dir():
                         roots.append(d)
             except OSError:
                 pass
 
-        # Classic Documents location — fallback
+        # Classic Documents location — very old installs
         docs = _get_documents_dir()
         try:
             for d in sorted(docs.glob("ZBrushData*"), reverse=True):
@@ -76,13 +81,22 @@ def _find_zbrush_data_dirs() -> list[Path]:
         except OSError:
             pass
 
-        # Absolute fallback (neither exists yet)
         if not roots:
-            roots.append(appdata / "Maxon" / "Maxon ZBrush")
+            roots.append(appdata / "Maxon" / "ZBrush")
 
     elif system == "Darwin":
-        base = Path.home() / "Library" / "Application Support" / "ZBrush"
-        roots.append(base)
+        maxon_dir = Path.home() / "Library" / "Application Support" / "Maxon"
+        if maxon_dir.exists():
+            try:
+                for d in sorted(maxon_dir.glob("ZBrush_*"), reverse=True):
+                    if d.is_dir():
+                        roots.append(d)
+            except OSError:
+                pass
+        # older macOS path
+        old = Path.home() / "Library" / "Application Support" / "ZBrush"
+        if old.exists():
+            roots.append(old)
     else:
         roots.append(Path.home() / ".zbrush")
 
@@ -161,13 +175,31 @@ def _remove_from_pythonpath(entry: Path) -> None:
     _set_user_pythonpath(os.pathsep.join(parts))
 
 
+# ── Config helpers (persist install paths for reliable uninstall) ─────────────
+
+def _save_install_paths(paths: list[str]) -> None:
+    try:
+        from core import config as _cfg
+        _cfg.set("zbrush_plugin_paths", paths)
+    except Exception:
+        pass
+
+
+def _load_install_paths() -> list[str]:
+    try:
+        from core import config as _cfg
+        return _cfg.get("zbrush_plugin_paths", []) or []
+    except Exception:
+        return []
+
+
 # ── Install / uninstall ───────────────────────────────────────────────────────
 
 def install_plugin() -> dict:
     """
-    Install the FLUX bridge plugin using BOTH mechanisms:
-      1. PYTHONPATH + init.py  → <zbrush_root>/FluxBridge/init.py  + PYTHONPATH entry
-      2. ZBRUSH_PLUGIN_PATH   → <zbrush_root>/ZStartup/ZPlugs64/zbrush_bridge_plugin.py
+    Install the FLUX bridge plugin via ZPlugs64 (primary) and PYTHONPATH+init.py (fallback).
+    Supports both ZBrush 2026.1+ (ZBrush_HASH) and earlier (Maxon ZBrush YYYY_HASH).
+    Installed paths are persisted in FLUX config for reliable uninstall.
 
     Returns {"ok": bool, "path": str | None, "paths": list[str], "error": str | None}.
     """
@@ -177,8 +209,20 @@ def install_plugin() -> dict:
     installed: list[str] = []
     errors:    list[str] = []
 
-    # ── Mechanism 1: PYTHONPATH + init.py ─────────────────────────────────────
+    # ── Primary: ZPlugs64 ─────────────────────────────────────────────────────
+    for plugs64 in _plugs64_dirs():
+        dest = plugs64 / _PLUGS64_FILENAME
+        try:
+            plugs64.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_PLUGIN_SRC, dest)
+            installed.append(str(dest))
+        except OSError as exc:
+            errors.append(f"ZPlugs64 install {dest}: {exc}")
+
+    # ── Fallback: PYTHONPATH + init.py ────────────────────────────────────────
     for init_path, pythonpath_entry in _flux_bridge_init_paths():
+        if str(init_path) in installed:
+            continue
         try:
             init_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(_PLUGIN_SRC, init_path)
@@ -187,52 +231,47 @@ def install_plugin() -> dict:
         except OSError as exc:
             errors.append(f"PYTHONPATH install {init_path}: {exc}")
 
-    # ── Mechanism 2: ZPlugs64 ─────────────────────────────────────────────────
-    for plugs64 in _plugs64_dirs():
-        dest = plugs64 / _PLUGS64_FILENAME
-        if dest in [Path(p) for p in installed]:
-            continue  # already installed by mechanism 1 to same path (unlikely)
-        try:
-            plugs64.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(_PLUGIN_SRC, dest)
-            installed.append(str(dest))
-        except OSError as exc:
-            errors.append(f"ZPlugs64 install {dest}: {exc}")
-
     if installed:
+        _save_install_paths(installed)
         return {"ok": True, "path": installed[0], "paths": installed, "error": None}
     return {"ok": False, "path": None, "paths": [], "error": "; ".join(errors) or "No ZBrush install found"}
 
 
 def uninstall_plugin() -> dict:
-    """Remove the FLUX bridge plugin from all install locations and clean PYTHONPATH."""
+    """Remove the FLUX bridge plugin from all install locations.
+
+    Uses paths saved in FLUX config (reliable) plus a live filesystem scan
+    (catches any manually-placed copies).
+    """
     removed: list[str] = []
     errors:  list[str] = []
 
-    # ── Mechanism 1: FluxBridge/init.py + PYTHONPATH ──────────────────────────
+    # Paths saved at install time + live scan (union)
+    saved = set(_load_install_paths())
+    scanned: set[str] = set()
+
     for init_path, pythonpath_entry in _flux_bridge_init_paths():
-        if init_path.exists():
+        scanned.add(str(init_path))
+        _remove_from_pythonpath(pythonpath_entry)
+
+    for plugs64 in _plugs64_dirs():
+        scanned.add(str(plugs64 / _PLUGS64_FILENAME))
+
+    for path_str in saved | scanned:
+        p = Path(path_str)
+        if p.exists():
             try:
-                init_path.unlink()
-                removed.append(str(init_path))
-                # Remove parent FluxBridge/ dir if now empty
+                p.unlink()
+                removed.append(path_str)
+                # Remove empty parent dir (FluxBridge/)
                 try:
-                    init_path.parent.rmdir()
+                    p.parent.rmdir()
                 except OSError:
                     pass
             except OSError as exc:
                 errors.append(str(exc))
-        _remove_from_pythonpath(pythonpath_entry)
 
-    # ── Mechanism 2: ZPlugs64 ─────────────────────────────────────────────────
-    for plugs64 in _plugs64_dirs():
-        dest = plugs64 / _PLUGS64_FILENAME
-        if dest.exists():
-            try:
-                dest.unlink()
-                removed.append(str(dest))
-            except OSError as exc:
-                errors.append(str(exc))
+    _save_install_paths([])
 
     if errors:
         return {"ok": False, "message": "; ".join(errors)}
