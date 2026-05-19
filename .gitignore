@@ -5,14 +5,19 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# PyInstaller output (build/ = cache intermédiaire PyInstaller)
 dist/
 build/
 
-# PyInstaller output
-dist/
-build/
-# keep flux.spec tracked — only ignore generated specs
-!flux.spec
+# Electron / TypeScript build artifacts
+tsconfig.electron.tsbuildinfo
+
+# electron-builder output
+release/
+
+# Node
+node_modules/
 
 # IDE
 .vscode/
@@ -32,4 +37,4 @@ TEST/
 .DS_Store
 Thumbs.db
 desktop.ini
-INSTALLEURS/Flux_Installer_v0.1.0.exe
+INSTALLEURS/

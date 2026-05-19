@@ -1,0 +1,31 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './app/src/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        flux: {
+          bg:      'var(--color-bg)',
+          surface: 'var(--color-surface)',
+          fg:      'var(--color-fg)',
+          accent:  'var(--color-accent)',
+        },
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Cascadia Code', 'monospace'],
+      },
+      borderRadius: {
+        'flux-sm': '4px',
+        'flux':    '6px',
+        'flux-lg': '8px',
+      },
+      boxShadow: {
+        'flux-xs': 'var(--shadow-xs)',
+        'flux-sm': 'var(--shadow-sm)',
+        'flux-md': 'var(--shadow-md)',
+      },
+    },
+  },
+  plugins: [],
+}

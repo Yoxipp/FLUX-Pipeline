@@ -1,0 +1,202 @@
+﻿# paths.py — single source of truth for all absolute path construction.
+# Every other module MUST call these helpers instead of building paths manually.
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+# Lazily imported to avoid circular deps at module level
+_installer_paths = None
+
+
+def _get_installer_paths():
+    global _installer_paths
+    if _installer_paths is None:
+        from installer import installer_paths as _ip
+        _installer_paths = _ip
+    return _installer_paths
+
+from core.constants import (
+    FLUX_ROOT_DIRS,
+    FLUX_MARKER_FILENAME,
+    JSON_ACTIVITY,
+    JSON_CHAT,
+)
+
+# ── Exe-relative bootstrap (config.json next to the exe) ─────────────────────
+
+def _get_exe_dir() -> Path:
+    """Return the directory containing the running exe (prod) or project root (dev)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    # dev: flux/core/paths.py → up 3 levels → project root
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def get_config_json_path() -> Path:
+    """Return the config.json path.
+
+    Prod (frozen exe): %APPDATA%/FluxPipeline/config.json — user-writable even when
+    the app is installed in Program Files (which is read-only without admin rights).
+    Dev (non-frozen):  project root / config.json (existing behaviour).
+    """
+    if getattr(sys, "frozen", False):
+        return _get_installer_paths().get_appdata_dir() / "config.json"
+    return _get_exe_dir() / "config.json"
+
+
+def get_prefs_path() -> Path:
+    """Return the user prefs file.
+
+    Prod (frozen exe): %APPDATA%/FluxPipeline/prefs.json
+    Dev (non-frozen):  config.json next-to-project-root (existing behavior)
+    """
+    if getattr(sys, "frozen", False):
+        return _get_installer_paths().get_prefs_path()
+    return get_config_json_path()
+
+
+def _read_config_json() -> dict:
+    p = get_config_json_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_config_json(data: dict) -> None:
+    p = get_config_json_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _update_config_json(key: str, value: str) -> None:
+    data = _read_config_json()
+    data[key] = value
+    _write_config_json(data)
+
+
+# ── FLUX_ROOT resolution ──────────────────────────────────────────────────────
+
+def get_flux_root() -> Path | None:
+    """Return the workspace path from config.json next to the exe, or None."""
+    workspace = _read_config_json().get("workspace")
+    return Path(workspace) if workspace else None
+
+
+def set_flux_root(path: Path | str) -> None:
+    """Persist workspace path to config.json next to the exe."""
+    _update_config_json("workspace", str(Path(path)))
+
+
+# ── Install username (config.json, chosen at first launch) ───────────────────
+
+def get_config_username() -> str | None:
+    """Return the username stored in config.json, or None if not set."""
+    return _read_config_json().get("username") or None
+
+
+def set_config_username(name: str) -> None:
+    """Persist the chosen username to config.json next to the exe."""
+    _update_config_json("username", name)
+
+
+# ── FLUX_ROOT subdirectories ──────────────────────────────────────────────────
+
+def get_users_dir() -> Path:
+    return _root_subdir("USER")
+
+
+def get_projects_dir() -> Path:
+    return _root_subdir("DOSSIER_PROJETS")
+
+
+def get_config_dir() -> Path:
+    return _root_subdir("CONFIG")
+
+
+def get_update_dir() -> Path:
+    return _root_subdir("FLUX_UPDATE")
+
+
+def _root_subdir(name: str) -> Path:
+    root = get_flux_root()
+    if root is None:
+        raise RuntimeError("FLUX_ROOT is not set. Run first-launch setup first.")
+    return root / name
+
+
+# ── User paths ────────────────────────────────────────────────────────────────
+
+def get_user_dir(username: str) -> Path:
+    return get_users_dir() / username
+
+
+# ── Project paths ─────────────────────────────────────────────────────────────
+
+def get_project_path(project_name: str) -> Path:
+    return get_projects_dir() / project_name
+
+
+def get_project_tokens_path(project_name: str) -> Path:
+    from core.constants import JSON_TOKENS
+    return get_project_path(project_name) / JSON_TOKENS
+
+
+# ── CONFIG / shared JSON paths ────────────────────────────────────────────────
+
+def get_activity_path() -> Path:
+    return get_config_dir() / JSON_ACTIVITY
+
+
+def get_chat_path() -> Path:
+    return get_config_dir() / JSON_CHAT
+
+
+# ── FLUX_ROOT marker ──────────────────────────────────────────────────────────
+
+def get_flux_marker_path(root: Path | None = None) -> Path:
+    r = root or get_flux_root()
+    if r is None:
+        raise RuntimeError("FLUX_ROOT is not set.")
+    return r / FLUX_MARKER_FILENAME
+
+
+def is_flux_root(directory: Path) -> bool:
+    """Return True if *directory* contains the .flux marker."""
+    return (directory / FLUX_MARKER_FILENAME).exists()
+
+
+# ── Path safety helpers ───────────────────────────────────────────────────────
+
+def ensure_dir(path: Path) -> Path:
+    """Create *path* (and parents) if it does not exist. Return *path*."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def path_exists_safe(path: Path) -> bool:
+    """Return True if *path* exists, swallowing OS errors (slow network, etc.)."""
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def normalize_path(path: Path | str) -> Path:
+    """Resolve to absolute, normalise separators (handles UNC and OneDrive paths)."""
+    return Path(path).resolve()
+
+
+def is_subpath(child: Path, parent: Path) -> bool:
+    """Return True if *child* is strictly inside *parent*."""
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
