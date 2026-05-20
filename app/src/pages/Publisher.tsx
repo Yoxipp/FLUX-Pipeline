@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
@@ -329,6 +330,7 @@ function PublishComposer({
 
 export function Publisher() {
   const { settings } = useSettings()
+  const location = useLocation()
   const [dcc, setDcc]           = useState('Maya')
   const [projects, setProjects] = useState<string[]>([])
   const [project, setProject]   = useState('')
@@ -404,26 +406,24 @@ export function Publisher() {
       .catch(() => setShots([]))
   }, [project, mode, sel.seq])
 
-  // ZBrush — connection polling
+  // ZBrush connection — single effect handles both navigation state and manual DCC switch.
+  // Merged to avoid race condition where the dcc-change cleanup (→ false) overwrites
+  // the navigation-state set (→ true) that fired in the same render cycle.
   useEffect(() => {
-    if (dcc !== 'ZBrush') return
-    let cancelled = false
-
-    const poll = async () => {
-      try {
-        const ping = await api.pingDcc('zbrush')
-        if (cancelled) return
-        setZbrushConnected(ping.connected)
-        setZbrushVersion(ping.version ?? null)
-      } catch {
-        if (!cancelled) setZbrushConnected(false)
-      }
+    // Sidebar navigated here after detecting the freeze — mark connected immediately, no ping.
+    if (location.state?.zbrushConnected) {
+      setDcc('ZBrush')
+      setZbrushConnected(true)
+      return
     }
-
-    void poll()
-    const id = setInterval(() => void poll(), 3000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [dcc])
+    // Manual DCC switch — one-shot ping, no polling interval.
+    if (dcc !== 'ZBrush') { setZbrushConnected(false); setZbrushVersion(null); return }
+    let cancelled = false
+    api.pingDcc('zbrush')
+      .then(p => { if (!cancelled) { setZbrushConnected(p.connected); setZbrushVersion(p.version ?? null) } })
+      .catch(() => { if (!cancelled) setZbrushConnected(false) })
+    return () => { cancelled = true }
+  }, [dcc, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset exportExt when switching DCC if current format isn't in the new list
   useEffect(() => {
@@ -565,6 +565,12 @@ export function Publisher() {
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
+  const handleCancelZBrush = useCallback(() => {
+    setZbrushConnected(false)
+    setZbrushVersion(null)
+    api.cancelZBrush().catch(() => {}) // fire-and-forget — ZBrush may not be in freeze
+  }, [])
+
   const reset = useCallback(() => {
     setSel(EMPTY_SEL)
     setNewMode(EMPTY_NEW_MODE)
@@ -621,6 +627,8 @@ export function Publisher() {
           user:           settings?.username ?? undefined,
         })
         toast.success(`v${res.version_str} → ZBrush`)
+        setZbrushConnected(false)
+        setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
       } else if (dcc === 'Fichier local') {
         if (!sourcePath.trim()) {
@@ -1051,6 +1059,9 @@ export function Publisher() {
       {/* Bottom bar */}
       <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
         <Btn ghost onClick={reset}>Réinitialiser</Btn>
+        {dcc === 'ZBrush' && (
+          <Btn ghost onClick={handleCancelZBrush}>Annuler</Btn>
+        )}
         <Btn primary onClick={() => void handlePublish()}>
           {publishing ? 'Publication…' : 'Publish →'}
         </Btn>

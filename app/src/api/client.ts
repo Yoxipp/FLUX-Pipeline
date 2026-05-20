@@ -108,6 +108,9 @@ export const api = {
   publishZBrush: (payload: ZBrushPublishPayload) =>
     apiCall<ZBrushPublishResult>('POST', '/dcc/zbrush/publish', payload),
 
+  cancelZBrush: () =>
+    apiCall<{ cancelled: boolean }>('POST', '/dcc/zbrush/cancel'),
+
   // Importer
   importFiles: (dcc: string, file_paths: string[], project_name?: string) =>
     apiCall<{ results: { path: string; success: boolean }[] }>('POST', '/import', { dcc, file_paths, project_name }),

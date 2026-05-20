@@ -418,6 +418,15 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
     return result
 
 
+@router.post("/zbrush/cancel")
+async def cancel_zbrush() -> dict:
+    """Release ZBrush from the freeze loop (user cancelled the publish)."""
+    from dcc.zbrush.client import zbrush_client
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, zbrush_client.cancel)
+    return {"cancelled": result.get("ok", False)}
+
+
 # ── Houdini Importer HDA endpoints ───────────────────────────────────────────
 
 

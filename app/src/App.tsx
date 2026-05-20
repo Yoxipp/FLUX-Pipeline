@@ -59,7 +59,7 @@ function AppShell({ settings }: { settings: Settings }) {
         <StatusBar dccStatus={dccStatus} />
       </div>
       <Toaster
-        position="bottom-right"
+        position="top-center"
         theme="dark"
         toastOptions={{
           style: {

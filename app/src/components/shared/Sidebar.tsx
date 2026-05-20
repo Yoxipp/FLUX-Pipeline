@@ -155,7 +155,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const prevZbrushOk = useRef<boolean | null>(null)
   useEffect(() => {
     if (zbrushServerOk === true && prevZbrushOk.current !== true) {
-      if (pathname !== '/publisher') navigate('/publisher')
+      if (pathname !== '/publisher') navigate('/publisher', { state: { zbrushConnected: true } })
     }
     prevZbrushOk.current = zbrushServerOk
   }, [zbrushServerOk, navigate, pathname])
