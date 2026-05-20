@@ -136,6 +136,7 @@ def publish_zbrush(
             user=user,
             filename=dest_name,
             project=project_name or project_path.name,
+            dest_folder=dest_folder,
         )
     except Exception as exc:
         log.warning("activity log failed: %s", exc)

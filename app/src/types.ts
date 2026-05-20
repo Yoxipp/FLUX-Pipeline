@@ -13,6 +13,7 @@ export interface ActivityEvent {
   user: string
   action: string
   file?: string
+  dest_folder?: string
   project?: string
   date: string
   time: string

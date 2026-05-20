@@ -147,7 +147,7 @@ def publish_file(
         return None
 
     append_log(dest_folder, base_name, format_version(new_ver), description, user)
-    log_publish(user, dest_name, project_name or project_path.name)
+    log_publish(user, dest_name, project_name or project_path.name, dest_folder=dest_folder)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, next_ver)
     return dest_path

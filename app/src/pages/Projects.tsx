@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
@@ -984,6 +985,21 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
   )
 }
 
+// ── Deep-link helper ──────────────────────────────────────────────────────────
+
+function resolveOpenPath(absPath: string, workspace: string): NavLevel | null {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  // Projects live at FLUX_ROOT/DOSSIER_PROJETS/<project>/...
+  const ws   = norm(workspace) + '/DOSSIER_PROJETS'
+  const ap   = norm(absPath)
+  if (!ap.toLowerCase().startsWith(ws.toLowerCase())) return null
+  const relative = ap.slice(ws.length).replace(/^\//, '')
+  const parts    = relative.split('/').filter(Boolean)
+  if (parts.length === 0) return null
+  const [project, ...subpath] = parts
+  return { kind: 'inside', project, subpath }
+}
+
 // ── Composant principal ───────────────────────────────────────────────────────
 
 export function Projects() {
@@ -1001,9 +1017,19 @@ export function Projects() {
   const [sequences, setSequences]         = useState<string[]>([])
 
   const { settings } = useSettings()
+  const location = useLocation()
   useEffect(() => {
     if (settings?.last_project) setActiveProject(settings.last_project)
   }, [settings?.last_project])
+
+  useEffect(() => {
+    const openPath = (location.state as { openPath?: string } | null)?.openPath
+    if (!openPath || !settings?.workspace) return
+    const navLevel = resolveOpenPath(openPath, settings.workspace)
+    if (!navLevel) return
+    setNavStack([{ kind: 'root' }, navLevel])
+    setNavIdx(1)
+  }, [settings?.workspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [tab, setTab]             = useState<Tab>('project')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')

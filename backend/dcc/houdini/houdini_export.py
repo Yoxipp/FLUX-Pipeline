@@ -329,7 +329,7 @@ def publish_houdini_rop(
     # 6. Log
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
     try:
-        log_publish(user or "unknown", output_path.name, project_path.name)
+        log_publish(user or "unknown", output_path.name, project_path.name, dest_folder=output_path.parent)
         from features.publisher.modif_log import append_log
         if not is_sequence:
             append_log(output_path.parent, get_base_name(f"{filename}{ext}"), ver_str, description, user)
