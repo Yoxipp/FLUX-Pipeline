@@ -26,12 +26,12 @@ def _tokens_path(project_path: Path) -> Path:
 # ── bootstrap ─────────────────────────────────────────────────────────────────
 
 def build_default_tokens() -> dict:
-    """Return a fresh tokens dict seeded with the default CLASS and TYPE entries."""
+    """Return a fresh tokens dict seeded with the default CLASS, TYPE and INSTANCE entries."""
     return {
         "CLASS":    dict(DEFAULT_CLASS_TOKENS),
         "TYPE":     dict(DEFAULT_TYPE_TOKENS),
         "NAME":     {},
-        "INSTANCE": {},
+        "INSTANCE": {"null": ""},
         "SEQ":      {},
         "SHOT":     {},
         "custom":   {},
@@ -55,7 +55,7 @@ def load_tokens(project_path: Path) -> dict:
     defaults = build_default_tokens()
     for section in _TOKEN_SECTIONS:
         default_section = defaults.get(section, {})
-        if section in ("CLASS", "TYPE") and default_section:
+        if section in ("CLASS", "TYPE", "INSTANCE") and default_section:
             # Always ensure built-in tokens exist; custom entries take priority on key collision
             raw[section] = {**default_section, **raw.get(section, {})}
         else:

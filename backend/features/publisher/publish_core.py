@@ -24,10 +24,10 @@ log = get_logger(__name__)
 def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     """Return the destination folder for *filename* inside *project_path*.
 
-    Asset:  project/<CLASS_path>/<NAME>/<type_sub>/
+    Asset:  project/<NAME_path>/<type_sub>/<instance>/
             type_sub comes from DEFAULT_TYPE_TOKENS (e.g. SCULPT → model/sculpt)
             or falls back to TYPE.lower() for unknown types.
-    Shot:   project/<CLASS_template{seq=SEQ, shot=SHOT}>/
+    Shot:   project/<CLASS_template{seq=SEQ, shot=SHOT}>/<instance>/
     Returns None if *filename* is unparseable or required tokens are missing.
     """
     parsed = parse_filename(filename)
@@ -36,6 +36,8 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
         return None
 
     tokens = load_tokens(project_path)
+
+    instance = parsed["INSTANCE"].lower() if parsed["INSTANCE"] else "null"
 
     if parsed["is_shot"]:
         class_rel = get_path_for_token(tokens, "CLASS", parsed["CLASS"])
@@ -47,9 +49,9 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
         except KeyError as e:
             log.warning("Template substitution failed for %r: %s", class_rel, e)
             return None
-        return project_path / rel
+        return project_path / rel / instance
 
-    # asset: NAME token gives asset root, TYPE maps to subfolder
+    # asset: NAME token gives asset root, TYPE maps to subfolder, then instance
     name_rel = get_path_for_token(tokens, "NAME", parsed["NAME"])
     if name_rel is None:
         # fallback: CLASS_path/NAME
@@ -60,7 +62,7 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
         name_rel = f"{class_rel}/{parsed['NAME']}"
 
     type_sub = DEFAULT_TYPE_TOKENS.get(parsed["TYPE"], parsed["TYPE"].lower())
-    return project_path / name_rel / type_sub
+    return project_path / name_rel / type_sub / instance
 
 
 # ── versioning ─────────────────────────────────────────────────────────────────
