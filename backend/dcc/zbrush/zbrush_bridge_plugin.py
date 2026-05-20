@@ -119,6 +119,18 @@ def _apply_obj_options(options: dict) -> None:
             zbc.set_slider("Tool:Export:Mat", 1 if options["materials"] else 0)
         except Exception:
             pass
+    scope = options.get("scope", "selected")
+    if scope == "all":
+        try:
+            zbc.press("Tool:Export:All")
+        except Exception:
+            pass
+    elif scope == "visible":
+        try:
+            zbc.press("Tool:Export:Visible")
+        except Exception:
+            pass
+    # "selected" is ZBrush's default — no button press needed
 
 
 # ── FBX export helpers ────────────────────────────────────────────────────────
@@ -142,6 +154,18 @@ def _apply_fbx_options(options: dict) -> None:
         try:
             zbc.set_slider("FBXExportImport:MatExportGrp:ExportMat",
                            1 if options["materials"] else 0)
+        except Exception:
+            pass
+    scope = options.get("scope", "all")
+    _FBX_SCOPE_BUTTONS = {
+        "all":      "FBXExportImport:ExportGrp:AllMeshes",
+        "selected": "FBXExportImport:ExportGrp:SelMesh",
+        "visible":  "FBXExportImport:ExportGrp:VisMeshes",
+    }
+    btn = _FBX_SCOPE_BUTTONS.get(scope)
+    if btn:
+        try:
+            zbc.press(btn)
         except Exception:
             pass
 

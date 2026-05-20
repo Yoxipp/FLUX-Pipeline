@@ -63,41 +63,53 @@ def publish_zbrush(
 
     ensure_dir(dest_folder)
 
-    # ── 2. Versioning ─────────────────────────────────────────────────────────
+    # ── 2. Prepare paths ──────────────────────────────────────────────────────
     base_name = get_base_name(filename)
     next_ver  = get_next_version(dest_folder, base_name)
 
-    had_last  = rename_last_to_versioned(dest_folder, base_name, next_ver) is not None
-    new_ver   = next_ver + 1 if had_last else next_ver
-    ver_str   = format_version(new_ver, DEFAULT_PADDING)
+    # Export to a temp file so that ZBrush's set_next_filename never receives a
+    # path that was just renamed away — which causes a spurious "unable to open"
+    # dialog even when the export succeeds.
+    temp_path = dest_folder / f"{base_name}_FLUX_TMP{ext}"
+    temp_str  = str(temp_path)
 
-    dest_name = f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
-    dest_path = dest_folder / dest_name
-
-    # ── 3. Export from ZBrush ─────────────────────────────────────────────────
-    dest_str = str(dest_path).replace("\\", "/")
-
+    # ── 3. Export from ZBrush → temp ─────────────────────────────────────────
     if ext == ".ztl":
-        result = zbrush_client.export_ztl(dest_str)
+        result = zbrush_client.export_ztl(temp_str)
     elif ext == ".obj":
-        result = zbrush_client.export_obj(dest_str, export_options)
+        result = zbrush_client.export_obj(temp_str, export_options)
     elif ext == ".fbx":
-        result = zbrush_client.export_fbx(dest_str, export_options)
+        result = zbrush_client.export_fbx(temp_str, export_options)
     else:
         return {"ok": False, "error": f"Unhandled extension: {ext}"}
 
     if not result.get("ok"):
+        temp_path.unlink(missing_ok=True)
         err = result.get("error") or result.get("msg", "Unknown error from ZBrush")
         log.error("ZBrush export failed: %s", err)
         return {"ok": False, "error": err}
 
-    # Release ZBrush from freeze before keep_local (which can take time)
+    # Release ZBrush from freeze ASAP, before any file I/O
     try:
         zbrush_client.stop()
     except Exception:
         pass
 
-    # ── 4. Keep Local ─────────────────────────────────────────────────────────
+    # ── 4. Versioning (after export — temp path is safe to rename) ────────────
+    had_last = rename_last_to_versioned(dest_folder, base_name, next_ver) is not None
+    new_ver  = next_ver + 1 if had_last else next_ver
+    ver_str  = format_version(new_ver, DEFAULT_PADDING)
+
+    dest_name = f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
+    dest_path = dest_folder / dest_name
+
+    try:
+        temp_path.rename(dest_path)
+    except OSError as exc:
+        log.error("Failed to move temp export to LAST: %s", exc)
+        return {"ok": False, "error": f"File move failed: {exc}"}
+
+    # ── 5. Keep Local ─────────────────────────────────────────────────────────
     if keep_local and local_dir:
         local_path = Path(local_dir)
         if local_path.is_dir():
@@ -107,7 +119,7 @@ def publish_zbrush(
             except OSError as exc:
                 log.warning("Keep-local copy failed: %s", exc)
 
-    # ── 5. Logging ────────────────────────────────────────────────────────────
+    # ── 6. Logging ────────────────────────────────────────────────────────────
     try:
         append_log(
             folder_path=dest_folder,
