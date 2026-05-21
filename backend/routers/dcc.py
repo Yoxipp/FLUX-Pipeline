@@ -386,6 +386,48 @@ class MayaPublishRequest(BaseModel):
     user:         str | None = None
 
 
+@router.get("/maya/connect_cmd")
+async def maya_connect_cmd() -> dict:
+    """Return the Python command to paste in Maya's Script Editor to open commandPort."""
+    from pathlib import Path as _PL
+    backend = str(_PL(__file__).resolve().parent.parent)
+    cmd = (
+        f"import sys; sys.path.insert(0, r'{backend}'); "
+        f"import maya.cmds as cmds; "
+        f"cmds.commandPort(name=':7001', sourceType='python', noreturn=False); "
+        f"print('[FLUX] commandPort 7001 opened')"
+    )
+    return {"cmd": cmd, "backend": backend}
+
+
+@router.get("/maya/diag")
+async def maya_diag() -> dict:
+    """Diagnostic — reports autostart install state and what's actually in userSetup.py."""
+    from dcc.maya import autostart as _ma
+    loop = asyncio.get_event_loop()
+    startup = await loop.run_in_executor(None, lambda: _ma.get_startup_file())
+    installed = await loop.run_in_executor(None, lambda: _ma.is_installed())
+    snippet: str | None = None
+    if startup and startup.exists():
+        try:
+            content = startup.read_text(encoding="utf-8")
+            # Extract just the FLUX block for inspection
+            begin = "# >>> FLUX autostart"
+            end   = "# <<< FLUX autostart"
+            b = content.find(begin)
+            e = content.find(end, b)
+            if b >= 0 and e >= 0:
+                snippet = content[b : e + len(end)]
+        except OSError:
+            pass
+    return {
+        "startup_file": str(startup) if startup else None,
+        "file_exists": startup.exists() if startup else False,
+        "installed": installed,
+        "flux_block_snippet": snippet,
+    }
+
+
 @router.post("/maya/publish")
 async def maya_publish(req: MayaPublishRequest) -> dict:
     """Maya publish workflow.
@@ -432,16 +474,25 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     tmp_dir = await loop.run_in_executor(None, lambda: tempfile.mkdtemp(prefix="flux_maya_pub_"))
     tmp_path = str(tmp_dir).replace("\\", "/") + f"/{filename_with_ext}"
 
+    # Flux backend path — prepended to every Maya command so dcc.maya.* is importable
+    # even in sessions started before the autostart was installed.
+    from pathlib import Path as _PLib
+    _backend_root = str(_PLib(__file__).resolve().parent.parent)  # backend/
+
+    path_prefix = f"import sys; sys.path.insert(0, r'{_backend_root}')"
+
     # Build single-line command (semicolons) — Maya commandPort runs this in exec() context
     scope_fn = "export_scene" if req.scope == "scene" else "export_selection"
     if ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2:
         fs, fe = req.frame_range
         cmd = (
+            f"{path_prefix}; "
             f"from dcc.maya.maya_export import {scope_fn}; "
             f"{scope_fn}(r'{tmp_path}', '{ext}', frame_start={fs}, frame_end={fe})"
         )
     else:
         cmd = (
+            f"{path_prefix}; "
             f"from dcc.maya.maya_export import {scope_fn}; "
             f"{scope_fn}(r'{tmp_path}', '{ext}')"
         )

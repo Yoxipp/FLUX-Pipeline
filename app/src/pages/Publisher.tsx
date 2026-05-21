@@ -8,6 +8,31 @@ import { toast } from 'sonner'
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
+/** Click-to-copy monospaced command block. */
+function CopyBlock({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div
+      onClick={() => {
+        void navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }}
+      title="Cliquer pour copier"
+      style={{
+        fontFamily: 'var(--mono)', fontSize: 8,
+        color: copied ? 'var(--ok)' : 'var(--accent-hi)',
+        background: 'var(--bg-deep)', border: `1px solid ${copied ? 'var(--ok)' : 'var(--rule-2)'}`,
+        borderRadius: 4, padding: '5px 8px', cursor: 'pointer',
+        wordBreak: 'break-all', lineHeight: 1.6, userSelect: 'all',
+        transition: 'color 0.2s, border-color 0.2s',
+      }}
+    >
+      {copied ? '✓ Copié !' : text}
+    </div>
+  )
+}
+
 function formatToken(raw: string): string {
   return raw
     .normalize('NFD').replace(/\p{Mn}/gu, '')
@@ -381,8 +406,11 @@ export function Publisher() {
   const [detectedNodeType, setDetectedNodeType]   = useState<string | null>(null)
 
   // Maya-specific
-  const [mayaConnected, setMayaConnected] = useState(false)
-  const [mayaScope, setMayaScope]         = useState<'scene' | 'selection'>('selection')
+  const [mayaConnected, setMayaConnected]           = useState(false)
+  const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('selection')
+  const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
+  const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
+  const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
 
   // Projects
   useEffect(() => {
@@ -432,6 +460,19 @@ export function Publisher() {
       .catch(() => { if (!cancelled) setZbrushConnected(false) })
     return () => { cancelled = true }
   }, [dcc, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch the Maya connect command once on mount (backend path is stable)
+  useEffect(() => {
+    api.getMayaConnectCmd().then(r => setMayaConnectCmd(r.cmd)).catch(() => {})
+  }, [])
+
+  // Re-check autostart status whenever Maya panel is active — catches Sidebar install/uninstall
+  useEffect(() => {
+    if (dcc !== 'Maya') return
+    api.getDccAutostart('maya')
+      .then(r => { setMayaAutostartInstalled(r.installed); setMayaStartupFile(r.startup_file ?? null) })
+      .catch(() => { setMayaAutostartInstalled(false) })
+  }, [dcc])
 
   // Maya connection — poll every 3 s when Maya DCC is active (commandPort can open any time)
   useEffect(() => {
@@ -881,34 +922,94 @@ export function Publisher() {
               </div>
             ) : dcc === 'Maya' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+                {/* Connection dot */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{
                     width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
                     background: mayaConnected ? 'var(--ok)' : 'var(--err)',
+                    transition: 'background 0.3s',
                   }} />
-                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                    {mayaConnected ? 'Connecté — commandPort 7001' : 'Port 7001 injoignable'}
+                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: mayaConnected ? 'var(--ok)' : 'var(--ink-3)' }}>
+                    {mayaConnected ? '✓ Connecté — commandPort 7001' : 'Port 7001 injoignable'}
                   </div>
                 </div>
-                {!mayaConnected && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                      Dans Maya → Script Editor → Python, exécute :
+
+                {/* Step-by-step guide when not connected — only render once autostart state resolved */}
+                {!mayaConnected && mayaAutostartInstalled !== null && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+                    {/* Step 1 — Plug */}
+                    <div style={{
+                      display: 'flex', gap: 7, padding: '6px 8px', borderRadius: 5,
+                      background: mayaAutostartInstalled ? 'var(--paper-2)' : 'var(--accent-soft)',
+                      border: `1px solid ${mayaAutostartInstalled ? 'var(--rule-2)' : 'var(--accent)'}`,
+                    }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: mayaAutostartInstalled ? 'var(--ok)' : 'var(--accent)',
+                        fontSize: 8, fontWeight: 700, color: 'white',
+                      }}>
+                        {mayaAutostartInstalled ? '✓' : '1'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, color: mayaAutostartInstalled ? 'var(--ink-3)' : 'var(--accent-hi)' }}>
+                          {mayaAutostartInstalled ? 'Autostart installé' : 'Installer l\'autostart Maya'}
+                        </div>
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.4 }}>
+                          {mayaAutostartInstalled
+                            ? (mayaStartupFile ?? 'userSetup.py mis à jour')
+                            : 'Sidebar → bouton Plug ⬡ à côté de Maya'}
+                        </div>
+                      </div>
                     </div>
-                    <div
-                      onClick={() => navigator.clipboard.writeText("import maya.cmds as cmds; cmds.commandPort(name=':7001', sourceType='python', noreturn=False)")}
-                      title="Cliquer pour copier"
-                      style={{
-                        fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)',
+
+                    {/* Step 2 — Restart Maya */}
+                    {mayaAutostartInstalled && (
+                      <div style={{
+                        display: 'flex', gap: 7, padding: '6px 8px', borderRadius: 5,
                         background: 'var(--accent-soft)', border: '1px solid var(--accent)',
-                        borderRadius: 4, padding: '5px 8px', cursor: 'pointer', wordBreak: 'break-all',
-                      }}
-                    >
-                      {"import maya.cmds as cmds; cmds.commandPort(name=':7001', sourceType='python', noreturn=False)"}
-                    </div>
-                    <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                      ou redémarre Maya (autostart installé via Plug)
-                    </div>
+                      }}>
+                        <div style={{
+                          width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'var(--accent)', fontSize: 8, fontWeight: 700, color: 'white',
+                        }}>2</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--accent-hi)' }}>
+                            Redémarre Maya
+                          </div>
+                          <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.4 }}>
+                            Le commandPort s'ouvre automatiquement au démarrage
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Quick open — paste in Maya Script Editor */}
+                    {mayaConnectCmd && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          Ouvrir le port immédiatement — Maya Script Editor (Python) :
+                        </div>
+                        <CopyBlock text={mayaConnectCmd} />
+                      </div>
+                    )}
+
+                    {/* Diagnostic — check where Maya actually loads scripts from */}
+                    {mayaAutostartInstalled && mayaStartupFile && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          Si ça ne marche toujours pas — vérifie le chemin Maya (Script Editor Python) :
+                        </div>
+                        <CopyBlock text={`import maya.cmds as cmds; print(cmds.internalVar(userScriptDir=True))`} />
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.5 }}>
+                          Compare avec : <span style={{ color: 'var(--accent-hi)', wordBreak: 'break-all' }}>{mayaStartupFile.replace(/userSetup\.py$/i, '')}</span>
+                          <br />Si différent → le bloc est écrit au mauvais endroit.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

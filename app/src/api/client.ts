@@ -105,6 +105,9 @@ export const api = {
     apiCall<HoudiniPublishResult>('POST', '/dcc/houdini/publish', payload),
 
   // Maya
+  getMayaConnectCmd: () =>
+    apiCall<{ cmd: string; backend: string }>('GET', '/dcc/maya/connect_cmd'),
+
   publishMaya: (payload: {
     project_name: string
     filename:     string

@@ -1,23 +1,32 @@
 # autostart.py — FLUX Maya userSetup.py manager.
-# Installs / removes the FLUX autostart block in Maya's userSetup.py.
-# Works without Maya being open.
+# Installs / removes the FLUX autostart block in every Maya version's userSetup.py.
+#
+# Path resolution strategy (no hardcoding):
+#   1. Locate MAYA_APP_DIR:
+#        - $MAYA_APP_DIR env var (explicit override)
+#        - Windows : winreg Personal → Documents/maya
+#        - macOS   : ~/Library/Preferences/Autodesk/maya
+#        - Linux   : ~/maya
+#   2. Glob MAYA_APP_DIR/20*/scripts/userSetup.py  (all installed versions)
+#      + MAYA_APP_DIR/scripts/userSetup.py          (version-agnostic, loaded by all versions)
+#   3. Install/remove the FLUX block in EVERY discovered file.
+#
+# This mirrors the pattern used by tools like hconfig (Houdini) that query the filesystem
+# rather than hardcode paths — works on any machine regardless of Maya version.
 
 from __future__ import annotations
 
+import os
 import platform
 import re
-import shutil
 from pathlib import Path
 
-# Markers — never change these; they identify the FLUX block in userSetup.py.
+# ── Block markers — never change, they identify the FLUX block ────────────────
 _BLOCK_BEGIN = "# >>> FLUX autostart — do not edit manually"
 _BLOCK_END   = "# <<< FLUX autostart"
 
-# flux_bridge.py source (deployed next to userSetup.py)
-_BRIDGE_SRC = Path(__file__).parent / "startup" / "flux_bridge.py"
 
-
-# ── Prefs / startup file location ────────────────────────────────────────────
+# ── MAYA_APP_DIR resolution ───────────────────────────────────────────────────
 
 def _get_documents_dir() -> Path:
     """Return the real Windows Documents folder (handles GPO/OneDrive redirects)."""
@@ -36,164 +45,221 @@ def _get_documents_dir() -> Path:
         return Path.home() / "Documents"
 
 
-def _extract_version(maya_exe_path: str) -> str | None:
-    """Extract 4-digit Maya version from exe path, e.g. 'Maya 2024' → '2024'."""
-    m = re.search(r"[Mm]aya\D*(\d{4})", str(maya_exe_path))
-    return m.group(1) if m else None
+def _get_maya_app_dir() -> Path | None:
+    """Locate MAYA_APP_DIR using env var → OS default, without running Maya.
 
+    Equivalent to what `hconfig -j` does for Houdini.
+    Returns None if no maya prefs directory is found.
+    """
+    # Explicit override — highest priority
+    env = os.environ.get("MAYA_APP_DIR", "").strip()
+    if env:
+        candidate = Path(env)
+        if candidate.exists():
+            return candidate
 
-def _find_prefs_dir(maya_exe_path: str | None = None) -> Path | None:
-    """Locate Maya's per-user prefs directory without running Maya."""
     system = platform.system()
-    version = _extract_version(maya_exe_path) if maya_exe_path else None
-
     if system == "Windows":
-        docs = _get_documents_dir()
-        base = docs / "maya"
-        if version:
-            candidate = base / version
-            if candidate.exists():
-                return candidate
-        # Glob all maya/20xx versions, descending
-        try:
-            candidates = sorted(
-                [d for d in base.glob("20*") if d.is_dir()],
-                key=lambda d: d.name, reverse=True,
-            )
-            return candidates[0] if candidates else None
-        except OSError:
-            return None
-
+        base = _get_documents_dir() / "maya"
     elif system == "Darwin":
         base = Path.home() / "Library" / "Preferences" / "Autodesk" / "maya"
-        if version:
-            candidate = base / version
-            if candidate.exists():
-                return candidate
-        try:
-            candidates = sorted(
-                [d for d in base.glob("20*") if d.is_dir()],
-                key=lambda d: d.name, reverse=True,
-            )
-            return candidates[0] if candidates else None
-        except OSError:
-            return None
-
-    else:  # Linux
+    else:
         base = Path.home() / "maya"
-        if version:
-            candidate = base / version
-            if candidate.exists():
-                return candidate
-        try:
-            candidates = sorted(
-                [d for d in base.glob("20*") if d.is_dir()],
-                key=lambda d: d.name, reverse=True,
-            )
-            return candidates[0] if candidates else None
-        except OSError:
-            return None
+
+    return base if base.exists() else None
 
 
-def get_startup_file(maya_exe_path: str | None = None) -> Path | None:
-    """Return the userSetup.py path (may not exist yet). None if prefs dir not found."""
-    prefs = _find_prefs_dir(maya_exe_path)
-    return (prefs / "scripts" / "userSetup.py") if prefs else None
+def _discover_startup_files(maya_app_dir: Path) -> list[Path]:
+    """Return every userSetup.py path that Maya may execute on startup.
+
+    Includes:
+    - maya_app_dir/20*/scripts/userSetup.py  (one per installed version)
+    - maya_app_dir/scripts/userSetup.py      (version-agnostic, loaded by all)
+
+    Files do not need to exist yet — the list defines where we WILL write.
+    Missing parent directories are created by install().
+    """
+    targets: list[Path] = []
+
+    # All version-specific folders (e.g. 2022, 2024, 2026, ...)
+    try:
+        for ver_dir in sorted(maya_app_dir.glob("20*"), key=lambda d: d.name):
+            if ver_dir.is_dir():
+                targets.append(ver_dir / "scripts" / "userSetup.py")
+    except OSError:
+        pass
+
+    # Version-agnostic fallback (loaded by all versions as part of MAYA_SCRIPT_PATH)
+    targets.append(maya_app_dir / "scripts" / "userSetup.py")
+
+    return targets
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def is_installed(maya_exe_path: str | None = None) -> bool:
-    startup = get_startup_file(maya_exe_path)
-    if startup is None or not startup.exists():
-        return False
+def get_startup_file(maya_exe_path: str | None = None) -> Path | None:
+    """Return the primary userSetup.py path for display / status checks.
+
+    For backwards compatibility with the router (which expects a single path).
+    Returns the most-recently-modified version-specific file, or the version-agnostic
+    one as a fallback.
+    """
+    app_dir = _get_maya_app_dir()
+    if app_dir is None:
+        return None
+
+    # Prefer the most recent version folder that has a scripts/ directory
     try:
-        return _BLOCK_BEGIN in startup.read_text(encoding="utf-8")
+        ver_dirs = sorted(
+            [d for d in app_dir.glob("20*") if d.is_dir()],
+            key=lambda d: d.name, reverse=True,
+        )
+        for vd in ver_dirs:
+            scripts = vd / "scripts"
+            if scripts.is_dir():
+                return scripts / "userSetup.py"
     except OSError:
+        pass
+
+    return app_dir / "scripts" / "userSetup.py"
+
+
+def is_installed(maya_exe_path: str | None = None) -> bool:
+    """Return True when at least one discovered userSetup.py has a valid FLUX block.
+
+    A valid block must contain the direct commandPort call (not the old flux_bridge pattern).
+    """
+    app_dir = _get_maya_app_dir()
+    if app_dir is None:
         return False
+
+    for path in _discover_startup_files(app_dir):
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _BLOCK_BEGIN not in content:
+            continue
+        b_start = content.find(_BLOCK_BEGIN)
+        b_end   = content.find(_BLOCK_END, b_start)
+        fragment = content[b_start : b_end + len(_BLOCK_END)] if b_end > b_start else ""
+        if "commandPort" in fragment:
+            return True
+
+    return False
 
 
 def install(maya_exe_path: str | None = None) -> dict:
-    """Deploy flux_bridge.py and append/upgrade the FLUX block in userSetup.py.
+    """Write the FLUX autostart block into every Maya version's userSetup.py.
 
-    Idempotent — safe to call multiple times.
+    The block:
+      1. Opens commandPort 7001 via maya.cmds (zero external deps).
+      2. Adds the Flux backend dir to sys.path so Hub commands can import dcc.maya.*.
+
+    Idempotent — always writes the latest block, replacing any stale version.
+    Works for any Maya version found on the machine; no paths are hardcoded.
     Returns {"success": bool, "message": str, "path": str | None}
     """
-    startup = get_startup_file(maya_exe_path)
-    if startup is None:
-        return {"success": False, "message": "Maya prefs directory not found", "path": None}
+    app_dir = _get_maya_app_dir()
+    if app_dir is None:
+        return {"success": False, "message": "Maya prefs directory not found — launch Maya once to create it", "path": None}
 
-    scripts_dir = startup.parent
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-
-    # Deploy flux_bridge.py next to userSetup.py
-    try:
-        shutil.copy2(_BRIDGE_SRC, scripts_dir / "flux_bridge.py")
-    except Exception as exc:
-        return {"success": False, "message": f"Failed to deploy flux_bridge.py: {exc}", "path": None}
+    # Flux backend directory resolved at runtime (no hardcoding).
+    _flux_backend = str(Path(__file__).resolve().parent.parent.parent)
 
     _NEW_BLOCK = (
         f"{_BLOCK_BEGIN}\n"
         f"try:\n"
-        f"    import sys as _s, os as _o\n"
-        f"    _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__)))\n"
-        f"    import flux_bridge\n"
+        f"    import maya.cmds as _cmds\n"
+        f"    _cmds.commandPort(name=':7001', sourceType='python', noreturn=False)\n"
+        f"    print('[FLUX] commandPort 7001 opened')\n"
         f"except Exception as _e:\n"
-        f"    print(f'[FLUX] Autostart error (Maya continues normally): {{_e}}')\n"
+        f"    print(f'[FLUX] commandPort error: {{_e}}')\n"
+        f"try:\n"
+        f"    import sys as _s\n"
+        f"    if r'{_flux_backend}' not in _s.path:\n"
+        f"        _s.path.insert(0, r'{_flux_backend}')\n"
+        f"    print(f'[FLUX] backend path added: {_flux_backend}')\n"
+        f"except Exception as _e:\n"
+        f"    print(f'[FLUX] sys.path error: {{_e}}')\n"
         f"{_BLOCK_END}"
     )
 
-    existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
+    targets = _discover_startup_files(app_dir)
+    written: list[str] = []
+    errors:  list[str] = []
 
-    if _BLOCK_BEGIN in existing:
-        b_start = existing.find(_BLOCK_BEGIN)
-        b_end   = existing.find(_BLOCK_END, b_start)
-        old_fragment = existing[b_start : b_end + len(_BLOCK_END)] if b_end > b_start else ""
-        needs_upgrade = "try:" not in old_fragment or "flux_bridge" not in old_fragment
-        if needs_upgrade:
+    for startup in targets:
+        startup.parent.mkdir(parents=True, exist_ok=True)
+
+        existing = ""
+        if startup.exists():
             try:
-                startup.write_text(existing.replace(old_fragment, _NEW_BLOCK), encoding="utf-8")
+                existing = startup.read_text(encoding="utf-8")
             except OSError as exc:
-                return {"success": False, "message": f"Cannot upgrade userSetup.py: {exc}", "path": str(startup)}
-            return {"success": True, "message": f"upgraded: {startup}", "path": str(startup)}
-        return {"success": True, "message": "already_installed", "path": str(startup)}
+                errors.append(f"{startup.name}: read error — {exc}")
+                continue
 
-    block = f"\n{_NEW_BLOCK}\n"
-    try:
-        with open(startup, "a", encoding="utf-8") as fh:
-            fh.write(block)
-    except OSError as exc:
-        return {"success": False, "message": f"Cannot write userSetup.py: {exc}", "path": str(startup)}
+        if _BLOCK_BEGIN in existing:
+            b_start = existing.find(_BLOCK_BEGIN)
+            b_end   = existing.find(_BLOCK_END, b_start)
+            old_frag = existing[b_start : b_end + len(_BLOCK_END)] if b_end > b_start else ""
+            if old_frag == _NEW_BLOCK:
+                continue  # already up to date
+            try:
+                startup.write_text(existing.replace(old_frag, _NEW_BLOCK), encoding="utf-8")
+                written.append(str(startup))
+            except OSError as exc:
+                errors.append(f"{startup.name}: write error — {exc}")
+        else:
+            try:
+                with open(startup, "a", encoding="utf-8") as fh:
+                    fh.write(f"\n{_NEW_BLOCK}\n")
+                written.append(str(startup))
+            except OSError as exc:
+                errors.append(f"{startup.name}: write error — {exc}")
 
-    return {"success": True, "message": f"installed: {startup}", "path": str(startup)}
+    if errors and not written:
+        return {"success": False, "message": "; ".join(errors), "path": None}
+
+    primary = get_startup_file(maya_exe_path)
+    msg = f"installed in {len(written)} file(s)" if written else "already_installed"
+    return {"success": True, "message": msg, "path": str(primary) if primary else None}
 
 
 def uninstall(maya_exe_path: str | None = None) -> dict:
-    """Remove the FLUX autostart block from userSetup.py.
+    """Remove the FLUX autostart block from every Maya version's userSetup.py.
 
     Returns {"success": bool, "message": str}
     """
-    startup = get_startup_file(maya_exe_path)
-    if startup is None or not startup.exists():
+    app_dir = _get_maya_app_dir()
+    if app_dir is None:
         return {"success": True, "message": "not_installed"}
 
-    try:
-        content = startup.read_text(encoding="utf-8")
-    except OSError as exc:
-        return {"success": False, "message": f"Cannot read userSetup.py: {exc}"}
+    removed = 0
+    for path in _discover_startup_files(app_dir):
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _BLOCK_BEGIN not in content:
+            continue
+        cleaned = re.sub(
+            rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
+            "",
+            content,
+            flags=re.DOTALL,
+        )
+        try:
+            path.write_text(cleaned, encoding="utf-8")
+            removed += 1
+        except OSError:
+            pass
 
-    if _BLOCK_BEGIN not in content:
+    if removed == 0:
         return {"success": True, "message": "not_installed"}
-
-    cleaned = re.sub(
-        rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
-        "",
-        content,
-        flags=re.DOTALL,
-    )
-    try:
-        startup.write_text(cleaned, encoding="utf-8")
-    except OSError as exc:
-        return {"success": False, "message": f"Cannot write userSetup.py: {exc}"}
-
-    return {"success": True, "message": "uninstalled"}
+    return {"success": True, "message": f"uninstalled from {removed} file(s)"}
