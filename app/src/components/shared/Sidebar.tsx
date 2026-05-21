@@ -101,6 +101,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
   const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
+  const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
@@ -116,6 +117,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('zbrush').then(p => setZbrushServerOk(p.connected)).catch(() => setZbrushServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('maya').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, maya: r.installed }))
+      if (r.installed) {
+        api.pingDcc('maya').then(p => setMayaServerOk(p.connected)).catch(() => setMayaServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -126,6 +133,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.houdini])
+
+  // Poll Maya commandPort every 5 s when autostart is installed
+  useEffect(() => {
+    if (!autostartInstalled.maya) { setMayaServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('maya').then(p => setMayaServerOk(p.connected)).catch(() => setMayaServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.maya])
 
   // Poll ZBrush bridge when plugin is installed.
   // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
@@ -184,10 +200,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const _setServerOk = (key: string, value: boolean | null) => {
     if (key === 'houdini') setHoudiniServerOk(value)
     if (key === 'zbrush')  setZbrushServerOk(value)
+    if (key === 'maya')    setMayaServerOk(value)
   }
 
   const handleToggleAutostart = async (key: string) => {
-    if (key !== 'houdini' && key !== 'zbrush') return
+    if (key !== 'houdini' && key !== 'zbrush' && key !== 'maya') return
     setAutostartLoading(prev => new Set(prev).add(key))
     try {
       if (autostartInstalled[key]) {
@@ -271,12 +288,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const findOk         = findResult[s.key]
           const isHoudini      = s.key === 'houdini'
           const isZBrush       = s.key === 'zbrush'
-          const hasPlug        = isHoudini || isZBrush
+          const isMaya         = s.key === 'maya'
+          const hasPlug        = isHoudini || isZBrush || isMaya
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : null
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : null
           // ZBrush: freeze-based, server only responds during publish → always accent when installed
-          // Houdini: always-on server → red when installed but unreachable
+          // Houdini/Maya: always-on server → red when installed but unreachable
           const plugOk         = hasPlug && autoInstalled && (isZBrush || serverOk === true)
           const plugFailed     = hasPlug && autoInstalled && !isZBrush && serverOk === false
 
@@ -367,6 +385,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                    autoLoading ? '…' :
                    isHoudini
                      ? (autoInstalled ? 'Autostart installé — clic pour désinstaller' : "Installer l'autostart dans 123.py")
+                   : isMaya
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté — commandPort 7001 actif' : 'Autostart installé — clic pour désinstaller')
+                         : 'Installer flux_bridge dans userSetup.py')
                      : (autoInstalled
                          ? (serverOk === true ? 'Freeze actif — publication en cours' : 'Plugin installé — clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}

@@ -113,9 +113,32 @@ def execute_command(command: str) -> str | None:
     """Send a Python command string to Maya and return the response string.
 
     Must be called from the Hub (Python 3.13). Returns None on error.
+    Uses a fresh TCP connection so the call works even on first use.
     """
-    if not _HAS_SOCKET_MANAGER:
-        log.error("execute_command: socket_manager unavailable (PySide6 missing?)")
+    return send_command_direct(command)
+
+
+def send_command_direct(command: str, timeout: float = 60.0) -> str | None:
+    """Open a fresh TCP connection to Maya's commandPort, send *command*, return response.
+
+    Uses a dedicated socket (not the persistent socket_manager) so it:
+      - Works without a prior socket_manager.connect() call.
+      - Supports custom timeouts for long-running exports.
+      - Avoids socket state issues between calls.
+
+    Returns the response string on success, None on any error.
+    """
+    import socket as _sock_mod
+    try:
+        s = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(("127.0.0.1", MAYA_PORT))
+        s.sendall((command + "\n").encode("utf-8"))
+        response = s.recv(65536).decode("utf-8", errors="replace").strip()
+        s.close()
+        log.debug("Maya command OK (len=%d)", len(response))
+        return response
+    except OSError as exc:
+        log.error("send_command_direct failed: %s", exc)
         return None
-    return _socket_manager.send_command_safe("Maya", command)  # type: ignore[union-attr]
 

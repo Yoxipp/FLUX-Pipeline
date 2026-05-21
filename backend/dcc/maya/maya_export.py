@@ -44,12 +44,19 @@ def _normalise_ext(extension: str) -> str:
     return extension if extension.startswith(".") else f".{extension}"
 
 
-def _export_abc(file_path: Path, selection_only: bool) -> bool:
+def _export_abc(
+    file_path: Path,
+    selection_only: bool,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+) -> bool:
     if not _ensure_plugin("AbcExport"):
         return False
     flags = "-writeVisibility -uvWrite"
     if selection_only:
         flags += " -selection"
+    if frame_start is not None and frame_end is not None:
+        flags += f" -frameRange {frame_start} {frame_end}"
     path_fwd = str(file_path).replace("\\", "/")
     try:
         cmds.AbcExport(j=f"{flags} -file {path_fwd}")  # type: ignore[union-attr]
@@ -59,12 +66,38 @@ def _export_abc(file_path: Path, selection_only: bool) -> bool:
         return False
 
 
+def _export_usd(file_path: Path, selection_only: bool) -> bool:
+    if not _ensure_plugin("mayaUsdExport"):
+        return False
+    path_fwd = str(file_path).replace("\\", "/")
+    kwargs: dict = {
+        "file":              path_fwd,
+        "defaultMeshScheme": "none",
+        "exportUVs":         1,
+        "exportSkels":       "none",
+    }
+    if selection_only:
+        kwargs["selection"] = True
+    try:
+        cmds.mayaUSDExport(**kwargs)  # type: ignore[union-attr]
+        return True
+    except Exception as exc:
+        log.error("USD export failed: %s", exc)
+        return False
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
-def export_selection(file_path: str | Path, extension: str) -> Path | None:
+def export_selection(
+    file_path: str | Path,
+    extension: str,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+) -> Path | None:
     """Export the current Maya selection to *file_path*.
 
-    Supported extensions: .mb .ma .abc .fbx .obj
+    Supported extensions: .mb .ma .abc .fbx .obj .usd
+    frame_start/frame_end only apply to .abc (animated geo).
     Returns the exported path on success, None on failure.
     """
     if not _IN_MAYA:
@@ -77,7 +110,10 @@ def export_selection(file_path: str | Path, extension: str) -> Path | None:
 
     try:
         if ext == ".abc":
-            return out if _export_abc(out, selection_only=True) else None
+            return out if _export_abc(out, selection_only=True, frame_start=frame_start, frame_end=frame_end) else None
+
+        if ext == ".usd":
+            return out if _export_usd(out, selection_only=True) else None
 
         if ext == ".fbx":
             _ensure_plugin("fbxmaya")
@@ -95,10 +131,16 @@ def export_selection(file_path: str | Path, extension: str) -> Path | None:
         return None
 
 
-def export_scene(file_path: str | Path, extension: str) -> Path | None:
+def export_scene(
+    file_path: str | Path,
+    extension: str,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+) -> Path | None:
     """Export the entire Maya scene to *file_path*.
 
-    Supported extensions: .mb .ma .abc .fbx .obj
+    Supported extensions: .mb .ma .abc .fbx .obj .usd
+    frame_start/frame_end only apply to .abc (animated geo).
     Returns the exported path on success, None on failure.
     """
     if not _IN_MAYA:
@@ -111,7 +153,10 @@ def export_scene(file_path: str | Path, extension: str) -> Path | None:
 
     try:
         if ext == ".abc":
-            return out if _export_abc(out, selection_only=False) else None
+            return out if _export_abc(out, selection_only=False, frame_start=frame_start, frame_end=frame_end) else None
+
+        if ext == ".usd":
+            return out if _export_usd(out, selection_only=False) else None
 
         if ext == ".fbx":
             _ensure_plugin("fbxmaya")

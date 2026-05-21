@@ -12,12 +12,14 @@ from core.constants import DCC_COLORS, DCC_PORTS
 from core.logger import get_logger
 from core.socket_manager import socket_manager
 from dcc.houdini import autostart as _houdini_autostart
+from dcc.maya    import autostart as _maya_autostart
 from dcc.zbrush  import autostart as _zbrush_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 
 # Maps dcc_key (lowercase) → autostart module. Extend here when adding new DCCs.
 _AUTOSTART_MODULES: dict = {
     "houdini": _houdini_autostart,
+    "maya":    _maya_autostart,
     "zbrush":  _zbrush_autostart,
 }
 
@@ -153,6 +155,11 @@ async def ping_dcc(dcc_key: str) -> dict:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, zbrush_client.ping)
         return {"connected": result.get("ok", False), "version": result.get("version")}
+    if dcc_key == "maya":
+        from dcc.maya.maya_connection import is_server_running
+        loop = asyncio.get_event_loop()
+        ok = await loop.run_in_executor(None, is_server_running)
+        return {"connected": ok, "version": None}
     raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
 
 
@@ -363,6 +370,111 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
     return result
+
+
+# ── Maya endpoints ───────────────────────────────────────────────────────────
+
+
+class MayaPublishRequest(BaseModel):
+    project_name: str
+    filename:     str               # base name without version/ext, e.g. "CHAR_RIG_HorseBody_adam"
+    extension:    str               # e.g. ".abc"
+    scope:        str = "scene"    # "scene" | "selection"
+    is_sequence:  bool = False
+    frame_range:  list[int] | None = None   # [start, end]
+    description:  str = ""
+    user:         str | None = None
+
+
+@router.post("/maya/publish")
+async def maya_publish(req: MayaPublishRequest) -> dict:
+    """Maya publish workflow.
+
+    Resolves the pipeline path from tokens, sends an export command to Maya
+    (which writes the file to a temp location), then archives the previous version.
+    For .abc with is_sequence, passes frame_range to AbcExport.
+    """
+    import shutil
+    import tempfile
+
+    import os
+
+    from core import config
+    from core.paths import get_project_path
+    from dcc.maya.maya_connection import send_command_direct
+    from features.folder_manager.naming_validator import format_version, get_base_name
+    from features.publisher.publish_core import publish_file, resolve_publish_path
+    from features.publisher.version_resolver import get_last_file, get_next_version
+
+    user = req.user or config.get_current_user() or "unknown"
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    ext = req.extension if req.extension.startswith(".") else f".{req.extension}"
+    filename_with_ext = f"{req.filename}{ext}"
+
+    # Pre-flight: compute the version number that will be assigned after publish
+    loop = asyncio.get_event_loop()
+    dest_folder = await loop.run_in_executor(
+        None, lambda: resolve_publish_path(project_path, filename_with_ext)
+    )
+    if dest_folder is not None:
+        base_name = get_base_name(filename_with_ext)
+        next_ver  = await loop.run_in_executor(None, lambda: get_next_version(dest_folder, base_name))
+        had_last  = await loop.run_in_executor(None, lambda: get_last_file(dest_folder, base_name)) is not None
+        new_ver   = next_ver + 1 if had_last else next_ver
+        version_str = format_version(new_ver)
+    else:
+        version_str = "001"
+
+    # Build temp export path
+    tmp_dir = await loop.run_in_executor(None, lambda: tempfile.mkdtemp(prefix="flux_maya_pub_"))
+    tmp_path = str(tmp_dir).replace("\\", "/") + f"/{filename_with_ext}"
+
+    # Build single-line command (semicolons) — Maya commandPort runs this in exec() context
+    scope_fn = "export_scene" if req.scope == "scene" else "export_selection"
+    if ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2:
+        fs, fe = req.frame_range
+        cmd = (
+            f"from dcc.maya.maya_export import {scope_fn}; "
+            f"{scope_fn}(r'{tmp_path}', '{ext}', frame_start={fs}, frame_end={fe})"
+        )
+    else:
+        cmd = (
+            f"from dcc.maya.maya_export import {scope_fn}; "
+            f"{scope_fn}(r'{tmp_path}', '{ext}')"
+        )
+
+    # Timeout: 30s for static exports, 600s for animated ABC (100 frames can be slow)
+    export_timeout = 600.0 if (ext == ".abc" and req.is_sequence) else 120.0
+
+    try:
+        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=export_timeout))
+        if result is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Maya ne répond pas sur le port 7001. "
+                    "Assure-toi que le commandPort est ouvert : dans Maya > Script Editor, "
+                    "exécute cmds.commandPort(name=':7001', sourceType='python', noreturn=False)"
+                ),
+            )
+
+        if not os.path.exists(tmp_path):
+            raise HTTPException(status_code=503, detail=f"Export Maya échoué — fichier absent : {tmp_path}")
+
+        from pathlib import Path as _Path
+        pub_result = await loop.run_in_executor(
+            None,
+            lambda: publish_file(_Path(tmp_path), project_path, req.description, user, req.project_name),
+        )
+        if pub_result is None:
+            raise HTTPException(status_code=500, detail="publish_core a échoué")
+
+        return {"ok": True, "version_str": version_str, "dest": str(pub_result)}
+    finally:
+        await loop.run_in_executor(None, lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
 
 
 # ── ZBrush endpoints ──────────────────────────────────────────────────────────

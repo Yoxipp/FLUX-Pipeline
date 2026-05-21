@@ -104,6 +104,19 @@ export const api = {
   publishHoudiniRop: (payload: HoudiniPublishPayload) =>
     apiCall<HoudiniPublishResult>('POST', '/dcc/houdini/publish', payload),
 
+  // Maya
+  publishMaya: (payload: {
+    project_name: string
+    filename:     string
+    extension:    string
+    scope?:       string
+    is_sequence?: boolean
+    frame_range?: [number, number]
+    description?: string
+    user?:        string
+  }) =>
+    apiCall<{ ok: boolean; version_str: string; dest: string }>('POST', '/dcc/maya/publish', payload),
+
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>
     apiCall<ZBrushPublishResult>('POST', '/dcc/zbrush/publish', payload),

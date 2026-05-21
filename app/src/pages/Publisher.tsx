@@ -69,10 +69,12 @@ function resolveNodeExt(rawType: string): string | undefined {
 const EXPORT_FORMATS         = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx', '.mb', '.ma']
 const ZBRUSH_EXPORT_FORMATS  = ['.ztl', '.obj', '.fbx']
 const HOUDINI_EXPORT_FORMATS = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx']
+const MAYA_EXPORT_FORMATS    = ['.abc', '.fbx', '.obj', '.usd', '.mb', '.ma']
 
 function formatsForDcc(dcc: string): string[] {
   if (dcc === 'ZBrush')  return ZBRUSH_EXPORT_FORMATS
   if (dcc === 'Houdini') return HOUDINI_EXPORT_FORMATS
+  if (dcc === 'Maya')    return MAYA_EXPORT_FORMATS
   return EXPORT_FORMATS
 }
 
@@ -378,6 +380,10 @@ export function Publisher() {
   const [houdiniVersion, setHoudiniVersion]       = useState<string | null>(null)
   const [detectedNodeType, setDetectedNodeType]   = useState<string | null>(null)
 
+  // Maya-specific
+  const [mayaConnected, setMayaConnected] = useState(false)
+  const [mayaScope, setMayaScope]         = useState<'scene' | 'selection'>('selection')
+
   // Projects
   useEffect(() => {
     api.getProjects()
@@ -426,6 +432,23 @@ export function Publisher() {
       .catch(() => { if (!cancelled) setZbrushConnected(false) })
     return () => { cancelled = true }
   }, [dcc, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Maya connection — poll every 3 s when Maya DCC is active (commandPort can open any time)
+  useEffect(() => {
+    if (dcc !== 'Maya') { setMayaConnected(false); return }
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const p = await api.pingDcc('maya')
+        if (!cancelled) setMayaConnected(p.connected)
+      } catch {
+        if (!cancelled) setMayaConnected(false)
+      }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dcc])
 
   // Reset exportExt when switching DCC if current format isn't in the new list
   useEffect(() => {
@@ -598,7 +621,24 @@ export function Publisher() {
     try {
       await createNewTokens()
 
-      if (dcc === 'Houdini') {
+      if (dcc === 'Maya') {
+        if (!mayaConnected) {
+          toast.error('Maya non connecté — ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
+          return
+        }
+        const isAnimAbc = isSequence && exportExt === '.abc'
+        const res = await api.publishMaya({
+          project_name: project,
+          filename,
+          extension:    exportExt,
+          scope:        mayaScope,
+          is_sequence:  isAnimAbc,
+          frame_range:  isAnimAbc ? [frameStart, frameEnd] : undefined,
+          description:  description || undefined,
+          user:         settings?.username ?? undefined,
+        })
+        toast.success(`v${res.version_str} → Maya`)
+      } else if (dcc === 'Houdini') {
         const res = await api.publishHoudiniRop({
           project_name:  project,
           filename,
@@ -659,6 +699,7 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
     zbrushConnected, zbObjOptions, zbFbxOptions, keepLocal, localDir,
+    mayaConnected, mayaScope,
   ])
 
   const filename = buildFilename()
@@ -834,6 +875,39 @@ export function Publisher() {
                           </label>
                         ))}
                       </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : dcc === 'Maya' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{
+                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                    background: mayaConnected ? 'var(--ok)' : 'var(--err)',
+                  }} />
+                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                    {mayaConnected ? 'Connecté — commandPort 7001' : 'Port 7001 injoignable'}
+                  </div>
+                </div>
+                {!mayaConnected && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                      Dans Maya → Script Editor → Python, exécute :
+                    </div>
+                    <div
+                      onClick={() => navigator.clipboard.writeText("import maya.cmds as cmds; cmds.commandPort(name=':7001', sourceType='python', noreturn=False)")}
+                      title="Cliquer pour copier"
+                      style={{
+                        fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)',
+                        background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+                        borderRadius: 4, padding: '5px 8px', cursor: 'pointer', wordBreak: 'break-all',
+                      }}
+                    >
+                      {"import maya.cmds as cmds; cmds.commandPort(name=':7001', sourceType='python', noreturn=False)"}
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                      ou redémarre Maya (autostart installé via Plug)
                     </div>
                   </div>
                 )}
@@ -1017,8 +1091,8 @@ export function Publisher() {
             </div>
           </div>
 
-          {/* SÉQUENCE ANIMÉE — not available for ZBrush */}
-          <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: dcc === 'ZBrush' ? 0.35 : 1, pointerEvents: dcc === 'ZBrush' ? 'none' : undefined }}>
+          {/* SÉQUENCE ANIMÉE — ZBrush: never; Maya: .abc only; Houdini: always */}
+          <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 0.35 : 1, pointerEvents: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 'none' : undefined }}>
             <SecTitle>SÉQUENCE ANIMÉE</SecTitle>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSequence ? 10 : 0 }}>
               <div onClick={() => setIsSequence(v => !v)} style={{
@@ -1051,6 +1125,29 @@ export function Publisher() {
               </div>
             )}
           </div>
+
+          {/* SCOPE — Maya only */}
+          {dcc === 'Maya' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>SCOPE</SecTitle>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {(['selection', 'scene'] as const).map(s => (
+                  <div
+                    key={s}
+                    onClick={() => setMayaScope(s)}
+                    style={{
+                      padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: mayaScope === s ? 600 : 400,
+                      border: mayaScope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                      background: mayaScope === s ? 'var(--accent-soft)' : 'var(--paper-2)',
+                      color: mayaScope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
+                      transition: 'all 0.1s',
+                    }}
+                  >{s}</div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* APERÇU OUTPUT */}
           <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
