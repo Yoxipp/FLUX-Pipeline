@@ -37,20 +37,16 @@ except ImportError:
 # ── Maya-side functions ───────────────────────────────────────────────────────
 
 def start_server(port: int = MAYA_PORT) -> bool:
-    """Open Maya commandPort on *port*. Must be called from inside Maya."""
+    """Open Maya commandPort on *port*. Must be called from inside Maya (ideally via executeDeferred)."""
     if not _IN_MAYA:
         log.error("start_server: not running inside Maya")
         return False
     try:
-        _cmds.commandPort(name=f":{port}", sourceType="python", noreturn=False)
+        port_str = f":{port}"
+        if not _cmds.commandPort(port_str, query=True):
+            _cmds.commandPort(name=port_str, sourceType="python", noreturn=False)
         log.info("Maya commandPort open on port %d", port)
         return True
-    except RuntimeError as exc:
-        if "already" in str(exc).lower():
-            log.debug("commandPort already open on port %d", port)
-            return True
-        log.error("start_server failed: %s", exc)
-        return False
     except Exception as exc:
         log.error("start_server failed: %s", exc)
         return False

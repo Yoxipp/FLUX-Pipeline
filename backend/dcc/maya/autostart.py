@@ -155,8 +155,9 @@ def install(maya_exe_path: str | None = None) -> dict:
     """Write the FLUX autostart block into every Maya version's userSetup.py.
 
     The block:
-      1. Opens commandPort 7001 via maya.cmds (zero external deps).
-      2. Adds the Flux backend dir to sys.path so Hub commands can import dcc.maya.*.
+      1. Adds the Flux backend dir to sys.path (synchronously — no Maya cmds needed).
+      2. Opens commandPort via executeDeferred so Maya is fully initialised first.
+         Uses commandPort(query=True) to avoid double-bind on repeated startups.
 
     Idempotent — always writes the latest block, replacing any stale version.
     Works for any Maya version found on the machine; no paths are hardcoded.
@@ -169,21 +170,31 @@ def install(maya_exe_path: str | None = None) -> dict:
     # Flux backend directory resolved at runtime (no hardcoding).
     _flux_backend = str(Path(__file__).resolve().parent.parent.parent)
 
+    # Port resolved from constants — reinstalling picks up any change automatically.
+    try:
+        from core.constants import DCC_PORTS
+        _maya_port = DCC_PORTS.get("Maya", 7001)
+    except ImportError:
+        _maya_port = 7001
+
     _NEW_BLOCK = (
         f"{_BLOCK_BEGIN}\n"
         f"try:\n"
-        f"    import maya.cmds as _cmds\n"
-        f"    _cmds.commandPort(name=':7001', sourceType='python', noreturn=False)\n"
-        f"    print('[FLUX] commandPort 7001 opened')\n"
-        f"except Exception as _e:\n"
-        f"    print(f'[FLUX] commandPort error: {{_e}}')\n"
-        f"try:\n"
-        f"    import sys as _s\n"
+        f"    import sys as _s, maya.utils as _mu\n"
         f"    if r'{_flux_backend}' not in _s.path:\n"
         f"        _s.path.insert(0, r'{_flux_backend}')\n"
-        f"    print(f'[FLUX] backend path added: {_flux_backend}')\n"
+        f"    def _flux_open_port():\n"
+        f"        try:\n"
+        f"            import maya.cmds as _c\n"
+        f"            _p = ':{_maya_port}'\n"
+        f"            if not _c.commandPort(_p, query=True):\n"
+        f"                _c.commandPort(name=_p, sourceType='python', noreturn=False)\n"
+        f"            print('[FLUX] commandPort {_maya_port} opened')\n"
+        f"        except Exception as _e:\n"
+        f"            print(f'[FLUX] commandPort error: {{_e}}')\n"
+        f"    _mu.executeDeferred(_flux_open_port)\n"
         f"except Exception as _e:\n"
-        f"    print(f'[FLUX] sys.path error: {{_e}}')\n"
+        f"    print(f'[FLUX] autostart error: {{_e}}')\n"
         f"{_BLOCK_END}"
     )
 
