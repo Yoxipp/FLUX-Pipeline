@@ -428,6 +428,57 @@ async def maya_diag() -> dict:
     }
 
 
+class MayaImportRequest(BaseModel):
+    project_name: str
+    rel_path: str  # project-relative path, e.g. "CHAR/RIG/HorseBody/adam/HorseBody_adam.fbx"
+
+
+_MAYA_IMPORT_EXTS = {".obj", ".fbx", ".ma", ".mb", ".abc"}
+
+
+@router.post("/maya/import")
+async def maya_import_file(req: MayaImportRequest) -> dict:
+    """Import a file into the current Maya scene via commandPort.
+
+    Resolves the absolute path from project_name + rel_path, then sends
+    import_file() to Maya. Supports .obj .fbx .ma .mb .abc (Alembic cache).
+    """
+    from pathlib import Path as _PLib
+    from core.paths import get_project_path
+    from dcc.maya.maya_connection import send_command_direct
+
+    ext = _PLib(req.rel_path).suffix.lower()
+    if ext not in _MAYA_IMPORT_EXTS:
+        raise HTTPException(status_code=400, detail=f"Format non supporté pour l'import Maya : {ext}")
+
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    file_path = project_path / req.rel_path.replace("/", "\\")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Fichier introuvable : {file_path}")
+
+    _backend_root = str(_PLib(__file__).resolve().parent.parent)
+    fp_fwd = str(file_path).replace("\\", "/")
+    cmd = (
+        f"import sys; sys.path.insert(0, r'{_backend_root}'); "
+        f"from dcc.maya.maya_import import import_file; "
+        f"import_file(r'{fp_fwd}')"
+    )
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0))
+
+    if result is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Maya ne répond pas. Assure-toi que Maya est ouvert et le commandPort actif.",
+        )
+
+    return {"ok": True, "file": fp_fwd}
+
+
 @router.post("/maya/publish")
 async def maya_publish(req: MayaPublishRequest) -> dict:
     """Maya publish workflow.

@@ -727,7 +727,7 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onOpenInHoudini, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onOpenInHoudini, onOpenInMaya, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -740,6 +740,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
   onMove:           () => void
   onDelete:         () => void
   onOpenInHoudini?: () => void
+  onOpenInMaya?:    () => void
   onClose:          () => void
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -799,7 +800,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
           {row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
         </>
       )}
-      {onOpenInHoudini && (
+      {(onOpenInHoudini || onOpenInMaya) && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           <div
@@ -824,18 +825,34 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
                 borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 140,
                 overflow: 'hidden', paddingBlock: 4, zIndex: 1001,
               }}>
-                <div
-                  onClick={() => { onOpenInHoudini(); onClose() }}
-                  style={{
-                    padding: '6px 12px', fontSize: 11, cursor: 'pointer',
-                    color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
-                    transition: 'background 0.06s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  Houdini
-                </div>
+                {onOpenInHoudini && (
+                  <div
+                    onClick={() => { onOpenInHoudini(); onClose() }}
+                    style={{
+                      padding: '6px 12px', fontSize: 11, cursor: 'pointer',
+                      color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
+                      transition: 'background 0.06s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    Houdini
+                  </div>
+                )}
+                {onOpenInMaya && (
+                  <div
+                    onClick={() => { onOpenInMaya(); onClose() }}
+                    style={{
+                      padding: '6px 12px', fontSize: 11, cursor: 'pointer',
+                      color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
+                      transition: 'background 0.06s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    Maya
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1437,6 +1454,14 @@ export function Projects() {
     })
   }, [nav])
 
+  const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc'])
+
+  const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    await api.importFileInMaya(nav.project, rel_path)
+  }, [nav])
+
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
     for (const item of targets) {
@@ -1845,6 +1870,14 @@ export function Projects() {
           onOpenInHoudini={nav.kind === 'inside' && ctxMenu.items.length === 1
             ? () => void handleOpenInHoudini(ctxMenu.items[0])
             : undefined}
+          onOpenInMaya={
+            nav.kind === 'inside' &&
+            ctxMenu.items.length === 1 &&
+            !ctxMenu.items[0].isDir &&
+            MAYA_IMPORT_EXTS.has('.' + (ctxMenu.items[0].name.split('.').pop() ?? '').toLowerCase())
+              ? () => void handleOpenInMaya(ctxMenu.items[0])
+              : undefined
+          }
           onClose={() => setCtxMenu(null)}
         />
       )}

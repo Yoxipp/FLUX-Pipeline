@@ -108,6 +108,9 @@ export const api = {
   getMayaConnectCmd: () =>
     apiCall<{ cmd: string; backend: string }>('GET', '/dcc/maya/connect_cmd'),
 
+  importFileInMaya: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path }),
+
   publishMaya: (payload: {
     project_name: string
     filename:     string
