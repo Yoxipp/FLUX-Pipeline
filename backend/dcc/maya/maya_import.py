@@ -55,8 +55,18 @@ def import_file(file_path: str | Path) -> list[str] | None:
         if ext == ".abc":
             if not _ensure_plugin("AbcImport"):
                 return None
-            result = cmds.AbcImport(str(src).replace("\\", "/"), mode="import")  # type: ignore[union-attr]
-            nodes = [result] if isinstance(result, str) else (result or [])
+            path_fwd = str(src).replace("\\", "/")
+            # cmds.file with type="Alembic" uses the registered file translator,
+            # the same path as File > Import in Maya. Both mel.eval('AbcImport ...')
+            # and cmds.AbcImport() reported empty groups because they share the same
+            # underlying MEL command; cmds.file goes through a different code path.
+            nodes: list[str] = cmds.file(  # type: ignore[union-attr]
+                path_fwd,
+                i=True,
+                type="Alembic",
+                ignoreVersion=True,
+                returnNewNodes=True,
+            ) or []
             log.info("Imported (ABC) %s → %d nodes", src.name, len(nodes))
             return nodes
 

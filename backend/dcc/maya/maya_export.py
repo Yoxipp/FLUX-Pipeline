@@ -50,16 +50,43 @@ def _export_abc(
     frame_start: int | None = None,
     frame_end: int | None = None,
 ) -> bool:
+    """Export to Alembic matching 'Cache > Alembic Cache > Export {All|Selection} to Alembic'.
+
+    Explicit -root flags are required — AbcExport silently writes an empty file when
+    no roots are given on several Maya versions (confirmed via SO/44573304).
+    cmds.AbcExport(j=...) is used (Python binding) to avoid nested MEL string quoting.
+    """
     if not _ensure_plugin("AbcExport"):
         return False
-    flags = "-writeVisibility -uvWrite"
-    if selection_only:
-        flags += " -selection"
-    if frame_start is not None and frame_end is not None:
-        flags += f" -frameRange {frame_start} {frame_end}"
+
     path_fwd = str(file_path).replace("\\", "/")
+
+    # AbcExport needs shape nodes as -root, not transforms.
+    # Passing transforms silently produces empty Alembic files on several Maya versions.
+    if selection_only:
+        sel: list[str] = cmds.ls(sl=True, long=True) or []  # type: ignore[union-attr]
+        # User typically selects transforms; traverse to find all mesh shapes underneath.
+        descendants: list[str] = cmds.listRelatives(sel, allDescendents=True, fullPath=True) or []  # type: ignore[union-attr]
+        shapes: list[str] = cmds.ls(sel + descendants, type="mesh", long=True, noIntermediate=True) or []  # type: ignore[union-attr]
+    else:
+        # All mesh shapes in the scene (equivalent to "Export All")
+        shapes = cmds.ls(type="mesh", long=True, noIntermediate=True) or []  # type: ignore[union-attr]
+
+    if not shapes:
+        log.warning("ABC export: no mesh shapes found (selection_only=%s)", selection_only)
+        return False
+
+    job_parts: list[str] = []
+    if frame_start is not None and frame_end is not None:
+        job_parts.append(f"-frameRange {frame_start} {frame_end}")
+    job_parts += ["-uvWrite", "-worldSpace", "-writeVisibility", "-dataFormat ogawa"]
+    for shape in shapes:
+        job_parts.append(f"-root {shape}")
+    job_parts.append(f'-file "{path_fwd}"')
+
     try:
-        cmds.AbcExport(j=f"{flags} -file {path_fwd}")  # type: ignore[union-attr]
+        cmds.AbcExport(j=" ".join(job_parts))  # type: ignore[union-attr]
+        log.info("Exported (ABC) %d shapes → %s", len(shapes), file_path.name)
         return True
     except Exception as exc:
         log.error("ABC export failed: %s", exc)

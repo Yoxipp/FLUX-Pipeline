@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
 import { useLocation } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Search,
@@ -1459,7 +1460,15 @@ export function Projects() {
   const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
-    await api.importFileInMaya(nav.project, rel_path)
+    try {
+      await api.importFileInMaya(nav.project, rel_path)
+      toast.success(`${item.name} importé dans Maya`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      toast.error(msg.includes('répond pas')
+        ? 'Maya non connecté — ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
+        : `Import Maya échoué — ${msg}`)
+    }
   }, [nav])
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
