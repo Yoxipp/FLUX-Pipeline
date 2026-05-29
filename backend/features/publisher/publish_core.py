@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING, DEFAULT_TYPE_TOKENS
+from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.activity.activity_writer import log_publish
@@ -25,8 +25,8 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     """Return the destination folder for *filename* inside *project_path*.
 
     Asset:  project/<NAME_path>/<type_sub>/<instance>/
-            type_sub comes from DEFAULT_TYPE_TOKENS (e.g. SCULPT → model/sculpt)
-            or falls back to TYPE.lower() for unknown types.
+            type_sub comes from tokens["TYPE"] (defaults + project custom entries),
+            falls back to TYPE.lower() for unknown types.
     Shot:   project/<CLASS_template{seq=SEQ, shot=SHOT}>/<instance>/
     Returns None if *filename* is unparseable or required tokens are missing.
     """
@@ -61,7 +61,7 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
             return None
         name_rel = f"{class_rel}/{parsed['NAME']}"
 
-    type_sub = DEFAULT_TYPE_TOKENS.get(parsed["TYPE"], parsed["TYPE"].lower())
+    type_sub = tokens.get("TYPE", {}).get(parsed["TYPE"]) or parsed["TYPE"].lower()
     return project_path / name_rel / type_sub / instance
 
 

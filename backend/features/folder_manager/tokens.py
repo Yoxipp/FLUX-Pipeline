@@ -104,7 +104,7 @@ def add_token(
 ) -> bool:
     """Add or update a single token entry in tokens.json.
 
-    *token_type* : one of CLASS / TYPE / NAME / SEQ / SHOT / custom
+    *token_type* : one of CLASS / TYPE / NAME / INSTANCE / SEQ / SHOT / custom
     *rel_path*   : forward-slash relative path from the project root
     Returns True on success.
     """

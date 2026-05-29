@@ -174,7 +174,7 @@ function PublishComposer({
   const MODULES: Mod[] = mode === 'asset'
     ? [
         { key: 'class',    label: 'CLASS',    opts: assetClasses, allowNew: false },
-        { key: 'type',     label: 'TYPE',     opts: typeKeys,     allowNew: true  },
+        { key: 'type',     label: 'TYPE',     opts: typeKeys,     allowNew: false },
         { key: 'name',     label: 'NAME',     opts: nameKeys,     allowNew: true  },
         { key: 'instance', label: 'INSTANCE', opts: instanceKeys, allowNew: true  },
       ]
@@ -615,12 +615,8 @@ export function Publisher() {
       return
     }
     // asset mode
-    const newType = newMode.type     ? formatToken(newVals.type     || '') : ''
     const newName = newMode.name     ? formatToken(newVals.name     || '') : ''
     const newInst = newMode.instance ? formatToken(newVals.instance || '') : ''
-    if (newType) {
-      await api.addToken({ project, token_type: 'TYPE', token_value: newType, rel_path: newType.toLowerCase() })
-    }
     if (newName && sel.class) {
       try { await api.createAsset(project, sel.class, newName) } catch { /* may already exist */ }
     }

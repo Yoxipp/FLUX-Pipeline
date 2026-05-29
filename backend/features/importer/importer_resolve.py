@@ -10,7 +10,7 @@ import re
 import time
 from pathlib import Path
 
-from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_INSTANCE, DEFAULT_TYPE_TOKENS
+from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_INSTANCE
 from core.logger import get_logger
 from core.paths import get_projects_dir
 from features.folder_manager.naming_validator import build_asset_filename
@@ -229,7 +229,8 @@ def path_to_tokens(project_path: Path, rel_parts: list[str]) -> dict:
     }
 
     # Reverse-map TYPE subpaths: "model/sculpt" → "SCULPT", "rig/rig" → "RIG", …
-    type_by_subpath: dict[str, str] = {v: k for k, v in DEFAULT_TYPE_TOKENS.items()}
+    # tokens["TYPE"] already contains DEFAULT_TYPE_TOKENS merged with any custom entries.
+    type_by_subpath: dict[str, str] = {v: k for k, v in tokens.get("TYPE", {}).items()}
 
     result = {"CLASS": "", "TYPE": "", "NAME": "", "INSTANCE": ""}
     if not rel_parts:
