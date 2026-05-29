@@ -728,7 +728,7 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onOpenInHoudini, onOpenInMaya, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onCopyPath, onOpenInHoudini, onOpenInMaya, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -740,6 +740,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
   onRename:         () => void
   onMove:           () => void
   onDelete:         () => void
+  onCopyPath?:      () => void
   onOpenInHoudini?: () => void
   onOpenInMaya?:    () => void
   onClose:          () => void
@@ -793,6 +794,12 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
         isArchived ? 'Désarchiver' : 'Archiver',
         false,
         () => { onArchive(); onClose() },
+      )}
+      {onCopyPath && count === 1 && (
+        <>
+          <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
+          {row('Copier le chemin', false, () => { onCopyPath(); onClose() })}
+        </>
       )}
       {canEdit && (
         <>
@@ -1503,6 +1510,21 @@ export function Projects() {
     }
   }, [nav, loadItems])
 
+  const handleCopyPath = useCallback(async (item: ExplorerItem) => {
+    const ws = settings?.workspace
+    if (!ws) return
+    const sep = ws.includes('\\') ? '\\' : '/'
+    const parts = nav.kind === 'root'
+      ? [ws, 'DOSSIER_PROJETS', item.name]
+      : [ws, 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
+    try {
+      await navigator.clipboard.writeText(parts.join(sep))
+      toast.success('Chemin copié')
+    } catch {
+      toast.error('Impossible de copier le chemin')
+    }
+  }, [nav, settings?.workspace])
+
   const recentSidebarItems = recents.slice(0, 5)
 
   return (
@@ -1876,6 +1898,7 @@ export function Projects() {
           onRename={() => setRenameTarget(ctxMenu.items[0])}
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
+          onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
           onOpenInHoudini={nav.kind === 'inside' && ctxMenu.items.length === 1
             ? () => void handleOpenInHoudini(ctxMenu.items[0])
             : undefined}
