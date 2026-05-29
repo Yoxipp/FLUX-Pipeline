@@ -61,32 +61,53 @@ def _export_abc(
 
     path_fwd = str(file_path).replace("\\", "/")
 
-    # AbcExport needs shape nodes as -root, not transforms.
-    # Passing transforms silently produces empty Alembic files on several Maya versions.
+    # AbcExport -root must receive transform/group nodes, never shape nodes.
+    # Shapes don't carry transformation data; using them as roots drops hierarchy
+    # and produces empty or broken ABC files on many Maya versions.
     if selection_only:
         sel: list[str] = cmds.ls(sl=True, long=True) or []  # type: ignore[union-attr]
-        # User typically selects transforms; traverse to find all mesh shapes underneath.
-        descendants: list[str] = cmds.listRelatives(sel, allDescendents=True, fullPath=True) or []  # type: ignore[union-attr]
-        shapes: list[str] = cmds.ls(sel + descendants, type="mesh", long=True, noIntermediate=True) or []  # type: ignore[union-attr]
+        roots: list[str] = []
+        for node in sel:
+            if cmds.nodeType(node) == "transform":  # type: ignore[union-attr]
+                roots.append(node)
+            else:
+                # Shape or non-transform selected — use its parent transform
+                parents: list[str] = cmds.listRelatives(node, parent=True, fullPath=True) or []  # type: ignore[union-attr]
+                roots.extend(parents)
+        roots = list(dict.fromkeys(roots))  # deduplicate, preserve order
     else:
-        # All mesh shapes in the scene (equivalent to "Export All")
-        shapes = cmds.ls(type="mesh", long=True, noIntermediate=True) or []  # type: ignore[union-attr]
+        # World-level assemblies that contain mesh geometry (equivalent to "Export All")
+        all_assemblies: list[str] = cmds.ls(assemblies=True, long=True) or []  # type: ignore[union-attr]
+        roots = [
+            a for a in all_assemblies
+            if cmds.ls(a, dag=True, type="mesh", noIntermediate=True)  # type: ignore[union-attr]
+        ]
+        if not roots:
+            # Fallback for non-standard scenes: direct parents of all mesh shapes
+            all_shapes: list[str] = cmds.ls(type="mesh", long=True, noIntermediate=True) or []  # type: ignore[union-attr]
+            parents_set: set[str] = set()
+            for s in all_shapes:
+                p: list[str] = cmds.listRelatives(s, parent=True, fullPath=True) or []  # type: ignore[union-attr]
+                parents_set.update(p)
+            roots = list(parents_set)
 
-    if not shapes:
-        log.warning("ABC export: no mesh shapes found (selection_only=%s)", selection_only)
+    if not roots:
+        log.warning("ABC export: no DAG roots found (selection_only=%s)", selection_only)
         return False
+
+    log.debug("ABC export roots (%d): %s", len(roots), roots)
 
     job_parts: list[str] = []
     if frame_start is not None and frame_end is not None:
         job_parts.append(f"-frameRange {frame_start} {frame_end}")
     job_parts += ["-uvWrite", "-worldSpace", "-writeVisibility", "-dataFormat ogawa"]
-    for shape in shapes:
-        job_parts.append(f"-root {shape}")
+    for root in roots:
+        job_parts.append(f"-root {root}")
     job_parts.append(f'-file "{path_fwd}"')
 
     try:
         cmds.AbcExport(j=" ".join(job_parts))  # type: ignore[union-attr]
-        log.info("Exported (ABC) %d shapes → %s", len(shapes), file_path.name)
+        log.info("Exported (ABC) %d roots → %s", len(roots), file_path.name)
         return True
     except Exception as exc:
         log.error("ABC export failed: %s", exc)
