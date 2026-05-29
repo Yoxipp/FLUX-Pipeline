@@ -70,6 +70,11 @@ function AppShell({ settings }: { settings: Settings }) {
             fontSize: 11,
             boxShadow: 'var(--shadow-md)',
           },
+          classNames: {
+            success: 'flux-toast-ok',
+            warning: 'flux-toast-warn',
+            error:   'flux-toast-err',
+          },
         }}
       />
     </HashRouter>

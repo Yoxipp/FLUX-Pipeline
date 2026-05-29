@@ -1031,7 +1031,7 @@ export function Publisher() {
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                     borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
@@ -1054,7 +1054,7 @@ export function Publisher() {
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                     borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
@@ -1117,7 +1117,7 @@ export function Publisher() {
                       flex: 1, height: 28,
                       background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
                       borderRadius: 5, padding: '0 8px',
-                      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                      fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
                       boxShadow: 'var(--shadow-inset)', outline: 'none',
                     }}
                   />
@@ -1161,8 +1161,8 @@ export function Publisher() {
                 width: '100%', height: 90, resize: 'none',
                 background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
                 borderRadius: 6, padding: '10px 12px',
-                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
-                fontStyle: 'italic', outline: 'none', boxShadow: 'var(--shadow-inset)',
+                fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)',
+                outline: 'none', boxShadow: 'var(--shadow-inset)',
               }}
             />
           </div>
