@@ -10,8 +10,11 @@ from pydantic import BaseModel
 from core.logger import get_logger
 from features.shelf_manager.shelf_core import (
     get_installed_versions,
+    install_hdas,
     install_shelf,
+    is_hda_installed,
     is_shelf_installed,
+    remove_hdas,
     remove_shelf,
 )
 
@@ -33,17 +36,36 @@ class ShelfRemoveRequest(BaseModel):
 
 @router.get("")
 async def get_shelves() -> dict:
-    """Return shelf status for all supported DCCs and their installed versions."""
+    """Return shelf + HDA status for all supported DCCs and their installed versions."""
     loop = asyncio.get_event_loop()
     result = {}
     for dcc in _SUPPORTED_DCCS:
         versions = await loop.run_in_executor(None, lambda d=dcc: get_installed_versions(d))
-        installed = {
+        installed: dict[str, bool] = {
             v: await loop.run_in_executor(None, lambda d=dcc, ver=v: is_shelf_installed(d, ver))
             for v in versions
         }
-        result[dcc] = {"versions": versions, "installed": installed}
+        hdas: dict[str, bool] = {}
+        if dcc == "Houdini":
+            hdas = {
+                v: await loop.run_in_executor(None, lambda ver=v: is_hda_installed(ver))
+                for v in versions
+            }
+        result[dcc] = {"versions": versions, "installed": installed, "hdas_installed": hdas}
     return result
+
+
+@router.get("/{dcc}/{version}/status")
+async def get_shelf_status(dcc: str, version: str) -> dict:
+    """Return shelf + HDA install status for a specific DCC version."""
+    if dcc not in _SUPPORTED_DCCS:
+        raise HTTPException(status_code=400, detail=f"DCC non supporté : {dcc}")
+    loop = asyncio.get_event_loop()
+    shelf = await loop.run_in_executor(None, lambda: is_shelf_installed(dcc, version))
+    hdas = False
+    if dcc == "Houdini":
+        hdas = await loop.run_in_executor(None, lambda: is_hda_installed(version))
+    return {"dcc": dcc, "version": version, "shelf": shelf, "hdas": hdas}
 
 
 @router.post("/install")

@@ -229,7 +229,7 @@ export const api = {
 
   // Shelf
   getShelves: () =>
-    apiCall<Record<string, { versions: string[]; installed: Record<string, boolean> }>>('GET', '/shelf'),
+    apiCall<Record<string, { versions: string[]; installed: Record<string, boolean>; hdas_installed: Record<string, boolean> }>>('GET', '/shelf'),
 
   installShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('POST', '/shelf/install', { dcc, version }),
