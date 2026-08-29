@@ -9,6 +9,9 @@ venv/
 # PyInstaller output (build/ = cache intermédiaire PyInstaller)
 dist/
 build/
+# ...but 'build/' above is a source package for the USD assembler, not PyInstaller output.
+!backend/features/**/build/
+!backend/features/**/build/*.py
 
 # Electron / TypeScript build artifacts
 tsconfig.electron.tsbuildinfo
@@ -38,3 +41,7 @@ TEST/
 Thumbs.db
 desktop.ini
 INSTALLEURS/
+
+# Runtime temp
+.flux_tmp_*.json
+backend_port
