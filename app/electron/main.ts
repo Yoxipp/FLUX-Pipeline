@@ -5,6 +5,56 @@ import path from 'path'
 import { startPythonSidecar, stopPythonSidecar, waitForPort } from './python_bridge'
 
 let win: BrowserWindow | null = null
+let splash: BrowserWindow | null = null
+
+// ── Splash screen ─────────────────────────────────────────────────────────────
+// Shown the instant Electron is ready, covering the gap until the main window has
+// loaded (Vite in dev / backend cold-start). Flat Flux identity — no glow.
+function splashHtml(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  :root{--bg:#161514;--ink:#cac8c5;--ink3:#8a8784;
+        --accent:oklch(66% 0.10 52);--accent-hi:oklch(75% 0.115 52);
+        --accent-soft:color-mix(in oklch, oklch(66% 0.10 52) 14%, transparent);
+        --border:color-mix(in oklch, oklch(66% 0.10 52) 50%, transparent);}
+  *{margin:0;box-sizing:border-box;-webkit-user-select:none}
+  html,body{height:100%}
+  body{background:var(--bg);border:1px solid #2a2826;border-radius:12px;
+       font-family:'Consolas','SF Mono',ui-monospace,monospace;
+       display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;overflow:hidden}
+  .mark{width:56px;height:56px;border-radius:14px;background:var(--accent-soft);
+        border:1px solid var(--border);color:var(--accent-hi);
+        display:flex;align-items:center;justify-content:center;font-weight:700;font-size:26px}
+  .word{display:flex;align-items:baseline;gap:9px}
+  .flux{color:var(--ink);font-weight:600;font-size:18px;letter-spacing:.16em}
+  .sub{color:var(--ink3);font-size:12px;letter-spacing:.02em}
+  .bar{width:180px;height:2px;background:#2a2826;border-radius:2px;overflow:hidden;margin-top:2px}
+  .bar>i{display:block;height:100%;width:40%;border-radius:2px;background:var(--accent);
+         animation:slide 1.1s ease-in-out infinite}
+  @keyframes slide{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+  </style></head><body>
+  <div class="mark">F</div>
+  <div class="word"><span class="flux">FLUX</span><span class="sub">Pipeline Tool</span></div>
+  <div class="bar"><i></i></div>
+  </body></html>`
+}
+
+function createSplash(): void {
+  splash = new BrowserWindow({
+    width: 380, height: 240,
+    frame: false, transparent: true, resizable: false, movable: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false,
+    backgroundColor: '#00000000',
+  })
+  splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHtml()))
+  splash.once('ready-to-show', () => splash?.show())
+  // Failsafe: never let the splash linger if the main window fails to load.
+  setTimeout(closeSplash, 20_000)
+}
+
+function closeSplash(): void {
+  if (splash && !splash.isDestroyed()) splash.close()
+  splash = null
+}
 
 async function createWindow(): Promise<void> {
   win = new BrowserWindow({
@@ -13,6 +63,7 @@ async function createWindow(): Promise<void> {
     minWidth:        1000,
     minHeight:       700,
     backgroundColor: '#0f0f0f',
+    show:            false,     // shown once loaded, so the splash hands over cleanly
     frame:           false,    // frameless — TitleBar React gère les contrôles
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
@@ -21,11 +72,18 @@ async function createWindow(): Promise<void> {
     },
   })
 
-  if (!app.isPackaged) {
-    await win.loadURL('http://localhost:5173')
-    win.webContents.openDevTools()
-  } else {
-    await win.loadFile(path.join(__dirname, '../dist/index.html'))
+  try {
+    if (!app.isPackaged) {
+      await win.loadURL('http://localhost:5173')
+      win.webContents.openDevTools()
+    } else {
+      await win.loadFile(path.join(__dirname, '../dist/index.html'))
+    }
+  } finally {
+    // Reveal the real window and retire the splash, even if the load errored.
+    win.show()
+    win.focus()
+    closeSplash()
   }
 
   // Ctrl+Shift+I ouvre les DevTools même en production (debug packagé)
@@ -74,13 +132,15 @@ ipcMain.on('window:close',    () => win?.close())
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  try {
-    await startPythonSidecar()
-  } catch (err) {
-    console.error('[Electron] Failed to start Python sidecar:', err)
-  }
+  // Splash first — visible immediately, covers the Vite/backend startup gap.
+  createSplash()
 
-  // En dev : attendre que Vite soit prêt avant d'ouvrir la fenêtre
+  // Backend en arrière-plan : ne bloque PAS l'ouverture de la fenêtre (le cold
+  // start ~5s rendait l'app lente à ouvrir). Il se connecte quand il est prêt.
+  startPythonSidecar().catch((err) =>
+    console.error('[Electron] Failed to start Python sidecar:', err))
+
+  // En dev : attendre seulement que Vite soit prêt (nécessaire pour loadURL).
   if (!app.isPackaged) {
     try {
       await waitForPort(5173, 30_000)
