@@ -34,12 +34,14 @@ export async function startPythonSidecar(): Promise<void> {
     const execPath = path.join(process.resourcesPath, 'backend', 'flux_backend.exe')
     pythonProcess = spawn(execPath, [], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,   // no console window for the backend exe
       env: { ...process.env, FLUX_PORT: String(PYTHON_PORT) },
     })
   } else {
     const backendScript = path.join(__dirname, '../backend/main.py')
     pythonProcess = spawn('python', [backendScript], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,   // no console flash when spawning python in dev
       env: { ...process.env, FLUX_PORT: String(PYTHON_PORT) },
     })
   }

@@ -51,7 +51,7 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,   # no console window in production (logs go to %APPDATA%/FLUX/logs)
 )
 
 coll = COLLECT(

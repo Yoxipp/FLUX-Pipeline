@@ -45,3 +45,4 @@ INSTALLEURS/
 # Runtime temp
 .flux_tmp_*.json
 backend_port
+flux_dev.log
