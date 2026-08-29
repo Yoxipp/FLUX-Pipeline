@@ -83,6 +83,16 @@ def _normalise(data: dict) -> Recipe:
         )
         layers.append(LayerSpec("variantset", asset, {"asset": asset}))
 
+    # Assembly target: the asset is the container prim; components below reference
+    # published components as instances parented under it.
+    parent_entity: str | None = None
+    if target.get("kind") == "assembly" and target.get("asset"):
+        asset = target["asset"]
+        layers.append(
+            LayerSpec("prim", asset, {"asset": asset, "target_kind": "assembly"})
+        )
+        parent_entity = asset
+
     assembly = data.get("assembly")
     if assembly:
         ref = RefSpec(
@@ -104,7 +114,15 @@ def _normalise(data: dict) -> Recipe:
             variants=_parse_variants(comp.get("variants")),
         )
         layers.append(
-            LayerSpec(kind="reference", name=ref.instance or ref.asset, params={"ref": ref})
+            LayerSpec(
+                kind="reference",
+                name=ref.instance or ref.asset,
+                params={
+                    "ref": ref,
+                    "parent_entity": parent_entity,
+                    "xform": comp.get("xform"),
+                },
+            )
         )
 
     return Recipe(target=target, layers=tuple(layers), options=options)

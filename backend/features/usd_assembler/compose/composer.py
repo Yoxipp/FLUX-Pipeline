@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from pxr import Usd
+from pxr import Gf, Usd, UsdGeom
 
 from ..build.base import Arc, LayerContribution
 from ..io import stage_factory
@@ -47,6 +47,8 @@ class StageComposer:
         handler = {
             Arc.PAYLOAD: self._apply_payload,
             Arc.VARIANT: self._apply_variant,
+            Arc.REFERENCE: self._apply_reference,
+            Arc.OVER: self._apply_prim,
         }.get(contrib.arc)
         if handler is None:
             self._ctx.log.warning("arc %s not handled yet (later phase)", contrib.arc)
@@ -78,3 +80,38 @@ class StageComposer:
         default = contrib.opinions.get("default")
         if default:
             vset.SetVariantSelection(default)
+
+    def _apply_prim(self, stage: "Usd.Stage", contrib: LayerContribution) -> None:
+        """Define a container prim (assembly/group root) with kind + defaultPrim."""
+        prim = stage.DefinePrim(contrib.prim_path, contrib.opinions.get("prim_type", "Xform"))
+        kind = contrib.opinions.get("kind")
+        if kind:
+            Usd.ModelAPI(prim).SetKind(kind)
+        if contrib.opinions.get("default_prim"):
+            stage.SetDefaultPrim(prim)
+
+    def _apply_reference(self, stage: "Usd.Stage", contrib: LayerContribution) -> None:
+        """Reference a component onto an instance prim, then place + select it."""
+        prim = stage.DefinePrim(contrib.prim_path, contrib.opinions.get("prim_type", "Xform"))
+
+        if contrib.asset is not None:
+            prim.GetReferences().AddReference(_as_asset_path(contrib.asset.path))
+
+        self._apply_xform(prim, contrib.opinions.get("xform"))
+
+        # Variant selections only (the sets live in the referenced component).
+        for set_name, selection in sorted(contrib.opinions.get("variant_selections", {}).items()):
+            prim.GetVariantSet(set_name).SetVariantSelection(selection)
+
+    @staticmethod
+    def _apply_xform(prim: "Usd.Prim", xform: dict | None) -> None:
+        """Author translate/rotate/scale ops in a fixed order (deterministic)."""
+        if not xform:
+            return
+        xformable = UsdGeom.Xformable(prim)
+        if "translate" in xform:
+            xformable.AddTranslateOp().Set(Gf.Vec3d(*xform["translate"]))
+        if "rotate" in xform:
+            xformable.AddRotateXYZOp().Set(Gf.Vec3f(*xform["rotate"]))
+        if "scale" in xform:
+            xformable.AddScaleOp().Set(Gf.Vec3f(*xform["scale"]))
