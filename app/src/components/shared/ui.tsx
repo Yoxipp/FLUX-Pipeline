@@ -37,14 +37,14 @@ export const Pill = ({ children, active, disabled, dot, style }: {
   </div>
 )
 
-export const Btn = ({ children, primary, ghost, sm, kbd, style, onClick }: {
+export const Btn = ({ children, primary, ghost, sm, kbd, disabled, style, onClick }: {
   children: React.ReactNode; primary?: boolean; ghost?: boolean; sm?: boolean; kbd?: boolean
-  style?: CSSProperties; onClick?: () => void
+  disabled?: boolean; style?: CSSProperties; onClick?: () => void
 }) => (
   <div
-    className={`btn${primary ? ' primary' : ''}${ghost ? ' ghost' : ''}${sm ? ' sm' : ''}${kbd ? ' kbd' : ''}`}
-    style={style}
-    onClick={onClick}
+    className={`btn${primary ? ' primary' : ''}${ghost ? ' ghost' : ''}${sm ? ' sm' : ''}${kbd ? ' kbd' : ''}${disabled ? ' disabled' : ''}`}
+    style={disabled ? { opacity: 0.45, pointerEvents: 'none', ...style } : style}
+    onClick={disabled ? undefined : onClick}
   >{children}</div>
 )
 

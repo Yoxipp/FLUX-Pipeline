@@ -236,4 +236,26 @@ export const api = {
 
   removeShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', '/shelf', { dcc, version }),
+
+  // Maya tools catalog
+  getTools: () =>
+    apiCall<{ versions: string[]; tools: { id: string; label: string; filename: string; installed: Record<string, boolean> }[] }>('GET', '/shelf/tools'),
+
+  installTool: (tool_id: string, version: string) =>
+    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/install', { tool_id, version }),
+
+  removeTool: (tool_id: string, version: string) =>
+    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/remove', { tool_id, version }),
+
+  // USD Assembler
+  assembleRecipe: (recipe: unknown, project?: string, strict = true) =>
+    apiCall<{
+      success: boolean
+      root?: string
+      layers?: string[]
+      issues: { level: string; msg: string; prim: string | null }[]
+    }>('POST', '/usd/assemble', { recipe, project, strict }),
+
+  getRecipeSchema: () =>
+    apiCall<Record<string, unknown>>('GET', '/usd/schema'),
 }
