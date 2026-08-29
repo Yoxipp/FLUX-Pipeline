@@ -83,15 +83,39 @@ def _normalise(data: dict) -> Recipe:
         )
         layers.append(LayerSpec("variantset", asset, {"asset": asset}))
 
+    # Where instances are parented, and (for a shot) which department layer the
+    # assembler authors placement into. Both stay unset for a bare component.
+    parent_entity: str | None = None
+    placement_dept: str | None = None
+
     # Assembly target: the asset is the container prim; components below reference
     # published components as instances parented under it.
-    parent_entity: str | None = None
     if target.get("kind") == "assembly" and target.get("asset"):
         asset = target["asset"]
         layers.append(
             LayerSpec("prim", asset, {"asset": asset, "target_kind": "assembly"})
         )
         parent_entity = asset
+
+    # Shot target: a group root over a stack of department sublayers. The
+    # assembler scaffolds the placement (assembly + components) into the weakest
+    # department layer; the other departments are empty stubs for the DCCs.
+    if target.get("kind") == "shot":
+        entity = _shot_entity(target)
+        layers.append(
+            LayerSpec("prim", entity, {"asset": entity, "target_kind": "shot"})
+        )
+        parent_entity = entity
+        departments = list(data.get("departments", []))
+        for dept in departments:
+            layers.append(
+                LayerSpec(
+                    kind="sublayer",
+                    name=dept,
+                    params={"department": dept, "entity": entity},
+                )
+            )
+        placement_dept = departments[0] if departments else None
 
     assembly = data.get("assembly")
     if assembly:
@@ -100,10 +124,17 @@ def _normalise(data: dict) -> Recipe:
             version=assembly.get("version", "latest"),
             variants=_parse_variants(assembly.get("variants")),
         )
-        layers.append(LayerSpec(kind="reference", name="assembly", params={"ref": ref}))
-
-    for dept in data.get("departments", []):
-        layers.append(LayerSpec(kind="sublayer", name=dept, params={"department": dept}))
+        layers.append(
+            LayerSpec(
+                kind="reference",
+                name=ref.asset,
+                params={
+                    "ref": ref,
+                    "parent_entity": parent_entity,
+                    "dept": placement_dept,
+                },
+            )
+        )
 
     components = data.get("components", [])
     for comp in sorted(components, key=lambda c: c.get("instance") or c["asset"]):
@@ -121,11 +152,21 @@ def _normalise(data: dict) -> Recipe:
                     "ref": ref,
                     "parent_entity": parent_entity,
                     "xform": comp.get("xform"),
+                    "dept": placement_dept,
                 },
             )
         )
 
     return Recipe(target=target, layers=tuple(layers), options=options)
+
+
+def _shot_entity(target: dict) -> str:
+    """Build the shot's prim/layer stem from sequence + shot (e.g. SEQ010_SH020)."""
+    seq = target.get("sequence")
+    shot = target.get("shot")
+    if seq and shot:
+        return f"{seq}_{shot}"
+    return shot or seq or target.get("name") or "shot"
 
 
 def load(data: dict) -> Recipe:

@@ -59,6 +59,9 @@ class ReferenceBuilder:
         prim_path = ctx.naming.prim_path(leaf, parent=parent)
 
         opinions: dict = {"prim_type": "Xform"}
+        dept = spec.params.get("dept")
+        if dept is not None:
+            opinions["dept"] = dept
         xform = _normalise_xform(spec.params.get("xform"))
         if xform:
             opinions["xform"] = xform

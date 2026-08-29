@@ -1,0 +1,17 @@
+#usda 1.0
+(
+    defaultPrim = "SEQ010_SH020"
+    subLayers = [
+        @./SEQ010_SH020_lighting.usda@,
+        @./SEQ010_SH020_fx.usda@,
+        @./SEQ010_SH020_anim.usda@,
+        @./SEQ010_SH020_layout.usda@
+    ]
+)
+
+def Xform "SEQ010_SH020" (
+    kind = "group"
+)
+{
+}
+

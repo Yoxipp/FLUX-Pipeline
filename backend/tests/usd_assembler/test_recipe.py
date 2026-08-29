@@ -31,17 +31,20 @@ class LoadValidRecipe(unittest.TestCase):
         self.assertEqual(recipe.options["format"], "usda")
 
     def test_layer_order_is_deterministic(self) -> None:
-        # assembly first, then departments in order, then components.
+        # Shot: group root prim, then departments (weak→strong) as sublayers so
+        # they exist before placements, then the assembly + components referenced
+        # into the layout layer (assembly before components).
         recipe = loader.load(_SHOT_RECIPE)
         kinds = [(l.kind, l.name) for l in recipe.layers]
         self.assertEqual(
             kinds,
             [
-                ("reference", "assembly"),
+                ("prim", "SEQ010_SH020"),
                 ("sublayer", "layout"),
                 ("sublayer", "anim"),
                 ("sublayer", "fx"),
                 ("sublayer", "lighting"),
+                ("reference", "ENV_forest"),
                 ("reference", "hero_01"),
             ],
         )

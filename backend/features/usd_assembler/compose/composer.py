@@ -11,6 +11,7 @@ from pxr import Gf, Usd, UsdGeom
 
 from ..build.base import Arc, LayerContribution
 from ..io import stage_factory
+from .edit_target import EditTargetRouter
 
 if TYPE_CHECKING:
     from ..context import AssemblyContext
@@ -33,17 +34,29 @@ class StageComposer:
     def __init__(self, ctx: "AssemblyContext", registry: "Registry") -> None:
         self._ctx = ctx
         self._registry = registry
+        self._router: EditTargetRouter | None = None
 
     def compose(self, recipe: "Recipe") -> "Usd.Stage":
         stage = stage_factory.in_memory()
+        self._router = EditTargetRouter(stage)
         for spec in recipe.layers:
             builder = self._registry.get_builder(spec.kind)
             for contrib in builder.contribute(self._ctx, spec):
                 self._apply(stage, contrib)
+        # Publish the shot sublayer stack strongest-first (no-op without depts).
+        self._router.finalize(list(reversed(self._ctx.layout.department_order())))
         return stage
+
+    def department_layers(self) -> dict:
+        """Return {dept: (filename, Sdf.Layer)} produced by the last compose()."""
+        return self._router.department_layers() if self._router else {}
 
     # ── Arc -> pxr ──────────────────────────────────────────────────────────────
     def _apply(self, stage: "Usd.Stage", contrib: LayerContribution) -> None:
+        if contrib.arc is Arc.SUBLAYER:
+            self._apply_sublayer(contrib)
+            return
+
         handler = {
             Arc.PAYLOAD: self._apply_payload,
             Arc.VARIANT: self._apply_variant,
@@ -53,7 +66,24 @@ class StageComposer:
         if handler is None:
             self._ctx.log.warning("arc %s not handled yet (later phase)", contrib.arc)
             return
-        handler(stage, contrib)
+
+        # Route the contribution into its department layer, if any.
+        dept = contrib.opinions.get("dept")
+        routed = dept is not None and self._router is not None
+        if routed:
+            stage.SetEditTarget(self._router.target_for(dept))
+        try:
+            handler(stage, contrib)
+        finally:
+            if routed:
+                stage.SetEditTarget(self._router.root_target())
+
+    def _apply_sublayer(self, contrib: LayerContribution) -> None:
+        """Materialise a department layer under the root (order fixed on finalize)."""
+        assert self._router is not None
+        self._router.add_department(
+            contrib.opinions["department"], contrib.opinions["filename"]
+        )
 
     def _apply_payload(self, stage: "Usd.Stage", contrib: LayerContribution) -> None:
         prim_type = contrib.opinions.get("prim_type", "Xform")
