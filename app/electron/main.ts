@@ -2,7 +2,7 @@
 
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import path from 'path'
-import { startPythonSidecar, stopPythonSidecar, waitForPort } from './python_bridge'
+import { startPythonSidecar, stopPythonSidecar } from './python_bridge'
 
 let win: BrowserWindow | null = null
 let splash: BrowserWindow | null = null
@@ -72,18 +72,37 @@ async function createWindow(): Promise<void> {
     },
   })
 
-  try {
-    if (!app.isPackaged) {
-      await win.loadURL('http://localhost:5173')
-      win.webContents.openDevTools()
-    } else {
-      await win.loadFile(path.join(__dirname, '../dist/index.html'))
+  // Reveal the window independently of the load promise: 'ready-to-show' fires
+  // once the renderer can paint, and a fallback timer guarantees we never stay
+  // hidden even if the dev server is slow/unreachable. Idempotent.
+  const reveal = () => {
+    if (!win) return
+    if (!win.isVisible()) {
+      win.show()
+      win.focus()
     }
-  } finally {
-    // Reveal the real window and retire the splash, even if the load errored.
-    win.show()
-    win.focus()
     closeSplash()
+  }
+  win.once('ready-to-show', reveal)
+  setTimeout(reveal, 12_000)
+
+  // Load the renderer. In dev the Vite server may not be up yet, so retry the
+  // URL until it answers instead of blocking startup on a fixed port wait.
+  if (!app.isPackaged) {
+    const url = 'http://localhost:5173'
+    const deadline = Date.now() + 30_000
+    const tryLoad = () => {
+      win?.loadURL(url).catch(() => {
+        if (Date.now() < deadline && win && !win.isDestroyed()) {
+          setTimeout(tryLoad, 300)
+        }
+      })
+    }
+    tryLoad()
+    win.webContents.openDevTools()
+  } else {
+    win.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) =>
+      console.error('[Electron] loadFile failed:', err))
   }
 
   // Ctrl+Shift+I ouvre les DevTools même en production (debug packagé)
@@ -140,15 +159,8 @@ app.whenReady().then(async () => {
   startPythonSidecar().catch((err) =>
     console.error('[Electron] Failed to start Python sidecar:', err))
 
-  // En dev : attendre seulement que Vite soit prêt (nécessaire pour loadURL).
-  if (!app.isPackaged) {
-    try {
-      await waitForPort(5173, 30_000)
-    } catch {
-      console.warn('[Electron] Vite not ready after 30s, opening anyway')
-    }
-  }
-
+  // Create the window immediately (hidden); it retries the Vite URL on its own
+  // and reveals itself once painted, so nothing here can block it opening.
   await createWindow()
 })
 
