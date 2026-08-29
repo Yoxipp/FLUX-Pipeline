@@ -7,6 +7,10 @@ import { startPythonSidecar, stopPythonSidecar } from './python_bridge'
 let win: BrowserWindow | null = null
 let splash: BrowserWindow | null = null
 
+// FLUX window/taskbar icon. In dev it lives next to the sources; packaged builds
+// get the icon from the exe (electron-builder), so we only set it in dev.
+const ICON = app.isPackaged ? undefined : path.join(__dirname, '..', 'scripts', 'icon.ico')
+
 // ── Splash screen ─────────────────────────────────────────────────────────────
 // Shown the instant Electron is ready, covering the gap until the main window has
 // loaded (Vite in dev / backend cold-start). Flat Flux identity — no glow.
@@ -43,7 +47,7 @@ function createSplash(): void {
     width: 380, height: 240,
     frame: false, transparent: true, resizable: false, movable: false,
     alwaysOnTop: true, skipTaskbar: true, show: false,
-    backgroundColor: '#00000000',
+    backgroundColor: '#00000000', icon: ICON,
   })
   splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHtml()))
   splash.once('ready-to-show', () => splash?.show())
@@ -64,6 +68,7 @@ async function createWindow(): Promise<void> {
     minHeight:       700,
     backgroundColor: '#0f0f0f',
     show:            false,     // shown once loaded, so the splash hands over cleanly
+    icon:            ICON,
     frame:           false,    // frameless — TitleBar React gère les contrôles
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
@@ -151,6 +156,9 @@ ipcMain.on('window:close',    () => win?.close())
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // Windows: group under the FLUX identity so the taskbar shows our icon.
+  if (process.platform === 'win32') app.setAppUserModelId('com.flux.pipeline')
+
   // Splash first — visible immediately, covers the Vite/backend startup gap.
   createSplash()
 
