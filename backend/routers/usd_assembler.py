@@ -1,0 +1,97 @@
+# routers/usd_assembler.py — assemble published USD from a declarative recipe.
+#
+# pxr is heavy and, on Windows, can abort a worker thread on teardown, so it must
+# NOT load at sidecar boot: the façade (which pulls pxr) is imported lazily inside
+# the handler, and the long compose/write runs in a thread via run_in_executor.
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from core import config
+from core.logger import get_logger
+from core.paths import get_project_path
+
+log = get_logger(__name__)
+router = APIRouter()
+
+# Where assembled layers are written under the project (config-overridable).
+_DEFAULT_OUTPUT_SUBDIR = "usd/assembly"
+_SCHEMA_PATH = Path(__file__).resolve().parent.parent / (
+    "features/usd_assembler/recipe/schema.json"
+)
+
+
+class AssembleRequest(BaseModel):
+    recipe: dict
+    project: str | None = None
+    strict: bool = True
+
+
+def _resolve_project(project: str | None) -> tuple[str, Path]:
+    """Return (project_name, project_path) for *project* or the last active one."""
+    name = project or config.get_last_project()
+    if not name:
+        raise HTTPException(status_code=400, detail="no project selected")
+    path = get_project_path(name)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"project not found: {name}")
+    return name, path
+
+
+def _run_assemble(recipe: dict, project_path: Path, strict: bool) -> dict:
+    """Blocking assemble pass (runs in an executor thread). Imports pxr lazily."""
+    from features.usd_assembler.resolve.flux_resolver import FluxResolver
+    from features.usd_assembler.usd_assembler_core import AssemblyError, assemble
+
+    ns = config.get("usd_assembler", {}) or {}
+    resolver = FluxResolver(project_path, ns)
+    dest_dir = project_path / ns.get("output_subdir", _DEFAULT_OUTPUT_SUBDIR)
+
+    try:
+        result = assemble(
+            recipe, resolver=resolver, dest_dir=dest_dir, config=ns, strict=strict
+        )
+    except AssemblyError as exc:
+        return {
+            "success": False,
+            "issues": [
+                {"level": i.level, "msg": i.msg, "prim": i.prim} for i in exc.issues
+            ],
+        }
+
+    return {
+        "success": True,
+        "root": str(result.root),
+        "layers": [str(p) for p in result.layers],
+        "issues": [
+            {"level": i.level, "msg": i.msg, "prim": i.prim} for i in result.issues
+        ],
+    }
+
+
+@router.post("/assemble")
+async def assemble_recipe(req: AssembleRequest) -> dict:
+    """Assemble a recipe into published USD and return the written layer paths."""
+    _, project_path = _resolve_project(req.project)
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(
+            None, lambda: _run_assemble(req.recipe, project_path, req.strict)
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # surface loader/resolver errors as 400s
+        log.exception("assemble failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/schema")
+async def get_recipe_schema() -> dict:
+    """Return the recipe JSON Schema (drives the frontend recipe builder)."""
+    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))

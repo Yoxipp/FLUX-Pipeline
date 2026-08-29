@@ -58,5 +58,30 @@ class Registry:
         return None
 
 
+def default_registry() -> "Registry":
+    """Return a Registry with every built-in builder registered.
+
+    Builders are imported lazily (they are pure — no pxr) so importing this
+    module stays cheap and side-effect free; the façade calls this to get a
+    fully-wired registry without knowing the concrete builder classes.
+    """
+    from .build.payload_builder import PayloadBuilder
+    from .build.prim_builder import PrimBuilder
+    from .build.reference_builder import ReferenceBuilder
+    from .build.sublayer_builder import SublayerBuilder
+    from .build.variantset_builder import VariantSetBuilder
+
+    registry = Registry()
+    for builder in (
+        PayloadBuilder(),
+        VariantSetBuilder(),
+        PrimBuilder(),
+        ReferenceBuilder(),
+        SublayerBuilder(),
+    ):
+        registry.register_builder(builder)
+    return registry
+
+
 # Module-level singleton wired at startup / by the façade.
 REGISTRY = Registry()
