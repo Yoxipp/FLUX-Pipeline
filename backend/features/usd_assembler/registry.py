@@ -49,13 +49,15 @@ class Registry:
             raise KeyError(f"no resolver registered under '{name}'")
 
     # ── plugins ───────────────────────────────────────────────────────────────
-    def discover_plugins(self) -> None:
-        """Auto-discover studio plugins under ``plugins/`` (Phase 6).
+    def discover_plugins(self) -> list[str]:
+        """Auto-discover studio plugins under ``plugins/`` and register them.
 
-        Stubbed in Phase 0: no-op so the import graph stays pure and the call
-        site (façade) can already be wired.
+        Each plugin module exposes ``register(registry)``. Returns the names of
+        the modules that registered something (for startup logging).
         """
-        return None
+        from .plugins import discover
+
+        return discover(self)
 
 
 def default_registry() -> "Registry":
@@ -80,6 +82,8 @@ def default_registry() -> "Registry":
         SublayerBuilder(),
     ):
         registry.register_builder(builder)
+    # Let studio plugins extend/override the core builders (last registration wins).
+    registry.discover_plugins()
     return registry
 
 
