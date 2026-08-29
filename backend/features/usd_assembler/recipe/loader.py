@@ -72,6 +72,17 @@ def _normalise(data: dict) -> Recipe:
     options = dict(data.get("options", {}))
     layers: list[LayerSpec] = []
 
+    # Component target: the asset itself becomes a component (payload geometry +
+    # variantSets). VariantSet templates are resolved from config by the builder,
+    # not authored here.
+    if target.get("kind") == "component" and target.get("asset"):
+        asset = target["asset"]
+        version = target.get("version", "latest")
+        layers.append(
+            LayerSpec("payload", asset, {"asset": asset, "version": version})
+        )
+        layers.append(LayerSpec("variantset", asset, {"asset": asset}))
+
     assembly = data.get("assembly")
     if assembly:
         ref = RefSpec(
