@@ -64,7 +64,14 @@ def _run_parent() -> int:
     fd, sentinel = tempfile.mkstemp(prefix="usd_asm_test_", suffix=".json")
     os.close(fd)
     os.unlink(sentinel)
-    env = {**os.environ, _SENTINEL_ENV: sentinel, "_USD_ASM_TEST_CHILD": "1"}
+    env = {
+        **os.environ,
+        _SENTINEL_ENV: sentinel,
+        "_USD_ASM_TEST_CHILD": "1",
+        # Pin stages alive for the run so a mid-run stage free can't abort a USD
+        # worker thread before the verdict is written (see stage_factory).
+        "USD_ASM_KEEPALIVE_STAGES": "1",
+    }
 
     try:
         for attempt in range(1, _MAX_ATTEMPTS + 1):
