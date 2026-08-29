@@ -91,16 +91,25 @@ function resolveNodeExt(rawType: string): string | undefined {
   return NODE_TYPE_TO_EXT[normalised]
 }
 
-const EXPORT_FORMATS         = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx', '.mb', '.ma']
-const ZBRUSH_EXPORT_FORMATS  = ['.ztl', '.obj', '.fbx']
-const HOUDINI_EXPORT_FORMATS = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx']
-const MAYA_EXPORT_FORMATS    = ['.abc', '.fbx', '.obj', '.usd', '.mb', '.ma']
+// Export formats offered per software — only what each DCC can actually write.
+// USD comes in three flavours: .usd (auto), .usda (ascii), .usdc (binary crate).
+const USD_FORMATS = ['.usd', '.usda', '.usdc']
+
+const EXPORT_FORMATS_BY_DCC: Record<string, string[]> = {
+  Maya:           ['.abc', '.fbx', '.obj', '.ma', '.mb', ...USD_FORMATS],
+  Houdini:        ['.abc', '.bgeo', '.vdb', '.obj', '.fbx', '.exr', '.hip', ...USD_FORMATS],
+  Nuke:           ['.exr', '.dpx', '.tif', '.png', '.mov', '.nk'],
+  'Substance P.': ['.png', '.exr', '.tga', '.tif', '.jpg'],
+  ZBrush:         ['.ztl', '.obj', '.fbx'],
+  Marvelous:      ['.obj', '.fbx', '.abc', '.zprj'],
+  Photoshop:      ['.psd', '.png', '.tif', '.jpg', '.exr'],
+}
+
+// Fallback (e.g. "Fichier local"): a broad, DCC-agnostic superset.
+const DEFAULT_EXPORT_FORMATS = ['.abc', '.fbx', '.obj', '.exr', '.png', '.tif', ...USD_FORMATS]
 
 function formatsForDcc(dcc: string): string[] {
-  if (dcc === 'ZBrush')  return ZBRUSH_EXPORT_FORMATS
-  if (dcc === 'Houdini') return HOUDINI_EXPORT_FORMATS
-  if (dcc === 'Maya')    return MAYA_EXPORT_FORMATS
-  return EXPORT_FORMATS
+  return EXPORT_FORMATS_BY_DCC[dcc] ?? DEFAULT_EXPORT_FORMATS
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
