@@ -96,6 +96,7 @@ DEFAULT_TYPE_TOKENS: dict[str, str] = {
     "CLOTH":     "cloth",
     "MUSCLE":    "muscle",
     "GBL":       "global",
+    "GAJ":       "usd",   # Geo + Anim + Joints — light layered USD export
 }
 
 # Predefined anim instances (sub-folders inside /anim/)
