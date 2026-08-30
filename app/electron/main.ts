@@ -190,6 +190,12 @@ app.on('window-all-closed', async () => {
   app.quit()
 })
 
+// Belt-and-suspenders: also kill the backend on any quit path (menu, taskbar,
+// signal) so no zombie backend survives on port 8765.
+app.on('before-quit', () => {
+  void stopPythonSidecar()
+})
+
 app.on('activate', async () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     await createWindow()
