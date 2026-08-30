@@ -115,13 +115,15 @@ def author_light_asset(
     dest_dir: str | Path,
     *,
     fmt: str = "usda",
-    version_label: str = "v001",
+    version_label: str | None = None,
 ) -> dict[str, Path]:
     """Author the light layered asset into *dest_dir*.
 
     Writes ``{asset}_model``, ``{asset}_skel``, optional ``{asset}_anim`` and a root
-    ``{asset}_{version}`` that sublayers them strong->weak (anim, skel, model). The
-    root's defaultPrim is the asset token, matching the Flux USD publish contract.
+    ``{asset}`` that sublayers them strong->weak (anim, skel, model). The root's
+    defaultPrim is the asset token. When *version_label* is given it is appended to
+    every file name (e.g. ``{asset}_model_v001``); the default (None) uses plain names,
+    which suits a per-version output folder.
     Returns a dict of {"model","skel","anim"(optional),"root"} -> Path.
     """
     dest = Path(dest_dir)
@@ -132,10 +134,10 @@ def author_light_asset(
     skel_path = f"{root_path}/Skeleton"
     anim_path = f"{root_path}/Anim"
 
+    _suffix_ver = f"_{version_label}" if version_label else ""
+
     def _fname(suffix: str) -> str:
-        # Sublayers carry the same version label as the root so a whole version set
-        # (root + model/skel/anim) archives together without name clashes.
-        return f"{asset.asset}_{suffix}_{version_label}.{fmt}"
+        return f"{asset.asset}_{suffix}{_suffix_ver}.{fmt}"
 
     paths: dict[str, Path] = {}
 
@@ -155,7 +157,7 @@ def author_light_asset(
         sublayers.insert(0, anim_p.name)      # anim is strongest
 
     # Root file the resolver picks: defaultPrim + sublayer stack.
-    root_p = dest / f"{asset.asset}_{version_label}.{fmt}"
+    root_p = dest / f"{asset.asset}{_suffix_ver}.{fmt}"
     root_stage = _new_stage(root_p, fmt)
     root_layer = root_stage.GetRootLayer()
     root_layer.subLayerPaths = sublayers

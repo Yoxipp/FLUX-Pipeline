@@ -1,43 +1,42 @@
-# publish.py — place a light layered asset into the Flux publish layout with
-# LAST/vNNN versioning, keeping every version set self-consistent.
+# publish.py — place a light layered asset into the Flux publish layout.
 #
-# Active set:   {asset}_LAST.usd + {asset}_{model,skel,anim}_LAST.usd
-# Archived set: {asset}_vNNN.usd + {asset}_{model,skel,anim}_vNNN.usd
-# The archived root's subLayerPaths are rewritten from _LAST to _vNNN so old
-# versions keep pointing at their own sublayers. The resolver reads {asset}_LAST.*.
+# The whole light asset (root + model/skel/anim) lives in ONE per-version folder:
+#   <dest>/<base>_LAST/         active version  (root <base>.usd + <base>_{model,skel,anim}.usd)
+#   <dest>/<base>_vNNN/         archived versions
+# Archiving is a folder rename, so the root keeps pointing at its sibling sublayers
+# (relative names) with no rewriting. <dest> is the token-resolved publish folder, so
+# the light asset sits next to the DCC's normal publishes.
 
 from __future__ import annotations
 
-import tempfile
+import re
+from dataclasses import replace
 from pathlib import Path
-
-from pxr import Sdf
 
 from core.constants import ACTIVE_VERSION_LABEL
 from core.logger import get_logger
-from features.publisher.publish_core import ensure_dir, rename_last_to_versioned
-from features.publisher.version_resolver import get_next_version
+from features.publisher.publish_core import ensure_dir
 
 from .contract import LightAsset
 from .skel_export import author_light_asset
 
 log = get_logger("usd_export.publish")
 
-# Published layout under the project (matches the assembler's FluxResolver).
+# Fallback layout under the project when no dest_dir is given (matches FluxResolver).
 _USD_SUBDIR = "{asset}/model/usd"
-_SUBLAYER_SUFFIXES = ("model", "skel", "anim")
 
 
-def _rewrite_archived_root_sublayers(root_path: Path, version_label: str) -> None:
-    """Point an archived root at its own versioned sublayers (rename _LAST -> _vNNN)."""
-    layer = Sdf.Layer.FindOrOpen(str(root_path).replace("\\", "/"))
-    if layer is None:
-        log.warning("archived root not reopenable: %s", root_path)
-        return
-    old = ACTIVE_VERSION_LABEL
-    new_subs = [p.replace(f"_{old}.", f"_{version_label}.") for p in layer.subLayerPaths]
-    layer.subLayerPaths = new_subs
-    layer.Save()
+def _next_version(parent: Path, base: str) -> int:
+    """Highest existing {base}_vNNN archive folder number + 1 (1 when none)."""
+    n = 0
+    if parent.exists():
+        rx = re.compile(re.escape(base) + r"_v(\d+)$")
+        for d in parent.iterdir():
+            if d.is_dir():
+                m = rx.match(d.name)
+                if m:
+                    n = max(n, int(m.group(1)))
+    return n + 1
 
 
 def publish_light_asset(
@@ -46,38 +45,37 @@ def publish_light_asset(
     *,
     fmt: str = "usd",
     config: dict | None = None,
+    dest_dir: str | Path | None = None,
+    base_name: str | None = None,
 ) -> dict:
-    """Author *asset* and publish it as the active LAST set under *project_path*.
+    """Author *asset* and publish it as the active LAST folder.
 
-    Returns {"root": Path, "version": "vNNN", "layers": {name: Path}}.
+    *dest_dir* is the output folder (pass the token-resolved publish path); *base_name*
+    is the file/folder stem (e.g. "CHAR_BLOCK_DAVID_null"). Falls back to
+    ``{project}/{asset}/model/usd`` and the asset name when omitted.
+
+    Returns {"root": Path, "version": "vNNN", "folder": Path, "layers": {name: Path}}.
     """
-    project = Path(project_path)
-    subdir = (config or {}).get("usd_export", {}).get("usd_subdir", _USD_SUBDIR)
-    dest = project / subdir.format(asset=asset.asset)
-    ensure_dir(dest)
+    base = base_name or asset.asset
+    if dest_dir is not None:
+        parent = Path(dest_dir)
+    else:
+        subdir = (config or {}).get("usd_export", {}).get("usd_subdir", _USD_SUBDIR)
+        parent = Path(project_path) / subdir.format(asset=asset.asset)
+    ensure_dir(parent)
 
-    # Version number the new active set will represent (mirrors publish_core).
-    next_ver = get_next_version(dest, asset.asset)
-    had_last = rename_last_to_versioned(dest, asset.asset, next_ver) is not None
-    if had_last:
-        for suffix in _SUBLAYER_SUFFIXES:
-            rename_last_to_versioned(dest, f"{asset.asset}_{suffix}", next_ver)
-        archived_root = next(dest.glob(f"{asset.asset}_v{next_ver:03d}.*"), None)
-        if archived_root is not None:
-            _rewrite_archived_root_sublayers(archived_root, f"v{next_ver:03d}")
-    new_ver = next_ver + 1 if had_last else next_ver
+    active = parent / f"{base}_{ACTIVE_VERSION_LABEL}"   # e.g. CHAR_..._LAST/
+    if active.exists():
+        ver = _next_version(parent, base)
+        active.rename(parent / f"{base}_v{ver:03d}")     # archive the whole folder
+        version_str = f"v{ver + 1:03d}"
+    else:
+        version_str = "v001"
+    active.mkdir(parents=True, exist_ok=True)
 
-    # Author the fresh active set in a temp dir, then move it into place.
-    with tempfile.TemporaryDirectory() as tmp:
-        authored = author_light_asset(asset, tmp, fmt=fmt, version_label=ACTIVE_VERSION_LABEL)
-        moved: dict[str, Path] = {}
-        for key, src in authored.items():
-            target = dest / src.name
-            if target.exists():
-                target.unlink()
-            src.replace(target)
-            moved[key] = target
+    # Name the files off the base (plain names; the folder carries the version).
+    light = replace(asset, asset=base)
+    authored = author_light_asset(light, active, fmt=fmt, version_label=None)
 
-    version_str = f"v{new_ver:03d}"
-    log.info("Published light asset %s (%s) -> %s", asset.asset, version_str, moved["root"].name)
-    return {"root": moved["root"], "version": version_str, "layers": moved}
+    log.info("Published light asset %s (%s) -> %s", base, version_str, active)
+    return {"root": authored["root"], "version": version_str, "folder": active, "layers": authored}

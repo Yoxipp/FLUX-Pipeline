@@ -254,6 +254,8 @@ def run_light_export(
     frame_start: int | None = None,
     frame_end: int | None = None,
     fmt: str = "usd",
+    dest_dir: str | None = None,
+    base_name: str | None = None,
 ) -> dict:
     """Extract a KineFX skinned asset from Houdini and publish a light USD asset.
 
@@ -282,7 +284,9 @@ def run_light_export(
         from features.usd_export.contract import light_asset_from_dict
 
         light = light_asset_from_dict(payload["asset"])
-        pub = publish_light_asset(light, Path(project_path), fmt=fmt)
+        pub = publish_light_asset(
+            light, Path(project_path), fmt=fmt, dest_dir=dest_dir, base_name=base_name
+        )
         log.info("Houdini light USD export published: %s (%s)", asset, pub["version"])
         return {"ok": True, "asset": asset, "version": pub["version"], "root": str(pub["root"])}
     except Exception as exc:

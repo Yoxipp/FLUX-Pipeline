@@ -165,6 +165,7 @@ export const api = {
   exportMayaLightUsd: (payload: {
     project_name: string
     asset:        string
+    filename?:    string
     mesh?:        string
     root_joint?:  string
     frame_start?: number

@@ -678,6 +678,7 @@ export function Publisher() {
           const res = await api.exportMayaLightUsd({
             project_name: project,
             asset:        assetName,
+            filename,
             frame_start:  isSequence ? frameStart : undefined,
             frame_end:    isSequence ? frameEnd : undefined,
           })

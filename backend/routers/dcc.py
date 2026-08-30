@@ -375,6 +375,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
 class HoudiniLightExportRequest(BaseModel):
     project_name: str
     asset:        str
+    filename:     str | None = None   # full base for the token publish path
     skel_node:    str | None = None
     mesh_node:    str | None = None
     frame_start:  int | None = None
@@ -392,6 +393,18 @@ async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
     if not project_path.exists():
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
+    dest_dir = None
+    base_name = None
+    if req.filename:
+        from features.folder_manager.naming_validator import get_base_name
+        from features.publisher.publish_core import resolve_publish_path
+
+        full = f"{req.filename}.{req.fmt}"
+        rp = resolve_publish_path(project_path, full)
+        if rp is None:
+            raise HTTPException(status_code=400, detail=f"Chemin de publish introuvable pour {req.filename}")
+        dest_dir, base_name = str(rp), get_base_name(full)
+
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None,
@@ -399,6 +412,7 @@ async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
             req.asset, str(project_path),
             skel_node=req.skel_node, mesh_node=req.mesh_node,
             frame_start=req.frame_start, frame_end=req.frame_end, fmt=req.fmt,
+            dest_dir=dest_dir, base_name=base_name,
         ),
     )
     if not result.get("ok"):
@@ -556,6 +570,7 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
 class MayaLightExportRequest(BaseModel):
     project_name: str
     asset:        str
+    filename:     str | None = None   # full base (CLASS_TYPE_NAME_INSTANCE) for token path
     mesh:         str | None = None
     root_joint:   str | None = None
     frame_start:  int | None = None
@@ -637,16 +652,34 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
             reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
             raise HTTPException(status_code=500, detail=f"Export USD léger échoué{reason}")
 
-        # Author + publish with pxr, backend-side (Maya stays pxr-free).
+        # Author + publish with pxr, backend-side (Maya stays pxr-free). Resolve the
+        # destination from tokens so the light asset lands next to normal publishes,
+        # grouped in a {base}_LAST folder.
         from features.usd_export import publish_light_asset
         from features.usd_export.contract import light_asset_from_dict
 
+        dest_dir = None
+        base_name = None
+        if req.filename:
+            from features.folder_manager.naming_validator import get_base_name
+            from features.publisher.publish_core import resolve_publish_path
+
+            full = f"{req.filename}.{req.fmt}"
+            dest_dir = resolve_publish_path(project_path, full)
+            if dest_dir is None:
+                raise HTTPException(status_code=400, detail=f"Chemin de publish introuvable pour {req.filename}")
+            base_name = get_base_name(full)
+
         light = light_asset_from_dict(envelope["asset"])
         pub = await loop.run_in_executor(
-            None, lambda: publish_light_asset(light, project_path, fmt=req.fmt)
+            None,
+            lambda: publish_light_asset(
+                light, project_path, fmt=req.fmt, dest_dir=dest_dir, base_name=base_name
+            ),
         )
-        log.info("Light USD export published: %s (%s)", req.asset, pub["version"])
-        return {"ok": True, "asset": req.asset, "version": pub["version"], "root": str(pub["root"])}
+        log.info("Light USD export published: %s (%s) -> %s", base_name or req.asset, pub["version"], pub["folder"])
+        return {"ok": True, "asset": base_name or req.asset, "version": pub["version"],
+                "root": str(pub["root"]), "folder": str(pub["folder"])}
     finally:
         await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
 

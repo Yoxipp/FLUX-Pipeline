@@ -1,4 +1,4 @@
-# test_publish.py — light-export publish layout + versioning, resolver compatibility.
+# test_publish.py — light-export publish (per-version folder layout).
 
 from __future__ import annotations
 
@@ -6,9 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pxr import Sdf, Usd
+from pxr import Usd
 
-from features.usd_assembler.resolve.flux_resolver import FluxResolver
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
 
 _ID = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
@@ -28,40 +27,39 @@ def _asset() -> LightAsset:
 
 
 class PublishLightAsset(unittest.TestCase):
-    def test_first_publish_writes_last_set(self):
+    def test_first_publish_creates_last_folder(self):
         with tempfile.TemporaryDirectory() as proj:
-            res = publish_light_asset(_asset(), proj, fmt="usd")
-            dest = Path(proj) / "CHAR_hero" / "model" / "usd"
-            self.assertTrue((dest / "CHAR_hero_LAST.usd").exists())
-            self.assertTrue((dest / "CHAR_hero_model_LAST.usd").exists())
-            self.assertTrue((dest / "CHAR_hero_skel_LAST.usd").exists())
+            dest = Path(proj) / "pub"
+            res = publish_light_asset(_asset(), proj, fmt="usd", dest_dir=dest, base_name="CHAR_BLOCK_DAVID_null")
+            folder = dest / "CHAR_BLOCK_DAVID_null_LAST"
+            self.assertTrue(folder.is_dir())
+            self.assertTrue((folder / "CHAR_BLOCK_DAVID_null.usd").exists())
+            self.assertTrue((folder / "CHAR_BLOCK_DAVID_null_model.usd").exists())
+            self.assertTrue((folder / "CHAR_BLOCK_DAVID_null_skel.usd").exists())
             self.assertEqual(res["version"], "v001")
 
-    def test_resolver_picks_last(self):
-        with tempfile.TemporaryDirectory() as proj:
-            publish_light_asset(_asset(), proj, fmt="usd")
-            resolved = FluxResolver(proj).resolve("CHAR_hero", "latest")
-            self.assertEqual(resolved.path.name, "CHAR_hero_LAST.usd")
-            self.assertEqual(resolved.default_prim, "CHAR_hero")
-            # the resolved root composes to a valid asset root
-            stage = Usd.Stage.Open(str(resolved.path))
-            self.assertEqual(stage.GetDefaultPrim().GetName(), "CHAR_hero")
-            self.assertTrue(stage.GetPrimAtPath("/CHAR_hero/body").IsValid())
+            stage = Usd.Stage.Open(str(folder / "CHAR_BLOCK_DAVID_null.usd"))
+            # file names use the base, but the prim identity is the sanitized base too
+            self.assertEqual(stage.GetDefaultPrim().GetName(), "CHAR_BLOCK_DAVID_null")
+            self.assertTrue(stage.GetPrimAtPath("/CHAR_BLOCK_DAVID_null/body").IsValid())
 
-    def test_second_publish_archives_previous(self):
+    def test_second_publish_archives_folder(self):
         with tempfile.TemporaryDirectory() as proj:
-            publish_light_asset(_asset(), proj, fmt="usd")
-            res2 = publish_light_asset(_asset(), proj, fmt="usd")
-            dest = Path(proj) / "CHAR_hero" / "model" / "usd"
-            # previous LAST archived to v001, new active still LAST
-            self.assertTrue((dest / "CHAR_hero_v001.usd").exists())
-            self.assertTrue((dest / "CHAR_hero_model_v001.usd").exists())
-            self.assertTrue((dest / "CHAR_hero_LAST.usd").exists())
+            dest = Path(proj) / "pub"
+            publish_light_asset(_asset(), proj, fmt="usd", dest_dir=dest, base_name="DAVID")
+            res2 = publish_light_asset(_asset(), proj, fmt="usd", dest_dir=dest, base_name="DAVID")
+            self.assertTrue((dest / "DAVID_v001").is_dir())
+            self.assertTrue((dest / "DAVID_LAST").is_dir())
             self.assertEqual(res2["version"], "v002")
-            # archived root points at its OWN versioned sublayers, not _LAST
-            layer = Sdf.Layer.FindOrOpen(str(dest / "CHAR_hero_v001.usd"))
-            self.assertTrue(any("_v001." in p for p in layer.subLayerPaths))
-            self.assertFalse(any("_LAST." in p for p in layer.subLayerPaths))
+            # archived root still composes from its own sibling sublayers
+            stage = Usd.Stage.Open(str(dest / "DAVID_v001" / "DAVID.usd"))
+            self.assertTrue(stage.GetPrimAtPath("/DAVID/body").IsValid())
+
+    def test_fallback_layout_without_dest(self):
+        with tempfile.TemporaryDirectory() as proj:
+            res = publish_light_asset(_asset(), proj, fmt="usd")
+            self.assertTrue((Path(proj) / "CHAR_hero" / "model" / "usd" / "CHAR_hero_LAST").is_dir())
+            self.assertEqual(res["version"], "v001")
 
 
 if __name__ == "__main__":
