@@ -203,6 +203,7 @@ export function Console() {
               style={{
                 flex: 1, overflowY: 'auto', padding: '8px 0',
                 fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5,
+                userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
               }}
             >
               {shown.length === 0 ? (

@@ -234,6 +234,7 @@ def install(houdini_exe_path: str | None = None) -> dict:
         needs_upgrade = (
             "try:" not in old_fragment
             or "homeHoudiniDirectory" not in old_fragment
+            or "__file__" in old_fragment   # legacy block: __file__ is undefined in Houdini exec
         )
         if needs_upgrade:
             try:

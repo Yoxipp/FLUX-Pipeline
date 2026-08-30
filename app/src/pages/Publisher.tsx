@@ -1216,7 +1216,7 @@ export function Publisher() {
                   }} />
                 </div>
                 <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: lightUsd ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
-                  UsdSkel (model + skel + anim, joints animés)
+                  UsdSkel (model + skel + animation des joints)
                 </span>
               </div>
             </div>
