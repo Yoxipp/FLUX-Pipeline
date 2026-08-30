@@ -61,6 +61,9 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
     entry = _EXT_MAP.get(ext)
     if entry is None:
         return {"ok": False, "error": f"Unsupported import extension: {ext}"}
+    if ext == ".fbx":
+        # No reliable single-node FBX importer across Houdini versions.
+        return {"ok": False, "error": "Import FBX dans Houdini non supporté : utilise .abc ou .usd (ou File > Import FBX dans Houdini)"}
 
     node_type, parm_name = entry
     file_str = str(file_path).replace("\\", "/")

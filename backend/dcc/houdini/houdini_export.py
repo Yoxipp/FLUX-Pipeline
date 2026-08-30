@@ -262,6 +262,79 @@ def cook_rop(
     return resp
 
 
+def export_via_node(
+    node_path: str,
+    extension: str,
+    output_path: str | Path,
+    frame_range: tuple[int, int, int] | None = None,
+) -> dict:
+    """Export from ANY selected node: reuse it if it is a ROP, otherwise create the
+    right output ROP (rop_geometry for geo/obj/usd, rop_alembic for .abc) as a child of
+    the node's SOP network, wire it to the node, set the output path and cook.
+
+    Returns {"ok": True, "rop": "..."} or {"ok": False, "error": "..."}.
+    """
+    ext = _norm_ext(extension).lower()
+    out = str(output_path).replace("\\", "/")
+    fr_repr = repr(tuple(frame_range)) if frame_range else "None"
+    rop_map_repr = repr(_ROP_PARM)
+
+    code = textwrap.dedent(f"""\
+        _n = hou.node({node_path!r})
+        if _n is None:
+            raise RuntimeError("Node not found: {node_path}")
+        _out = {out!r}
+        _ext = {ext!r}
+        _fr = {fr_repr}
+        _ropmap = {rop_map_repr}
+        import pathlib as _pl
+        _pl.Path(_out).parent.mkdir(parents=True, exist_ok=True)
+
+        _tname = _n.type().name()
+        if _tname in _ropmap:
+            _rop = _n
+            _op = _ropmap[_tname]
+        else:
+            _cat = _n.type().category().name()
+            if _cat == 'Sop':
+                _parent, _sop = _n.parent(), _n
+            elif _n.childTypeCategory() and _n.childTypeCategory().name() == 'Sop':
+                _parent, _sop = _n, (_n.renderNode() or _n.displayNode())
+            else:
+                raise RuntimeError("Select a SOP or a geo object (got %s)" % _cat)
+            if _sop is None:
+                raise RuntimeError("No SOP to export inside %s" % _n.path())
+            if _ext == '.abc':
+                _rop = _parent.createNode('rop_alembic', node_name='flux_export'); _op = 'filename'
+            else:
+                _rop = _parent.createNode('rop_geometry', node_name='flux_export'); _op = 'sopoutput'
+            for _sp in ('soppath', 'sopname'):
+                if _rop.parm(_sp) is not None:
+                    _rop.parm(_sp).set(_sop.path()); break
+
+        _set = False
+        for _pn in (_op, 'sopoutput', 'filename', 'lopoutput', 'file', 'picture'):
+            if _pn and _rop.parm(_pn) is not None:
+                _rop.parm(_pn).set(_out); _set = True; break
+        if not _set:
+            raise RuntimeError("Cannot set output parm on ROP type: %s" % _rop.type().name())
+
+        if _fr:
+            _rop.render(frame_range=_fr)
+        else:
+            _rop.render()
+        result = {{"ok": True, "rop": _rop.path()}}
+    """)
+
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        rop = (resp.get("result") or {}).get("rop")
+        log.info("Houdini export via node %s -> %s (%s)", node_path, out, rop)
+    else:
+        log.error("export_via_node failed: %s", resp.get("error"))
+    return resp
+
+
 def publish_houdini_rop(
     project_path: Path | str,
     filename: str,
@@ -317,15 +390,11 @@ def publish_houdini_rop(
     else:
         effective_ver = next_ver
 
-    # 4. Set output path on the ROP
-    set_resp = set_rop_output(rop_node_path, output_path)
-    if not set_resp.get("ok"):
-        return {"ok": False, "error": "set_rop_output: " + set_resp.get("error", "unknown")}
-
-    # 5. Cook
-    cook_resp = cook_rop(rop_node_path, frame_range)
-    if not cook_resp.get("ok"):
-        return {"ok": False, "error": "cook_rop: " + cook_resp.get("error", "unknown")}
+    # 4+5. Export: reuse the node if it is a ROP, else auto-create the right output ROP
+    # as a child, wire it, set the path and cook — so any selected node can be exported.
+    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range)
+    if not exp_resp.get("ok"):
+        return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
 
     # 6. Log
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
