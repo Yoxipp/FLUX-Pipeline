@@ -107,8 +107,6 @@ export interface ZBrushPublishPayload {
   filename:       string
   extension:      string
   export_options?: Record<string, unknown>
-  keep_local?:    boolean
-  local_dir?:     string
   description?:   string
   user?:          string
 }

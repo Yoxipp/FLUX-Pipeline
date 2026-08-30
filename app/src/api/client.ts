@@ -18,6 +18,15 @@ import type {
 
 const BASE_URL = 'http://127.0.0.1:8765'
 
+export interface LogRecord {
+  id:      number
+  ts:      number
+  levelno: number
+  level:   string
+  logger:  string
+  msg:     string
+}
+
 async function apiCall<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   endpoint: string,
@@ -94,6 +103,16 @@ export const api = {
   removeDccAutostart: (dcc: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', `/dcc/${dcc}/autostart`),
 
+  // Console logs
+  getLogs: (after = 0, level?: string) =>
+    apiCall<{ records: LogRecord[] }>(
+      'GET',
+      `/logs?after=${after}${level ? `&level=${encodeURIComponent(level)}` : ''}`,
+    ),
+
+  clearLogs: () =>
+    apiCall<{ ok: boolean }>('DELETE', '/logs'),
+
   // Publisher
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
@@ -122,6 +141,18 @@ export const api = {
     user?:        string
   }) =>
     apiCall<{ ok: boolean; version_str: string; dest: string }>('POST', '/dcc/maya/publish', payload),
+
+  exportMayaLightUsd: (payload: {
+    project_name: string
+    asset:        string
+    mesh?:        string
+    root_joint?:  string
+    frame_start?: number
+    frame_end?:   number
+    fmt?:         string
+  }) =>
+    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+      'POST', '/dcc/maya/export-usd', payload),
 
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>

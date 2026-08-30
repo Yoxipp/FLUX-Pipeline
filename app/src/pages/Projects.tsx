@@ -254,14 +254,14 @@ function TokenFinder({ project, tokens, onChange }: {
             >
               <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
               <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
-                {value || '—'}
+                {value || '-'}
               </span>
             </div>
             {isOpen && (
               <div style={{ position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: 110, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
                 {value && (
                   <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
-                    — effacer
+                    effacer
                   </div>
                 )}
                 {opts.length === 0 ? (
@@ -327,7 +327,7 @@ function SelectEl({ options, value, onChange }: { options: string[]; value: stri
       <SelectTrigger style={{ width: '100%' }} />
       <SelectContent>
         {options.length === 0
-          ? <SelectItem value="__empty__">—</SelectItem>
+          ? <SelectItem value="__empty__">-</SelectItem>
           : options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
       </SelectContent>
     </Select>
@@ -487,7 +487,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
         <div className="cap">SHOT</div>
         <div>
           <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>IN SEQUENCE</div>
-          <SelectEl options={sequences.length > 0 ? sequences : ['—']} value={seq} onChange={setSeq} />
+          <SelectEl options={sequences.length > 0 ? sequences : ['-']} value={seq} onChange={setSeq} />
         </div>
         <div>
           <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>SHOT NO.</div>
@@ -960,7 +960,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
     <>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
-          {label} — {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
+          {label} · {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {items.length === 0 ? (
@@ -1451,15 +1451,24 @@ export function Projects() {
   const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
-    const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
-    await api.createFluxImporterNode({
-      project:       nav.project,
-      flux_class:    tok.CLASS,
-      flux_type:     tok.TYPE,
-      flux_name:     tok.NAME,
-      flux_instance: tok.INSTANCE,
-      flux_iter:     'LAST',
-    })
+    try {
+      const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
+      await api.createFluxImporterNode({
+        project:       nav.project,
+        flux_class:    tok.CLASS,
+        flux_type:     tok.TYPE,
+        flux_name:     tok.NAME,
+        flux_instance: tok.INSTANCE,
+        flux_iter:     'LAST',
+      })
+      toast.success(`${item.name} importé dans Houdini`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)
+      toast.error(offline
+        ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
+        : `Import Houdini échoué : ${msg}`)
+    }
   }, [nav])
 
   const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc'])
@@ -1473,8 +1482,8 @@ export function Projects() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
       toast.error(msg.includes('répond pas')
-        ? 'Maya non connecté — ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
-        : `Import Maya échoué — ${msg}`)
+        ? 'Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
+        : `Import Maya échoué : ${msg}`)
     }
   }, [nav])
 
@@ -1704,8 +1713,8 @@ export function Projects() {
                 <>
                   <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--paper-2)' }}>
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', flex: 1 }}>
-                      <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS — </span>
-                      {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} — </span>}
+                      <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS · </span>
+                      {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} · </span>}
                       {findLoading ? 'Recherche…' : searchResults.length === 0 ? 'Aucun résultat' : `${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`}
                     </div>
                     <div
@@ -1865,7 +1874,7 @@ export function Projects() {
             <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
             <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--accent-hi)' }}>
-                {activeProject || '—'}
+                {activeProject || '-'}
               </div>
               <div style={{ fontSize: 9, color: 'var(--ink-3)', marginTop: 2 }}>
                 {sequences.length > 0 ? `${sequences.length} séquences` : 'Aucune séquence'}

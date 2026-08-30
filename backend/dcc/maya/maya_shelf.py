@@ -29,22 +29,22 @@ _CONNECT_CMD = (
 _BUTTONS: list[dict[str, str]] = [
     {
         "label":      "Publish",
-        "annotation": "Flux — Publish scene to pipeline",
+        "annotation": "Flux · Publish scene to pipeline",
         "command":    "from dcc.maya import maya_publish; maya_publish.publish()",
     },
     {
         "label":      "Import",
-        "annotation": "Flux — Import asset from pipeline",
+        "annotation": "Flux · Import asset from pipeline",
         "command":    "from dcc.maya import maya_import; maya_import.open_importer()",
     },
     {
         "label":      "Connect",
-        "annotation": f"Flux — Open commandPort (port {_MAYA_PORT})",
+        "annotation": f"Flux · Open commandPort (port {_MAYA_PORT})",
         "command":    _CONNECT_CMD,
     },
     {
         "label":      "Hub",
-        "annotation": "Flux — Open Flux Hub",
+        "annotation": "Flux · Open Flux Hub",
         "command":    "from dcc.maya import maya_connection; maya_connection.open_hub()",
     },
 ]

@@ -311,7 +311,7 @@ function PublishComposer({
                       fontWeight: filled ? 600 : 400,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3,
                     }}>
-                      {selVal || '—'}
+                      {selVal || '-'}
                     </span>
                   </div>
                 )}
@@ -328,7 +328,7 @@ function PublishComposer({
                         onClick={() => { onSelect(key, ''); setOpen(null) }}
                         style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
                       >
-                        — effacer
+                        effacer
                       </div>
                     )}
                     {opts.length === 0 ? (
@@ -404,9 +404,6 @@ export function Publisher() {
     scope: 'all' as 'all' | 'selected' | 'visible',
   })
 
-  // Keep Local (functional for ZBrush, placeholder for others)
-  const [keepLocal, setKeepLocal]   = useState(false)
-  const [localDir, setLocalDir]     = useState('')
 
   // Houdini-specific
   const [ropNodePath, setRopNodePath]             = useState('')
@@ -417,6 +414,7 @@ export function Publisher() {
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
   const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('selection')
+  const [lightUsd, setLightUsd]                     = useState(false)   // Maya UsdSkel light export
   const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
   const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
   const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
@@ -516,6 +514,11 @@ export function Publisher() {
         if (cancelled) return
         setHoudiniConnected(ping.connected)
         setHoudiniVersion(ping.version)
+        if (!ping.connected) {
+          // Drop stale node context so a later publish doesn't target a dead node.
+          setRopNodePath('')
+          setDetectedNodeType(null)
+        }
         if (ping.connected) {
           const state = await api.getHoudiniState()
           if (cancelled) return
@@ -648,8 +651,6 @@ export function Publisher() {
     setNewVals(EMPTY_NEW_VALS)
     setSourcePath('')
     setDescription('')
-    setKeepLocal(false)
-    setLocalDir('')
   }, [])
 
   const handlePublish = useCallback(async () => {
@@ -669,7 +670,18 @@ export function Publisher() {
 
       if (dcc === 'Maya') {
         if (!mayaConnected) {
-          toast.error('Maya non connecté — ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
+          toast.error('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
+          return
+        }
+        if (lightUsd && mode === 'asset') {
+          const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
+          const res = await api.exportMayaLightUsd({
+            project_name: project,
+            asset:        assetName,
+            frame_start:  isSequence ? frameStart : undefined,
+            frame_end:    isSequence ? frameEnd : undefined,
+          })
+          toast.success(`USD léger ${res.version} → ${res.asset}`)
           return
         }
         const isAnimAbc = isSequence && exportExt === '.abc'
@@ -685,6 +697,10 @@ export function Publisher() {
         })
         toast.success(`v${res.version_str} → Maya`)
       } else if (dcc === 'Houdini') {
+        if (!houdiniConnected) {
+          toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
+          return
+        }
         const res = await api.publishHoudiniRop({
           project_name:  project,
           filename,
@@ -698,7 +714,7 @@ export function Publisher() {
         toast.success(`v${res.version_str} → ${res.rop_node}`)
       } else if (dcc === 'ZBrush') {
         if (!zbrushConnected) {
-          toast.error('ZBrush non connecté — active le bridge FLUX dans ZBrush')
+          toast.error('ZBrush non connecté : active le bridge FLUX dans ZBrush')
           return
         }
         const exportOptions =
@@ -709,8 +725,6 @@ export function Publisher() {
           filename,
           extension:      exportExt,
           export_options: exportOptions,
-          keep_local:     keepLocal && !!localDir,
-          local_dir:      localDir || undefined,
           description:    description || undefined,
           user:           settings?.username ?? undefined,
         })
@@ -744,8 +758,8 @@ export function Publisher() {
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
-    zbrushConnected, zbObjOptions, zbFbxOptions, keepLocal, localDir,
-    mayaConnected, mayaScope,
+    zbrushConnected, zbObjOptions, zbFbxOptions,
+    mayaConnected, mayaScope, lightUsd, sel, newMode, newVals, houdiniConnected,
   ])
 
   const filename = buildFilename()
@@ -819,8 +833,8 @@ export function Publisher() {
                     }} />
                     <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                       {zbrushConnected
-                        ? `Connecté${zbrushVersion ? ` — ${zbrushVersion}` : ''}`
-                        : 'Non connecté — installe le plugin via le bouton Plug dans la sidebar'}
+                        ? `Connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}`
+                        : 'Non connecté : installe le plugin via le bouton Plug dans la sidebar'}
                     </div>
                   </div>
                 </div>
@@ -936,7 +950,7 @@ export function Publisher() {
                     transition: 'background 0.3s',
                   }} />
                   <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: mayaConnected ? 'var(--ok)' : 'var(--ink-3)' }}>
-                    {mayaConnected ? '✓ Connecté — commandPort 7001' : 'Port 7001 injoignable'}
+                    {mayaConnected ? '✓ Connecté · commandPort 7001' : 'Port 7001 injoignable'}
                   </div>
                 </div>
 
@@ -996,7 +1010,7 @@ export function Publisher() {
                     {mayaConnectCmd && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                          Ouvrir le port immédiatement — Maya Script Editor (Python) :
+                          Ouvrir le port immédiatement · Maya Script Editor (Python) :
                         </div>
                         <CopyBlock text={mayaConnectCmd} />
                       </div>
@@ -1006,7 +1020,7 @@ export function Publisher() {
                     {mayaAutostartInstalled && mayaStartupFile && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                          Si ça ne marche toujours pas — vérifie le chemin Maya (Script Editor Python) :
+                          Si ça ne marche toujours pas, vérifie le chemin Maya (Script Editor Python) :
                         </div>
                         <CopyBlock text={`import maya.cmds as cmds; print(cmds.internalVar(userScriptDir=True))`} />
                         <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.5 }}>
@@ -1028,8 +1042,8 @@ export function Publisher() {
                   }} />
                   <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                     {houdiniConnected
-                      ? `Connecté${houdiniVersion ? ` — Houdini ${houdiniVersion}` : ''}`
-                      : 'Houdini non connecté — lance le serveur FLUX dans Houdini'}
+                      ? `Connecté${houdiniVersion ? ` · Houdini ${houdiniVersion}` : ''}`
+                      : 'Houdini non connecté : lance le serveur FLUX dans Houdini'}
                   </div>
                 </div>
                 <input
@@ -1077,84 +1091,11 @@ export function Publisher() {
               </div>
             )}
 
-            {/* Keep Local collapsible */}
-            <div style={{ borderRadius: 6, border: '1px solid var(--rule-2)', overflow: 'hidden' }}>
-              {/* Header */}
-              <div
-                onClick={() => { if (dcc === 'ZBrush') setKeepLocal(v => !v) }}
-                style={{
-                  padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8,
-                  cursor: dcc === 'ZBrush' ? 'pointer' : 'default',
-                  background: keepLocal && dcc === 'ZBrush' ? 'var(--accent-soft)' : 'var(--paper-2)',
-                  userSelect: 'none',
-                }}
-              >
-                {/* Toggle pill */}
-                <div style={{
-                  width: 28, height: 16, borderRadius: 8, flexShrink: 0,
-                  background: (keepLocal && dcc === 'ZBrush') ? 'var(--accent)' : 'var(--rule-2)',
-                  position: 'relative', transition: 'background 0.15s',
-                  opacity: dcc === 'ZBrush' ? 1 : 0.4,
-                }}>
-                  <div style={{
-                    position: 'absolute', top: 2,
-                    left: (keepLocal && dcc === 'ZBrush') ? 14 : 2,
-                    width: 12, height: 12, borderRadius: '50%', background: 'white',
-                    transition: 'left 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,.25)',
-                  }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, letterSpacing: '0.08em', color: (keepLocal && dcc === 'ZBrush') ? 'var(--accent-hi)' : 'var(--ink-3)', textTransform: 'uppercase' }}>
-                    Keep Local
-                  </span>
-                  {dcc !== 'ZBrush' && (
-                    <span style={{ marginLeft: 6, fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                      (bientôt disponible)
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Body — visible when toggled on ZBrush */}
-              {keepLocal && dcc === 'ZBrush' && (
-                <div style={{ padding: '8px 10px', borderTop: '1px solid var(--rule-2)', background: 'var(--bg-deep)', display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input
-                    value={localDir}
-                    onChange={e => setLocalDir(e.target.value)}
-                    placeholder="Dossier local de sauvegarde…"
-                    style={{
-                      flex: 1, height: 28,
-                      background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
-                      borderRadius: 5, padding: '0 8px',
-                      fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
-                      boxShadow: 'var(--shadow-inset)', outline: 'none',
-                    }}
-                  />
-                  <div
-                    title="Sélectionner un dossier"
-                    onClick={async () => {
-                      try {
-                        const dir = await window.electronAPI?.openFolder()
-                        if (dir) setLocalDir(dir)
-                      } catch { /* no electron bridge — user types manually */ }
-                    }}
-                    style={{
-                      width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-                      cursor: 'pointer', flexShrink: 0,
-                    }}
-                  >
-                    <FolderIcon color="var(--accent)" />
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Published by */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>PUBLIÉ PAR</div>
               <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {settings?.username ?? '—'}
+                {settings?.username ?? '-'}
               </div>
             </div>
           </div>
@@ -1213,7 +1154,7 @@ export function Publisher() {
                 }} />
               </div>
               <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {isSequence ? 'Activé — dossier versionné + $F4' : 'Désactivé — fichier unique LAST'}
+                {isSequence ? 'Activé · dossier versionné + $F4' : 'Désactivé · fichier unique LAST'}
               </div>
             </div>
             {isSequence && (
@@ -1255,6 +1196,32 @@ export function Publisher() {
             </div>
           )}
 
+          {/* EXPORT USD LÉGER — Maya asset only */}
+          {dcc === 'Maya' && mode === 'asset' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>EXPORT USD LÉGER</SecTitle>
+              <div
+                onClick={() => setLightUsd(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
+              >
+                <div style={{
+                  width: 28, height: 16, borderRadius: 8, flexShrink: 0,
+                  background: lightUsd ? 'var(--accent)' : 'var(--rule-2)',
+                  position: 'relative', transition: 'background 0.15s',
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 2, left: lightUsd ? 14 : 2,
+                    width: 12, height: 12, borderRadius: '50%', background: 'white',
+                    transition: 'left 0.15s',
+                  }} />
+                </div>
+                <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: lightUsd ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
+                  UsdSkel (model + skel + anim, joints animés)
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* APERÇU OUTPUT */}
           <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <SecTitle>APERÇU OUTPUT</SecTitle>
@@ -1276,12 +1243,7 @@ export function Publisher() {
               )}
               {dcc === 'ZBrush' && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : 'var(--err)' }}>
-                  {zbrushConnected ? `● ZBrush connecté${zbrushVersion ? ` — ${zbrushVersion}` : ''}` : '✕ ZBrush non connecté'}
-                </div>
-              )}
-              {keepLocal && localDir && dcc === 'ZBrush' && (
-                <div style={{ marginTop: 4, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                  ↳ Copie locale : {localDir}
+                  {zbrushConnected ? `● ZBrush connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}` : '✕ ZBrush non connecté'}
                 </div>
               )}
             </div>

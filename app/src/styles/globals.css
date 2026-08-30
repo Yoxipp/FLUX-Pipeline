@@ -113,9 +113,9 @@ body {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--ink-4); display: inline-block; flex-shrink: 0;
 }
-.dot.ok     { background: var(--ok); box-shadow: 0 0 4px color-mix(in oklch, var(--ok) 50%, transparent); }
-.dot.warn   { background: var(--warn); box-shadow: 0 0 4px color-mix(in oklch, var(--warn) 50%, transparent); }
-.dot.err    { background: var(--err); box-shadow: 0 0 4px color-mix(in oklch, var(--err) 50%, transparent); }
+.dot.ok     { background: var(--ok); }
+.dot.warn   { background: var(--warn); }
+.dot.err    { background: var(--err); }
 .dot.accent { background: var(--accent); }
 
 /* ── button ── */
@@ -139,11 +139,11 @@ body {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent-hi);
-  box-shadow: var(--shadow-xs), 0 0 8px color-mix(in oklch, var(--accent) 20%, transparent);
+  box-shadow: var(--shadow-xs);
 }
 .btn.primary:hover {
   background: var(--hl);
-  box-shadow: var(--shadow-sm), 0 0 10px color-mix(in oklch, var(--accent) 25%, transparent);
+  box-shadow: var(--shadow-sm);
 }
 .btn.ghost {
   border-color: transparent; background: transparent; color: var(--ink-2);

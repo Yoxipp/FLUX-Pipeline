@@ -25,12 +25,12 @@ def _show_error(message: str) -> None:
     """Show an error dialog inside Maya (or just log it when outside Maya)."""
     log.error(message)
     if _IN_MAYA:
-        cmds.confirmDialog(title="Flux — Publish Error", message=message, button=["OK"])  # type: ignore[union-attr]
+        cmds.confirmDialog(title="Flux · Publish Error", message=message, button=["OK"])  # type: ignore[union-attr]
 
 
 def _show_info(message: str) -> None:
     if _IN_MAYA:
-        cmds.confirmDialog(title="Flux — Published", message=message, button=["OK"])  # type: ignore[union-attr]
+        cmds.confirmDialog(title="Flux · Published", message=message, button=["OK"])  # type: ignore[union-attr]
 
 
 # ── public API ────────────────────────────────────────────────────────────────

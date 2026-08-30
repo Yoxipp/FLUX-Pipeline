@@ -49,7 +49,7 @@ def load_tokens(project_path: Path) -> dict:
     path = _tokens_path(project_path)
     raw = read_json(path)
     if not isinstance(raw, dict) or "CLASS" not in raw:
-        log.warning("tokens.json missing or invalid at %s — using defaults", path)
+        log.warning("tokens.json missing or invalid at %s, using defaults", path)
         return build_default_tokens()
 
     defaults = build_default_tokens()
@@ -109,7 +109,7 @@ def add_token(
     Returns True on success.
     """
     if token_type not in _TOKEN_SECTIONS:
-        log.warning("Unknown token section %r — falling back to 'custom'", token_type)
+        log.warning("Unknown token section %r, falling back to 'custom'", token_type)
         token_type = "custom"
 
     tokens = load_tokens(project_path)

@@ -69,7 +69,7 @@ export const Toggle = ({ on }: { on: boolean }) => (
     border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
     background: on ? 'var(--accent-soft)' : 'var(--bg-deep)',
     position: 'relative', display: 'inline-block',
-    boxShadow: on ? 'var(--shadow-xs), 0 0 6px color-mix(in oklch, var(--accent) 20%, transparent)' : 'var(--shadow-inset)',
+    boxShadow: on ? 'var(--shadow-xs)' : 'var(--shadow-inset)',
     transition: 'background 0.18s, border-color 0.18s, box-shadow 0.18s',
   }}>
     <div style={{

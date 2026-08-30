@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
+import { Console } from './Console'
 import { api } from '../../api/client'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
 
@@ -104,7 +105,7 @@ function SettingsPopover({ username }: { username: string }) {
             flex: 1, fontSize: 10, fontFamily: 'var(--mono)', color: workspace ? 'var(--ink-2)' : 'var(--ink-4)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             fontStyle: workspace ? 'normal' : 'italic',
-          }}>{workspace || '—'}</span>
+          }}>{workspace || '-'}</span>
         </div>
         <div
           onClick={() => !changing && void handleChangeWorkspace()}
@@ -202,6 +203,9 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
       </div>
 
       <div style={{ flex: 1 }} />
+
+      {/* console (left of the bell) */}
+      <Console />
 
       {/* notif bell */}
       <div className="no-drag" style={{ position: 'relative' }}>

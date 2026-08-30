@@ -186,9 +186,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     prevHoudiniOkToast.current = houdiniServerOk
     if (prev === undefined) return
     if (houdiniServerOk === false && prev !== false)
-      toast.warning('Houdini — serveur non connecté. Rouvrir Houdini pour l\'activer.', { duration: 7000 })
+      toast.warning('Houdini · serveur non connecté. Rouvrir Houdini pour l\'activer.', { duration: 7000 })
     else if (houdiniServerOk === true && prev !== true)
-      toast.success('Houdini — serveur connecté', { duration: 3000 })
+      toast.success('Houdini · serveur connecté', { duration: 3000 })
   }, [houdiniServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -196,9 +196,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     prevZbrushOkToast.current = zbrushServerOk
     if (prev === undefined) return
     if (zbrushServerOk === false && prev !== false)
-      toast.warning('ZBrush — bridge non connecté. Ouvrir ZBrush pour l\'activer.', { duration: 7000 })
+      toast.warning('ZBrush · bridge non connecté. Ouvrir ZBrush pour l\'activer.', { duration: 7000 })
     else if (zbrushServerOk === true && prev !== true)
-      toast.success('ZBrush — bridge actif', { duration: 3000 })
+      toast.success('ZBrush · bridge actif', { duration: 3000 })
   }, [zbrushServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -206,9 +206,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     prevMayaOkToast.current = mayaServerOk
     if (prev === undefined) return
     if (mayaServerOk === false && prev !== false)
-      toast.warning('Maya — commandPort non connecté. Rouvrir Maya pour l\'activer.', { duration: 7000 })
+      toast.warning('Maya · commandPort non connecté. Rouvrir Maya pour l\'activer.', { duration: 7000 })
     else if (mayaServerOk === true && prev !== true)
-      toast.success('Maya — commandPort connecté', { duration: 3000 })
+      toast.success('Maya · commandPort connecté', { duration: 3000 })
   }, [mayaServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAutoFindAll = async () => {
@@ -265,7 +265,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         }
       }
     } catch (e) {
-      toast.error(`Autostart — ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
+      toast.error(`Autostart · ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
     } finally {
       setAutostartLoading(prev => { const n = new Set(prev); n.delete(key); return n })
     }
@@ -286,10 +286,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       if (res.launched) {
         toast.success(`${name} lancé`, { duration: 4000 })
       } else {
-        toast.error(`${name} — introuvable`, { duration: 6000 })
+        toast.error(`${name} · introuvable`, { duration: 6000 })
       }
     } catch {
-      toast.error(`${name} — erreur de lancement`, { duration: 6000 })
+      toast.error(`${name} · erreur de lancement`, { duration: 6000 })
     } finally {
       setLaunching(prev => { const next = new Set(prev); next.delete(key); return next })
     }
@@ -420,16 +420,16 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </div>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {!hasPlug ? 'Connexion port local — prochainement' :
+                  {!hasPlug ? 'Connexion port local · prochainement' :
                    autoLoading ? '…' :
                    isHoudini
-                     ? (autoInstalled ? 'Autostart installé — clic pour désinstaller' : "Installer l'autostart dans 123.py")
+                     ? (autoInstalled ? 'Autostart installé · clic pour désinstaller' : "Installer l'autostart dans 123.py")
                    : isMaya
                      ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté — commandPort 7001 actif' : 'Autostart installé — clic pour désinstaller')
+                         ? (serverOk === true ? 'Connecté · commandPort 7001 actif' : 'Autostart installé · clic pour désinstaller')
                          : 'Installer flux_bridge dans userSetup.py')
                      : (autoInstalled
-                         ? (serverOk === true ? 'Freeze actif — publication en cours' : 'Plugin installé — clic pour désinstaller')
+                         ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}
                 </TooltipContent>
               </Tooltip>

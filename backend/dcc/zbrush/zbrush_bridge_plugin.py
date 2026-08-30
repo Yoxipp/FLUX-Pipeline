@@ -451,7 +451,7 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
         pass
     if _in_freeze:
         if _ZBRUSH_AVAILABLE:
-            zbc.show_note("Publication en cours — FLUX est en train de publier.")
+            zbc.show_note("Publication en cours, FLUX est en train de publier.")
         return
     if _server_sock is None:
         if _ZBRUSH_AVAILABLE:

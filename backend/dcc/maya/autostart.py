@@ -165,7 +165,7 @@ def install(maya_exe_path: str | None = None) -> dict:
     """
     app_dir = _get_maya_app_dir()
     if app_dir is None:
-        return {"success": False, "message": "Maya prefs directory not found — launch Maya once to create it", "path": None}
+        return {"success": False, "message": "Maya prefs directory not found, launch Maya once to create it", "path": None}
 
     # Flux backend directory resolved at runtime (no hardcoding).
     _flux_backend = str(Path(__file__).resolve().parent.parent.parent)
@@ -210,7 +210,7 @@ def install(maya_exe_path: str | None = None) -> dict:
             try:
                 existing = startup.read_text(encoding="utf-8")
             except OSError as exc:
-                errors.append(f"{startup.name}: read error — {exc}")
+                errors.append(f"{startup.name}: read error: {exc}")
                 continue
 
         if _BLOCK_BEGIN in existing:
@@ -223,14 +223,14 @@ def install(maya_exe_path: str | None = None) -> dict:
                 startup.write_text(existing.replace(old_frag, _NEW_BLOCK), encoding="utf-8")
                 written.append(str(startup))
             except OSError as exc:
-                errors.append(f"{startup.name}: write error — {exc}")
+                errors.append(f"{startup.name}: write error: {exc}")
         else:
             try:
                 with open(startup, "a", encoding="utf-8") as fh:
                     fh.write(f"\n{_NEW_BLOCK}\n")
                 written.append(str(startup))
             except OSError as exc:
-                errors.append(f"{startup.name}: write error — {exc}")
+                errors.append(f"{startup.name}: write error: {exc}")
 
     if errors and not written:
         return {"success": False, "message": "; ".join(errors), "path": None}

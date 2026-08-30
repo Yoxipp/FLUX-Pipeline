@@ -47,7 +47,7 @@ except Exception as _offline_err:
         globals()[_n] = _dead_menu
     def export_geo(node):
         p = node.parm("status_msg")
-        if p: p.set("FLUX offline — démarre le backend puis réessaie")
+        if p: p.set("FLUX offline : démarre le backend puis réessaie")
     on_created = on_loaded = _noop
 '''
 
@@ -146,11 +146,11 @@ def _tokens(node):
 
 def menu_project(node):
     projects = _cached("projects", lambda: _get("/dcc/houdini/exporter/tokens").get("projects", []))
-    return _flat(projects) if projects else ["", "— no projects —"]
+    return _flat(projects) if projects else ["", "no projects"]
 
 def menu_class(node):
     keys = list(_tokens(node).get("CLASS", {}).keys())
-    return _flat(keys) if keys else ["", "— no project —"]
+    return _flat(keys) if keys else ["", "no project"]
 
 _DEFAULT_TYPES = ["SCULPT","BLOCK","TOPO","TEX","LDEV","FUR","HAIR","FEATHERS","SK","WGHT","RIG","CLOTH","MUSCLE","GBL"]
 
@@ -168,7 +168,7 @@ def menu_name(node):
         filtered = sorted(k for k, v in names.items() if v.startswith(prefix))
         if filtered: return _flat(filtered)
     keys = sorted(names.keys())
-    return _flat(keys) if keys else ["", "— no project —"]
+    return _flat(keys) if keys else ["", "no project"]
 
 def menu_instance(node):
     toks = _tokens(node)

@@ -50,5 +50,5 @@ async def publish(req: PublishRequest) -> PublishResult:
     )
 
     if dest is None:
-        return PublishResult(success=False, dest_path=None, message="Publish échoué — voir les logs")
+        return PublishResult(success=False, dest_path=None, message="Publish échoué, voir les logs")
     return PublishResult(success=True, dest_path=str(dest), message="Publish réussi")

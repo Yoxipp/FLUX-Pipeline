@@ -105,7 +105,7 @@ ANIM_INSTANCES: tuple[str, ...] = ("block", "spline", "polish")
 USD_PRESETS: dict[str, dict] = {
     "GEO":  {"label": "Geo",  "description": "Static geometry layer (mesh, UV, normals)"},
     "RIG":  {"label": "Rig",  "description": "SkelRoot + joints + skin weights"},
-    "ANIM": {"label": "Anim", "description": "SkelAnimation — animated joints only"},
+    "ANIM": {"label": "Anim", "description": "SkelAnimation, animated joints only"},
 }
 
 # USD file naming inside assets/<class>/<name>/model/usd/

@@ -323,7 +323,7 @@ def install(_exe_path: str | None = None) -> dict:
     result = install_plugin()
     paths  = result.get("paths", [])
     msg    = result.get("error") or (
-        f"Installed ({len(paths)} location(s)) — restart ZBrush to activate"
+        f"Installed ({len(paths)} location(s)) , restart ZBrush to activate"
         if paths else "failed"
     )
     return {"success": result["ok"], "message": msg, "path": result.get("path")}
