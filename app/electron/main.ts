@@ -1,6 +1,6 @@
 // main.ts — Electron main process: fenêtre native + sidecar Python.
 
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import path from 'path'
 import { startPythonSidecar, stopPythonSidecar } from './python_bridge'
 
@@ -8,8 +8,21 @@ let win: BrowserWindow | null = null
 let splash: BrowserWindow | null = null
 
 // FLUX window/taskbar icon. In dev it lives next to the sources; packaged builds
-// get the icon from the exe (electron-builder), so we only set it in dev.
-const ICON = app.isPackaged ? undefined : path.join(__dirname, '..', 'scripts', 'icon.ico')
+// also get the exe icon from electron-builder, but setting the window icon makes
+// the taskbar reliably show ours. Loaded as a nativeImage (more robust than a
+// raw path for the taskbar) — falls back to the .png if the .ico is unreadable.
+const _ICON_ICO = path.join(__dirname, '..', 'scripts', 'icon.ico')
+const _ICON_PNG = path.join(__dirname, '..', 'scripts', 'icon.png')
+let ICON = nativeImage.createFromPath(_ICON_ICO)
+if (ICON.isEmpty()) ICON = nativeImage.createFromPath(_ICON_PNG)
+
+// Reusable "atom F" mark (matches the app icon) for the splash.
+const ATOM_SVG = `<svg width="64" height="64" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(-28 44 44)" fill="none" stroke="#9a5127" stroke-width="4"/>
+  <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(28 44 44)" fill="none" stroke="#e07b3c" stroke-width="4"/>
+  <path d="M31 26h27v9H41v8h15v9H41v14h-10z" fill="#efa061"/>
+  <circle cx="66" cy="30" r="4.5" fill="#efa061"/>
+</svg>`
 
 // ── Splash screen ─────────────────────────────────────────────────────────────
 // Shown the instant Electron is ready, covering the gap until the main window has
@@ -25,9 +38,7 @@ function splashHtml(): string {
   body{background:var(--bg);border:1px solid #2a2826;border-radius:12px;
        font-family:'Consolas','SF Mono',ui-monospace,monospace;
        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;overflow:hidden}
-  .mark{width:56px;height:56px;border-radius:14px;background:var(--accent-soft);
-        border:1px solid var(--border);color:var(--accent-hi);
-        display:flex;align-items:center;justify-content:center;font-weight:700;font-size:26px}
+  .mark{display:flex;align-items:center;justify-content:center}
   .word{display:flex;align-items:baseline;gap:9px}
   .flux{color:var(--ink);font-weight:600;font-size:18px;letter-spacing:.16em}
   .sub{color:var(--ink3);font-size:12px;letter-spacing:.02em}
@@ -36,7 +47,7 @@ function splashHtml(): string {
          animation:slide 1.1s ease-in-out infinite}
   @keyframes slide{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
   </style></head><body>
-  <div class="mark">F</div>
+  <div class="mark">${ATOM_SVG}</div>
   <div class="word"><span class="flux">FLUX</span><span class="sub">Pipeline Tool</span></div>
   <div class="bar"><i></i></div>
   </body></html>`
@@ -76,6 +87,8 @@ async function createWindow(): Promise<void> {
       nodeIntegration:  false,  // OBLIGATOIRE
     },
   })
+
+  if (!ICON.isEmpty()) win.setIcon(ICON)   // belt-and-suspenders for the taskbar
 
   // Reveal the window independently of the load promise: 'ready-to-show' fires
   // once the renderer can paint, and a fallback timer guarantees we never stay

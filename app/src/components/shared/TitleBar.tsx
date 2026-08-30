@@ -183,16 +183,18 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
       position: 'relative', flexShrink: 0,
     }}>
 
-      {/* logo */}
+      {/* logo — atom F */}
       <div className="no-drag" style={{
-        width: 22, height: 22,
-        background: 'var(--accent-soft)',
-        border: '1px solid var(--accent)',
+        width: 24, height: 24, flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 11,
-        color: 'var(--accent-hi)', borderRadius: 6, flexShrink: 0,
-        boxShadow: 'var(--shadow-xs)',
-      }}>F</div>
+      }}>
+        <svg width="24" height="24" viewBox="0 0 88 88">
+          <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(-28 44 44)" fill="none" stroke="var(--accent)" strokeWidth="5" opacity="0.65" />
+          <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(28 44 44)" fill="none" stroke="var(--accent)" strokeWidth="5" />
+          <path d="M31 26h27v9H41v8h15v9H41v14h-10z" fill="var(--accent-hi)" />
+          <circle cx="66" cy="30" r="5" fill="var(--accent-hi)" />
+        </svg>
+      </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
         <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</span>
