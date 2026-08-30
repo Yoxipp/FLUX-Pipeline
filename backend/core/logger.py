@@ -5,12 +5,63 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
+from collections import deque
 from datetime import date
 from pathlib import Path
 
 
 _LOG_DIR: Path | None = None
 _handlers_initialised = False
+
+# ── in-memory ring buffer (feeds the Flux UI console) ───────────────────────────
+_LOG_BUFFER_CAPACITY = 800
+_log_records: deque[dict] = deque(maxlen=_LOG_BUFFER_CAPACITY)
+_log_seq = 0
+_log_lock = threading.Lock()
+
+
+class _RingBufferHandler(logging.Handler):
+    """Keep the most recent log records in memory so the Flux UI can display them.
+
+    Records are lightweight dicts (id/ts/level/logger/msg) exposed via
+    get_recent_logs(); the monotonic id lets the frontend fetch only new lines.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        global _log_seq
+        try:
+            msg = record.getMessage()
+        except Exception:  # pragma: no cover - defensive against bad args
+            msg = str(record.msg)
+        with _log_lock:
+            _log_seq += 1
+            _log_records.append({
+                "id":      _log_seq,
+                "ts":      record.created,
+                "levelno": record.levelno,
+                "level":   record.levelname,
+                "logger":  record.name,
+                "msg":     msg,
+            })
+
+
+def get_recent_logs(after: int = 0, min_level: str | None = None) -> list[dict]:
+    """Return buffered records with id > *after*, optionally filtered by level name."""
+    threshold = 0
+    if min_level:
+        lvl = logging.getLevelName(min_level.upper())
+        if isinstance(lvl, int):
+            threshold = lvl
+    with _log_lock:
+        records = list(_log_records)
+    return [r for r in records if r["id"] > after and r["levelno"] >= threshold]
+
+
+def clear_logs() -> None:
+    """Drop every buffered record (does not touch file/console handlers)."""
+    with _log_lock:
+        _log_records.clear()
 
 
 def _get_log_dir() -> Path:
@@ -52,6 +103,11 @@ def _initialise_root() -> None:
     ch.setLevel(logging.DEBUG)
     ch.setFormatter(_ColourFormatter())
     root.addHandler(ch)
+
+    # In-memory ring buffer — surfaced in the Flux UI console via /logs.
+    rb = _RingBufferHandler()
+    rb.setLevel(logging.DEBUG)
+    root.addHandler(rb)
 
     _ensure_file_handler(root)
 

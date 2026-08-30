@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from core import config
 from core.logger import get_logger
-from routers import activity, dcc, files, folder_manager, importer, publish, settings, shelf, usd_assembler
+from routers import activity, dcc, files, folder_manager, importer, logs, publish, settings, shelf, usd_assembler
 
 log = get_logger("main")
 
@@ -64,6 +64,7 @@ app.include_router(settings.router,       prefix="/settings",       tags=["Setti
 app.include_router(folder_manager.router, prefix="/folder",         tags=["FolderManager"])
 app.include_router(shelf.router,          prefix="/shelf",          tags=["Shelf"])
 app.include_router(usd_assembler.router,  prefix="/usd",            tags=["UsdAssembler"])
+app.include_router(logs.router,           prefix="/logs",           tags=["Logs"])
 
 
 if __name__ == "__main__":
