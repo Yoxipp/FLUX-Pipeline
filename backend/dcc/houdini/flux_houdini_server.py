@@ -49,14 +49,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _dispatch(self, kind: str, payload=None) -> dict:
+    def _dispatch(self, kind: str, payload=None, timeout: float = 8.0) -> dict:
         req_id = str(uuid.uuid4())
         evt = threading.Event()
         _request_queue.put((kind, req_id, payload, evt))
-        if evt.wait(timeout=8.0):
+        if evt.wait(timeout=timeout):
             with _response_lock:
                 return _response_store.pop(req_id, {"error": "missing result"})
-        return {"error": "timeout — main thread may be busy"}
+        # Timed out waiting: drop any late result so it doesn't leak in the store.
+        with _response_lock:
+            _response_store.pop(req_id, None)
+        return {"ok": False, "error": "timeout: main thread may be busy"}
 
     def do_GET(self) -> None:
         if self.path == "/ping":
@@ -77,7 +80,8 @@ class _Handler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._send_json({"error": "invalid JSON"}, 400)
                 return
-            self._send_json(self._dispatch("run", data.get("code", "")))
+            # ROP cooks / heavy exports can run long; allow the main thread time.
+            self._send_json(self._dispatch("run", data.get("code", ""), timeout=600.0))
         else:
             self._send_json({"error": "not found"}, 404)
 

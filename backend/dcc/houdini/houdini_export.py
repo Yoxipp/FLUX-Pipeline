@@ -220,7 +220,8 @@ def set_rop_output(rop_node_path: str, output_path: str | Path) -> dict:
 
     resp = houdini_client.run(code)
     if resp.get("ok"):
-        log.info("Set ROP output parm '%s' → %s", resp.get("parm"), out)
+        parm = (resp.get("result") or {}).get("parm")
+        log.info("Set ROP output parm '%s' -> %s", parm, out)
     else:
         log.error("set_rop_output failed: %s", resp.get("error"))
     return resp
