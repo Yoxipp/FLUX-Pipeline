@@ -673,12 +673,13 @@ export function Publisher() {
           toast.error('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
           return
         }
-        if (lightUsd && mode === 'asset') {
+        if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
           const res = await api.exportMayaLightUsd({
             project_name: project,
             asset:        assetName,
             filename,
+            fmt:          exportExt.replace('.', ''),
             frame_start:  isSequence ? frameStart : undefined,
             frame_end:    isSequence ? frameEnd : undefined,
           })
@@ -1197,31 +1198,41 @@ export function Publisher() {
             </div>
           )}
 
-          {/* EXPORT USD LÉGER — Maya asset only */}
-          {dcc === 'Maya' && mode === 'asset' && (
-            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>EXPORT USD LÉGER</SecTitle>
-              <div
-                onClick={() => setLightUsd(v => !v)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
-              >
-                <div style={{
-                  width: 28, height: 16, borderRadius: 8, flexShrink: 0,
-                  background: lightUsd ? 'var(--accent)' : 'var(--rule-2)',
-                  position: 'relative', transition: 'background 0.15s',
-                }}>
+          {/* EXPORT USD LÉGER — Maya asset only, USD formats only */}
+          {dcc === 'Maya' && mode === 'asset' && (() => {
+            const usdOk = ['.usd', '.usda', '.usdc'].includes(exportExt)
+            const on = usdOk && lightUsd
+            return (
+              <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+                <SecTitle>EXPORT USD LÉGER</SecTitle>
+                <div
+                  onClick={() => { if (usdOk) setLightUsd(v => !v) }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    cursor: usdOk ? 'pointer' : 'default', userSelect: 'none',
+                    opacity: usdOk ? 1 : 0.45,
+                  }}
+                >
                   <div style={{
-                    position: 'absolute', top: 2, left: lightUsd ? 14 : 2,
-                    width: 12, height: 12, borderRadius: '50%', background: 'white',
-                    transition: 'left 0.15s',
-                  }} />
+                    width: 28, height: 16, borderRadius: 8, flexShrink: 0,
+                    background: on ? 'var(--accent)' : 'var(--rule-2)',
+                    position: 'relative', transition: 'background 0.15s',
+                  }}>
+                    <div style={{
+                      position: 'absolute', top: 2, left: on ? 14 : 2,
+                      width: 12, height: 12, borderRadius: '50%', background: 'white',
+                      transition: 'left 0.15s',
+                    }} />
+                  </div>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
+                    {usdOk
+                      ? 'UsdSkel (model + skel + animation des joints)'
+                      : 'Disponible seulement en usd / usda / usdc'}
+                  </span>
                 </div>
-                <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: lightUsd ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
-                  UsdSkel (model + skel + animation des joints)
-                </span>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* APERÇU OUTPUT */}
           <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
