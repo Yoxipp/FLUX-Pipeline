@@ -1471,7 +1471,7 @@ export function Projects() {
     }
   }, [nav])
 
-  const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc'])
+  const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc', '.usd', '.usda', '.usdc', '.usdz'])
 
   const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return

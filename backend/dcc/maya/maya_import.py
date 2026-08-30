@@ -23,6 +23,17 @@ _FILE_TYPES: dict[str, str] = {
     ".obj": "OBJ",
 }
 
+# USD container extensions, imported via the mayaUsd "USD Import" translator.
+_USD_EXTS: frozenset[str] = frozenset({".usd", ".usda", ".usdc", ".usdz"})
+
+
+def _load_usd_plugin() -> bool:
+    """Load the Maya USD plugin (provides the 'USD Import' file translator)."""
+    for plugin in ("mayaUsdPlugin", "mayaUsdImport"):
+        if _ensure_plugin(plugin):
+            return True
+    return False
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -70,10 +81,27 @@ def import_file(file_path: str | Path) -> list[str] | None:
             log.info("Imported (ABC) %s → %d nodes", src.name, len(nodes))
             return nodes
 
+        if ext in _USD_EXTS:
+            if not _load_usd_plugin():
+                log.error("USD import: Maya USD plugin unavailable (tried mayaUsdPlugin)")
+                return None
+            nodes = cmds.file(  # type: ignore[union-attr]
+                str(src),
+                i=True,
+                type="USD Import",
+                ignoreVersion=True,
+                returnNewNodes=True,
+            ) or []
+            log.info("Imported (USD) %s → %d nodes", src.name, len(nodes))
+            return nodes
+
         if ext == ".fbx":
             _ensure_plugin("fbxmaya")
 
-        file_type = _FILE_TYPES.get(ext, "mayaBinary")
+        file_type = _FILE_TYPES.get(ext)
+        if file_type is None:
+            log.error("Unsupported import extension: %s", ext)
+            return None
         nodes = cmds.file(  # type: ignore[union-attr]
             str(src),
             i=True,

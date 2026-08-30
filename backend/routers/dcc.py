@@ -467,7 +467,7 @@ class MayaImportRequest(BaseModel):
     rel_path: str  # project-relative path, e.g. "CHAR/RIG/HorseBody/adam/HorseBody_adam.fbx"
 
 
-_MAYA_IMPORT_EXTS = {".obj", ".fbx", ".ma", ".mb", ".abc"}
+_MAYA_IMPORT_EXTS = {".obj", ".fbx", ".ma", ".mb", ".abc", ".usd", ".usda", ".usdc", ".usdz"}
 
 
 @router.post("/maya/import")
