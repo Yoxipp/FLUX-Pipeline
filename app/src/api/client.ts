@@ -31,12 +31,32 @@ async function apiCall<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   endpoint: string,
   body?: unknown,
+  timeoutMs?: number,   // optional: fail fast instead of hanging on a wedged backend
 ): Promise<T> {
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let signal: AbortSignal | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  if (timeoutMs) {
+    const controller = new AbortController()
+    signal = controller.signal
+    timer = setTimeout(() => controller.abort(), timeoutMs)
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}${endpoint}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
+    })
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') {
+      throw new Error(`Backend injoignable (timeout ${timeoutMs}ms sur ${endpoint})`)
+    }
+    throw e
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`
@@ -55,7 +75,7 @@ async function apiCall<T>(
 export const api = {
   // Settings
   getSettings: () =>
-    apiCall<Settings>('GET', '/settings'),
+    apiCall<Settings>('GET', '/settings', undefined, 10000),   // fail fast on a wedged backend
 
   initFirstLaunch: (workspace: string, username: string) =>
     apiCall<{ success: boolean }>('POST', '/settings/init', { workspace, username }),
