@@ -26,6 +26,9 @@ _FILE_TYPES: dict[str, str] = {
     ".obj": "OBJexport",
 }
 
+# USD container extensions, all routed through mayaUSDExport.
+_USD_EXTS: frozenset[str] = frozenset({".usd", ".usda", ".usdc"})
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -114,12 +117,28 @@ def _export_abc(
         return False
 
 
+def _load_usd_plugin() -> bool:
+    """Load the Maya USD plugin.
+
+    The `mayaUSDExport` command is provided by `mayaUsdPlugin` (Maya 2022+).
+    `mayaUsdExport` is kept as a fallback for older/renamed builds.
+    """
+    for plugin in ("mayaUsdPlugin", "mayaUsdExport"):
+        if _ensure_plugin(plugin):
+            return True
+    return False
+
+
 def _export_usd(file_path: Path, selection_only: bool) -> bool:
-    if not _ensure_plugin("mayaUsdExport"):
+    if not _load_usd_plugin():
+        log.error("USD export: Maya USD plugin unavailable (tried mayaUsdPlugin)")
         return False
     path_fwd = str(file_path).replace("\\", "/")
+    # .usda -> ascii text, .usdc / .usd -> binary crate (standard, compact).
+    usd_format = "usda" if file_path.suffix.lower() == ".usda" else "usdc"
     kwargs: dict = {
         "file":              path_fwd,
+        "defaultUSDFormat":  usd_format,
         "defaultMeshScheme": "none",
         "exportUVs":         1,
         "exportSkels":       "none",
@@ -144,7 +163,7 @@ def export_selection(
 ) -> Path | None:
     """Export the current Maya selection to *file_path*.
 
-    Supported extensions: .mb .ma .abc .fbx .obj .usd
+    Supported extensions: .mb .ma .abc .fbx .obj .usd .usda .usdc
     frame_start/frame_end only apply to .abc (animated geo).
     Returns the exported path on success, None on failure.
     """
@@ -160,11 +179,17 @@ def export_selection(
         if ext == ".abc":
             return out if _export_abc(out, selection_only=True, frame_start=frame_start, frame_end=frame_end) else None
 
-        if ext == ".usd":
+        if ext in _USD_EXTS:
             return out if _export_usd(out, selection_only=True) else None
 
-        if ext == ".fbx":
-            _ensure_plugin("fbxmaya")
+        # Some formats are provided by a plugin that Maya does not load by default.
+        # Loading it up front turns "unknown file type" errors into an actionable one.
+        if ext == ".fbx" and not _ensure_plugin("fbxmaya"):
+            log.error("FBX export: 'fbxmaya' plugin could not be loaded")
+            return None
+        if ext == ".obj" and not _ensure_plugin("objExport"):
+            log.error("OBJ export: 'objExport' plugin could not be loaded")
+            return None
 
         file_type = _FILE_TYPES.get(ext)
         if file_type is None:
@@ -187,7 +212,7 @@ def export_scene(
 ) -> Path | None:
     """Export the entire Maya scene to *file_path*.
 
-    Supported extensions: .mb .ma .abc .fbx .obj .usd
+    Supported extensions: .mb .ma .abc .fbx .obj .usd .usda .usdc
     frame_start/frame_end only apply to .abc (animated geo).
     Returns the exported path on success, None on failure.
     """
@@ -203,11 +228,16 @@ def export_scene(
         if ext == ".abc":
             return out if _export_abc(out, selection_only=False, frame_start=frame_start, frame_end=frame_end) else None
 
-        if ext == ".usd":
+        if ext in _USD_EXTS:
             return out if _export_usd(out, selection_only=False) else None
 
-        if ext == ".fbx":
-            _ensure_plugin("fbxmaya")
+        # Load plugin-provided formats up front (see export_selection for rationale).
+        if ext == ".fbx" and not _ensure_plugin("fbxmaya"):
+            log.error("FBX export: 'fbxmaya' plugin could not be loaded")
+            return None
+        if ext == ".obj" and not _ensure_plugin("objExport"):
+            log.error("OBJ export: 'objExport' plugin could not be loaded")
+            return None
 
         file_type = _FILE_TYPES.get(ext)
         if file_type is None:
@@ -220,6 +250,66 @@ def export_scene(
     except Exception as exc:
         log.error("export_scene failed: %s", exc)
         return None
+
+
+def run_publish_export(
+    file_path: str,
+    extension: str,
+    scope: str,
+    result_path: str,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+) -> None:
+    """Export for the Flux publisher and persist a JSON result envelope.
+
+    Runs inside Maya. Maya is a separate process from the Flux hub, so its log
+    messages are otherwise invisible to the user. This captures every 'flux.*'
+    log record emitted during the export and writes
+    ``{ok, path, logs:[{level,msg}]}`` to *result_path*, letting the hub surface
+    the real failure reason (e.g. a missing plugin) in the Flux console.
+
+    *scope* is 'scene' for a full-scene export, anything else exports the selection.
+    """
+    import json
+    import logging
+
+    records: list[dict] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = str(record.msg)
+            records.append({"level": record.levelname, "msg": msg})
+
+    collector = _Collector()
+    collector.setLevel(logging.INFO)
+    flux_root = logging.getLogger("flux")
+    flux_root.addHandler(collector)
+
+    result: Path | None = None
+    try:
+        export_fn = export_scene if scope == "scene" else export_selection
+        if extension == ".abc" and frame_start is not None and frame_end is not None:
+            result = export_fn(file_path, extension, frame_start=frame_start, frame_end=frame_end)
+        else:
+            result = export_fn(file_path, extension)
+    except Exception as exc:  # pragma: no cover - defensive; export_fn already guards
+        records.append({"level": "ERROR", "msg": f"export raised: {exc!r}"})
+    finally:
+        flux_root.removeHandler(collector)
+
+    envelope = {
+        "ok":   result is not None,
+        "path": str(result) if result else None,
+        "logs": records,
+    }
+    try:
+        with open(result_path, "w", encoding="utf-8") as fh:
+            json.dump(envelope, fh)
+    except OSError as exc:
+        log.error("run_publish_export: cannot write result envelope: %s", exc)
 
 
 def export_scene_to_temp(extension: str = ".mb") -> Path | None:

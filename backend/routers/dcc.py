@@ -372,6 +372,40 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     return result
 
 
+class HoudiniLightExportRequest(BaseModel):
+    project_name: str
+    asset:        str
+    skel_node:    str | None = None
+    mesh_node:    str | None = None
+    frame_start:  int | None = None
+    frame_end:    int | None = None
+    fmt:          str = "usd"
+
+
+@router.post("/houdini/export-usd")
+async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
+    """Light layered UsdSkel export from a KineFX rig: Houdini extracts, backend authors."""
+    from core.paths import get_project_path
+    from dcc.houdini.houdini_usd_light_export import run_light_export
+
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: run_light_export(
+            req.asset, str(project_path),
+            skel_node=req.skel_node, mesh_node=req.mesh_node,
+            frame_start=req.frame_start, frame_end=req.frame_end, fmt=req.fmt,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Export USD léger échoué"))
+    return result
+
+
 # ── Maya endpoints ───────────────────────────────────────────────────────────
 
 
@@ -459,24 +493,162 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {file_path}")
 
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+    import tempfile as _tempfile
+
     _backend_root = str(_PLib(__file__).resolve().parent.parent)
     fp_fwd = str(file_path).replace("\\", "/")
+    # Maya writes a JSON result envelope here so the hub knows if the import actually
+    # succeeded (Maya runs in another process; a plain call always looked like success).
+    result_dir = _tempfile.mkdtemp(prefix="flux_maya_import_")
+    result_path = result_dir.replace("\\", "/") + "/_flux_import_result.json"
     cmd = (
         f"import sys; sys.path.insert(0, r'{_backend_root}'); "
-        f"from dcc.maya.maya_import import import_file; "
-        f"import_file(r'{fp_fwd}')"
+        f"sys.modules.pop('dcc.maya.maya_import', None); "
+        f"from dcc.maya.maya_import import run_import; "
+        f"run_import(r'{fp_fwd}', r'{result_path}')"
     )
 
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0))
+    try:
+        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0))
+        if result is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Maya ne répond pas. Assure-toi que Maya est ouvert et le commandPort actif.",
+            )
 
-    if result is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Maya ne répond pas. Assure-toi que Maya est ouvert et le commandPort actif.",
+        # Read the envelope; mirror Maya's logs into the hub logger (Flux console) and
+        # keep error lines for the failure detail.
+        ok = False
+        maya_errors: list[str] = []
+        if _os.path.exists(result_path):
+            try:
+                with open(result_path, encoding="utf-8") as _fh:
+                    envelope = _json.load(_fh)
+            except (OSError, ValueError):
+                envelope = None
+            if envelope:
+                ok = bool(envelope.get("ok"))
+                for rec in envelope.get("logs", []):
+                    lvl = str(rec.get("level", "INFO")).upper()
+                    text = f"[Maya] {rec.get('msg', '')}"
+                    if lvl in ("ERROR", "CRITICAL"):
+                        log.error(text)
+                        maya_errors.append(str(rec.get("msg", "")))
+                    elif lvl == "WARNING":
+                        log.warning(text)
+                    else:
+                        log.info(text)
+
+        if not ok:
+            reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
+            log.error("Import Maya échoué : %s%s", fp_fwd, reason)
+            raise HTTPException(status_code=500, detail=f"Import Maya échoué : {_PLib(fp_fwd).name}{reason}")
+
+        return {"ok": True, "file": fp_fwd}
+    finally:
+        await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
+
+
+class MayaLightExportRequest(BaseModel):
+    project_name: str
+    asset:        str
+    mesh:         str | None = None
+    root_joint:   str | None = None
+    frame_start:  int | None = None
+    frame_end:    int | None = None
+    fmt:          str = "usd"
+
+
+@router.post("/maya/export-usd")
+async def maya_export_usd(req: MayaLightExportRequest) -> dict:
+    """Light layered UsdSkel export: Maya extracts raw data, the backend authors USD.
+
+    Maya writes a JSON envelope (no pxr in Maya); the hub rebuilds the LightAsset and
+    publishes it with pxr into {asset}/model/usd as the active LAST set.
+    """
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+    import tempfile as _tempfile
+    from pathlib import Path as _PLib
+
+    from core.paths import get_project_path
+    from dcc.maya.maya_connection import send_command_direct
+
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    _backend_root = str(_PLib(__file__).resolve().parent.parent)
+    result_dir = _tempfile.mkdtemp(prefix="flux_maya_light_")
+    result_path = result_dir.replace("\\", "/") + "/_flux_light_export.json"
+
+    def _arg(v: object) -> str:
+        if v is None:
+            return "None"
+        if isinstance(v, int):
+            return str(v)
+        return "r'" + str(v).replace("'", "") + "'"
+
+    cmd = (
+        f"import sys; sys.path.insert(0, r'{_backend_root}'); "
+        f"sys.modules.pop('dcc.maya.maya_usd_light_export', None); "
+        f"from dcc.maya.maya_usd_light_export import run_light_export; "
+        f"run_light_export({_arg(req.asset)}, r'{result_path}', "
+        f"mesh={_arg(req.mesh)}, root_joint={_arg(req.root_joint)}, "
+        f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)})"
+    )
+
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=300.0))
+        if result is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Maya ne répond pas. Ouvre Maya avec le bridge FLUX actif.",
+            )
+
+        # Read the envelope; mirror Maya's logs into the Flux console.
+        maya_errors: list[str] = []
+        envelope = None
+        if _os.path.exists(result_path):
+            try:
+                with open(result_path, encoding="utf-8") as _fh:
+                    envelope = _json.load(_fh)
+            except (OSError, ValueError):
+                envelope = None
+        if envelope:
+            for rec in envelope.get("logs", []):
+                lvl = str(rec.get("level", "INFO")).upper()
+                text = f"[Maya] {rec.get('msg', '')}"
+                if lvl in ("ERROR", "CRITICAL"):
+                    log.error(text)
+                    maya_errors.append(str(rec.get("msg", "")))
+                elif lvl == "WARNING":
+                    log.warning(text)
+                else:
+                    log.info(text)
+
+        if not envelope or not envelope.get("ok") or not envelope.get("asset"):
+            reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
+            raise HTTPException(status_code=500, detail=f"Export USD léger échoué{reason}")
+
+        # Author + publish with pxr, backend-side (Maya stays pxr-free).
+        from features.usd_export import publish_light_asset
+        from features.usd_export.contract import light_asset_from_dict
+
+        light = light_asset_from_dict(envelope["asset"])
+        pub = await loop.run_in_executor(
+            None, lambda: publish_light_asset(light, project_path, fmt=req.fmt)
         )
-
-    return {"ok": True, "file": fp_fwd}
+        log.info("Light USD export published: %s (%s)", req.asset, pub["version"])
+        return {"ok": True, "asset": req.asset, "version": pub["version"], "root": str(pub["root"])}
+    finally:
+        await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
 
 
 @router.post("/maya/publish")
@@ -524,28 +696,37 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     # Build temp export path
     tmp_dir = await loop.run_in_executor(None, lambda: tempfile.mkdtemp(prefix="flux_maya_pub_"))
     tmp_path = str(tmp_dir).replace("\\", "/") + f"/{filename_with_ext}"
+    # Maya writes a JSON result envelope here (captures its own logs for the console)
+    result_path = str(tmp_dir).replace("\\", "/") + "/_flux_export_result.json"
 
     # Flux backend path — prepended to every Maya command so dcc.maya.* is importable
     # even in sessions started before the autostart was installed.
     from pathlib import Path as _PLib
     _backend_root = str(_PLib(__file__).resolve().parent.parent)  # backend/
 
-    path_prefix = f"import sys; sys.path.insert(0, r'{_backend_root}')"
+    # Drop the cached export module so a running Maya picks up updated backend code
+    # without needing a restart (Maya keeps sys.modules across commandPort calls).
+    path_prefix = (
+        f"import sys; sys.path.insert(0, r'{_backend_root}'); "
+        f"sys.modules.pop('dcc.maya.maya_export', None)"
+    )
 
-    # Build single-line command (semicolons) — Maya commandPort runs this in exec() context
-    scope_fn = "export_scene" if req.scope == "scene" else "export_selection"
+    # Build single-line command (semicolons) — Maya commandPort runs this in exec() context.
+    # run_publish_export writes a JSON envelope to result_path with Maya's own logs so
+    # the hub can report the real failure reason (Maya is a separate process).
+    scope = "scene" if req.scope == "scene" else "selection"
     if ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2:
         fs, fe = req.frame_range
         cmd = (
             f"{path_prefix}; "
-            f"from dcc.maya.maya_export import {scope_fn}; "
-            f"{scope_fn}(r'{tmp_path}', '{ext}', frame_start={fs}, frame_end={fe})"
+            f"from dcc.maya.maya_export import run_publish_export; "
+            f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}', frame_start={fs}, frame_end={fe})"
         )
     else:
         cmd = (
             f"{path_prefix}; "
-            f"from dcc.maya.maya_export import {scope_fn}; "
-            f"{scope_fn}(r'{tmp_path}', '{ext}')"
+            f"from dcc.maya.maya_export import run_publish_export; "
+            f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}')"
         )
 
     # Timeout: 30s for static exports, 600s for animated ABC (100 frames can be slow)
@@ -563,8 +744,36 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
                 ),
             )
 
+        # Read the envelope Maya wrote; mirror its logs into the hub logger so they
+        # appear in the Flux console, and keep any error lines for the failure detail.
+        maya_errors: list[str] = []
+        if os.path.exists(result_path):
+            import json as _json
+            try:
+                with open(result_path, encoding="utf-8") as _fh:
+                    envelope = _json.load(_fh)
+            except (OSError, ValueError) as exc:
+                log.warning("Could not read Maya export envelope: %s", exc)
+                envelope = None
+            if envelope:
+                for rec in envelope.get("logs", []):
+                    lvl = str(rec.get("level", "INFO")).upper()
+                    text = f"[Maya] {rec.get('msg', '')}"
+                    if lvl in ("ERROR", "CRITICAL"):
+                        log.error(text)
+                        maya_errors.append(str(rec.get("msg", "")))
+                    elif lvl == "WARNING":
+                        log.warning(text)
+                    else:
+                        log.info(text)
+
         if not os.path.exists(tmp_path):
-            raise HTTPException(status_code=503, detail=f"Export Maya échoué — fichier absent : {tmp_path}")
+            reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
+            log.error("Export Maya échoué, fichier absent : %s%s", tmp_path, reason)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Export Maya échoué, fichier absent : {tmp_path}{reason}",
+            )
 
         from pathlib import Path as _Path
         pub_result = await loop.run_in_executor(

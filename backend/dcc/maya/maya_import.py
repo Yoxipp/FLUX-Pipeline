@@ -89,6 +89,47 @@ def import_file(file_path: str | Path) -> list[str] | None:
         return None
 
 
+def run_import(file_path: str | Path, result_path: str) -> None:
+    """Import for the Flux hub and persist a JSON result envelope.
+
+    Runs inside Maya. Maya is a separate process from the hub, so its log messages
+    are otherwise invisible. This captures every 'flux.*' log record emitted during
+    the import and writes ``{ok, nodes, logs:[{level,msg}]}`` to *result_path*, so
+    the hub can tell whether the import actually succeeded and surface the reason.
+    """
+    import json
+    import logging
+
+    records: list[dict] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = str(record.msg)
+            records.append({"level": record.levelname, "msg": msg})
+
+    collector = _Collector()
+    collector.setLevel(logging.INFO)
+    flux_root = logging.getLogger("flux")
+    flux_root.addHandler(collector)
+
+    nodes: list[str] | None = None
+    try:
+        nodes = import_file(file_path)
+    except Exception as exc:  # pragma: no cover - defensive; import_file already guards
+        records.append({"level": "ERROR", "msg": f"import raised: {exc!r}"})
+    finally:
+        flux_root.removeHandler(collector)
+
+    try:
+        with open(result_path, "w", encoding="utf-8") as fh:
+            json.dump({"ok": nodes is not None, "nodes": nodes or [], "logs": records}, fh)
+    except OSError as exc:
+        log.error("run_import: cannot write result envelope: %s", exc)
+
+
 def reference_file(file_path: str | Path) -> str | None:
     """Create a Maya reference from *file_path*.
 
