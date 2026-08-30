@@ -81,7 +81,7 @@ async def assemble_recipe(req: AssembleRequest) -> dict:
     _, project_path = _resolve_project(req.project)
     loop = asyncio.get_event_loop()
     try:
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, lambda: _run_assemble(req.recipe, project_path, req.strict)
         )
     except HTTPException:
@@ -89,6 +89,20 @@ async def assemble_recipe(req: AssembleRequest) -> dict:
     except Exception as exc:  # surface loader/resolver errors as 400s
         log.exception("assemble failed")
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # Mirror the outcome into the logger so full messages are readable in the Flux console.
+    if result.get("success"):
+        log.info("USD assembly OK -> %s", result.get("root"))
+        for lyr in result.get("layers", []):
+            log.info("USD assembly layer: %s", lyr)
+    else:
+        log.error("USD assembly failed")
+    for iss in result.get("issues", []):
+        prim = f" [{iss['prim']}]" if iss.get("prim") else ""
+        (log.error if iss.get("level") == "error" else log.warning)(
+            "USD assembly %s%s: %s", iss.get("level"), prim, iss.get("msg")
+        )
+    return result
 
 
 @router.get("/schema")
