@@ -38,7 +38,7 @@ const ALEMBIC: ExportOption[] = [
 // and defaults match the ROP's own defaults so nothing changes unless toggled.
 const FBX: ExportOption[] = [
   // common
-  { key: 'forceskindeform',  label: 'Force skin deform export',   type: 'bool', default: false, tier: 'common' },
+  { key: 'forceskindeform',  label: 'Skin weights / boneCapture (force skin deform)', type: 'bool', default: false, tier: 'common' },
   { key: 'forceblendshape',  label: 'Force blend shape export',   type: 'bool', default: false, tier: 'common' },
   { key: 'computesmoothinggroups', label: 'Compute smoothing groups', type: 'bool', default: false, tier: 'common' },
   { key: 'exportkind',       label: 'Export in ASCII format',     type: 'bool', default: true,  tier: 'common' },

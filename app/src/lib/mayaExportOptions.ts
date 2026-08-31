@@ -41,7 +41,7 @@ const FBX: ExportOption[] = [
   // common
   { key: 'smoothing_groups', label: 'Smoothing groups',       type: 'bool', default: true,  tier: 'common' },
   { key: 'smooth_mesh',      label: 'Smooth mesh',            type: 'bool', default: true,  tier: 'common' },
-  { key: 'skins',            label: 'Skins',                  type: 'bool', default: true,  tier: 'common' },
+  { key: 'skins',            label: 'Skin weights (boneCapture)', type: 'bool', default: true,  tier: 'common' },
   { key: 'blend_shapes',     label: 'Blend shapes',           type: 'bool', default: true,  tier: 'common' },
   { key: 'bake_animation',   label: 'Bake animation',         type: 'bool', default: false, tier: 'common' },
   { key: 'bake_start',       label: 'Bake start',             type: 'int',  default: 1,     tier: 'common', dependsOn: 'bake_animation' },
