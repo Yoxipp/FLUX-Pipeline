@@ -55,6 +55,43 @@ class AnimData:
 
 
 @dataclass
+class CameraData:
+    """A camera authored as a UsdGeom.Camera in the camera layer.
+
+    focal_length / apertures are in millimetres (GfCamera convention); the backend
+    passes them straight to UsdGeom.Camera.
+    """
+
+    name: str
+    transform: Mat4                            # world matrix, row-major 16
+    focal_length: float = 35.0                 # mm
+    horizontal_aperture: float = 36.0          # mm
+    vertical_aperture: float = 24.0            # mm
+    clipping_range: tuple[float, float] = (0.1, 10000.0)
+    projection: str = "perspective"            # "perspective" | "orthographic"
+    fstop: float | None = None
+    focus_distance: float | None = None
+
+
+@dataclass
+class LightData:
+    """A light authored under UsdLux in the light layer."""
+
+    name: str
+    transform: Mat4                            # world matrix, row-major 16
+    light_type: str = "distant"                # distant|point|spot|rect|disk|dome
+    intensity: float = 1.0
+    exposure: float = 0.0
+    color: Vec3 = (1.0, 1.0, 1.0)
+    normalize: bool = False
+    radius: float | None = None                # point/disk/sphere
+    width: float | None = None                 # rect
+    height: float | None = None                # rect
+    cone_angle: float | None = None            # spot (degrees)
+    cone_softness: float | None = None         # spot
+
+
+@dataclass
 class LightAsset:
     """Full input to author_light_asset()."""
 
@@ -62,6 +99,8 @@ class LightAsset:
     skeleton: SkeletonData
     meshes: list[MeshData] = field(default_factory=list)
     anim: AnimData | None = None      # None = rig only, no animation layer
+    cameras: list[CameraData] = field(default_factory=list)
+    lights: list[LightData] = field(default_factory=list)
 
 
 # ── (de)serialisation — lets the DCC extract raw data (no pxr) and hand it to the
@@ -101,7 +140,39 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             rotations=[[tuple(q) for q in row] for row in a["rotations"]],
             scales=[[tuple(v) for v in row] for row in a["scales"]],
         )
-    return LightAsset(asset=d["asset"], skeleton=skeleton, meshes=meshes, anim=anim)
+    cameras = [
+        CameraData(
+            name=c["name"],
+            transform=tuple(c["transform"]),
+            focal_length=float(c.get("focal_length", 35.0)),
+            horizontal_aperture=float(c.get("horizontal_aperture", 36.0)),
+            vertical_aperture=float(c.get("vertical_aperture", 24.0)),
+            clipping_range=tuple(c.get("clipping_range", (0.1, 10000.0))),  # type: ignore[arg-type]
+            projection=str(c.get("projection", "perspective")),
+            fstop=(float(c["fstop"]) if c.get("fstop") is not None else None),
+            focus_distance=(float(c["focus_distance"]) if c.get("focus_distance") is not None else None),
+        )
+        for c in d.get("cameras", [])
+    ]
+    lights = [
+        LightData(
+            name=l["name"],
+            transform=tuple(l["transform"]),
+            light_type=str(l.get("light_type", "distant")),
+            intensity=float(l.get("intensity", 1.0)),
+            exposure=float(l.get("exposure", 0.0)),
+            color=tuple(l.get("color", (1.0, 1.0, 1.0))),  # type: ignore[arg-type]
+            normalize=bool(l.get("normalize", False)),
+            radius=(float(l["radius"]) if l.get("radius") is not None else None),
+            width=(float(l["width"]) if l.get("width") is not None else None),
+            height=(float(l["height"]) if l.get("height") is not None else None),
+            cone_angle=(float(l["cone_angle"]) if l.get("cone_angle") is not None else None),
+            cone_softness=(float(l["cone_softness"]) if l.get("cone_softness") is not None else None),
+        )
+        for l in d.get("lights", [])
+    ]
+    return LightAsset(asset=d["asset"], skeleton=skeleton, meshes=meshes, anim=anim,
+                      cameras=cameras, lights=lights)
 
 
 def filter_animated_joints(

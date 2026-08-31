@@ -116,6 +116,76 @@ def _author_anim_layer(
     stage.GetRootLayer().Save()
 
 
+def _author_camera_layer(path: Path, root_path: str, cameras, fmt: str) -> None:
+    """Camera layer: a UsdGeom.Camera per DCC camera (mm apertures)."""
+    stage = _new_stage(path, fmt)
+    stage.OverridePrim(root_path)
+    for cam in cameras:
+        cpath = f"{root_path}/{sanitize_token(cam.name)}"
+        ucam = UsdGeom.Camera.Define(stage, cpath)
+        ucam.CreateProjectionAttr(cam.projection)
+        ucam.CreateFocalLengthAttr(float(cam.focal_length))
+        ucam.CreateHorizontalApertureAttr(float(cam.horizontal_aperture))
+        ucam.CreateVerticalApertureAttr(float(cam.vertical_aperture))
+        ucam.CreateClippingRangeAttr(Gf.Vec2f(float(cam.clipping_range[0]), float(cam.clipping_range[1])))
+        if cam.fstop is not None:
+            ucam.CreateFStopAttr(float(cam.fstop))
+        if cam.focus_distance is not None:
+            ucam.CreateFocusDistanceAttr(float(cam.focus_distance))
+        UsdGeom.Xformable(ucam).AddTransformOp().Set(_mat(cam.transform))
+    stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
+    stage.GetRootLayer().Save()
+
+
+def _author_light_layer(path: Path, root_path: str, lights, fmt: str) -> None:
+    """Light layer: a UsdLux light per DCC light. Each attr is guarded so UsdLux
+    API differences across USD versions never break the whole export."""
+    from pxr import UsdLux
+
+    makers = {
+        "distant": UsdLux.DistantLight,
+        "point":   UsdLux.SphereLight,
+        "spot":    UsdLux.SphereLight,
+        "rect":    UsdLux.RectLight,
+        "disk":    UsdLux.DiskLight,
+        "dome":    UsdLux.DomeLight,
+    }
+
+    def _try(fn, *a):
+        try:
+            fn(*a)
+        except Exception as exc:  # pragma: no cover - version guard
+            log.warning("light attr skipped: %s", exc)
+
+    stage = _new_stage(path, fmt)
+    stage.OverridePrim(root_path)
+    for lt in lights:
+        maker = makers.get(lt.light_type, UsdLux.DistantLight)
+        lpath = f"{root_path}/{sanitize_token(lt.name)}"
+        ulight = maker.Define(stage, lpath)
+        _try(ulight.CreateIntensityAttr, float(lt.intensity))
+        _try(ulight.CreateExposureAttr, float(lt.exposure))
+        _try(ulight.CreateColorAttr, Gf.Vec3f(*lt.color))
+        _try(ulight.CreateNormalizeAttr, bool(lt.normalize))
+        if lt.radius is not None and hasattr(ulight, "CreateRadiusAttr"):
+            _try(ulight.CreateRadiusAttr, float(lt.radius))
+        if lt.width is not None and hasattr(ulight, "CreateWidthAttr"):
+            _try(ulight.CreateWidthAttr, float(lt.width))
+        if lt.height is not None and hasattr(ulight, "CreateHeightAttr"):
+            _try(ulight.CreateHeightAttr, float(lt.height))
+        if lt.cone_angle is not None:
+            try:
+                shaping = UsdLux.ShapingAPI.Apply(ulight.GetPrim())
+                shaping.CreateShapingConeAngleAttr(float(lt.cone_angle))
+                if lt.cone_softness is not None:
+                    shaping.CreateShapingConeSoftnessAttr(float(lt.cone_softness))
+            except Exception as exc:  # pragma: no cover - version guard
+                log.warning("spot shaping skipped: %s", exc)
+        UsdGeom.Xformable(ulight).AddTransformOp().Set(_mat(lt.transform))
+    stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
+    stage.GetRootLayer().Save()
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def author_light_asset(
@@ -166,6 +236,18 @@ def author_light_asset(
         _author_anim_layer(anim_p, root_path, skel_path, anim_path, asset.anim, fmt)
         paths["anim"] = anim_p
         sublayers.insert(0, anim_p.name)      # anim is strongest
+
+    # Camera / light layers (disjoint prims under the root — order not critical).
+    if asset.cameras:
+        cam_p = dest / _fname("cam")
+        _author_camera_layer(cam_p, root_path, asset.cameras, fmt)
+        paths["cam"] = cam_p
+        sublayers.append(cam_p.name)
+    if asset.lights:
+        light_p = dest / _fname("light")
+        _author_light_layer(light_p, root_path, asset.lights, fmt)
+        paths["light"] = light_p
+        sublayers.append(light_p.name)
 
     # Root file the resolver picks: defaultPrim + sublayer stack.
     root_p = dest / f"{asset.asset}{_suffix_ver}.{fmt}"

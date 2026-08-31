@@ -224,6 +224,86 @@ def _extract_anim(joints_dag: list[str], tokens: list[str], frame_start: int, fr
     )
 
 
+def _extract_cameras(scope: str, sel_set: set[str]):
+    """Extract user cameras (skips Maya's startup persp/top/front/side)."""
+    from features.usd_export.contract import CameraData
+
+    out = []
+    for shp in (cmds.ls(type="camera", long=True) or []):
+        try:
+            if cmds.camera(shp, q=True, startupCamera=True):
+                continue
+        except Exception:
+            pass
+        tr = (cmds.listRelatives(shp, parent=True, fullPath=True) or [None])[0]
+        if tr is None:
+            continue
+        if scope == "selection" and sel_set and tr not in sel_set and shp not in sel_set:
+            continue
+        def _g(attr, default=None):
+            try:
+                return cmds.getAttr(f"{shp}.{attr}")
+            except Exception:
+                return default
+        ortho = bool(_g("orthographic", False))
+        out.append(CameraData(
+            name=_short(tr),
+            transform=_matrix16(cmds.getAttr(f"{tr}.worldMatrix[0]")),
+            focal_length=float(_g("focalLength", 35.0)),
+            horizontal_aperture=float(_g("horizontalFilmAperture", 1.417)) * 25.4,  # inch -> mm
+            vertical_aperture=float(_g("verticalFilmAperture", 0.945)) * 25.4,
+            clipping_range=(float(_g("nearClipPlane", 0.1)), float(_g("farClipPlane", 10000.0))),
+            projection="orthographic" if ortho else "perspective",
+            fstop=(float(_g("fStop")) if _g("fStop") is not None else None),
+            focus_distance=(float(_g("focusDistance")) if _g("focusDistance") is not None else None),
+        ))
+    return out
+
+
+def _extract_lights(scope: str, sel_set: set[str]):
+    """Extract Maya lights, mapped to UsdLux types."""
+    from features.usd_export.contract import LightData
+
+    type_map = {
+        "directionalLight": "distant", "pointLight": "point", "spotLight": "spot",
+        "areaLight": "rect", "ambientLight": "dome", "volumeLight": "point",
+    }
+    out = []
+    for maya_type, usd_type in type_map.items():
+        for shp in (cmds.ls(type=maya_type, long=True) or []):
+            tr = (cmds.listRelatives(shp, parent=True, fullPath=True) or [None])[0]
+            if tr is None:
+                continue
+            if scope == "selection" and sel_set and tr not in sel_set and shp not in sel_set:
+                continue
+            def _g(attr, default=None):
+                try:
+                    return cmds.getAttr(f"{shp}.{attr}")
+                except Exception:
+                    return default
+            col = _g("color", (1.0, 1.0, 1.0))
+            if isinstance(col, list):          # getAttr color returns [(r,g,b)]
+                col = col[0] if col and isinstance(col[0], (list, tuple)) else col
+            cone = None
+            softness = None
+            if maya_type == "spotLight":
+                full = _g("coneAngle", 40.0)
+                cone = float(full) / 2.0        # Maya full angle -> USD half-angle from axis
+                pen = _g("penumbraAngle", 0.0)
+                if pen:
+                    softness = max(0.0, min(1.0, abs(float(pen)) / max(float(full), 1.0)))
+            out.append(LightData(
+                name=_short(tr),
+                transform=_matrix16(cmds.getAttr(f"{tr}.worldMatrix[0]")),
+                light_type=usd_type,
+                intensity=float(_g("intensity", 1.0)),
+                color=tuple(float(c) for c in col[:3]),
+                cone_angle=cone,
+                cone_softness=softness,
+            ))
+    return out
+
+
 def _scene_skin_pairs() -> list[tuple[str, str]]:
     """Every (mesh_transform, skinCluster) pair in the scene."""
     pairs: list[tuple[str, str]] = []
@@ -245,6 +325,8 @@ def _build_light_asset(
     include_anim: bool = True,
     include_weights: bool = True,
     include_uv: bool = True,
+    include_cam: bool = False,
+    include_light: bool = False,
     scope: str = "selection",
 ):
     """Extract a LightAsset from the Maya scene, honouring the include flags.
@@ -262,8 +344,14 @@ def _build_light_asset(
 
     eff_weights = include_weights and include_geo and include_skel
     eff_anim = include_anim and include_skel
+    sel_set = set(cmds.ls(selection=True, long=True) or [])
 
-    # Collect (mesh, skinCluster) pairs.
+    # Cameras / lights are independent of any skeleton (a pure light/camera rig needs
+    # no skinned mesh).
+    cameras = _extract_cameras(scope, sel_set) if include_cam else []
+    lights = _extract_lights(scope, sel_set) if include_light else []
+
+    # Collect (mesh, skinCluster) pairs — only needed for geo/skel/weights/anim.
     if scope == "scene":
         pairs = _scene_skin_pairs()
     else:
@@ -276,63 +364,56 @@ def _build_light_asset(
             sk = _skin_cluster(m)
             if sk:
                 pairs.append((m, sk))
-        if not pairs:                       # nothing skinned selected -> whole scene
+        if not pairs and (include_geo or include_skel):   # fall back to the whole scene
             pairs = _scene_skin_pairs()
 
-    # Dedup meshes, preserve order.
     seen: set[str] = set()
     pairs = [(m, sk) for m, sk in pairs if not (m in seen or seen.add(m))]
 
-    if not pairs:
-        log.error("light export: no skinned mesh found (%s)", scope)
+    skeleton = SkeletonData(joints=[], bind_transforms=[], rest_transforms=[])
+    meshes: list = []
+    anim = None
+
+    if pairs:
+        # Skeleton root: provided, else walk up from the first skin's first influence.
+        if root_joint is None:
+            infl = cmds.skinCluster(pairs[0][1], q=True, inf=True) or []
+            if infl:
+                node = (cmds.ls(infl[0], long=True) or [infl[0]])[0]
+                while True:
+                    parent = cmds.listRelatives(node, parent=True, type="joint", fullPath=True)
+                    if not parent:
+                        break
+                    node = parent[0]
+                root_joint = node
+
+        joints_dag = _joint_chain(root_joint) if root_joint else []
+        tokens = _token_paths(joints_dag) if joints_dag else []
+
+        if frame_start is None:
+            frame_start = int(cmds.playbackOptions(q=True, min=True))
+        if frame_end is None:
+            frame_end = int(cmds.playbackOptions(q=True, max=True))
+
+        if include_skel and joints_dag:
+            skeleton = _extract_skeleton(joints_dag, tokens, pairs[0][1])
+        if include_geo:
+            for m, sk in pairs:
+                meshes.append(_extract_mesh(
+                    m, sk if (eff_weights and joints_dag) else None, joints_dag,
+                    want_weights=eff_weights, want_uv=include_uv,
+                ))
+        if eff_anim and joints_dag:
+            anim = _extract_anim(joints_dag, tokens, frame_start, frame_end)
+
+    if not meshes and not skeleton.joints and not cameras and not lights:
+        log.error("light export: nothing to export (%s) — no skinned mesh, camera or light", scope)
         return None
 
-    # Skeleton root: provided, else walk up from the first skin's first influence.
-    if root_joint is None:
-        infl = cmds.skinCluster(pairs[0][1], q=True, inf=True) or []
-        if not infl:
-            log.error("light export: skinCluster %s has no influences", pairs[0][1])
-            return None
-        node = (cmds.ls(infl[0], long=True) or [infl[0]])[0]
-        while True:
-            parent = cmds.listRelatives(node, parent=True, type="joint", fullPath=True)
-            if not parent:
-                break
-            node = parent[0]
-        root_joint = node
-
-    joints_dag = _joint_chain(root_joint)
-    if not joints_dag:
-        log.error("light export: no joints under root %s", root_joint)
-        return None
-    tokens = _token_paths(joints_dag)
-
-    if frame_start is None:
-        frame_start = int(cmds.playbackOptions(q=True, min=True))
-    if frame_end is None:
-        frame_end = int(cmds.playbackOptions(q=True, max=True))
-
-    if include_skel:
-        skeleton = _extract_skeleton(joints_dag, tokens, pairs[0][1])
-    else:
-        skeleton = SkeletonData(joints=[], bind_transforms=[], rest_transforms=[])
-
-    meshes = []
-    if include_geo:
-        for m, sk in pairs:
-            meshes.append(_extract_mesh(
-                m, sk if eff_weights else None, joints_dag,
-                want_weights=eff_weights, want_uv=include_uv,
-            ))
-
-    anim = _extract_anim(joints_dag, tokens, frame_start, frame_end) if eff_anim else None
-
-    if not meshes and not skeleton.joints:
-        log.error("light export: nothing to export (geo and skel both excluded)")
-        return None
-
-    log.info("light export: %s mesh(es), scope=%s, root=%s", len(meshes), scope, _short(root_joint))
-    return LightAsset(asset=asset, skeleton=skeleton, meshes=meshes, anim=anim)
+    log.info("light export: %d mesh(es), %d cam, %d light, scope=%s",
+             len(meshes), len(cameras), len(lights), scope)
+    return LightAsset(asset=asset, skeleton=skeleton, meshes=meshes, anim=anim,
+                      cameras=cameras, lights=lights)
 
 
 def run_light_export(

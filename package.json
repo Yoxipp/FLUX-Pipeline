@@ -4,7 +4,8 @@
   "description": "FLUX Pipeline Hub",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "tsc -p tsconfig.electron.json && concurrently \"vite\" \"electron .\"",
+    "dev:backend": "python backend/main.py",
+    "dev": "tsc -p tsconfig.electron.json && concurrently -k -n vite,electron -c green,magenta \"vite\" \"electron .\"",
     "build:frontend": "vite build",
     "build:backend": "pyinstaller scripts/backend.spec --distpath backend/dist --noconfirm",
     "build:electron": "tsc -p tsconfig.electron.json",
