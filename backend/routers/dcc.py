@@ -303,6 +303,7 @@ class HoudiniPublishRequest(BaseModel):
     frame_range: list[int] | None = None   # [start, end, step]
     frame_padding: int = 4
     export_options: dict | None = None     # ROP parms to set (see houdini_export)
+    attr_filter: dict | None = None        # {"mode": "keep"|"remove", "names": [...]}
     description: str = ""
     user: str | None = None
 
@@ -366,6 +367,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
             description=req.description,
             user=user,
             options=req.export_options,
+            attr_filter=req.attr_filter,
         ),
     )
 

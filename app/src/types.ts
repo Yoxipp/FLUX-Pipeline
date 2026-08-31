@@ -81,6 +81,7 @@ export interface HoudiniPublishPayload {
   frame_range?: [number, number, number]
   frame_padding?: number
   export_options?: Record<string, unknown>
+  attr_filter?: { mode: 'keep' | 'remove'; names: string[] }
   description?: string
   user?: string
 }

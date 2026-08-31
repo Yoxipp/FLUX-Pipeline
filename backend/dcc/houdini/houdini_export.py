@@ -270,6 +270,7 @@ def export_via_node(
     output_path: str | Path,
     frame_range: tuple[int, int, int] | None = None,
     options: dict | None = None,
+    attr_filter: dict | None = None,
 ) -> dict:
     """Export from ANY selected node: reuse it if it is a ROP, otherwise create the
     right output ROP (rop_geometry for geo/obj/usd, rop_alembic for .abc) as a child of
@@ -279,6 +280,11 @@ def export_via_node(
     cook (see houdiniExportOptions.ts). Each is set only if the parm exists on the
     ROP and never fails the export — an unknown/absent parm is silently skipped.
 
+    *attr_filter* optionally inserts an attribdelete before the ROP to filter point
+    attributes: ``{"mode": "keep"|"remove", "names": ["curveu", ...]}``. "keep" keeps
+    only the listed point attributes (P is always protected); "remove" deletes them.
+    Applies to the SOP-based ROPs (geo/obj/usd/abc); not to the FBX object ROP.
+
     Returns {"ok": True, "rop": "..."} or {"ok": False, "error": "..."}.
     """
     ext = _norm_ext(extension).lower()
@@ -286,6 +292,7 @@ def export_via_node(
     fr_repr = repr(tuple(frame_range)) if frame_range else "None"
     rop_map_repr = repr(_ROP_PARM)
     opts_repr = repr(dict(options or {}))
+    af_repr = repr(dict(attr_filter or {}))
 
     code = textwrap.dedent(f"""\
         _n = hou.node({node_path!r})
@@ -296,6 +303,7 @@ def export_via_node(
         _fr = {fr_repr}
         _ropmap = {rop_map_repr}
         _opts = {opts_repr}
+        _af = {af_repr}
         import pathlib as _pl
         _pl.Path(_out).parent.mkdir(parents=True, exist_ok=True)
 
@@ -313,11 +321,32 @@ def export_via_node(
                 raise RuntimeError("Select a SOP or a geo object (got %s)" % _cat)
             if _sop is None:
                 raise RuntimeError("No SOP to export inside %s" % _n.path())
+
+            # Optional attribute filter: insert an attribdelete on the SOP stream
+            # (point attributes) before the ROP. Not applied to the FBX object ROP.
+            _tail = _sop
+            _af_names = [_x for _x in _af.get('names', []) if _x]
+            if _af_names and _ext != '.fbx':
+                _adl = _parent.createNode('attribdelete', node_name='flux_attr_filter')
+                _adl.setFirstInput(_tail)
+                if _af.get('mode') == 'keep':
+                    _keep = list(_af_names)
+                    if 'P' not in _keep:
+                        _keep.append('P')
+                    if _adl.parm('negate') is not None:
+                        _adl.parm('negate').set(True)
+                    if _adl.parm('ptdel') is not None:
+                        _adl.parm('ptdel').set(' '.join(_keep))
+                else:
+                    if _adl.parm('ptdel') is not None:
+                        _adl.parm('ptdel').set(' '.join(_af_names))
+                _tail = _adl
+
             if _ext == '.abc':
                 _rop = _parent.createNode('rop_alembic', node_name='flux_export'); _op = 'filename'
                 for _sp in ('soppath', 'sopname'):
                     if _rop.parm(_sp) is not None:
-                        _rop.parm(_sp).set(_sop.path()); break
+                        _rop.parm(_sp).set(_tail.path()); break
             elif _ext == '.fbx':
                 # FBX is written by the Filmbox ROP in /out, scoped to the geo object
                 # root (rop_geometry cannot write FBX). Reuse the node if it exists.
@@ -332,7 +361,7 @@ def export_via_node(
                 _rop = _parent.createNode('rop_geometry', node_name='flux_export'); _op = 'sopoutput'
                 for _sp in ('soppath', 'sopname'):
                     if _rop.parm(_sp) is not None:
-                        _rop.parm(_sp).set(_sop.path()); break
+                        _rop.parm(_sp).set(_tail.path()); break
 
         _set = False
         for _pn in (_op, 'sopoutput', 'filename', 'lopoutput', 'file', 'picture'):
@@ -377,6 +406,7 @@ def publish_houdini_rop(
     description: str = "",
     user: str = "",
     options: dict | None = None,
+    attr_filter: dict | None = None,
 ) -> dict:
     """Full Houdini publish workflow via a ROP node.
 
@@ -424,7 +454,7 @@ def publish_houdini_rop(
 
     # 4+5. Export: reuse the node if it is a ROP, else auto-create the right output ROP
     # as a child, wire it, set the path and cook — so any selected node can be exported.
-    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range, options)
+    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range, options, attr_filter)
     if not exp_resp.get("ok"):
         return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
 

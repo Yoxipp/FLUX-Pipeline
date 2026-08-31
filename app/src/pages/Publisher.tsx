@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
+import { Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon, Check, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { Btn, SecTitle, FolderIcon, Check, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
@@ -407,6 +408,9 @@ export function Publisher() {
   // active extension changes — defaults reproduce the pre-options export exactly.
   const [mayaExportOpts, setMayaExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(schemaForExt('.abc')))
   const [houExportOpts, setHouExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(houdiniSchemaForExt('.abc')))
+  // Houdini export attribute filter (F): keep-only / remove named point attributes.
+  const [houAttrMode, setHouAttrMode] = useState<'none' | 'keep' | 'remove'>('none')
+  const [houAttrNames, setHouAttrNames] = useState<string[]>([])
 
   // Resizable right panel (draggable splitter). Width persists per viewer; a
   // "Reset interface" action in the settings fires 'flux:reset-ui' to restore it.
@@ -782,6 +786,9 @@ export function Publisher() {
           is_sequence:   isSequence,
           frame_range:   isSequence ? [frameStart, frameEnd, frameStep] : undefined,
           export_options: houExportOpts,
+          attr_filter:   (houAttrMode !== 'none' && houAttrNames.some(n => n.trim()))
+            ? { mode: houAttrMode, names: houAttrNames.map(n => n.trim()).filter(Boolean) }
+            : undefined,
           description:   description || undefined,
           user:          settings?.username ?? undefined,
         })
@@ -833,7 +840,7 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
     zbrushConnected, zbObjOptions, zbFbxOptions,
-    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, newMode, newVals, houdiniConnected, houExportOpts,
+    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, newMode, newVals, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
   const filename = buildFilename()
@@ -1301,6 +1308,67 @@ export function Publisher() {
                 values={houExportOpts}
                 onChange={(k, v) => setHouExportOpts(prev => ({ ...prev, [k]: v }))}
               />
+            </div>
+          )}
+
+          {/* ATTRIBUTS — Houdini, filtre les attributs point à l'export (attribdelete) */}
+          {dcc === 'Houdini' && exportExt !== '.fbx' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>ATTRIBUTS</SecTitle>
+              <div style={{ display: 'flex', gap: 4, marginBottom: houAttrMode === 'none' ? 0 : 10 }}>
+                {([['none', 'Tous'], ['keep', 'Garder uniquement'], ['remove', 'Supprimer']] as const).map(([m, label]) => (
+                  <div key={m} onClick={() => setHouAttrMode(m)} style={{
+                    padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                    fontFamily: 'var(--mono)', fontWeight: houAttrMode === m ? 600 : 400,
+                    border: houAttrMode === m ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                    background: houAttrMode === m ? 'var(--accent-soft)' : 'var(--paper-2)',
+                    color: houAttrMode === m ? 'var(--accent-hi)' : 'var(--ink-3)',
+                  }}>{label}</div>
+                ))}
+              </div>
+              {houAttrMode !== 'none' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className="cap">Presets</span>
+                    {['boneCapture', 'curveu'].map(p => (
+                      <Pill key={p} style={{ cursor: 'pointer' }}>
+                        <span onClick={() => setHouAttrNames(prev => prev.includes(p) ? prev : [...prev, p])}>{p}</span>
+                      </Pill>
+                    ))}
+                    <Pill style={{ cursor: 'pointer' }}>
+                      <span onClick={() => setHouAttrNames(prev => [...prev, 'mask'])}>+ mask</span>
+                    </Pill>
+                    <div style={{ flex: 1 }} />
+                    <Btn sm onClick={() => setHouAttrNames(prev => [...prev, ''])}>+ attribut</Btn>
+                  </div>
+                  {houAttrNames.length === 0 && (
+                    <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+                      {houAttrMode === 'keep' ? 'Aucun attribut listé (P toujours conservé)' : 'Aucun attribut à supprimer'}
+                    </div>
+                  )}
+                  {houAttrNames.map((n, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        value={n}
+                        placeholder="nom de l'attribut point"
+                        onChange={e => setHouAttrNames(prev => prev.map((x, j) => j === i ? e.target.value : x))}
+                        style={{
+                          flex: 1, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                          borderRadius: 5, padding: '0 8px', fontFamily: 'var(--mono)', fontSize: 11,
+                          color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+                        }}
+                      />
+                      <div onClick={() => setHouAttrNames(prev => prev.filter((_, j) => j !== i))}
+                        className="scale-hover-lg" style={{ cursor: 'pointer', color: 'var(--ink-4)', display: 'flex' }}>
+                        <Trash2 size={13} strokeWidth={1.75} />
+                      </div>
+                    </div>
+                  ))}
+                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+                    Attributs point uniquement (curveu, masks, boneCapture…). Renommage : bientôt.
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
