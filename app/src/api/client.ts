@@ -172,6 +172,7 @@ export const api = {
     frame_start?: number
     frame_end?:   number
     fmt?:         string
+    scope?:       string
     include_geo?:     boolean
     include_skel?:    boolean
     include_anim?:    boolean

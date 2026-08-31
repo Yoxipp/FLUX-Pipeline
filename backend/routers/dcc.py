@@ -615,6 +615,7 @@ class MayaLightExportRequest(BaseModel):
     frame_start:  int | None = None
     frame_end:    int | None = None
     fmt:          str = "usd"
+    scope:        str = "selection"   # "scene" | "selection"
     # What to include in the light export (checkboxes in the Publisher).
     include_geo:     bool = True
     include_skel:    bool = True
@@ -663,7 +664,7 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)}, "
         f"include_geo={_arg(req.include_geo)}, include_skel={_arg(req.include_skel)}, "
         f"include_anim={_arg(req.include_anim)}, include_weights={_arg(req.include_weights)}, "
-        f"include_uv={_arg(req.include_uv)})"
+        f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)})"
     )
 
     loop = asyncio.get_event_loop()

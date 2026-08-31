@@ -794,6 +794,7 @@ export function Publisher() {
             asset:        assetName,
             filename,
             fmt:          exportExt.replace('.', ''),
+            scope:        mayaScope,
             frame_start:  isSequence ? frameStart : undefined,
             frame_end:    isSequence ? frameEnd : undefined,
             include_geo:     lightInclude.geo,
