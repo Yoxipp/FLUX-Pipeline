@@ -1274,6 +1274,24 @@ export function Publisher() {
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
         <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
 
+          {/* PRESETS — quick USD Layers setups (Maya & Houdini). Set format + layers. */}
+          {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && (
+            <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+              <SecTitle>PRESETS</SecTitle>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {([
+                  { label: 'Base light USD', ext: '.usd', layers: { geo: true, skel: true, anim: true, weights: true, uv: true } },
+                  { label: 'Géo USD',        ext: '.usd', layers: { geo: true, skel: false, anim: false, weights: false, uv: true } },
+                  { label: 'Skin USD',       ext: '.usd', layers: { geo: true, skel: true, anim: false, weights: true, uv: true } },
+                ] as const).map(p => (
+                  <Pill key={p.label} style={{ cursor: 'pointer' }}>
+                    <span onClick={() => { setExportExt(p.ext); setLightUsd(true); setLightInclude({ ...p.layers }) }}>{p.label}</span>
+                  </Pill>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* FORMAT */}
           <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
             <SecTitle>FORMAT</SecTitle>
@@ -1349,9 +1367,8 @@ export function Publisher() {
             </div>
           )}
 
-          {/* OPTIONS D'EXPORT — Maya, per-format. Hidden when the light-USD path
-              is active (that path uses a dedicated exporter, not these options). */}
-          {dcc === 'Maya' && !(lightUsd && ['.usd', '.usda', '.usdc'].includes(exportExt)) && schemaForExt(exportExt).length > 0 && (
+          {/* OPTIONS D'EXPORT — Maya, per-format (coexists with USD Layers). */}
+          {dcc === 'Maya' && schemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
@@ -1362,9 +1379,8 @@ export function Publisher() {
             </div>
           )}
 
-          {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters). Hidden when the
-              USD Layers (light export) path is active — those use a different exporter. */}
-          {dcc === 'Houdini' && !(lightUsd && ['.usd', '.usda', '.usdc'].includes(exportExt)) && houdiniSchemaForExt(exportExt).length > 0 && (
+          {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters). */}
+          {dcc === 'Houdini' && houdiniSchemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
@@ -1376,7 +1392,7 @@ export function Publisher() {
           )}
 
           {/* ATTRIBUTS — Houdini, filtre les attributs point à l'export (attribdelete) */}
-          {dcc === 'Houdini' && exportExt !== '.fbx' && !(lightUsd && ['.usd', '.usda', '.usdc'].includes(exportExt)) && (
+          {dcc === 'Houdini' && exportExt !== '.fbx' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>ATTRIBUTS</SecTitle>
               <div style={{ display: 'flex', gap: 4, marginBottom: houAttrMode === 'none' ? 0 : 10 }}>
