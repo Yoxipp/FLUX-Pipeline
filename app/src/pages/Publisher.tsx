@@ -823,6 +823,24 @@ export function Publisher() {
           toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
           return
         }
+        if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
+          const res = await api.exportHoudiniLightUsd({
+            project_name: project,
+            asset:        assetName,
+            filename,
+            fmt:          exportExt.replace('.', ''),
+            frame_start:  isSequence ? frameStart : undefined,
+            frame_end:    isSequence ? frameEnd : undefined,
+            include_geo:     lightInclude.geo,
+            include_skel:    lightInclude.skel,
+            include_anim:    lightInclude.anim,
+            include_weights: lightInclude.weights,
+            include_uv:      lightInclude.uv,
+          })
+          toast.success(`USD Layers ${res.version} → ${res.asset}`)
+          return
+        }
         const res = await api.publishHoudiniRop({
           project_name:  project,
           filename,
@@ -1344,8 +1362,9 @@ export function Publisher() {
             </div>
           )}
 
-          {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters) */}
-          {dcc === 'Houdini' && houdiniSchemaForExt(exportExt).length > 0 && (
+          {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters). Hidden when the
+              USD Layers (light export) path is active — those use a different exporter. */}
+          {dcc === 'Houdini' && !(lightUsd && ['.usd', '.usda', '.usdc'].includes(exportExt)) && houdiniSchemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
@@ -1357,7 +1376,7 @@ export function Publisher() {
           )}
 
           {/* ATTRIBUTS — Houdini, filtre les attributs point à l'export (attribdelete) */}
-          {dcc === 'Houdini' && exportExt !== '.fbx' && (
+          {dcc === 'Houdini' && exportExt !== '.fbx' && !(lightUsd && ['.usd', '.usda', '.usdc'].includes(exportExt)) && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>ATTRIBUTS</SecTitle>
               <div style={{ display: 'flex', gap: 4, marginBottom: houAttrMode === 'none' ? 0 : 10 }}>
@@ -1411,13 +1430,14 @@ export function Publisher() {
             </div>
           )}
 
-          {/* EXPORT USD LÉGER — Maya asset only, USD formats only (hidden otherwise) */}
-          {dcc === 'Maya' && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
+          {/* USD LAYERS — Maya & Houdini, asset + USD formats only (hidden otherwise).
+              Layered UsdSkel export; the checkboxes choose which layers to author. */}
+          {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
             const usdOk = true
             const on = usdOk && lightUsd
             return (
               <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-                <SecTitle>EXPORT USD LÉGER</SecTitle>
+                <SecTitle>USD LAYERS</SecTitle>
                 <div
                   onClick={() => { if (usdOk) setLightUsd(v => !v) }}
                   style={{
@@ -1439,7 +1459,7 @@ export function Publisher() {
                   </div>
                   <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
                     {usdOk
-                      ? 'UsdSkel (model + skel + animation des joints)'
+                      ? 'Export en layers USD (model / skel / anim…) — choisis ci-dessous'
                       : 'Disponible seulement en usd / usda / usdc'}
                   </span>
                 </div>

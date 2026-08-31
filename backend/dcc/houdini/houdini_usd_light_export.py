@@ -35,6 +35,11 @@ _EXTRACT_CODE = textwrap.dedent(r'''
     _MESH = {mesh!r}
     _FS   = {fs!r}
     _FE   = {fe!r}
+    _INC_GEO  = {inc_geo}
+    _INC_SKEL = {inc_skel}
+    _INC_ANIM = {inc_anim}
+    _INC_W    = {inc_w}
+    _INC_UV   = {inc_uv}
     _logs = []
 
     def _log(level, msg):
@@ -111,13 +116,21 @@ _EXTRACT_CODE = textwrap.dedent(r'''
 
     def _mesh_geo(geo):
         pts = [list(p.position()) for p in geo.points()]
-        counts, indices = [], []
+        counts, indices, uvs = [], [], []
+        _uv_vtx = _INC_UV and geo.findVertexAttrib("uv") is not None
+        _uv_pt = _INC_UV and (not _uv_vtx) and geo.findPointAttrib("uv") is not None
         for prim in geo.prims():
             vs = prim.vertices()
             counts.append(len(vs))
             for v in vs:
                 indices.append(v.point().number())
-        return pts, counts, indices
+                if _uv_vtx or _uv_pt:
+                    try:
+                        uv = v.attribValue("uv") if _uv_vtx else v.point().attribValue("uv")
+                    except Exception:
+                        uv = (0.0, 0.0, 0.0)
+                    uvs.append([float(uv[0]), float(uv[1])])
+        return pts, counts, indices, uvs
 
     def _weights(geo, joints):
         # Best-effort boneCapture extraction. Returns (indices, weights, elem, geom_bind) or None.
@@ -163,83 +176,93 @@ _EXTRACT_CODE = textwrap.dedent(r'''
 
     try:
         skel_node, mesh_node = _pick_nodes()
-        if skel_node is None:
+        if _INC_SKEL and skel_node is None:
             result = {{"__error__": "no KineFX skeleton found (pass skel_node or select it)", "__logs__": _logs}}
-        elif mesh_node is None:
+        elif _INC_GEO and mesh_node is None:
             result = {{"__error__": "no mesh found (pass mesh_node or select it)", "__logs__": _logs}}
         else:
-            sg = skel_node.geometry()
-            mg = mesh_node.geometry()
-            joints, bind, rest = _skeleton(sg)
-            pts, counts, indices = _mesh_geo(mg)
-            mesh_name = mesh_node.name()
+            joints, bind, rest = [], [], []
+            if _INC_SKEL and skel_node is not None:
+                joints, bind, rest = _skeleton(skel_node.geometry())
 
-            mesh_dict = {{
-                "name": mesh_name,
-                "points": pts,
-                "face_vertex_counts": counts,
-                "face_vertex_indices": indices,
-                "joint_indices": [],
-                "joint_weights": [],
-                "influences_per_point": 0,
-                "geom_bind_transform": None,
-            }}
-            w = _weights(mg, joints)
-            if w is not None:
-                mesh_dict["joint_indices"] = w[0]
-                mesh_dict["joint_weights"] = w[1]
-                mesh_dict["influences_per_point"] = w[2]
-                mesh_dict["geom_bind_transform"] = w[3]
+            meshes = []
+            if _INC_GEO and mesh_node is not None:
+                mg = mesh_node.geometry()
+                pts, counts, indices, uvs = _mesh_geo(mg)
+                mesh_dict = {{
+                    "name": mesh_node.name(),
+                    "points": pts,
+                    "face_vertex_counts": counts,
+                    "face_vertex_indices": indices,
+                    "uvs": uvs,
+                    "uv_indices": [],
+                    "joint_indices": [],
+                    "joint_weights": [],
+                    "influences_per_point": 0,
+                    "geom_bind_transform": None,
+                }}
+                if _INC_W and _INC_SKEL and joints:
+                    w = _weights(mg, joints)
+                    if w is not None:
+                        mesh_dict["joint_indices"] = w[0]
+                        mesh_dict["joint_weights"] = w[1]
+                        mesh_dict["influences_per_point"] = w[2]
+                        mesh_dict["geom_bind_transform"] = w[3]
+                meshes = [mesh_dict]
 
             # Animation: sample local transforms over the frame range, keep moving joints.
             anim = None
-            fs = int(_FS) if _FS is not None else int(hou.playbar.frameRange()[0])
-            fe = int(_FE) if _FE is not None else int(hou.playbar.frameRange()[1])
-            if fe > fs:
-                times = list(range(fs, fe + 1))
-                per_time = []
-                for t in times:
-                    hou.setFrame(t)
-                    lm = _local_map(skel_node.geometry())
-                    per_time.append([list(lm.get(j, hou.Matrix4(1)).asTuple()) for j in joints])
-                # filter animated
-                moving = []
-                for jn in range(len(joints)):
-                    first = per_time[0][jn]
-                    if any(any(abs(a - b) > 1e-6 for a, b in zip(per_time[ti][jn], first)) for ti in range(1, len(times))):
-                        moving.append(jn)
-                if moving:
-                    def _decomp(m16):
-                        m = hou.Matrix4(m16)
-                        tr = m.extractTranslates()
-                        q = hou.Quaternion(m.extractRotationMatrix3())
-                        s = m.extractScales()
-                        return list(tr), [q[0], q[1], q[2], q[3]], list(s)
-                    a_joints = [joints[j] for j in moving]
-                    translations, rotations, scales = [], [], []
-                    for ti in range(len(times)):
-                        tt, rr, ss = [], [], []
-                        for j in moving:
-                            T, Q, S = _decomp(per_time[ti][j])
-                            tt.append(T); rr.append(Q); ss.append(S)
-                        translations.append(tt); rotations.append(rr); scales.append(ss)
-                    anim = {{
-                        "joints": a_joints,
-                        "times": [float(t) for t in times],
-                        "translations": translations,
-                        "rotations": rotations,
-                        "scales": scales,
-                    }}
+            if _INC_ANIM and _INC_SKEL and joints and skel_node is not None:
+                fs = int(_FS) if _FS is not None else int(hou.playbar.frameRange()[0])
+                fe = int(_FE) if _FE is not None else int(hou.playbar.frameRange()[1])
+                if fe > fs:
+                    times = list(range(fs, fe + 1))
+                    per_time = []
+                    for t in times:
+                        hou.setFrame(t)
+                        lm = _local_map(skel_node.geometry())
+                        per_time.append([list(lm.get(j, hou.Matrix4(1)).asTuple()) for j in joints])
+                    # filter animated
+                    moving = []
+                    for jn in range(len(joints)):
+                        first = per_time[0][jn]
+                        if any(any(abs(a - b) > 1e-6 for a, b in zip(per_time[ti][jn], first)) for ti in range(1, len(times))):
+                            moving.append(jn)
+                    if moving:
+                        def _decomp(m16):
+                            m = hou.Matrix4(m16)
+                            tr = m.extractTranslates()
+                            q = hou.Quaternion(m.extractRotationMatrix3())
+                            s = m.extractScales()
+                            return list(tr), [q[0], q[1], q[2], q[3]], list(s)
+                        a_joints = [joints[j] for j in moving]
+                        translations, rotations, scales = [], [], []
+                        for ti in range(len(times)):
+                            tt, rr, ss = [], [], []
+                            for j in moving:
+                                T, Q, S = _decomp(per_time[ti][j])
+                                tt.append(T); rr.append(Q); ss.append(S)
+                            translations.append(tt); rotations.append(rr); scales.append(ss)
+                        anim = {{
+                            "joints": a_joints,
+                            "times": [float(t) for t in times],
+                            "translations": translations,
+                            "rotations": rotations,
+                            "scales": scales,
+                        }}
 
-            result = {{
-                "asset": {{
-                    "asset": {asset!r},
-                    "skeleton": {{"joints": joints, "bind_transforms": bind, "rest_transforms": rest}},
-                    "meshes": [mesh_dict],
-                    "anim": anim,
-                }},
-                "__logs__": _logs,
-            }}
+            if not meshes and not joints:
+                result = {{"__error__": "nothing to export (geo and skel both excluded)", "__logs__": _logs}}
+            else:
+                result = {{
+                    "asset": {{
+                        "asset": {asset!r},
+                        "skeleton": {{"joints": joints, "bind_transforms": bind, "rest_transforms": rest}},
+                        "meshes": meshes,
+                        "anim": anim,
+                    }},
+                    "__logs__": _logs,
+                }}
     except Exception as exc:
         result = {{"__error__": "extraction raised: %s" % exc, "__logs__": _logs}}
 ''')
@@ -256,14 +279,25 @@ def run_light_export(
     fmt: str = "usd",
     dest_dir: str | None = None,
     base_name: str | None = None,
+    include_geo: bool = True,
+    include_skel: bool = True,
+    include_anim: bool = True,
+    include_weights: bool = True,
+    include_uv: bool = True,
 ) -> dict:
     """Extract a KineFX skinned asset from Houdini and publish a light USD asset.
+
+    The include_* flags choose which USD layers/data to author (same contract as the
+    Maya light export): weights need geo+skel, anim needs skel.
 
     Returns {"ok": True, "version": "vNNN", "root": "..."} or {"ok": False, "error": "..."}.
     """
     code = _EXTRACT_CODE.format(
         skel=skel_node or "", mesh=mesh_node or "",
         fs=frame_start, fe=frame_end, asset=asset,
+        inc_geo=bool(include_geo), inc_skel=bool(include_skel),
+        inc_anim=bool(include_anim), inc_w=bool(include_weights),
+        inc_uv=bool(include_uv),
     )
     resp = houdini_client.run(code)
     if not resp.get("ok"):

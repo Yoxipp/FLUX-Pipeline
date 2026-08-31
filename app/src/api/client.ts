@@ -181,6 +181,24 @@ export const api = {
     apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
       'POST', '/dcc/maya/export-usd', payload),
 
+  exportHoudiniLightUsd: (payload: {
+    project_name: string
+    asset:        string
+    filename?:    string
+    skel_node?:   string
+    mesh_node?:   string
+    frame_start?: number
+    frame_end?:   number
+    fmt?:         string
+    include_geo?:     boolean
+    include_skel?:    boolean
+    include_anim?:    boolean
+    include_weights?: boolean
+    include_uv?:      boolean
+  }) =>
+    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+      'POST', '/dcc/houdini/export-usd', payload),
+
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>
     apiCall<ZBrushPublishResult>('POST', '/dcc/zbrush/publish', payload),

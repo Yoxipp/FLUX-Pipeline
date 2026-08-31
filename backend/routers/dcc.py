@@ -385,6 +385,12 @@ class HoudiniLightExportRequest(BaseModel):
     frame_start:  int | None = None
     frame_end:    int | None = None
     fmt:          str = "usd"
+    # Which USD layers/data to author (same contract as the Maya light export).
+    include_geo:     bool = True
+    include_skel:    bool = True
+    include_anim:    bool = True
+    include_weights: bool = True
+    include_uv:      bool = True
 
 
 @router.post("/houdini/export-usd")
@@ -417,6 +423,9 @@ async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
             skel_node=req.skel_node, mesh_node=req.mesh_node,
             frame_start=req.frame_start, frame_end=req.frame_end, fmt=req.fmt,
             dest_dir=dest_dir, base_name=base_name,
+            include_geo=req.include_geo, include_skel=req.include_skel,
+            include_anim=req.include_anim, include_weights=req.include_weights,
+            include_uv=req.include_uv,
         ),
     )
     if not result.get("ok"):
