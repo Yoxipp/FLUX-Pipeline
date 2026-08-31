@@ -38,6 +38,8 @@ _ROP_PARM: dict[str, str] = {
     "alembic":      "filename",
     "rop_alembic":  "filename",
     "usdexport":    "lopoutput",
+    "rop_fbx":      "sopoutput",
+    "filmboxfbx":   "sopoutput",    # Filmbox FBX ROP (/out)
     "ifd":          "vm_picture",   # Mantra
     "karma":        "picture",
     "karma_old":    "picture",
@@ -267,10 +269,15 @@ def export_via_node(
     extension: str,
     output_path: str | Path,
     frame_range: tuple[int, int, int] | None = None,
+    options: dict | None = None,
 ) -> dict:
     """Export from ANY selected node: reuse it if it is a ROP, otherwise create the
     right output ROP (rop_geometry for geo/obj/usd, rop_alembic for .abc) as a child of
     the node's SOP network, wire it to the node, set the output path and cook.
+
+    *options* is a {parm_name: value} dict of ROP parameters to apply before the
+    cook (see houdiniExportOptions.ts). Each is set only if the parm exists on the
+    ROP and never fails the export — an unknown/absent parm is silently skipped.
 
     Returns {"ok": True, "rop": "..."} or {"ok": False, "error": "..."}.
     """
@@ -278,6 +285,7 @@ def export_via_node(
     out = str(output_path).replace("\\", "/")
     fr_repr = repr(tuple(frame_range)) if frame_range else "None"
     rop_map_repr = repr(_ROP_PARM)
+    opts_repr = repr(dict(options or {}))
 
     code = textwrap.dedent(f"""\
         _n = hou.node({node_path!r})
@@ -287,6 +295,7 @@ def export_via_node(
         _ext = {ext!r}
         _fr = {fr_repr}
         _ropmap = {rop_map_repr}
+        _opts = {opts_repr}
         import pathlib as _pl
         _pl.Path(_out).parent.mkdir(parents=True, exist_ok=True)
 
@@ -297,20 +306,33 @@ def export_via_node(
         else:
             _cat = _n.type().category().name()
             if _cat == 'Sop':
-                _parent, _sop = _n.parent(), _n
+                _parent, _sop, _objroot = _n.parent(), _n, _n.parent()
             elif _n.childTypeCategory() and _n.childTypeCategory().name() == 'Sop':
-                _parent, _sop = _n, (_n.renderNode() or _n.displayNode())
+                _parent, _sop, _objroot = _n, (_n.renderNode() or _n.displayNode()), _n
             else:
                 raise RuntimeError("Select a SOP or a geo object (got %s)" % _cat)
             if _sop is None:
                 raise RuntimeError("No SOP to export inside %s" % _n.path())
             if _ext == '.abc':
                 _rop = _parent.createNode('rop_alembic', node_name='flux_export'); _op = 'filename'
+                for _sp in ('soppath', 'sopname'):
+                    if _rop.parm(_sp) is not None:
+                        _rop.parm(_sp).set(_sop.path()); break
+            elif _ext == '.fbx':
+                # FBX is written by the Filmbox ROP in /out, scoped to the geo object
+                # root (rop_geometry cannot write FBX). Reuse the node if it exists.
+                _rop = hou.node('/out/flux_fbx_export')
+                if _rop is None:
+                    _rop = hou.node('/out').createNode('filmboxfbx', node_name='flux_fbx_export')
+                _op = 'sopoutput'
+                for _sp in ('startnode', 'exportnode', 'root'):
+                    if _rop.parm(_sp) is not None:
+                        _rop.parm(_sp).set(_objroot.path()); break
             else:
                 _rop = _parent.createNode('rop_geometry', node_name='flux_export'); _op = 'sopoutput'
-            for _sp in ('soppath', 'sopname'):
-                if _rop.parm(_sp) is not None:
-                    _rop.parm(_sp).set(_sop.path()); break
+                for _sp in ('soppath', 'sopname'):
+                    if _rop.parm(_sp) is not None:
+                        _rop.parm(_sp).set(_sop.path()); break
 
         _set = False
         for _pn in (_op, 'sopoutput', 'filename', 'lopoutput', 'file', 'picture'):
@@ -318,6 +340,15 @@ def export_via_node(
                 _rop.parm(_pn).set(_out); _set = True; break
         if not _set:
             raise RuntimeError("Cannot set output parm on ROP type: %s" % _rop.type().name())
+
+        # Apply per-format ROP options defensively (skip absent parms / bad values).
+        for _k, _v in _opts.items():
+            _p = _rop.parm(_k)
+            if _p is not None:
+                try:
+                    _p.set(_v)
+                except Exception:
+                    pass
 
         if _fr:
             _rop.render(frame_range=_fr)
@@ -345,6 +376,7 @@ def publish_houdini_rop(
     frame_padding: int = FRAME_PADDING,
     description: str = "",
     user: str = "",
+    options: dict | None = None,
 ) -> dict:
     """Full Houdini publish workflow via a ROP node.
 
@@ -392,7 +424,7 @@ def publish_houdini_rop(
 
     # 4+5. Export: reuse the node if it is a ROP, else auto-create the right output ROP
     # as a child, wire it, set the path and cook — so any selected node can be exported.
-    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range)
+    exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range, options)
     if not exp_resp.get("ok"):
         return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
 

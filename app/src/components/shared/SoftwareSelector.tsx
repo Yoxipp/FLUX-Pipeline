@@ -13,9 +13,12 @@ const SW_DCC = [
 interface Props {
   active?: string
   onChange?: (name: string) => void
+  // Publisher shows "Fichier local" as a standalone source; the Importer hides it
+  // and exposes local-file import as a per-software action instead.
+  showLocal?: boolean
 }
 
-export function SoftwareSelector({ active = 'Maya', onChange }: Props) {
+export function SoftwareSelector({ active = 'Maya', onChange, showLocal = true }: Props) {
   return (
     <div style={{
       minHeight: 34, borderBottom: '1px solid var(--rule)',
@@ -30,10 +33,14 @@ export function SoftwareSelector({ active = 'Maya', onChange }: Props) {
             <span onClick={() => onChange?.(s.name)}>{s.name}</span>
           </Pill>
         ))}
-        <div style={{ width: 1, height: 12, background: 'var(--rule-2)', margin: '0 4px', flexShrink: 0 }} />
-        <Pill active={'Fichier local' === active} style={{ cursor: 'pointer' }}>
-          <span onClick={() => onChange?.('Fichier local')}>Fichier local</span>
-        </Pill>
+        {showLocal && (
+          <>
+            <div style={{ width: 1, height: 12, background: 'var(--rule-2)', margin: '0 4px', flexShrink: 0 }} />
+            <Pill active={'Fichier local' === active} style={{ cursor: 'pointer' }}>
+              <span onClick={() => onChange?.('Fichier local')}>Fichier local</span>
+            </Pill>
+          </>
+        )}
       </div>
     </div>
   )

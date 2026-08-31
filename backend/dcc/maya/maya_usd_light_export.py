@@ -101,8 +101,13 @@ def _extract_skeleton(joints_dag: list[str], tokens: list[str], skin: str):
     return SkeletonData(joints=tokens, bind_transforms=bind_transforms, rest_transforms=rest_transforms)
 
 
-def _extract_mesh(mesh: str, skin: str, joints_dag: list[str]):
-    """Return a MeshData with geometry + full skin binding for *mesh*."""
+def _extract_mesh(mesh: str, skin: str | None, joints_dag: list[str],
+                  want_weights: bool = True, want_uv: bool = True):
+    """Return a MeshData with geometry, optional UVs and optional skin binding.
+
+    *skin* None (or *want_weights* False) skips the skin binding; *want_uv* False
+    skips the UV set.
+    """
     from features.usd_export.contract import MeshData
 
     mesh_short = _short(mesh)
@@ -125,7 +130,22 @@ def _extract_mesh(mesh: str, skin: str, joints_dag: list[str]):
         face_vertex_counts=vtx_counts,
         face_vertex_indices=vtx_indices,
     )
-    if not skin:
+
+    # UVs — authored as an indexed faceVarying "st" primvar. getAssignedUVs()
+    # returns per-face uv counts (parallel to face_vertex_counts) + flat uv ids.
+    if want_uv:
+        try:
+            uv_sel = om.MSelectionList()
+            uv_sel.add(mesh)
+            mfn = om.MFnMesh(uv_sel.getDagPath(0))
+            us, vs = mfn.getUVs()
+            _uv_counts, uv_ids = mfn.getAssignedUVs()
+            data.uvs = [(float(us[i]), float(vs[i])) for i in range(len(us))]
+            data.uv_indices = [int(x) for x in uv_ids]
+        except Exception as exc:
+            log.warning("UV extraction failed on %s: %s", mesh_short, exc)
+
+    if not skin or not want_weights:
         return data
 
     # Skin weights via OpenMaya: flat, vertex-major, one entry per influence.
@@ -210,9 +230,23 @@ def _build_light_asset(
     root_joint: str | None,
     frame_start: int | None,
     frame_end: int | None,
+    include_geo: bool = True,
+    include_skel: bool = True,
+    include_anim: bool = True,
+    include_weights: bool = True,
+    include_uv: bool = True,
 ):
-    """Extract a LightAsset from the Maya scene. Returns None (and logs) on error."""
-    from features.usd_export.contract import LightAsset
+    """Extract a LightAsset from the Maya scene, honouring the include flags.
+
+    Dependency rules: skin weights need geo + skel; anim needs skel. Excluded data
+    is simply not extracted, and the authoring core skips the matching layer.
+    Returns None (and logs) on error.
+    """
+    from features.usd_export.contract import LightAsset, SkeletonData
+
+    # Effective flags after dependency rules.
+    eff_weights = include_weights and include_geo and include_skel
+    eff_anim = include_anim and include_skel
 
     # Resolve mesh from arg or selection.
     if mesh is None:
@@ -254,10 +288,26 @@ def _build_light_asset(
     if frame_end is None:
         frame_end = int(cmds.playbackOptions(q=True, max=True))
 
-    skeleton = _extract_skeleton(joints_dag, tokens, skin)
-    mesh_data = _extract_mesh(mesh, skin, joints_dag)
-    anim = _extract_anim(joints_dag, tokens, frame_start, frame_end)
-    return LightAsset(asset=asset, skeleton=skeleton, meshes=[mesh_data], anim=anim)
+    if include_skel:
+        skeleton = _extract_skeleton(joints_dag, tokens, skin)
+    else:
+        skeleton = SkeletonData(joints=[], bind_transforms=[], rest_transforms=[])
+
+    meshes = []
+    if include_geo:
+        mesh_data = _extract_mesh(
+            mesh, skin if eff_weights else None, joints_dag,
+            want_weights=eff_weights, want_uv=include_uv,
+        )
+        meshes = [mesh_data]
+
+    anim = _extract_anim(joints_dag, tokens, frame_start, frame_end) if eff_anim else None
+
+    if not meshes and not skeleton.joints:
+        log.error("light export: nothing to export (geo and skel both excluded)")
+        return None
+
+    return LightAsset(asset=asset, skeleton=skeleton, meshes=meshes, anim=anim)
 
 
 def run_light_export(
@@ -267,6 +317,11 @@ def run_light_export(
     root_joint: str | None = None,
     frame_start: int | None = None,
     frame_end: int | None = None,
+    include_geo: bool = True,
+    include_skel: bool = True,
+    include_anim: bool = True,
+    include_weights: bool = True,
+    include_uv: bool = True,
 ) -> None:
     """Extract a light asset from Maya and write a JSON envelope to *result_path*.
 
@@ -298,7 +353,12 @@ def run_light_export(
         if not _IN_MAYA:
             log.error("run_light_export: not running inside Maya")
         else:
-            light = _build_light_asset(asset, mesh, root_joint, frame_start, frame_end)
+            light = _build_light_asset(
+                asset, mesh, root_joint, frame_start, frame_end,
+                include_geo=include_geo, include_skel=include_skel,
+                include_anim=include_anim, include_weights=include_weights,
+                include_uv=include_uv,
+            )
             if light is not None:
                 data = dataclasses.asdict(light)
     except Exception as exc:  # pragma: no cover - defensive

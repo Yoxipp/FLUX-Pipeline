@@ -181,6 +181,77 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     return True, f"Installed → {dest}"
 
 
+# ── Maya tools catalog (choisir quel tool installer) ──────────────────────────
+# Chaque tool = un shelf Maya autonome (1 bouton) dans resources/shelves/maya/.
+MAYA_TOOLS: list[dict] = [
+    {"id": "flux",      "label": "Flux Pipeline",        "filename": "shelf_Flux.mel"},
+    {"id": "adam_rig",   "label": "Flux Rigging Tool",    "filename": "shelf_AntRigToolbox.mel"},
+    {"id": "flux_anim", "label": "Flux Animation Tool",  "filename": "shelf_FluxAnimTool.mel"},
+]
+
+
+def _tool(tool_id: str) -> dict | None:
+    return next((t for t in MAYA_TOOLS if t["id"] == tool_id), None)
+
+
+def list_tools() -> list[dict]:
+    """Catalogue des tools Maya installables (id + label + fichier)."""
+    return [dict(t) for t in MAYA_TOOLS]
+
+
+def is_tool_installed(tool_id: str, version: str) -> bool:
+    t = _tool(tool_id)
+    shelf_dir = get_dcc_shelf_dir("Maya", version)
+    if not t or shelf_dir is None:
+        return False
+    return (shelf_dir / t["filename"]).is_file()
+
+
+def install_tool_shelf(tool_id: str, version: str) -> tuple[bool, str]:
+    """Copie le shelf d'un tool du catalogue dans le dossier shelves de Maya."""
+    t = _tool(tool_id)
+    if not t:
+        return False, f"Tool inconnu : '{tool_id}'."
+    src = _RESOURCES_ROOT / "maya" / t["filename"]
+    if not src.is_file():
+        return False, f"Source shelf introuvable : {src}"
+    dest_dir = get_dcc_shelf_dir("Maya", version)
+    if dest_dir is None:
+        return False, f"Dossier shelves Maya {version} introuvable."
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest_dir / src.name)
+    except OSError as exc:
+        return False, f"Erreur : {exc}"
+    install_dir = _get_maya_install_shelf_dir(version)
+    if install_dir is not None:
+        try:
+            shutil.copy2(src, install_dir / src.name)
+        except OSError:
+            pass
+    return True, f"Installé → {dest_dir / src.name}"
+
+
+def remove_tool_shelf(tool_id: str, version: str) -> tuple[bool, str]:
+    """Retire le shelf d'un tool du catalogue."""
+    t = _tool(tool_id)
+    if not t:
+        return False, f"Tool inconnu : '{tool_id}'."
+    removed = False
+    for d in (get_dcc_shelf_dir("Maya", version),
+              _get_maya_install_shelf_dir(version)):
+        if d is None:
+            continue
+        f = d / t["filename"]
+        try:
+            if f.is_file():
+                f.unlink()
+                removed = True
+        except OSError as exc:
+            return False, f"Erreur : {exc}"
+    return (removed, "Retiré" if removed else "Rien à retirer")
+
+
 def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     """Remove the Flux shelf file from the DCC user directory.
 
@@ -227,7 +298,7 @@ def update_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     if is_shelf_installed(dcc_name, version):
         ok, msg = remove_shelf(dcc_name, version)
         if not ok:
-            return False, f"Update aborted — remove failed: {msg}"
+            return False, f"Update aborted, remove failed: {msg}"
     return install_shelf(dcc_name, version)
 
 
@@ -298,7 +369,7 @@ def install_hdas(version: str) -> tuple[bool, str]:
             return False, f"Live build error: {exc}"
 
     if not hdas:
-        return False, "No staged HDAs found — run the installer first or build via scripts/build_hdas.py."
+        return False, "No staged HDAs found. Run the installer first or build via scripts/build_hdas.py."
     return False, f"Cannot resolve otls directory for Houdini {version}."
 
 
@@ -325,7 +396,7 @@ def remove_hdas(version: str) -> tuple[bool, str]:
                 errors.append(f"{hda.name}: {exc}")
 
     if errors:
-        return False, f"Partial removal — errors: {'; '.join(errors)}"
+        return False, f"Partial removal, errors: {'; '.join(errors)}"
     if not removed:
         return True, "HDAs were not installed."
     return True, f"Removed: {', '.join(removed)}"

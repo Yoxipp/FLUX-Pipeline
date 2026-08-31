@@ -1,10 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { Btn, SecTitle, FolderIcon, Check, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { ExportOptions } from '../components/shared/ExportOptions'
+import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
+import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { api } from '../api/client'
 import { useSettings } from '../hooks/useSettings'
 import { toast } from 'sonner'
+
+// ── Resizable right panel (per-viewer UI pref) ────────────────────────────────
+const RIGHT_WIDTH_KEY = 'flux.ui.publisherRightWidth'
+const RIGHT_WIDTH_DEFAULT = 460
+const RIGHT_WIDTH_MIN = 320
+
+function readStoredWidth(): number {
+  try {
+    const v = parseInt(localStorage.getItem(RIGHT_WIDTH_KEY) || '', 10)
+    if (!Number.isNaN(v)) return v
+  } catch { /* private mode / blocked storage */ }
+  return RIGHT_WIDTH_DEFAULT
+}
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -387,6 +403,48 @@ export function Publisher() {
   const [frameEnd, setFrameEnd]     = useState(100)
   const [frameStep, setFrameStep]   = useState(1)
 
+  // Per-format export options (Maya). Reset to the format's defaults whenever the
+  // active extension changes — defaults reproduce the pre-options export exactly.
+  const [mayaExportOpts, setMayaExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(schemaForExt('.abc')))
+  const [houExportOpts, setHouExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(houdiniSchemaForExt('.abc')))
+
+  // Resizable right panel (draggable splitter). Width persists per viewer; a
+  // "Reset interface" action in the settings fires 'flux:reset-ui' to restore it.
+  const splitContainerRef = useRef<HTMLDivElement>(null)
+  const [rightWidth, setRightWidth] = useState<number>(() => readStoredWidth())
+
+  useEffect(() => {
+    try { localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth)) } catch { /* blocked storage */ }
+  }, [rightWidth])
+
+  useEffect(() => {
+    const onReset = () => setRightWidth(RIGHT_WIDTH_DEFAULT)
+    window.addEventListener('flux:reset-ui', onReset)
+    return () => window.removeEventListener('flux:reset-ui', onReset)
+  }, [])
+
+  const startSplitDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = rightWidth
+    const rect = splitContainerRef.current?.getBoundingClientRect()
+    const maxW = rect ? Math.max(360, rect.width - 360) : 900
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      setRightWidth(Math.min(Math.max(startW - dx, RIGHT_WIDTH_MIN), maxW))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [rightWidth])
+
   // Source / description / state
   const [sourcePath, setSourcePath]   = useState('')
   const [description, setDescription] = useState('')
@@ -415,6 +473,7 @@ export function Publisher() {
   const [mayaConnected, setMayaConnected]           = useState(false)
   const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('selection')
   const [lightUsd, setLightUsd]                     = useState(false)   // Maya UsdSkel light export
+  const [lightInclude, setLightInclude]             = useState({ geo: true, skel: true, anim: true, weights: true, uv: true })
   const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
   const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
   const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
@@ -503,6 +562,12 @@ export function Publisher() {
     const formats = formatsForDcc(dcc)
     if (!formats.includes(exportExt)) setExportExt(formats[0])
   }, [dcc]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset export options to the active format's defaults whenever it changes.
+  useEffect(() => {
+    setMayaExportOpts(defaultOptions(schemaForExt(exportExt)))
+    setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
+  }, [exportExt])
 
   // Houdini polling — connection + selected node + auto-format
   useEffect(() => {
@@ -682,6 +747,11 @@ export function Publisher() {
             fmt:          exportExt.replace('.', ''),
             frame_start:  isSequence ? frameStart : undefined,
             frame_end:    isSequence ? frameEnd : undefined,
+            include_geo:     lightInclude.geo,
+            include_skel:    lightInclude.skel,
+            include_anim:    lightInclude.anim,
+            include_weights: lightInclude.weights,
+            include_uv:      lightInclude.uv,
           })
           toast.success(`USD léger ${res.version} → ${res.asset}`)
           return
@@ -694,6 +764,7 @@ export function Publisher() {
           scope:        mayaScope,
           is_sequence:  isAnimAbc,
           frame_range:  isAnimAbc ? [frameStart, frameEnd] : undefined,
+          export_options: mayaExportOpts,
           description:  description || undefined,
           user:         settings?.username ?? undefined,
         })
@@ -710,6 +781,7 @@ export function Publisher() {
           rop_node_path: ropNodePath || undefined,
           is_sequence:   isSequence,
           frame_range:   isSequence ? [frameStart, frameEnd, frameStep] : undefined,
+          export_options: houExportOpts,
           description:   description || undefined,
           user:          settings?.username ?? undefined,
         })
@@ -761,7 +833,7 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
     zbrushConnected, zbObjOptions, zbFbxOptions,
-    mayaConnected, mayaScope, lightUsd, sel, newMode, newVals, houdiniConnected,
+    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, newMode, newVals, houdiniConnected, houExportOpts,
   ])
 
   const filename = buildFilename()
@@ -780,10 +852,10 @@ export function Publisher() {
 
       <SoftwareSelector active={dcc} onChange={setDcc} />
 
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* ── Left: Composer + source + description ── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--rule)', minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
           <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', minHeight: 0 }}>
 
@@ -1120,8 +1192,17 @@ export function Publisher() {
           </div>
         </div>
 
+        {/* draggable splitter — resizes the right panel */}
+        <div
+          onMouseDown={startSplitDrag}
+          title="Glisser pour redimensionner"
+          style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: 'var(--rule)', transition: 'background 0.12s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--rule)' }}
+        />
+
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
 
           {/* FORMAT */}
           <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
@@ -1198,9 +1279,34 @@ export function Publisher() {
             </div>
           )}
 
-          {/* EXPORT USD LÉGER — Maya asset only, USD formats only */}
-          {dcc === 'Maya' && mode === 'asset' && (() => {
-            const usdOk = ['.usd', '.usda', '.usdc'].includes(exportExt)
+          {/* OPTIONS D'EXPORT — Maya, per-format. Hidden when the light-USD path
+              is active (that path uses a dedicated exporter, not these options). */}
+          {dcc === 'Maya' && !(lightUsd && ['.usd', '.usda', '.usdc'].includes(exportExt)) && schemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={schemaForExt(exportExt)}
+                values={mayaExportOpts}
+                onChange={(k, v) => setMayaExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters) */}
+          {dcc === 'Houdini' && houdiniSchemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={houdiniSchemaForExt(exportExt)}
+                values={houExportOpts}
+                onChange={(k, v) => setHouExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* EXPORT USD LÉGER — Maya asset only, USD formats only (hidden otherwise) */}
+          {dcc === 'Maya' && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
+            const usdOk = true
             const on = usdOk && lightUsd
             return (
               <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
@@ -1230,14 +1336,25 @@ export function Publisher() {
                       : 'Disponible seulement en usd / usda / usdc'}
                   </span>
                 </div>
+                {on && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: 10 }}>
+                    {([['geo', 'Geo'], ['skel', 'Squelette'], ['anim', 'Animation'], ['weights', 'Skin weights (boneCapture)'], ['uv', 'UV']] as const).map(([k, label]) => (
+                      <div key={k} onClick={() => setLightInclude(p => ({ ...p, [k]: !p[k] }))}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+                        <Check on={lightInclude[k]} />
+                        <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })()}
 
           {/* APERÇU OUTPUT */}
-          <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <SecTitle>APERÇU OUTPUT</SecTitle>
-            <div className="subcard" style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0, overflowY: 'auto' }}>
+            <div className="subcard" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 90, maxHeight: 200, overflowY: 'auto' }}>
               {isSequence ? (<>
                 <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{filename}_v001/</div>
                 <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)', paddingLeft: 12 }}>

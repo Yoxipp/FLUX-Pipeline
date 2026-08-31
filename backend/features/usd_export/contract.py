@@ -24,6 +24,11 @@ class MeshData:
     joint_weights: list[float] = field(default_factory=list)
     influences_per_point: int = 0
     geom_bind_transform: Mat4 | None = None   # identity when None
+    # UV set, authored as an indexed faceVarying "st" primvar. uvs are the unique
+    # (u, v) pairs; uv_indices is one index per face-vertex (parallel to
+    # face_vertex_indices). Empty = no UVs authored.
+    uvs: list[tuple[float, float]] = field(default_factory=list)
+    uv_indices: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +86,8 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             influences_per_point=int(m.get("influences_per_point", 0)),
             geom_bind_transform=(tuple(m["geom_bind_transform"])
                                  if m.get("geom_bind_transform") else None),
+            uvs=[tuple(uv) for uv in m.get("uvs", [])],
+            uv_indices=list(m.get("uv_indices", [])),
         )
         for m in d.get("meshes", [])
     ]

@@ -157,6 +157,7 @@ export const api = {
     scope?:       string
     is_sequence?: boolean
     frame_range?: [number, number]
+    export_options?: Record<string, unknown>
     description?: string
     user?:        string
   }) =>
@@ -171,6 +172,11 @@ export const api = {
     frame_start?: number
     frame_end?:   number
     fmt?:         string
+    include_geo?:     boolean
+    include_skel?:    boolean
+    include_anim?:    boolean
+    include_weights?: boolean
+    include_uv?:      boolean
   }) =>
     apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
       'POST', '/dcc/maya/export-usd', payload),
@@ -271,6 +277,11 @@ export const api = {
   getFluxTokensFromPath: (project: string, rel_path: string) =>
     apiCall<{ CLASS: string; TYPE: string; NAME: string; INSTANCE: string }>(
       'GET', `/dcc/houdini/importer/path_to_tokens?project=${encodeURIComponent(project)}&rel_path=${encodeURIComponent(rel_path)}`,
+    ),
+
+  importHoudiniCharacter: (file_path: string, network_path = '/obj') =>
+    apiCall<{ node_path: string; node_type: string; file_set: boolean; has_bonecapture: boolean; point_count: number }>(
+      'POST', '/dcc/houdini/import-character', { file_path, network_path },
     ),
 
   createFluxImporterNode: (params: {

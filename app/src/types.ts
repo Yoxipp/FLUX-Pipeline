@@ -80,6 +80,7 @@ export interface HoudiniPublishPayload {
   is_sequence?: boolean
   frame_range?: [number, number, number]
   frame_padding?: number
+  export_options?: Record<string, unknown>
   description?: string
   user?: string
 }

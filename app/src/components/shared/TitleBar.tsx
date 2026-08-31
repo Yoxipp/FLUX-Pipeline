@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
 import { Console } from './Console'
@@ -58,6 +58,11 @@ function SettingsPopover({ username }: { username: string }) {
     setAccentKey(key)
     applyAccentPreset(key)
     void api.updateSettings({ theme_accent: key })
+  }
+
+  const handleResetUi = () => {
+    try { localStorage.removeItem('flux.ui.publisherRightWidth') } catch { /* blocked storage */ }
+    window.dispatchEvent(new Event('flux:reset-ui'))
   }
 
   const handleChangeWorkspace = async () => {
@@ -160,6 +165,26 @@ function SettingsPopover({ username }: { username: string }) {
         </div>
       </div>
 
+      {/* interface */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>INTERFACE</div>
+        <div
+          onClick={handleResetUi}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 10px', borderRadius: 7,
+            border: '1px solid var(--rule-2)', background: 'var(--paper)',
+            fontSize: 11, color: 'var(--ink-3)', cursor: 'pointer',
+            transition: 'border-color 0.12s, color 0.12s',
+          }}
+          onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--accent)'; el.style.color = 'var(--accent-hi)' }}
+          onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.color = 'var(--ink-3)' }}
+        >
+          <RotateCcw size={11} strokeWidth={1.75} />
+          Réinitialiser l'interface
+        </div>
+      </div>
+
       {/* version */}
       {version && (
         <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
@@ -167,6 +192,13 @@ function SettingsPopover({ username }: { username: string }) {
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>{version}</div>
         </div>
       )}
+
+      {/* credit */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8, textAlign: 'center' }}>
+        <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+          Made by Adam Fresne-Roux and Milo Moreau
+        </span>
+      </div>
     </div>
   )
 }

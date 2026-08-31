@@ -10,7 +10,11 @@ Supported import extensions:
     .abc                    → Alembic SOP
     .usd / .usda / .usdc    → USD Import SOP
     .bgeo / .bgeo.sc / .geo / .obj  → File SOP
-    .fbx                    → FBX Character Import (OBJ-level — network_path must be /obj)
+    .fbx                    → KineFX FBX Character Import (SOP; carries boneCapture)
+
+Skinned assets (Maya UsdSkel light export or FBX with skin) can be imported as a
+KineFX character via create_character_import_node(): the imported mesh carries the
+`boneCapture` point attribute (skin weights), joints matched by name 1:1.
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ _EXT_MAP: dict[str, tuple[str, str]] = {
     ".bgeo.sc": ("file",                     "file"),
     ".geo":     ("file",                     "file"),
     ".obj":     ("file",                     "file"),
-    ".fbx":     ("filmboxcharacterimport",   ""),
+    ".fbx":     ("kinefx::fbxcharacterimport", ""),   # handled via create_character_import_node
 }
 
 # Common file-path parm names, tried when the mapped one is absent (version drift).
@@ -62,8 +66,9 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
     if entry is None:
         return {"ok": False, "error": f"Unsupported import extension: {ext}"}
     if ext == ".fbx":
-        # No reliable single-node FBX importer across Houdini versions.
-        return {"ok": False, "error": "Import FBX dans Houdini non supporté : utilise .abc ou .usd (ou File > Import FBX dans Houdini)"}
+        # FBX is a KineFX character import (SOP) — routes through the dedicated path,
+        # which also yields boneCapture. Fixes the old "not supported" gap.
+        return create_character_import_node(network_path, file_path)
 
     node_type, parm_name = entry
     file_str = str(file_path).replace("\\", "/")
@@ -91,6 +96,88 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
         log.info("Created Houdini import node (%s) for %s", node_type, Path(file_path).name)
     else:
         log.error("create_import_node failed: %s", resp.get("error"))
+    return resp
+
+
+def create_character_import_node(network_path: str, file_path: str | Path) -> dict:
+    """Import a skinned asset as a KineFX character → mesh carries `boneCapture`.
+
+    ``.usd/.usda/.usdc/.usdz`` → ``kinefx::usdcharacterimport``
+    ``.fbx``                   → ``kinefx::fbxcharacterimport``
+
+    These are SOP nodes, so if *network_path* is an OBJ context a Geometry node is
+    created to hold the import. The file parameter is discovered at runtime (a file
+    string parm, else the first parm whose name contains "file") so it works across
+    Houdini versions. Joints map to the skeleton by name 1:1 (UsdSkel / FBX names).
+
+    Returns {"ok", "node_path", "node_type", "file_set", "has_bonecapture",
+    "point_count"} or {"ok": False, "error": "..."}.
+    """
+    ext = _get_ext(file_path)
+    if ext in (".usd", ".usda", ".usdc", ".usdz"):
+        node_type = "kinefx::usdcharacterimport"
+    elif ext == ".fbx":
+        node_type = "kinefx::fbxcharacterimport"
+    else:
+        return {"ok": False, "error": f"Character import needs .usd*/.fbx (got {ext})"}
+
+    file_str = str(file_path).replace("\\", "/")
+    code = textwrap.dedent(f"""\
+        _net = hou.node({network_path!r})
+        if _net is None:
+            raise RuntimeError("Network not found: {network_path}")
+        # KineFX character import is a SOP — wrap in a Geometry node if needed.
+        if _net.childTypeCategory() == hou.objNodeTypeCategory():
+            _net = _net.createNode("geo", node_name="flux_character")
+        _node = _net.createNode({node_type!r}, node_name="flux_character_import")
+
+        # Find the file parm (version-agnostic): a file-reference string parm first,
+        # else the first parm whose name mentions "file".
+        _fp = None
+        for _p in _node.parms():
+            _t = _p.parmTemplate()
+            try:
+                if (_t.type() == hou.parmTemplateType.String
+                        and _t.stringType() == hou.stringParmType.FileReference):
+                    _fp = _p; break
+            except Exception:
+                pass
+        if _fp is None:
+            for _p in _node.parms():
+                if "file" in _p.name().lower():
+                    _fp = _p; break
+        _set = False
+        if _fp is not None:
+            _fp.set({file_str!r}); _set = True
+
+        _node.setSelected(True, clear_all_selected=True)
+
+        # Cook and report whether boneCapture landed (so the hub can warn if not).
+        _has_bc = False
+        _npt = 0
+        try:
+            _g = _node.geometry()
+            if _g is not None:
+                _npt = _g.intrinsicValue("pointcount")
+                _has_bc = _g.findPointAttrib("boneCapture") is not None
+        except Exception:
+            pass
+
+        result = {{"ok": True, "node_path": _node.path(), "node_type": {node_type!r},
+                   "file_set": _set, "has_bonecapture": _has_bc, "point_count": _npt}}
+    """)
+
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        r = resp.get("result") or {}
+        if not r.get("file_set"):
+            log.warning("create_character_import_node: no file parm found on %s", node_type)
+        if not r.get("has_bonecapture"):
+            log.warning("create_character_import_node: %s imported but no boneCapture attr (check the asset carries skin weights)", Path(file_path).name)
+        log.info("KineFX character import (%s) for %s -> boneCapture=%s, %s pts",
+                 node_type, Path(file_path).name, r.get("has_bonecapture"), r.get("point_count"))
+    else:
+        log.error("create_character_import_node failed: %s", resp.get("error"))
     return resp
 
 

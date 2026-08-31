@@ -302,6 +302,7 @@ class HoudiniPublishRequest(BaseModel):
     is_sequence: bool = False
     frame_range: list[int] | None = None   # [start, end, step]
     frame_padding: int = 4
+    export_options: dict | None = None     # ROP parms to set (see houdini_export)
     description: str = ""
     user: str | None = None
 
@@ -364,6 +365,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
             frame_padding=req.frame_padding,
             description=req.description,
             user=user,
+            options=req.export_options,
         ),
     )
 
@@ -420,6 +422,31 @@ async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
     return result
 
 
+class HoudiniCharacterImportRequest(BaseModel):
+    file_path:    str            # absolute path to a skinned .usd*/.fbx
+    network_path: str = "/obj"   # where to create the import (wraps in a geo if OBJ ctx)
+
+
+@router.post("/houdini/import-character")
+async def houdini_import_character(req: HoudiniCharacterImportRequest) -> dict:
+    """Import a skinned asset as a KineFX character → mesh carries boneCapture.
+
+    Uses kinefx::usdcharacterimport (.usd*) / kinefx::fbxcharacterimport (.fbx).
+    """
+    from dcc.houdini.client import houdini_client
+    from dcc.houdini.houdini_import import create_character_import_node
+
+    if not houdini_client.is_connected():
+        raise HTTPException(status_code=503, detail="Houdini non connecté (lance le serveur FLUX dans Houdini)")
+    loop = asyncio.get_event_loop()
+    resp = await loop.run_in_executor(
+        None, lambda: create_character_import_node(req.network_path, req.file_path)
+    )
+    if not resp.get("ok"):
+        raise HTTPException(status_code=503, detail=resp.get("error", "Import KineFX character échoué"))
+    return resp.get("result", {})
+
+
 # ── Maya endpoints ───────────────────────────────────────────────────────────
 
 
@@ -430,6 +457,7 @@ class MayaPublishRequest(BaseModel):
     scope:        str = "scene"    # "scene" | "selection"
     is_sequence:  bool = False
     frame_range:  list[int] | None = None   # [start, end]
+    export_options: dict | None = None      # per-format export options (see maya_export)
     description:  str = ""
     user:         str | None = None
 
@@ -576,6 +604,12 @@ class MayaLightExportRequest(BaseModel):
     frame_start:  int | None = None
     frame_end:    int | None = None
     fmt:          str = "usd"
+    # What to include in the light export (checkboxes in the Publisher).
+    include_geo:     bool = True
+    include_skel:    bool = True
+    include_anim:    bool = True
+    include_weights: bool = True   # UsdSkel skin binding (bone capture)
+    include_uv:      bool = True
 
 
 @router.post("/maya/export-usd")
@@ -615,7 +649,10 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"from dcc.maya.maya_usd_light_export import run_light_export; "
         f"run_light_export({_arg(req.asset)}, r'{result_path}', "
         f"mesh={_arg(req.mesh)}, root_joint={_arg(req.root_joint)}, "
-        f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)})"
+        f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)}, "
+        f"include_geo={_arg(req.include_geo)}, include_skel={_arg(req.include_skel)}, "
+        f"include_anim={_arg(req.include_anim)}, include_weights={_arg(req.include_weights)}, "
+        f"include_uv={_arg(req.include_uv)})"
     )
 
     loop = asyncio.get_event_loop()
@@ -748,18 +785,28 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     # run_publish_export writes a JSON envelope to result_path with Maya's own logs so
     # the hub can report the real failure reason (Maya is a separate process).
     scope = "scene" if req.scope == "scene" else "selection"
+
+    # Export options travel as base64(JSON) so the single-line Maya command stays
+    # quote-safe (base64 is [A-Za-z0-9+/=], never breaks the surrounding quotes).
+    import base64 as _b64
+    import json as _json2
+    opts_b64 = ""
+    if req.export_options:
+        opts_b64 = _b64.b64encode(_json2.dumps(req.export_options).encode("utf-8")).decode("ascii")
+
     if ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2:
         fs, fe = req.frame_range
         cmd = (
             f"{path_prefix}; "
             f"from dcc.maya.maya_export import run_publish_export; "
-            f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}', frame_start={fs}, frame_end={fe})"
+            f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}', "
+            f"frame_start={fs}, frame_end={fe}, options_b64='{opts_b64}')"
         )
     else:
         cmd = (
             f"{path_prefix}; "
             f"from dcc.maya.maya_export import run_publish_export; "
-            f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}')"
+            f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}', options_b64='{opts_b64}')"
         )
 
     # Timeout: 30s for static exports, 600s for animated ABC (100 frames can be slow)

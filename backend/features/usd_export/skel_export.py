@@ -52,6 +52,14 @@ def _author_model_layer(
         gmesh.CreateFaceVertexCountsAttr(Vt.IntArray(mesh.face_vertex_counts))
         gmesh.CreateFaceVertexIndicesAttr(Vt.IntArray(mesh.face_vertex_indices))
 
+        if mesh.uvs:
+            st = UsdGeom.PrimvarsAPI(gmesh.GetPrim()).CreatePrimvar(
+                "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.faceVarying
+            )
+            st.Set(Vt.Vec2fArray([Gf.Vec2f(u, v) for (u, v) in mesh.uvs]))
+            if mesh.uv_indices:
+                st.SetIndices(Vt.IntArray(mesh.uv_indices))
+
         if mesh.influences_per_point > 0:
             binding = UsdSkel.BindingAPI.Apply(gmesh.GetPrim())
             n = mesh.influences_per_point
@@ -140,17 +148,20 @@ def author_light_asset(
         return f"{asset.asset}_{suffix}{_suffix_ver}.{fmt}"
 
     paths: dict[str, Path] = {}
+    has_skel = bool(asset.skeleton and asset.skeleton.joints)
 
     model_p = dest / _fname("model")
     _author_model_layer(model_p, root_path, skel_path, token, asset.meshes, fmt)
     paths["model"] = model_p
 
-    skel_p = dest / _fname("skel")
-    _author_skel_layer(skel_p, root_path, skel_path, asset.skeleton, fmt)
-    paths["skel"] = skel_p
+    sublayers = [model_p.name]               # strong -> weak (model is weakest)
+    if has_skel:
+        skel_p = dest / _fname("skel")
+        _author_skel_layer(skel_p, root_path, skel_path, asset.skeleton, fmt)
+        paths["skel"] = skel_p
+        sublayers.insert(0, skel_p.name)     # skel above model
 
-    sublayers = [skel_p.name, model_p.name]   # strong -> weak
-    if asset.anim is not None and asset.anim.joints:
+    if has_skel and asset.anim is not None and asset.anim.joints:
         anim_p = dest / _fname("anim")
         _author_anim_layer(anim_p, root_path, skel_path, anim_path, asset.anim, fmt)
         paths["anim"] = anim_p

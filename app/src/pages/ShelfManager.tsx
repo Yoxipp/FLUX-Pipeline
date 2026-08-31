@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Upload, Download, FolderOpen, Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2, Package } from 'lucide-react'
+import { Upload, Download, Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2, Package } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, Pill } from '../components/shared/ui'
 import { api } from '../api/client'
@@ -13,7 +13,7 @@ const ShelfBtn = ({ icon: Icon, label, primary }: { icon: LucideIcon; label: str
       background: primary ? 'var(--accent-soft)' : 'var(--paper)',
       color: primary ? 'var(--accent-hi)' : 'var(--ink-3)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      boxShadow: primary ? 'var(--shadow-sm), 0 0 8px color-mix(in oklch, var(--accent) 18%, transparent)' : 'var(--shadow-sm)',
+      boxShadow: 'var(--shadow-sm)',
       transition: 'box-shadow 0.12s',
     }}>
       <Icon size={16} strokeWidth={1.75} />
@@ -51,6 +51,9 @@ export function ShelfManager() {
   const [shelfData, setShelfData] = useState<AllShelvesResponse>({})
   const [log, setLog] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
+  const [tools, setTools] = useState<{ id: string; label: string; installed: Record<string, boolean> }[]>([])
+  const [toolVersions, setToolVersions] = useState<string[]>([])
+  const [toolVersion, setToolVersion] = useState('')
 
   const currentData: ShelfData = shelfData[dcc] ?? { versions: [], installed: {}, hdas_installed: {} }
   const versions = currentData.versions
@@ -112,6 +115,31 @@ export function ShelfManager() {
     setBusy(false)
   }
 
+  async function fetchTools() {
+    try {
+      const d = await api.getTools()
+      setTools(d.tools)
+      setToolVersions(d.versions)
+      setToolVersion(v => v || (d.versions[d.versions.length - 1] ?? ''))
+    } catch { /* backend indispo : on ignore */ }
+  }
+  useEffect(() => { fetchTools() }, [])
+
+  async function handleTool(id: string, remove: boolean) {
+    if (!toolVersion) return
+    setBusy(true)
+    try {
+      const res = remove ? await api.removeTool(id, toolVersion)
+                         : await api.installTool(id, toolVersion)
+      addLog('ok', res.message)
+      await fetchTools()
+    } catch (e: any) {
+      addLog('err', String(e?.message ?? e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const shelfOk = version ? (currentData.installed[version] ?? false) : false
   const hdaOk   = version ? (currentData.hdas_installed[version] ?? false) : false
   const isHoudini = dcc === 'Houdini'
@@ -123,7 +151,7 @@ export function ShelfManager() {
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Gestion du Shelf</div>
       </div>
 
-      <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} />
+      <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
@@ -166,7 +194,6 @@ export function ShelfManager() {
             <div className="card" style={{ padding: '14px 20px', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
               <ShelfBtn icon={Upload}     label="Exporter" primary />
               <ShelfBtn icon={Download}   label="Importer" />
-              <ShelfBtn icon={FolderOpen} label="SAZ" />
               {isHoudini && <ShelfBtn icon={Package} label="HDAs" />}
               <div style={{ flex: 1 }} />
               <div className="lbl" style={{ alignSelf: 'center', textAlign: 'right', lineHeight: 1.5 }}>
@@ -195,6 +222,48 @@ export function ShelfManager() {
             </div>
           </div>
 
+          {/* Catalogue de tools Maya (rig toolbox / anim tool / flux) — Maya only.
+              Rigging/Anim toolboxes are Maya-specific; Houdini has no equivalent. */}
+          {dcc === 'Maya' && (
+          <div>
+            <SecTitle>Tools Maya (catalogue)</SecTitle>
+            {toolVersions.length === 0 ? (
+              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+                Aucune version Maya détectée
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                  {toolVersions.map(v => (
+                    <Pill key={v} active={toolVersion === v} style={{ cursor: 'pointer' }}>
+                      <span onClick={() => setToolVersion(v)}>{v}</span>
+                    </Pill>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {tools.map(t => {
+                    const ok = toolVersion ? (t.installed[toolVersion] ?? false) : false
+                    return (
+                      <div key={t.id} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ flex: 1, fontSize: 12, color: 'var(--ink)' }}>{t.label}</div>
+                        <Badge ok={ok} label={ok ? 'Installé' : 'Absent'} />
+                        <Btn primary disabled={busy || !toolVersion} style={{ height: 28, gap: 5 }} onClick={() => { void handleTool(t.id, false) }}>
+                          <Download size={11} strokeWidth={2} />
+                          Installer
+                        </Btn>
+                        <Btn ghost disabled={busy || !toolVersion || !ok} style={{ height: 28, gap: 5 }} onClick={() => { void handleTool(t.id, true) }}>
+                          <Trash2 size={11} strokeWidth={2} />
+                          Retirer
+                        </Btn>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+          )}
+
         </div>
 
         {/* log */}
@@ -206,7 +275,7 @@ export function ShelfManager() {
             color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', gap: 2,
           }}>
             {log.length === 0 ? (
-              <div style={{ color: 'var(--ink-4)' }}>— En attente d&apos;une action —</div>
+              <div style={{ color: 'var(--ink-4)' }}>En attente d&apos;une action</div>
             ) : (
               log.map((e, i) => {
                 const Icon = e.type === 'ok' ? CheckCircle2 : e.type === 'err' ? XCircle : ArrowRight
@@ -225,7 +294,7 @@ export function ShelfManager() {
             {version && (
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', color: 'var(--ink-4)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span className="dot" style={{ width: 5, height: 5, background: shelfOk ? 'var(--ok)' : 'var(--err)', borderRadius: '50%' }} />
-                {shelfOk ? `Shelf actif — ${version}` : `Shelf inactif — ${version}`}
+                {shelfOk ? `Shelf actif · ${version}` : `Shelf inactif · ${version}`}
                 {isHoudini && (
                   <>
                     <span style={{ margin: '0 4px' }}>·</span>
