@@ -23,6 +23,51 @@ function readStoredWidth(): number {
   return RIGHT_WIDTH_DEFAULT
 }
 
+// The best-known Houdini point attributes, proposed when adding an attribute row.
+const COMMON_HOU_ATTRS = [
+  'boneCapture', 'curveu', 'uv', 'N', 'Cd', 'pscale', 'v', 'orient', 'up', 'width', 'rest', 'id', 'name', 'mask',
+]
+
+// Editable combobox for an attribute name: free text + a dropdown of common attrs.
+function AttrCombo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const q = value.trim().toLowerCase()
+  const matches = q ? COMMON_HOU_ATTRS.filter(a => a.toLowerCase().includes(q)) : COMMON_HOU_ATTRS
+  return (
+    <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <input
+        value={value}
+        placeholder="nom de l'attribut point"
+        onChange={e => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        style={{
+          width: '100%', height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+          borderRadius: 5, padding: '0 8px', fontFamily: 'var(--mono)', fontSize: 11,
+          color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+        }}
+      />
+      {open && matches.length > 0 && (
+        <div className="card" style={{
+          position: 'absolute', top: 29, left: 0, width: '100%', zIndex: 30,
+          maxHeight: 180, overflowY: 'auto', padding: 3, boxShadow: 'var(--shadow-md)',
+        }}>
+          {matches.map(a => (
+            <div
+              key={a}
+              onMouseDown={e => { e.preventDefault(); onChange(a); setOpen(false) }}
+              className="row"
+              style={{ padding: '5px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}
+            >
+              {a}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Utilities ────────────────────────────────────────────────────────────────
 
 /** Click-to-copy monospaced command block. */
@@ -1348,15 +1393,9 @@ export function Publisher() {
                   )}
                   {houAttrNames.map((n, i) => (
                     <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <input
+                      <AttrCombo
                         value={n}
-                        placeholder="nom de l'attribut point"
-                        onChange={e => setHouAttrNames(prev => prev.map((x, j) => j === i ? e.target.value : x))}
-                        style={{
-                          flex: 1, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                          borderRadius: 5, padding: '0 8px', fontFamily: 'var(--mono)', fontSize: 11,
-                          color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
-                        }}
+                        onChange={v => setHouAttrNames(prev => prev.map((x, j) => j === i ? v : x))}
                       />
                       <div onClick={() => setHouAttrNames(prev => prev.filter((_, j) => j !== i))}
                         className="scale-hover-lg" style={{ cursor: 'pointer', color: 'var(--ink-4)', display: 'flex' }}>
