@@ -428,6 +428,8 @@ def run_light_export(
     include_anim: bool = True,
     include_weights: bool = True,
     include_uv: bool = True,
+    include_cam: bool = False,
+    include_light: bool = False,
     scope: str = "selection",
 ) -> None:
     """Extract a light asset from Maya and write a JSON envelope to *result_path*.
