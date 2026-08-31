@@ -13,7 +13,7 @@
 // (e.g. FBX "Remove single key", "Selection Sets") and are intentionally omitted
 // rather than shown as dead controls.
 
-export type ExportOptionType = 'bool' | 'enum' | 'int' | 'float'
+export type ExportOptionType = 'bool' | 'enum' | 'int' | 'float' | 'string'
 
 export interface ExportOption {
   key: string
@@ -67,6 +67,12 @@ const FBX: ExportOption[] = [
     choices: [{ value: 'euler', label: 'Euler' }, { value: 'quaternion', label: 'Quaternion' }, { value: 'resample', label: 'Resample as Euler' }] },
   { key: 'up_axis', label: 'Up axis', type: 'enum', default: 'y', tier: 'advanced',
     choices: [{ value: 'y', label: 'Y' }, { value: 'z', label: 'Z' }] },
+  { key: 'animation_only',  label: 'Animation only',      type: 'bool', default: false, tier: 'advanced' },
+  { key: 'audio',           label: 'Audio',               type: 'bool', default: false, tier: 'advanced' },
+  { key: 'cache_file',      label: 'Geometry cache file', type: 'bool', default: false, tier: 'advanced' },
+  { key: 'shape_attributes', label: 'Shape attributes',   type: 'bool', default: false, tier: 'advanced' },
+  { key: 'split_takes',     label: 'Split animation into takes', type: 'bool', default: false, tier: 'advanced' },
+  { key: 'generate_log',    label: 'Generate log',        type: 'bool', default: false, tier: 'advanced' },
   { key: 'ascii', label: 'ASCII (vs binary)', type: 'bool', default: false, tier: 'advanced' },
   { key: 'file_version', label: 'FBX version', type: 'enum', default: 'FBX202000', tier: 'advanced',
     choices: [
@@ -97,25 +103,47 @@ const ABC: ExportOption[] = [
   { key: 'write_face_sets',  label: 'Write face sets',  type: 'bool', default: false, tier: 'advanced' },
   { key: 'euler_filter',     label: 'Euler filter',     type: 'bool', default: false, tier: 'advanced' },
   { key: 'no_normals',       label: 'No normals',       type: 'bool', default: false, tier: 'advanced' },
+  { key: 'write_creases',    label: 'Write creases',    type: 'bool', default: false, tier: 'advanced' },
+  { key: 'auto_subd',        label: 'Auto subdiv (creases/holes)', type: 'bool', default: false, tier: 'advanced' },
   { key: 'data_format', label: 'Data format', type: 'enum', default: 'ogawa', tier: 'advanced',
     choices: [{ value: 'ogawa', label: 'Ogawa' }, { value: 'hdf5', label: 'HDF5' }] },
 ]
 
-// ── USD (.usd / .usda / .usdc) — mayaUSDExport kwargs ─────────────────────────
+// ── USD (.usd / .usda / .usdc) — mayaUSDExport flags ──────────────────────────
+// Keys are the EXACT mayaUSDExport long flag names (from `cmds.help('mayaUSDExport')`);
+// the backend passes them straight through. Defaults keep Flux's current behaviour
+// (polys via defaultMeshScheme=none, exportUVs on, no skels/skin).
 const USD: ExportOption[] = [
-  { key: 'export_uvs',        label: 'Export UVs',       type: 'bool', default: true,  tier: 'common' },
-  { key: 'export_materials',  label: 'Materials',        type: 'bool', default: true,  tier: 'common' },
-  { key: 'export_blend_shapes', label: 'Blend shapes',   type: 'bool', default: false, tier: 'common' },
-  { key: 'export_skels', label: 'Skeletons', type: 'enum', default: 'none', tier: 'common',
+  // common
+  { key: 'exportUVs',         label: 'Export UVs',        type: 'bool', default: true,  tier: 'common' },
+  { key: 'exportMaterials',   label: 'Materials',         type: 'bool', default: true,  tier: 'common' },
+  { key: 'exportBlendShapes', label: 'Blend shapes',      type: 'bool', default: false, tier: 'common' },
+  { key: 'exportSkels', label: 'Skeletons', type: 'enum', default: 'none', tier: 'common',
     choices: [{ value: 'none', label: 'None' }, { value: 'auto', label: 'Auto' }, { value: 'explicit', label: 'Explicit' }] },
-  { key: 'export_skin', label: 'Skin clusters', type: 'enum', default: 'none', tier: 'advanced',
-    choices: [{ value: 'none', label: 'None' }, { value: 'auto', label: 'Auto' }, { value: 'explicit', label: 'Explicit' }] },
-  { key: 'mesh_scheme', label: 'Mesh scheme', type: 'enum', default: 'none', tier: 'advanced',
-    choices: [{ value: 'none', label: 'None (polys)' }, { value: 'catmullClark', label: 'Catmull-Clark' }] },
-  { key: 'export_color_sets',   label: 'Color sets',        type: 'bool', default: false, tier: 'advanced' },
-  { key: 'export_display_color', label: 'Display color',    type: 'bool', default: false, tier: 'advanced' },
-  { key: 'merge_xform_shape',   label: 'Merge transform & shape', type: 'bool', default: true, tier: 'advanced' },
-  { key: 'strip_namespaces',    label: 'Strip namespaces',  type: 'bool', default: false, tier: 'advanced' },
+  { key: 'defaultMeshScheme', label: 'Mesh scheme', type: 'enum', default: 'none', tier: 'common',
+    choices: [
+      { value: 'none', label: 'None (polys)' }, { value: 'catmullClark', label: 'Catmull-Clark' },
+      { value: 'loop', label: 'Loop' }, { value: 'bilinear', label: 'Bilinear' },
+    ] },
+  // advanced
+  { key: 'exportSkin', label: 'Skin clusters', type: 'enum', default: 'none', tier: 'advanced',
+    choices: [{ value: 'none', label: 'None' }, { value: 'auto', label: 'Auto' }] },
+  { key: 'exportColorSets',     label: 'Color sets',        type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'exportDisplayColor',  label: 'Display color',     type: 'bool', default: false, tier: 'advanced' },
+  { key: 'exportComponentTags', label: 'Component tags',    type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'exportVisibility',    label: 'Visibility',        type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'exportInstances',     label: 'Instances',         type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'mergeTransformAndShape', label: 'Merge transform & shape', type: 'bool', default: true, tier: 'advanced' },
+  { key: 'stripNamespaces',     label: 'Strip namespaces',  type: 'bool', default: false, tier: 'advanced' },
+  { key: 'eulerFilter',         label: 'Euler filter',      type: 'bool', default: false, tier: 'advanced' },
+  { key: 'staticSingleSample',  label: 'Static single sample', type: 'bool', default: false, tier: 'advanced' },
+  { key: 'worldspace',          label: 'World space',       type: 'bool', default: false, tier: 'advanced' },
+  { key: 'preserveUVSetNames',  label: 'Preserve UV set names', type: 'bool', default: false, tier: 'advanced' },
+  { key: 'normalizeNurbs',      label: 'Normalize NURBS',   type: 'bool', default: false, tier: 'advanced' },
+  { key: 'geomSidedness', label: 'Geom sidedness', type: 'enum', default: 'derived', tier: 'advanced',
+    choices: [{ value: 'derived', label: 'Derived' }, { value: 'single', label: 'Single' }, { value: 'double', label: 'Double' }] },
+  { key: 'upAxis', label: 'Up axis', type: 'enum', default: 'y', tier: 'advanced',
+    choices: [{ value: 'y', label: 'Y' }, { value: 'z', label: 'Z' }] },
 ]
 
 // Map an extension to its schema (usd variants share one schema).

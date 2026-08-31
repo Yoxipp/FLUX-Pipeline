@@ -16,21 +16,49 @@
 
 import type { ExportOption } from './mayaExportOptions'
 
-// Geometry ROP (rop_geometry) — used for bgeo/geo/obj/vdb/usd/usda/usdc.
+// Geometry ROP (rop_geometry / geometry) — used for bgeo/geo/obj/vdb/usd/usda/usdc.
+// Real parm names/defaults/menus dumped from Houdini (the geometry ROP is thin; the
+// output format is chosen by the file extension).
 const GEO: ExportOption[] = [
   { key: 'mkpath',      label: 'Create intermediate dirs', type: 'bool', default: true,  tier: 'common' },
   { key: 'initsim',     label: 'Initialize simulation OPs', type: 'bool', default: false, tier: 'common' },
+  { key: 'xformtype', label: 'Transform', type: 'enum', default: 'none', tier: 'advanced',
+    choices: [{ value: 'none', label: 'None' }, { value: 'world', label: 'World' }] },
   { key: 'alfprogress', label: 'Alfred style progress',    type: 'bool', default: false, tier: 'advanced' },
+  { key: 'savebackground', label: 'Save in background',    type: 'bool', default: true,  tier: 'advanced' },
 ]
 
-// Alembic ROP (rop_alembic) — used for .abc.
+// Alembic ROP (rop_alembic / alembic) — used for .abc. Full real parm set.
 const ALEMBIC: ExportOption[] = [
-  { key: 'format', label: 'Format', type: 'enum', default: 'ogawa', tier: 'common',
-    choices: [{ value: 'ogawa', label: 'Ogawa' }, { value: 'hdf5', label: 'HDF5' }] },
+  // common
+  { key: 'format', label: 'Format', type: 'enum', default: 'default', tier: 'common',
+    choices: [{ value: 'default', label: 'Default' }, { value: 'ogawa', label: 'Ogawa' }, { value: 'hdf5', label: 'HDF5' }] },
   { key: 'save_attributes', label: 'Save attributes',           type: 'bool', default: true,  tier: 'common' },
   { key: 'build_from_path', label: 'Build hierarchy from attribute', type: 'bool', default: false, tier: 'common' },
-  { key: 'use_instancing',  label: 'Use instancing',            type: 'bool', default: false, tier: 'advanced' },
-  { key: 'mkpath',          label: 'Create intermediate dirs',  type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'facesets', label: 'Face sets', type: 'enum', default: 'nonempty', tier: 'common',
+    choices: [{ value: 'no', label: 'None' }, { value: 'nonempty', label: 'Non-empty' }, { value: 'all', label: 'All' }] },
+  // advanced
+  { key: 'use_instancing',     label: 'Use instancing',           type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'shape_nodes',        label: 'Create shape nodes',       type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'outputindexedarrays', label: 'Output indexed arrays',   type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'save_hidden',        label: 'Save hidden objects',      type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'full_bounds',        label: 'Full bounding box tree',   type: 'bool', default: false, tier: 'advanced' },
+  { key: 'mkpath',             label: 'Create intermediate dirs', type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'packed_transform', label: 'Packed transform', type: 'enum', default: 'deform', tier: 'advanced',
+    choices: [{ value: 'deform', label: 'Deform' }, { value: 'transform', label: 'Transform' }, { value: 'transformparent', label: 'Transform parent' }] },
+  { key: 'collapse', label: 'Collapse objects', type: 'enum', default: 'off', tier: 'advanced',
+    choices: [{ value: 'off', label: 'Off' }, { value: 'geo', label: 'Geo' }, { value: 'on', label: 'On' }] },
+  { key: 'partition_mode', label: 'Partition mode', type: 'enum', default: 'no', tier: 'advanced',
+    choices: [
+      { value: 'no', label: 'No' }, { value: 'full', label: 'Full' }, { value: 'shape', label: 'Shape' },
+      { value: 'xform', label: 'Xform' }, { value: 'xformshape', label: 'Xform+Shape' },
+    ] },
+  { key: 'motionBlur', label: 'Motion blur',       type: 'bool', default: false, tier: 'advanced' },
+  // attribute patterns (native ABC filtering)
+  { key: 'pointAttributes',     label: 'Point attributes',     type: 'string', default: '*', tier: 'advanced' },
+  { key: 'vertexAttributes',    label: 'Vertex attributes',    type: 'string', default: '*', tier: 'advanced' },
+  { key: 'primitiveAttributes', label: 'Primitive attributes', type: 'string', default: '*', tier: 'advanced' },
+  { key: 'detailAttributes',    label: 'Detail attributes',    type: 'string', default: '*', tier: 'advanced' },
 ]
 
 // Filmbox FBX ROP (filmboxfbx) — used for .fbx. Names/defaults/menu tokens are the

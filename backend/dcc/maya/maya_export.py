@@ -156,6 +156,14 @@ def _export_fbx(file_path: Path, selection_only: bool, options: dict | None) -> 
     _flag("FBXExportIncludeChildren", _b(o, "include_children", True))
     _flag("FBXExportUseSceneName", _b(o, "use_scene_name", False))
 
+    # More scene content / animation options
+    _flag("FBXExportAnimationOnly", _b(o, "animation_only", False))
+    _flag("FBXExportAudio", _b(o, "audio", False))
+    _flag("FBXExportCacheFile", _b(o, "cache_file", False))
+    _flag("FBXExportShapeAttributes", _b(o, "shape_attributes", False))
+    _flag("FBXExportSplitAnimationIntoTakes", _b(o, "split_takes", False))
+    _flag("FBXExportGenerateLog", _b(o, "generate_log", False))
+
     # File format
     _flag("FBXExportInAscii", _b(o, "ascii", False))
     _safe(f'FBXExportUpAxis {_s(o, "up_axis", "y")}')
@@ -269,6 +277,10 @@ def _export_abc(
         job_parts.append("-eulerFilter")
     if _b(o, "no_normals", False):
         job_parts.append("-noNormals")
+    if _b(o, "write_creases", False):
+        job_parts.append("-writeCreases")
+    if _b(o, "auto_subd", False):
+        job_parts.append("-autoSubd")
     job_parts.append(f"-dataFormat {_s(o, 'data_format', 'ogawa')}")
     for root in roots:
         job_parts.append(f"-root {root}")
@@ -297,6 +309,19 @@ def _load_usd_plugin() -> bool:
     return False
 
 
+# mayaUSDExport flags the UI may pass. Keys == exact mayaUSDExport long flag names,
+# so options flow straight through (see mayaExportOptions.ts USD schema).
+_USD_BOOL_FLAGS: frozenset[str] = frozenset({
+    "exportUVs", "exportMaterials", "exportBlendShapes", "exportColorSets",
+    "exportDisplayColor", "exportComponentTags", "exportVisibility", "exportInstances",
+    "mergeTransformAndShape", "stripNamespaces", "eulerFilter", "staticSingleSample",
+    "worldspace", "preserveUVSetNames", "normalizeNurbs",
+})
+_USD_STR_FLAGS: frozenset[str] = frozenset({
+    "exportSkels", "exportSkin", "defaultMeshScheme", "geomSidedness", "upAxis", "kind",
+})
+
+
 def _export_usd(file_path: Path, selection_only: bool, options: dict | None = None) -> bool:
     if not _load_usd_plugin():
         log.error("USD export: Maya USD plugin unavailable (tried mayaUsdPlugin)")
@@ -305,24 +330,24 @@ def _export_usd(file_path: Path, selection_only: bool, options: dict | None = No
     # .usda -> ascii text, .usdc / .usd -> binary crate (standard, compact).
     usd_format = "usda" if file_path.suffix.lower() == ".usda" else "usdc"
     o = options or {}
-    kwargs: dict = {
-        "file":              path_fwd,
-        "defaultUSDFormat":  usd_format,
-        "defaultMeshScheme": _s(o, "mesh_scheme", "none"),
-        "exportUVs":         1 if _b(o, "export_uvs", True) else 0,
-        "exportSkels":       _s(o, "export_skels", "none"),
-        "exportSkin":        _s(o, "export_skin", "none"),
-        "exportBlendShapes": 1 if _b(o, "export_blend_shapes", False) else 0,
-        "exportColorSets":   1 if _b(o, "export_color_sets", False) else 0,
-        "exportDisplayColor": 1 if _b(o, "export_display_color", False) else 0,
-        "mergeTransformAndShape": 1 if _b(o, "merge_xform_shape", True) else 0,
-        "stripNamespaces":   1 if _b(o, "strip_namespaces", False) else 0,
-    }
-    # Materials on = leave shadingMode at its default (useRegistry); off = "none".
-    if not _b(o, "export_materials", True):
-        kwargs["shadingMode"] = "none"
+    kwargs: dict = {"file": path_fwd, "defaultUSDFormat": usd_format}
     if selection_only:
         kwargs["selection"] = True
+
+    # Pass known flags straight through (keys are the real mayaUSDExport flag names).
+    for key, val in o.items():
+        if key in _USD_BOOL_FLAGS:
+            kwargs[key] = 1 if bool(val) else 0
+        elif key in _USD_STR_FLAGS:
+            sval = str(val).strip()
+            if sval:
+                kwargs[key] = sval
+
+    # Preserve Flux defaults when the UI did not provide them.
+    kwargs.setdefault("exportUVs", 1)
+    kwargs.setdefault("exportSkels", "none")
+    kwargs.setdefault("defaultMeshScheme", "none")
+
     try:
         cmds.mayaUSDExport(**kwargs)  # type: ignore[union-attr]
         return True

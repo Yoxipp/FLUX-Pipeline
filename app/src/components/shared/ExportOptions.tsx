@@ -58,6 +58,21 @@ function Row({ opt, values, onChange }: { opt: ExportOption; values: Values; onC
     )
   }
 
+  if (opt.type === 'string') {
+    const val = values[opt.key]
+    return (
+      <div style={wrap}>
+        <span style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{opt.label}</span>
+        <input
+          type="text"
+          value={val === undefined || val === null ? '' : String(val)}
+          onChange={e => onChange(opt.key, e.target.value)}
+          style={{ ...numInputStyle, width: 120, textAlign: 'left', fontFamily: 'var(--mono)' }}
+        />
+      </div>
+    )
+  }
+
   // int / float
   const raw = values[opt.key]
   return (
