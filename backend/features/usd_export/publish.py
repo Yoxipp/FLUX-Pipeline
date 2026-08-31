@@ -27,15 +27,18 @@ _USD_SUBDIR = "{asset}/model/usd"
 
 
 def _next_version(parent: Path, base: str) -> int:
-    """Highest existing {base}_vNNN archive folder number + 1 (1 when none)."""
+    """Highest existing {base}_vNNN archive number + 1 (1 when none).
+
+    Counts BOTH archived folders ({base}_vNNN/) and archived flat files
+    ({base}_vNNN.ext) so layered and non-layered publishes share one version line.
+    """
     n = 0
     if parent.exists():
-        rx = re.compile(re.escape(base) + r"_v(\d+)$")
+        rx = re.compile(re.escape(base) + r"_v(\d+)(?:\.[^.]+)?$")
         for d in parent.iterdir():
-            if d.is_dir():
-                m = rx.match(d.name)
-                if m:
-                    n = max(n, int(m.group(1)))
+            m = rx.match(d.name)
+            if m:
+                n = max(n, int(m.group(1)))
     return n + 1
 
 
@@ -65,9 +68,19 @@ def publish_light_asset(
     ensure_dir(parent)
 
     active = parent / f"{base}_{ACTIVE_VERSION_LABEL}"   # e.g. CHAR_..._LAST/
-    if active.exists():
+    # Archive any previous active version before taking the LAST slot: a folder (a prior
+    # layered export) AND any flat {base}_LAST.ext file left by the non-layered USD
+    # publisher — otherwise a _LAST/ folder and a _LAST.usda file would coexist.
+    stale_files = [
+        p for p in parent.glob(f"{base}_{ACTIVE_VERSION_LABEL}.*")
+        if p.is_file()
+    ] if parent.exists() else []
+    if active.exists() or stale_files:
         ver = _next_version(parent, base)
-        active.rename(parent / f"{base}_v{ver:03d}")     # archive the whole folder
+        if active.exists():
+            active.rename(parent / f"{base}_v{ver:03d}")     # archive the whole folder
+        for f in stale_files:
+            f.rename(parent / f"{base}_v{ver:03d}{f.suffix}")  # archive the flat LAST file
         version_str = f"v{ver + 1:03d}"
     else:
         version_str = "v001"

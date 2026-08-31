@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
 import { Console } from './Console'
@@ -203,8 +203,64 @@ function SettingsPopover({ username }: { username: string }) {
   )
 }
 
+/* ── slide-to-confirm quit ── */
+function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
+  const trackW = 300
+  const handleW = 50
+  const maxX = trackW - handleW - 6
+  const [x, setX] = useState(0)
+  const [done, setDone] = useState(false)
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const origin = e.clientX - x
+    const move = (ev: MouseEvent) => setX(Math.min(Math.max(ev.clientX - origin, 0), maxX))
+    const up = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', move)
+      document.removeEventListener('mouseup', up)
+      const nx = Math.min(Math.max(ev.clientX - origin, 0), maxX)
+      if (nx >= maxX - 4) { setX(maxX); setDone(true); setTimeout(onConfirm, 120) }
+      else setX(0)
+    }
+    document.addEventListener('mousemove', move)
+    document.addEventListener('mouseup', up)
+  }
+
+  const pct = maxX > 0 ? x / maxX : 0
+  return (
+    <div style={{
+      position: 'relative', width: trackW, height: 50, borderRadius: 25,
+      background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+      boxShadow: 'var(--shadow-inset)', overflow: 'hidden', userSelect: 'none',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 12, color: 'var(--ink-4)', opacity: 1 - pct, pointerEvents: 'none',
+      }}>
+        Glisse pour fermer FLUX
+      </div>
+      <div style={{
+        position: 'absolute', top: 0, bottom: 0, left: 0, width: x + handleW,
+        background: 'var(--accent-soft)', borderRadius: 25, transition: done ? 'width 0.12s' : 'none',
+      }} />
+      <div
+        onMouseDown={startDrag}
+        style={{
+          position: 'absolute', top: 3, left: x + 3, width: handleW - 6, height: 44,
+          borderRadius: '50%', background: 'var(--accent)', cursor: 'grab',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: 'var(--shadow-sm)', transition: x === 0 && !done ? 'left 0.12s' : 'none',
+        }}
+      >
+        <ChevronsRight size={18} strokeWidth={2.5} color="var(--accent-hi)" />
+      </div>
+    </div>
+  )
+}
+
 export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   const user = username ?? 'User'
 
   return (
@@ -314,8 +370,38 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
       <div className="no-drag" style={{ display: 'flex', gap: 7, alignItems: 'center', marginLeft: 4, flexShrink: 0 }}>
         <WinBtn hoverBg="#ffbd2e" icon={Minus}     action={() => window.electronAPI?.windowMinimize()} />
         <WinBtn hoverBg="#28c940" icon={Maximize2} action={() => window.electronAPI?.windowMaximize()} />
-        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => window.electronAPI?.windowClose()} />
+        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => setConfirmClose(true)} />
       </div>
+
+      {/* slide-to-confirm quit overlay */}
+      {confirmClose && (
+        <div
+          className="no-drag"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setConfirmClose(false) }}
+        >
+          <div className="card" style={{
+            padding: '24px 28px', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 16, boxShadow: 'var(--shadow-md)',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>Fermer FLUX ?</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'center', maxWidth: 300, lineHeight: 1.5 }}>
+              Les logiciels ouverts (Maya, Houdini…) restent ouverts. Pense quand même à sauvegarder tes scènes.
+            </div>
+            <SlideToConfirm onConfirm={() => window.electronAPI?.windowClose()} />
+            <div
+              onClick={() => setConfirmClose(false)}
+              style={{ fontSize: 11, color: 'var(--ink-4)', cursor: 'pointer', padding: '4px 8px' }}
+            >
+              Annuler
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
