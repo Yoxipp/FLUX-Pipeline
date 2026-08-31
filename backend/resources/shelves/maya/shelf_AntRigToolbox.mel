@@ -1,0 +1,13 @@
+// shelf_AntRigToolbox.mel — Ant Rig Toolbox shelf for Autodesk Maya.
+// Installed by the Flux Shelf Manager into ~/maya/<version>/prefs/shelves/.
+// Maya auto-sources this file on startup because the proc matches the filename.
+
+global proc shelf_AntRigToolbox() {
+    shelfButton
+        -label        "FluxRig"
+        -annotation   "Flux Rigging Tool — rigging tools suite"
+        -image1       "commandButton.png"
+        -sourceType   "python"
+        -command      "import adam_rig_toolbox; adam_rig_toolbox.show()"
+    ;
+}

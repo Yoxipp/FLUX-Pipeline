@@ -31,24 +31,27 @@ def log_event(
     project: str,
     filename: str | None = None,
     path: Path | None = None,
+    dest_folder: Path | str | None = None,
 ) -> bool:
     """Append a single event entry to activite.json.
 
-    *action*   : "publish" | "import" | "connect" | "update" | "error"
-    *project*  : project name or DCC name for connect events
-    *filename* : optional asset filename involved
+    *action*      : "publish" | "import" | "connect" | "update" | "error"
+    *project*     : project name or DCC name for connect events
+    *filename*    : optional asset filename involved
+    *dest_folder* : optional publish destination directory (for folder-open UX)
     Returns True on success.
     """
     date, time = _now()
     entry = {
-        "id":      _make_id(user),
-        "user":    user,
-        "action":  action,
-        "project": project,
-        "file":    filename or "",
-        "date":    date,
-        "time":    time,
-        "read":    False,
+        "id":          _make_id(user),
+        "user":        user,
+        "action":      action,
+        "project":     project,
+        "file":        filename or "",
+        "dest_folder": str(dest_folder) if dest_folder else "",
+        "date":        date,
+        "time":        time,
+        "read":        False,
     }
 
     act_path = path or get_activity_path()
@@ -65,8 +68,8 @@ def log_event(
 
 # ── shortcuts ─────────────────────────────────────────────────────────────────
 
-def log_publish(user: str, filename: str, project: str) -> bool:
-    return log_event(user, "publish", project, filename)
+def log_publish(user: str, filename: str, project: str, dest_folder: Path | str | None = None) -> bool:
+    return log_event(user, "publish", project, filename, dest_folder=dest_folder)
 
 
 def log_import(user: str, filename: str, project: str) -> bool:

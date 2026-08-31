@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { toast } from 'sonner'
 import {
   Home, Upload, Download, Layers,
   BookOpen, FolderOpen, Activity,
@@ -61,7 +62,7 @@ function NavItem({ icon: Icon, label, active, indent = false, notif = 0, onClick
           background: 'var(--accent-soft)',
           border: '1px solid var(--accent)',
           color: 'var(--accent-hi)',
-          fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 600,
+          fontFamily: 'var(--sans)', fontSize: 8, fontWeight: 600,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: 'var(--shadow-xs)',
         }}>{notif}</span>
@@ -91,16 +92,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
-  const [launchResult, setLaunchResult]       = useState<Record<string, boolean>>({})
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
   const [findingAll, setFindingAll]           = useState(false)
   const [findResult, setFindResult]           = useState<Record<string, boolean | null>>({})
   const [autostartInstalled, setAutostartInstalled] = useState<Record<string, boolean>>({})
   const [autostartLoading, setAutostartLoading]     = useState<Set<string>>(new Set())
-  const [autostartError, setAutostartError]         = useState<string | null>(null)
   const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
   const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
+  const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
@@ -116,6 +116,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('zbrush').then(p => setZbrushServerOk(p.connected)).catch(() => setZbrushServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('maya').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, maya: r.installed }))
+      if (r.installed) {
+        api.pingDcc('maya').then(p => setMayaServerOk(p.connected)).catch(() => setMayaServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -126,6 +132,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.houdini])
+
+  // Poll Maya commandPort every 5 s when autostart is installed
+  useEffect(() => {
+    if (!autostartInstalled.maya) { setMayaServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('maya').then(p => setMayaServerOk(p.connected)).catch(() => setMayaServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.maya])
 
   // Poll ZBrush bridge when plugin is installed.
   // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
@@ -151,14 +166,50 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [autostartInstalled.zbrush])
 
+  // Toast transition refs — undefined = initial render sentinel (no toast on first load)
+  const prevHoudiniOkToast = useRef<boolean | null | undefined>(undefined)
+  const prevZbrushOkToast  = useRef<boolean | null | undefined>(undefined)
+  const prevMayaOkToast    = useRef<boolean | null | undefined>(undefined)
+
   // Auto-navigate to Publisher on ZBrush freeze detected (null/false → true transition)
   const prevZbrushOk = useRef<boolean | null>(null)
   useEffect(() => {
     if (zbrushServerOk === true && prevZbrushOk.current !== true) {
-      if (pathname !== '/publisher') navigate('/publisher')
+      if (pathname !== '/publisher') navigate('/publisher', { state: { zbrushConnected: true } })
     }
     prevZbrushOk.current = zbrushServerOk
   }, [zbrushServerOk, navigate, pathname])
+
+  // Server status toasts — only on transitions, skip very first render
+  useEffect(() => {
+    const prev = prevHoudiniOkToast.current
+    prevHoudiniOkToast.current = houdiniServerOk
+    if (prev === undefined) return
+    if (houdiniServerOk === false && prev !== false)
+      toast.warning('Houdini · serveur non connecté. Rouvrir Houdini pour l\'activer.', { duration: 7000 })
+    else if (houdiniServerOk === true && prev !== true)
+      toast.success('Houdini · serveur connecté', { duration: 3000 })
+  }, [houdiniServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const prev = prevZbrushOkToast.current
+    prevZbrushOkToast.current = zbrushServerOk
+    if (prev === undefined) return
+    if (zbrushServerOk === false && prev !== false)
+      toast.warning('ZBrush · bridge non connecté. Ouvrir ZBrush pour l\'activer.', { duration: 7000 })
+    else if (zbrushServerOk === true && prev !== true)
+      toast.success('ZBrush · bridge actif', { duration: 3000 })
+  }, [zbrushServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const prev = prevMayaOkToast.current
+    prevMayaOkToast.current = mayaServerOk
+    if (prev === undefined) return
+    if (mayaServerOk === false && prev !== false)
+      toast.warning('Maya · commandPort non connecté. Rouvrir Maya pour l\'activer.', { duration: 7000 })
+    else if (mayaServerOk === true && prev !== true)
+      toast.success('Maya · commandPort connecté', { duration: 3000 })
+  }, [mayaServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAutoFindAll = async () => {
     setFindingAll(true)
@@ -184,10 +235,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const _setServerOk = (key: string, value: boolean | null) => {
     if (key === 'houdini') setHoudiniServerOk(value)
     if (key === 'zbrush')  setZbrushServerOk(value)
+    if (key === 'maya')    setMayaServerOk(value)
   }
 
   const handleToggleAutostart = async (key: string) => {
-    if (key !== 'houdini' && key !== 'zbrush') return
+    if (key !== 'houdini' && key !== 'zbrush' && key !== 'maya') return
     setAutostartLoading(prev => new Set(prev).add(key))
     try {
       if (autostartInstalled[key]) {
@@ -213,8 +265,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         }
       }
     } catch (e) {
-      setAutostartError(e instanceof Error ? e.message : String(e))
-      setTimeout(() => setAutostartError(null), 5000)
+      toast.error(`Autostart · ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
     } finally {
       setAutostartLoading(prev => { const n = new Set(prev); n.delete(key); return n })
     }
@@ -229,11 +280,16 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
   const handleLaunch = async (key: string) => {
     setLaunching(prev => new Set(prev).add(key))
+    const name = SOFTWARE.find(s => s.key === key)?.name ?? key
     try {
       const res = await api.launchDcc(key)
-      setLaunchResult(prev => ({ ...prev, [key]: res.launched }))
+      if (res.launched) {
+        toast.success(`${name} lancé`, { duration: 4000 })
+      } else {
+        toast.error(`${name} · introuvable`, { duration: 6000 })
+      }
     } catch {
-      setLaunchResult(prev => ({ ...prev, [key]: false }))
+      toast.error(`${name} · erreur de lancement`, { duration: 6000 })
     } finally {
       setLaunching(prev => { const next = new Set(prev); next.delete(key); return next })
     }
@@ -271,12 +327,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const findOk         = findResult[s.key]
           const isHoudini      = s.key === 'houdini'
           const isZBrush       = s.key === 'zbrush'
-          const hasPlug        = isHoudini || isZBrush
+          const isMaya         = s.key === 'maya'
+          const hasPlug        = isHoudini || isZBrush || isMaya
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : null
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : null
           // ZBrush: freeze-based, server only responds during publish → always accent when installed
-          // Houdini: always-on server → red when installed but unreachable
+          // Houdini/Maya: always-on server → red when installed but unreachable
           const plugOk         = hasPlug && autoInstalled && (isZBrush || serverOk === true)
           const plugFailed     = hasPlug && autoInstalled && !isZBrush && serverOk === false
 
@@ -301,11 +358,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
               {/* feedback badge — hasPath permanent, puis find/ping éphémères */}
               {hasPath
-                ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--ok)' }}>✓</span>
+                ? <span style={{ fontSize: 8, color: 'var(--ok)' }}>✓</span>
                 : findOk === false
-                  ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--err)' }}>✗</span>
+                  ? <span style={{ fontSize: 8, color: 'var(--err)' }}>✗</span>
                   : pingResult[s.key]
-                    ? <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: pingResult[s.key] === '✗' ? 'var(--err)' : 'var(--ok)' }}>
+                    ? <span style={{ fontSize: 8, color: pingResult[s.key] === '✗' ? 'var(--err)' : 'var(--ok)' }}>
                         {pingResult[s.key]}
                       </span>
                     : null
@@ -363,12 +420,16 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </div>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {!hasPlug ? 'Connexion port local — prochainement' :
+                  {!hasPlug ? 'Connexion port local · prochainement' :
                    autoLoading ? '…' :
                    isHoudini
-                     ? (autoInstalled ? 'Autostart installé — clic pour désinstaller' : "Installer l'autostart dans 123.py")
+                     ? (autoInstalled ? 'Autostart installé · clic pour désinstaller' : "Installer l'autostart dans 123.py")
+                   : isMaya
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · commandPort 7001 actif' : 'Autostart installé · clic pour désinstaller')
+                         : 'Installer flux_bridge dans userSetup.py')
                      : (autoInstalled
-                         ? (serverOk === true ? 'Freeze actif — publication en cours' : 'Plugin installé — clic pour désinstaller')
+                         ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}
                 </TooltipContent>
               </Tooltip>
@@ -422,7 +483,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               background: 'var(--paper-2)',
               color: findingAll ? 'var(--ink-3)' : 'var(--ink-2)',
               cursor: findingAll ? 'default' : 'pointer',
-              fontSize: 10, fontFamily: 'var(--mono)',
+              fontSize: 10, fontFamily: 'var(--sans)',
               transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
             }}
           >
@@ -441,78 +502,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </NavGroup>
 
       <div style={{ flex: 1 }} />
-
-      {/* Toast serveur Houdini non connecté */}
-      {autostartInstalled.houdini && houdiniServerOk === false && !autostartError && (
-        <div style={{
-          margin: '0 8px 6px',
-          padding: '5px 8px',
-          borderRadius: 5,
-          border: '1px solid var(--err)',
-          background: 'color-mix(in oklch, var(--err) 8%, transparent)',
-          fontSize: 10, fontFamily: 'var(--mono)',
-          color: 'var(--err)',
-        }}>
-          ✗ Houdini — serveur non connecté. Rouvrir Houdini pour l'activer.
-        </div>
-      )}
-
-      {/* Toast bridge ZBrush non connecté */}
-      {autostartInstalled.zbrush && zbrushServerOk === false && !autostartError && (
-        <div style={{
-          margin: '0 8px 6px',
-          padding: '5px 8px',
-          borderRadius: 5,
-          border: '1px solid var(--err)',
-          background: 'color-mix(in oklch, var(--err) 8%, transparent)',
-          fontSize: 10, fontFamily: 'var(--mono)',
-          color: 'var(--err)',
-        }}>
-          ✗ ZBrush — bridge non connecté. Ouvre ZBrush pour l'activer.
-        </div>
-      )}
-
-      {/* Toast erreur autostart */}
-      {autostartError && (
-        <div
-          onClick={() => setAutostartError(null)}
-          style={{
-            margin: '0 8px 6px',
-            padding: '5px 8px',
-            borderRadius: 5,
-            border: '1px solid var(--err)',
-            background: 'color-mix(in oklch, var(--err) 8%, transparent)',
-            fontSize: 10, fontFamily: 'var(--mono)',
-            color: 'var(--err)',
-            cursor: 'pointer',
-          }}
-        >
-          {`✗ Autostart — ${autostartError}`}
-        </div>
-      )}
-
-      {/* Résultat de lancement — mini toast en bas */}
-      {Object.entries(launchResult).map(([key, ok]) => {
-        const name = SOFTWARE.find(s => s.key === key)?.name ?? key
-        return (
-          <div
-            key={key}
-            onClick={() => setLaunchResult(prev => { const n = { ...prev }; delete n[key]; return n })}
-            style={{
-              margin: '0 8px 6px',
-              padding: '5px 8px',
-              borderRadius: 5,
-              border: `1px solid ${ok ? 'var(--ok)' : 'var(--err)'}`,
-              background: ok ? 'color-mix(in oklch, var(--ok) 8%, transparent)' : 'color-mix(in oklch, var(--err) 8%, transparent)',
-              fontSize: 10, fontFamily: 'var(--mono)',
-              color: ok ? 'var(--ok)' : 'var(--err)',
-              cursor: 'pointer',
-            }}
-          >
-            {ok ? `✓ ${name} lancé` : `✗ ${name} — introuvable`}
-          </div>
-        )
-      })}
     </div>
   )
 }

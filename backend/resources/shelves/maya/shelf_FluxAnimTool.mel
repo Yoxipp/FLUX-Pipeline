@@ -1,0 +1,13 @@
+// shelf_FluxAnimTool.mel — Flux Anim Tool shelf for Autodesk Maya.
+// Installed by the Flux Shelf Manager into ~/maya/<version>/prefs/shelves/.
+// Maya auto-sources this file on startup because the proc matches the filename.
+
+global proc shelf_FluxAnimTool() {
+    shelfButton
+        -label        "FluxAnim"
+        -annotation   "Flux Animation Tool — picker + anim/tech-anim suite"
+        -image1       "commandButton.png"
+        -sourceType   "python"
+        -command      "import flux_anim_tool; flux_anim_tool.show()"
+    ;
+}

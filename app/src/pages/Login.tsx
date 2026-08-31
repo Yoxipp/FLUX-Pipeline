@@ -126,7 +126,7 @@ export function Login({ onDone }: Props) {
               background: 'var(--bg-deep)',
               border: '1px solid var(--rule-2)',
               borderRadius: 6, outline: 'none',
-              fontFamily: 'inherit', fontSize: 11, color: 'var(--ink)',
+              fontFamily: 'inherit', fontSize: 11, color: 'var(--ink-2)',
               boxShadow: 'var(--shadow-inset)',
               boxSizing: 'border-box',
             }}

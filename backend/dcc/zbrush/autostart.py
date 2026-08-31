@@ -81,9 +81,6 @@ def _find_zbrush_data_dirs() -> list[Path]:
         except OSError:
             pass
 
-        if not roots:
-            roots.append(appdata / "Maxon" / "ZBrush")
-
     elif system == "Darwin":
         maxon_dir = Path.home() / "Library" / "Application Support" / "Maxon"
         if maxon_dir.exists():
@@ -308,6 +305,9 @@ def get_zbrush_plugin_dir() -> Path | None:
 
 
 # ── Router-compatible interface ───────────────────────────────────────────────
+# The generic DCC router passes the exe path to every autostart module, but
+# ZBrush derives its plugin directory from %APPDATA% (independent of the exe).
+# The _exe_path parameter is accepted for interface compatibility and ignored.
 
 def is_installed(_exe_path: str | None = None) -> bool:
     return get_plugin_status()["installed"]
@@ -323,7 +323,7 @@ def install(_exe_path: str | None = None) -> dict:
     result = install_plugin()
     paths  = result.get("paths", [])
     msg    = result.get("error") or (
-        f"Installed ({len(paths)} location(s)) — restart ZBrush to activate"
+        f"Installed ({len(paths)} location(s)) , restart ZBrush to activate"
         if paths else "failed"
     )
     return {"success": result["ok"], "message": msg, "path": result.get("path")}

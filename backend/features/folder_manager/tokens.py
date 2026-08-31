@@ -26,12 +26,12 @@ def _tokens_path(project_path: Path) -> Path:
 # ── bootstrap ─────────────────────────────────────────────────────────────────
 
 def build_default_tokens() -> dict:
-    """Return a fresh tokens dict seeded with the default CLASS and TYPE entries."""
+    """Return a fresh tokens dict seeded with the default CLASS, TYPE and INSTANCE entries."""
     return {
         "CLASS":    dict(DEFAULT_CLASS_TOKENS),
         "TYPE":     dict(DEFAULT_TYPE_TOKENS),
         "NAME":     {},
-        "INSTANCE": {},
+        "INSTANCE": {"null": ""},
         "SEQ":      {},
         "SHOT":     {},
         "custom":   {},
@@ -49,13 +49,13 @@ def load_tokens(project_path: Path) -> dict:
     path = _tokens_path(project_path)
     raw = read_json(path)
     if not isinstance(raw, dict) or "CLASS" not in raw:
-        log.warning("tokens.json missing or invalid at %s — using defaults", path)
+        log.warning("tokens.json missing or invalid at %s, using defaults", path)
         return build_default_tokens()
 
     defaults = build_default_tokens()
     for section in _TOKEN_SECTIONS:
         default_section = defaults.get(section, {})
-        if section in ("CLASS", "TYPE") and default_section:
+        if section in ("CLASS", "TYPE", "INSTANCE") and default_section:
             # Always ensure built-in tokens exist; custom entries take priority on key collision
             raw[section] = {**default_section, **raw.get(section, {})}
         else:
@@ -104,12 +104,12 @@ def add_token(
 ) -> bool:
     """Add or update a single token entry in tokens.json.
 
-    *token_type* : one of CLASS / TYPE / NAME / SEQ / SHOT / custom
+    *token_type* : one of CLASS / TYPE / NAME / INSTANCE / SEQ / SHOT / custom
     *rel_path*   : forward-slash relative path from the project root
     Returns True on success.
     """
     if token_type not in _TOKEN_SECTIONS:
-        log.warning("Unknown token section %r — falling back to 'custom'", token_type)
+        log.warning("Unknown token section %r, falling back to 'custom'", token_type)
         token_type = "custom"
 
     tokens = load_tokens(project_path)

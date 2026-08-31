@@ -1,10 +1,75 @@
 // main.ts — Electron main process: fenêtre native + sidecar Python.
 
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import path from 'path'
-import { startPythonSidecar, stopPythonSidecar, waitForPort } from './python_bridge'
+import { startPythonSidecar, stopPythonSidecar } from './python_bridge'
 
 let win: BrowserWindow | null = null
+let splash: BrowserWindow | null = null
+
+// FLUX window/taskbar icon. In dev it lives next to the sources; packaged builds
+// also get the exe icon from electron-builder, but setting the window icon makes
+// the taskbar reliably show ours. Loaded as a nativeImage (more robust than a
+// raw path for the taskbar) — falls back to the .png if the .ico is unreadable.
+const _ICON_ICO = path.join(__dirname, '..', 'scripts', 'icon.ico')
+const _ICON_PNG = path.join(__dirname, '..', 'scripts', 'icon.png')
+let ICON = nativeImage.createFromPath(_ICON_ICO)
+if (ICON.isEmpty()) ICON = nativeImage.createFromPath(_ICON_PNG)
+
+// Reusable "atom F" mark (matches the app icon) for the splash.
+const ATOM_SVG = `<svg width="64" height="64" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(-28 44 44)" fill="none" stroke="#9a5127" stroke-width="4"/>
+  <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(28 44 44)" fill="none" stroke="#e07b3c" stroke-width="4"/>
+  <path d="M31 26h27v9H41v8h15v9H41v14h-10z" fill="#efa061"/>
+  <circle cx="66" cy="30" r="4.5" fill="#efa061"/>
+</svg>`
+
+// ── Splash screen ─────────────────────────────────────────────────────────────
+// Shown the instant Electron is ready, covering the gap until the main window has
+// loaded (Vite in dev / backend cold-start). Flat Flux identity — no glow.
+function splashHtml(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  :root{--bg:#161514;--ink:#cac8c5;--ink3:#8a8784;
+        --accent:oklch(66% 0.10 52);--accent-hi:oklch(75% 0.115 52);
+        --accent-soft:color-mix(in oklch, oklch(66% 0.10 52) 14%, transparent);
+        --border:color-mix(in oklch, oklch(66% 0.10 52) 50%, transparent);}
+  *{margin:0;box-sizing:border-box;-webkit-user-select:none}
+  html,body{height:100%}
+  body{background:var(--bg);border:1px solid #2a2826;border-radius:12px;
+       font-family:'Consolas','SF Mono',ui-monospace,monospace;
+       display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;overflow:hidden}
+  .mark{display:flex;align-items:center;justify-content:center}
+  .word{display:flex;align-items:baseline;gap:9px}
+  .flux{color:var(--ink);font-weight:600;font-size:18px;letter-spacing:.16em}
+  .sub{color:var(--ink3);font-size:12px;letter-spacing:.02em}
+  .bar{width:180px;height:2px;background:#2a2826;border-radius:2px;overflow:hidden;margin-top:2px}
+  .bar>i{display:block;height:100%;width:40%;border-radius:2px;background:var(--accent);
+         animation:slide 1.1s ease-in-out infinite}
+  @keyframes slide{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+  </style></head><body>
+  <div class="mark">${ATOM_SVG}</div>
+  <div class="word"><span class="flux">FLUX</span><span class="sub">Pipeline Tool</span></div>
+  <div class="bar"><i></i></div>
+  </body></html>`
+}
+
+function createSplash(): void {
+  splash = new BrowserWindow({
+    width: 380, height: 240,
+    frame: false, transparent: true, resizable: false, movable: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false,
+    backgroundColor: '#00000000', icon: ICON,
+  })
+  splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(splashHtml()))
+  splash.once('ready-to-show', () => splash?.show())
+  // Failsafe: never let the splash linger if the main window fails to load.
+  setTimeout(closeSplash, 20_000)
+}
+
+function closeSplash(): void {
+  if (splash && !splash.isDestroyed()) splash.close()
+  splash = null
+}
 
 async function createWindow(): Promise<void> {
   win = new BrowserWindow({
@@ -13,6 +78,8 @@ async function createWindow(): Promise<void> {
     minWidth:        1000,
     minHeight:       700,
     backgroundColor: '#0f0f0f',
+    show:            false,     // shown once loaded, so the splash hands over cleanly
+    icon:            ICON,
     frame:           false,    // frameless — TitleBar React gère les contrôles
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
@@ -21,11 +88,39 @@ async function createWindow(): Promise<void> {
     },
   })
 
+  if (!ICON.isEmpty()) win.setIcon(ICON)   // belt-and-suspenders for the taskbar
+
+  // Reveal the window independently of the load promise: 'ready-to-show' fires
+  // once the renderer can paint, and a fallback timer guarantees we never stay
+  // hidden even if the dev server is slow/unreachable. Idempotent.
+  const reveal = () => {
+    if (!win) return
+    if (!win.isVisible()) {
+      win.show()
+      win.focus()
+    }
+    closeSplash()
+  }
+  win.once('ready-to-show', reveal)
+  setTimeout(reveal, 12_000)
+
+  // Load the renderer. In dev the Vite server may not be up yet, so retry the
+  // URL until it answers instead of blocking startup on a fixed port wait.
   if (!app.isPackaged) {
-    await win.loadURL('http://localhost:5173')
+    const url = 'http://localhost:5173'
+    const deadline = Date.now() + 30_000
+    const tryLoad = () => {
+      win?.loadURL(url).catch(() => {
+        if (Date.now() < deadline && win && !win.isDestroyed()) {
+          setTimeout(tryLoad, 300)
+        }
+      })
+    }
+    tryLoad()
     win.webContents.openDevTools()
   } else {
-    await win.loadFile(path.join(__dirname, '../dist/index.html'))
+    win.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) =>
+      console.error('[Electron] loadFile failed:', err))
   }
 
   // Ctrl+Shift+I ouvre les DevTools même en production (debug packagé)
@@ -74,27 +169,31 @@ ipcMain.on('window:close',    () => win?.close())
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
-  try {
-    await startPythonSidecar()
-  } catch (err) {
-    console.error('[Electron] Failed to start Python sidecar:', err)
-  }
+  // Windows: group under the FLUX identity so the taskbar shows our icon.
+  if (process.platform === 'win32') app.setAppUserModelId('com.flux.pipeline')
 
-  // En dev : attendre que Vite soit prêt avant d'ouvrir la fenêtre
-  if (!app.isPackaged) {
-    try {
-      await waitForPort(5173, 30_000)
-    } catch {
-      console.warn('[Electron] Vite not ready after 30s, opening anyway')
-    }
-  }
+  // Splash first — visible immediately, covers the Vite/backend startup gap.
+  createSplash()
 
+  // Backend en arrière-plan : ne bloque PAS l'ouverture de la fenêtre (le cold
+  // start ~5s rendait l'app lente à ouvrir). Il se connecte quand il est prêt.
+  startPythonSidecar().catch((err) =>
+    console.error('[Electron] Failed to start Python sidecar:', err))
+
+  // Create the window immediately (hidden); it retries the Vite URL on its own
+  // and reveals itself once painted, so nothing here can block it opening.
   await createWindow()
 })
 
 app.on('window-all-closed', async () => {
   await stopPythonSidecar()
   app.quit()
+})
+
+// Belt-and-suspenders: also kill the backend on any quit path (menu, taskbar,
+// signal) so no zombie backend survives on port 8765.
+app.on('before-quit', () => {
+  void stopPythonSidecar()
 })
 
 app.on('activate', async () => {

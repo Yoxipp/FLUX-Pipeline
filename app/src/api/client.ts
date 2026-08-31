@@ -18,16 +18,45 @@ import type {
 
 const BASE_URL = 'http://127.0.0.1:8765'
 
+export interface LogRecord {
+  id:      number
+  ts:      number
+  levelno: number
+  level:   string
+  logger:  string
+  msg:     string
+}
+
 async function apiCall<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   endpoint: string,
   body?: unknown,
+  timeoutMs?: number,   // optional: fail fast instead of hanging on a wedged backend
 ): Promise<T> {
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  let signal: AbortSignal | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  if (timeoutMs) {
+    const controller = new AbortController()
+    signal = controller.signal
+    timer = setTimeout(() => controller.abort(), timeoutMs)
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}${endpoint}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
+    })
+  } catch (e) {
+    if ((e as { name?: string })?.name === 'AbortError') {
+      throw new Error(`Backend injoignable (timeout ${timeoutMs}ms sur ${endpoint})`)
+    }
+    throw e
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`
@@ -46,7 +75,7 @@ async function apiCall<T>(
 export const api = {
   // Settings
   getSettings: () =>
-    apiCall<Settings>('GET', '/settings'),
+    apiCall<Settings>('GET', '/settings', undefined, 10000),   // fail fast on a wedged backend
 
   initFirstLaunch: (workspace: string, username: string) =>
     apiCall<{ success: boolean }>('POST', '/settings/init', { workspace, username }),
@@ -94,6 +123,16 @@ export const api = {
   removeDccAutostart: (dcc: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', `/dcc/${dcc}/autostart`),
 
+  // Console logs
+  getLogs: (after = 0, level?: string) =>
+    apiCall<{ records: LogRecord[] }>(
+      'GET',
+      `/logs?after=${after}${level ? `&level=${encodeURIComponent(level)}` : ''}`,
+    ),
+
+  clearLogs: () =>
+    apiCall<{ ok: boolean }>('DELETE', '/logs'),
+
   // Publisher
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
@@ -104,9 +143,69 @@ export const api = {
   publishHoudiniRop: (payload: HoudiniPublishPayload) =>
     apiCall<HoudiniPublishResult>('POST', '/dcc/houdini/publish', payload),
 
+  // Maya
+  getMayaConnectCmd: () =>
+    apiCall<{ cmd: string; backend: string }>('GET', '/dcc/maya/connect_cmd'),
+
+  importFileInMaya: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path }),
+
+  publishMaya: (payload: {
+    project_name: string
+    filename:     string
+    extension:    string
+    scope?:       string
+    is_sequence?: boolean
+    frame_range?: [number, number]
+    export_options?: Record<string, unknown>
+    description?: string
+    user?:        string
+  }) =>
+    apiCall<{ ok: boolean; version_str: string; dest: string }>('POST', '/dcc/maya/publish', payload),
+
+  exportMayaLightUsd: (payload: {
+    project_name: string
+    asset:        string
+    filename?:    string
+    mesh?:        string
+    root_joint?:  string
+    frame_start?: number
+    frame_end?:   number
+    fmt?:         string
+    scope?:       string
+    include_geo?:     boolean
+    include_skel?:    boolean
+    include_anim?:    boolean
+    include_weights?: boolean
+    include_uv?:      boolean
+  }) =>
+    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+      'POST', '/dcc/maya/export-usd', payload),
+
+  exportHoudiniLightUsd: (payload: {
+    project_name: string
+    asset:        string
+    filename?:    string
+    skel_node?:   string
+    mesh_node?:   string
+    frame_start?: number
+    frame_end?:   number
+    fmt?:         string
+    include_geo?:     boolean
+    include_skel?:    boolean
+    include_anim?:    boolean
+    include_weights?: boolean
+    include_uv?:      boolean
+  }) =>
+    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+      'POST', '/dcc/houdini/export-usd', payload),
+
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>
     apiCall<ZBrushPublishResult>('POST', '/dcc/zbrush/publish', payload),
+
+  cancelZBrush: () =>
+    apiCall<{ cancelled: boolean }>('POST', '/dcc/zbrush/cancel'),
 
   // Importer
   importFiles: (dcc: string, file_paths: string[], project_name?: string) =>
@@ -199,6 +298,11 @@ export const api = {
       'GET', `/dcc/houdini/importer/path_to_tokens?project=${encodeURIComponent(project)}&rel_path=${encodeURIComponent(rel_path)}`,
     ),
 
+  importHoudiniCharacter: (file_path: string, network_path = '/obj') =>
+    apiCall<{ node_path: string; node_type: string; file_set: boolean; has_bonecapture: boolean; point_count: number }>(
+      'POST', '/dcc/houdini/import-character', { file_path, network_path },
+    ),
+
   createFluxImporterNode: (params: {
     project?: string; flux_class?: string; flux_type?: string;
     flux_name?: string; flux_instance?: string; flux_iter?: string;
@@ -207,11 +311,33 @@ export const api = {
 
   // Shelf
   getShelves: () =>
-    apiCall<Record<string, { versions: string[]; installed: Record<string, boolean> }>>('GET', '/shelf'),
+    apiCall<Record<string, { versions: string[]; installed: Record<string, boolean>; hdas_installed: Record<string, boolean> }>>('GET', '/shelf'),
 
   installShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('POST', '/shelf/install', { dcc, version }),
 
   removeShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', '/shelf', { dcc, version }),
+
+  // Maya tools catalog
+  getTools: () =>
+    apiCall<{ versions: string[]; tools: { id: string; label: string; filename: string; installed: Record<string, boolean> }[] }>('GET', '/shelf/tools'),
+
+  installTool: (tool_id: string, version: string) =>
+    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/install', { tool_id, version }),
+
+  removeTool: (tool_id: string, version: string) =>
+    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/remove', { tool_id, version }),
+
+  // USD Assembler
+  assembleRecipe: (recipe: unknown, project?: string, strict = true) =>
+    apiCall<{
+      success: boolean
+      root?: string
+      layers?: string[]
+      issues: { level: string; msg: string; prim: string | null }[]
+    }>('POST', '/usd/assemble', { recipe, project, strict }),
+
+  getRecipeSchema: () =>
+    apiCall<Record<string, unknown>>('GET', '/usd/schema'),
 }

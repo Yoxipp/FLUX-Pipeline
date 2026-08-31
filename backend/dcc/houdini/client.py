@@ -60,14 +60,17 @@ class HoudiniClient:
                 result["selected_node_types"] = r["result"]
         return result
 
-    def run(self, code: str) -> dict:
+    def run(self, code: str, timeout: float = 600.0) -> dict:
         """
         Execute Python code on Houdini's main thread.
         Assign to `result` to return a value:
             client.run("result = hou.frame()")
         Returns {"ok": True, "result": ...} or {"ok": False, "error": "..."}.
+
+        *timeout* is generous by default so ROP cooks / heavy exports are not
+        reported as failures while Houdini is still working.
         """
-        return self._post("/run", {"code": code})
+        return self._post("/run", {"code": code}, timeout=timeout)
 
     # ------------------------------------------------------------------
     # Convenience helpers

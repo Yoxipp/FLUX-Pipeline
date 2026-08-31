@@ -1,11 +1,99 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
+import { Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { Btn, SecTitle, FolderIcon, Check, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { ExportOptions } from '../components/shared/ExportOptions'
+import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
+import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { api } from '../api/client'
 import { useSettings } from '../hooks/useSettings'
 import { toast } from 'sonner'
 
+// ── Resizable right panel (per-viewer UI pref) ────────────────────────────────
+const RIGHT_WIDTH_KEY = 'flux.ui.publisherRightWidth'
+const RIGHT_WIDTH_DEFAULT = 460
+const RIGHT_WIDTH_MIN = 320
+
+function readStoredWidth(): number {
+  try {
+    const v = parseInt(localStorage.getItem(RIGHT_WIDTH_KEY) || '', 10)
+    if (!Number.isNaN(v)) return v
+  } catch { /* private mode / blocked storage */ }
+  return RIGHT_WIDTH_DEFAULT
+}
+
+// The best-known Houdini point attributes, proposed when adding an attribute row.
+const COMMON_HOU_ATTRS = [
+  'boneCapture', 'curveu', 'uv', 'N', 'Cd', 'pscale', 'v', 'orient', 'up', 'width', 'rest', 'id', 'name', 'mask',
+]
+
+// Editable combobox for an attribute name: free text + a dropdown of common attrs.
+function AttrCombo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const q = value.trim().toLowerCase()
+  const matches = q ? COMMON_HOU_ATTRS.filter(a => a.toLowerCase().includes(q)) : COMMON_HOU_ATTRS
+  return (
+    <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <input
+        value={value}
+        placeholder="nom de l'attribut point"
+        onChange={e => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        style={{
+          width: '100%', height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+          borderRadius: 5, padding: '0 8px', fontFamily: 'var(--mono)', fontSize: 11,
+          color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+        }}
+      />
+      {open && matches.length > 0 && (
+        <div className="card" style={{
+          position: 'absolute', top: 29, left: 0, width: '100%', zIndex: 30,
+          maxHeight: 180, overflowY: 'auto', padding: 3, boxShadow: 'var(--shadow-md)',
+        }}>
+          {matches.map(a => (
+            <div
+              key={a}
+              onMouseDown={e => { e.preventDefault(); onChange(a); setOpen(false) }}
+              className="row"
+              style={{ padding: '5px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 4, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}
+            >
+              {a}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Utilities ────────────────────────────────────────────────────────────────
+
+/** Click-to-copy monospaced command block. */
+function CopyBlock({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div
+      onClick={() => {
+        void navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }}
+      title="Cliquer pour copier"
+      style={{
+        fontFamily: 'var(--mono)', fontSize: 8,
+        color: copied ? 'var(--ok)' : 'var(--accent-hi)',
+        background: 'var(--bg-deep)', border: `1px solid ${copied ? 'var(--ok)' : 'var(--rule-2)'}`,
+        borderRadius: 4, padding: '5px 8px', cursor: 'pointer',
+        wordBreak: 'break-all', lineHeight: 1.6, userSelect: 'all',
+        transition: 'color 0.2s, border-color 0.2s',
+      }}
+    >
+      {copied ? '✓ Copié !' : text}
+    </div>
+  )
+}
 
 function formatToken(raw: string): string {
   return raw
@@ -65,14 +153,25 @@ function resolveNodeExt(rawType: string): string | undefined {
   return NODE_TYPE_TO_EXT[normalised]
 }
 
-const EXPORT_FORMATS         = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx', '.mb', '.ma']
-const ZBRUSH_EXPORT_FORMATS  = ['.ztl', '.obj', '.fbx']
-const HOUDINI_EXPORT_FORMATS = ['.abc', '.bgeo', '.usd', '.obj', '.hip', '.exr', '.fbx']
+// Export formats offered per software — only what each DCC can actually write.
+// USD comes in three flavours: .usd (auto), .usda (ascii), .usdc (binary crate).
+const USD_FORMATS = ['.usd', '.usda', '.usdc']
+
+const EXPORT_FORMATS_BY_DCC: Record<string, string[]> = {
+  Maya:           ['.abc', '.fbx', '.obj', '.ma', '.mb', ...USD_FORMATS],
+  Houdini:        ['.abc', '.bgeo', '.vdb', '.obj', '.fbx', '.exr', '.hip', ...USD_FORMATS],
+  Nuke:           ['.exr', '.dpx', '.tif', '.png', '.mov', '.nk'],
+  'Substance P.': ['.png', '.exr', '.tga', '.tif', '.jpg'],
+  ZBrush:         ['.ztl', '.obj', '.fbx'],
+  Marvelous:      ['.obj', '.fbx', '.abc', '.zprj'],
+  Photoshop:      ['.psd', '.png', '.tif', '.jpg', '.exr'],
+}
+
+// Fallback (e.g. "Fichier local"): a broad, DCC-agnostic superset.
+const DEFAULT_EXPORT_FORMATS = ['.abc', '.fbx', '.obj', '.exr', '.png', '.tif', ...USD_FORMATS]
 
 function formatsForDcc(dcc: string): string[] {
-  if (dcc === 'ZBrush')  return ZBRUSH_EXPORT_FORMATS
-  if (dcc === 'Houdini') return HOUDINI_EXPORT_FORMATS
-  return EXPORT_FORMATS
+  return EXPORT_FORMATS_BY_DCC[dcc] ?? DEFAULT_EXPORT_FORMATS
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -146,7 +245,7 @@ function PublishComposer({
   const MODULES: Mod[] = mode === 'asset'
     ? [
         { key: 'class',    label: 'CLASS',    opts: assetClasses, allowNew: false },
-        { key: 'type',     label: 'TYPE',     opts: typeKeys,     allowNew: true  },
+        { key: 'type',     label: 'TYPE',     opts: typeKeys,     allowNew: false },
         { key: 'name',     label: 'NAME',     opts: nameKeys,     allowNew: true  },
         { key: 'instance', label: 'INSTANCE', opts: instanceKeys, allowNew: true  },
       ]
@@ -274,7 +373,7 @@ function PublishComposer({
                       fontWeight: filled ? 600 : 400,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3,
                     }}>
-                      {selVal || '—'}
+                      {selVal || '-'}
                     </span>
                   </div>
                 )}
@@ -291,7 +390,7 @@ function PublishComposer({
                         onClick={() => { onSelect(key, ''); setOpen(null) }}
                         style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
                       >
-                        — effacer
+                        effacer
                       </div>
                     )}
                     {opts.length === 0 ? (
@@ -329,6 +428,7 @@ function PublishComposer({
 
 export function Publisher() {
   const { settings } = useSettings()
+  const location = useLocation()
   const [dcc, setDcc]           = useState('Maya')
   const [projects, setProjects] = useState<string[]>([])
   const [project, setProject]   = useState('')
@@ -349,6 +449,51 @@ export function Publisher() {
   const [frameEnd, setFrameEnd]     = useState(100)
   const [frameStep, setFrameStep]   = useState(1)
 
+  // Per-format export options (Maya). Reset to the format's defaults whenever the
+  // active extension changes — defaults reproduce the pre-options export exactly.
+  const [mayaExportOpts, setMayaExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(schemaForExt('.abc')))
+  const [houExportOpts, setHouExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(houdiniSchemaForExt('.abc')))
+  // Houdini export attribute filter (F): keep-only / remove named point attributes.
+  const [houAttrMode, setHouAttrMode] = useState<'none' | 'keep' | 'remove'>('none')
+  const [houAttrNames, setHouAttrNames] = useState<string[]>([])
+
+  // Resizable right panel (draggable splitter). Width persists per viewer; a
+  // "Reset interface" action in the settings fires 'flux:reset-ui' to restore it.
+  const splitContainerRef = useRef<HTMLDivElement>(null)
+  const [rightWidth, setRightWidth] = useState<number>(() => readStoredWidth())
+
+  useEffect(() => {
+    try { localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth)) } catch { /* blocked storage */ }
+  }, [rightWidth])
+
+  useEffect(() => {
+    const onReset = () => setRightWidth(RIGHT_WIDTH_DEFAULT)
+    window.addEventListener('flux:reset-ui', onReset)
+    return () => window.removeEventListener('flux:reset-ui', onReset)
+  }, [])
+
+  const startSplitDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = rightWidth
+    const rect = splitContainerRef.current?.getBoundingClientRect()
+    const maxW = rect ? Math.max(360, rect.width - 360) : 900
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      setRightWidth(Math.min(Math.max(startW - dx, RIGHT_WIDTH_MIN), maxW))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [rightWidth])
+
   // Source / description / state
   const [sourcePath, setSourcePath]   = useState('')
   const [description, setDescription] = useState('')
@@ -359,20 +504,28 @@ export function Publisher() {
   const [zbrushVersion, setZbrushVersion]     = useState<string | null>(null)
   const [zbObjOptions, setZbObjOptions] = useState({
     uvs: true, normals: true, flip_v: false, groups: false, materials: false,
+    scope: 'selected' as 'all' | 'selected' | 'visible',
   })
   const [zbFbxOptions, setZbFbxOptions] = useState({
     fbx_version: '2019', animation: false, materials: true,
+    scope: 'all' as 'all' | 'selected' | 'visible',
   })
 
-  // Keep Local (functional for ZBrush, placeholder for others)
-  const [keepLocal, setKeepLocal]   = useState(false)
-  const [localDir, setLocalDir]     = useState('')
 
   // Houdini-specific
   const [ropNodePath, setRopNodePath]             = useState('')
   const [houdiniConnected, setHoudiniConnected]   = useState(false)
   const [houdiniVersion, setHoudiniVersion]       = useState<string | null>(null)
   const [detectedNodeType, setDetectedNodeType]   = useState<string | null>(null)
+
+  // Maya-specific
+  const [mayaConnected, setMayaConnected]           = useState(false)
+  const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('selection')
+  const [lightUsd, setLightUsd]                     = useState(false)   // Maya UsdSkel light export
+  const [lightInclude, setLightInclude]             = useState({ geo: true, skel: true, anim: true, weights: true, uv: true })
+  const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
+  const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
+  const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
 
   // Projects
   useEffect(() => {
@@ -404,22 +557,50 @@ export function Publisher() {
       .catch(() => setShots([]))
   }, [project, mode, sel.seq])
 
-  // ZBrush — connection polling
+  // ZBrush connection — single effect handles both navigation state and manual DCC switch.
+  // Merged to avoid race condition where the dcc-change cleanup (→ false) overwrites
+  // the navigation-state set (→ true) that fired in the same render cycle.
   useEffect(() => {
-    if (dcc !== 'ZBrush') return
+    // Sidebar navigated here after detecting the freeze — mark connected immediately, no ping.
+    if (location.state?.zbrushConnected) {
+      setDcc('ZBrush')
+      setZbrushConnected(true)
+      return
+    }
+    // Manual DCC switch — one-shot ping, no polling interval.
+    if (dcc !== 'ZBrush') { setZbrushConnected(false); setZbrushVersion(null); return }
     let cancelled = false
+    api.pingDcc('zbrush')
+      .then(p => { if (!cancelled) { setZbrushConnected(p.connected); setZbrushVersion(p.version ?? null) } })
+      .catch(() => { if (!cancelled) setZbrushConnected(false) })
+    return () => { cancelled = true }
+  }, [dcc, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetch the Maya connect command once on mount (backend path is stable)
+  useEffect(() => {
+    api.getMayaConnectCmd().then(r => setMayaConnectCmd(r.cmd)).catch(() => {})
+  }, [])
+
+  // Re-check autostart status whenever Maya panel is active — catches Sidebar install/uninstall
+  useEffect(() => {
+    if (dcc !== 'Maya') return
+    api.getDccAutostart('maya')
+      .then(r => { setMayaAutostartInstalled(r.installed); setMayaStartupFile(r.startup_file ?? null) })
+      .catch(() => { setMayaAutostartInstalled(false) })
+  }, [dcc])
+
+  // Maya connection — poll every 3 s when Maya DCC is active (commandPort can open any time)
+  useEffect(() => {
+    if (dcc !== 'Maya') { setMayaConnected(false); return }
+    let cancelled = false
     const poll = async () => {
       try {
-        const ping = await api.pingDcc('zbrush')
-        if (cancelled) return
-        setZbrushConnected(ping.connected)
-        setZbrushVersion(ping.version ?? null)
+        const p = await api.pingDcc('maya')
+        if (!cancelled) setMayaConnected(p.connected)
       } catch {
-        if (!cancelled) setZbrushConnected(false)
+        if (!cancelled) setMayaConnected(false)
       }
     }
-
     void poll()
     const id = setInterval(() => void poll(), 3000)
     return () => { cancelled = true; clearInterval(id) }
@@ -431,6 +612,12 @@ export function Publisher() {
     if (!formats.includes(exportExt)) setExportExt(formats[0])
   }, [dcc]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset export options to the active format's defaults whenever it changes.
+  useEffect(() => {
+    setMayaExportOpts(defaultOptions(schemaForExt(exportExt)))
+    setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
+  }, [exportExt])
+
   // Houdini polling — connection + selected node + auto-format
   useEffect(() => {
     if (dcc !== 'Houdini') return
@@ -441,6 +628,11 @@ export function Publisher() {
         if (cancelled) return
         setHoudiniConnected(ping.connected)
         setHoudiniVersion(ping.version)
+        if (!ping.connected) {
+          // Drop stale node context so a later publish doesn't target a dead node.
+          setRopNodePath('')
+          setDetectedNodeType(null)
+        }
         if (ping.connected) {
           const state = await api.getHoudiniState()
           if (cancelled) return
@@ -549,12 +741,8 @@ export function Publisher() {
       return
     }
     // asset mode
-    const newType = newMode.type     ? formatToken(newVals.type     || '') : ''
     const newName = newMode.name     ? formatToken(newVals.name     || '') : ''
     const newInst = newMode.instance ? formatToken(newVals.instance || '') : ''
-    if (newType) {
-      await api.addToken({ project, token_type: 'TYPE', token_value: newType, rel_path: newType.toLowerCase() })
-    }
     if (newName && sel.class) {
       try { await api.createAsset(project, sel.class, newName) } catch { /* may already exist */ }
     }
@@ -565,14 +753,18 @@ export function Publisher() {
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
+  const handleCancelZBrush = useCallback(() => {
+    setZbrushConnected(false)
+    setZbrushVersion(null)
+    api.cancelZBrush().catch(() => {}) // fire-and-forget — ZBrush may not be in freeze
+  }, [])
+
   const reset = useCallback(() => {
     setSel(EMPTY_SEL)
     setNewMode(EMPTY_NEW_MODE)
     setNewVals(EMPTY_NEW_VALS)
     setSourcePath('')
     setDescription('')
-    setKeepLocal(false)
-    setLocalDir('')
   }, [])
 
   const handlePublish = useCallback(async () => {
@@ -590,7 +782,66 @@ export function Publisher() {
     try {
       await createNewTokens()
 
-      if (dcc === 'Houdini') {
+      if (dcc === 'Maya') {
+        if (!mayaConnected) {
+          toast.error('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
+          return
+        }
+        if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
+          const res = await api.exportMayaLightUsd({
+            project_name: project,
+            asset:        assetName,
+            filename,
+            fmt:          exportExt.replace('.', ''),
+            scope:        mayaScope,
+            frame_start:  isSequence ? frameStart : undefined,
+            frame_end:    isSequence ? frameEnd : undefined,
+            include_geo:     lightInclude.geo,
+            include_skel:    lightInclude.skel,
+            include_anim:    lightInclude.anim,
+            include_weights: lightInclude.weights,
+            include_uv:      lightInclude.uv,
+          })
+          toast.success(`USD léger ${res.version} → ${res.asset}`)
+          return
+        }
+        const isAnimAbc = isSequence && exportExt === '.abc'
+        const res = await api.publishMaya({
+          project_name: project,
+          filename,
+          extension:    exportExt,
+          scope:        mayaScope,
+          is_sequence:  isAnimAbc,
+          frame_range:  isAnimAbc ? [frameStart, frameEnd] : undefined,
+          export_options: mayaExportOpts,
+          description:  description || undefined,
+          user:         settings?.username ?? undefined,
+        })
+        toast.success(`v${res.version_str} → Maya`)
+      } else if (dcc === 'Houdini') {
+        if (!houdiniConnected) {
+          toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
+          return
+        }
+        if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
+          const res = await api.exportHoudiniLightUsd({
+            project_name: project,
+            asset:        assetName,
+            filename,
+            fmt:          exportExt.replace('.', ''),
+            frame_start:  isSequence ? frameStart : undefined,
+            frame_end:    isSequence ? frameEnd : undefined,
+            include_geo:     lightInclude.geo,
+            include_skel:    lightInclude.skel,
+            include_anim:    lightInclude.anim,
+            include_weights: lightInclude.weights,
+            include_uv:      lightInclude.uv,
+          })
+          toast.success(`USD Layers ${res.version} → ${res.asset}`)
+          return
+        }
         const res = await api.publishHoudiniRop({
           project_name:  project,
           filename,
@@ -598,13 +849,17 @@ export function Publisher() {
           rop_node_path: ropNodePath || undefined,
           is_sequence:   isSequence,
           frame_range:   isSequence ? [frameStart, frameEnd, frameStep] : undefined,
+          export_options: houExportOpts,
+          attr_filter:   (houAttrMode !== 'none' && houAttrNames.some(n => n.trim()))
+            ? { mode: houAttrMode, names: houAttrNames.map(n => n.trim()).filter(Boolean) }
+            : undefined,
           description:   description || undefined,
           user:          settings?.username ?? undefined,
         })
         toast.success(`v${res.version_str} → ${res.rop_node}`)
       } else if (dcc === 'ZBrush') {
         if (!zbrushConnected) {
-          toast.error('ZBrush non connecté — active le bridge FLUX dans ZBrush')
+          toast.error('ZBrush non connecté : active le bridge FLUX dans ZBrush')
           return
         }
         const exportOptions =
@@ -615,12 +870,12 @@ export function Publisher() {
           filename,
           extension:      exportExt,
           export_options: exportOptions,
-          keep_local:     keepLocal && !!localDir,
-          local_dir:      localDir || undefined,
           description:    description || undefined,
           user:           settings?.username ?? undefined,
         })
         toast.success(`v${res.version_str} → ZBrush`)
+        setZbrushConnected(false)
+        setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
       } else if (dcc === 'Fichier local') {
         if (!sourcePath.trim()) {
@@ -648,7 +903,8 @@ export function Publisher() {
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
-    zbrushConnected, zbObjOptions, zbFbxOptions, keepLocal, localDir,
+    zbrushConnected, zbObjOptions, zbFbxOptions,
+    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, newMode, newVals, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
   const filename = buildFilename()
@@ -667,10 +923,10 @@ export function Publisher() {
 
       <SoftwareSelector active={dcc} onChange={setDcc} />
 
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* ── Left: Composer + source + description ── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--rule)', minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
           <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', minHeight: 0 }}>
 
@@ -722,8 +978,8 @@ export function Publisher() {
                     }} />
                     <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                       {zbrushConnected
-                        ? `Connecté${zbrushVersion ? ` — ${zbrushVersion}` : ''}`
-                        : 'Non connecté — installe le plugin via le bouton Plug dans la sidebar'}
+                        ? `Connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}`
+                        : 'Non connecté : installe le plugin via le bouton Plug dans la sidebar'}
                     </div>
                   </div>
                 </div>
@@ -732,7 +988,7 @@ export function Publisher() {
                 {exportExt === '.obj' && (
                   <div>
                     <div className="cap" style={{ marginBottom: 6 }}>OPTIONS OBJ</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginBottom: 8 }}>
                       {([
                         ['uvs',       'UVs'],
                         ['normals',   'Normales'],
@@ -743,13 +999,28 @@ export function Publisher() {
                         <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
                           <input
                             type="checkbox"
-                            checked={zbObjOptions[key]}
+                            checked={zbObjOptions[key] as boolean}
                             onChange={e => setZbObjOptions(prev => ({ ...prev, [key]: e.target.checked }))}
                             style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
                           />
                           <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{label}</span>
                         </label>
                       ))}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>SCOPE</span>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {(['selected', 'visible', 'all'] as const).map(s => (
+                          <div key={s} onClick={() => setZbObjOptions(prev => ({ ...prev, scope: s }))} style={{
+                            padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
+                            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: zbObjOptions.scope === s ? 600 : 400,
+                            border: zbObjOptions.scope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                            background: zbObjOptions.scope === s ? 'var(--accent-soft)' : 'transparent',
+                            color: zbObjOptions.scope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
+                            transition: 'all 0.1s',
+                          }}>{s}</div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -778,6 +1049,21 @@ export function Publisher() {
                           ))}
                         </div>
                       </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>SCOPE</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {(['all', 'selected', 'visible'] as const).map(s => (
+                            <div key={s} onClick={() => setZbFbxOptions(prev => ({ ...prev, scope: s }))} style={{
+                              padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
+                              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: zbFbxOptions.scope === s ? 600 : 400,
+                              border: zbFbxOptions.scope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                              background: zbFbxOptions.scope === s ? 'var(--accent-soft)' : 'transparent',
+                              color: zbFbxOptions.scope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
+                              transition: 'all 0.1s',
+                            }}>{s}</div>
+                          ))}
+                        </div>
+                      </div>
                       <div style={{ display: 'flex', gap: 14 }}>
                         {([
                           ['animation', 'Animation'],
@@ -798,6 +1084,99 @@ export function Publisher() {
                   </div>
                 )}
               </div>
+            ) : dcc === 'Maya' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+                {/* Connection dot */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{
+                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                    background: mayaConnected ? 'var(--ok)' : 'var(--err)',
+                    transition: 'background 0.3s',
+                  }} />
+                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: mayaConnected ? 'var(--ok)' : 'var(--ink-3)' }}>
+                    {mayaConnected ? '✓ Connecté · commandPort 7001' : 'Port 7001 injoignable'}
+                  </div>
+                </div>
+
+                {/* Step-by-step guide when not connected — only render once autostart state resolved */}
+                {!mayaConnected && mayaAutostartInstalled !== null && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+                    {/* Step 1 — Plug */}
+                    <div style={{
+                      display: 'flex', gap: 7, padding: '6px 8px', borderRadius: 5,
+                      background: mayaAutostartInstalled ? 'var(--paper-2)' : 'var(--accent-soft)',
+                      border: `1px solid ${mayaAutostartInstalled ? 'var(--rule-2)' : 'var(--accent)'}`,
+                    }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: mayaAutostartInstalled ? 'var(--ok)' : 'var(--accent)',
+                        fontSize: 8, fontWeight: 700, color: 'white',
+                      }}>
+                        {mayaAutostartInstalled ? '✓' : '1'}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, color: mayaAutostartInstalled ? 'var(--ink-3)' : 'var(--accent-hi)' }}>
+                          {mayaAutostartInstalled ? 'Autostart installé' : 'Installer l\'autostart Maya'}
+                        </div>
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.4 }}>
+                          {mayaAutostartInstalled
+                            ? (mayaStartupFile ?? 'userSetup.py mis à jour')
+                            : 'Sidebar → bouton Plug ⬡ à côté de Maya'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Step 2 — Restart Maya */}
+                    {mayaAutostartInstalled && (
+                      <div style={{
+                        display: 'flex', gap: 7, padding: '6px 8px', borderRadius: 5,
+                        background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+                      }}>
+                        <div style={{
+                          width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'var(--accent)', fontSize: 8, fontWeight: 700, color: 'white',
+                        }}>2</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--accent-hi)' }}>
+                            Redémarre Maya
+                          </div>
+                          <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.4 }}>
+                            Le commandPort s'ouvre automatiquement au démarrage
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Quick open — paste in Maya Script Editor */}
+                    {mayaConnectCmd && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          Ouvrir le port immédiatement · Maya Script Editor (Python) :
+                        </div>
+                        <CopyBlock text={mayaConnectCmd} />
+                      </div>
+                    )}
+
+                    {/* Diagnostic — check where Maya actually loads scripts from */}
+                    {mayaAutostartInstalled && mayaStartupFile && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          Si ça ne marche toujours pas, vérifie le chemin Maya (Script Editor Python) :
+                        </div>
+                        <CopyBlock text={`import maya.cmds as cmds; print(cmds.internalVar(userScriptDir=True))`} />
+                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.5 }}>
+                          Compare avec : <span style={{ color: 'var(--accent-hi)', wordBreak: 'break-all' }}>{mayaStartupFile.replace(/userSetup\.py$/i, '')}</span>
+                          <br />Si différent → le bloc est écrit au mauvais endroit.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : dcc === 'Houdini' ? (
               <div>
                 <div className="cap" style={{ marginBottom: 6 }}>NODE ROP</div>
@@ -808,8 +1187,8 @@ export function Publisher() {
                   }} />
                   <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                     {houdiniConnected
-                      ? `Connecté${houdiniVersion ? ` — Houdini ${houdiniVersion}` : ''}`
-                      : 'Houdini non connecté — lance le serveur FLUX dans Houdini'}
+                      ? `Connecté${houdiniVersion ? ` · Houdini ${houdiniVersion}` : ''}`
+                      : 'Houdini non connecté : lance le serveur FLUX dans Houdini'}
                   </div>
                 </div>
                 <input
@@ -820,7 +1199,7 @@ export function Publisher() {
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                     borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
@@ -843,7 +1222,7 @@ export function Publisher() {
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                     borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
@@ -857,86 +1236,11 @@ export function Publisher() {
               </div>
             )}
 
-            {/* Keep Local collapsible */}
-            <div style={{ borderRadius: 6, border: '1px solid var(--rule-2)', overflow: 'hidden' }}>
-              {/* Header */}
-              <div
-                onClick={() => { if (dcc === 'ZBrush') setKeepLocal(v => !v) }}
-                style={{
-                  padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8,
-                  cursor: dcc === 'ZBrush' ? 'pointer' : 'default',
-                  background: keepLocal && dcc === 'ZBrush' ? 'var(--accent-soft)' : 'var(--paper-2)',
-                  userSelect: 'none',
-                }}
-              >
-                {/* Toggle pill */}
-                <div style={{
-                  width: 28, height: 16, borderRadius: 8, flexShrink: 0,
-                  background: (keepLocal && dcc === 'ZBrush') ? 'var(--accent)' : 'var(--rule-2)',
-                  position: 'relative', transition: 'background 0.15s',
-                  opacity: dcc === 'ZBrush' ? 1 : 0.4,
-                }}>
-                  <div style={{
-                    position: 'absolute', top: 2,
-                    left: (keepLocal && dcc === 'ZBrush') ? 14 : 2,
-                    width: 12, height: 12, borderRadius: '50%', background: 'white',
-                    transition: 'left 0.15s', boxShadow: '0 1px 2px rgba(0,0,0,.25)',
-                  }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, letterSpacing: '0.08em', color: (keepLocal && dcc === 'ZBrush') ? 'var(--accent-hi)' : 'var(--ink-3)', textTransform: 'uppercase' }}>
-                    Keep Local
-                  </span>
-                  {dcc !== 'ZBrush' && (
-                    <span style={{ marginLeft: 6, fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                      (bientôt disponible)
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Body — visible when toggled on ZBrush */}
-              {keepLocal && dcc === 'ZBrush' && (
-                <div style={{ padding: '8px 10px', borderTop: '1px solid var(--rule-2)', background: 'var(--bg-deep)', display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input
-                    value={localDir}
-                    onChange={e => setLocalDir(e.target.value)}
-                    placeholder="Dossier local de sauvegarde…"
-                    style={{
-                      flex: 1, height: 28,
-                      background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
-                      borderRadius: 5, padding: '0 8px',
-                      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
-                      boxShadow: 'var(--shadow-inset)', outline: 'none',
-                    }}
-                  />
-                  <div
-                    title="Sélectionner un dossier"
-                    onClick={async () => {
-                      try {
-                        // Electron IPC for native folder dialog
-                        const win = window as unknown as { electron?: { selectDirectory?: () => Promise<string | null> } }
-                        const dir = await win.electron?.selectDirectory?.()
-                        if (dir) setLocalDir(dir)
-                      } catch { /* no electron bridge — user types manually */ }
-                    }}
-                    style={{
-                      width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-                      cursor: 'pointer', flexShrink: 0,
-                    }}
-                  >
-                    <FolderIcon color="var(--accent)" />
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Published by */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>PUBLIÉ PAR</div>
               <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {settings?.username ?? '—'}
+                {settings?.username ?? '-'}
               </div>
             </div>
           </div>
@@ -952,15 +1256,42 @@ export function Publisher() {
                 width: '100%', height: 90, resize: 'none',
                 background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
                 borderRadius: 6, padding: '10px 12px',
-                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
-                fontStyle: 'italic', outline: 'none', boxShadow: 'var(--shadow-inset)',
+                fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)',
+                outline: 'none', boxShadow: 'var(--shadow-inset)',
               }}
             />
           </div>
         </div>
 
+        {/* draggable splitter — resizes the right panel */}
+        <div
+          onMouseDown={startSplitDrag}
+          title="Glisser pour redimensionner"
+          style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: 'var(--rule)', transition: 'background 0.12s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--rule)' }}
+        />
+
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
+
+          {/* PRESETS — quick USD Layers setups (Maya & Houdini). Set format + layers. */}
+          {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && (
+            <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+              <SecTitle>PRESETS</SecTitle>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {([
+                  { label: 'Base light USD', ext: '.usd', layers: { geo: true, skel: true, anim: true, weights: true, uv: true } },
+                  { label: 'Géo USD',        ext: '.usd', layers: { geo: true, skel: false, anim: false, weights: false, uv: true } },
+                  { label: 'Skin USD',       ext: '.usd', layers: { geo: true, skel: true, anim: false, weights: true, uv: true } },
+                ] as const).map(p => (
+                  <Pill key={p.label} style={{ cursor: 'pointer' }}>
+                    <span onClick={() => { setExportExt(p.ext); setLightUsd(true); setLightInclude({ ...p.layers }) }}>{p.label}</span>
+                  </Pill>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* FORMAT */}
           <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
@@ -979,8 +1310,8 @@ export function Publisher() {
             </div>
           </div>
 
-          {/* SÉQUENCE ANIMÉE — not available for ZBrush */}
-          <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: dcc === 'ZBrush' ? 0.35 : 1, pointerEvents: dcc === 'ZBrush' ? 'none' : undefined }}>
+          {/* SÉQUENCE ANIMÉE — ZBrush: never; Maya: .abc only; Houdini: always */}
+          <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 0.35 : 1, pointerEvents: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 'none' : undefined }}>
             <SecTitle>SÉQUENCE ANIMÉE</SecTitle>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSequence ? 10 : 0 }}>
               <div onClick={() => setIsSequence(v => !v)} style={{
@@ -995,7 +1326,7 @@ export function Publisher() {
                 }} />
               </div>
               <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {isSequence ? 'Activé — dossier versionné + $F4' : 'Désactivé — fichier unique LAST'}
+                {isSequence ? 'Activé · dossier versionné + $F4' : 'Désactivé · fichier unique LAST'}
               </div>
             </div>
             {isSequence && (
@@ -1014,10 +1345,160 @@ export function Publisher() {
             )}
           </div>
 
+          {/* SCOPE — Maya only */}
+          {dcc === 'Maya' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>SCOPE</SecTitle>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {(['selection', 'scene'] as const).map(s => (
+                  <div
+                    key={s}
+                    onClick={() => setMayaScope(s)}
+                    style={{
+                      padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: mayaScope === s ? 600 : 400,
+                      border: mayaScope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                      background: mayaScope === s ? 'var(--accent-soft)' : 'var(--paper-2)',
+                      color: mayaScope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
+                      transition: 'all 0.1s',
+                    }}
+                  >{s}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Maya, per-format (coexists with USD Layers). */}
+          {dcc === 'Maya' && schemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={schemaForExt(exportExt)}
+                values={mayaExportOpts}
+                onChange={(k, v) => setMayaExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters). */}
+          {dcc === 'Houdini' && houdiniSchemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={houdiniSchemaForExt(exportExt)}
+                values={houExportOpts}
+                onChange={(k, v) => setHouExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* ATTRIBUTS — Houdini, filtre les attributs point à l'export (attribdelete) */}
+          {dcc === 'Houdini' && exportExt !== '.fbx' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>ATTRIBUTS</SecTitle>
+              <div style={{ display: 'flex', gap: 4, marginBottom: houAttrMode === 'none' ? 0 : 10 }}>
+                {([['none', 'Tous'], ['keep', 'Garder uniquement'], ['remove', 'Supprimer']] as const).map(([m, label]) => (
+                  <div key={m} onClick={() => setHouAttrMode(m)} style={{
+                    padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                    fontFamily: 'var(--mono)', fontWeight: houAttrMode === m ? 600 : 400,
+                    border: houAttrMode === m ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                    background: houAttrMode === m ? 'var(--accent-soft)' : 'var(--paper-2)',
+                    color: houAttrMode === m ? 'var(--accent-hi)' : 'var(--ink-3)',
+                  }}>{label}</div>
+                ))}
+              </div>
+              {houAttrMode !== 'none' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span className="cap">Presets</span>
+                    {['boneCapture', 'curveu'].map(p => (
+                      <Pill key={p} style={{ cursor: 'pointer' }}>
+                        <span onClick={() => setHouAttrNames(prev => prev.includes(p) ? prev : [...prev, p])}>{p}</span>
+                      </Pill>
+                    ))}
+                    <Pill style={{ cursor: 'pointer' }}>
+                      <span onClick={() => setHouAttrNames(prev => [...prev, 'mask'])}>+ mask</span>
+                    </Pill>
+                    <div style={{ flex: 1 }} />
+                    <Btn sm onClick={() => setHouAttrNames(prev => [...prev, ''])}>+ attribut</Btn>
+                  </div>
+                  {houAttrNames.length === 0 && (
+                    <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+                      {houAttrMode === 'keep' ? 'Aucun attribut listé (P toujours conservé)' : 'Aucun attribut à supprimer'}
+                    </div>
+                  )}
+                  {houAttrNames.map((n, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <AttrCombo
+                        value={n}
+                        onChange={v => setHouAttrNames(prev => prev.map((x, j) => j === i ? v : x))}
+                      />
+                      <div onClick={() => setHouAttrNames(prev => prev.filter((_, j) => j !== i))}
+                        className="scale-hover-lg" style={{ cursor: 'pointer', color: 'var(--ink-4)', display: 'flex' }}>
+                        <Trash2 size={13} strokeWidth={1.75} />
+                      </div>
+                    </div>
+                  ))}
+                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+                    Attributs point uniquement (curveu, masks, boneCapture…). Renommage : bientôt.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* USD LAYERS — Maya & Houdini, asset + USD formats only (hidden otherwise).
+              Layered UsdSkel export; the checkboxes choose which layers to author. */}
+          {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
+            const usdOk = true
+            const on = usdOk && lightUsd
+            return (
+              <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+                <SecTitle>USD LAYERS</SecTitle>
+                <div
+                  onClick={() => { if (usdOk) setLightUsd(v => !v) }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    cursor: usdOk ? 'pointer' : 'default', userSelect: 'none',
+                    opacity: usdOk ? 1 : 0.45,
+                  }}
+                >
+                  <div style={{
+                    width: 28, height: 16, borderRadius: 8, flexShrink: 0,
+                    background: on ? 'var(--accent)' : 'var(--rule-2)',
+                    position: 'relative', transition: 'background 0.15s',
+                  }}>
+                    <div style={{
+                      position: 'absolute', top: 2, left: on ? 14 : 2,
+                      width: 12, height: 12, borderRadius: '50%', background: 'white',
+                      transition: 'left 0.15s',
+                    }} />
+                  </div>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
+                    {usdOk
+                      ? 'Export en layers USD (model / skel / anim…) — choisis ci-dessous'
+                      : 'Disponible seulement en usd / usda / usdc'}
+                  </span>
+                </div>
+                {on && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: 10 }}>
+                    {([['geo', 'Geo'], ['skel', 'Squelette'], ['anim', 'Animation'], ['weights', 'Skin weights (boneCapture)'], ['uv', 'UV']] as const).map(([k, label]) => (
+                      <div key={k} onClick={() => setLightInclude(p => ({ ...p, [k]: !p[k] }))}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+                        <Check on={lightInclude[k]} />
+                        <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           {/* APERÇU OUTPUT */}
-          <div style={{ flex: 1, padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <SecTitle>APERÇU OUTPUT</SecTitle>
-            <div className="subcard" style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0, overflowY: 'auto' }}>
+            <div className="subcard" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 90, maxHeight: 200, overflowY: 'auto' }}>
               {isSequence ? (<>
                 <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{filename}_v001/</div>
                 <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)', paddingLeft: 12 }}>
@@ -1035,12 +1516,7 @@ export function Publisher() {
               )}
               {dcc === 'ZBrush' && (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : 'var(--err)' }}>
-                  {zbrushConnected ? `● ZBrush connecté${zbrushVersion ? ` — ${zbrushVersion}` : ''}` : '✕ ZBrush non connecté'}
-                </div>
-              )}
-              {keepLocal && localDir && dcc === 'ZBrush' && (
-                <div style={{ marginTop: 4, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                  ↳ Copie locale : {localDir}
+                  {zbrushConnected ? `● ZBrush connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}` : '✕ ZBrush non connecté'}
                 </div>
               )}
             </div>
@@ -1051,6 +1527,9 @@ export function Publisher() {
       {/* Bottom bar */}
       <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
         <Btn ghost onClick={reset}>Réinitialiser</Btn>
+        {dcc === 'ZBrush' && (
+          <Btn ghost onClick={handleCancelZBrush}>Annuler</Btn>
+        )}
         <Btn primary onClick={() => void handlePublish()}>
           {publishing ? 'Publication…' : 'Publish →'}
         </Btn>

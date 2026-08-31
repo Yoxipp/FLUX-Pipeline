@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "flux:usd_assembler/recipe",
+  "title": "Flux USD Assembler Recipe",
+  "description": "Authoring form of an assembly recipe. Only pipeline identities (asset+version), never absolute paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target"],
+  "properties": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["component", "assembly", "shot", "sequence"] },
+        "name": { "type": "string", "minLength": 1 },
+        "asset": { "type": "string", "minLength": 1 },
+        "version": { "$ref": "#/$defs/version" },
+        "sequence": { "type": "string", "minLength": 1 },
+        "shot": { "type": "string", "minLength": 1 }
+      }
+    },
+    "assembly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset"],
+      "properties": {
+        "asset": { "type": "string", "minLength": 1 },
+        "version": { "$ref": "#/$defs/version" },
+        "variants": { "$ref": "#/$defs/variants" }
+      }
+    },
+    "departments": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset"],
+        "properties": {
+          "asset": { "type": "string", "minLength": 1 },
+          "version": { "$ref": "#/$defs/version" },
+          "instance": { "type": "string", "minLength": 1 },
+          "variants": { "$ref": "#/$defs/variants" },
+          "xform": { "$ref": "#/$defs/xform" }
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "enum": ["usda", "usdc", "usd"] },
+        "load": { "enum": ["all", "none", "payloads-on-demand"] }
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^(latest|v[0-9]+)$"
+    },
+    "variants": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "propertyNames": { "minLength": 1 }
+    },
+    "xform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "translate": { "$ref": "#/$defs/vec3" },
+        "rotate": { "$ref": "#/$defs/vec3" },
+        "scale": { "$ref": "#/$defs/vec3" }
+      }
+    },
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    }
+  }
+}

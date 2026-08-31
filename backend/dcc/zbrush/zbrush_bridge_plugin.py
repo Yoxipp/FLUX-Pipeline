@@ -119,6 +119,18 @@ def _apply_obj_options(options: dict) -> None:
             zbc.set_slider("Tool:Export:Mat", 1 if options["materials"] else 0)
         except Exception:
             pass
+    scope = options.get("scope", "selected")
+    if scope == "all":
+        try:
+            zbc.press("Tool:Export:All")
+        except Exception:
+            pass
+    elif scope == "visible":
+        try:
+            zbc.press("Tool:Export:Visible")
+        except Exception:
+            pass
+    # "selected" is ZBrush's default — no button press needed
 
 
 # ── FBX export helpers ────────────────────────────────────────────────────────
@@ -142,6 +154,18 @@ def _apply_fbx_options(options: dict) -> None:
         try:
             zbc.set_slider("FBXExportImport:MatExportGrp:ExportMat",
                            1 if options["materials"] else 0)
+        except Exception:
+            pass
+    scope = options.get("scope", "all")
+    _FBX_SCOPE_BUTTONS = {
+        "all":      "FBXExportImport:ExportGrp:AllMeshes",
+        "selected": "FBXExportImport:ExportGrp:SelMesh",
+        "visible":  "FBXExportImport:ExportGrp:VisMeshes",
+    }
+    btn = _FBX_SCOPE_BUTTONS.get(scope)
+    if btn:
+        try:
+            zbc.press(btn)
         except Exception:
             pass
 
@@ -268,7 +292,7 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
                 return False  # probe-only connection (connected then immediately closed)
             buf += chunk
         cmd = json.loads(buf.split(b"\n")[0].decode("utf-8"))
-        if cmd.get("action") == "stop":
+        if cmd.get("action") in ("stop", "cancel"):
             conn.sendall(b'{"status":"ok"}\n')
             conn.close()
             return True
@@ -376,6 +400,45 @@ def _focus_flux_window() -> None:
         _log(f"_focus_flux_window error: {exc!r}")
 
 
+def _focus_zbrush_window() -> None:
+    """Bring ZBrush's own main window to the foreground (Windows only).
+    Runs inside ZBrush's process so we locate the window by matching our own PID."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes as _wt
+        _u32 = ctypes.windll.user32
+
+        cur_pid = os.getpid()
+        found: "list[int]" = []  # [hwnd] — mutable container avoids nonlocal in callback
+
+        @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+        def _enum(hwnd: int, _: int) -> bool:
+            if not _u32.IsWindowVisible(hwnd):
+                return True
+            pid = _wt.DWORD(0)
+            _u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value != cur_pid:
+                return True
+            buf = ctypes.create_unicode_buffer(512)
+            _u32.GetWindowTextW(hwnd, buf, 512)
+            if buf.value:
+                found.append(hwnd)
+            return True
+
+        _u32.EnumWindows(_enum, 0)
+        if found:
+            hwnd = found[0]
+            _u32.ShowWindow(hwnd, 9)   # SW_RESTORE
+            _u32.SetForegroundWindow(hwnd)
+            _log(f"ZBrush window refocused hwnd={hwnd}")
+        else:
+            _log("ZBrush main window not found")
+    except Exception as exc:
+        _log(f"_focus_zbrush_window error: {exc!r}")
+
+
 def _on_publish_click(*args: object, **kwargs: object) -> None:
     """Callback for the 'Publish to FLUX' button in ZPlugin:FLUX.
     *args/**kwargs accepted — ZBrush may pass positional arguments to button callbacks."""
@@ -388,7 +451,7 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
         pass
     if _in_freeze:
         if _ZBRUSH_AVAILABLE:
-            zbc.show_note("Publication en cours — FLUX est en train de publier.")
+            zbc.show_note("Publication en cours, FLUX est en train de publier.")
         return
     if _server_sock is None:
         if _ZBRUSH_AVAILABLE:
@@ -402,6 +465,7 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
     finally:
         _in_freeze = False
         _log("zbc.freeze() returned — ZBrush UI restored")
+        _focus_zbrush_window()
 
 
 def _register_zbrush_ui() -> None:

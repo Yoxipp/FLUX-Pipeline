@@ -20,7 +20,7 @@ def set_current_user(name: str) -> None:
     try:
         create_user_dir(name)
     except RuntimeError:
-        log.warning("FLUX_ROOT not set — skipping user dir creation for '%s'", name)
+        log.warning("FLUX_ROOT not set, skipping user dir creation for '%s'", name)
 
 
 def list_users() -> list[str]:

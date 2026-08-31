@@ -37,14 +37,14 @@ export const Pill = ({ children, active, disabled, dot, style }: {
   </div>
 )
 
-export const Btn = ({ children, primary, ghost, sm, kbd, style, onClick }: {
+export const Btn = ({ children, primary, ghost, sm, kbd, disabled, style, onClick }: {
   children: React.ReactNode; primary?: boolean; ghost?: boolean; sm?: boolean; kbd?: boolean
-  style?: CSSProperties; onClick?: () => void
+  disabled?: boolean; style?: CSSProperties; onClick?: () => void
 }) => (
   <div
-    className={`btn${primary ? ' primary' : ''}${ghost ? ' ghost' : ''}${sm ? ' sm' : ''}${kbd ? ' kbd' : ''}`}
-    style={style}
-    onClick={onClick}
+    className={`btn${primary ? ' primary' : ''}${ghost ? ' ghost' : ''}${sm ? ' sm' : ''}${kbd ? ' kbd' : ''}${disabled ? ' disabled' : ''}`}
+    style={disabled ? { opacity: 0.45, pointerEvents: 'none', ...style } : style}
+    onClick={disabled ? undefined : onClick}
   >{children}</div>
 )
 
@@ -69,7 +69,7 @@ export const Toggle = ({ on }: { on: boolean }) => (
     border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
     background: on ? 'var(--accent-soft)' : 'var(--bg-deep)',
     position: 'relative', display: 'inline-block',
-    boxShadow: on ? 'var(--shadow-xs), 0 0 6px color-mix(in oklch, var(--accent) 20%, transparent)' : 'var(--shadow-inset)',
+    boxShadow: on ? 'var(--shadow-xs)' : 'var(--shadow-inset)',
     transition: 'background 0.18s, border-color 0.18s, box-shadow 0.18s',
   }}>
     <div style={{

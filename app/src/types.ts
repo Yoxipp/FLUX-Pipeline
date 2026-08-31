@@ -13,6 +13,7 @@ export interface ActivityEvent {
   user: string
   action: string
   file?: string
+  dest_folder?: string
   project?: string
   date: string
   time: string
@@ -79,6 +80,8 @@ export interface HoudiniPublishPayload {
   is_sequence?: boolean
   frame_range?: [number, number, number]
   frame_padding?: number
+  export_options?: Record<string, unknown>
+  attr_filter?: { mode: 'keep' | 'remove'; names: string[] }
   description?: string
   user?: string
 }
@@ -106,8 +109,6 @@ export interface ZBrushPublishPayload {
   filename:       string
   extension:      string
   export_options?: Record<string, unknown>
-  keep_local?:    boolean
-  local_dir?:     string
   description?:   string
   user?:          string
 }

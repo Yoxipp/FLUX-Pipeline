@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import os
 import subprocess
 from pathlib import Path
 
@@ -51,17 +52,24 @@ def get_installed_dccs() -> dict[str, str]:
 
 
 def launch_dcc(dcc_name: str) -> bool:
-    """Launch *dcc_name* as a detached process. Returns True if the process started."""
+    """Launch *dcc_name* fully independent of the hub. Returns True on start.
+
+    CRITICAL: the DCC must NOT be a descendant of the FastAPI backend, otherwise the
+    hub's shutdown (taskkill /PID <backend> /T) tree-kills it — closing FLUX would kill
+    an open Maya/Houdini with unsaved work. On Windows we use os.startfile (ShellExecute),
+    which reparents the process to Explorer so it survives the hub closing; DETACHED_PROCESS
+    alone is NOT enough (taskkill /T walks parent->child links regardless).
+    """
     exe = _resolve_exe(dcc_name)
     if exe is None:
         log.warning("No executable found for '%s'", dcc_name)
         return False
     try:
-        subprocess.Popen(
-            [exe],
-            creationflags=_DETACHED_PROCESS,
-            close_fds=True,
-        )
+        if os.name == "nt":
+            os.startfile(exe)  # type: ignore[attr-defined]  # Windows only; reparents to Explorer
+        else:
+            # POSIX: new session detaches from the hub's process group.
+            subprocess.Popen([exe], start_new_session=True, close_fds=True)
         log.info("Launched %s — %s", dcc_name, exe)
         return True
     except OSError as e:

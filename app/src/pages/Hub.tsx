@@ -10,18 +10,6 @@ import { Avatar, Tag } from '../components/shared/ui'
 import { api } from '../api/client'
 import type { LucideIcon } from 'lucide-react'
 
-const ACTIVITY_MOCK = [
-  { name: 'CHAR_HorseRig_LIVE.mb',   who: 'Adam', h: 'il y a 2h',  t: 'CHAR', v: 'v0003' },
-  { name: 'ENV_City_Block_LIVE.usda', who: 'Milo', h: 'hier 18:42', t: 'ENV',  v: 'v0001' },
-  { name: 'PROP_Sword_LIVE.mb',       who: 'Dorian',  h: 'hier 15:20', t: 'PROP', v: 'v0002' },
-  { name: 'CHAR_Tigre_LIVE.mb',       who: 'Adam', h: 'lun 11:05',  t: 'CHAR', v: 'v0005' },
-]
-
-const CHAT_FALLBACK = [
-  { who: 'Milo', h: '14:18', msg: 'le rig cheval est dispo sur le serveur' },
-  { who: 'Adam', h: '14:20', msg: 'ok je pull, merci' },
-]
-
 const SHORTCUTS: { ic: LucideIcon; t: string; s: string; path: string; active?: boolean }[] = [
   { ic: Upload,     t: 'Publisher',      s: 'Exporter un asset',  path: '/publisher', active: true },
   { ic: Download,   t: 'Importer',       s: 'Charger un asset',   path: '/importer' },
@@ -46,9 +34,9 @@ export function Hub() {
   const { events }    = useActivity()
   const { settings }  = useSettings()
   const dccStatus     = useDccStatus()
-  const user          = settings?.username ?? 'Milo'
+  const user          = settings?.username ?? 'User'
 
-  const [chatMessages, setChatMessages] = useState(CHAT_FALLBACK)
+  const [chatMessages, setChatMessages] = useState<{ who: string; h: string; msg: string }[]>([])
   const [chatInput, setChatInput]       = useState('')
 
   const loadChat = useCallback(async () => {
@@ -76,9 +64,7 @@ export function Hub() {
     } catch {}
   }, [chatInput, user, loadChat])
 
-  const activityRows = events.length > 0
-    ? events.slice(0, 4).map(e => ({ name: e.file ?? e.action, who: e.user, h: e.time, t: e.action, v: '' }))
-    : ACTIVITY_MOCK
+  const activityRows = events.slice(0, 4).map(e => ({ name: e.file ?? e.action, who: e.user, h: e.time, t: e.action, v: '' }))
 
   const now     = new Date()
   const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
@@ -111,6 +97,11 @@ export function Hub() {
           <div style={{ flex: '0 0 40%', display: 'flex', flexDirection: 'column', minHeight: 0, borderBottom: '1px solid var(--rule)' }}>
             <div style={{ padding: '10px 16px 6px', flexShrink: 0 }}><div className="cap">ACTIVITÉ RÉCENTE</div></div>
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+              {activityRows.length === 0 && (
+                <div style={{ padding: '10px 16px', fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                  Aucune activité récente
+                </div>
+              )}
               {activityRows.map((r, i) => (
                 <div key={i} className="row" style={{ padding: '8px 16px' }}>
                   <div style={{ width: 7, height: 7, borderRadius: 3, background: 'var(--accent-soft)', border: '1px solid var(--accent)', flexShrink: 0 }} />
@@ -131,6 +122,11 @@ export function Hub() {
               <div className="cap">TEAM CHAT</div>
             </div>
             <div style={{ flex: 1, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
+              {chatMessages.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
+                  Aucun message
+                </div>
+              )}
               {chatMessages.map((m, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8 }}>
                   <Avatar ch={m.who[0]} size={20} />
@@ -193,7 +189,7 @@ export function Hub() {
                       background: c.active ? 'var(--accent-soft)' : 'var(--paper-2)',
                       display: 'flex', flexDirection: 'column', gap: 8,
                       borderRadius: 8, cursor: 'pointer',
-                      boxShadow: c.active ? 'var(--shadow-sm), 0 0 10px color-mix(in oklch, var(--accent) 12%, transparent)' : 'var(--shadow-sm)',
+                      boxShadow: 'var(--shadow-sm)',
                       transition: 'border-color 0.12s, background 0.12s, transform 0.12s',
                     }}
                   >

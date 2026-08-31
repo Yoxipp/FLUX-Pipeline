@@ -68,6 +68,11 @@ class ZBrushClient:
         """Send stop command to release ZBrush from the freeze loop."""
         return self._send({"action": "stop"})
 
+    def cancel(self) -> dict:
+        """Send cancel command — same effect as stop but with a shorter timeout.
+        Used for user-initiated cancels so the UI doesn't hang if ZBrush isn't frozen."""
+        return self._send({"action": "cancel"}, timeout=3.0)
+
     # ------------------------------------------------------------------
     # Low-level
     # ------------------------------------------------------------------

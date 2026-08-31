@@ -76,7 +76,7 @@ export function FirstLaunch() {
           <div>
             <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 14, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</div>
             <div style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
-              {step === 1 ? 'Étape 1 / 2 — Dossier de travail' : 'Étape 2 / 2 — Utilisateur'}
+              {step === 1 ? 'Étape 1 / 2 · Dossier de travail' : 'Étape 2 / 2 · Utilisateur'}
             </div>
           </div>
         </div>

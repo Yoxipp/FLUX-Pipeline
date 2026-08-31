@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING, DEFAULT_TYPE_TOKENS
+from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.activity.activity_writer import log_publish
@@ -24,10 +24,10 @@ log = get_logger(__name__)
 def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     """Return the destination folder for *filename* inside *project_path*.
 
-    Asset:  project/<CLASS_path>/<NAME>/<type_sub>/
-            type_sub comes from DEFAULT_TYPE_TOKENS (e.g. SCULPT → model/sculpt)
-            or falls back to TYPE.lower() for unknown types.
-    Shot:   project/<CLASS_template{seq=SEQ, shot=SHOT}>/
+    Asset:  project/<NAME_path>/<type_sub>/<instance>/
+            type_sub comes from tokens["TYPE"] (defaults + project custom entries),
+            falls back to TYPE.lower() for unknown types.
+    Shot:   project/<CLASS_template{seq=SEQ, shot=SHOT}>/<instance>/
     Returns None if *filename* is unparseable or required tokens are missing.
     """
     parsed = parse_filename(filename)
@@ -36,6 +36,8 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
         return None
 
     tokens = load_tokens(project_path)
+
+    instance = parsed["INSTANCE"].lower() if parsed["INSTANCE"] else "null"
 
     if parsed["is_shot"]:
         class_rel = get_path_for_token(tokens, "CLASS", parsed["CLASS"])
@@ -47,9 +49,9 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
         except KeyError as e:
             log.warning("Template substitution failed for %r: %s", class_rel, e)
             return None
-        return project_path / rel
+        return project_path / rel / instance
 
-    # asset: NAME token gives asset root, TYPE maps to subfolder
+    # asset: NAME token gives asset root, TYPE maps to subfolder, then instance
     name_rel = get_path_for_token(tokens, "NAME", parsed["NAME"])
     if name_rel is None:
         # fallback: CLASS_path/NAME
@@ -59,8 +61,8 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
             return None
         name_rel = f"{class_rel}/{parsed['NAME']}"
 
-    type_sub = DEFAULT_TYPE_TOKENS.get(parsed["TYPE"], parsed["TYPE"].lower())
-    return project_path / name_rel / type_sub
+    type_sub = tokens.get("TYPE", {}).get(parsed["TYPE"]) or parsed["TYPE"].lower()
+    return project_path / name_rel / type_sub / instance
 
 
 # ── versioning ─────────────────────────────────────────────────────────────────
@@ -145,7 +147,7 @@ def publish_file(
         return None
 
     append_log(dest_folder, base_name, format_version(new_ver), description, user)
-    log_publish(user, dest_name, project_name or project_path.name)
+    log_publish(user, dest_name, project_name or project_path.name, dest_folder=dest_folder)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, next_ver)
     return dest_path

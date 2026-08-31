@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
+import { useLocation } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
@@ -252,14 +254,14 @@ function TokenFinder({ project, tokens, onChange }: {
             >
               <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
               <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
-                {value || '—'}
+                {value || '-'}
               </span>
             </div>
             {isOpen && (
               <div style={{ position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: 110, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
                 {value && (
                   <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
-                    — effacer
+                    effacer
                   </div>
                 )}
                 {opts.length === 0 ? (
@@ -310,7 +312,7 @@ function Spinner({ value, onChange }: { value: number; onChange: (v: number) => 
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') commit() }}
-        style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
+        style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
       />
       <div onClick={() => onChange(value + 1)} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
         <Plus size={10} strokeWidth={2} />
@@ -325,7 +327,7 @@ function SelectEl({ options, value, onChange }: { options: string[]; value: stri
       <SelectTrigger style={{ width: '100%' }} />
       <SelectContent>
         {options.length === 0
-          ? <SelectItem value="__empty__">—</SelectItem>
+          ? <SelectItem value="__empty__">-</SelectItem>
           : options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
       </SelectContent>
     </Select>
@@ -338,7 +340,7 @@ function InputField({ value, onChange, placeholder }: { value: string; onChange:
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      style={{ width: '100%', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 10, padding: '0 8px', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
+      style={{ width: '100%', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 10, padding: '0 8px', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
     />
   )
 }
@@ -485,7 +487,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
         <div className="cap">SHOT</div>
         <div>
           <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>IN SEQUENCE</div>
-          <SelectEl options={sequences.length > 0 ? sequences : ['—']} value={seq} onChange={setSeq} />
+          <SelectEl options={sequences.length > 0 ? sequences : ['-']} value={seq} onChange={setSeq} />
         </div>
         <div>
           <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>SHOT NO.</div>
@@ -601,7 +603,7 @@ function RenameModal({ item, onConfirm, onCancel }: {
           value={name}
           onChange={e => setName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') void handleConfirm() }}
-          style={{ width: '100%', height: 32, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 11, padding: '0 10px', outline: 'none', boxSizing: 'border-box' }}
+          style={{ width: '100%', height: 32, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 11, padding: '0 10px', outline: 'none', boxSizing: 'border-box' }}
         />
         {error && <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)', marginTop: 6 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
@@ -726,7 +728,7 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onOpenInHoudini, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onCopyPath, onOpenInHoudini, onOpenInMaya, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -738,7 +740,9 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
   onRename:         () => void
   onMove:           () => void
   onDelete:         () => void
+  onCopyPath?:      () => void
   onOpenInHoudini?: () => void
+  onOpenInMaya?:    () => void
   onClose:          () => void
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -791,6 +795,12 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
         false,
         () => { onArchive(); onClose() },
       )}
+      {onCopyPath && count === 1 && (
+        <>
+          <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
+          {row('Copier le chemin', false, () => { onCopyPath(); onClose() })}
+        </>
+      )}
       {canEdit && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
@@ -798,7 +808,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
           {row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
         </>
       )}
-      {onOpenInHoudini && (
+      {(onOpenInHoudini || onOpenInMaya) && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           <div
@@ -823,18 +833,34 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
                 borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 140,
                 overflow: 'hidden', paddingBlock: 4, zIndex: 1001,
               }}>
-                <div
-                  onClick={() => { onOpenInHoudini(); onClose() }}
-                  style={{
-                    padding: '6px 12px', fontSize: 11, cursor: 'pointer',
-                    color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
-                    transition: 'background 0.06s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  Houdini
-                </div>
+                {onOpenInHoudini && (
+                  <div
+                    onClick={() => { onOpenInHoudini(); onClose() }}
+                    style={{
+                      padding: '6px 12px', fontSize: 11, cursor: 'pointer',
+                      color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
+                      transition: 'background 0.06s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    Houdini
+                  </div>
+                )}
+                {onOpenInMaya && (
+                  <div
+                    onClick={() => { onOpenInMaya(); onClose() }}
+                    style={{
+                      padding: '6px 12px', fontSize: 11, cursor: 'pointer',
+                      color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
+                      transition: 'background 0.06s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    Maya
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -934,7 +960,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
     <>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
-          {label} — {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
+          {label} · {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {items.length === 0 ? (
@@ -984,6 +1010,21 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
   )
 }
 
+// ── Deep-link helper ──────────────────────────────────────────────────────────
+
+function resolveOpenPath(absPath: string, workspace: string): NavLevel | null {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  // Projects live at FLUX_ROOT/DOSSIER_PROJETS/<project>/...
+  const ws   = norm(workspace) + '/DOSSIER_PROJETS'
+  const ap   = norm(absPath)
+  if (!ap.toLowerCase().startsWith(ws.toLowerCase())) return null
+  const relative = ap.slice(ws.length).replace(/^\//, '')
+  const parts    = relative.split('/').filter(Boolean)
+  if (parts.length === 0) return null
+  const [project, ...subpath] = parts
+  return { kind: 'inside', project, subpath }
+}
+
 // ── Composant principal ───────────────────────────────────────────────────────
 
 export function Projects() {
@@ -1001,9 +1042,19 @@ export function Projects() {
   const [sequences, setSequences]         = useState<string[]>([])
 
   const { settings } = useSettings()
+  const location = useLocation()
   useEffect(() => {
     if (settings?.last_project) setActiveProject(settings.last_project)
   }, [settings?.last_project])
+
+  useEffect(() => {
+    const openPath = (location.state as { openPath?: string } | null)?.openPath
+    if (!openPath || !settings?.workspace) return
+    const navLevel = resolveOpenPath(openPath, settings.workspace)
+    if (!navLevel) return
+    setNavStack([{ kind: 'root' }, navLevel])
+    setNavIdx(1)
+  }, [settings?.workspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [tab, setTab]             = useState<Tab>('project')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
@@ -1400,15 +1451,40 @@ export function Projects() {
   const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
-    const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
-    await api.createFluxImporterNode({
-      project:       nav.project,
-      flux_class:    tok.CLASS,
-      flux_type:     tok.TYPE,
-      flux_name:     tok.NAME,
-      flux_instance: tok.INSTANCE,
-      flux_iter:     'LAST',
-    })
+    try {
+      const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
+      await api.createFluxImporterNode({
+        project:       nav.project,
+        flux_class:    tok.CLASS,
+        flux_type:     tok.TYPE,
+        flux_name:     tok.NAME,
+        flux_instance: tok.INSTANCE,
+        flux_iter:     'LAST',
+      })
+      toast.success(`${item.name} importé dans Houdini`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)
+      toast.error(offline
+        ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
+        : `Import Houdini échoué : ${msg}`)
+    }
+  }, [nav])
+
+  const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc', '.usd', '.usda', '.usdc', '.usdz'])
+
+  const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    try {
+      await api.importFileInMaya(nav.project, rel_path)
+      toast.success(`${item.name} importé dans Maya`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      toast.error(msg.includes('répond pas')
+        ? 'Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
+        : `Import Maya échoué : ${msg}`)
+    }
   }, [nav])
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
@@ -1442,6 +1518,21 @@ export function Projects() {
       setDeleteError(e instanceof Error ? e.message : 'Erreur lors de la suppression')
     }
   }, [nav, loadItems])
+
+  const handleCopyPath = useCallback(async (item: ExplorerItem) => {
+    const ws = settings?.workspace
+    if (!ws) return
+    const sep = ws.includes('\\') ? '\\' : '/'
+    const parts = nav.kind === 'root'
+      ? [ws, 'DOSSIER_PROJETS', item.name]
+      : [ws, 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
+    try {
+      await navigator.clipboard.writeText(parts.join(sep))
+      toast.success('Chemin copié')
+    } catch {
+      toast.error('Impossible de copier le chemin')
+    }
+  }, [nav, settings?.workspace])
 
   const recentSidebarItems = recents.slice(0, 5)
 
@@ -1497,7 +1588,7 @@ export function Projects() {
               onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null) }}
               onKeyDown={e => { if (e.key === 'Enter') void handleSearch(searchQuery) }}
               placeholder="Rechercher…"
-              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 10, color: 'var(--ink)', fontFamily: 'var(--mono)' }}
+              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 10, color: 'var(--ink-2)', fontFamily: 'var(--sans)' }}
             />
             {searchQuery && (
               <X size={9} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0, cursor: 'pointer' }}
@@ -1622,8 +1713,8 @@ export function Projects() {
                 <>
                   <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--paper-2)' }}>
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', flex: 1 }}>
-                      <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS — </span>
-                      {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} — </span>}
+                      <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS · </span>
+                      {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} · </span>}
                       {findLoading ? 'Recherche…' : searchResults.length === 0 ? 'Aucun résultat' : `${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`}
                     </div>
                     <div
@@ -1783,7 +1874,7 @@ export function Projects() {
             <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
             <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--accent-hi)' }}>
-                {activeProject || '—'}
+                {activeProject || '-'}
               </div>
               <div style={{ fontSize: 9, color: 'var(--ink-3)', marginTop: 2 }}>
                 {sequences.length > 0 ? `${sequences.length} séquences` : 'Aucune séquence'}
@@ -1816,9 +1907,18 @@ export function Projects() {
           onRename={() => setRenameTarget(ctxMenu.items[0])}
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
+          onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
           onOpenInHoudini={nav.kind === 'inside' && ctxMenu.items.length === 1
             ? () => void handleOpenInHoudini(ctxMenu.items[0])
             : undefined}
+          onOpenInMaya={
+            nav.kind === 'inside' &&
+            ctxMenu.items.length === 1 &&
+            !ctxMenu.items[0].isDir &&
+            MAYA_IMPORT_EXTS.has('.' + (ctxMenu.items[0].name.split('.').pop() ?? '').toLowerCase())
+              ? () => void handleOpenInMaya(ctxMenu.items[0])
+              : undefined
+          }
           onClose={() => setCtxMenu(null)}
         />
       )}

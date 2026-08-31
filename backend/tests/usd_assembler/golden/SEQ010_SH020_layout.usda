@@ -1,0 +1,19 @@
+#usda 1.0
+
+over "SEQ010_SH020"
+{
+    def Xform "ENV_forest" (
+        prepend references = @ENV_forest.usda@
+    )
+    {
+    }
+
+    def Xform "hero_01" (
+        prepend references = @CHAR_hero.usda@
+    )
+    {
+        double3 xformOp:translate = (2, 0, 5)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}
+

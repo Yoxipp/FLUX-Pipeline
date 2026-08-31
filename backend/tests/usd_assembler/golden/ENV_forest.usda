@@ -1,0 +1,39 @@
+#usda 1.0
+(
+    defaultPrim = "ENV_forest"
+)
+
+def Xform "ENV_forest" (
+    kind = "assembly"
+)
+{
+    def Xform "rock_a" (
+        prepend references = @Rock_granite.usd@
+    )
+    {
+        float3 xformOp:rotateXYZ = (0, 45, 0)
+        double3 xformOp:translate = (3, 0, 2)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+
+    def Xform "tree_a" (
+        prepend references = @Tree_pine.usd@
+        variants = {
+            string lod = "hi"
+        }
+    )
+    {
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Xform "tree_b" (
+        prepend references = @Tree_pine.usd@
+    )
+    {
+        float3 xformOp:scale = (1.2, 1.2, 1.2)
+        double3 xformOp:translate = (10, 0, -4)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+}
+
