@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  Home, Upload, Download, Layers,
+  Home, Upload, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine,
@@ -307,14 +307,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </div>
 
       <NavGroup title="ASSETS">
-        <NavItem icon={Upload}   label="Publisher"      active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
-        <NavItem icon={Download} label="Importer"       active={pathname === '/importer'}  indent onClick={() => navigate('/importer')} />
-        <NavItem icon={Layers}   label="USD Assembleur" active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
+        <NavItem icon={FolderOpen} label="Folder Manager" active={pathname === '/projects'}  indent onClick={() => navigate('/projects')} />
+        <NavItem icon={Upload}     label="Publisher"      active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
+        <NavItem icon={Layers}     label="USD Assembleur" active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
       </NavGroup>
 
       <NavGroup title="PIPELINE">
         <NavItem icon={BookOpen}   label="Shelf Manager"  active={pathname === '/shelf'}    indent onClick={() => navigate('/shelf')} />
-        <NavItem icon={FolderOpen} label="Folder Manager" active={pathname === '/projects'} indent onClick={() => navigate('/projects')} />
         <NavItem icon={Activity}   label="Activité"       active={pathname === '/activity'} indent notif={unreadCount} onClick={() => navigate('/activity')} />
       </NavGroup>
 

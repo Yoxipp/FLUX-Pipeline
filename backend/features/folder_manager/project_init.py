@@ -21,7 +21,6 @@ _PROJECT_DIRS = (
     "assets/chara",
     "assets/props",
     "assets/enviros",
-    "assets/cfx_rig",
     "assets/fx_rig",
     "shot",
     "lighting",

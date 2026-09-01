@@ -136,3 +136,32 @@ async def list_users() -> dict:
     loop = asyncio.get_event_loop()
     users = await loop.run_in_executor(None, _list)
     return {"users": users}
+
+
+# ── Per-user data blob (favorites / recents / archived, …) ────────────────────
+
+@router.get("/user-data")
+async def get_user_data() -> dict:
+    """Return the active user's settings blob (USER/<user>/UserSettings/User.json)."""
+    user = config.get_current_user()
+    if not user:
+        return {}
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: user_utils.read_user_data(user))
+
+
+@router.put("/user-data")
+async def put_user_data(patch: dict) -> dict:
+    """Merge *patch* into the active user's settings blob and persist it."""
+    user = config.get_current_user()
+    if not user:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
+
+    def _merge() -> dict:
+        data = user_utils.read_user_data(user)
+        data.update(patch)
+        user_utils.write_user_data(user, data)
+        return data
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _merge)

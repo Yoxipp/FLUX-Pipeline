@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from core.constants import JSON_MODIF_LOG
@@ -85,24 +84,6 @@ def list_folders(project_path: Path, parent_rel: str = "") -> list[str]:
     except OSError as e:
         log.warning("list_folders error at %s: %s", target, e)
         return []
-
-
-def get_file_metadata(file_path: Path) -> dict:
-    """Return basic filesystem metadata for a file (matches FileEntry TypeScript type)."""
-    try:
-        stat = file_path.stat()
-        modified = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-        size = stat.st_size
-    except OSError:
-        modified = ""
-        size = 0
-    return {
-        "name":     file_path.name,
-        "path":     str(file_path),
-        "size":     size,
-        "modified": modified,
-        "is_dir":   False,
-    }
 
 
 def list_files_immediate(folder_path: Path) -> list[Path]:

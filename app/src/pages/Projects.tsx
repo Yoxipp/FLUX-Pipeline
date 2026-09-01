@@ -4,11 +4,16 @@ import { useLocation } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
-  HardDrive, Plus, Minus, X, Trash2,
+  HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw, Lock,
 } from 'lucide-react'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
 import { useSettings } from '../hooks/useSettings'
+import { useDccStatus } from '../hooks/useDccStatus'
+
+// DCCs the backend can import into (from the Folder Manager). Others have no
+// import bridge yet, so they never appear in "Ouvrir dans…".
+const IMPORT_DCCS = ['Maya', 'Houdini'] as const
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +46,17 @@ interface TokenSel { class: string; type: string; name: string; instance: string
 
 interface CtxMenu { x: number; y: number; items: ExplorerItem[] }
 
+// Clipboard for copy/cut → paste. Scoped to a project + source folder.
+interface Clip { op: 'copy' | 'cut'; project: string; subpath: string[]; items: ExplorerItem[] }
+
+// Reversible file operations, for Ctrl+Z. One user action pushes one UndoOp
+// (which may bundle several items). Delete is destructive → never recorded.
+type UndoAction =
+  | { kind: 'move';   project: string; fromSub: string[]; toSub: string[]; name: string }
+  | { kind: 'rename'; project: string; sub: string[]; oldName: string; newName: string }
+  | { kind: 'copy';   project: string; sub: string[]; name: string }   // undo = delete the created copy
+interface UndoOp { label: string; actions: UndoAction[] }
+
 type Tab = 'project' | 'asset' | 'shot' | 'directory'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'project',   label: 'Projet' },
@@ -49,7 +65,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'directory', label: 'Dossier' },
 ]
 
-const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'CFXRIG', 'FXRIG']
+const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'FXRIG']
 const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custom']
 const FINDER_ITERS = ['LAST', 'V001', 'V002', 'V003', 'V004', 'V005']
 
@@ -91,19 +107,6 @@ function navigateTargetFor(s: SavedItem): NavLevel {
     return { kind: 'inside', project: s.project, subpath: [...s.subpath, s.label] }
   }
   return { kind: 'inside', project: s.project, subpath: s.subpath }
-}
-
-function readLS<T>(key: string, fallback: T): T {
-  try { return JSON.parse(localStorage.getItem(key) ?? '') as T } catch { return fallback }
-}
-
-// Saved-list keys are scoped per artist so one user's favorites / recents / archived
-// never leak into another's after a user switch. `flux.currentUser` is written
-// synchronously by App.tsx before any page renders.
-function userScopedKey(base: string): string {
-  let user = ''
-  try { user = localStorage.getItem('flux.currentUser') ?? '' } catch { /* blocked storage */ }
-  return user ? `${base}::${user}` : base
 }
 
 // ── Icônes SVG ────────────────────────────────────────────────────────────────
@@ -737,15 +740,17 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count, onFavorite, onArchive, onRename, onMove, onDelete, onCopyPath, onOpenInHoudini, onOpenInMaya, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, onOpenInHoudini, onOpenInMaya, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
+  locked: boolean
   canEdit: boolean
   canDelete: boolean
   count: number
   onFavorite:       () => void
   onArchive:        () => void
+  onToggleLock?:    () => void
   onRename:         () => void
   onMove:           () => void
   onDelete:         () => void
@@ -804,6 +809,12 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
         false,
         () => { onArchive(); onClose() },
       )}
+      {onToggleLock && count === 1 && (
+        <>
+          <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
+          {row(locked ? '🔓 Déverrouiller' : '🔒 Verrouiller', false, () => { onToggleLock(); onClose() })}
+        </>
+      )}
       {onCopyPath && count === 1 && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
@@ -814,7 +825,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           {count === 1 && row('Renommer', false, () => { onRename(); onClose() })}
-          {row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
+          {!locked && row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
         </>
       )}
       {(onOpenInHoudini || onOpenInMaya) && (
@@ -875,7 +886,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, canEdit, canDelete, count,
           </div>
         </>
       )}
-      {canDelete && (
+      {canDelete && !locked && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           {row(count > 1 ? `Supprimer (${count})` : 'Supprimer', true, () => { onDelete(); onClose() })}
@@ -1051,7 +1062,12 @@ export function Projects() {
   const [sequences, setSequences]         = useState<string[]>([])
 
   const { settings } = useSettings()
+  const dccStatus = useDccStatus()
   const location = useLocation()
+
+  // Local-file → DCC import (migrated from the old Importer page)
+  const [localDcc, setLocalDcc]             = useState<string>('Maya')
+  const [localImporting, setLocalImporting] = useState(false)
   useEffect(() => {
     if (settings?.last_project) setActiveProject(settings.last_project)
   }, [settings?.last_project])
@@ -1068,13 +1084,11 @@ export function Projects() {
   const [tab, setTab]             = useState<Tab>('project')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
 
-  // Saved lists (localStorage, scoped per artist — see userScopedKey)
-  const FAV_KEY  = userScopedKey('flux_favorites')
-  const ARCH_KEY = userScopedKey('flux_archived')
-  const REC_KEY  = userScopedKey('flux_recents')
-  const [favorites, setFavorites] = useState<SavedItem[]>(() => readLS<SavedItem[]>(FAV_KEY,  []))
-  const [archived,  setArchived]  = useState<SavedItem[]>(() => readLS<SavedItem[]>(ARCH_KEY, []))
-  const [recents,   setRecents]   = useState<SavedItem[]>(() => readLS<SavedItem[]>(REC_KEY,  []))
+  // Saved lists — persisted per-user on the Flux drive (USER/<user>/UserSettings/User.json)
+  const [favorites, setFavorites] = useState<SavedItem[]>([])
+  const [archived,  setArchived]  = useState<SavedItem[]>([])
+  const [recents,   setRecents]   = useState<SavedItem[]>([])
+  const savedLoaded = useRef(false)
 
   // Context menu & delete confirm
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null)
@@ -1092,13 +1106,42 @@ export function Projects() {
   const [findLoading, setFindLoading]     = useState(false)
   const [resultLabel, setResultLabel]     = useState('')
 
+  // Editable / copy-paste path bar
+  const [editingPath, setEditingPath] = useState(false)
+  const [pathDraft, setPathDraft]     = useState('')
+  const [pathError, setPathError]     = useState('')
+
+  // File clipboard + drag & drop
+  const [clipboard, setClipboard]   = useState<Clip | null>(null)
+  const [dragOverName, setDragOverName] = useState<string | null>(null)
+  const [dragOverBc, setDragOverBc]     = useState<number | null>(null)
+  const [dragOverUp, setDragOverUp]     = useState(false)
+  const [undoStack, setUndoStack]       = useState<UndoOp[]>([])
+  const [locks, setLocks]               = useState<Set<string>>(new Set())  // locked rel paths, current project
+  const dragNamesRef = useRef<string[]>([])
+
   const lastClickedRef = useRef<string | null>(null)
 
   // ── Persist saved lists ────────────────────────────────────────────────────
 
-  useEffect(() => { localStorage.setItem(FAV_KEY,  JSON.stringify(favorites)) }, [FAV_KEY,  favorites])
-  useEffect(() => { localStorage.setItem(ARCH_KEY, JSON.stringify(archived))  }, [ARCH_KEY, archived])
-  useEffect(() => { localStorage.setItem(REC_KEY,  JSON.stringify(recents))   }, [REC_KEY,  recents])
+  // Load saved lists once from the per-user store
+  useEffect(() => {
+    api.getUserData().then(d => {
+      const fm = (d.folder_manager ?? {}) as { favorites?: SavedItem[]; archived?: SavedItem[]; recents?: SavedItem[] }
+      if (Array.isArray(fm.favorites)) setFavorites(fm.favorites)
+      if (Array.isArray(fm.archived))  setArchived(fm.archived)
+      if (Array.isArray(fm.recents))   setRecents(fm.recents)
+    }).catch(() => {}).finally(() => { savedLoaded.current = true })
+  }, [])
+
+  // Persist (debounced) after the initial load, so empty state never overwrites the store
+  useEffect(() => {
+    if (!savedLoaded.current) return
+    const t = setTimeout(() => {
+      void api.setUserData({ folder_manager: { favorites, archived, recents } }).catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [favorites, archived, recents])
 
   // ── Close context menu on outside click / Escape ───────────────────────────
 
@@ -1113,18 +1156,39 @@ export function Projects() {
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', h) }
   }, [ctxMenu])
 
+  // ── Locks ──────────────────────────────────────────────────────────────────
+
+  const lockRelOf = useCallback((item: ExplorerItem): string =>
+    (nav.kind === 'inside' ? [...nav.subpath, item.name] : [item.name]).join('/'), [nav])
+
+  const isItemLocked = useCallback((item: ExplorerItem): boolean =>
+    nav.kind === 'inside' && locks.has(lockRelOf(item)), [nav, locks, lockRelOf])
+
+  const toggleLock = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const willLock = !locks.has(lockRelOf(item))
+    try {
+      const d = await api.setLock(nav.project, nav.subpath, item.name, willLock)
+      setLocks(new Set(d.locked))
+      toast.success(willLock ? `"${item.name}" verrouillé` : `"${item.name}" déverrouillé`)
+    } catch (e) {
+      toast.error(`Verrou : ${e instanceof Error ? e.message : 'échec'}`)
+    }
+  }, [nav, locks, lockRelOf])
+
   // ── Delete key on selected item ────────────────────────────────────────────
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'Delete' && selectedNames.size > 0 && !deleteConfirm && nav.kind === 'inside') {
         const targets = items.filter(it => selectedNames.has(it.name))
+        if (targets.some(isItemLocked)) { toast.error('Élément verrouillé — déverrouillez d’abord'); return }
         if (targets.length > 0) setDeleteConfirm(targets)
       }
     }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
-  }, [selectedNames, items, deleteConfirm, nav])
+  }, [selectedNames, items, deleteConfirm, nav, isItemLocked])
 
   // ── Dérivés ────────────────────────────────────────────────────────────────
 
@@ -1165,6 +1229,72 @@ export function Projects() {
     else if (nav.kind === 'inside')
       navigateTo({ kind: 'inside', project: nav.project, subpath: nav.subpath.slice(0, segIdx - 1) })
   }, [nav, navigateTo])
+
+  // ── Path bar (copy / paste-to-navigate) ────────────────────────────────────
+
+  // Absolute Windows/POSIX path of the current location, on the Flux drive.
+  const currentAbsPath = useCallback((): string => {
+    const ws = settings?.workspace
+    if (!ws) return ''
+    const sep = ws.includes('\\') ? '\\' : '/'
+    const base = [ws.replace(/[\\/]+$/, ''), 'DOSSIER_PROJETS']
+    if (nav.kind === 'inside') base.push(nav.project, ...nav.subpath)
+    return base.join(sep)
+  }, [settings?.workspace, nav])
+
+  // Parse a pasted/typed path → NavLevel. Accepts:
+  //  - absolute Windows (C:\…\DOSSIER_PROJETS\PROJ\sub) or UNC/POSIX under the workspace
+  //  - relative "PROJ/sub" or "DOSSIER_PROJETS/PROJ/sub" (both separators)
+  const parsePathToNav = useCallback((raw: string): NavLevel | null => {
+    const s = raw.trim().replace(/^["']+|["']+$/g, '')
+    if (!s) return null
+    const ws = settings?.workspace ?? ''
+    const isAbs = /^[a-zA-Z]:[\\/]/.test(s) || s.startsWith('\\\\') || s.startsWith('/')
+    if (isAbs) return ws ? resolveOpenPath(s, ws) : null
+    let norm = s.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    const mk = 'DOSSIER_PROJETS/'
+    const idx = norm.toUpperCase().indexOf(mk)
+    if (idx !== -1) norm = norm.slice(idx + mk.length)
+    const parts = norm.split('/').filter(Boolean)
+    if (parts.length && parts[0].toUpperCase() === 'PROJETS') parts.shift()  // breadcrumb prefix
+    if (parts.length === 0) return { kind: 'root' }
+    const [project, ...subpath] = parts
+    return { kind: 'inside', project, subpath }
+  }, [settings?.workspace])
+
+  const commitPathValue = useCallback(async (raw: string) => {
+    const target = parsePathToNav(raw)
+    if (!target) { setPathError('Chemin invalide (hors du workspace FLUX ?)'); return }
+    if (target.kind === 'root') { setEditingPath(false); setPathError(''); navigateTo({ kind: 'root' }); return }
+    try {
+      await api.browseProject(target.project, target.subpath.join('/') || undefined)  // throws on 404
+      setEditingPath(false); setPathError(''); navigateTo(target)
+    } catch {
+      setPathError('Chemin introuvable dans le workspace FLUX')
+    }
+  }, [parsePathToNav, navigateTo])
+
+  const copyCurrentPath = useCallback(() => {
+    const p = currentAbsPath()
+    if (!p) return
+    navigator.clipboard.writeText(p).then(
+      () => toast.success('Chemin copié'),
+      () => toast.error('Copie impossible'),
+    )
+  }, [currentAbsPath])
+
+  const startEditPath = useCallback(() => {
+    setPathDraft(currentAbsPath())
+    setPathError('')
+    setEditingPath(true)
+  }, [currentAbsPath])
+
+  const pasteNavigate = useCallback(async () => {
+    try {
+      const txt = await navigator.clipboard.readText()
+      if (txt.trim()) void commitPathValue(txt)
+    } catch { /* clipboard blocked */ }
+  }, [commitPathValue])
 
   // ── Saved-list helpers ─────────────────────────────────────────────────────
 
@@ -1256,6 +1386,13 @@ export function Projects() {
     if (!tokensProject) { setProjectTokens({}); return }
     api.getTokens(tokensProject).then(d => setProjectTokens(d.tokens)).catch(() => setProjectTokens({}))
   }, [tokensProject, tokenRefreshTick])
+
+  // Load folder locks for the browsed project
+  const lockProject = nav.kind === 'inside' ? nav.project : ''
+  useEffect(() => {
+    if (!lockProject) { setLocks(new Set()); return }
+    api.getLocks(lockProject).then(d => setLocks(new Set(d.locked))).catch(() => setLocks(new Set()))
+  }, [lockProject])
 
   // ── Find / Search ──────────────────────────────────────────────────────────
 
@@ -1405,6 +1542,11 @@ export function Projects() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
+  const pushUndo = useCallback((op: UndoOp) => {
+    if (op.actions.length === 0) return
+    setUndoStack(prev => [...prev, op].slice(-50))
+  }, [])
+
   const handleDoubleClick = useCallback((item: ExplorerItem) => {
     if (!item.isDir) return
     addToRecents(item, nav)
@@ -1453,12 +1595,13 @@ export function Projects() {
   const handleRename = useCallback(async (item: ExplorerItem, newName: string) => {
     if (nav.kind !== 'inside') return
     await api.patchItem(nav.project, nav.subpath, item.name, newName)
+    pushUndo({ label: `renommage "${item.name}"`, actions: [{ kind: 'rename', project: nav.project, sub: nav.subpath, oldName: item.name, newName }] })
     const oldKey = currentItemKey(item, nav)
     setFavorites(prev => prev.map(s => savedKey(s) === oldKey ? { ...s, label: newName } : s))
     setRecents(prev   => prev.map(s => savedKey(s) === oldKey ? { ...s, label: newName } : s))
     setRenameTarget(null)
     await loadItems()
-  }, [nav, loadItems])
+  }, [nav, loadItems, pushUndo])
 
   const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
@@ -1501,16 +1644,149 @@ export function Projects() {
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
+    const undoActions: UndoAction[] = []
     for (const item of targets) {
       await api.patchItem(nav.project, nav.subpath, item.name, undefined, newSubpath)
+      undoActions.push({ kind: 'move', project: nav.project, fromSub: nav.subpath, toSub: newSubpath, name: item.name })
       const k = currentItemKey(item, nav)
       setFavorites(prev => prev.filter(s => savedKey(s) !== k))
       setRecents(prev   => prev.filter(s => savedKey(s) !== k))
     }
+    pushUndo({ label: `déplacement (${undoActions.length})`, actions: undoActions })
     setMoveTarget(null)
     setSelectedNames(new Set())
     await loadItems()
-  }, [nav, loadItems])
+  }, [nav, loadItems, pushUndo])
+
+  // ── Clipboard (copy / cut / paste) + drag & drop ───────────────────────────
+
+  const uniqueName = (base: string, existing: Set<string>): string => {
+    if (!existing.has(base)) return base
+    const dot  = base.lastIndexOf('.')
+    const stem = dot > 0 ? base.slice(0, dot) : base
+    const ext  = dot > 0 ? base.slice(dot) : ''
+    let n = 2
+    while (existing.has(`${stem} (${n})${ext}`)) n++
+    return `${stem} (${n})${ext}`
+  }
+
+  const copySelection = useCallback(() => {
+    if (nav.kind !== 'inside' || selectedNames.size === 0) return
+    const sel = items.filter(i => selectedNames.has(i.name))
+    setClipboard({ op: 'copy', project: nav.project, subpath: nav.subpath, items: sel })
+    toast.success(`${sel.length} élément(s) copié(s)`)
+  }, [nav, selectedNames, items])
+
+  const cutSelection = useCallback(() => {
+    if (nav.kind !== 'inside' || selectedNames.size === 0) return
+    const sel = items.filter(i => selectedNames.has(i.name))
+    const cuttable = sel.filter(i => !isItemLocked(i))
+    if (cuttable.length < sel.length) toast.error(`${sel.length - cuttable.length} verrouillé(s) — non coupé(s)`)
+    if (cuttable.length === 0) return
+    setClipboard({ op: 'cut', project: nav.project, subpath: nav.subpath, items: cuttable })
+  }, [nav, selectedNames, items, isItemLocked])
+
+  const selectAll = useCallback(() => {
+    setSelectedNames(new Set(items.filter(i => !isItemArchived(i)).map(i => i.name)))
+  }, [items, isItemArchived])
+
+  const pasteClipboard = useCallback(async () => {
+    if (!clipboard || nav.kind !== 'inside') return
+    if (clipboard.project !== nav.project) { toast.error('Collage entre projets non supporté'); return }
+    const destSub = nav.subpath
+    const sameFolder = clipboard.subpath.join('/') === destSub.join('/')
+    if (clipboard.op === 'cut' && sameFolder) return  // no-op
+    const existing = new Set(items.map(i => i.name))
+    const undoActions: UndoAction[] = []
+    let ok = 0
+    for (const it of clipboard.items) {
+      try {
+        if (clipboard.op === 'cut') {
+          await api.patchItem(clipboard.project, clipboard.subpath, it.name, undefined, destSub)
+          undoActions.push({ kind: 'move', project: clipboard.project, fromSub: clipboard.subpath, toSub: destSub, name: it.name })
+          const k = itemKey(clipboard.project, clipboard.subpath, it.name)
+          setFavorites(prev => prev.filter(s => savedKey(s) !== k))
+          setRecents(prev   => prev.filter(s => savedKey(s) !== k))
+        } else {
+          const target = uniqueName(it.name, existing)
+          await api.copyItem(clipboard.project, clipboard.subpath, it.name, destSub, target === it.name ? undefined : target)
+          undoActions.push({ kind: 'copy', project: clipboard.project, sub: destSub, name: target })
+          existing.add(target)
+        }
+        ok++
+      } catch (e) {
+        toast.error(`${it.name} : ${e instanceof Error ? e.message : 'échec'}`)
+      }
+    }
+    pushUndo({ label: clipboard.op === 'cut' ? `déplacement (${undoActions.length})` : `copie (${undoActions.length})`, actions: undoActions })
+    if (clipboard.op === 'cut') setClipboard(null)
+    if (ok > 0) { toast.success(`${ok} élément(s) ${clipboard.op === 'cut' ? 'déplacé(s)' : 'copié(s)'}`); await loadItems() }
+  }, [clipboard, nav, items, loadItems, pushUndo])
+
+  // Drag & drop: move `names` from the current folder into destSub (a folder within the project)
+  const moveNamesTo = useCallback(async (names: string[], destSub: string[]) => {
+    if (nav.kind !== 'inside' || names.length === 0) return
+    if (destSub.join('/') === nav.subpath.join('/')) return  // same folder → no-op
+    const all = items.filter(i => names.includes(i.name))
+    const targets = all.filter(i => !isItemLocked(i))
+    if (targets.length < all.length) toast.error(`${all.length - targets.length} verrouillé(s) — non déplacé(s)`)
+    if (targets.length === 0) return
+    const undoActions: UndoAction[] = []
+    let ok = 0
+    for (const it of targets) {
+      try {
+        await api.patchItem(nav.project, nav.subpath, it.name, undefined, destSub)
+        undoActions.push({ kind: 'move', project: nav.project, fromSub: nav.subpath, toSub: destSub, name: it.name })
+        const k = currentItemKey(it, nav)
+        setFavorites(prev => prev.filter(s => savedKey(s) !== k))
+        setRecents(prev   => prev.filter(s => savedKey(s) !== k))
+        ok++
+      } catch (e) {
+        toast.error(`${it.name} : ${e instanceof Error ? e.message : 'échec'}`)
+      }
+    }
+    pushUndo({ label: `déplacement (${undoActions.length})`, actions: undoActions })
+    setSelectedNames(new Set())
+    if (ok > 0) { toast.success(`${ok} élément(s) déplacé(s)`); await loadItems() }
+  }, [nav, items, loadItems, pushUndo, isItemLocked])
+
+  const undoLast = useCallback(async () => {
+    const op = undoStack[undoStack.length - 1]
+    if (!op) { toast('Rien à annuler'); return }
+    setUndoStack(prev => prev.slice(0, -1))
+    let ok = 0
+    for (const a of [...op.actions].reverse()) {
+      try {
+        if (a.kind === 'move')        await api.patchItem(a.project, a.toSub, a.name, undefined, a.fromSub)
+        else if (a.kind === 'rename') await api.patchItem(a.project, a.sub, a.newName, a.oldName)
+        else if (a.kind === 'copy')   await api.deleteItem(a.project, a.sub, a.name)
+        ok++
+      } catch (e) {
+        toast.error(`Annulation : ${e instanceof Error ? e.message : 'échec'}`)
+      }
+    }
+    if (ok > 0) { toast.success(`Annulé : ${op.label}`); await loadItems() }
+  }, [undoStack, loadItems])
+
+  // Clipboard / select-all keyboard shortcuts (guarded against inputs, modals, path bar)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      if (typing || editingPath) return
+      if (renameTarget || moveTarget || deleteConfirm) return
+      if (t && t.closest && t.closest('[data-flux-pathbar]')) return  // path bar owns its own Ctrl+C/V
+      if (!(e.ctrlKey || e.metaKey)) return
+      const k = e.key.toLowerCase()
+      if (k === 'c') copySelection()
+      else if (k === 'x') cutSelection()
+      else if (k === 'v') { e.preventDefault(); void pasteClipboard() }
+      else if (k === 'a') { e.preventDefault(); selectAll() }
+      else if (k === 'z') { e.preventDefault(); void undoLast() }
+    }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [copySelection, cutSelection, pasteClipboard, selectAll, undoLast, editingPath, renameTarget, moveTarget, deleteConfirm])
 
   const handleDelete = useCallback(async (targets: ExplorerItem[]) => {
     if (nav.kind !== 'inside') return
@@ -1546,51 +1822,145 @@ export function Projects() {
     }
   }, [nav, settings?.workspace])
 
+  // Local-file import into a DCC (native picker → /import). Migrated from Importer.
+  const handleLocalImport = useCallback(async () => {
+    const picked = await window.electronAPI?.openFile?.([
+      { name: 'Fichiers 3D', extensions: ['mb', 'ma', 'abc', 'fbx', 'obj', 'usd', 'usda', 'usdc', 'usdz'] },
+      { name: 'Tous les fichiers', extensions: ['*'] },
+    ])
+    if (!picked) return
+    const proj = navProject || activeProject
+    setLocalImporting(true)
+    try {
+      const res = await api.importFiles(localDcc, [picked], proj || undefined)
+      const ok = res.results.filter(r => r.success).length
+      const name = picked.split(/[\\/]/).pop() ?? picked
+      if (ok > 0) toast.success(`${name} → ${localDcc}`)
+      else        toast.error(`Échec import : vérifie que ${localDcc} est connecté (bridge FLUX actif)`)
+    } catch (e) {
+      toast.error('Erreur : ' + (e instanceof Error ? e.message : 'inconnue'))
+    } finally {
+      setLocalImporting(false)
+    }
+  }, [localDcc, navProject, activeProject])
+
   const recentSidebarItems = recents.slice(0, 5)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
       {/* En-tête */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Projets</div>
+      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Folder Manager</div>
+        <div style={{ flex: 1 }} />
+        {/* Import fichier local → DCC (migré de l'ancien Importer) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 104 }}>
+            <SelectEl options={[...IMPORT_DCCS]} value={localDcc} onChange={setLocalDcc} />
+          </div>
+          <div
+            className="btn ghost"
+            onClick={() => { if (!localImporting) void handleLocalImport() }}
+            style={{ cursor: localImporting ? 'default' : 'pointer', opacity: localImporting ? 0.6 : 1, whiteSpace: 'nowrap' }}
+          >
+            {localImporting ? 'Import…' : 'Fichier local…'}
+          </div>
+        </div>
       </div>
 
       {/* Barre de navigation */}
       <div style={{ padding: '6px 10px 7px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
 
-        {/* Ligne 1 : back/fwd + breadcrumb + search */}
+        {/* Ligne 1 : back/fwd/undo + breadcrumb + search */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {[
-            { Icon: ChevronLeft,  action: goBack,    ok: canBack },
-            { Icon: ChevronRight, action: goForward, ok: canForward },
-          ].map(({ Icon, action, ok }, i) => (
-            <div
-              key={i}
-              onClick={ok ? action : undefined}
-              style={{ width: 24, height: 24, border: '1px solid var(--rule-2)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? 'var(--ink-2)' : 'var(--ink-4)', boxShadow: 'var(--shadow-xs)', cursor: ok ? 'pointer' : 'default', opacity: ok ? 1 : 0.4, flexShrink: 0 }}
-            >
-              <Icon size={13} strokeWidth={2} />
-            </div>
-          ))}
+          {(() => {
+            const navBtn = (ok: boolean): React.CSSProperties => ({ width: 24, height: 24, border: '1px solid var(--rule-2)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? 'var(--ink-2)' : 'var(--ink-4)', boxShadow: 'var(--shadow-xs)', cursor: ok ? 'pointer' : 'default', opacity: ok ? 1 : 0.4, flexShrink: 0, transition: 'background 0.1s, border-color 0.1s, color 0.1s' })
+            const upDroppable = nav.kind === 'inside' && nav.subpath.length >= 1
+            return (
+              <>
+                {/* Retour — clic: historique ; déposer ici: monter d'un niveau */}
+                <div
+                  onClick={canBack ? goBack : undefined}
+                  onDragOver={upDroppable ? (e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!dragOverUp) setDragOverUp(true) }) : undefined}
+                  onDragLeave={upDroppable ? (() => setDragOverUp(false)) : undefined}
+                  onDrop={upDroppable ? (e => { e.preventDefault(); e.stopPropagation(); setDragOverUp(false); void moveNamesTo(dragNamesRef.current, (nav.kind === 'inside' ? nav.subpath : []).slice(0, -1)) }) : undefined}
+                  title={upDroppable ? 'Retour · déposer ici pour monter d’un niveau' : 'Retour'}
+                  style={{ ...navBtn(canBack || upDroppable), ...(dragOverUp ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-hi)' } : {}) }}
+                >
+                  <ChevronLeft size={13} strokeWidth={2} />
+                </div>
+                {/* Suivant */}
+                <div onClick={canForward ? goForward : undefined} title="Suivant" style={navBtn(canForward)}>
+                  <ChevronRight size={13} strokeWidth={2} />
+                </div>
+                {/* Annuler (Ctrl+Z) */}
+                <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title="Annuler (Ctrl+Z)" style={navBtn(undoStack.length > 0)}>
+                  <RotateCcw size={12} strokeWidth={2} />
+                </div>
+              </>
+            )
+          })()}
 
-          {/* Breadcrumb */}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, fontFamily: 'var(--mono)', fontSize: 10, height: 24, border: '1px solid var(--rule)', padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', overflow: 'hidden' }}>
-            {breadcrumb.map((seg, i) => {
-              const isLast = i === breadcrumb.length - 1
-              return (
-                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: isLast ? 0 : 1, minWidth: isLast ? 'auto' : 0 }}>
-                  {i > 0 && <ChevronRight size={9} strokeWidth={1.5} color="var(--ink-4)" style={{ flexShrink: 0 }} />}
-                  <span
-                    onClick={!isLast ? () => navigateToBreadcrumb(i) : undefined}
-                    style={{ color: isLast ? 'var(--ink)' : 'var(--ink-3)', fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'default', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
-                  >
-                    {seg}
-                  </span>
-                </span>
-              )
-            })}
-          </div>
+          {/* Path bar — breadcrumb (clic pour naviguer) OU champ éditable (Ctrl+V pour naviguer vers un chemin) */}
+          {editingPath ? (
+            <input
+              autoFocus
+              value={pathDraft}
+              onChange={e => { setPathDraft(e.target.value); if (pathError) setPathError('') }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') void commitPathValue(pathDraft)
+                else if (e.key === 'Escape') { setEditingPath(false); setPathError('') }
+              }}
+              onBlur={() => { if (!pathError) setEditingPath(false) }}
+              spellCheck={false}
+              placeholder="Coller un chemin (C:\… ou PROJET/sous-dossier) puis Entrée"
+              style={{ flex: 1, minWidth: 0, height: 24, border: '1px solid ' + (pathError ? 'var(--err)' : 'var(--accent)'), padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)', outline: 'none' }}
+            />
+          ) : (
+            <div
+              data-flux-pathbar
+              tabIndex={0}
+              title="Cliquer pour éditer · Ctrl+C copier le chemin · Ctrl+V coller un chemin pour y naviguer"
+              onClick={startEditPath}
+              onKeyDown={e => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { e.preventDefault(); copyCurrentPath() }
+                else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { e.preventDefault(); void pasteNavigate() }
+              }}
+              style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, fontFamily: 'var(--mono)', fontSize: 10, height: 24, border: '1px solid var(--rule)', padding: '0 4px 0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', overflow: 'hidden', cursor: 'text', outline: 'none' }}
+            >
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, overflow: 'hidden' }}>
+                {breadcrumb.map((seg, i) => {
+                  const isLast = i === breadcrumb.length - 1
+                  return (
+                    <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: isLast ? 0 : 1, minWidth: isLast ? 'auto' : 0 }}>
+                      {i > 0 && <ChevronRight size={9} strokeWidth={1.5} color="var(--ink-4)" style={{ flexShrink: 0 }} />}
+                      <span
+                        onClick={!isLast ? (e) => { e.stopPropagation(); navigateToBreadcrumb(i) } : undefined}
+                        onDragOver={!isLast && i >= 1 ? (e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBc !== i) setDragOverBc(i) }) : undefined}
+                        onDragLeave={!isLast && i >= 1 ? (() => setDragOverBc(prev => (prev === i ? null : prev))) : undefined}
+                        onDrop={!isLast && i >= 1 && nav.kind === 'inside' ? (e => {
+                          e.preventDefault(); e.stopPropagation(); setDragOverBc(null)
+                          void moveNamesTo(dragNamesRef.current, nav.subpath.slice(0, i - 1))
+                        }) : undefined}
+                        style={{ color: dragOverBc === i ? 'var(--accent-hi)' : isLast ? 'var(--ink)' : 'var(--ink-3)', background: dragOverBc === i ? 'var(--accent-soft)' : 'transparent', borderRadius: 3, padding: dragOverBc === i ? '0 3px' : 0, fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'text', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
+                      >
+                        {seg}
+                      </span>
+                    </span>
+                  )
+                })}
+              </div>
+              <div
+                onClick={e => { e.stopPropagation(); copyCurrentPath() }}
+                title="Copier le chemin"
+                style={{ flexShrink: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4, color: 'var(--ink-4)', cursor: 'pointer' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--accent-hi)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-4)' }}
+              >
+                <Copy size={11} strokeWidth={1.75} />
+              </div>
+            </div>
+          )}
 
           {/* Search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, border: '1px solid var(--rule-2)', padding: '0 6px', height: 24, width: 150, background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', flexShrink: 0 }}>
@@ -1610,6 +1980,13 @@ export function Projects() {
           </div>
         </div>
 
+        {/* Erreur de chemin (coller/naviguer) */}
+        {pathError && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--err)', padding: '0 2px' }}>
+            {pathError}
+          </div>
+        )}
+
         {/* Ligne 2 : Token Finder + Find */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <TokenFinder project={navProject || activeProject} tokens={projectTokens} onChange={setTokenSel} />
@@ -1620,6 +1997,13 @@ export function Projects() {
           >
             {findLoading ? '…' : 'Find'}
           </div>
+          {clipboard && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '0 8px', height: 30, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', boxShadow: 'var(--shadow-inset)' }}>
+              <Copy size={10} strokeWidth={1.75} color="var(--ink-4)" />
+              <span>{clipboard.items.length} {clipboard.op === 'cut' ? 'coupé(s)' : 'copié(s)'}</span>
+              <X size={10} strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => setClipboard(null)} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1778,6 +2162,12 @@ export function Projects() {
                     {items.filter(item => !isItemArchived(item)).map((item, i) => {
                       const isSel     = selectedNames.has(item.name)
                       const isHovered = hoveredName === item.name
+                      const isDropTarget = item.isDir && dragOverName === item.name
+                      const isCut = clipboard?.op === 'cut' && nav.kind === 'inside' &&
+                        clipboard.project === nav.project &&
+                        clipboard.subpath.join('/') === nav.subpath.join('/') &&
+                        clipboard.items.some(ci => ci.name === item.name)
+                      const locked = isItemLocked(item)
                       return (
                         <div
                           key={i}
@@ -1811,7 +2201,22 @@ export function Projects() {
                           onContextMenu={e => handleRightClick(e, item)}
                           onMouseEnter={() => setHoveredName(item.name)}
                           onMouseLeave={() => setHoveredName(null)}
-                          style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent', gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s' }}
+                          draggable
+                          onDragStart={e => {
+                            const names = selectedNames.has(item.name) && selectedNames.size > 0 ? [...selectedNames] : [item.name]
+                            if (!selectedNames.has(item.name)) setSelectedNames(new Set([item.name]))
+                            dragNamesRef.current = names
+                            e.dataTransfer.effectAllowed = 'move'
+                            e.dataTransfer.setData('text/plain', names.join('\n'))
+                          }}
+                          onDragOver={item.isDir ? (e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverName !== item.name) setDragOverName(item.name) }) : undefined}
+                          onDragLeave={item.isDir ? (() => setDragOverName(prev => (prev === item.name ? null : prev))) : undefined}
+                          onDrop={item.isDir ? (e => {
+                            e.preventDefault(); e.stopPropagation(); setDragOverName(null)
+                            const names = dragNamesRef.current.filter(n => n !== item.name)
+                            void moveNamesTo(names, [...(nav.kind === 'inside' ? nav.subpath : []), item.name])
+                          }) : undefined}
+                          style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: (isDropTarget || isSel) ? 'var(--accent-soft)' : 'transparent', border: isDropTarget ? '1px dashed var(--accent)' : isSel ? '1px solid var(--accent)' : '1px solid transparent', opacity: isCut ? 0.45 : 1, gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s, opacity 0.12s' }}
                         >
                           {/* Checkbox multi-sélection */}
                           {(isHovered || isSel) && (
@@ -1828,6 +2233,14 @@ export function Projects() {
                               style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSel ? 'var(--accent)' : 'var(--ink-4)'}`, background: isSel ? 'var(--accent)' : 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
                             >
                               {isSel && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            </div>
+                          )}
+                          {locked && (
+                            <div
+                              title="Verrouillé"
+                              style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: 3, background: 'var(--paper-2)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-hi)', zIndex: 1, boxShadow: 'var(--shadow-xs)' }}
+                            >
+                              <Lock size={9} strokeWidth={2} />
                             </div>
                           )}
                           {item.isDir
@@ -1911,22 +2324,31 @@ export function Projects() {
           y={ctxMenu.y}
           isFavorited={isItemFavorited(ctxMenu.items[0])}
           isArchived={isItemArchived(ctxMenu.items[0])}
+          locked={ctxMenu.items.some(isItemLocked)}
           canEdit={nav.kind === 'inside'}
           canDelete={nav.kind === 'inside'}
           count={ctxMenu.items.length}
           onFavorite={() => ctxMenu.items.forEach(toggleFavorite)}
           onArchive={() => ctxMenu.items.forEach(toggleArchived)}
+          onToggleLock={nav.kind === 'inside' && ctxMenu.items.length === 1
+            ? () => void toggleLock(ctxMenu.items[0])
+            : undefined}
           onRename={() => setRenameTarget(ctxMenu.items[0])}
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
-          onOpenInHoudini={nav.kind === 'inside' && ctxMenu.items.length === 1
-            ? () => void handleOpenInHoudini(ctxMenu.items[0])
-            : undefined}
+          onOpenInHoudini={
+            nav.kind === 'inside' &&
+            ctxMenu.items.length === 1 &&
+            !!dccStatus['Houdini']?.connected   // only when Houdini is actually available
+              ? () => void handleOpenInHoudini(ctxMenu.items[0])
+              : undefined
+          }
           onOpenInMaya={
             nav.kind === 'inside' &&
             ctxMenu.items.length === 1 &&
             !ctxMenu.items[0].isDir &&
+            !!dccStatus['Maya']?.connected &&   // only when Maya is actually available
             MAYA_IMPORT_EXTS.has('.' + (ctxMenu.items[0].name.split('.').pop() ?? '').toLowerCase())
               ? () => void handleOpenInMaya(ctxMenu.items[0])
               : undefined

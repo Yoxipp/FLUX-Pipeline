@@ -88,6 +88,13 @@ export const api = {
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
 
+  // Per-user data blob (favorites / recents / archived …) — stored on the Flux drive
+  getUserData: () =>
+    apiCall<Record<string, unknown>>('GET', '/settings/user-data'),
+
+  setUserData: (patch: Record<string, unknown>) =>
+    apiCall<Record<string, unknown>>('PUT', '/settings/user-data', patch),
+
   // DCC
   findDccExe: (dcc: string) =>
     apiCall<{ dcc: string; path: string | null; found: boolean }>('GET', `/dcc/find/${dcc}`),
@@ -191,12 +198,9 @@ export const api = {
   cancelZBrush: () =>
     apiCall<{ cancelled: boolean }>('POST', '/dcc/zbrush/cancel'),
 
-  // Importer
+  // Importer — local-file → DCC import (folder browsing now lives in Folder Manager)
   importFiles: (dcc: string, file_paths: string[], project_name?: string) =>
     apiCall<{ results: { path: string; success: boolean }[] }>('POST', '/import', { dcc, file_paths, project_name }),
-
-  browseImport: (project_name: string, subpath?: string) =>
-    apiCall<{ path: string; folders: string[]; files: FileEntry[] }>('GET', `/import/browse?project_name=${encodeURIComponent(project_name)}${subpath ? `&subpath=${encodeURIComponent(subpath)}` : ''}`),
 
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
@@ -263,6 +267,20 @@ export const api = {
 
   deleteItem: (project: string, subpath: string[], name: string) =>
     apiCall<{ deleted: string }>('DELETE', '/folder/items', { project, subpath: subpath.join('/'), name }),
+
+  copyItem: (project: string, subpath: string[], name: string, dstSubpath: string[], newName?: string) =>
+    apiCall<{ name: string; path: string }>('POST', '/folder/copy', {
+      project, subpath: subpath.join('/'), name,
+      dst_subpath: dstSubpath.join('/'), new_name: newName ?? '',
+    }),
+
+  getLocks: (project: string) =>
+    apiCall<{ locked: string[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/locks`),
+
+  setLock: (project: string, subpath: string[], name: string, locked: boolean) =>
+    apiCall<{ locked: string[] }>('POST', '/folder/locks', {
+      project, subpath: subpath.join('/'), name, locked,
+    }),
 
   patchItem: (project: string, subpath: string[], name: string, newName?: string, newSubpath?: string[]) =>
     apiCall<{ name: string; path: string }>('PATCH', '/folder/items', {

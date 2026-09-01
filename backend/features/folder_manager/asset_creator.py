@@ -11,12 +11,13 @@ from features.folder_manager.tokens import add_token, get_path_for_token, load_t
 
 log = get_logger(__name__)
 
-# Sub-folders generated per asset class at creation time
+# Sub-folders generated per asset class at creation time.
+# CHAR includes its CFX_Rig sub-structure (moved from the old flat CFXRIG class):
+# assets/chara/<CHAR>/CFX_Rig/{fur,cloth,muscle}
 _ASSET_SUBDIRS: dict[str, tuple[str, ...]] = {
-    "CHAR":   ("model", "shading", "groom", "rig"),
+    "CHAR":   ("model", "shading", "groom", "rig", "CFX_Rig/fur", "CFX_Rig/cloth", "CFX_Rig/muscle"),
     "PROPS":  ("model", "shading", "groom", "rig"),
     "ENV":    ("global",),
-    "CFXRIG": ("fur", "cloth", "muscle"),
     "FXRIG":  (),   # empty — setups added manually
 }
 

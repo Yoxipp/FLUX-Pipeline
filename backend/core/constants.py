@@ -70,8 +70,9 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "CHAR":   "assets/chara",
     "PROPS":  "assets/props",
     "ENV":    "assets/enviros",
-    "CFXRIG": "assets/cfx_rig",
     "FXRIG":  "assets/fx_rig",
+    # CFX_Rig is no longer a flat CLASS — it lives per-character under
+    # assets/chara/<CHARACTER_NAME>/CFX_Rig (scaffolded by asset_creator).
     "LAYOUT": "shot/{seq}/{shot}/layout",
     "ANIM":   "shot/{seq}/{shot}/anim",
     "FX":     "shot/{seq}/{shot}/fx",

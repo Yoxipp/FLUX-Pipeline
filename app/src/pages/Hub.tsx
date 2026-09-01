@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Upload, Download, BookOpen, FolderOpen, Activity, SendHorizonal,
+  Upload, BookOpen, FolderOpen, Activity, SendHorizonal,
 } from 'lucide-react'
 import { useActivity }  from '../hooks/useActivity'
 import { useSettings }  from '../hooks/useSettings'
@@ -11,11 +11,10 @@ import { api } from '../api/client'
 import type { LucideIcon } from 'lucide-react'
 
 const SHORTCUTS: { ic: LucideIcon; t: string; s: string; path: string; active?: boolean }[] = [
-  { ic: Upload,     t: 'Publisher',      s: 'Exporter un asset',  path: '/publisher', active: true },
-  { ic: Download,   t: 'Importer',       s: 'Charger un asset',   path: '/importer' },
-  { ic: BookOpen,   t: 'Shelf Manager',  s: 'Installer / màj',    path: '/shelf' },
-  { ic: FolderOpen, t: 'Folder Manager', s: 'Gérer les projets',  path: '/projects' },
-  { ic: Activity,   t: 'Activité',       s: 'Historique équipe',  path: '/activity' },
+  { ic: FolderOpen, t: 'Folder Manager', s: 'Naviguer & importer', path: '/projects', active: true },
+  { ic: Upload,     t: 'Publisher',      s: 'Exporter un asset',   path: '/publisher' },
+  { ic: BookOpen,   t: 'Shelf Manager',  s: 'Installer / màj',     path: '/shelf' },
+  { ic: Activity,   t: 'Activité',       s: 'Historique équipe',   path: '/activity' },
 ]
 
 const DCC_STATUS_ITEMS = [

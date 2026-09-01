@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from core import config, paths
+from core.constants import JSON_USER_SETTINGS
+from core.json_manager import read_json, write_json
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -45,4 +49,31 @@ def create_user_dir(name: str) -> None:
     """Create FLUX_ROOT/USER/<name>/ if it does not exist."""
     paths.ensure_dir(paths.get_user_dir(name))
     log.debug("User dir ready for '%s'", name)
+
+
+# ── Per-user settings blob (favorites / recents / archived, …) ────────────────
+# Stored at FLUX_ROOT/USER/<name>/UserSettings/User.json — on the shared drive,
+# so a user's data follows them across machines and never leaks between users.
+
+def _user_settings_path(name: str) -> Path:
+    return paths.get_user_dir(name) / "UserSettings" / JSON_USER_SETTINGS
+
+
+def read_user_data(name: str) -> dict:
+    """Return the user's settings blob, or {} if none / unreadable."""
+    try:
+        data = read_json(_user_settings_path(name))
+        return data if isinstance(data, dict) else {}
+    except (RuntimeError, OSError):
+        return {}
+
+
+def write_user_data(name: str, data: dict) -> bool:
+    """Persist (overwrite) the user's settings blob. Returns True on success."""
+    try:
+        path = _user_settings_path(name)
+        paths.ensure_dir(path.parent)
+        return write_json(path, data)
+    except (RuntimeError, OSError):
+        return False
 

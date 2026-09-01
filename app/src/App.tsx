@@ -10,7 +10,6 @@ import { useActivity }   from './hooks/useActivity'
 import { useSettings }   from './hooks/useSettings'
 import { Hub }           from './pages/Hub'
 import { Publisher }     from './pages/Publisher'
-import { Importer }      from './pages/Importer'
 import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
@@ -47,7 +46,6 @@ function AppShell({ settings }: { settings: Settings }) {
             <Routes>
               <Route path="/"          element={<Hub />} />
               <Route path="/publisher" element={<Publisher />} />
-              <Route path="/importer"  element={<Importer />} />
               <Route path="/activity"  element={<Activity />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
@@ -119,11 +117,6 @@ export function App() {
   if (settings.first_launch) {
     return <FirstLaunch />
   }
-
-  // Persist the active artist synchronously (during render, before any page mounts)
-  // so per-user scoped storage — favorites / recents / archived — never leaks
-  // from the previous user into the new one after a switch.
-  try { localStorage.setItem('flux.currentUser', settings.username ?? '') } catch { /* blocked storage */ }
 
   return <AppShell settings={settings} />
 }

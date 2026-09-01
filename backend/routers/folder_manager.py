@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from core.logger import get_logger
 from core.paths import get_project_path, is_subpath
 from features.folder_manager.asset_creator import create_asset, list_assets
+from features.folder_manager.locks import is_locked, load_locks, set_lock
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
@@ -315,6 +316,12 @@ async def patch_item(req: ItemPatch) -> dict:
     new_subpath = req.new_subpath.strip() if req.new_subpath.strip() != "" else req.subpath
     dst_path    = (project_path / new_subpath / new_name) if new_subpath else (project_path / new_name)
 
+    # A locked item cannot be MOVED (parent change). Pure rename stays allowed.
+    # Only the item itself is checked — a locked child never blocks its parent.
+    rel_src = f"{req.subpath}/{req.name}" if req.subpath else req.name
+    if new_subpath != req.subpath and is_locked(project_path, rel_src):
+        raise HTTPException(status_code=423, detail=f"Élément verrouillé : {req.name}")
+
     if src_path.resolve() == dst_path.resolve():
         raise HTTPException(status_code=400, detail="Source et destination identiques")
 
@@ -342,6 +349,90 @@ async def patch_item(req: ItemPatch) -> dict:
     return {"name": new_name, "path": str(dst_path)}
 
 
+# ── Locks ─────────────────────────────────────────────────────────────────────
+
+class LockSet(BaseModel):
+    project: str
+    subpath: str   # parent relative path; "" = project root
+    name:    str
+    locked:  bool
+
+
+@router.get("/projects/{project_name}/locks")
+async def get_locks(project_name: str) -> dict:
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_event_loop()
+    locked = await loop.run_in_executor(None, lambda: load_locks(project_path))
+    return {"locked": locked}
+
+
+@router.post("/locks")
+async def post_lock(req: LockSet) -> dict:
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    rel = f"{req.subpath}/{req.name}" if req.subpath else req.name
+    loop = asyncio.get_event_loop()
+    locked = await loop.run_in_executor(None, lambda: set_lock(project_path, rel, req.locked))
+    return {"locked": locked}
+
+
+# ── Copy ──────────────────────────────────────────────────────────────────────
+
+class ItemCopy(BaseModel):
+    project:     str
+    subpath:     str        # source parent, relative from project root
+    name:        str        # source item name
+    dst_subpath: str = ""   # destination parent (relative); "" = project root
+    new_name:    str = ""   # optional target name (for conflict resolution)
+
+
+@router.post("/copy")
+async def copy_item(req: ItemCopy) -> dict:
+    """Copy a file or folder (recursively) to another location inside the same project."""
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+
+    src_path = (project_path / req.subpath / req.name) if req.subpath else (project_path / req.name)
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")
+
+    dst_name   = req.new_name.strip() or req.name
+    dst_parent = (project_path / req.dst_subpath) if req.dst_subpath else project_path
+    dst_path   = dst_parent / dst_name
+
+    if not is_subpath(dst_path.resolve().parent, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+
+    if src_path.is_dir():
+        try:
+            dst_path.resolve().relative_to(src_path.resolve())
+            raise HTTPException(status_code=400, detail="Impossible de copier un dossier dans lui-même")
+        except ValueError:
+            pass
+
+    if dst_path.exists():
+        raise HTTPException(status_code=409, detail=f"'{dst_name}' existe déjà à destination")
+
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    loop = asyncio.get_event_loop()
+    try:
+        if src_path.is_dir():
+            await loop.run_in_executor(None, lambda: shutil.copytree(src_path, dst_path))
+        else:
+            await loop.run_in_executor(None, lambda: shutil.copy2(src_path, dst_path))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission refusée : {dst_name}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    log.info("Copied %s → %s", src_path, dst_path)
+    return {"name": dst_name, "path": str(dst_path)}
+
+
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 class ItemDelete(BaseModel):
@@ -363,6 +454,10 @@ async def delete_item(req: ItemDelete) -> dict:
 
     if not item_path.exists():
         raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")
+
+    rel = f"{req.subpath}/{req.name}" if req.subpath else req.name
+    if is_locked(project_path, rel):
+        raise HTTPException(status_code=423, detail=f"Élément verrouillé : {req.name}")
 
     loop = asyncio.get_event_loop()
     try:
