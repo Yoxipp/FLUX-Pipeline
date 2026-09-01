@@ -3,7 +3,6 @@
 import type {
   ActivityEvent,
   ChatMessage,
-  DccStatusMap,
   FileEntry,
   HoudiniPublishPayload,
   HoudiniPublishResult,
@@ -90,23 +89,8 @@ export const api = {
     apiCall<{ users: string[] }>('GET', '/settings/users'),
 
   // DCC
-  getDccStatus: () =>
-    apiCall<DccStatusMap>('GET', '/dcc/status'),
-
-  connectDcc: (dcc: string) =>
-    apiCall<{ dcc: string; connected: boolean }>('POST', `/dcc/connect/${dcc}`),
-
-  disconnectDcc: (dcc: string) =>
-    apiCall<{ dcc: string; connected: boolean }>('POST', `/dcc/disconnect/${dcc}`),
-
-  executeCommand: (dcc: string, command: string) =>
-    apiCall<{ success: boolean; result: string; dcc: string }>('POST', '/dcc/execute', { dcc, command }),
-
   findDccExe: (dcc: string) =>
     apiCall<{ dcc: string; path: string | null; found: boolean }>('GET', `/dcc/find/${dcc}`),
-
-  getInstalledDccs: () =>
-    apiCall<{ dccs: Record<string, string> }>('GET', '/dcc/installed'),
 
   launchDcc: (dcc: string, exe_path?: string) =>
     apiCall<{ dcc: string; launched: boolean }>('POST', '/dcc/launch', { dcc, exe_path }),
@@ -224,9 +208,6 @@ export const api = {
     return apiCall<{ events: ActivityEvent[]; unread_count: number }>('GET', `/activity?${qs}`)
   },
 
-  markEventRead: (event_id: string) =>
-    apiCall<{ success: boolean }>('POST', '/activity/read', { event_id }),
-
   markAllRead: () =>
     apiCall<{ success: boolean }>('POST', '/activity/read-all'),
 
@@ -252,9 +233,6 @@ export const api = {
 
   createProject: (name: string) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name }),
-
-  getTypesForClass: (project: string, class_token?: string) =>
-    apiCall<{ types: string[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/types${class_token ? `?class_token=${encodeURIComponent(class_token)}` : ''}`),
 
   getAssets: (project: string, class_token?: string) =>
     apiCall<{ assets: string[] }>('GET', `/folder/projects/${project}/assets${class_token ? `?class_token=${class_token}` : ''}`),
@@ -298,11 +276,6 @@ export const api = {
       'GET', `/dcc/houdini/importer/path_to_tokens?project=${encodeURIComponent(project)}&rel_path=${encodeURIComponent(rel_path)}`,
     ),
 
-  importHoudiniCharacter: (file_path: string, network_path = '/obj') =>
-    apiCall<{ node_path: string; node_type: string; file_set: boolean; has_bonecapture: boolean; point_count: number }>(
-      'POST', '/dcc/houdini/import-character', { file_path, network_path },
-    ),
-
   createFluxImporterNode: (params: {
     project?: string; flux_class?: string; flux_type?: string;
     flux_name?: string; flux_instance?: string; flux_iter?: string;
@@ -337,7 +310,4 @@ export const api = {
       layers?: string[]
       issues: { level: string; msg: string; prim: string | null }[]
     }>('POST', '/usd/assemble', { recipe, project, strict }),
-
-  getRecipeSchema: () =>
-    apiCall<Record<string, unknown>>('GET', '/usd/schema'),
 }

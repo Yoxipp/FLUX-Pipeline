@@ -23,7 +23,12 @@ export function useActivity(limit = 50) {
   useEffect(() => {
     void refresh()
     const id = setInterval(() => { void refresh() }, POLL_INTERVAL_MS)
-    return () => clearInterval(id)
+    const onRefresh = () => { void refresh() }
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('flux:refresh', onRefresh)
+    }
   }, [refresh])
 
   const markAllRead = useCallback(async () => {

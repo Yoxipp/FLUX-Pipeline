@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { DccStatusMap } from '../../types'
 
 interface Props {
@@ -5,6 +6,11 @@ interface Props {
 }
 
 export function StatusBar({ dccStatus }: Props) {
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
+  }, [])
+
   const items = Object.entries(dccStatus)
     .filter(([, entry]) => entry?.connected)
     .map(([key]) => ({ key, label: key }))
@@ -26,10 +32,12 @@ export function StatusBar({ dccStatus }: Props) {
         </span>
       ))}
       <span style={{ flex: 1 }} />
-      <span style={{
-        border: '1px solid var(--rule-2)', borderRadius: 999,
-        padding: '1px 7px', fontSize: 9, color: 'var(--ink-3)',
-      }}>v1.1</span>
+      {version && (
+        <span style={{
+          border: '1px solid var(--rule-2)', borderRadius: 999,
+          padding: '1px 7px', fontSize: 9, color: 'var(--ink-3)',
+        }}>v{version}</span>
+      )}
     </div>
   )
 }

@@ -16,5 +16,14 @@ export function useSettings() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Refresh without restart: re-fetch settings when the shell broadcasts flux:refresh.
+  useEffect(() => {
+    const onRefresh = () => {
+      api.getSettings().then(setSettings).catch(() => { /* keep current */ })
+    }
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => window.removeEventListener('flux:refresh', onRefresh)
+  }, [])
+
   return { settings, loading, error, setSettings }
 }

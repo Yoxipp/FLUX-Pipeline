@@ -113,7 +113,7 @@ export function Console() {
       <div className="no-drag" style={{ position: 'relative' }}>
         <div
           title="Console"
-          onClick={openDrawer}
+          onClick={() => (open ? setOpen(false) : openDrawer())}
           onMouseEnter={() => setHov(true)}
           onMouseLeave={() => setHov(false)}
           style={{

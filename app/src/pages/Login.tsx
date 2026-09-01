@@ -118,15 +118,16 @@ export function Login({ onDone }: Props) {
           <input
             ref={inputRef}
             value={newName}
-            onChange={e => { setNewName(e.target.value); if (e.target.value) setSelected(null) }}
+            onChange={e => { setNewName(e.target.value.toUpperCase()); if (e.target.value) setSelected(null) }}
             onKeyDown={e => { if (e.key === 'Enter' && canEnter) void enter() }}
-            placeholder="Nom d'utilisateur…"
+            placeholder="NOM DE L'ARTISTE"
             style={{
               width: '100%', padding: '7px 10px',
               background: 'var(--bg-deep)',
               border: '1px solid var(--rule-2)',
               borderRadius: 6, outline: 'none',
               fontFamily: 'inherit', fontSize: 11, color: 'var(--ink-2)',
+              textTransform: 'uppercase',
               boxShadow: 'var(--shadow-inset)',
               boxSizing: 'border-box',
             }}

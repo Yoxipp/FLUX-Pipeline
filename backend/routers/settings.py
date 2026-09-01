@@ -60,6 +60,9 @@ async def get_settings() -> dict:
 @router.post("/init")
 async def init_first_launch(req: InitRequest) -> dict:
     """First-launch setup: scaffold FLUX root structure, persist workspace + username."""
+    # Artist names are always stored/displayed in FULL UPPERCASE (frontend + backend).
+    username = req.username.strip().upper()
+
     def _scaffold():
         root = Path(req.workspace)
         for d in FLUX_ROOT_DIRS:
@@ -69,7 +72,7 @@ async def init_first_launch(req: InitRequest) -> dict:
         # - config.json (next to exe, lu par get_flux_root())
         # - prefs.json  (AppData, lu par config._load())
         set_flux_root(root)
-        config.create_user(req.username, req.workspace)
+        config.create_user(username, req.workspace)
 
     loop = asyncio.get_event_loop()
     try:
@@ -77,7 +80,7 @@ async def init_first_launch(req: InitRequest) -> dict:
     except Exception as exc:
         log.error("init_first_launch failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"success": True, "workspace": req.workspace, "username": req.username}
+    return {"success": True, "workspace": req.workspace, "username": username}
 
 
 @router.put("")
@@ -105,10 +108,12 @@ async def update_settings(req: SettingsUpdate) -> dict:
             await loop.run_in_executor(None, lambda d=dcc_name, p=path: config.set_dcc_exe(d, p))
 
     if req.username:
+        # Artist names are always stored/displayed in FULL UPPERCASE (frontend + backend).
+        new_user = req.username.strip().upper()
         # set_current_user crée le dossier FLUX_ROOT/USER/<name>/ en plus de persister
-        await loop.run_in_executor(None, lambda: user_utils.set_current_user(req.username))
-        await loop.run_in_executor(None, lambda: set_config_username(req.username))
-        log.info("User switched to '%s'", req.username)
+        await loop.run_in_executor(None, lambda: user_utils.set_current_user(new_user))
+        await loop.run_in_executor(None, lambda: set_config_username(new_user))
+        log.info("User switched to '%s'", new_user)
 
     if req.workspace:
         def _update_workspace():

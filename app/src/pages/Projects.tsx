@@ -97,6 +97,15 @@ function readLS<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? '') as T } catch { return fallback }
 }
 
+// Saved-list keys are scoped per artist so one user's favorites / recents / archived
+// never leak into another's after a user switch. `flux.currentUser` is written
+// synchronously by App.tsx before any page renders.
+function userScopedKey(base: string): string {
+  let user = ''
+  try { user = localStorage.getItem('flux.currentUser') ?? '' } catch { /* blocked storage */ }
+  return user ? `${base}::${user}` : base
+}
+
 // ── Icônes SVG ────────────────────────────────────────────────────────────────
 
 function FolderSvg({ size = 40, selected = false }: { size?: number; selected?: boolean }) {
@@ -1059,10 +1068,13 @@ export function Projects() {
   const [tab, setTab]             = useState<Tab>('project')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
 
-  // Saved lists (localStorage)
-  const [favorites, setFavorites] = useState<SavedItem[]>(() => readLS<SavedItem[]>('flux_favorites', []))
-  const [archived,  setArchived]  = useState<SavedItem[]>(() => readLS<SavedItem[]>('flux_archived',  []))
-  const [recents,   setRecents]   = useState<SavedItem[]>(() => readLS<SavedItem[]>('flux_recents',   []))
+  // Saved lists (localStorage, scoped per artist — see userScopedKey)
+  const FAV_KEY  = userScopedKey('flux_favorites')
+  const ARCH_KEY = userScopedKey('flux_archived')
+  const REC_KEY  = userScopedKey('flux_recents')
+  const [favorites, setFavorites] = useState<SavedItem[]>(() => readLS<SavedItem[]>(FAV_KEY,  []))
+  const [archived,  setArchived]  = useState<SavedItem[]>(() => readLS<SavedItem[]>(ARCH_KEY, []))
+  const [recents,   setRecents]   = useState<SavedItem[]>(() => readLS<SavedItem[]>(REC_KEY,  []))
 
   // Context menu & delete confirm
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null)
@@ -1084,9 +1096,9 @@ export function Projects() {
 
   // ── Persist saved lists ────────────────────────────────────────────────────
 
-  useEffect(() => { localStorage.setItem('flux_favorites', JSON.stringify(favorites)) }, [favorites])
-  useEffect(() => { localStorage.setItem('flux_archived',  JSON.stringify(archived))  }, [archived])
-  useEffect(() => { localStorage.setItem('flux_recents',   JSON.stringify(recents))   }, [recents])
+  useEffect(() => { localStorage.setItem(FAV_KEY,  JSON.stringify(favorites)) }, [FAV_KEY,  favorites])
+  useEffect(() => { localStorage.setItem(ARCH_KEY, JSON.stringify(archived))  }, [ARCH_KEY, archived])
+  useEffect(() => { localStorage.setItem(REC_KEY,  JSON.stringify(recents))   }, [REC_KEY,  recents])
 
   // ── Close context menu on outside click / Escape ───────────────────────────
 

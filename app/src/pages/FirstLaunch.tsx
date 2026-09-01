@@ -173,9 +173,9 @@ export function FirstLaunch() {
               </div>
               <input
                 value={username}
-                onChange={e => setUsername(e.target.value)}
+                onChange={e => setUsername(e.target.value.toUpperCase())}
                 onKeyDown={e => e.key === 'Enter' && void handleFinish()}
-                placeholder="Milo"
+                placeholder="NOM DE L'ARTISTE"
                 autoFocus={users.length === 0}
                 style={{
                   padding: '8px 10px',
@@ -183,6 +183,7 @@ export function FirstLaunch() {
                   border: '1px solid var(--rule-2)',
                   borderRadius: 7, outline: 'none',
                   fontFamily: 'inherit', fontSize: 12, color: 'var(--ink)',
+                  textTransform: 'uppercase',
                   boxSizing: 'border-box', width: '100%',
                 }}
               />

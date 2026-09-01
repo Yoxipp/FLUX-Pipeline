@@ -111,8 +111,6 @@ def parse_filename(filename: str) -> dict | None:
 
     # shot filenames: CLASS_SEQ###_SHOT###_instance_ITER
     if len(parts) >= 4 and _SEQ_RE.match(parts[1]):
-        if len(parts) < 4:
-            return None
         return {
             "CLASS":     parts[0],
             "SEQ":       parts[1],

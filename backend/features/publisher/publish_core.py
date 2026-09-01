@@ -152,19 +152,3 @@ def publish_file(
     log.info("Published %s → %s (v%03d)", filename, dest_path, next_ver)
     return dest_path
 
-
-def publish_from_dcc(
-    dcc_name: str,
-    project_path: Path,
-    description: str,
-    user: str,
-    project_name: str = "",
-) -> Path | None:
-    """Trigger a DCC export via socket then publish the exported file.
-
-    Not yet implemented — DCC bridge comes in 08_dcc_maya / 09_dcc_houdini.
-    """
-    # TODO: send export command via socket_manager, wait for temp file, call publish_file
-    log.warning("publish_from_dcc not implemented yet (dcc=%s)", dcc_name)
-    return None
-

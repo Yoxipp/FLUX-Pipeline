@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
@@ -9,7 +10,6 @@ import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
 interface Props {
   username: string | null
   unreadCount: number
-  onSettings: () => void
   onUserChange: () => void
 }
 
@@ -193,12 +193,6 @@ function SettingsPopover({ username }: { username: string }) {
         </div>
       )}
 
-      {/* credit */}
-      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8, textAlign: 'center' }}>
-        <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>
-          Made by Adam Fresne-Roux and Milo Moreau
-        </span>
-      </div>
     </div>
   )
 }
@@ -258,10 +252,24 @@ function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
   )
 }
 
-export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Props) {
+export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsHov,  setSettingsHov]  = useState(false)
+  const [bellHov,      setBellHov]      = useState(false)
+  const [refreshing,   setRefreshing]   = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
   const user = username ?? 'User'
+
+  // Refresh without restart: broadcast a global event that the shell hooks
+  // (settings, activity, DCC paths) listen for and re-fetch on.
+  const handleRefresh = () => {
+    if (refreshing) return
+    setRefreshing(true)
+    window.dispatchEvent(new Event('flux:refresh'))
+    setTimeout(() => setRefreshing(false), 600)
+  }
 
   return (
     <div className="drag-region" style={{
@@ -292,19 +300,41 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
 
       <div style={{ flex: 1 }} />
 
-      {/* console (left of the bell) */}
-      <Console />
-
-      {/* notif bell */}
-      <div className="no-drag" style={{ position: 'relative' }}>
-        <div style={{
+      {/* refresh (left of the console) */}
+      <div
+        className="no-drag"
+        title="Rafraîchir les données"
+        onClick={handleRefresh}
+        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--paper-2)'; el.style.color = 'var(--ink)' }}
+        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = 'var(--ink-3)' }}
+        style={{
           width: 28, height: 28, borderRadius: 7,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: 'var(--ink-3)', cursor: 'pointer',
           transition: 'background 0.1s, color 0.1s',
         }}
-          onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--paper-2)'; el.style.color = 'var(--ink)' }}
-          onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = 'var(--ink-3)' }}
+      >
+        <RefreshCw size={14} strokeWidth={1.75} style={refreshing ? { animation: 'spin 0.6s linear infinite' } : undefined} />
+      </div>
+
+      {/* console (left of the bell) */}
+      <Console />
+
+      {/* notif bell → Activité */}
+      <div className="no-drag" style={{ position: 'relative' }}>
+        <div
+          title="Activité & notifications"
+          onClick={() => navigate('/activity')}
+          onMouseEnter={() => setBellHov(true)}
+          onMouseLeave={() => setBellHov(false)}
+          style={{
+            width: 28, height: 28, borderRadius: 7,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: (bellHov || pathname === '/activity') ? 'var(--ink)' : 'var(--ink-3)',
+            background: (bellHov || pathname === '/activity') ? 'var(--paper-2)' : 'transparent',
+            cursor: 'pointer',
+            transition: 'background 0.1s, color 0.1s',
+          }}
         >
           <Bell size={14} strokeWidth={1.75} />
         </div>
@@ -321,18 +351,20 @@ export function TitleBar({ username, unreadCount, onSettings, onUserChange }: Pr
         )}
       </div>
 
-      {/* settings gear */}
-      <Popover onOpenChange={open => { setSettingsOpen(open); if (open) onSettings() }}>
+      {/* settings gear — même highlight que Console / cloche */}
+      <Popover onOpenChange={setSettingsOpen}>
         <PopoverTrigger asChild>
           <div
             className="no-drag"
+            title="Paramètres"
+            onMouseEnter={() => setSettingsHov(true)}
+            onMouseLeave={() => setSettingsHov(false)}
             style={{
-              width: 28, height: 28,
-              border: '1px solid ' + (settingsOpen ? 'var(--rule-2)' : 'transparent'),
+              width: 28, height: 28, borderRadius: 7,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: settingsOpen ? 'var(--ink)' : 'var(--ink-3)',
-              background: settingsOpen ? 'var(--paper-2)' : 'transparent',
-              borderRadius: 7, cursor: 'pointer',
+              color: (settingsOpen || settingsHov) ? 'var(--ink)' : 'var(--ink-3)',
+              background: (settingsOpen || settingsHov) ? 'var(--paper-2)' : 'transparent',
+              cursor: 'pointer',
               transition: 'background 0.12s, color 0.12s',
             }}
           >

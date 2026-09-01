@@ -15,6 +15,7 @@ def get_current_user() -> str | None:
 
 def set_current_user(name: str) -> None:
     """Set active user in memory, persist to config.json, ensure user dir exists."""
+    name = name.strip().upper()   # artist names are always FULL UPPERCASE
     config.set_current_user(name)
     config.set("username", name)
     try:

@@ -68,6 +68,7 @@ def create_user(name: str, workspace: str | Path) -> None:
     by paths.set_flux_root / paths.set_config_username are preserved.
     """
     global _active_user
+    name = name.strip().upper()   # artist names are always FULL UPPERCASE
     _active_user = name
 
     cfg = _load()

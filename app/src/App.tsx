@@ -27,7 +27,6 @@ import { Toaster } from 'sonner'
 function AppShell({ settings }: { settings: Settings }) {
   const dccStatus          = useDccStatus()
   const { unreadCount }    = useActivity()
-  const [_showSettings, setShowSettings] = useState(false)
   const [showLogin, setShowLogin]         = useState(false)
 
   return (
@@ -38,7 +37,6 @@ function AppShell({ settings }: { settings: Settings }) {
         <TitleBar
           username={settings?.username ?? null}
           unreadCount={unreadCount}
-          onSettings={() => setShowSettings(true)}
           onUserChange={() => setShowLogin(true)}
         />
 
@@ -121,6 +119,11 @@ export function App() {
   if (settings.first_launch) {
     return <FirstLaunch />
   }
+
+  // Persist the active artist synchronously (during render, before any page mounts)
+  // so per-user scoped storage — favorites / recents / archived — never leaks
+  // from the previous user into the new one after a switch.
+  try { localStorage.setItem('flux.currentUser', settings.username ?? '') } catch { /* blocked storage */ }
 
   return <AppShell settings={settings} />
 }
