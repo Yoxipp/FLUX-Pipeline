@@ -29,15 +29,15 @@ export function SoftwareSelector({ active = 'Maya', onChange, showLocal = true }
       <div style={{ width: 1, height: 12, background: 'var(--rule-2)' }} />
       <div style={{ display: 'flex', gap: 4, overflowX: 'auto', alignItems: 'center', paddingTop: 2, paddingBottom: 2 }}>
         {SW_DCC.map(s => (
-          <Pill key={s.name} active={s.name === active} style={{ cursor: 'pointer' }}>
-            <span onClick={() => onChange?.(s.name)}>{s.name}</span>
+          <Pill key={s.name} active={s.name === active} onClick={() => onChange?.(s.name)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            {s.name}
           </Pill>
         ))}
         {showLocal && (
           <>
             <div style={{ width: 1, height: 12, background: 'var(--rule-2)', margin: '0 4px', flexShrink: 0 }} />
-            <Pill active={'Fichier local' === active} style={{ cursor: 'pointer' }}>
-              <span onClick={() => onChange?.('Fichier local')}>Fichier local</span>
+            <Pill active={'Fichier local' === active} onClick={() => onChange?.('Fichier local')} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Fichier local
             </Pill>
           </>
         )}

@@ -95,6 +95,24 @@ function CopyBlock({ text }: { text: string }) {
   )
 }
 
+// One step of the Maya reconnect guide — uses the UI sans font, not mono.
+function MayaStep({ n, done, title, desc }: { n: number; done: boolean; title: string; desc: string }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <div style={{
+        width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: done ? 'var(--ok)' : 'var(--accent)', color: 'white',
+        fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 700,
+      }}>{done ? '✓' : n}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+        <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{title}</span>
+        <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.4, wordBreak: 'break-all' }}>{desc}</span>
+      </div>
+    </div>
+  )
+}
+
 function formatToken(raw: string): string {
   return raw
     .normalize('NFD').replace(/\p{Mn}/gu, '')
@@ -180,246 +198,241 @@ type PublishMode = 'asset' | 'shot'
 
 interface ComposerSel {
   [key: string]: string
-  class: string
-  type: string
-  name: string
-  seq: string
-  shot: string
+  category: string   // asset: CHAR / PROPS / ENV / FX
+  name:     string
+  task:     string   // asset: GEO / SHADING / GROOM / RIG / CFX / MULT
   instance: string
+  variante: string
+  seq:      string   // shot
+  shot:     string   // shot
 }
 
-const EMPTY_SEL: ComposerSel = { class: '', type: '', name: '', seq: '', shot: '', instance: 'null' }
-const EMPTY_NEW_MODE = { type: false, name: false, instance: false, seq: false, shot: false }
-const EMPTY_NEW_VALS = { type: '', name: '', instance: '', seq: '', shot: '' }
+const EMPTY_SEL: ComposerSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '' }
+
+// Publisher category → pipeline CLASS token. "FX" is a display label for FXRIG.
+const CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
+const ASSET_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX'] as const
+// Coarse task = TYPE token (fixed order); label shown title-cased, value uppercase.
+const ASSET_TASKS: { value: string; label: string }[] = [
+  { value: 'GEO', label: 'Geo' }, { value: 'SHADING', label: 'Shading' }, { value: 'GROOM', label: 'Groom' },
+  { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' }, { value: 'MULT', label: 'Mult' },
+]
+
+// Info popover copy for each token (explanation · expected · concrete example).
+interface TokenInfo { title: string; desc: string; expected: string; example: string }
+const TOKEN_INFO: Record<string, TokenInfo> = {
+  category: { title: 'Catégorie', desc: "Le type d'asset dans le pipeline.", expected: 'CHAR, PROPS, ENV ou FX', example: 'CHAR → assets/chara' },
+  name:     { title: 'Name', desc: "Le nom de l'asset. Seuls les noms de la catégorie choisie sont proposés.", expected: 'Nom court, sans espace', example: 'JEROME' },
+  task:     { title: 'Task', desc: "L'étape de production — détermine le sous-dossier de l'asset.", expected: 'Geo, Shading, Groom, Rig, Cfx ou Mult', example: 'Rig → assets/chara/JEROME/rig' },
+  instance: { title: 'Instance', desc: 'Sous-variante fonctionnelle. Suggestions basées sur Catégorie + Name + Task.', expected: 'Champ libre (null par défaut)', example: 'CHAR_RIG_JEROME_null_LAST' },
+  variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
+  seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ###', example: 'SEQ001' },
+  shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT###', example: 'SHOT010' },
+  shotName: { title: 'Name', desc: 'La classe du plan (task shot). Suggestions basées sur Sequence + Shot.', expected: 'Champ libre', example: 'ANIM, LAYOUT, FX, CFX…' },
+  shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Name.', expected: 'Champ libre', example: 'ANIM_SEQ001_SHOT010_block_LAST' },
+}
 
 // ── PublishComposer ───────────────────────────────────────────────────────────
 
-interface ComposerProps {
-  project:   string
-  tokens:    Record<string, Record<string, string>>
-  seqs:      string[]
-  shots:     string[]
-  mode:      PublishMode
-  sel:       ComposerSel
-  newMode:   Record<string, boolean>
-  newVals:   Record<string, string>
-  onModeSwitch: () => void
-  onSelect:     (key: string, value: string) => void
-  onNewToggle:  (key: string) => void
-  onNewVal:     (key: string, value: string) => void
-}
-
-interface Mod { key: string; label: string; opts: string[]; allowNew: boolean }
-
-function PublishComposer({
-  project, tokens, seqs, shots,
-  mode, sel, newMode, newVals,
-  onModeSwitch, onSelect, onNewToggle, onNewVal,
-}: ComposerProps) {
-  const [open, setOpen] = useState<string | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  const assetClasses  = Object.keys(tokens.CLASS ?? {}).filter(k => !(tokens.CLASS?.[k] ?? '').includes('{seq}'))
-  const shotClassNames = Object.keys(tokens.CLASS ?? {}).filter(k =>  (tokens.CLASS?.[k] ?? '').includes('{seq}'))
-  const typeKeys      = Object.keys(tokens.TYPE ?? {})
-  const instanceKeys  = ['null', ...Object.keys(tokens.INSTANCE ?? {})]
-
-  // Filter NAME tokens to only those belonging to the selected CLASS
-  const classPath = (tokens.CLASS?.[sel.class] ?? '').replace(/\\/g, '/')
-  const nameKeys = classPath
-    ? Object.keys(tokens.NAME ?? {}).filter(k => {
-        const rel = (tokens.NAME?.[k] ?? '').replace(/\\/g, '/')
-        return rel.startsWith(classPath + '/')
-      })
-    : Object.keys(tokens.NAME ?? {})
-
+// Circled "i" with a click popover — explanation / expected value / concrete example.
+function InfoDot({ info }: { info: TokenInfo }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (open === null) return
-    const h = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(null)
-    }
+    if (!open) return
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [open])
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
+      <div
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        title="Infos"
+        style={{
+          width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+          border: '1px solid ' + (open ? 'var(--accent)' : 'var(--rule-2)'),
+          color: open ? 'var(--accent-hi)' : 'var(--ink-4)',
+          background: open ? 'var(--accent-soft)' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 700, fontStyle: 'italic',
+          cursor: 'pointer', lineHeight: 1,
+        }}
+      >i</div>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 600, width: 210,
+          padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
+          borderRadius: 8, boxShadow: 'var(--shadow-md)', fontFamily: 'var(--sans)',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>{info.title}</div>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45, marginBottom: 6 }}>{info.desc}</div>
+          <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>Attendu : <span style={{ color: 'var(--ink-2)' }}>{info.expected}</span></div>
+          <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>Ex. : <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent-hi)' }}>{info.example}</span></div>
+        </div>
+      )}
+    </div>
+  )
+}
 
-  const MODULES: Mod[] = mode === 'asset'
-    ? [
-        { key: 'class',    label: 'CLASS',    opts: assetClasses, allowNew: false },
-        { key: 'type',     label: 'TYPE',     opts: typeKeys,     allowNew: false },
-        { key: 'name',     label: 'NAME',     opts: nameKeys,     allowNew: true  },
-        { key: 'instance', label: 'INSTANCE', opts: instanceKeys, allowNew: true  },
-      ]
-    : [
-        { key: 'seq',      label: 'SEQ',      opts: seqs,           allowNew: true  },
-        { key: 'shot',     label: 'SHOT',     opts: shots,          allowNew: true  },
-        { key: 'name',     label: 'NAME',     opts: shotClassNames, allowNew: false },
-        { key: 'instance', label: 'INSTANCE', opts: instanceKeys,   allowNew: true  },
-      ]
+// A composer module: label + info dot, then a value box — a fixed dropdown or a
+// free-text combobox whose dropdown lists contextual suggestions (`options`).
+function ModuleBox({ label, info, value, placeholder, options, fixed, onChange }: {
+  label: string; info: TokenInfo; value: string; placeholder?: string
+  options: string[]; fixed?: boolean; onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  const q = value.trim().toLowerCase()
+  const shown = fixed ? options : (q ? options.filter(o => o.toLowerCase().includes(q)) : options)
+  const filled = !!value
+  return (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 2 }}>
+        <span style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</span>
+        <InfoDot info={info} />
+      </div>
+      <div ref={ref} style={{ position: 'relative' }}>
+        {fixed ? (
+          <div
+            onClick={() => setOpen(o => !o)}
+            className="scale-hover"
+            style={{
+              height: 30, padding: '0 8px', display: 'flex', alignItems: 'center', cursor: 'pointer',
+              borderRadius: 5, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              background: filled ? 'var(--accent-soft)' : 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
+              fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink-4)',
+              fontWeight: filled ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >{value || placeholder || '-'}</div>
+        ) : (
+          <input
+            value={value}
+            placeholder={placeholder}
+            onChange={e => { onChange(e.target.value); setOpen(true) }}
+            onFocus={() => setOpen(true)}
+            style={{
+              width: '100%', height: 30, padding: '0 8px', boxSizing: 'border-box',
+              borderRadius: 5, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+              fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
+              fontWeight: filled ? 600 : 400,
+            }}
+          />
+        )}
+        {open && shown.length > 0 && (
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: '100%',
+            maxHeight: 180, overflowY: 'auto', background: 'var(--paper)',
+            border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)',
+          }}>
+            {shown.map(o => (
+              <div
+                key={o}
+                onMouseDown={e => { e.preventDefault(); onChange(o); setOpen(false) }}
+                style={{
+                  padding: '5px 8px', fontSize: 10, fontFamily: 'var(--mono)', cursor: 'pointer', whiteSpace: 'nowrap',
+                  color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)',
+                  background: o === value ? 'var(--accent-soft)' : 'transparent',
+                }}
+              >{o}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface ComposerProps {
+  project: string
+  tokens:  Record<string, Record<string, string>>
+  seqs:    string[]
+  shots:   string[]
+  mode:    PublishMode
+  sel:     ComposerSel
+  onModeSwitch: () => void
+  onSelect:     (key: string, value: string) => void
+}
+
+function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch, onSelect }: ComposerProps) {
+  // Asset names for the selected category (filtered by its CLASS path)
+  const cls = CATEGORY_TO_CLASS[sel.category] ?? ''
+  const classPath = (tokens.CLASS?.[cls] ?? '').replace(/\\/g, '/')
+  const names = classPath
+    ? Object.keys(tokens.NAME ?? {}).filter(k => (tokens.NAME?.[k] ?? '').replace(/\\/g, '/').startsWith(classPath + '/'))
+    : []
+
+  // Contextual suggestions, scanned from disk (never global)
+  const [instanceSug, setInstanceSug] = useState<string[]>([])
+  const [varianteSug, setVarianteSug] = useState<string[]>([])
+  const [shotNameSug, setShotNameSug] = useState<string[]>([])
+
+  useEffect(() => {
+    if (mode !== 'asset' || !project || !sel.category || !sel.name || !sel.task) { setInstanceSug([]); return }
+    let ok = true
+    api.suggestTokens({ project, field: 'instance', mode: 'asset', class_token: cls, name: sel.name, type_token: sel.task })
+      .then(d => { if (ok) setInstanceSug(d.suggestions) }).catch(() => { if (ok) setInstanceSug([]) })
+    return () => { ok = false }
+  }, [mode, project, cls, sel.category, sel.name, sel.task])
+
+  useEffect(() => {
+    let ok = true
+    if (mode === 'asset') {
+      if (!project || !sel.category || !sel.name || !sel.task) { setVarianteSug([]); return }
+      api.suggestTokens({ project, field: 'variante', mode: 'asset', class_token: cls, name: sel.name, type_token: sel.task, instance: sel.instance || 'null' })
+        .then(d => { if (ok) setVarianteSug(d.suggestions) }).catch(() => { if (ok) setVarianteSug([]) })
+    } else {
+      if (!project || !sel.seq || !sel.shot || !sel.name) { setVarianteSug([]); return }
+      api.suggestTokens({ project, field: 'variante', mode: 'shot', seq: sel.seq, shot: sel.shot, name: sel.name })
+        .then(d => { if (ok) setVarianteSug(d.suggestions) }).catch(() => { if (ok) setVarianteSug([]) })
+    }
+    return () => { ok = false }
+  }, [mode, project, cls, sel.category, sel.name, sel.task, sel.instance, sel.seq, sel.shot])
+
+  useEffect(() => {
+    if (mode !== 'shot' || !project || !sel.seq || !sel.shot) { setShotNameSug([]); return }
+    let ok = true
+    api.suggestTokens({ project, field: 'name', mode: 'shot', seq: sel.seq, shot: sel.shot })
+      .then(d => { if (ok) setShotNameSug(d.suggestions) }).catch(() => { if (ok) setShotNameSug([]) })
+    return () => { ok = false }
+  }, [mode, project, sel.seq, sel.shot])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {/* NEW buttons row */}
-      <div style={{ display: 'flex', gap: 4 }}>
-        <div style={{ width: 56, flexShrink: 0 }} />
-        <div style={{ flex: 1, display: 'flex' }}>
-          {MODULES.map((m) => (
-            <div key={m.key} style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-              {m.allowNew ? (
-                <div
-                  onClick={() => onNewToggle(m.key)}
-                  style={{
-                    padding: '2px 9px', borderRadius: 4,
-                    fontSize: 8, fontFamily: 'var(--mono)', fontWeight: 700,
-                    letterSpacing: '0.12em', cursor: 'pointer', userSelect: 'none',
-                    background: newMode[m.key] ? 'var(--accent)' : 'transparent',
-                    border: `1px solid ${newMode[m.key] ? 'var(--accent)' : 'var(--rule-2)'}`,
-                    color: newMode[m.key] ? 'white' : 'var(--ink-4)',
-                    transition: 'all 0.1s',
-                  }}
-                >
-                  NEW
-                </div>
-              ) : (
-                <div style={{ height: 20 }} />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+      {/* Asset / Shot toggle */}
+      <div onClick={onModeSwitch} className="scale-hover" style={{
+        width: 52, flexShrink: 0, height: 30,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: '1px solid var(--rule-2)', borderRadius: 5,
+        background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)',
+        cursor: 'pointer', fontSize: 8, fontFamily: 'var(--mono)',
+        color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)',
+        fontWeight: 700, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)',
+      }}>{mode === 'asset' ? 'ASSET' : 'SHOT'}</div>
 
-      {/* Composer bar */}
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 4 }}>
-        {/* Asset / Shot toggle */}
-        <div
-          onClick={onModeSwitch}
-          className="scale-hover"
-          style={{
-            width: 52, flexShrink: 0, height: 34,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid var(--rule-2)', borderRadius: 5,
-            background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)',
-            cursor: 'pointer', fontSize: 8, fontFamily: 'var(--mono)',
-            color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)',
-            fontWeight: 700, letterSpacing: '0.08em', userSelect: 'none',
-            boxShadow: 'var(--shadow-xs)', transition: 'all 0.12s',
-          }}
-        >
-          {mode === 'asset' ? 'ASSET' : 'SHOT'}
-        </div>
-
-        {/* Token boxes */}
-        <div
-          ref={rootRef}
-          style={{
-            flex: 1, display: 'flex',
-            border: '1px solid var(--rule-2)', borderRadius: 5,
-            background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
-            position: 'relative', overflow: 'visible',
-          }}
-        >
-          {MODULES.map(({ key, label, opts }, i) => {
-            const selVal = sel[key]
-            const isNew  = !!newMode[key]
-            const isOpen = open === key && !isNew
-            const filled = isNew ? !!newVals[key] : (!!selVal && selVal !== '')
-            const radius = i === 0 ? '4px 0 0 4px' : i === MODULES.length - 1 ? '0 4px 4px 0' : '0'
-
-            return (
-              <div
-                key={`${mode}-${key}`}
-                style={{ flex: 1, position: 'relative', borderLeft: i > 0 ? '1px solid var(--rule-2)' : 'none' }}
-              >
-                {isNew ? (
-                  <div style={{
-                    height: 34, padding: '0 7px',
-                    display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1,
-                    background: 'var(--accent-soft)', borderRadius: radius,
-                    border: '1px solid var(--accent)', margin: -1, boxSizing: 'border-box',
-                  }}>
-                    <span style={{ fontSize: 7, color: 'var(--accent-hi)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>
-                      {label}
-                    </span>
-                    <input
-                      autoFocus
-                      value={newVals[key]}
-                      onChange={e => onNewVal(key, e.target.value)}
-                      placeholder="nouveau…"
-                      onClick={e => e.stopPropagation()}
-                      style={{
-                        background: 'transparent', border: 'none', outline: 'none',
-                        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-                        color: 'var(--accent-hi)', width: '100%', padding: 0,
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => setOpen(isOpen ? null : key)}
-                    className="scale-hover"
-                    style={{
-                      height: 34, padding: '0 6px',
-                      display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1,
-                      cursor: 'pointer',
-                      background: filled ? 'var(--accent-soft)' : 'transparent',
-                      transition: 'background 0.08s, transform 0.08s', borderRadius: radius,
-                    }}
-                  >
-                    <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>
-                      {label}
-                    </span>
-                    <span style={{
-                      fontSize: 9, fontFamily: 'var(--mono)',
-                      color: filled ? 'var(--accent-hi)' : 'var(--ink-4)',
-                      fontWeight: filled ? 600 : 400,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3,
-                    }}>
-                      {selVal || '-'}
-                    </span>
-                  </div>
-                )}
-
-                {isOpen && (
-                  <div style={{
-                    position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 500,
-                    minWidth: 120, background: 'var(--paper)',
-                    border: '1px solid var(--rule-2)', borderRadius: 5,
-                    boxShadow: 'var(--shadow)', overflow: 'hidden',
-                  }}>
-                    {selVal && key !== 'instance' && (
-                      <div
-                        onClick={() => { onSelect(key, ''); setOpen(null) }}
-                        style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
-                      >
-                        effacer
-                      </div>
-                    )}
-                    {opts.length === 0 ? (
-                      <div style={{ padding: '7px 8px', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-                        {key === 'name' && !sel.class
-                          ? 'Sélectionne une CLASS'
-                          : project ? 'Vide' : 'Projet requis'}
-                      </div>
-                    ) : opts.map(o => (
-                      <div
-                        key={o}
-                        onClick={() => { onSelect(key, o); setOpen(null) }}
-                        style={{
-                          padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)',
-                          color: selVal === o ? 'var(--accent-hi)' : 'var(--ink-2)',
-                          background: selVal === o ? 'var(--accent-soft)' : 'transparent',
-                          cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {o}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      {mode === 'asset' ? (
+        <>
+          <ModuleBox label="Catégorie" info={TOKEN_INFO.category} value={sel.category} fixed options={[...ASSET_CATEGORIES]} placeholder="—" onChange={v => onSelect('category', v)} />
+          <ModuleBox label="Name" info={TOKEN_INFO.name} value={sel.name} options={names} placeholder={sel.category ? 'nom…' : 'catégorie ?'} onChange={v => onSelect('name', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.task} value={sel.task} fixed options={ASSET_TASKS.map(t => t.value)} placeholder="—" onChange={v => onSelect('task', v)} />
+          <ModuleBox label="Instance" info={TOKEN_INFO.instance} value={sel.instance} options={instanceSug} placeholder="null" onChange={v => onSelect('instance', v)} />
+          <ModuleBox label="Variante" info={TOKEN_INFO.variante} value={sel.variante} options={varianteSug} placeholder="(option)" onChange={v => onSelect('variante', v)} />
+        </>
+      ) : (
+        <>
+          <ModuleBox label="Sequence" info={TOKEN_INFO.seq} value={sel.seq} options={seqs} placeholder="SEQ001" onChange={v => onSelect('seq', v)} />
+          <ModuleBox label="Shot" info={TOKEN_INFO.shot} value={sel.shot} options={shots} placeholder="SHOT010" onChange={v => onSelect('shot', v)} />
+          <ModuleBox label="Name" info={TOKEN_INFO.shotName} value={sel.name} options={shotNameSug} placeholder="task…" onChange={v => onSelect('name', v)} />
+          <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
+        </>
+      )}
     </div>
   )
 }
@@ -437,8 +450,6 @@ export function Publisher() {
   // Composer state
   const [mode, setMode]       = useState<PublishMode>('asset')
   const [sel, setSel]         = useState<ComposerSel>(EMPTY_SEL)
-  const [newMode, setNewMode] = useState<Record<string, boolean>>(EMPTY_NEW_MODE)
-  const [newVals, setNewVals] = useState<Record<string, string>>(EMPTY_NEW_VALS)
   const [seqs, setSeqs]   = useState<string[]>([])
   const [shots, setShots] = useState<string[]>([])
 
@@ -520,7 +531,7 @@ export function Publisher() {
 
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
-  const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('selection')
+  const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
   const [lightUsd, setLightUsd]                     = useState(false)   // Maya UsdSkel light export
   const [lightInclude, setLightInclude]             = useState({ geo: true, skel: true, anim: true, weights: true, uv: true })
   const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
@@ -670,86 +681,56 @@ export function Publisher() {
   const handleModeSwitch = useCallback(() => {
     setMode(prev => prev === 'asset' ? 'shot' : 'asset')
     setSel(EMPTY_SEL)
-    setNewMode(EMPTY_NEW_MODE)
-    setNewVals(EMPTY_NEW_VALS)
   }, [])
 
   const handleSelect = useCallback((key: string, value: string) => {
     setSel(prev => {
       const next = { ...prev, [key]: value }
-      if (key === 'class') { next.type = ''; next.name = '' }
-      if (key === 'type')  { next.name = '' }
-      if (key === 'seq')   { next.shot = '' }
+      if (key === 'category') next.name = ''   // asset names depend on the category
+      if (key === 'seq')      next.shot = ''
       return next
     })
   }, [])
 
-  const handleNewToggle = useCallback((key: string) => {
-    const wasActive = newMode[key]
-    setNewMode(prev => ({ ...prev, [key]: !prev[key] }))
-    if (wasActive) setNewVals(prev => ({ ...prev, [key]: '' }))
-  }, [newMode])
-
-  const handleNewVal = useCallback((key: string, value: string) => {
-    setNewVals(prev => ({ ...prev, [key]: value }))
-  }, [])
-
   // ── Filename assembly ───────────────────────────────────────────────────────
-
-  const getEffective = useCallback((key: string): string => {
-    if (newMode[key]) {
-      const raw = newVals[key] || ''
-      if (key === 'seq')  return formatSeqLabel(raw)
-      if (key === 'shot') return formatShotLabel(raw)
-      return formatToken(raw)
-    }
-    return sel[key] || ''
-  }, [newMode, newVals, sel])
+  // Asset: CLASS_TASK_NAME_INSTANCE[_VARIANTE] · Shot: NAME_SEQ_SHOT_VARIANTE
 
   const buildFilename = useCallback((): string => {
-    const instance = getEffective('instance') || 'null'
     if (mode === 'asset') {
-      return `${getEffective('class')}_${getEffective('type')}_${getEffective('name')}_${instance}`
+      const cls  = CATEGORY_TO_CLASS[sel.category] ?? formatToken(sel.category)
+      const inst = formatToken(sel.instance) || 'null'
+      const varr = formatToken(sel.variante)
+      let base = `${cls}_${sel.task}_${formatToken(sel.name)}_${inst}`
+      if (varr) base += `_${varr}`
+      return base
     }
-    return `${getEffective('name')}_${getEffective('seq')}_${getEffective('shot')}_${instance}`
-  }, [mode, getEffective])
+    const varr = formatToken(sel.variante) || 'null'
+    return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${varr}`
+  }, [mode, sel])
 
-  // ── Token pre-creation before publish ──────────────────────────────────────
+  // ── Token / folder pre-creation before publish ─────────────────────────────
 
   const createNewTokens = useCallback(async () => {
     if (mode === 'shot') {
-      if (newMode.seq && newVals.seq) {
-        const num = parseInt(newVals.seq.replace(/[^0-9]/g, ''), 10)
-        if (!isNaN(num)) {
-          await api.createSequence(project, num)
-          const d = await api.getSequences(project)
-          setSeqs(d.sequences)
-        }
+      const seqLabel = formatSeqLabel(sel.seq)
+      const seqNum   = parseInt(seqLabel.replace(/[^0-9]/g, ''), 10)
+      if (!isNaN(seqNum) && !seqs.includes(seqLabel)) {
+        try { await api.createSequence(project, seqNum); const d = await api.getSequences(project); setSeqs(d.sequences) } catch { /* may exist */ }
       }
-      if (newMode.shot && newVals.shot) {
-        const seqLabel = newMode.seq ? formatSeqLabel(newVals.seq) : sel.seq
-        const seqNum   = parseInt(seqLabel.replace(/[^0-9]/g, ''), 10)
-        const shotNum  = parseInt(newVals.shot.replace(/[^0-9]/g, ''), 10)
-        if (!isNaN(seqNum) && !isNaN(shotNum)) {
-          await api.createShot(project, seqNum, shotNum)
-          if (seqLabel) {
-            const d = await api.getShots(project, seqLabel)
-            setShots(d.shots.map(s => s.split('/')[1] ?? s))
-          }
-        }
+      const shotLabel = formatShotLabel(sel.shot)
+      const shotNum   = parseInt(shotLabel.replace(/[^0-9]/g, ''), 10)
+      if (!isNaN(seqNum) && !isNaN(shotNum) && !shots.includes(shotLabel)) {
+        try { await api.createShot(project, seqNum, shotNum); const d = await api.getShots(project, seqLabel); setShots(d.shots.map(s => s.split('/')[1] ?? s)) } catch { /* may exist */ }
       }
       return
     }
-    // asset mode
-    const newName = newMode.name     ? formatToken(newVals.name     || '') : ''
-    const newInst = newMode.instance ? formatToken(newVals.instance || '') : ''
-    if (newName && sel.class) {
-      try { await api.createAsset(project, sel.class, newName) } catch { /* may already exist */ }
+    // asset mode — create the asset folder if the name is new for this category
+    const cls  = CATEGORY_TO_CLASS[sel.category] ?? ''
+    const name = formatToken(sel.name)
+    if (name && cls) {
+      try { await api.createAsset(project, cls, name) } catch { /* may already exist */ }
     }
-    if (newInst && newInst !== 'null') {
-      await api.addToken({ project, token_type: 'INSTANCE', token_value: newInst, rel_path: newInst.toLowerCase() })
-    }
-  }, [mode, project, sel.class, sel.seq, newMode, newVals])
+  }, [mode, project, sel, seqs, shots])
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
@@ -761,8 +742,6 @@ export function Publisher() {
 
   const reset = useCallback(() => {
     setSel(EMPTY_SEL)
-    setNewMode(EMPTY_NEW_MODE)
-    setNewVals(EMPTY_NEW_VALS)
     setSourcePath('')
     setDescription('')
   }, [])
@@ -773,7 +752,7 @@ export function Publisher() {
     const filename = buildFilename()
     const parts = filename.split('_').filter(Boolean)
     if (parts.length < 4) {
-      toast.error(mode === 'asset' ? 'Complète CLASS, TYPE et NAME' : 'Complète SEQ, SHOT et le type')
+      toast.error(mode === 'asset' ? 'Complète Catégorie, Name et Task' : 'Complète Sequence, Shot et Name')
       return
     }
 
@@ -788,7 +767,7 @@ export function Publisher() {
           return
         }
         if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
-          const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
+          const assetName = formatToken(sel.name) || parts[2]
           const res = await api.exportMayaLightUsd({
             project_name: project,
             asset:        assetName,
@@ -825,7 +804,7 @@ export function Publisher() {
           return
         }
         if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
-          const assetName = (newMode.name ? formatToken(newVals.name || '') : sel.name) || parts[2]
+          const assetName = formatToken(sel.name) || parts[2]
           const res = await api.exportHoudiniLightUsd({
             project_name: project,
             asset:        assetName,
@@ -904,8 +883,20 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath,
     zbrushConnected, zbObjOptions, zbFbxOptions,
-    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, newMode, newVals, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
+    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
+
+  // Ctrl/Cmd+P → publish (also prevents the browser print dialog)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault()
+        if (!publishing) void handlePublish()
+      }
+    }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [handlePublish, publishing])
 
   const filename = buildFilename()
 
@@ -957,12 +948,8 @@ export function Publisher() {
               shots={shots}
               mode={mode}
               sel={sel}
-              newMode={newMode}
-              newVals={newVals}
               onModeSwitch={handleModeSwitch}
               onSelect={handleSelect}
-              onNewToggle={handleNewToggle}
-              onNewVal={handleNewVal}
             />
 
             {/* Source / DCC info */}
@@ -1087,93 +1074,45 @@ export function Publisher() {
             ) : dcc === 'Maya' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
 
-                {/* Connection dot */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                    background: mayaConnected ? 'var(--ok)' : 'var(--err)',
-                    transition: 'background 0.3s',
-                  }} />
-                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: mayaConnected ? 'var(--ok)' : 'var(--ink-3)' }}>
-                    {mayaConnected ? '✓ Connecté · commandPort 7001' : 'Port 7001 injoignable'}
+                {/* Maya connection — coherent card, UI sans font (matches Launcher naming) */}
+                {mayaConnected ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0, boxShadow: '0 0 6px var(--ok)' }} />
+                    <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>Maya connecté</span>
+                    <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)' }}>· commandPort 7001</span>
                   </div>
-                </div>
-
-                {/* Step-by-step guide when not connected — only render once autostart state resolved */}
-                {!mayaConnected && mayaAutostartInstalled !== null && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-
-                    {/* Step 1 — Plug */}
-                    <div style={{
-                      display: 'flex', gap: 7, padding: '6px 8px', borderRadius: 5,
-                      background: mayaAutostartInstalled ? 'var(--paper-2)' : 'var(--accent-soft)',
-                      border: `1px solid ${mayaAutostartInstalled ? 'var(--rule-2)' : 'var(--accent)'}`,
-                    }}>
-                      <div style={{
-                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: mayaAutostartInstalled ? 'var(--ok)' : 'var(--accent)',
-                        fontSize: 8, fontWeight: 700, color: 'white',
-                      }}>
-                        {mayaAutostartInstalled ? '✓' : '1'}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, color: mayaAutostartInstalled ? 'var(--ink-3)' : 'var(--accent-hi)' }}>
-                          {mayaAutostartInstalled ? 'Autostart installé' : 'Installer l\'autostart Maya'}
-                        </div>
-                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.4 }}>
-                          {mayaAutostartInstalled
-                            ? (mayaStartupFile ?? 'userSetup.py mis à jour')
-                            : 'Sidebar → bouton Plug ⬡ à côté de Maya'}
-                        </div>
+                ) : mayaAutostartInstalled !== null && (
+                  <div style={{ borderRadius: 10, border: '1px solid var(--accent)', background: 'var(--accent-soft)', overflow: 'hidden' }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--rule-2)' }}>
+                      <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--err)', flexShrink: 0, marginTop: 4 }} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <span style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Maya n'est pas connecté</span>
+                        <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45 }}>
+                          Le pont FLUX (commandPort 7001) est injoignable. Suis les étapes pour l'activer.
+                        </span>
                       </div>
                     </div>
-
-                    {/* Step 2 — Restart Maya */}
-                    {mayaAutostartInstalled && (
-                      <div style={{
-                        display: 'flex', gap: 7, padding: '6px 8px', borderRadius: 5,
-                        background: 'var(--accent-soft)', border: '1px solid var(--accent)',
-                      }}>
-                        <div style={{
-                          width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          background: 'var(--accent)', fontSize: 8, fontWeight: 700, color: 'white',
-                        }}>2</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <div style={{ fontSize: 9, fontFamily: 'var(--mono)', fontWeight: 600, color: 'var(--accent-hi)' }}>
-                            Redémarre Maya
-                          </div>
-                          <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.4 }}>
-                            Le commandPort s'ouvre automatiquement au démarrage
-                          </div>
+                    {/* Steps */}
+                    <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--paper)' }}>
+                      <MayaStep
+                        n={1}
+                        done={!!mayaAutostartInstalled}
+                        title={mayaAutostartInstalled ? 'Autostart installé' : "Installer l'autostart Maya"}
+                        desc={mayaAutostartInstalled ? (mayaStartupFile ?? 'userSetup.py mis à jour') : 'Sidebar → bouton ⬡ à côté de Maya'}
+                      />
+                      {mayaAutostartInstalled && (
+                        <MayaStep n={2} done={false} title="Redémarre Maya" desc="Le commandPort s'ouvre automatiquement au lancement." />
+                      )}
+                      {mayaConnectCmd && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                          <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)' }}>
+                            Ou ouvre le port immédiatement — colle ceci dans le Script Editor (Python) de Maya :
+                          </span>
+                          <CopyBlock text={mayaConnectCmd} />
                         </div>
-                      </div>
-                    )}
-
-                    {/* Quick open — paste in Maya Script Editor */}
-                    {mayaConnectCmd && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                          Ouvrir le port immédiatement · Maya Script Editor (Python) :
-                        </div>
-                        <CopyBlock text={mayaConnectCmd} />
-                      </div>
-                    )}
-
-                    {/* Diagnostic — check where Maya actually loads scripts from */}
-                    {mayaAutostartInstalled && mayaStartupFile && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                          Si ça ne marche toujours pas, vérifie le chemin Maya (Script Editor Python) :
-                        </div>
-                        <CopyBlock text={`import maya.cmds as cmds; print(cmds.internalVar(userScriptDir=True))`} />
-                        <div style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', lineHeight: 1.5 }}>
-                          Compare avec : <span style={{ color: 'var(--accent-hi)', wordBreak: 'break-all' }}>{mayaStartupFile.replace(/userSetup\.py$/i, '')}</span>
-                          <br />Si différent → le bloc est écrit au mauvais endroit.
-                        </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1350,7 +1289,7 @@ export function Publisher() {
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>SCOPE</SecTitle>
               <div style={{ display: 'flex', gap: 4 }}>
-                {(['selection', 'scene'] as const).map(s => (
+                {(['scene', 'selection'] as const).map(s => (
                   <div
                     key={s}
                     onClick={() => setMayaScope(s)}

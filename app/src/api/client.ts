@@ -241,6 +241,21 @@ export const api = {
   getAssets: (project: string, class_token?: string) =>
     apiCall<{ assets: string[] }>('GET', `/folder/projects/${project}/assets${class_token ? `?class_token=${class_token}` : ''}`),
 
+  // Contextual token suggestions, scanned from what is published on disk (never global)
+  suggestTokens: (params: {
+    project: string; field: 'instance' | 'variante' | 'name'; mode?: 'asset' | 'shot'
+    class_token?: string; name?: string; type_token?: string; instance?: string; seq?: string; shot?: string
+  }) => {
+    const qs = new URLSearchParams({ project: params.project, field: params.field, mode: params.mode ?? 'asset' })
+    if (params.class_token) qs.set('class_token', params.class_token)
+    if (params.name)        qs.set('name', params.name)
+    if (params.type_token)  qs.set('type_token', params.type_token)
+    if (params.instance)    qs.set('instance', params.instance)
+    if (params.seq)         qs.set('seq', params.seq)
+    if (params.shot)        qs.set('shot', params.shot)
+    return apiCall<{ suggestions: string[] }>('GET', `/folder/suggest?${qs}`)
+  },
+
   createAsset: (project: string, class_token: string, name: string) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/assets', { project, class_token, name }),
 

@@ -28,10 +28,14 @@ export const SecTitle = ({ children, right }: { children: React.ReactNode; right
   </div>
 )
 
-export const Pill = ({ children, active, disabled, dot, style }: {
-  children: React.ReactNode; active?: boolean; disabled?: boolean; dot?: string; style?: CSSProperties
+export const Pill = ({ children, active, disabled, dot, style, onClick }: {
+  children: React.ReactNode; active?: boolean; disabled?: boolean; dot?: string; style?: CSSProperties; onClick?: () => void
 }) => (
-  <div className={`pill${active ? ' active' : ''}${disabled ? ' disabled' : ''}`} style={style}>
+  <div
+    className={`pill${active ? ' active' : ''}${disabled ? ' disabled' : ''}`}
+    style={style}
+    onClick={disabled ? undefined : onClick}
+  >
     {dot && <span className={`dot ${dot}`} />}
     {children}
   </div>

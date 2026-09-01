@@ -54,8 +54,8 @@ def _build_dcc_patterns() -> dict[str, list[str]]:
 DCC_EXE_PATTERNS: dict[str, list[str]] = _build_dcc_patterns()
 
 # ── Naming / token system ─────────────────────────────────────────────────────
-TOKEN_TYPES: tuple[str, ...] = ("CLASS", "TYPE", "NAME", "INSTANCE", "ITER")
-TOKEN_TYPES_SHOT: tuple[str, ...] = ("CLASS", "SEQ", "SHOT", "INSTANCE", "ITER")
+TOKEN_TYPES: tuple[str, ...] = ("CLASS", "TYPE", "NAME", "INSTANCE", "VARIANTE", "ITER")
+TOKEN_TYPES_SHOT: tuple[str, ...] = ("CLASS", "SEQ", "SHOT", "VARIANTE", "ITER")
 
 ACTIVE_VERSION_LABEL: str = "LAST"   # e.g. CHAR_RIG_JEROME_null_LAST.mb
 
@@ -81,23 +81,17 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "COMP":   "comp/{seq}/{shot}",
 }
 
-# Default TYPE token map (TYPE → asset-relative sub-folder path)
+# Default TYPE token map (Task → asset-relative top-level sub-folder).
+# The Publisher exposes exactly these 6 coarse tasks (fixed order), matching the
+# CHAR asset scaffold (model / shading / groom / rig / CFX_Rig). "mult" is a
+# catch-all created on demand.
 DEFAULT_TYPE_TOKENS: dict[str, str] = {
-    "SCULPT":    "model/sculpt",
-    "BLOCK":     "model/block_sculpt",
-    "TOPO":      "model/topo",
-    "TEX":       "shading/textures",
-    "LDEV":      "shading/lookdev",
-    "FUR":       "groom/fur",
-    "HAIR":      "groom/hair",
-    "FEATHERS":  "groom/feathers",
-    "SK":        "rig/skeleton",
-    "WGHT":      "rig/weight",
-    "RIG":       "rig/rig",
-    "CLOTH":     "cloth",
-    "MUSCLE":    "muscle",
-    "GBL":       "global",
-    "GAJ":       "usd",   # Geo + Anim + Joints — light layered USD export
+    "GEO":     "model",
+    "SHADING": "shading",
+    "GROOM":   "groom",
+    "RIG":     "rig",
+    "CFX":     "CFX_Rig",
+    "MULT":    "mult",
 }
 
 # Predefined anim instances (sub-folders inside /anim/)

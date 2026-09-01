@@ -122,6 +122,92 @@ async def get_types_for_class(project_name: str, class_token: str | None = None)
     return {"types": types}
 
 
+@router.get("/suggest")
+async def suggest_tokens(
+    project: str,
+    field: str,                # 'instance' | 'variante' | 'name'
+    mode: str = "asset",
+    class_token: str = "",
+    name: str = "",
+    type_token: str = "",
+    instance: str = "",
+    seq: str = "",
+    shot: str = "",
+) -> dict:
+    """Contextual token suggestions, scanned from what is actually published on disk.
+
+    Never returns a global list — always scoped to the current selection.
+    """
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+    from features.folder_manager.naming_validator import parse_filename
+
+    def _work() -> list[str]:
+        tokens = load_tokens(project_path)
+        vals: set[str] = set()
+
+        if mode == "asset":
+            # NAME suggestions only need the class → list asset folders under it
+            if field == "name":
+                class_rel = get_path_for_token(tokens, "CLASS", class_token)
+                if class_rel:
+                    folder = project_path / class_rel
+                    if folder.exists():
+                        vals = {p.name for p in folder.iterdir() if p.is_dir()}
+                return sorted(vals)
+
+            # instance / variante need a resolved asset (name)
+            name_rel = get_path_for_token(tokens, "NAME", name)
+            if not name_rel:
+                class_rel = get_path_for_token(tokens, "CLASS", class_token)
+                if not class_rel or not name:
+                    return []
+                name_rel = f"{class_rel}/{name}"
+            type_sub = tokens.get("TYPE", {}).get(type_token) or (type_token.lower() if type_token else "")
+
+            if field == "instance":
+                folder = (project_path / name_rel / type_sub) if type_sub else (project_path / name_rel)
+                if folder.exists():
+                    vals = {p.name for p in folder.iterdir() if p.is_dir()}
+            elif field == "variante":
+                inst = (instance or "null").lower()
+                folder = project_path / name_rel / type_sub / inst
+                if folder.exists():
+                    for f in folder.iterdir():
+                        if f.is_file():
+                            parsed = parse_filename(f.name)
+                            if parsed and parsed.get("VARIANTE"):
+                                vals.add(parsed["VARIANTE"])
+        else:  # shot
+            if field == "name":
+                folder = project_path / "shot" / seq / shot
+                if folder.exists():
+                    vals = {p.name.upper() for p in folder.iterdir() if p.is_dir()}
+            elif field == "variante":
+                class_rel = get_path_for_token(tokens, "CLASS", name)
+                folder = None
+                if class_rel:
+                    try:
+                        folder = project_path / class_rel.format(seq=seq, shot=shot)
+                    except (KeyError, IndexError):
+                        folder = None
+                if folder is None:
+                    folder = project_path / "shot" / seq / shot
+                if folder.exists():
+                    for f in folder.rglob("*"):
+                        if f.is_file():
+                            parsed = parse_filename(f.name)
+                            if parsed and parsed.get("VARIANTE"):
+                                vals.add(parsed["VARIANTE"])
+        return sorted(vals)
+
+    loop = asyncio.get_event_loop()
+    suggestions = await loop.run_in_executor(None, _work)
+    return {"suggestions": suggestions}
+
+
 @router.get("/projects/{project_name}/assets")
 async def get_assets(project_name: str, class_token: str | None = None) -> dict:
     project_path = get_project_path(project_name)

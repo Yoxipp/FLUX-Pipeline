@@ -42,7 +42,8 @@ interface FindResult {
 
 type FinderMode = 'asset' | 'shot'
 
-interface TokenSel { class: string; type: string; name: string; instance: string; iter: string; mode: FinderMode }
+interface TokenSel { category: string; name: string; task: string; instance: string; variante: string; seq: string; shot: string; mode: FinderMode }
+const EMPTY_TOKEN_SEL: TokenSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '', mode: 'asset' }
 
 interface CtxMenu { x: number; y: number; items: ExplorerItem[] }
 
@@ -67,7 +68,12 @@ const TABS: { id: Tab; label: string }[] = [
 
 const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'FXRIG']
 const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custom']
-const FINDER_ITERS = ['LAST', 'V001', 'V002', 'V003', 'V004', 'V005']
+
+// Finder — same fixed lists as the Publisher composer (Category / Task predefined,
+// FX is the display label for the FXRIG class). Name/Instance/Variante come from disk.
+const FINDER_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX']
+const FINDER_CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
+const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'MULT']
 
 const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: typeof Star }[] = [
   { id: 'favoris',  label: 'Favoris',  icon: Star },
@@ -162,40 +168,76 @@ function FileSvg({ size = 36, selected = false, ext = '' }: { size?: number; sel
 
 // ── Token Finder ──────────────────────────────────────────────────────────────
 
-function TokenFinder({ project, tokens, onChange }: {
+function TokenFinder({ project, onChange }: {
   project:  string
-  tokens:   Record<string, Record<string, string>>
   onChange: (sel: TokenSel) => void
 }) {
   const [mode, setMode] = useState<FinderMode>('asset')
-  const [sel, setSel]   = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '', mode: 'asset' })
+  const [sel, setSel]   = useState<TokenSel>(EMPTY_TOKEN_SEL)
   const [open, setOpen] = useState<number | null>(null)
   const [seqs,  setSeqs]  = useState<string[]>([])
   const [shots, setShots] = useState<string[]>([])
+  const [nameSug, setNameSug]         = useState<string[]>([])
+  const [instSug, setInstSug]         = useState<string[]>([])
+  const [varSug,  setVarSug]          = useState<string[]>([])
+  const [shotNameSug, setShotNameSug] = useState<string[]>([])
   const rootRef           = useRef<HTMLDivElement>(null)
 
-  // Derive options from tokens.json — no hardcoded arrays
-  const assetClasses = Object.keys(tokens.CLASS ?? {}).filter(k => !(tokens.CLASS?.[k] ?? '').includes('{seq}'))
-  const shotClasses  = Object.keys(tokens.CLASS ?? {}).filter(k =>  (tokens.CLASS?.[k] ?? '').includes('{seq}'))
-  const typeKeys     = Object.keys(tokens.TYPE ?? {})
-  const nameKeys     = Object.keys(tokens.NAME ?? {})
-  const instanceKeys = ['null', ...Object.keys(tokens.INSTANCE ?? {})]
+  const cls = FINDER_CATEGORY_TO_CLASS[sel.category] ?? ''
 
-  // SHOT mode: fetch sequences
+  // SHOT: sequences
   useEffect(() => {
     if (!project || mode !== 'shot') { setSeqs([]); return }
-    setSeqs([])
     api.getSequences(project).then(d => setSeqs(d.sequences)).catch(() => setSeqs([]))
   }, [project, mode])
 
-  // SHOT mode: fetch shots for selected SEQ
+  // SHOT: shots for selected SEQ
   useEffect(() => {
-    if (!project || mode !== 'shot' || !sel.class) { setShots([]); return }
-    setShots([])
-    api.getShots(project, sel.class)
-      .then(d => setShots(d.shots.map(s => s.split('/')[1] ?? s)))
-      .catch(() => setShots([]))
-  }, [project, mode, sel.class])
+    if (!project || mode !== 'shot' || !sel.seq) { setShots([]); return }
+    api.getShots(project, sel.seq).then(d => setShots(d.shots.map(s => s.split('/')[1] ?? s))).catch(() => setShots([]))
+  }, [project, mode, sel.seq])
+
+  // ASSET: Name = asset folders under the category class (scanned)
+  useEffect(() => {
+    if (!project || mode !== 'asset' || !sel.category) { setNameSug([]); return }
+    let ok = true
+    api.suggestTokens({ project, field: 'name', mode: 'asset', class_token: cls })
+      .then(d => { if (ok) setNameSug(d.suggestions) }).catch(() => { if (ok) setNameSug([]) })
+    return () => { ok = false }
+  }, [project, mode, cls, sel.category])
+
+  // ASSET: Instance = subfolders under name/task (scanned)
+  useEffect(() => {
+    if (!project || mode !== 'asset' || !sel.category || !sel.name || !sel.task) { setInstSug([]); return }
+    let ok = true
+    api.suggestTokens({ project, field: 'instance', mode: 'asset', class_token: cls, name: sel.name, type_token: sel.task })
+      .then(d => { if (ok) setInstSug(d.suggestions) }).catch(() => { if (ok) setInstSug([]) })
+    return () => { ok = false }
+  }, [project, mode, cls, sel.category, sel.name, sel.task])
+
+  // SHOT: Name = task folders under shot/seq/shot (scanned)
+  useEffect(() => {
+    if (!project || mode !== 'shot' || !sel.seq || !sel.shot) { setShotNameSug([]); return }
+    let ok = true
+    api.suggestTokens({ project, field: 'name', mode: 'shot', seq: sel.seq, shot: sel.shot })
+      .then(d => { if (ok) setShotNameSug(d.suggestions) }).catch(() => { if (ok) setShotNameSug([]) })
+    return () => { ok = false }
+  }, [project, mode, sel.seq, sel.shot])
+
+  // Variante = distinct variantes parsed from published files (both modes, scanned)
+  useEffect(() => {
+    let ok = true
+    if (mode === 'asset') {
+      if (!project || !sel.category || !sel.name || !sel.task) { setVarSug([]); return }
+      api.suggestTokens({ project, field: 'variante', mode: 'asset', class_token: cls, name: sel.name, type_token: sel.task, instance: sel.instance || 'null' })
+        .then(d => { if (ok) setVarSug(d.suggestions) }).catch(() => { if (ok) setVarSug([]) })
+    } else {
+      if (!project || !sel.seq || !sel.shot || !sel.name) { setVarSug([]); return }
+      api.suggestTokens({ project, field: 'variante', mode: 'shot', seq: sel.seq, shot: sel.shot, name: sel.name })
+        .then(d => { if (ok) setVarSug(d.suggestions) }).catch(() => { if (ok) setVarSug([]) })
+    }
+    return () => { ok = false }
+  }, [project, mode, cls, sel.category, sel.name, sel.task, sel.instance, sel.seq, sel.shot])
 
   useEffect(() => {
     if (open === null) return
@@ -208,37 +250,36 @@ function TokenFinder({ project, tokens, onChange }: {
 
   const update = (key: keyof TokenSel, value: string) => {
     const next: TokenSel = { ...sel, [key]: value, mode }
-    if (key === 'class') { next.type = ''; next.name = '' }
-    if (key === 'type')  { next.name = '' }
+    if (key === 'category') next.name = ''   // asset names depend on the category
+    if (key === 'seq')      next.shot = ''
     setSel(next); onChange(next); setOpen(null)
   }
   const clear = (key: keyof TokenSel) => {
     const next: TokenSel = { ...sel, [key]: '', mode }
-    if (key === 'class') { next.type = ''; next.name = '' }
-    if (key === 'type')  { next.name = '' }
+    if (key === 'category') next.name = ''
+    if (key === 'seq')      next.shot = ''
     setSel(next); onChange(next); setOpen(null)
   }
 
   const switchMode = () => {
     const newMode: FinderMode = mode === 'asset' ? 'shot' : 'asset'
-    const reset: TokenSel = { class: '', type: '', name: '', instance: '', iter: '', mode: newMode }
+    const reset: TokenSel = { ...EMPTY_TOKEN_SEL, mode: newMode }
     setMode(newMode); setSel(reset); onChange(reset); setOpen(null)
   }
 
   const MODULES: { key: keyof TokenSel; label: string; opts: string[] }[] = mode === 'asset'
     ? [
-        { key: 'class',    label: 'CLASS',    opts: assetClasses },
-        { key: 'type',     label: 'TYPE',     opts: typeKeys },
-        { key: 'name',     label: 'NAME',     opts: nameKeys },
-        { key: 'instance', label: 'INSTANCE', opts: instanceKeys },
-        { key: 'iter',     label: 'ITER',     opts: FINDER_ITERS },
+        { key: 'category', label: 'CATÉGORIE', opts: FINDER_CATEGORIES },
+        { key: 'name',     label: 'NAME',      opts: nameSug },
+        { key: 'task',     label: 'TASK',      opts: FINDER_TASKS },
+        { key: 'instance', label: 'INSTANCE',  opts: instSug },
+        { key: 'variante', label: 'VARIANTE',  opts: varSug },
       ]
     : [
-        { key: 'class',    label: 'SEQ',      opts: seqs },
-        { key: 'type',     label: 'SHOT',     opts: shots },
-        { key: 'name',     label: 'NAME',     opts: shotClasses },
-        { key: 'instance', label: 'INSTANCE', opts: instanceKeys },
-        { key: 'iter',     label: 'ITER',     opts: FINDER_ITERS },
+        { key: 'seq',      label: 'SEQ',       opts: seqs },
+        { key: 'shot',     label: 'SHOT',      opts: shots },
+        { key: 'name',     label: 'NAME',      opts: shotNameSug },
+        { key: 'variante', label: 'VARIANTE',  opts: varSug },
       ]
 
   return (
@@ -278,7 +319,7 @@ function TokenFinder({ project, tokens, onChange }: {
                 )}
                 {opts.length === 0 ? (
                   <div style={{ padding: '6px 8px', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-                    {project ? (key === 'type' && mode === 'asset' && sel.class ? 'Pas de type' : 'Vide') : 'Projet requis'}
+                    {project ? 'Vide' : 'Projet requis'}
                   </div>
                 ) : opts.map(o => (
                   <div
@@ -1098,7 +1139,7 @@ export function Projects() {
   const [moveTarget,     setMoveTarget]     = useState<ExplorerItem[] | null>(null)
 
   // Token Finder & Search
-  const [tokenSel, setTokenSel]           = useState<TokenSel>({ class: '', type: '', name: '', instance: '', iter: '', mode: 'asset' })
+  const [tokenSel, setTokenSel]           = useState<TokenSel>(EMPTY_TOKEN_SEL)
   const [projectTokens, setProjectTokens] = useState<Record<string, Record<string, string>>>({})
   const [tokenRefreshTick, setTokenRefreshTick] = useState(0)
   const [searchQuery, setSearchQuery]     = useState('')
@@ -1409,31 +1450,21 @@ export function Projects() {
     if (tokenSel.mode === 'shot') {
       setResultLabel('Shot Finder')
 
-      let seqList: string[]
-      if (tokenSel.class) {
-        seqList = [tokenSel.class]
-      } else {
-        try { seqList = (await api.getSequences(proj)).sequences } catch { seqList = [] }
-      }
+      const seqList = tokenSel.seq
+        ? [tokenSel.seq]
+        : await api.getSequences(proj).then(d => d.sequences).catch(() => [] as string[])
 
       for (const seq of seqList) {
-        let shotList: string[]
-        if (tokenSel.type) {
-          shotList = [tokenSel.type]
-        } else {
-          try {
-            const d = await api.getShots(proj, seq)
-            shotList = d.shots.map(s => s.split('/')[1] ?? s)
-          } catch { shotList = [] }
-        }
+        const shotList = tokenSel.shot
+          ? [tokenSel.shot]
+          : await api.getShots(proj, seq).then(d => d.shots.map(s => s.split('/')[1] ?? s)).catch(() => [] as string[])
         for (const shot of shotList) {
           const base = ['shot', seq, shot]
           if (tokenSel.name) {
             // Resolve via CLASS token template (e.g. "shot/{seq}/{shot}/anim")
             const template = classTokens[tokenSel.name]
             if (template) {
-              const resolved = template.replace('{seq}', seq).replace('{shot}', shot)
-              const subpath = resolved.split('/')
+              const subpath = template.replace('{seq}', seq).replace('{shot}', shot).split('/')
               results.push({ label: `${seq} / ${shot} / ${tokenSel.name}`, pathStr: subpath.join(' / '), project: proj, subpath, isDir: true })
             } else {
               const sub = tokenSel.name.toLowerCase()
@@ -1446,13 +1477,14 @@ export function Projects() {
       }
     } else {
       setResultLabel('Finder')
-      // Asset classes = CLASS tokens whose path doesn't contain {seq}
+      // Category → CLASS token; if none, search every asset class
+      const mappedCls = tokenSel.category ? (FINDER_CATEGORY_TO_CLASS[tokenSel.category] ?? '') : ''
       const assetClassKeys = Object.keys(classTokens).filter(k => !classTokens[k].includes('{seq}'))
-      const classes = tokenSel.class ? [tokenSel.class] : assetClassKeys
+      const classes = mappedCls ? [mappedCls] : assetClassKeys
       const nameLow = tokenSel.name.toLowerCase()
 
-      for (const cls of classes) {
-        const classRelPath = classTokens[cls]
+      for (const c of classes) {
+        const classRelPath = classTokens[c]
         if (!classRelPath) continue
         const basePath = classRelPath.split('/')
         let folders: { name: string }[] = []
@@ -1465,24 +1497,15 @@ export function Projects() {
 
         for (const folder of matching) {
           const assetPath = [...basePath, folder.name]
-          if (tokenSel.type) {
-            // Look up subfolder from TYPE tokens in tokens.json
-            const subfolder = typeTokens[tokenSel.type]
-            if (subfolder) {
-              const fullPath = [...assetPath, ...subfolder.split('/')]
-              results.push({ label: `${folder.name} / ${tokenSel.type}`, pathStr: fullPath.join(' / '), project: proj, subpath: fullPath, isDir: true })
+          if (tokenSel.task) {
+            // Task → TYPE subfolder (coarse token, e.g. GEO → model)
+            const subfolder = typeTokens[tokenSel.task] || tokenSel.task.toLowerCase()
+            const taskPath = [...assetPath, ...subfolder.split('/')]
+            if (tokenSel.instance) {
+              const p = [...taskPath, tokenSel.instance]
+              results.push({ label: `${folder.name} / ${tokenSel.task} / ${tokenSel.instance}`, pathStr: p.join(' / '), project: proj, subpath: p, isDir: true })
             } else {
-              // Unknown type — fall back to text match one level down
-              try {
-                const d2 = await api.browseProject(proj, assetPath.join('/'))
-                const typeLow = tokenSel.type.toLowerCase()
-                for (const sub of d2.folders) {
-                  if (sub.name.toLowerCase().includes(typeLow)) {
-                    const subPath = [...assetPath, sub.name]
-                    results.push({ label: `${folder.name} / ${sub.name}`, pathStr: subPath.join(' / '), project: proj, subpath: subPath, isDir: true })
-                  }
-                }
-              } catch {}
+              results.push({ label: `${folder.name} / ${tokenSel.task}`, pathStr: taskPath.join(' / '), project: proj, subpath: taskPath, isDir: true })
             }
           } else {
             results.push({ label: folder.name, pathStr: assetPath.join(' / '), project: proj, subpath: assetPath, isDir: true })
@@ -1989,7 +2012,7 @@ export function Projects() {
 
         {/* Ligne 2 : Token Finder + Find */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <TokenFinder project={navProject || activeProject} tokens={projectTokens} onChange={setTokenSel} />
+          <TokenFinder project={navProject || activeProject} onChange={setTokenSel} />
           <div
             onClick={() => void handleFind()}
             className="btn primary"

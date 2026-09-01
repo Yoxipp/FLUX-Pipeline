@@ -60,17 +60,23 @@ def build_asset_filename(
     type_token: str,
     name_token: str,
     instance: str = DEFAULT_INSTANCE,
+    variante: str = "",
     version: str = ACTIVE_VERSION_LABEL,
     extension: str = "",
 ) -> str:
-    """Return a properly formatted asset filename."""
+    """Return a properly formatted asset filename.
+
+    Format: CLASS_TYPE_NAME_INSTANCE[_VARIANTE]_ITER — VARIANTE is optional.
+    """
     parts = [
         format_token(class_token),
         format_token(type_token),
         format_token(name_token),
         format_token(instance) if instance else DEFAULT_INSTANCE,
-        version.upper(),
     ]
+    if variante:
+        parts.append(format_token(variante))
+    parts.append(version.upper())
     name = "_".join(parts)
     return f"{name}.{extension.lstrip('.')}" if extension else name
 
@@ -108,28 +114,39 @@ def parse_filename(filename: str) -> dict | None:
         ext = ""
 
     parts = stem.split("_")
+    if not parts or not parts[0]:
+        return None
 
-    # shot filenames: CLASS_SEQ###_SHOT###_instance_ITER
-    if len(parts) >= 4 and _SEQ_RE.match(parts[1]):
+    # Trailing ITER (LAST or vNNN) is optional; strip it so token slots line up
+    # whether the filename is a base (CHAR_RIG_HERO_null) or active (…_LAST).
+    has_iter = bool(_VERSION_RE.match(parts[-1])) or parts[-1].upper() == ACTIVE_VERSION_LABEL
+    iter_val = parts[-1] if has_iter else ""
+    core = parts[:-1] if has_iter else list(parts)
+
+    # shot: CLASS_SEQ###_SHOT###_VARIANTE  (VARIANTE replaces the old instance slot)
+    if len(core) >= 2 and _SEQ_RE.match(core[1]):
+        variante = core[3] if len(core) > 3 else DEFAULT_INSTANCE
         return {
-            "CLASS":     parts[0],
-            "SEQ":       parts[1],
-            "SHOT":      parts[2] if len(parts) > 2 else "",
-            "INSTANCE":  parts[3] if len(parts) > 3 else DEFAULT_INSTANCE,
-            "ITER":      parts[4] if len(parts) > 4 else "",
+            "CLASS":     core[0],
+            "SEQ":       core[1],
+            "SHOT":      core[2] if len(core) > 2 else "",
+            "INSTANCE":  variante,   # kept for back-compat with path resolution
+            "VARIANTE":  variante,
+            "ITER":      iter_val,
             "extension": ext,
             "is_shot":   True,
         }
 
-    # asset filenames: CLASS_TYPE_NAME_instance_ITER
-    if len(parts) < 4:
+    # asset: CLASS_TYPE_NAME_INSTANCE[_VARIANTE]
+    if len(core) < 3:
         return None
     return {
-        "CLASS":     parts[0],
-        "TYPE":      parts[1],
-        "NAME":      parts[2],
-        "INSTANCE":  parts[3] if len(parts) > 3 else DEFAULT_INSTANCE,
-        "ITER":      parts[4] if len(parts) > 4 else "",
+        "CLASS":     core[0],
+        "TYPE":      core[1],
+        "NAME":      core[2],
+        "INSTANCE":  core[3] if len(core) > 3 else DEFAULT_INSTANCE,
+        "VARIANTE":  core[4] if len(core) > 4 else "",
+        "ITER":      iter_val,
         "extension": ext,
         "is_shot":   False,
     }
