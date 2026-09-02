@@ -862,11 +862,14 @@ export function Publisher() {
           toast.error('Indique le fichier source')
           return
         }
+        // The source file keeps any name (photo, doc…); the destination name is
+        // built from the token composer, so send it as target_name.
         const res = await api.publish({
           source_path:  sourcePath,
           project_name: project,
           description:  description || undefined,
           user:         settings?.username ?? undefined,
+          target_name:  buildFilename(),
         })
         if (res.success) toast.success(res.message)
         else toast.error(res.message)

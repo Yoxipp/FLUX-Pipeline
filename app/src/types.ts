@@ -76,6 +76,7 @@ export interface PublishPayload {
   project_name: string
   description?: string
   user?: string
+  target_name?: string   // composed FLUX name when the source file isn't token-named
 }
 
 export interface PublishResult {
