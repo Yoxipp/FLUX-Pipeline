@@ -257,6 +257,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const [settingsHov,  setSettingsHov]  = useState(false)
   const [bellHov,      setBellHov]      = useState(false)
   const [refreshing,   setRefreshing]   = useState(false)
+  const [refreshDone,  setRefreshDone]  = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -267,8 +268,14 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const handleRefresh = () => {
     if (refreshing) return
     setRefreshing(true)
+    setRefreshDone(false)
     window.dispatchEvent(new Event('flux:refresh'))
-    setTimeout(() => setRefreshing(false), 600)
+    // Spin ~600ms, then flash "Refresh effectué" for 2s just left of the button.
+    setTimeout(() => {
+      setRefreshing(false)
+      setRefreshDone(true)
+      setTimeout(() => setRefreshDone(false), 2000)
+    }, 600)
   }
 
   return (
@@ -299,6 +306,19 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       </div>
 
       <div style={{ flex: 1 }} />
+
+      {/* transient confirmation, shown just left of the refresh button */}
+      {refreshDone && (
+        <span
+          className="no-drag"
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)',
+            whiteSpace: 'nowrap', animation: 'fadeIn 0.15s ease-out',
+          }}
+        >
+          Refresh effectué
+        </span>
+      )}
 
       {/* refresh (left of the console) */}
       <div

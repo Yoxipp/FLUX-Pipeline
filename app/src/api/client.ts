@@ -2,6 +2,7 @@
 
 import type {
   ActivityEvent,
+  ChatMention,
   ChatMessage,
   FileEntry,
   HoudiniPublishPayload,
@@ -220,6 +221,15 @@ export const api = {
 
   sendChat: (message: string, user?: string) =>
     apiCall<{ success: boolean }>('POST', '/activity/chat', { message, user }),
+
+  getMentions: (user?: string, unread_only?: boolean) =>
+    apiCall<{ mentions: ChatMention[]; unread_count: number }>(
+      'GET',
+      `/activity/chat/mentions${user || unread_only ? `?${user ? `user=${encodeURIComponent(user)}` : ''}${user && unread_only ? '&' : ''}${unread_only ? 'unread_only=true' : ''}` : ''}`,
+    ),
+
+  markMentionsRead: (user?: string) =>
+    apiCall<{ success: boolean }>('POST', '/activity/chat/mentions/read', { user }),
 
   // Files
   browseProject: (project_name: string, subpath?: string) =>

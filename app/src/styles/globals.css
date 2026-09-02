@@ -253,6 +253,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 
 /* ─── animations ── */
 @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
 
 /* ── scale hover utility ── */
 .scale-hover { transition: transform 0.12s; }

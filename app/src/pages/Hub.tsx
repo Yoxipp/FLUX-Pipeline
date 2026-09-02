@@ -18,6 +18,23 @@ const SHORTCUTS: { ic: LucideIcon; t: string; s: string; path: string; active?: 
   { ic: Activity,   t: 'Activité',       s: 'Historique équipe',   path: '/activity' },
 ]
 
+// Render chat text with @mentions highlighted; a mention of the current user is red.
+function renderChatText(text: string, currentUser: string) {
+  const parts = text.split(/(@\w+)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('@')) {
+      const isMe = part.slice(1).toLowerCase() === currentUser.toLowerCase()
+      return (
+        <span key={i} style={{
+          color: isMe ? 'var(--err)' : 'var(--accent-hi)',
+          fontWeight: 600,
+        }}>{part}</span>
+      )
+    }
+    return <span key={i}>{part}</span>
+  })
+}
+
 const DCC_STATUS_ITEMS = [
   { name: 'Maya',               key: 'Maya' },
   { name: 'Houdini',            key: 'Houdini' },
@@ -37,11 +54,16 @@ export function Hub() {
   const user          = settings?.username ?? 'User'
 
   const [chatMessages, setChatMessages] = useState<{ who: string; h: string; msg: string }[]>([])
+  const [chatUsers, setChatUsers]       = useState<string[]>([])
   const [chatInput, setChatInput]       = useState('')
+  // @mention autocomplete state
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionIdx, setMentionIdx]     = useState(0)
 
   const loadChat = useCallback(async () => {
     try {
       const data = await api.getChat(20)
+      setChatUsers(data.users)
       if (data.messages.length > 0) {
         setChatMessages(data.messages.map(m => ({ who: m.user, h: m.time, msg: m.message })))
       }
@@ -54,10 +76,34 @@ export function Hub() {
     return () => clearInterval(id)
   }, [loadChat])
 
+  // Being on the Hub (where the chat lives) clears the user's @mention badge.
+  useEffect(() => {
+    void api.markMentionsRead().then(() => window.dispatchEvent(new Event('flux:mentions'))).catch(() => {})
+  }, [])
+
+  // Users matching the current @query (empty query = all), max 6.
+  const mentionMatches = mentionQuery === null ? [] : chatUsers
+    .filter(u => u.toLowerCase().startsWith(mentionQuery.toLowerCase()) && u !== user)
+    .slice(0, 6)
+
+  // Detect a trailing "@partial" token at the caret so we can autocomplete it.
+  const onChatInput = (value: string) => {
+    setChatInput(value)
+    const m = /(?:^|\s)@(\w*)$/.exec(value)
+    if (m) { setMentionQuery(m[1]); setMentionIdx(0) }
+    else setMentionQuery(null)
+  }
+
+  const applyMention = (name: string) => {
+    setChatInput(prev => prev.replace(/@(\w*)$/, `@${name} `))
+    setMentionQuery(null)
+  }
+
   const sendChat = useCallback(async () => {
     if (!chatInput.trim()) return
     const msg = chatInput
     setChatInput('')
+    setMentionQuery(null)
     try {
       await api.sendChat(msg, user)
       await loadChat()
@@ -135,17 +181,50 @@ export function Hub() {
                       <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)' }}>{m.who}</span>
                       <span className="lbl">{m.h}</span>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.4 }}>{m.msg}</div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.4 }}>{renderChatText(m.msg, user)}</div>
                   </div>
                 </div>
               ))}
             </div>
-            <div style={{ padding: '8px 10px', borderTop: '1px solid var(--rule)', display: 'flex', gap: 6, flexShrink: 0 }}>
+            <div style={{ padding: '8px 10px', borderTop: '1px solid var(--rule)', display: 'flex', gap: 6, flexShrink: 0, position: 'relative' }}>
+              {/* @mention autocomplete dropdown */}
+              {mentionQuery !== null && mentionMatches.length > 0 && (
+                <div style={{
+                  position: 'absolute', bottom: 'calc(100% + 4px)', left: 10, minWidth: 160,
+                  background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 7,
+                  boxShadow: 'var(--shadow-md)', overflow: 'hidden', zIndex: 20,
+                }}>
+                  {mentionMatches.map((u, i) => (
+                    <div
+                      key={u}
+                      onMouseDown={e => { e.preventDefault(); applyMention(u) }}
+                      onMouseEnter={() => setMentionIdx(i)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
+                        cursor: 'pointer', fontSize: 11,
+                        background: i === mentionIdx ? 'var(--accent-soft)' : 'transparent',
+                        color: i === mentionIdx ? 'var(--accent-hi)' : 'var(--ink-2)',
+                      }}
+                    >
+                      <Avatar ch={u[0]?.toUpperCase() ?? '?'} size={16} />
+                      {u}
+                    </div>
+                  ))}
+                </div>
+              )}
               <input
                 value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void sendChat() }}
-                placeholder="Message…"
+                onChange={e => onChatInput(e.target.value)}
+                onKeyDown={e => {
+                  if (mentionQuery !== null && mentionMatches.length > 0) {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => (i + 1) % mentionMatches.length); return }
+                    if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionIdx(i => (i - 1 + mentionMatches.length) % mentionMatches.length); return }
+                    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyMention(mentionMatches[mentionIdx]); return }
+                    if (e.key === 'Escape')    { setMentionQuery(null); return }
+                  }
+                  if (e.key === 'Enter') void sendChat()
+                }}
+                placeholder="Message…  (@ pour mentionner)"
                 style={{
                   flex: 1, height: 28,
                   background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',

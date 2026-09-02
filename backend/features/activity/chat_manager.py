@@ -9,7 +9,7 @@ from pathlib import Path
 
 from core.json_manager import read_json, write_json
 from core.logger import get_logger
-from core.paths import get_chat_path, get_users_dir
+from core.paths import get_chat_path, get_mentions_path, get_users_dir
 
 log = get_logger(__name__)
 
@@ -26,12 +26,18 @@ def _make_id(user: str) -> str:
 
 
 def send_message(user: str, message: str, path: Path | None = None) -> bool:
-    """Append a chat message to teamChat.json. Returns True on success."""
+    """Append a chat message to teamChat.json. Returns True on success.
+
+    Any @name that matches a known user (case-insensitive, never the author) is
+    recorded as an unread mention so that user gets a red notification.
+    """
     date, time = _now()
+    msg_id = _make_id(user)
+    text = message.strip()
     entry = {
-        "id":      _make_id(user),
+        "id":      msg_id,
         "user":    user,
-        "message": message.strip(),
+        "message": text,
         "date":    date,
         "time":    time,
     }
@@ -43,6 +49,13 @@ def send_message(user: str, message: str, path: Path | None = None) -> bool:
     ok = write_json(chat_path, messages)
     if not ok:
         log.error("Failed to write teamChat.json at %s", chat_path)
+        return ok
+
+    # Record mentions (best-effort — never fail the send if this part errors).
+    try:
+        _record_mentions(from_user=user, msg_id=msg_id, text=text, date=date, time=time)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Failed to record chat mentions: %s", exc)
     return ok
 
 
@@ -66,3 +79,70 @@ def get_user_list() -> list[str]:
 def parse_pings(message: str) -> list[str]:
     """Return list of names mentioned as @name in *message*."""
     return _PING_RE.findall(message)
+
+
+# ── @mentions ─────────────────────────────────────────────────────────────────
+
+def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: str) -> None:
+    """Persist an unread mention entry for each valid @name in *text*.
+
+    Resolves each @name against the real user list (case-insensitive) so a typo
+    doesn't spam a phantom user, and skips self-mentions.
+    """
+    raw = parse_pings(text)
+    if not raw:
+        return
+    users = {u.lower(): u for u in get_user_list()}
+    targets: list[str] = []
+    for name in raw:
+        real = users.get(name.lower())
+        if real and real != from_user and real not in targets:
+            targets.append(real)
+    if not targets:
+        return
+
+    mpath = get_mentions_path()
+    data = read_json(mpath)
+    mentions = data if isinstance(data, list) else []
+    for to_user in targets:
+        mentions.append({
+            "id":        f"{msg_id}_{to_user}",
+            "message_id": msg_id,
+            "to_user":   to_user,
+            "from_user": from_user,
+            "text":      text,
+            "date":      date,
+            "time":      time,
+            "read":      False,
+        })
+    if not write_json(mpath, mentions):
+        log.error("Failed to write chatMentions.json at %s", mpath)
+
+
+def get_mentions(user: str, unread_only: bool = False, path: Path | None = None) -> list[dict]:
+    """Return mention entries addressed to *user*, newest first."""
+    data = read_json(path or get_mentions_path())
+    mentions = data if isinstance(data, list) else []
+    out = [m for m in mentions if m.get("to_user") == user and (not unread_only or not m.get("read"))]
+    out.sort(key=lambda m: (m.get("date", ""), m.get("time", "")), reverse=True)
+    return out
+
+
+def get_unread_mention_count(user: str, path: Path | None = None) -> int:
+    """Return how many unread mentions *user* has."""
+    return len(get_mentions(user, unread_only=True, path=path))
+
+
+def mark_mentions_read(user: str, path: Path | None = None) -> bool:
+    """Mark every mention addressed to *user* as read. Returns True on success."""
+    mpath = path or get_mentions_path()
+    data = read_json(mpath)
+    mentions = data if isinstance(data, list) else []
+    changed = False
+    for m in mentions:
+        if m.get("to_user") == user and not m.get("read"):
+            m["read"] = True
+            changed = True
+    if not changed:
+        return True
+    return write_json(mpath, mentions)

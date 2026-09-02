@@ -117,6 +117,7 @@ USD_FILE_PATTERNS: dict[str, str] = {
 # ── System JSON filenames (all live in FLUX_ROOT/CONFIG/) ────────────────────
 JSON_ACTIVITY: str  = "activite.json"
 JSON_CHAT: str      = "teamChat.json"
+JSON_MENTIONS: str  = "chatMentions.json"
 
 # Per-project JSON filenames
 JSON_TOKENS: str    = "tokens.json"        # project root

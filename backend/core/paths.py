@@ -23,6 +23,7 @@ from core.constants import (
     FLUX_MARKER_FILENAME,
     JSON_ACTIVITY,
     JSON_CHAT,
+    JSON_MENTIONS,
 )
 
 # ── Exe-relative bootstrap (config.json next to the exe) ─────────────────────
@@ -155,6 +156,10 @@ def get_activity_path() -> Path:
 
 def get_chat_path() -> Path:
     return get_config_dir() / JSON_CHAT
+
+
+def get_mentions_path() -> Path:
+    return get_config_dir() / JSON_MENTIONS
 
 
 # ── FLUX_ROOT marker ──────────────────────────────────────────────────────────

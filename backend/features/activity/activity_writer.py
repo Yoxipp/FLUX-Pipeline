@@ -72,8 +72,10 @@ def log_publish(user: str, filename: str, project: str, dest_folder: Path | str 
     return log_event(user, "publish", project, filename, dest_folder=dest_folder)
 
 
-def log_import(user: str, filename: str, project: str) -> bool:
-    return log_event(user, "import", project, filename)
+def log_import(user: str, filename: str, project: str, dest_folder: Path | str | None = None) -> bool:
+    # dest_folder = the imported file's source folder, so the notification can offer
+    # "copy path / open folder / open in Folder Manager" like a publish event.
+    return log_event(user, "import", project, filename, dest_folder=dest_folder)
 
 
 def log_connect(user: str, dcc_name: str) -> bool:

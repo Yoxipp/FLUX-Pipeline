@@ -28,6 +28,17 @@ export interface ChatMessage {
   time: string
 }
 
+export interface ChatMention {
+  id: string
+  message_id: string
+  to_user: string
+  from_user: string
+  text: string
+  date: string
+  time: string
+  read: boolean
+}
+
 export interface FileEntry {
   name: string
   path: string

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import type { DccStatusMap } from '../../types'
 import { api } from '../../api/client'
+import { useMentions } from '../../hooks/useMentions'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui'
 
 interface Props {
@@ -47,8 +48,8 @@ function dccDot(status: DccStatusMap, key: string): string {
   return entry.connected ? 'ok' : ''
 }
 
-function NavItem({ icon: Icon, label, active, indent = false, notif = 0, onClick }: {
-  icon: React.ElementType; label: string; active?: boolean; indent?: boolean; notif?: number; onClick?: () => void
+function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRed = false, onClick }: {
+  icon: React.ElementType; label: string; active?: boolean; indent?: boolean; notif?: number; notifRed?: boolean; onClick?: () => void
 }) {
   return (
     <div
@@ -61,9 +62,10 @@ function NavItem({ icon: Icon, label, active, indent = false, notif = 0, onClick
       {notif > 0 && (
         <span style={{
           minWidth: 17, height: 17, padding: '0 4px', borderRadius: 6,
-          background: 'var(--accent-soft)',
-          border: '1px solid var(--accent)',
-          color: 'var(--accent-hi)',
+          // Red badge for @mentions, accent badge for regular notifications.
+          background: notifRed ? 'color-mix(in oklch, var(--err) 18%, transparent)' : 'var(--accent-soft)',
+          border: '1px solid ' + (notifRed ? 'var(--err)' : 'var(--accent)'),
+          color: notifRed ? 'var(--err)' : 'var(--accent-hi)',
           fontFamily: 'var(--sans)', fontSize: 8, fontWeight: 600,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: 'var(--shadow-xs)',
@@ -93,6 +95,7 @@ function NavGroup({ title, children, open = true }: {
 export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const { unreadMentions } = useMentions()
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
   const [findingAll, setFindingAll]           = useState(false)
@@ -322,7 +325,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       flexShrink: 0,
     }}>
       <div style={{ padding: '10px 0 0' }}>
-        <NavItem icon={Home} label="Accueil" active={pathname === '/'} onClick={() => navigate('/')} />
+        <NavItem icon={Home} label="Accueil" active={pathname === '/'} notif={unreadMentions} notifRed onClick={() => navigate('/')} />
       </div>
 
       <NavGroup title="ASSETS">
