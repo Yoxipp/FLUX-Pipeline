@@ -8,9 +8,32 @@ from pathlib import Path
 
 from core.json_manager import read_json, write_json
 from core.logger import get_logger
-from core.paths import get_activity_path
+from core.paths import get_activity_path, get_flux_root
 
 log = get_logger(__name__)
+
+# Portable prefix stored instead of a machine-absolute path, so every teammate
+# resolves the notification against THEIR own FLUX_ROOT (workspace).
+_FLUX_PREFIX = "$FLUX"
+
+
+def _portable_path(p: Path | str | None) -> str:
+    """Return *p* relative to FLUX_ROOT as "$FLUX/<rel>", else its plain string.
+
+    The publisher's absolute path is meaningless on another machine; storing it
+    relative to the shared FLUX root lets each client expand it locally.
+    """
+    if not p:
+        return ""
+    path = Path(p)
+    root = get_flux_root()
+    if root:
+        try:
+            rel = path.resolve().relative_to(Path(root).resolve())
+            return f"{_FLUX_PREFIX}/{rel.as_posix()}"
+        except (ValueError, OSError):
+            pass  # not under FLUX_ROOT — keep absolute as a fallback
+    return str(path)
 
 
 def _now() -> tuple[str, str]:
@@ -48,7 +71,7 @@ def log_event(
         "action":      action,
         "project":     project,
         "file":        filename or "",
-        "dest_folder": str(dest_folder) if dest_folder else "",
+        "dest_folder": _portable_path(dest_folder),
         "date":        date,
         "time":        time,
         "read":        False,

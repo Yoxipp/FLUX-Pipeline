@@ -96,7 +96,7 @@ def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: st
     targets: list[str] = []
     for name in raw:
         real = users.get(name.lower())
-        if real and real != from_user and real not in targets:
+        if real and real.upper() != (from_user or "").upper() and real not in targets:
             targets.append(real)
     if not targets:
         return
@@ -120,10 +120,15 @@ def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: st
 
 
 def get_mentions(user: str, unread_only: bool = False, path: Path | None = None) -> list[dict]:
-    """Return mention entries addressed to *user*, newest first."""
+    """Return mention entries addressed to *user*, newest first.
+
+    Matching is case-insensitive so a name-case mismatch between the stored
+    to_user and the current user never silently drops notifications.
+    """
+    who = (user or "").upper()
     data = read_json(path or get_mentions_path())
     mentions = data if isinstance(data, list) else []
-    out = [m for m in mentions if m.get("to_user") == user and (not unread_only or not m.get("read"))]
+    out = [m for m in mentions if str(m.get("to_user", "")).upper() == who and (not unread_only or not m.get("read"))]
     out.sort(key=lambda m: (m.get("date", ""), m.get("time", "")), reverse=True)
     return out
 
@@ -135,12 +140,13 @@ def get_unread_mention_count(user: str, path: Path | None = None) -> int:
 
 def mark_mentions_read(user: str, path: Path | None = None) -> bool:
     """Mark every mention addressed to *user* as read. Returns True on success."""
+    who = (user or "").upper()
     mpath = path or get_mentions_path()
     data = read_json(mpath)
     mentions = data if isinstance(data, list) else []
     changed = False
     for m in mentions:
-        if m.get("to_user") == user and not m.get("read"):
+        if str(m.get("to_user", "")).upper() == who and not m.get("read"):
             m["read"] = True
             changed = True
     if not changed:

@@ -19,18 +19,14 @@ const SHORTCUTS: { ic: LucideIcon; titleKey: string; subKey: string; path: strin
   { ic: Activity,   titleKey: 'nav.activity',      subKey: 'hub.sc.activity',      path: '/activity' },
 ]
 
-// Render chat text with @mentions highlighted; a mention of the current user is red.
+// Render chat text with @mentions. Only the mention of the CURRENT user stands out
+// (bold accent); mentions of other people render as plain text — you shouldn't see
+// everyone else's name in bold orange, only your own ping.
 function renderChatText(text: string, currentUser: string) {
   const parts = text.split(/(@\w+)/g)
   return parts.map((part, i) => {
-    if (part.startsWith('@')) {
-      const isMe = part.slice(1).toLowerCase() === currentUser.toLowerCase()
-      return (
-        <span key={i} style={{
-          color: isMe ? 'var(--err)' : 'var(--accent-hi)',
-          fontWeight: 600,
-        }}>{part}</span>
-      )
+    if (part.startsWith('@') && part.slice(1).toLowerCase() === currentUser.toLowerCase()) {
+      return <span key={i} style={{ color: 'var(--accent-hi)', fontWeight: 600 }}>{part}</span>
     }
     return <span key={i}>{part}</span>
   })

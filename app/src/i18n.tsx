@@ -71,6 +71,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'activity.title':          { fr: 'Activité & Notifications', en: 'Activity & Notifications' },
   'activity.markAllRead':    { fr: 'Tout marquer lu',          en: 'Mark all read' },
   'activity.filter.all':     { fr: 'Tout',                     en: 'All' },
+  'activity.filter.mentions': { fr: 'Mentions',                en: 'Mentions' },
   'activity.filter.publishes': { fr: 'Publishes',              en: 'Publishes' },
   'activity.filter.imports': { fr: 'Imports',                  en: 'Imports' },
   'activity.filter.updates': { fr: 'Updates',                  en: 'Updates' },
