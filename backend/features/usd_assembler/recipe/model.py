@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 # Builder kinds a normalised LayerSpec may carry (== registry keys).
 LAYER_KINDS: frozenset[str] = frozenset(
-    {"sublayer", "reference", "payload", "variantset", "prim"}
+    {"sublayer", "reference", "payload", "variantset", "prim", "layerfile"}
 )
 
 # Recipe target kinds (what we are assembling).

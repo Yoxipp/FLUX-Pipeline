@@ -61,6 +61,10 @@ class AssemblyValidator:
         default = stage.GetDefaultPrim()
         if not default or not default.IsValid():
             return issues
+        # A component's children are its own geometry (from the model sublayer),
+        # not instance placeholders — the reference/payload check does not apply.
+        if Usd.ModelAPI(default).GetKind() == "component":
+            return issues
         for child in default.GetChildren():
             has_arc = child.HasAuthoredReferences() or child.HasPayload()
             if not has_arc:

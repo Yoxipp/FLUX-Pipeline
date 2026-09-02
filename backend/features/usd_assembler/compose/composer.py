@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pxr import Gf, Usd, UsdGeom
@@ -35,16 +36,22 @@ class StageComposer:
         self._ctx = ctx
         self._registry = registry
         self._router: EditTargetRouter | None = None
+        # Component layer-file contributions, collected then flushed to the root's
+        # subLayerPaths at finalize (a component's slots compose as sublayers).
+        self._layerfiles: list[LayerContribution] = []
 
     def compose(self, recipe: "Recipe") -> "Usd.Stage":
         stage = stage_factory.in_memory()
         self._router = EditTargetRouter(stage)
+        self._layerfiles = []
         for spec in recipe.layers:
             builder = self._registry.get_builder(spec.kind)
             for contrib in builder.contribute(self._ctx, spec):
                 self._apply(stage, contrib)
         # Publish the shot sublayer stack strongest-first (no-op without depts).
         self._router.finalize(list(reversed(self._ctx.layout.department_order())))
+        # Then flush any component layer-file stack onto the (now empty) root.
+        self._finalize_layerfiles(stage)
         return stage
 
     def department_layers(self) -> dict:
@@ -53,6 +60,11 @@ class StageComposer:
 
     # ── Arc -> pxr ──────────────────────────────────────────────────────────────
     def _apply(self, stage: "Usd.Stage", contrib: LayerContribution) -> None:
+        if contrib.arc is Arc.LAYERFILE:
+            # Deferred: applied as a batch on the root layer at finalize.
+            self._layerfiles.append(contrib)
+            return
+
         if contrib.arc is Arc.SUBLAYER:
             self._apply_sublayer(contrib)
             return
@@ -84,6 +96,50 @@ class StageComposer:
         self._router.add_department(
             contrib.opinions["department"], contrib.opinions["filename"]
         )
+
+    # ── component layer-file stack ──────────────────────────────────────────────
+    def _finalize_layerfiles(self, stage: "Usd.Stage") -> None:
+        """Publish the component slot stack as the root's subLayerPaths + root prim.
+
+        Each resolved slot becomes a sublayer, ordered strong→weak (lowest
+        ``order`` first). All slots of a v2 layered publish share one base, so the
+        composed prims land on ``/<base>``; the root then gets an *over* there that
+        stamps kind=component and becomes the stage defaultPrim — no typeName, so
+        the model sublayer's SkelRoot/Mesh types survive untouched.
+        """
+        if not self._layerfiles:
+            return
+
+        root = stage.GetRootLayer()
+        ordered = sorted(self._layerfiles, key=lambda c: c.opinions.get("order", 0))
+        out_dir = getattr(self._ctx, "output_dir", None)
+        for contrib in ordered:
+            if contrib.asset is None:
+                continue
+            root.subLayerPaths.append(self._layer_ref(contrib.asset.path, out_dir))
+
+        # The weakest slot (highest order, typically the model) carries the
+        # geometry base — the defaultPrim every slot composes onto.
+        base_prim = ordered[-1].asset.default_prim if ordered[-1].asset else None
+        if not base_prim:
+            return
+        over = stage.OverridePrim(f"/{base_prim}")
+        Usd.ModelAPI(over).SetKind(self._ctx.kinds.kind_for("component"))
+        stage.SetDefaultPrim(over)
+
+    @staticmethod
+    def _layer_ref(path, out_dir) -> str:
+        """Express a published layer path relative to *out_dir* (forward slashes).
+
+        Falls back to an absolute posix path when the layer lives on another drive
+        (Windows ``relpath`` raises across drives), keeping the root reopenable.
+        """
+        if out_dir is not None:
+            try:
+                return os.path.relpath(str(path), str(out_dir)).replace(os.sep, "/")
+            except ValueError:
+                pass
+        return Path(path).as_posix()
 
     def _apply_payload(self, stage: "Usd.Stage", contrib: LayerContribution) -> None:
         prim_type = contrib.opinions.get("prim_type", "Xform")

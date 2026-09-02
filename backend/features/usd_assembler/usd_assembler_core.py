@@ -54,6 +54,9 @@ def assemble(
     """
     ctx = build_context(strict=strict, config=config)
     ctx.resolver = resolver
+    # Where the root layer lands — lets the composer write component subLayerPaths
+    # relative to it (portable, no absolute paths baked into the published root).
+    ctx.output_dir = Path(dest_dir)
 
     parsed = loader.load(recipe)
     composer = StageComposer(ctx, default_registry())

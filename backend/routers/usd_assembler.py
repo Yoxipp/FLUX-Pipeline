@@ -109,3 +109,32 @@ async def assemble_recipe(req: AssembleRequest) -> dict:
 async def get_recipe_schema() -> dict:
     """Return the recipe JSON Schema (drives the frontend recipe builder)."""
     return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+@router.get("/layers")
+async def list_usd_layers(
+    asset: str, task: str, project: str | None = None
+) -> dict:
+    """List published layered-USD versions for *asset*'s *task* (component slots).
+
+    Feeds the frontend slot editor's version dropdown. Pure python (no pxr): the
+    FluxResolver only globs the published layout. An unresolvable identity (asset
+    with no NAME token, nothing published yet) returns an empty version map rather
+    than an error, so the editor degrades gracefully while the user is still typing.
+    """
+    name, project_path = _resolve_project(project)
+    from features.usd_assembler.resolve.base import ResolveError
+    from features.usd_assembler.resolve.flux_resolver import FluxResolver
+
+    ns = config.get("usd_assembler", {}) or {}
+    resolver = FluxResolver(project_path, ns)
+    try:
+        versions = resolver.list_layer_versions(asset, task)
+    except ResolveError as exc:
+        log.info("USD layers: %s (asset '%s', task '%s')", exc, asset, task)
+        versions = {}
+    except Exception as exc:  # unexpected — surface as a 400
+        log.exception("list layers failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"project": name, "asset": asset, "task": task, "versions": versions}

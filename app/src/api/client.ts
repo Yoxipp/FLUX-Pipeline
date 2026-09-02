@@ -358,4 +358,16 @@ export const api = {
       layers?: string[]
       issues: { level: string; msg: string; prim: string | null }[]
     }>('POST', '/usd/assemble', { recipe, project, strict }),
+
+  // Published layered-USD versions for a component slot (feeds the slot editor's
+  // version dropdown). Empty `versions` when nothing is published for asset+task.
+  getUsdLayers: (project: string, asset: string, task: string) => {
+    const qs = new URLSearchParams({ project, asset, task })
+    return apiCall<{
+      project: string
+      asset: string
+      task: string
+      versions: Record<string, { base: string; layers: string[] }>
+    }>('GET', `/usd/layers?${qs}`)
+  },
 }

@@ -67,6 +67,7 @@ def default_registry() -> "Registry":
     module stays cheap and side-effect free; the façade calls this to get a
     fully-wired registry without knowing the concrete builder classes.
     """
+    from .build.layerfile_builder import LayerFileBuilder
     from .build.payload_builder import PayloadBuilder
     from .build.prim_builder import PrimBuilder
     from .build.reference_builder import ReferenceBuilder
@@ -80,6 +81,7 @@ def default_registry() -> "Registry":
         PrimBuilder(),
         ReferenceBuilder(),
         SublayerBuilder(),
+        LayerFileBuilder(),
     ):
         registry.register_builder(builder)
     # Let studio plugins extend/override the core builders (last registration wins).

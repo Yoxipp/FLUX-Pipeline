@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from core.logger import get_logger
@@ -30,6 +31,9 @@ class AssemblyContext:
     layout: LayerNaming = field(default_factory=LayerNaming)
     log: Any = field(default_factory=lambda: get_logger("usd_assembler"))
     strict: bool = True
+    # Directory the root layer is written to. Set by the façade before compose so
+    # the composer can express component subLayerPaths relative to it.
+    output_dir: Path | None = None
 
 
 def build_context(*, strict: bool = True, config: dict | None = None) -> AssemblyContext:

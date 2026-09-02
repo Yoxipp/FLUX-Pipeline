@@ -15,9 +15,27 @@
         "kind": { "enum": ["component", "assembly", "shot", "sequence"] },
         "name": { "type": "string", "minLength": 1 },
         "asset": { "type": "string", "minLength": 1 },
+        "task": { "type": "string", "minLength": 1 },
         "version": { "$ref": "#/$defs/version" },
         "sequence": { "type": "string", "minLength": 1 },
-        "shot": { "type": "string", "minLength": 1 }
+        "shot": { "type": "string", "minLength": 1 },
+        "slots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slot", "asset", "task"],
+            "properties": {
+              "slot": { "$ref": "#/$defs/layerKind" },
+              "asset": { "type": "string", "minLength": 1 },
+              "task": { "type": "string", "minLength": 1 },
+              "layer": { "$ref": "#/$defs/layerKind" },
+              "version": { "$ref": "#/$defs/layerVersion" },
+              "follow_last": { "type": "boolean" }
+            }
+          }
+        }
       }
     },
     "assembly": {
@@ -63,6 +81,13 @@
     "version": {
       "type": "string",
       "pattern": "^(latest|v[0-9]+)$"
+    },
+    "layerKind": {
+      "enum": ["model", "skel", "anim", "cam", "light", "shading"]
+    },
+    "layerVersion": {
+      "type": "string",
+      "pattern": "^(latest|v[0-9]+|LAST)$"
     },
     "variants": {
       "type": "object",

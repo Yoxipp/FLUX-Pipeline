@@ -23,6 +23,7 @@ class Arc(Enum):
     VARIANT = "variant"
     OVER = "over"
     INHERIT = "inherit"
+    LAYERFILE = "layerfile"
 
 
 @dataclass(frozen=True)

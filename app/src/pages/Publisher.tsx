@@ -473,6 +473,10 @@ export function Publisher() {
   // "Reset interface" action in the settings fires 'flux:reset-ui' to restore it.
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const [rightWidth, setRightWidth] = useState<number>(() => readStoredWidth())
+  // Node path we last auto-suggested a format for, so the Houdini poll suggests a
+  // format once per newly-selected node instead of clobbering a manual override
+  // (e.g. rop_geometry → .obj) on every 3s tick.
+  const autoExtForNodeRef = useRef<string | null>(null)
 
   useEffect(() => {
     try { localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth)) } catch { /* blocked storage */ }
@@ -646,6 +650,7 @@ export function Publisher() {
           // Drop stale node context so a later publish doesn't target a dead node.
           setRopNodePath('')
           setDetectedNodeType(null)
+          autoExtForNodeRef.current = null
         }
         if (ping.connected) {
           const state = await api.getHoudiniState()
@@ -666,10 +671,16 @@ export function Publisher() {
             }
 
             setDetectedNodeType(rawType ?? null)
-            const ext = rawType ? resolveNodeExt(rawType) : undefined
-            if (ext) setExportExt(ext)
+            // Suggest the node's default format only when the selection changes,
+            // so a manual override (e.g. rop_geometry → .obj) survives later polls.
+            if (nodePath !== autoExtForNodeRef.current) {
+              autoExtForNodeRef.current = nodePath
+              const ext = rawType ? resolveNodeExt(rawType) : undefined
+              if (ext) setExportExt(ext)
+            }
           } else {
             setDetectedNodeType(null)
+            autoExtForNodeRef.current = null
           }
         }
       } catch { /* Houdini offline */ }

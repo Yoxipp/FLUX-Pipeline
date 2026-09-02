@@ -15,6 +15,18 @@ from .model import (
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.json")
 
+# Component slot stacking order, strong→weak (lower == stronger, listed first in
+# the root's subLayerPaths). Animation overrides camera overrides light overrides
+# shading overrides skel overrides model — the geometry is the weakest base.
+_SLOT_ORDER: dict[str, int] = {
+    "anim": 0,
+    "cam": 1,
+    "light": 2,
+    "shading": 3,
+    "skel": 4,
+    "model": 5,
+}
+
 # jsonschema is available in the backend env; degrade gracefully if ever absent.
 try:
     import jsonschema  # type: ignore
@@ -71,6 +83,31 @@ def _normalise(data: dict) -> Recipe:
     target = dict(data["target"])
     options = dict(data.get("options", {}))
     layers: list[LayerSpec] = []
+
+    # Component with explicit layer slots (v2 "USD Layers"): stack published layer
+    # files (model/skel/anim/cam/light) as the root's subLayerPaths, strong→weak.
+    # The composer authors the component root (over + kind + defaultPrim) from the
+    # resolved bases, so no separate root spec is emitted here. A slots component
+    # takes no assembly/components/departments — enumerate the slots and stop.
+    if target.get("kind") == "component" and target.get("slots"):
+        for slot in target["slots"]:
+            slot_kind = slot["slot"]
+            follow_last = slot.get("follow_last", True)
+            version = "latest" if follow_last else slot.get("version", "latest")
+            layers.append(
+                LayerSpec(
+                    kind="layerfile",
+                    name=slot_kind,
+                    params={
+                        "asset": slot["asset"],
+                        "task": slot["task"],
+                        "layer": slot.get("layer", slot_kind),
+                        "version": version,
+                        "order": _SLOT_ORDER.get(slot_kind, 99),
+                    },
+                )
+            )
+        return Recipe(target=target, layers=tuple(layers), options=options)
 
     # Component target: the asset itself becomes a component (payload geometry +
     # variantSets). VariantSet templates are resolved from config by the builder,
