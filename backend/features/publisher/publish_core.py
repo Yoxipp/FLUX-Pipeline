@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
-from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING
+from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.activity.activity_writer import log_publish
@@ -14,7 +13,8 @@ from features.folder_manager.naming_validator import (
 )
 from features.folder_manager.tokens import get_path_for_token, load_tokens
 from features.publisher.modif_log import append_log
-from features.publisher.version_resolver import get_last_file, get_next_version
+from features.publisher.publish_layout import publish_into_layout
+from features.publisher.version_resolver import get_last_file
 
 log = get_logger(__name__)
 
@@ -140,25 +140,21 @@ def publish_file(
     ensure_dir(dest_folder)
 
     base_name = get_base_name(filename)
-    next_ver  = get_next_version(dest_folder, base_name)
 
-    # If a LAST file exists, it gets archived as v{next_ver}; the new LAST is v{next_ver+1}.
-    # If no LAST exists (first publish ever), the new LAST is v{next_ver} = v001.
-    had_last = rename_last_to_versioned(dest_folder, base_name, next_ver) is not None
-    new_ver  = next_ver + 1 if had_last else next_ver
-
-    dest_name = f"{base_name}_{ACTIVE_VERSION_LABEL}{source_path.suffix}"
-    dest_path = dest_folder / dest_name
-
+    # New layout: each publish lands in its own per-version, per-format folder.
+    #   <dest>/<base>_<FMT>_LAST/<base>_LAST.ext   (active, one per format)
+    #   <dest>/<base>_<FMT>_Vnnn/<base>_vnnn.ext   (archived on the next publish)
     try:
-        shutil.copy2(source_path, dest_path)
+        dest_path, new_ver = publish_into_layout(source_path, dest_folder, base_name)
     except OSError as e:
         log.error("File copy failed: %s", e)
         return None
 
+    # modif log stays at the shared publish folder (spans all versions/formats)
     append_log(dest_folder, base_name, format_version(new_ver), description, user)
-    log_publish(user, dest_name, project_name or project_path.name, dest_folder=dest_folder)
+    # dest_path.parent is the LAST folder, so "open folder" lands next to the file
+    log_publish(user, dest_path.name, project_name or project_path.name, dest_folder=dest_path.parent)
 
-    log.info("Published %s → %s (v%03d)", filename, dest_path, next_ver)
+    log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
     return dest_path
 

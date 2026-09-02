@@ -137,10 +137,13 @@ def _scan_iters(
         return [ACTIVE_VERSION_LABEL]
 
     has_last = False
-    versions: list[int] = []
+    versions: set[int] = set()
 
-    for p in folder.iterdir():
-        if not p.is_file() or _extract_ext(p) == ".json":
+    # published_files walks both the legacy flat files and the nested
+    # <base>_<FMT>_{LAST,Vnnn}/ folders, so iters resolve under either layout.
+    from features.publisher.publish_layout import published_files
+    for p in published_files(folder):
+        if _extract_ext(p) == ".json":
             continue
         _, ver = _extract_iter_stem(p.name)
         if not ver:
@@ -148,7 +151,7 @@ def _scan_iters(
         if ver == ACTIVE_VERSION_LABEL:
             has_last = True
         elif _VERSION_RE.match(ver):
-            versions.append(int(ver[1:]))
+            versions.add(int(ver[1:]))
 
     result: list[str] = []
     if has_last:
@@ -189,9 +192,10 @@ def resolve_import_path(
     effective_instance = instance.strip() if instance.strip() else DEFAULT_INSTANCE
     target_stem = f"{class_tok}_{type_tok}_{name_tok}_{effective_instance}_{iter_val}".upper()
 
-    for p in folder.iterdir():
-        if not p.is_file():
-            continue
+    # published_files descends into the nested <base>_<FMT>_{LAST,Vnnn}/ folders
+    # as well as the legacy flat files, so import resolves under either layout.
+    from features.publisher.publish_layout import published_files
+    for p in published_files(folder):
         ext = _extract_ext(p)
         if ext == ".json":
             continue

@@ -244,6 +244,13 @@ export const api = {
   getProjects: () =>
     apiCall<{ projects: string[] }>('GET', '/folder/projects'),
 
+  // Active project — single source of truth, persisted backend-side (config.json)
+  getCurrentProject: () =>
+    apiCall<{ project: string | null }>('GET', '/project/current'),
+
+  setCurrentProject: (project: string) =>
+    apiCall<{ project: string }>('PUT', '/project/current', { project }),
+
   createProject: (name: string) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name }),
 

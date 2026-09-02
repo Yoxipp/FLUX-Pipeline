@@ -156,13 +156,14 @@ def build_rop_output_path(
     Reuses resolve_publish_path (tokens) + get_next_version (version_resolver).
     No duplication with publish_core.
 
-    Single file : dest_folder/basename_LAST.ext
+    Single file : dest_folder/basename_<FMT>_LAST/basename_LAST.ext
     Sequence    : dest_folder/basename_v001/basename_v001.$F4.ext
 
     Returns (output_path, next_version) or (None, None) on failure.
     """
     from features.folder_manager.naming_validator import get_base_name
     from features.publisher.publish_core import resolve_publish_path
+    from features.publisher.publish_layout import format_suffix
     from features.publisher.version_resolver import get_next_version
 
     project_path = Path(project_path)
@@ -185,7 +186,11 @@ def build_rop_output_path(
         frame_token = f"$F{frame_padding}"
         output_path = seq_folder / f"{base_name}_{ver_str}.{frame_token}{ext}"
     else:
-        output_path = dest_folder / f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
+        # Single file lands in its own per-format LAST folder. The folder is created
+        # by publish_via_rop AFTER archiving the previous LAST (do not create it here).
+        fmt = format_suffix(ext)
+        last_dir = dest_folder / f"{base_name}_{fmt}_{ACTIVE_VERSION_LABEL}"
+        output_path = last_dir / f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
 
     return output_path, next_ver
 
@@ -420,8 +425,8 @@ def publish_houdini_rop(
     Returns {"ok": True, "path": "...", "version": N} or {"ok": False, "error": "..."}.
     """
     from features.activity.activity_writer import log_publish
-    from features.publisher.publish_core import rename_last_to_versioned, resolve_publish_path
-    from features.publisher.version_resolver import get_next_version
+    from features.publisher.publish_core import resolve_publish_path
+    from features.publisher.publish_layout import archive_last_folder, format_suffix
     from features.folder_manager.naming_validator import get_base_name, format_version
 
     project_path = Path(project_path)
@@ -442,13 +447,16 @@ def publish_houdini_rop(
     if output_path is None:
         return {"ok": False, "error": f"Cannot resolve pipeline path for: {filename}{ext}"}
 
-    # 3. For single files: archive existing LAST before cook overwrites it
+    # 3. For single files: archive the previous LAST folder before the cook writes
+    #    the new one, then (re)create the empty LAST folder the ROP will render into.
     if not is_sequence:
         full_name = f"{filename}{ext}"
         dest_folder = resolve_publish_path(project_path, full_name)
         base_name = get_base_name(full_name)
-        had_last = rename_last_to_versioned(dest_folder, base_name, next_ver) is not None
-        effective_ver = next_ver + 1 if had_last else next_ver
+        fmt = format_suffix(ext)
+        archived = archive_last_folder(dest_folder, base_name, fmt, ext)
+        effective_ver = archived + 1 if archived is not None else next_ver
+        ensure_dir(output_path.parent)  # the <base>_<FMT>_LAST folder
     else:
         effective_ver = next_ver
 
@@ -464,7 +472,8 @@ def publish_houdini_rop(
         log_publish(user or "unknown", output_path.name, project_path.name, dest_folder=output_path.parent)
         from features.publisher.modif_log import append_log
         if not is_sequence:
-            append_log(output_path.parent, get_base_name(f"{filename}{ext}"), ver_str, description, user)
+            # modif log stays in the shared publish folder (spans all versions/formats)
+            append_log(dest_folder, get_base_name(f"{filename}{ext}"), ver_str, description, user)
     except Exception as exc:
         log.warning("Logging failed (non-fatal): %s", exc)
 

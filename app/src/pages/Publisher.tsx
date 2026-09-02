@@ -7,6 +7,7 @@ import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { api } from '../api/client'
+import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { toast } from 'sonner'
 
@@ -444,8 +445,7 @@ export function Publisher() {
   const { settings } = useSettings()
   const location = useLocation()
   const [dcc, setDcc]           = useState('Maya')
-  const [projects, setProjects] = useState<string[]>([])
-  const [project, setProject]   = useState('')
+  const { project, projects, setProject } = useProject()
   const [tokens, setTokens]     = useState<Record<string, Record<string, string>>>({})
 
   // Composer state
@@ -545,15 +545,7 @@ export function Publisher() {
   const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
   const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
 
-  // Projects
-  useEffect(() => {
-    api.getProjects()
-      .then(d => {
-        setProjects(d.projects)
-        if (d.projects.length > 0) setProject(d.projects[0])
-      })
-      .catch(() => {})
-  }, [])
+  // Projects come from the shared ProjectContext (useProject) — no local fetch.
 
   // Tokens for selected project
   useEffect(() => {

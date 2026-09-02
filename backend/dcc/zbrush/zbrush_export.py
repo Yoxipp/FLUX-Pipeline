@@ -12,15 +12,15 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING
+from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from dcc.zbrush.client import zbrush_client
 from features.activity.activity_writer import log_publish
 from features.folder_manager.naming_validator import format_version, get_base_name
 from features.publisher.modif_log import append_log
-from features.publisher.publish_core import resolve_publish_path, rename_last_to_versioned
-from features.publisher.version_resolver import get_next_version
+from features.publisher.publish_core import resolve_publish_path
+from features.publisher.publish_layout import publish_into_layout
 
 log = get_logger(__name__)
 
@@ -65,7 +65,6 @@ def publish_zbrush(
 
     # ── 2. Prepare paths ──────────────────────────────────────────────────────
     base_name = get_base_name(filename)
-    next_ver  = get_next_version(dest_folder, base_name)
 
     # Export to a temp file so that ZBrush's set_next_filename never receives a
     # path that was just renamed away — which causes a spurious "unable to open"
@@ -95,19 +94,18 @@ def publish_zbrush(
     except Exception:
         pass
 
-    # ── 4. Versioning (after export — temp path is safe to rename) ────────────
-    had_last = rename_last_to_versioned(dest_folder, base_name, next_ver) is not None
-    new_ver  = next_ver + 1 if had_last else next_ver
-    ver_str  = format_version(new_ver, DEFAULT_PADDING)
-
-    dest_name = f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
-    dest_path = dest_folder / dest_name
-
+    # ── 4. Versioning (after export — temp path is safe to consume) ────────────
+    # New layout: <dest>/<base>_<FMT>_LAST/<base>_LAST.ext, previous LAST archived.
     try:
-        temp_path.rename(dest_path)
+        dest_path, new_ver = publish_into_layout(temp_path, dest_folder, base_name)
     except OSError as exc:
-        log.error("Failed to move temp export to LAST: %s", exc)
+        temp_path.unlink(missing_ok=True)
+        log.error("Failed to place export in publish layout: %s", exc)
         return {"ok": False, "error": f"File move failed: {exc}"}
+    temp_path.unlink(missing_ok=True)  # temp is disposable once copied into the layout
+
+    ver_str   = format_version(new_ver, DEFAULT_PADDING)
+    dest_name = dest_path.name
 
     # ── 5. Keep Local ─────────────────────────────────────────────────────────
     if keep_local and local_dir:
@@ -136,7 +134,7 @@ def publish_zbrush(
             user=user,
             filename=dest_name,
             project=project_name or project_path.name,
-            dest_folder=dest_folder,
+            dest_folder=dest_path.parent,
         )
     except Exception as exc:
         log.warning("activity log failed: %s", exc)

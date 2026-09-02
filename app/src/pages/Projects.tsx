@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
+import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
 
@@ -1025,7 +1026,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
             >
               {s.isDir ? <FolderSvg size={24} /> : <FileSvg size={20} ext={getExt(s.label)} />}
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
+                <div title={s.label} style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
                 <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {s.project}{s.subpath.length > 0 ? ' / ' + s.subpath.join(' / ') : ''}
                 </div>
@@ -1084,17 +1085,15 @@ export function Projects() {
   const [hoveredName,   setHoveredName]     = useState<string | null>(null)
   const [loading, setLoading]               = useState(false)
 
-  const [projects, setProjects]           = useState<string[]>([])
-  const [activeProject, setActiveProject] = useState('')
+  // Active project + list come from the shared ProjectContext. Aliased to the
+  // existing local names so the rest of the page is unchanged. Navigating into a
+  // project calls setActiveProject -> the explored project becomes active everywhere.
+  const { project: activeProject, projects, setProject: setActiveProject, refreshProjects } = useProject()
   const [sequences, setSequences]         = useState<string[]>([])
 
   const { settings } = useSettings()
   const dccStatus = useDccStatus()
   const location = useLocation()
-
-  useEffect(() => {
-    if (settings?.last_project) setActiveProject(settings.last_project)
-  }, [settings?.last_project])
 
   useEffect(() => {
     const openPath = (location.state as { openPath?: string } | null)?.openPath
@@ -1225,6 +1224,11 @@ export function Projects() {
     navProject !== '' ? navProject
     : (selectedNames.size === 1 && projects.includes([...selectedNames][0])) ? [...selectedNames][0]
     : null
+
+  // Exploring a project makes it the active project everywhere (shared context).
+  useEffect(() => {
+    if (navProject && navProject !== activeProject) setActiveProject(navProject)
+  }, [navProject])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const canBack    = navIdx > 0
   const canForward = navIdx < navStack.length - 1
@@ -1380,7 +1384,7 @@ export function Projects() {
     try {
       if (nav.kind === 'root') {
         const d = await api.getProjects()
-        setProjects(d.projects)
+        void refreshProjects()  // keep the shared context list in sync
         setItems(d.projects.map(name => ({ name, isDir: true })))
       } else {
         const subpath = nav.subpath.join('/')
@@ -2046,7 +2050,7 @@ export function Projects() {
                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', fontSize: 11, color: s.project === activeProject ? 'var(--accent-hi)' : 'var(--ink-3)', cursor: 'pointer' }}
               >
                 <FolderIcon size={11} color={s.project === activeProject ? 'var(--accent)' : 'var(--ink-4)'} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+                <span title={s.label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
               </div>
             ))}
           </div>
@@ -2129,7 +2133,7 @@ export function Projects() {
                       >
                         <FolderSvg size={24} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
+                          <div title={r.label} style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
                           <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.project} / {r.pathStr}</div>
                         </div>
                       </div>
@@ -2240,7 +2244,7 @@ export function Projects() {
                           {item.isDir
                             ? <FolderSvg size={40} selected={isSel} />
                             : <FileSvg   size={34} selected={isSel} ext={getExt(item.name)} />}
-                          <div style={{ fontSize: 10, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                          <div title={item.name} style={{ fontSize: 10, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
                             {item.name}
                           </div>
                         </div>

@@ -191,8 +191,13 @@ class FluxResolver:
             return ResolvedAsset(path=last, default_prim=default_prim, version=frozen)
 
         matches = sorted(folder.glob(f"{base}_{version}.*")) if folder.exists() else []
-        if not matches:
+        found = matches[0] if matches else None
+        if found is None:
+            # nested layout: <base>_<FMT>_Vnnn/<base>_vnnn.ext
+            from features.publisher.publish_layout import find_version_file
+            found = find_version_file(folder, base, version)
+        if found is None:
             raise ResolveError(
                 f"version '{version}' of asset '{asset}' not found in {folder}"
             )
-        return ResolvedAsset(path=matches[0], default_prim=default_prim, version=version)
+        return ResolvedAsset(path=found, default_prim=default_prim, version=version)
