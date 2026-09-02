@@ -191,6 +191,15 @@ def create_character_import_node(network_path: str, file_path: str | Path) -> di
     return resp
 
 
+def _fallback_node_type(resolved_path: str) -> str:
+    """Native Houdini node type to import *resolved_path* when the HDA is missing.
+
+    Empty string when the extension has no native importer (caller then errors).
+    """
+    entry = _EXT_MAP.get(_get_ext(resolved_path))
+    return entry[0] if entry else ""
+
+
 def create_flux_importer_node(
     project: str = "",
     flux_class: str = "",
@@ -198,12 +207,22 @@ def create_flux_importer_node(
     flux_name: str = "",
     flux_instance: str = "",
     flux_iter: str = "LAST",
+    resolved_path: str = "",
 ) -> dict:
-    """Create a flux_importer HDA node in the active Houdini network pane.
+    """Create a FLUX import node in the active Houdini network pane.
 
-    Uses the current NetworkEditor pwd(). If that's an OBJ context, wraps inside
-    a new Geometry node. Returns {"ok": True, "node_path": "..."}.
+    Prefers the ``flux_importer`` HDA (token-driven, live re-resolve). When that
+    node type is not registered in the running Houdini (HDA not built/installed, or
+    a stale otls scan), and the backend already resolved a concrete file, it falls
+    back to a NATIVE import node (usdimport / alembic / file / kinefx) for that file
+    — so "Open in Houdini" works even without the HDA. *resolved_path* is the
+    backend-resolved absolute file (see importer_resolve.resolve_import_path).
+
+    Uses the current NetworkEditor pwd(); an OBJ context is wrapped in a Geometry
+    node. Returns {"ok": True, "node_path": "...", "resolved_path": "...", "mode": "hda"|"native"}.
     """
+    fb_type = _fallback_node_type(resolved_path)
+    fb_file = str(resolved_path).replace("\\", "/") if resolved_path else ""
     code = textwrap.dedent(f"""\
         import hou
         import re as _re
@@ -229,27 +248,64 @@ def create_flux_importer_node(
                 "Contexte '" + _pwd.path() + "' incompatible avec l'importer FLUX (SOP). "
                 "Place-toi dans /obj ou un réseau SOP (l'import USD /stage arrive bientôt)."
             )
-        _node = _target.createNode("flux_importer", node_name="flux_import_" + _nm)
-        if {project!r}:       _node.parm("project").set({project!r})
-        if {flux_class!r}:    _node.parm("flux_class").set({flux_class!r})
-        if {flux_type!r}:     _node.parm("flux_type").set({flux_type!r})
-        if {flux_name!r}:     _node.parm("flux_name").set({flux_name!r})
-        if {flux_instance!r}: _node.parm("flux_instance").set({flux_instance!r})
-        _node.parm("flux_iter").set({flux_iter!r})
-        _node.setSelected(True, clear_all_selected=True)
-        # Setting parms via .set() does NOT fire the HDA's resolve callback, and
-        # OnCreated only prefetches menus — so resolved_path would stay empty and
-        # nothing would import. Trigger the resolve explicitly now.
+
+        # Is the flux_importer HDA type actually registered here?
+        _hda_type = hou.sopNodeTypeCategory().nodeType("flux_importer")
         _resolved = ""
-        try:
-            hou.phm().resolve_path(_node)
-            _rp = _node.parm("resolved_path")
-            _resolved = _rp.eval() if _rp is not None else ""
-        except Exception as _re_exc:
-            _sm = _node.parm("status_msg")
-            if _sm is not None:
-                _sm.set("Resolve auto échoué : clique ↺ Resolve (" + str(_re_exc) + ")")
-        result = {{"ok": True, "node_path": _node.path(), "resolved_path": _resolved}}
+        _mode = ""
+        if _hda_type is not None:
+            _node = _target.createNode("flux_importer", node_name="flux_import_" + _nm)
+            if {project!r}:       _node.parm("project").set({project!r})
+            if {flux_class!r}:    _node.parm("flux_class").set({flux_class!r})
+            if {flux_type!r}:     _node.parm("flux_type").set({flux_type!r})
+            if {flux_name!r}:     _node.parm("flux_name").set({flux_name!r})
+            if {flux_instance!r}: _node.parm("flux_instance").set({flux_instance!r})
+            _node.parm("flux_iter").set({flux_iter!r})
+            _node.setSelected(True, clear_all_selected=True)
+            _mode = "hda"
+            # Setting parms via .set() does NOT fire the HDA's resolve callback, and
+            # OnCreated only prefetches menus — so resolved_path would stay empty and
+            # nothing would import. Trigger the resolve explicitly now.
+            try:
+                hou.phm().resolve_path(_node)
+                _rp = _node.parm("resolved_path")
+                _resolved = _rp.eval() if _rp is not None else ""
+            except Exception as _re_exc:
+                _sm = _node.parm("status_msg")
+                if _sm is not None:
+                    _sm.set("Resolve auto échoué : clique ↺ Resolve (" + str(_re_exc) + ")")
+        else:
+            # HDA absent → native fallback on the backend-resolved file.
+            if not {fb_file!r}:
+                raise RuntimeError(
+                    "Le node 'flux_importer' n'existe pas dans ce Houdini (HDA non installée) "
+                    "et aucun fichier n'a pu être résolu. Rebuild l'HDA (scripts/build_hdas.py) "
+                    "ou réinstalle le shelf Houdini."
+                )
+            if not {fb_type!r}:
+                raise RuntimeError("Extension non supportée par l'import natif : " + {fb_file!r})
+            _node = _target.createNode({fb_type!r}, node_name="flux_import_" + _nm)
+            # Find the file parm version-agnostically: a FileReference string parm,
+            # else the first parm whose name mentions "file".
+            _fp = None
+            for _p in _node.parms():
+                _t = _p.parmTemplate()
+                try:
+                    if (_t.type() == hou.parmTemplateType.String
+                            and _t.stringType() == hou.stringParmType.FileReference):
+                        _fp = _p; break
+                except Exception:
+                    pass
+            if _fp is None:
+                for _p in _node.parms():
+                    if "file" in _p.name().lower():
+                        _fp = _p; break
+            if _fp is not None:
+                _fp.set({fb_file!r})
+            _node.setSelected(True, clear_all_selected=True)
+            _resolved = {fb_file!r}
+            _mode = "native"
+        result = {{"ok": True, "node_path": _node.path(), "resolved_path": _resolved, "mode": _mode}}
     """)
     resp = houdini_client.run(code)
     if resp.get("ok"):
@@ -260,8 +316,8 @@ def create_flux_importer_node(
                 "(check the asset exists for these tokens / FLUX reachable from Houdini)",
                 r.get("node_path"),
             )
-        log.info("Created flux_importer node at %s (resolved=%s)",
-                 r.get("node_path"), r.get("resolved_path") or "<none>")
+        log.info("Created FLUX import node at %s (mode=%s, resolved=%s)",
+                 r.get("node_path"), r.get("mode"), r.get("resolved_path") or "<none>")
     else:
         log.error("create_flux_importer_node failed: %s", resp.get("error"))
     return resp

@@ -276,14 +276,34 @@ class HoudiniFluxImporterCreateRequest(BaseModel):
 
 @router.post("/houdini/importer/create_node")
 async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) -> dict:
-    """Create a flux_importer HDA node in the active Houdini network."""
+    """Create a flux_importer node in the active Houdini network.
+
+    Resolves the concrete file backend-side so the node can fall back to a native
+    importer when the flux_importer HDA is not registered in the running Houdini.
+    """
     from dcc.houdini.houdini_import import create_flux_importer_node
+    from core.paths import get_project_path
+    from features.importer.importer_resolve import resolve_import_path
+
+    # Backend-side token → absolute path (fallback for when the HDA is absent).
+    resolved_path = ""
+    if req.project and req.flux_class and req.flux_type and req.flux_name:
+        pp = get_project_path(req.project)
+        if pp.exists():
+            r = resolve_import_path(
+                pp, req.flux_class, req.flux_type, req.flux_name,
+                req.flux_instance, req.flux_iter or "LAST",
+            )
+            if r.get("ok"):
+                resolved_path = r.get("path") or ""
+
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None,
         lambda: create_flux_importer_node(
             req.project, req.flux_class, req.flux_type,
             req.flux_name, req.flux_instance, req.flux_iter,
+            resolved_path,
         ),
     )
     if not result.get("ok"):
