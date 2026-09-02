@@ -254,6 +254,11 @@ export const api = {
   createProject: (name: string) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name }),
 
+  // Hard-delete a whole project folder. Destructive: only call after the typed
+  // confirmation in the Archives view.
+  deleteProject: (name: string) =>
+    apiCall<{ deleted: string }>('DELETE', `/folder/projects/${encodeURIComponent(name)}`),
+
   getAssets: (project: string, class_token?: string) =>
     apiCall<{ assets: string[] }>('GET', `/folder/projects/${project}/assets${class_token ? `?class_token=${class_token}` : ''}`),
 

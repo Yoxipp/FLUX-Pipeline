@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.logger import get_logger
-from core.paths import get_project_path, is_subpath
+from core.paths import get_project_path, get_projects_dir, is_subpath
 from features.folder_manager.asset_creator import create_asset, list_assets
 from features.folder_manager.locks import is_locked, load_locks, set_lock
 from features.folder_manager.project_init import create_project, list_projects, project_exists
@@ -67,6 +67,40 @@ async def post_project(req: ProjectCreate) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"name": req.name, "path": str(path)}
+
+
+@router.delete("/projects/{project_name}")
+async def delete_project(project_name: str) -> dict:
+    """Hard-delete a whole project folder from the workspace.
+
+    Deliberately destructive: the frontend only calls this after the user typed the
+    exact confirmation phrase in the Archives view. Guarded so it can only ever remove
+    a direct child of DOSSIER_PROJETS — never a traversal target, never the dir itself.
+    """
+    name = project_name.strip()
+    if not name or not project_exists(name):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {name}")
+
+    projects_dir = get_projects_dir().resolve()
+    project_path = get_project_path(name).resolve()
+
+    # Must be a direct child of the projects dir (blocks '..', absolute names, symlink escapes).
+    if project_path.parent != projects_dir or not is_subpath(project_path, projects_dir):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, lambda: shutil.rmtree(project_path))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # If the deleted project was the active one, clear it so the app falls back cleanly.
+    from utils import project_utils
+    if project_utils.get_current_project() == name:
+        project_utils.set_current_project("")
+
+    log.warning("Hard-deleted project %s", project_path)
+    return {"deleted": name}
 
 
 # ── Assets ────────────────────────────────────────────────────────────────────

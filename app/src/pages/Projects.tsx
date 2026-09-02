@@ -974,16 +974,94 @@ function DeleteModal({ items, onConfirm, onCancel }: {
   )
 }
 
+// ── Hard-Delete Project Modal (typed confirmation) ────────────────────────────
+
+// Exact, case-sensitive phrase the user must type before a project can be deleted.
+const DELETE_PROJECT_PHRASE = 'yes DELETE it'
+
+function DeleteProjectModal({ project, onConfirm, onCancel }: {
+  project:   string
+  onConfirm: () => void
+  onCancel:  () => void
+}) {
+  const [typed, setTyped] = useState('')
+  const match = typed === DELETE_PROJECT_PHRASE
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onCancel])
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '22px 24px', minWidth: 340, maxWidth: 420, boxShadow: 'var(--shadow)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <Trash2 size={16} strokeWidth={1.75} color="var(--err)" />
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+            Supprimer le projet «&nbsp;{project}&nbsp;» ?
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
+          Le dossier du projet et tout son contenu seront retirés définitivement du workspace.
+          Cette action est irréversible.
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 8, lineHeight: 1.5 }}>
+          Tape{' '}
+          <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>
+            {DELETE_PROJECT_PHRASE}
+          </code>{' '}
+          pour confirmer.
+        </div>
+        <input
+          autoFocus
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && match) onConfirm() }}
+          placeholder={DELETE_PROJECT_PHRASE}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          style={{
+            width: '100%', boxSizing: 'border-box', marginBottom: 20,
+            padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)',
+            background: 'var(--paper-2)', color: 'var(--ink)',
+            border: `1px solid ${match ? 'var(--err)' : 'var(--rule-2)'}`, borderRadius: 6, outline: 'none',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div
+            className="btn primary"
+            onClick={() => { if (match) onConfirm() }}
+            style={{
+              cursor: match ? 'pointer' : 'not-allowed',
+              background: match ? 'var(--err)' : 'var(--rule-2)',
+              borderColor: match ? 'var(--err)' : 'var(--rule-2)',
+              opacity: match ? 1 : 0.5,
+            }}
+          >
+            Supprimer
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Saved Items List (Favoris / Récents / Archivés) ───────────────────────────
 
-function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }: {
-  items:       SavedItem[]
-  label:       string
-  emptyMsg:    string
-  removeLabel: string   // ex: "Désarchiver", "Retirer des Favoris", "Retirer"
-  onNavigate:  (s: SavedItem) => void
-  onRemove:    (s: SavedItem) => void
+function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, onDeleteProject }: {
+  items:            SavedItem[]
+  label:            string
+  emptyMsg:         string
+  removeLabel:      string   // ex: "Désarchiver", "Retirer des Favoris", "Retirer"
+  onNavigate:       (s: SavedItem) => void
+  onRemove:         (s: SavedItem) => void
+  onDeleteProject?: (s: SavedItem) => void   // Archives only: hard-delete a project root
 }) {
+  // A root-level project is identified by project === label && empty subpath.
+  const isProjectRoot = (s: SavedItem) => s.project === s.label && s.subpath.length === 0
   const [ctx, setCtx] = useState<{ x: number; y: number; item: SavedItem } | null>(null)
 
   useEffect(() => {
@@ -1052,6 +1130,12 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove }
         >
           {menuRow('Ouvrir', false, () => { onNavigate(ctx.item); setCtx(null) })}
           {menuRow(removeLabel, false, () => { onRemove(ctx.item); setCtx(null) })}
+          {onDeleteProject && isProjectRoot(ctx.item) && (
+            <>
+              <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
+              {menuRow('Supprimer définitivement', true, () => { onDeleteProject(ctx.item); setCtx(null) })}
+            </>
+          )}
         </div>
       )}
     </>
@@ -1116,6 +1200,7 @@ export function Projects() {
   // Context menu & delete confirm
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null)
   const [deleteConfirm,  setDeleteConfirm]  = useState<ExplorerItem[] | null>(null)
+  const [deleteProjectTarget, setDeleteProjectTarget] = useState<SavedItem | null>(null)
   const [deleteError,    setDeleteError]    = useState('')
   const [renameTarget,   setRenameTarget]   = useState<ExplorerItem | null>(null)
   const [moveTarget,     setMoveTarget]     = useState<ExplorerItem[] | null>(null)
@@ -1840,6 +1925,28 @@ export function Projects() {
     }
   }, [nav, loadItems])
 
+  // Hard-delete a whole project from the Archives view (after typed confirmation).
+  const handleDeleteProject = useCallback(async (s: SavedItem) => {
+    const name = s.project
+    try {
+      await api.deleteProject(name)
+      const purge = (list: SavedItem[]) => list.filter(x => x.project !== name)
+      setArchived(purge)
+      setFavorites(purge)
+      setRecents(purge)
+      await refreshProjects()
+      if (activeProject === name) {
+        const remaining = projects.filter(p => p !== name)
+        setActiveProject(remaining[0] ?? '')
+      }
+      toast.success(`Projet "${name}" supprimé`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Suppression du projet échouée')
+    } finally {
+      setDeleteProjectTarget(null)
+    }
+  }, [refreshProjects, activeProject, projects, setActiveProject])
+
   const handleCopyPath = useCallback(async (item: ExplorerItem) => {
     const ws = settings?.workspace
     if (!ws) return
@@ -2097,6 +2204,7 @@ export function Projects() {
               removeLabel="Désarchiver"
               onNavigate={navigateToSaved}
               onRemove={s => removeFromSaved(s, 'archived')}
+              onDeleteProject={s => setDeleteProjectTarget(s)}
             />
           )}
 
@@ -2345,6 +2453,14 @@ export function Projects() {
           items={deleteConfirm}
           onConfirm={() => void handleDelete(deleteConfirm)}
           onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {deleteProjectTarget && (
+        <DeleteProjectModal
+          project={deleteProjectTarget.project}
+          onConfirm={() => void handleDeleteProject(deleteProjectTarget)}
+          onCancel={() => setDeleteProjectTarget(null)}
         />
       )}
 
