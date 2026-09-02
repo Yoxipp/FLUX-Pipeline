@@ -510,6 +510,8 @@ export function Publisher() {
   const [sourcePath, setSourcePath]   = useState('')
   const [description, setDescription] = useState('')
   const [publishing, setPublishing]   = useState(false)
+  // Optional published-name override (local file). null = follow the token composer.
+  const [nameOverride, setNameOverride] = useState<string | null>(null)
 
   // ZBrush-specific
   const [zbrushConnected, setZbrushConnected] = useState(false)
@@ -869,7 +871,7 @@ export function Publisher() {
           project_name: project,
           description:  description || undefined,
           user:         settings?.username ?? undefined,
-          target_name:  buildFilename(),
+          target_name:  (nameOverride && nameOverride.trim()) || buildFilename(),
         })
         if (res.success) toast.success(res.message)
         else toast.error(res.message)
@@ -885,7 +887,7 @@ export function Publisher() {
   }, [
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
-    description, settings?.username, sourcePath,
+    description, settings?.username, sourcePath, nameOverride,
     zbrushConnected, zbObjOptions, zbFbxOptions,
     mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
@@ -1191,6 +1193,30 @@ export function Publisher() {
                     <FolderOpen size={12} strokeWidth={1.75} />
                     Parcourir
                   </div>
+                </div>
+
+                {/* Published name — editable; defaults to the composed token name.
+                    Must stay token-parseable (it drives the destination folder). */}
+                <div className="cap" style={{ margin: '10px 0 6px' }}>NOM PUBLIÉ</div>
+                <input
+                  value={nameOverride ?? filename}
+                  onChange={e => setNameOverride(e.target.value)}
+                  spellCheck={false}
+                  placeholder={filename}
+                  style={{
+                    width: '100%', height: 28,
+                    background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                    borderRadius: 5, padding: '0 8px',
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                    boxShadow: 'var(--shadow-inset)', outline: 'none',
+                  }}
+                />
+                <div style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 4, fontFamily: 'var(--mono)' }}>
+                  Extension conservée depuis le fichier source. {nameOverride !== null && (
+                    <span onClick={() => setNameOverride(null)} style={{ color: 'var(--accent-hi)', cursor: 'pointer' }}>
+                      Réinitialiser
+                    </span>
+                  )}
                 </div>
               </div>
             ) : (
