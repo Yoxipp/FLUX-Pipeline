@@ -313,7 +313,9 @@ export const api = {
     project?: string; flux_class?: string; flux_type?: string;
     flux_name?: string; flux_instance?: string; flux_iter?: string;
   }) =>
-    apiCall<{ ok: boolean; node_path?: string }>('POST', '/dcc/houdini/importer/create_node', params),
+    apiCall<{ ok: boolean; result?: { node_path?: string; resolved_path?: string } }>(
+      'POST', '/dcc/houdini/importer/create_node', params,
+    ),
 
   // Shelf
   getShelves: () =>

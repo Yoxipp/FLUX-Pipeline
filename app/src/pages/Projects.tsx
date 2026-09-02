@@ -1631,7 +1631,7 @@ export function Projects() {
     const rel_path = [...nav.subpath, item.name].join('/')
     try {
       const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
-      await api.createFluxImporterNode({
+      const res = await api.createFluxImporterNode({
         project:       nav.project,
         flux_class:    tok.CLASS,
         flux_type:     tok.TYPE,
@@ -1639,7 +1639,13 @@ export function Projects() {
         flux_instance: tok.INSTANCE,
         flux_iter:     'LAST',
       })
-      toast.success(`${item.name} importé dans Houdini`)
+      // Node is created but resolve can still find nothing (asset missing for these
+      // tokens, or FLUX unreachable from Houdini) — warn instead of a false success.
+      if (res.result?.resolved_path) {
+        toast.success(`${item.name} importé dans Houdini`)
+      } else {
+        toast.warning(`Node créé mais fichier non résolu pour ${item.name} — clique ↺ Resolve dans le node`)
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
       const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)

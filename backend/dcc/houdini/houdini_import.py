@@ -237,11 +237,31 @@ def create_flux_importer_node(
         if {flux_instance!r}: _node.parm("flux_instance").set({flux_instance!r})
         _node.parm("flux_iter").set({flux_iter!r})
         _node.setSelected(True, clear_all_selected=True)
-        result = {{"ok": True, "node_path": _node.path()}}
+        # Setting parms via .set() does NOT fire the HDA's resolve callback, and
+        # OnCreated only prefetches menus — so resolved_path would stay empty and
+        # nothing would import. Trigger the resolve explicitly now.
+        _resolved = ""
+        try:
+            hou.phm().resolve_path(_node)
+            _rp = _node.parm("resolved_path")
+            _resolved = _rp.eval() if _rp is not None else ""
+        except Exception as _re_exc:
+            _sm = _node.parm("status_msg")
+            if _sm is not None:
+                _sm.set("Resolve auto échoué : clique ↺ Resolve (" + str(_re_exc) + ")")
+        result = {{"ok": True, "node_path": _node.path(), "resolved_path": _resolved}}
     """)
     resp = houdini_client.run(code)
     if resp.get("ok"):
-        log.info("Created flux_importer node at %s", resp.get("result", {}).get("node_path"))
+        r = resp.get("result") or {}
+        if not r.get("resolved_path"):
+            log.warning(
+                "create_flux_importer_node: node %s created but resolved_path is empty "
+                "(check the asset exists for these tokens / FLUX reachable from Houdini)",
+                r.get("node_path"),
+            )
+        log.info("Created flux_importer node at %s (resolved=%s)",
+                 r.get("node_path"), r.get("resolved_path") or "<none>")
     else:
         log.error("create_flux_importer_node failed: %s", resp.get("error"))
     return resp

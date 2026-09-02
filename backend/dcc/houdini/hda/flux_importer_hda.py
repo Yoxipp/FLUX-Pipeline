@@ -395,10 +395,22 @@ _sw.setInput(0, _usd)
 _sw.setInput(1, _abc)
 _sw.setInput(2, _file)
 
-# Path expressions reference the HDA parameter via ch()
-_usd.parm("filepath").setExpression('ch("../../resolved_path")',  hou.exprLanguage.Python)
-_abc.parm("fileName").setExpression('ch("../../resolved_path")',  hou.exprLanguage.Python)
-_file.parm("file").setExpression('ch("../../resolved_path")',     hou.exprLanguage.Python)
+# Path expressions reference the HDA parameter via ch().
+# Parm names drift across Houdini versions (usdimport: filepath vs filepath1),
+# so bind the first parm that actually exists instead of hardcoding one.
+def _bind_path(_n, _candidates):
+    for _pn in _candidates:
+        _p = _n.parm(_pn)
+        if _p is not None:
+            _p.setExpression('ch("../../resolved_path")', hou.exprLanguage.Python)
+            return _pn
+    raise RuntimeError(
+        "No file parm found on " + _n.type().name() + " (tried " + ", ".join(_candidates) + ")"
+    )
+
+_bind_path(_usd,  ["filepath1", "filepath", "file"])
+_bind_path(_abc,  ["fileName", "filename", "file"])
+_bind_path(_file, ["file", "filename"])
 
 # Switch driven by file extension
 _sw.parm("input").setExpression("""

@@ -8,6 +8,10 @@ from core.constants import ANIM_INSTANCES, DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_seq, format_shot
+from features.folder_manager.sequence_template import (
+    create_sequence_usd_template,
+    create_shot_usd_template,
+)
 from features.folder_manager.tokens import add_token, load_tokens
 
 log = get_logger(__name__)
@@ -40,6 +44,9 @@ def create_sequence(
 
     ensure_dir(seq_path)
     add_token(project_path, "SEQ", seq_label, seq_rel)
+    # Author the sequence USD template (root layer + base light rig). Never an
+    # empty .usd — a failure here only logs, the folder/token still stand.
+    create_sequence_usd_template(seq_path, seq_label)
     log.info("Sequence created: %s", seq_path)
     return seq_path
 
@@ -70,6 +77,7 @@ def create_shot(
         seq_rel = f"shot/{seq_label}"
         ensure_dir(seq_path)
         add_token(project_path, "SEQ", seq_label, seq_rel)
+        create_sequence_usd_template(seq_path, seq_label)
         log.debug("Auto-created parent sequence %s", seq_label)
 
     _scaffold_shot(shot_path)
@@ -77,6 +85,8 @@ def create_shot(
     # Token key uses "SEQ###/SHOT###" so shots are scoped under their sequence
     token_key = f"{seq_label}/{shot_label}"
     add_token(project_path, "SHOT", token_key, shot_rel)
+    # Author the shot USD template: strong shot light over the weak sequence rig.
+    create_shot_usd_template(shot_path, seq_label, shot_label)
     log.info("Shot created: %s", shot_path)
     return shot_path
 
