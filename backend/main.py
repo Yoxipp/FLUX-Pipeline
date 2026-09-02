@@ -39,6 +39,13 @@ async def lifespan(app: FastAPI):
     if saved_user:
         config.set_current_user(saved_user)
         log.info("[FLUX] Active user: %s", saved_user)
+    # Re-stage bundled Houdini HDAs (copy-if-newer). Keeps a dev who pulled updated
+    # .hda in sync so the offline shelf install works without a live rebuild.
+    try:
+        from installer.install_ops import deploy_houdini_hdas
+        deploy_houdini_hdas()
+    except Exception as exc:  # never block startup on a staging hiccup
+        log.warning("[FLUX] HDA re-stage skipped: %s", exc)
     yield
     log.info("[FLUX] Backend shutting down")
 
