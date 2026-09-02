@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
+import { FluxLogo } from './Logo'
 import { Console } from './Console'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
@@ -318,17 +319,12 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       position: 'relative', flexShrink: 0,
     }}>
 
-      {/* logo — atom F */}
+      {/* logo — official FLUX mark */}
       <div className="no-drag" style={{
         width: 24, height: 24, flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <svg width="24" height="24" viewBox="0 0 88 88">
-          <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(-28 44 44)" fill="none" stroke="var(--accent)" strokeWidth="5" opacity="0.65" />
-          <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(28 44 44)" fill="none" stroke="var(--accent)" strokeWidth="5" />
-          <path d="M31 26h27v9H41v8h15v9H41v14h-10z" fill="var(--accent-hi)" />
-          <circle cx="66" cy="30" r="5" fill="var(--accent-hi)" />
-        </svg>
+        <FluxLogo size={24} />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>

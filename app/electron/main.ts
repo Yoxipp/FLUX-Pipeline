@@ -2,6 +2,7 @@
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { startPythonSidecar, stopPythonSidecar } from './python_bridge'
 
 let win: BrowserWindow | null = null
@@ -16,13 +17,16 @@ const _ICON_PNG = path.join(__dirname, '..', 'scripts', 'icon.png')
 let ICON = nativeImage.createFromPath(_ICON_ICO)
 if (ICON.isEmpty()) ICON = nativeImage.createFromPath(_ICON_PNG)
 
-// Reusable "atom F" mark (matches the app icon) for the splash.
-const ATOM_SVG = `<svg width="64" height="64" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(-28 44 44)" fill="none" stroke="#9a5127" stroke-width="4"/>
-  <ellipse cx="44" cy="44" rx="31" ry="12" transform="rotate(28 44 44)" fill="none" stroke="#e07b3c" stroke-width="4"/>
-  <path d="M31 26h27v9H41v8h15v9H41v14h-10z" fill="#efa061"/>
-  <circle cx="66" cy="30" r="4.5" fill="#efa061"/>
-</svg>`
+// Official FLUX mark for the splash — the app icon PNG, embedded as a data URI so
+// the splash's data: HTML can show it without a file:// reference. Used as-is.
+const ATOM_SVG = (() => {
+  try {
+    const buf = fs.readFileSync(_ICON_PNG)
+    return `<img width="64" height="64" style="object-fit:contain" src="data:image/png;base64,${buf.toString('base64')}" />`
+  } catch {
+    return '' // splash still shows the wordmark if the icon can't be read
+  }
+})()
 
 // ── Splash screen ─────────────────────────────────────────────────────────────
 // Shown the instant Electron is ready, covering the gap until the main window has

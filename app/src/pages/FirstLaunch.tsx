@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { api } from '../api/client'
 import { Avatar } from '../components/shared/ui'
+import { FluxLogo } from '../components/shared/Logo'
 
 export function FirstLaunch() {
   const [step, setStep]           = useState<1 | 2>(1)
@@ -66,13 +67,7 @@ export function FirstLaunch() {
 
         {/* logo + titre */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 8,
-            background: 'var(--accent-soft)', border: '1px solid var(--accent)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 15,
-            color: 'var(--accent-hi)', boxShadow: 'var(--shadow-xs)',
-          }}>F</div>
+          <FluxLogo size={30} />
           <div>
             <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 14, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</div>
             <div style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
