@@ -35,11 +35,11 @@ class PublishLayout(unittest.TestCase):
             dest = tmp / "all"
             path, ver = publish_into_layout(src, dest, _BASE)
             self.assertEqual(ver, 1)
-            self.assertEqual(path, dest / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd")
+            self.assertEqual(path, dest / "USD" / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd")
             self.assertTrue(path.exists())
             self.assertEqual(path.read_text(), "v1")
             # no archive folder yet
-            self.assertFalse((dest / f"{_BASE}_USD_V001").exists())
+            self.assertFalse((dest / "USD" / f"{_BASE}_USD_V001").exists())
 
     def test_second_publish_archives_previous_last(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -50,12 +50,12 @@ class PublishLayout(unittest.TestCase):
             self.assertEqual(v1, 1)
             self.assertEqual(v2, 2)
             # v001 archived (folder + inner file renamed, format NOT in file name)
-            arch = dest / f"{_BASE}_USD_V001"
+            arch = dest / "USD" / f"{_BASE}_USD_V001"
             self.assertTrue(arch.is_dir())
             self.assertTrue((arch / f"{_BASE}_v001.usd").exists())
             self.assertEqual((arch / f"{_BASE}_v001.usd").read_text(), "v1")
             # LAST now holds v2
-            active = dest / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd"
+            active = dest / "USD" / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd"
             self.assertTrue(active.exists())
             self.assertEqual(active.read_text(), "v2")
 
@@ -67,8 +67,8 @@ class PublishLayout(unittest.TestCase):
             publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
             _, v3 = publish_into_layout(_src(tmp, "c.usd", "3"), dest, _BASE)
             self.assertEqual(v3, 3)
-            self.assertTrue((dest / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd").exists())
-            self.assertTrue((dest / f"{_BASE}_USD_V002" / f"{_BASE}_v002.usd").exists())
+            self.assertTrue((dest / "USD" / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd").exists())
+            self.assertTrue((dest / "USD" / f"{_BASE}_USD_V002" / f"{_BASE}_v002.usd").exists())
             self.assertEqual(highest_version(dest, _BASE, "USD"), 2)
 
     def test_formats_are_independent_lineages(self):
@@ -83,10 +83,10 @@ class PublishLayout(unittest.TestCase):
             self.assertEqual(fv1, 1)  # FBX starts its own line at v001
             self.assertTrue(last_folder(dest, _BASE, "USD").is_dir())
             self.assertTrue(last_folder(dest, _BASE, "FBX").is_dir())
-            self.assertTrue((dest / f"{_BASE}_FBX_LAST" / f"{_BASE}_LAST.fbx").exists())
+            self.assertTrue((dest / "FBX" / f"{_BASE}_FBX_LAST" / f"{_BASE}_LAST.fbx").exists())
             # FBX has no archive yet, USD has V001
-            self.assertFalse((dest / f"{_BASE}_FBX_V001").exists())
-            self.assertTrue((dest / f"{_BASE}_USD_V001").is_dir())
+            self.assertFalse((dest / "FBX" / f"{_BASE}_FBX_V001").exists())
+            self.assertTrue((dest / "USD" / f"{_BASE}_USD_V001").is_dir())
 
 
 class LayoutReaders(unittest.TestCase):
@@ -160,12 +160,12 @@ class LayoutReaders(unittest.TestCase):
             tmp = Path(tmp)
             dest = tmp / "all"
             # simulate a Houdini render straight into the LAST folder
-            last = dest / f"{_BASE}_USD_LAST"
+            last = dest / "USD" / f"{_BASE}_USD_LAST"
             last.mkdir(parents=True)
             (last / f"{_BASE}_LAST.usd").write_text("old")
             ver = archive_last_folder(dest, _BASE, "USD", ".usd")
             self.assertEqual(ver, 1)
-            self.assertTrue((dest / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd").exists())
+            self.assertTrue((dest / "USD" / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd").exists())
             self.assertFalse(last.exists())  # renamed away, ready to be recreated
             # nothing to archive on a clean folder
             self.assertIsNone(archive_last_folder(dest, _BASE, "FBX", ".fbx"))

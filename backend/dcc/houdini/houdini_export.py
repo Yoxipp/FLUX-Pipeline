@@ -163,7 +163,7 @@ def build_rop_output_path(
     """
     from features.folder_manager.naming_validator import get_base_name
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import format_suffix
+    from features.publisher.publish_layout import last_folder
     from features.publisher.version_resolver import get_next_version
 
     project_path = Path(project_path)
@@ -186,10 +186,9 @@ def build_rop_output_path(
         frame_token = f"$F{frame_padding}"
         output_path = seq_folder / f"{base_name}_{ver_str}.{frame_token}{ext}"
     else:
-        # Single file lands in its own per-format LAST folder. The folder is created
-        # by publish_via_rop AFTER archiving the previous LAST (do not create it here).
-        fmt = format_suffix(ext)
-        last_dir = dest_folder / f"{base_name}_{fmt}_{ACTIVE_VERSION_LABEL}"
+        # Single file lands in its own <FMT>/<base>_<FMT>_LAST folder. The folder is
+        # created by publish_via_rop AFTER archiving the previous LAST (not here).
+        last_dir = last_folder(dest_folder, base_name, ext.lstrip("."))
         output_path = last_dir / f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
 
     return output_path, next_ver

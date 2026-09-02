@@ -195,30 +195,63 @@ def _push_event(event: dict) -> None:
             _event_clients.remove(q)
 
 
+def _safe_status(msg: str, severity: str = "Message") -> None:
+    """Set a Houdini status message, falling back to print when the UI isn't ready.
+
+    123.py runs very early in startup — hou.ui (and its event loop) may not exist
+    yet, so every hou.ui call here must be best-effort and never abort start().
+    """
+    try:
+        hou.ui.setStatusMessage(msg, severity=getattr(hou.severityType, severity))
+    except Exception:
+        print(f"[FLUX] {msg}")
+
+
+def _register_queue_processor(attempt: int = 0) -> None:
+    """Register the main-thread queue drainer, retrying until the UI loop is ready.
+
+    /run dispatches Python onto Houdini's main thread via this callback. If the UI
+    event loop isn't up yet (early startup), retry a few times with a deferred wait
+    so commands work once Houdini finishes launching — instead of silently never
+    processing the queue.
+    """
+    try:
+        hou.ui.addEventLoopCallback(_process_queue)
+        return
+    except Exception:
+        pass
+    if attempt >= 100:
+        print("[FLUX] Could not register event-loop callback; /run will not work.")
+        return
+    # Defer on the MAIN thread (hou.ui must never be touched from a worker thread).
+    try:
+        import hdefereval
+        hdefereval.executeDeferredAfterWaiting(lambda: _register_queue_processor(attempt + 1), 5)
+    except Exception:
+        print("[FLUX] hdefereval unavailable; event-loop callback not registered yet.")
+
+
 def start(port: int = FLUX_PORT) -> None:
     global _httpd
     if _httpd is not None:
-        hou.ui.setStatusMessage(
-            f"[FLUX] Serveur Houdini déjà actif sur le port {_httpd.server_address[1]}",
-            severity=hou.severityType.Message,
-        )
+        _safe_status(f"[FLUX] Serveur Houdini déjà actif sur le port {_httpd.server_address[1]}")
         return
 
+    # 1. Critical path: bind the HTTP server. This alone makes FLUX see Houdini as
+    #    connected (the backend probes port 48884). If it fails, we are not connected.
     try:
         _httpd = _ThreadedHTTPServer(("localhost", port), _Handler)
-        t = threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http")
-        t.start()
-        hou.ui.addEventLoopCallback(_process_queue)
-        hou.ui.setStatusMessage(
-            f"[FLUX] Bien connecté au port local {port}",
-            severity=hou.severityType.ImportantMessage,
-        )
+        threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http").start()
     except Exception as exc:
         _httpd = None
-        hou.ui.setStatusMessage(
-            f"[FLUX] Erreur démarrage serveur : {exc}",
-            severity=hou.severityType.Error,
-        )
+        _safe_status(f"[FLUX] Erreur démarrage serveur : {exc}", "Error")
+        return
+
+    # 2. Best-effort: hook the main-thread queue drainer. A failure here must NOT
+    #    tear down the already-bound server (that would drop the connection handle
+    #    while the port stays open — "connected but dead").
+    _register_queue_processor()
+    _safe_status(f"[FLUX] Bien connecté au port local {port}", "ImportantMessage")
 
 
 def stop() -> None:

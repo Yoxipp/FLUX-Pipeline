@@ -58,7 +58,7 @@ class ImporterResolveNestedLayout(unittest.TestCase):
         self.assertEqual(res["ext"], ".usd")
         self.assertEqual(
             Path(res["path"]),
-            dest / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd",
+            dest / "USD" / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd",
         )
         self.assertEqual(Path(res["path"]).read_text(), "v1")
 
@@ -79,7 +79,7 @@ class ImporterResolveNestedLayout(unittest.TestCase):
         self.assertTrue(v1["ok"], v1)
         self.assertEqual(
             Path(v1["path"]),
-            dest / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd",
+            dest / "USD" / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd",
         )
         self.assertEqual(Path(v1["path"]).read_text(), "v1")
 
