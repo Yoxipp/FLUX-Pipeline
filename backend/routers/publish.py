@@ -22,6 +22,7 @@ class PublishRequest(BaseModel):
     project_name: str
     description: str = ""
     user: str | None = None   # defaults to current user
+    target_name: str | None = None  # composed FLUX name when the source isn't token-named
 
 
 class PublishResult(BaseModel):
@@ -46,7 +47,7 @@ async def publish(req: PublishRequest) -> PublishResult:
     loop = asyncio.get_event_loop()
     dest = await loop.run_in_executor(
         None,
-        lambda: publish_file(source, project_path, req.description, user, req.project_name),
+        lambda: publish_file(source, project_path, req.description, user, req.project_name, req.target_name),
     )
 
     if dest is None:

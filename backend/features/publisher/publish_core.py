@@ -102,11 +102,12 @@ def publish_file(
     description: str,
     user: str,
     project_name: str = "",
+    target_name: str | None = None,
 ) -> Path | None:
     """Publish *source_path* into the correct folder inside *project_path*.
 
     Steps:
-      1. Parse source filename → tokens
+      1. Parse the logical filename → tokens
       2. Resolve destination folder from tokens.json
       3. Compute next version number
       4. Rename existing LAST → vXXX
@@ -114,9 +115,18 @@ def publish_file(
       6. Append entry to modif_logs.json
       7. Append event to activite.json
 
+    *target_name* : when the source file is NOT named with FLUX tokens (e.g. a
+    local image ``Capture.png``), the caller passes the composed token name
+    (``CHAR_REF_HERO_null``). The source then only provides the bytes and its
+    extension; the destination is named from *target_name*. When omitted, the
+    source filename itself must be a valid FLUX name (DCC exports already are).
+
     Returns the destination LAST path on success, None on failure.
     """
-    filename = source_path.name
+    if target_name:
+        filename = target_name if Path(target_name).suffix else f"{target_name}{source_path.suffix}"
+    else:
+        filename = source_path.name
     parsed = parse_filename(filename)
     if parsed is None:
         log.error("Unparseable filename: %s", filename)
