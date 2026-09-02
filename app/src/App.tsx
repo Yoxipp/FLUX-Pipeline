@@ -1,7 +1,8 @@
 // App.tsx — shell principal : routing, TitleBar, Sidebar, StatusBar.
 
-import { useEffect, useState } from 'react'
-import { HashRouter, Route, Routes } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { api } from './api/client'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
 import { StatusBar } from './components/shared/StatusBar'
@@ -18,7 +19,42 @@ import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
 import { applyAccentPreset } from './lib/accentPresets'
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
+
+// Watches the current user's unread @mentions and pops a floating toast
+// (bottom-right) whenever a NEW one arrives. Silent on first load so it never
+// replays the backlog. Must live inside the router (uses navigate).
+function MentionWatcher() {
+  const navigate = useNavigate()
+  const seen = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await api.getMentions(undefined, true)
+        if (!alive) return
+        if (seen.current === null) { seen.current = new Set(r.mentions.map(m => m.id)); return }
+        for (const m of r.mentions) {
+          if (!seen.current.has(m.id)) {
+            seen.current.add(m.id)
+            toast(`${m.from_user} t'a mentionné`, {
+              description: m.text,
+              position: 'bottom-right',
+              duration: 6000,
+              action: { label: 'Voir', onClick: () => navigate('/') },
+            })
+          }
+        }
+      } catch { /* backend down — retry next tick */ }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 10_000)
+    const onRefresh = () => void poll()
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => { alive = false; clearInterval(id); window.removeEventListener('flux:refresh', onRefresh) }
+  }, [navigate])
+  return null
+}
 
 // Inner shell — only mounted after first-launch wizard completes.
 // Hooks that poll the backend (useActivity, useDccStatus) live here so they
@@ -55,6 +91,7 @@ function AppShell({ settings }: { settings: Settings }) {
         </div>
 
         <StatusBar dccStatus={dccStatus} />
+        <MentionWatcher />
       </div>
       <Toaster
         position="top-center"
