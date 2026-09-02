@@ -89,6 +89,12 @@ export const api = {
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
 
+  renameUser: (old: string, next: string) =>
+    apiCall<{ success: boolean; message: string }>('PUT', '/settings/users/rename', { old, new: next }),
+
+  deleteUser: (name: string) =>
+    apiCall<{ success: boolean; message: string }>('DELETE', `/settings/users/${encodeURIComponent(name)}`),
+
   // Per-user data blob (favorites / recents / archived …) — stored on the Flux drive
   getUserData: () =>
     apiCall<Record<string, unknown>>('GET', '/settings/user-data'),

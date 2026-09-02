@@ -51,6 +51,55 @@ def create_user_dir(name: str) -> None:
     log.debug("User dir ready for '%s'", name)
 
 
+def rename_user(old: str, new: str) -> tuple[bool, str]:
+    """Rename artist *old* -> *new* (renames FLUX_ROOT/USER/<old>).
+
+    Names are stored FULL UPPERCASE. If *old* is the active user, the active
+    user follows the rename. Returns (ok, message).
+    """
+    old = (old or "").strip().upper()
+    new = (new or "").strip().upper()
+    if not new:
+        return False, "Le nom ne peut pas être vide."
+    if new == old:
+        return False, "Le nouveau nom est identique."
+    if not user_exists(old):
+        return False, f"Artiste introuvable : {old}"
+    if user_exists(new):
+        return False, f"Un artiste nommé {new} existe déjà."
+    try:
+        paths.get_user_dir(old).rename(paths.get_user_dir(new))
+    except OSError as exc:
+        log.error("rename_user %s -> %s failed: %s", old, new, exc)
+        return False, f"Échec du renommage : {exc}"
+    if get_current_user() == old:
+        config.set_current_user(new)
+        config.set("username", new)
+    log.info("Renamed artist '%s' -> '%s'", old, new)
+    return True, f"{old} renommé en {new}"
+
+
+def delete_user(name: str) -> tuple[bool, str]:
+    """Delete artist *name* (removes FLUX_ROOT/USER/<name> and its data).
+
+    Refuses to delete the currently active user (switch first). Returns (ok, message).
+    """
+    import shutil
+
+    name = (name or "").strip().upper()
+    if not user_exists(name):
+        return False, f"Artiste introuvable : {name}"
+    if get_current_user() == name:
+        return False, "Impossible de supprimer l'artiste actif — change d'utilisateur d'abord."
+    try:
+        shutil.rmtree(paths.get_user_dir(name))
+    except OSError as exc:
+        log.error("delete_user %s failed: %s", name, exc)
+        return False, f"Échec de la suppression : {exc}"
+    log.info("Deleted artist '%s'", name)
+    return True, f"{name} supprimé"
+
+
 # ── Per-user settings blob (favorites / recents / archived, …) ────────────────
 # Stored at FLUX_ROOT/USER/<name>/UserSettings/User.json — on the shared drive,
 # so a user's data follows them across machines and never leaks between users.

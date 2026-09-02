@@ -145,6 +145,31 @@ async def list_users() -> dict:
     return {"users": users}
 
 
+class UserRenameRequest(BaseModel):
+    old: str
+    new: str
+
+
+@router.put("/users/rename")
+async def rename_user_endpoint(req: UserRenameRequest) -> dict:
+    """Rename an artist (renames their USER folder; active user follows)."""
+    loop = asyncio.get_event_loop()
+    ok, msg = await loop.run_in_executor(None, lambda: user_utils.rename_user(req.old, req.new))
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg}
+
+
+@router.delete("/users/{name}")
+async def delete_user_endpoint(name: str) -> dict:
+    """Delete an artist and their data (refuses the active user)."""
+    loop = asyncio.get_event_loop()
+    ok, msg = await loop.run_in_executor(None, lambda: user_utils.delete_user(name))
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg}
+
+
 # ── Per-user data blob (favorites / recents / archived, …) ────────────────────
 
 @router.get("/user-data")
