@@ -12,7 +12,10 @@
       "additionalProperties": false,
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["component", "assembly", "shot", "sequence"] },
+        "kind": {
+          "description": "What USD entity this recipe builds, and the USD Kind it is stamped with. USD model hierarchy: assembly > group > component > subcomponent. A model root (assembly/component) is referenceable and versioned as a whole; a group is pure organisation and is never referenced on its own.\n- component (USD kind=component): a single LEAF asset, whatever it is: a CHAR, a rock, a single car wheel, one prop, one env piece. Payload geometry + variant sets (lod/look/purpose). Cannot nest other models. v2 layered publishes stack per-asset slots over the geometry base (see $defs.layerKind).\n- assembly (USD kind=assembly): an AGGREGATE that references several components/sub-assemblies as ONE reusable, versioned unit: all the parts of a car (body + 4 wheels + doors), all the elements of a forest, or a crowd of many characters. Use only when the group is reused as a block; independent hero CHARs go straight into the shot as components, not wrapped in an assembly.\n- shot (USD kind=group): NOT a model. A container that REFERENCES (never copies) one assembly (the set) + components (the CHARs) and only authors their placement (xform) + per-dept overrides. The CHAR lives in the shot as a reference to its published CHAR_hero.usda, so on disk the shot stays a tiny file; USD composes shot + CHAR + set into ONE stage at open time, but they remain separate .usd files. Department layers stack strong->weak (lighting > fx > anim > layout); placement is authored in the weakest layer (layout).\n- sequence (USD kind=group): NOT a model. Groups shots and carries the shared base light rig every shot inherits and can override.",
+          "enum": ["component", "assembly", "shot", "sequence"]
+        },
         "name": { "type": "string", "minLength": 1 },
         "asset": { "type": "string", "minLength": 1 },
         "task": { "type": "string", "minLength": 1 },
@@ -39,6 +42,7 @@
       }
     },
     "assembly": {
+      "description": "The single assembly (USD kind=assembly) referenced at the root of a shot: an aggregate that groups several components as one versioned unit (all elements of a forest, all parts of a car, a crowd). It is REFERENCED, not copied; its internal dressing is authored in its own published layer, never here.",
       "type": "object",
       "additionalProperties": false,
       "required": ["asset"],
@@ -49,11 +53,13 @@
       }
     },
     "departments": {
+      "description": "Shot department layers, weak->strong (default: layout, anim, fx, lighting). Each becomes a sublayer of the shot root; 'lighting' is the shot light rig that overrides the sequence base rig. The composer publishes them strong->weak in subLayerPaths.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
     },
     "components": {
+      "description": "Components (USD kind=component) REFERENCED and PLACED as instances inside a shot: a CHAR, a rock, a standalone prop, each with its own xform. The shot points at the published component USD (e.g. CHAR_hero.usda) and only authors placement + per-dept overrides, never a copy of the geometry. These go directly in the shot (not wrapped in an assembly) so every one can be animated/placed per shot.",
       "type": "array",
       "items": {
         "type": "object",
@@ -83,6 +89,7 @@
       "pattern": "^(latest|v[0-9]+)$"
     },
     "layerKind": {
+      "description": "A per-asset USD slot in a v2 layered component publish. Slots sublayer strong->weak over the geometry base (stack order: anim > cam > light > shading > skel > model). These are the asset's OWN layers, not the scene: 'light' here is a light bound to the asset itself (e.g. a lamp prop's emission), NOT the shot/sequence light rig, which lives in the shot 'lighting' department and the seq/shot *_light.usda templates.\n- model: geometry base (weakest).\n- skel: SkelRoot + joints + skin weights.\n- shading: materials/looks bound over the geometry.\n- light: UsdLux lights owned by the asset, under /<asset>/.../Lighting.\n- cam: a camera owned by the asset (e.g. a rig cam).\n- anim: SkelAnimation / animated overrides (strongest).",
       "enum": ["model", "skel", "anim", "cam", "light", "shading"]
     },
     "layerVersion": {
