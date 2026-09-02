@@ -5,6 +5,7 @@ import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
 import { Console } from './Console'
 import { api } from '../../api/client'
+import { useI18n } from '../../i18n'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
 
 interface Props {
@@ -39,6 +40,7 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
 
 /* ── popover paramètres ── */
 function SettingsPopover({ username }: { username: string }) {
+  const { t, lang, setLang } = useI18n()
   const [workspace, setWorkspace]   = useState('')
   const [version, setVersion]       = useState('')
   const [changing, setChanging]     = useState(false)
@@ -81,7 +83,7 @@ function SettingsPopover({ username }: { username: string }) {
     <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--ink-2)' }}>
-          Paramètres
+          {t('settings.title')}
         </div>
         <PopoverClose
           style={{ cursor: 'pointer', width: 20, height: 20, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', background: 'transparent', border: 'none' }}
@@ -94,7 +96,7 @@ function SettingsPopover({ username }: { username: string }) {
 
       {/* utilisateur courant */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 4 }}>UTILISATEUR</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 4 }}>{t('settings.user')}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Avatar ch={username[0].toUpperCase()} size={20} />
           <span style={{ fontSize: 11, color: 'var(--ink)' }}>{username}</span>
@@ -103,7 +105,7 @@ function SettingsPopover({ username }: { username: string }) {
 
       {/* workspace */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>WORKSPACE</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.workspace')}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
           <FolderOpen size={12} strokeWidth={1.75} color="var(--ink-4)" />
           <span style={{
@@ -131,13 +133,13 @@ function SettingsPopover({ username }: { username: string }) {
             ? <RefreshCw size={11} strokeWidth={1.75} style={{ animation: 'spin 1s linear infinite' }} />
             : <FolderOpen size={11} strokeWidth={1.75} />
           }
-          {changing ? 'Changement…' : 'Changer de répertoire…'}
+          {changing ? t('settings.changing') : t('settings.changeDir')}
         </div>
       </div>
 
       {/* accent color */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 8 }}>COULEUR D'ACCENT</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 8 }}>{t('settings.accent')}</div>
         <div style={{ display: 'flex', gap: 6 }}>
           {ACCENT_PRESETS.map(p => {
             const active = accentKey === p.key
@@ -167,7 +169,7 @@ function SettingsPopover({ username }: { username: string }) {
 
       {/* interface */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>INTERFACE</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.interface')}</div>
         <div
           onClick={handleResetUi}
           style={{
@@ -181,14 +183,41 @@ function SettingsPopover({ username }: { username: string }) {
           onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.color = 'var(--ink-3)' }}
         >
           <RotateCcw size={11} strokeWidth={1.75} />
-          Réinitialiser l'interface
+          {t('settings.resetUi')}
+        </div>
+      </div>
+
+      {/* langue */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.language')}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['fr', 'en'] as const).map(l => {
+            const active = lang === l
+            return (
+              <div
+                key={l}
+                onClick={() => setLang(l)}
+                style={{
+                  flex: 1, textAlign: 'center',
+                  padding: '6px 10px', borderRadius: 7,
+                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--rule-2)'),
+                  background: active ? 'var(--accent-soft)' : 'var(--paper)',
+                  color: active ? 'var(--accent-hi)' : 'var(--ink-3)',
+                  fontSize: 11, fontWeight: active ? 600 : 400, cursor: 'pointer',
+                  transition: 'border-color 0.12s, color 0.12s, background 0.12s',
+                }}
+              >
+                {l === 'fr' ? 'Français' : 'English'}
+              </div>
+            )
+          })}
         </div>
       </div>
 
       {/* version */}
       {version && (
         <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>VERSION</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>{t('settings.version')}</div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>{version}</div>
         </div>
       )}
@@ -199,6 +228,7 @@ function SettingsPopover({ username }: { username: string }) {
 
 /* ── slide-to-confirm quit ── */
 function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
+  const { t } = useI18n()
   const trackW = 300
   const handleW = 50
   const maxX = trackW - handleW - 6
@@ -231,7 +261,7 @@ function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
         position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 12, color: 'var(--ink-4)', opacity: 1 - pct, pointerEvents: 'none',
       }}>
-        Glisse pour fermer FLUX
+        {t('titlebar.slideToClose')}
       </div>
       <div style={{
         position: 'absolute', top: 0, bottom: 0, left: 0, width: x + handleW,
@@ -261,6 +291,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const [confirmClose, setConfirmClose] = useState(false)
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const { t } = useI18n()
   const user = username ?? 'User'
 
   // Refresh without restart: broadcast a global event that the shell hooks
@@ -302,7 +333,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
         <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</span>
-        <span style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>Pipeline Tool</span>
+        <span style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>{t('titlebar.tagline')}</span>
       </div>
 
       <div style={{ flex: 1 }} />
@@ -316,14 +347,14 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
             whiteSpace: 'nowrap', animation: 'fadeIn 0.15s ease-out',
           }}
         >
-          Refresh effectué
+          {t('titlebar.refreshDone')}
         </span>
       )}
 
       {/* refresh (left of the console) */}
       <div
         className="no-drag"
-        title="Rafraîchir les données"
+        title={t('titlebar.refresh')}
         onClick={handleRefresh}
         onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--paper-2)'; el.style.color = 'var(--ink)' }}
         onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = 'var(--ink-3)' }}
@@ -343,7 +374,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       {/* notif bell → Activité */}
       <div className="no-drag" style={{ position: 'relative' }}>
         <div
-          title="Activité & notifications"
+          title={t('titlebar.notifications')}
           onClick={() => navigate('/activity')}
           onMouseEnter={() => setBellHov(true)}
           onMouseLeave={() => setBellHov(false)}
@@ -376,7 +407,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
         <PopoverTrigger asChild>
           <div
             className="no-drag"
-            title="Paramètres"
+            title={t('titlebar.settings')}
             onMouseEnter={() => setSettingsHov(true)}
             onMouseLeave={() => setSettingsHov(false)}
             style={{
@@ -440,16 +471,16 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
             padding: '24px 28px', display: 'flex', flexDirection: 'column',
             alignItems: 'center', gap: 16, boxShadow: 'var(--shadow-md)',
           }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>Fermer FLUX ?</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{t('titlebar.closeFlux')}</div>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'center', maxWidth: 300, lineHeight: 1.5 }}>
-              Les logiciels ouverts (Maya, Houdini…) restent ouverts. Pense quand même à sauvegarder tes scènes.
+              {t('titlebar.closeHint')}
             </div>
             <SlideToConfirm onConfirm={() => window.electronAPI?.windowClose()} />
             <div
               onClick={() => setConfirmClose(false)}
               style={{ fontSize: 11, color: 'var(--ink-4)', cursor: 'pointer', padding: '4px 8px' }}
             >
-              Annuler
+              {t('titlebar.cancel')}
             </div>
           </div>
         </div>

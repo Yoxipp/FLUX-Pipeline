@@ -33,6 +33,7 @@ class SettingsUpdate(BaseModel):
     dcc_path: dict | None = None   # {"Maya": "C:/path/maya.exe", ...}
     username: str | None = None
     workspace: str | None = None   # change le répertoire du pipe
+    language: str | None = None    # UI language: "fr" | "en"
 
 
 @router.get("")
@@ -46,6 +47,7 @@ async def get_settings() -> dict:
     last_proj = await loop.run_in_executor(None, config.get_last_project)
 
     dcc_paths = await loop.run_in_executor(None, lambda: config.get("dcc_paths", {}))
+    language = await loop.run_in_executor(None, lambda: config.get("language", "fr"))
 
     return {
         "first_launch": is_first,
@@ -54,6 +56,7 @@ async def get_settings() -> dict:
         "theme":        theme,
         "last_project": last_proj,
         "dcc_paths":    dcc_paths,
+        "language":     language,
     }
 
 
@@ -102,6 +105,10 @@ async def update_settings(req: SettingsUpdate) -> dict:
 
     if req.last_project is not None:
         await loop.run_in_executor(None, lambda: config.set_last_project(req.last_project))
+
+    if req.language:
+        lang = req.language if req.language in ("fr", "en") else "fr"
+        await loop.run_in_executor(None, lambda: config.set("language", lang))
 
     if req.dcc_path:
         for dcc_name, path in req.dcc_path.items():

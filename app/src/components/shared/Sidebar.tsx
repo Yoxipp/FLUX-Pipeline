@@ -10,6 +10,7 @@ import {
 import type { DccStatusMap } from '../../types'
 import { api } from '../../api/client'
 import { useMentions } from '../../hooks/useMentions'
+import { useI18n } from '../../i18n'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui'
 
 interface Props {
@@ -96,6 +97,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { unreadMentions } = useMentions()
+  const { t } = useI18n()
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
   const [findingAll, setFindingAll]           = useState(false)
@@ -325,18 +327,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       flexShrink: 0,
     }}>
       <div style={{ padding: '10px 0 0' }}>
-        <NavItem icon={Home} label="Accueil" active={pathname === '/'} notif={unreadMentions} notifRed onClick={() => navigate('/')} />
+        <NavItem icon={Home} label={t('nav.home')} active={pathname === '/'} notif={unreadMentions} notifRed onClick={() => navigate('/')} />
       </div>
 
       <NavGroup title="ASSETS">
-        <NavItem icon={FolderOpen} label="Folder Manager" active={pathname === '/projects'}  indent onClick={() => navigate('/projects')} />
-        <NavItem icon={Upload}     label="Publisher"      active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
-        <NavItem icon={Layers}     label="USD Assembleur" active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
+        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent onClick={() => navigate('/projects')} />
+        <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
+        <NavItem icon={Layers}     label={t('nav.usdAssembler')}  active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
       </NavGroup>
 
       <NavGroup title="PIPELINE">
-        <NavItem icon={BookOpen}   label="Shelf Manager"  active={pathname === '/shelf'}    indent onClick={() => navigate('/shelf')} />
-        <NavItem icon={Activity}   label="Activité"       active={pathname === '/activity'} indent notif={unreadCount} onClick={() => navigate('/activity')} />
+        <NavItem icon={BookOpen}   label={t('nav.shelfManager')}  active={pathname === '/shelf'}    indent onClick={() => navigate('/shelf')} />
+        <NavItem icon={Activity}   label={t('nav.activity')}      active={pathname === '/activity'} indent notif={unreadCount} onClick={() => navigate('/activity')} />
       </NavGroup>
 
       <NavGroup title="LAUNCHER">

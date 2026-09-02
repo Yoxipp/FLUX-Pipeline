@@ -8,14 +8,15 @@ import { useSettings }  from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
 import { Avatar, Tag } from '../components/shared/ui'
 import { api } from '../api/client'
+import { useI18n } from '../i18n'
 import type { LucideIcon } from 'lucide-react'
 
-const SHORTCUTS: { ic: LucideIcon; t: string; s: string; path: string; active?: boolean }[] = [
-  { ic: FolderOpen, t: 'Folder Manager', s: 'Naviguer & importer', path: '/projects', active: true },
-  { ic: Upload,     t: 'Publisher',      s: 'Exporter un asset',   path: '/publisher' },
-  { ic: Layers,     t: 'USD Assembler',  s: 'Composer des layers', path: '/usd' },
-  { ic: BookOpen,   t: 'Shelf Manager',  s: 'Installer / màj',     path: '/shelf' },
-  { ic: Activity,   t: 'Activité',       s: 'Historique équipe',   path: '/activity' },
+const SHORTCUTS: { ic: LucideIcon; titleKey: string; subKey: string; path: string; active?: boolean }[] = [
+  { ic: FolderOpen, titleKey: 'nav.folderManager', subKey: 'hub.sc.folderManager', path: '/projects', active: true },
+  { ic: Upload,     titleKey: 'nav.publisher',     subKey: 'hub.sc.publisher',     path: '/publisher' },
+  { ic: Layers,     titleKey: 'nav.usdAssembler',  subKey: 'hub.sc.usd',           path: '/usd' },
+  { ic: BookOpen,   titleKey: 'nav.shelfManager',  subKey: 'hub.sc.shelf',         path: '/shelf' },
+  { ic: Activity,   titleKey: 'nav.activity',      subKey: 'hub.sc.activity',      path: '/activity' },
 ]
 
 // Render chat text with @mentions highlighted; a mention of the current user is red.
@@ -48,6 +49,7 @@ const DCC_STATUS_ITEMS = [
 
 export function Hub() {
   const navigate      = useNavigate()
+  const { t }         = useI18n()
   const { events }    = useActivity()
   const { settings }  = useSettings()
   const dccStatus     = useDccStatus()
@@ -126,7 +128,7 @@ export function Hub() {
       {/* header */}
       <div style={{ padding: '16px 22px 14px', borderBottom: '1px solid var(--rule)', flexShrink: 0 }}>
         <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>
-          Bonjour, <span style={{ color: 'var(--accent-hi)' }}>{user}</span>
+          {t('hub.hello')}, <span style={{ color: 'var(--accent-hi)' }}>{user}</span>
         </div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 4 }}>
           {dateStr} · {timeStr}
@@ -141,11 +143,11 @@ export function Hub() {
 
           {/* activité récente — 40% */}
           <div style={{ flex: '0 0 40%', display: 'flex', flexDirection: 'column', minHeight: 0, borderBottom: '1px solid var(--rule)' }}>
-            <div style={{ padding: '10px 16px 6px', flexShrink: 0 }}><div className="cap">ACTIVITÉ RÉCENTE</div></div>
+            <div style={{ padding: '10px 16px 6px', flexShrink: 0 }}><div className="cap">{t('hub.recentActivity')}</div></div>
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               {activityRows.length === 0 && (
                 <div style={{ padding: '10px 16px', fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                  Aucune activité récente
+                  {t('hub.noRecentActivity')}
                 </div>
               )}
               {activityRows.map((r, i) => (
@@ -165,12 +167,12 @@ export function Hub() {
           <div style={{ flex: '0 0 60%', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--paper-2)' }}>
             <div style={{ padding: '7px 14px', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               <div style={{ width: 14, height: 14, borderRadius: 4, border: '1px solid var(--rule-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, color: 'var(--ink-2)', boxShadow: 'var(--shadow-xs)' }}>D</div>
-              <div className="cap">TEAM CHAT</div>
+              <div className="cap">{t('hub.teamChat')}</div>
             </div>
             <div style={{ flex: 1, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
               {chatMessages.length === 0 && (
                 <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                  Aucun message
+                  {t('hub.noMessage')}
                 </div>
               )}
               {chatMessages.map((m, i) => (
@@ -224,7 +226,7 @@ export function Hub() {
                   }
                   if (e.key === 'Enter') void sendChat()
                 }}
-                placeholder="Message…  (@ pour mentionner)"
+                placeholder={t('hub.messagePlaceholder')}
                 style={{
                   flex: 1, height: 28,
                   background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
@@ -253,7 +255,7 @@ export function Hub() {
 
           {/* raccourcis */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '10px 16px 0' }}>
-            <div style={{ marginBottom: 8 }}><div className="cap">RACCOURCIS</div></div>
+            <div style={{ marginBottom: 8 }}><div className="cap">{t('hub.shortcuts')}</div></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, flex: 1, alignContent: 'start' }}>
               {SHORTCUTS.map((c, i) => {
                 const Icon = c.ic
@@ -282,8 +284,8 @@ export function Hub() {
                     }}>
                       <Icon size={14} strokeWidth={1.75} />
                     </div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: c.active ? 'var(--ink)' : 'var(--ink-2)' }}>{c.t}</div>
-                    <div className="lbl" style={{ marginTop: -2 }}>{c.s}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: c.active ? 'var(--ink)' : 'var(--ink-2)' }}>{t(c.titleKey)}</div>
+                    <div className="lbl" style={{ marginTop: -2 }}>{t(c.subKey)}</div>
                   </div>
                 )
               })}
@@ -292,11 +294,11 @@ export function Hub() {
 
           {/* DCC status */}
           <div style={{ padding: '10px 16px 16px', flexShrink: 0 }}>
-            <div style={{ marginBottom: 8 }}><div className="cap">CONNEXION DCC</div></div>
+            <div style={{ marginBottom: 8 }}><div className="cap">{t('hub.dccConnection')}</div></div>
             <div className="card" style={{ padding: '4px 0' }}>
               {dccItems.length === 0
                 ? <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                    Aucun DCC connecté
+                    {t('hub.noDcc')}
                   </div>
                 : dccItems.map((d, i) => (
                     <div key={i} style={{

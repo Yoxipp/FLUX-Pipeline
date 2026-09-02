@@ -68,6 +68,7 @@ export interface Settings {
   }
   last_project: string | null
   dcc_paths: Record<string, string>
+  language?: 'fr' | 'en'
 }
 
 export interface PublishPayload {
