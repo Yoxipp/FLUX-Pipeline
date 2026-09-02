@@ -35,19 +35,25 @@ class LayerFileBuilder:
         task = params["task"]
         layer = params["layer"]
         version = params.get("version", "latest")
+        instance = params.get("instance", "")
+        variante = params.get("variante", "")
         order = params.get("order", 0)
 
         try:
-            resolved = ctx.resolver.resolve_layer(asset, task, layer, version)
+            resolved = ctx.resolver.resolve_layer(
+                asset, task, layer, version, instance=instance, variante=variante
+            )
         except ResolveError:
             if ctx.strict:
                 raise
             ctx.log.warning(
-                "layer '%s' of '%s' (task '%s', version '%s') unresolved; "
-                "skipped (permissive)",
+                "layer '%s' of '%s' (task '%s', instance '%s', variante '%s', "
+                "version '%s') unresolved; skipped (permissive)",
                 layer,
                 asset,
                 task,
+                instance,
+                variante,
                 version,
             )
             return []

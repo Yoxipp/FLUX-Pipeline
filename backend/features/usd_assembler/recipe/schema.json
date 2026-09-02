@@ -33,6 +33,8 @@
               "slot": { "$ref": "#/$defs/layerKind" },
               "asset": { "type": "string", "minLength": 1 },
               "task": { "type": "string", "minLength": 1 },
+              "instance": { "type": "string", "minLength": 1 },
+              "variante": { "type": "string", "minLength": 1 },
               "layer": { "$ref": "#/$defs/layerKind" },
               "version": { "$ref": "#/$defs/layerVersion" },
               "follow_last": { "type": "boolean" }

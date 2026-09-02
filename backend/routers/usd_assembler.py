@@ -138,3 +138,58 @@ async def list_usd_layers(
         raise HTTPException(status_code=400, detail=str(exc))
 
     return {"project": name, "asset": asset, "task": task, "versions": versions}
+
+
+def _resolver_for(project: str | None):
+    """Build a FluxResolver for *project* (or the active one). Pure python, no pxr."""
+    name, project_path = _resolve_project(project)
+    from features.usd_assembler.resolve.flux_resolver import FluxResolver
+
+    ns = config.get("usd_assembler", {}) or {}
+    return name, FluxResolver(project_path, ns)
+
+
+@router.get("/tasks")
+async def list_usd_tasks(asset: str, project: str | None = None) -> dict:
+    """TYPE/task tokens published under *asset* — feeds the slot task combobox."""
+    name, resolver = _resolver_for(project)
+    try:
+        tasks = resolver.list_tasks(asset)
+    except Exception as exc:  # unresolvable identity → empty, editor keeps typing
+        log.info("USD tasks: %s (asset '%s')", exc, asset)
+        tasks = []
+    return {"project": name, "asset": asset, "tasks": tasks}
+
+
+@router.get("/instances")
+async def list_usd_instances(
+    asset: str, task: str = "", project: str | None = None
+) -> dict:
+    """Instance leaves published for *asset* (optionally scoped to *task*)."""
+    name, resolver = _resolver_for(project)
+    try:
+        instances = resolver.list_instances(asset, task)
+    except Exception as exc:
+        log.info("USD instances: %s (asset '%s', task '%s')", exc, asset, task)
+        instances = []
+    return {"project": name, "asset": asset, "task": task, "instances": instances}
+
+
+@router.get("/variantes")
+async def list_usd_variantes(
+    asset: str, task: str, instance: str = "", project: str | None = None
+) -> dict:
+    """VARIANTE tokens published for *asset*/*task* (optionally one *instance*)."""
+    name, resolver = _resolver_for(project)
+    try:
+        variantes = resolver.list_variantes(asset, task, instance)
+    except Exception as exc:
+        log.info(
+            "USD variantes: %s (asset '%s', task '%s', instance '%s')",
+            exc, asset, task, instance,
+        )
+        variantes = []
+    return {
+        "project": name, "asset": asset, "task": task,
+        "instance": instance, "variantes": variantes,
+    }

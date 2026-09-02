@@ -549,6 +549,52 @@ class MayaImportRequest(BaseModel):
 
 
 _MAYA_IMPORT_EXTS = {".obj", ".fbx", ".ma", ".mb", ".abc", ".usd", ".usda", ".usdc", ".usdz"}
+# USD container extensions whose binary-crate form must be transcoded to ASCII for Maya.
+_USD_IMPORT_EXTS = {".usd", ".usda", ".usdc", ".usdz"}
+
+
+def _maya_usd_source(file_path, work_dir: str):
+    """Return a USD path Maya's mayaUsd can actually read.
+
+    The FLUX backend authors crate (usdc) files with a very recent USD (26.x). Maya
+    2024 ships an OLDER mayaUsd/USD that cannot read those binary crates → Maya's
+    "USD Import" fails with "Error reading file" (reproduced even on a manual File>Import).
+    ASCII .usda is version-independent, so when the source is a binary crate we flatten
+    the composed stage to a temporary .usda (self-contained: no external-reference path
+    resolution to worry about) and hand THAT to Maya. Non-crate inputs (.usda ASCII,
+    .usdz) are returned unchanged.
+
+    Returns the path Maya should import (str). *work_dir* is an existing temp dir the
+    caller already owns (cleaned up by the caller).
+    """
+    from pathlib import Path as _PLib
+
+    src = _PLib(file_path)
+    try:
+        with open(src, "rb") as _fh:
+            magic = _fh.read(8)
+    except OSError:
+        return str(src).replace("\\", "/")
+
+    # Only binary crate needs transcoding. "PXR-USDC" is the crate magic.
+    if magic != b"PXR-USDC":
+        return str(src).replace("\\", "/")
+
+    try:
+        from pxr import Usd
+        stage = Usd.Stage.Open(str(src))
+        if stage is None:
+            return str(src).replace("\\", "/")
+        out = _PLib(work_dir) / (src.stem + ".usda")
+        # Flatten so the temp layer is fully self-contained (references/sublayers baked
+        # in) — Maya then reads one ASCII file with no dependency on the original layout.
+        stage.Flatten().Export(str(out))
+        log.info("[Maya] transcoded crate USD → ASCII for import: %s", src.name)
+        return str(out).replace("\\", "/")
+    except Exception as exc:
+        # Best-effort: if transcoding fails, fall back to the original file.
+        log.warning("[Maya] USD crate→usda transcode failed for %s: %s", src.name, exc)
+        return str(src).replace("\\", "/")
 
 
 @router.post("/maya/import")
@@ -556,7 +602,8 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     """Import a file into the current Maya scene via commandPort.
 
     Resolves the absolute path from project_name + rel_path, then sends
-    import_file() to Maya. Supports .obj .fbx .ma .mb .abc (Alembic cache).
+    import_file() to Maya. Supports .obj .fbx .ma .mb .abc (Alembic cache) and USD
+    (binary crate is transcoded to ASCII .usda so Maya 2024's mayaUsd can read it).
     """
     from pathlib import Path as _PLib
     from core.paths import get_project_path
@@ -580,16 +627,37 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     import tempfile as _tempfile
 
     _backend_root = str(_PLib(__file__).resolve().parent.parent)
-    fp_fwd = str(file_path).replace("\\", "/")
     # Maya writes a JSON result envelope here so the hub knows if the import actually
     # succeeded (Maya runs in another process; a plain call always looked like success).
     result_dir = _tempfile.mkdtemp(prefix="flux_maya_import_")
     result_path = result_dir.replace("\\", "/") + "/_flux_import_result.json"
+
+    # USD binary crates authored by the backend's recent USD are unreadable by Maya 2024's
+    # mayaUsd → transcode to a temp ASCII .usda (in result_dir, cleaned up with it). Other
+    # formats pass through unchanged.
+    if ext in _USD_IMPORT_EXTS:
+        fp_fwd = _maya_usd_source(file_path, result_dir)
+    else:
+        fp_fwd = str(file_path).replace("\\", "/")
+
+    # Every path travels as base64(UTF-8) and is decoded inside Maya. Maya's commandPort
+    # decodes the incoming bytes with the system locale (cp1252 on a French Windows), so a
+    # raw accented path (e.g. "OneDrive - Example School") gets mojibaked and
+    # Maya reads a corrupt path → "Error reading file". base64 is pure ASCII, so it survives
+    # any decode; we rebuild the real UTF-8 string on the Maya side. Same rationale as the
+    # export options below.
+    import base64 as _b64
+
+    def _enc(_s: str) -> str:
+        return _b64.b64encode(_s.encode("utf-8")).decode("ascii")
+
     cmd = (
-        f"import sys; sys.path.insert(0, r'{_backend_root}'); "
+        f"import sys, base64 as _b64; "
+        f"sys.path.insert(0, _b64.b64decode('{_enc(_backend_root)}').decode('utf-8')); "
         f"sys.modules.pop('dcc.maya.maya_import', None); "
         f"from dcc.maya.maya_import import run_import; "
-        f"run_import(r'{fp_fwd}', r'{result_path}')"
+        f"run_import(_b64.b64decode('{_enc(fp_fwd)}').decode('utf-8'), "
+        f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'))"
     )
 
     loop = asyncio.get_event_loop()

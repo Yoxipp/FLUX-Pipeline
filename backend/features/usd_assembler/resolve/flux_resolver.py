@@ -80,24 +80,38 @@ class FluxResolver:
         return self._project / name_rel / type_sub
 
     # ── layered-publish discovery (component v2) ────────────────────────────────
-    def _scan_version_folders(self, parent: Path) -> dict[str, dict]:
+    def _scan_version_folders(
+        self, parent: Path, instance: str = "", variante: str = ""
+    ) -> dict[str, dict]:
         """Return {version_label: {"base", "folder", "layers": [kind...]}}.
 
         Walks the instance subfolders under *parent* and collects every
         ``<base>_LAST`` / ``<base>_vNNN`` folder, recording which layer files it
-        holds. Deterministic (instances and versions sorted).
+        holds. Deterministic (instances and versions sorted). When *instance* is
+        given, only that instance leaf is scanned (disambiguates same-version
+        publishes across instances); when *variante* is given, only folders whose
+        published files carry that VARIANTE token are kept.
         """
         found: dict[str, dict] = {}
         if not parent.exists():
             return found
         # instance leaf (e.g. "null"); tolerate publishes written directly under parent.
-        candidates = [parent] + sorted(p for p in parent.iterdir() if p.is_dir())
+        if instance:
+            leaf = parent / instance.lower()
+            candidates = [leaf] if leaf.exists() else []
+        else:
+            candidates = [parent] + sorted(p for p in parent.iterdir() if p.is_dir())
+        want_var = variante.lower() if variante else ""
         for inst in candidates:
+            if not inst.exists():
+                continue
             for folder in sorted(p for p in inst.iterdir() if p.is_dir()):
                 m = _VER_FOLDER_RE.match(folder.name)
                 if not m:
                     continue
                 base, ver = m.group("base"), m.group("ver")
+                if want_var and not self._folder_has_variante(folder, want_var):
+                    continue
                 layers = [
                     kind
                     for kind in LAYER_KINDS
@@ -106,7 +120,32 @@ class FluxResolver:
                 found[ver] = {"base": base, "folder": folder, "layers": layers}
         return found
 
-    def list_layer_versions(self, asset: str, task: str) -> dict[str, dict]:
+    @staticmethod
+    def _variante_of_layer_file(name: str) -> str:
+        """VARIANTE token of a layered layer file, or "" when it has none.
+
+        Layer files are ``<CLASS_TYPE_NAME_INSTANCE[_VARIANTE]>_<layer>.<ext>``, so
+        the variante can't be read positionally like a normal publish (the trailing
+        layer kind sits where a variante would). We key off the final layer-kind
+        token: only when a token exists BETWEEN the instance (index 3) and that
+        layer kind is it a variante.
+        """
+        stem = name.rsplit(".", 1)[0]
+        parts = stem.split("_")
+        if len(parts) <= 5 or parts[-1] not in LAYER_KINDS:
+            return ""
+        return parts[4]
+
+    def _folder_has_variante(self, folder: Path, want_var: str) -> bool:
+        """True when any layer file in *folder* carries VARIANTE == *want_var*."""
+        for f in folder.iterdir():
+            if f.is_file() and self._variante_of_layer_file(f.name).lower() == want_var:
+                return True
+        return False
+
+    def list_layer_versions(
+        self, asset: str, task: str, instance: str = "", variante: str = ""
+    ) -> dict[str, dict]:
         """List published versions of *asset*'s *task* layered publish.
 
         Returns ``{version_label: {"base", "layers": [kind...]}}`` where
@@ -114,23 +153,98 @@ class FluxResolver:
         published (caller decides whether that is an error).
         """
         parent = self._publish_parent(asset, task)
-        scanned = self._scan_version_folders(parent)
+        scanned = self._scan_version_folders(parent, instance, variante)
         return {
             ver: {"base": info["base"], "layers": info["layers"]}
             for ver, info in scanned.items()
         }
 
+    # ── contextual suggestions (feed the assembler comboboxes) ──────────────────
+    def list_tasks(self, asset: str) -> list[str]:
+        """TYPE/task subfolders published under *asset* (its NAME path). Empty when
+        the asset has no NAME token or nothing is published yet."""
+        tokens = self._tokens()
+        name_rel = get_path_for_token(tokens, "NAME", asset)
+        if name_rel is None:
+            return []
+        base = self._project / name_rel
+        if not base.exists():
+            return []
+        return sorted(p.name for p in base.iterdir() if p.is_dir())
+
+    def list_instances(self, asset: str, task: str = "") -> list[str]:
+        """Instance leaves published for *asset* (optionally scoped to *task*).
+
+        Instances are the folders under ``<NAME>/<TYPE>`` that are not themselves
+        version folders. Without *task*, scans every TYPE folder under the asset.
+        """
+        tokens = self._tokens()
+        name_rel = get_path_for_token(tokens, "NAME", asset)
+        if name_rel is None:
+            return []
+        name_dir = self._project / name_rel
+        if not name_dir.exists():
+            return []
+        if task:
+            type_sub = tokens.get("TYPE", {}).get(task) or task.lower()
+            roots = [name_dir / type_sub]
+        else:
+            roots = [p for p in name_dir.iterdir() if p.is_dir()]
+        insts: set[str] = set()
+        for r in roots:
+            if not r.exists():
+                continue
+            for p in r.iterdir():
+                if p.is_dir() and not _VER_FOLDER_RE.match(p.name):
+                    insts.add(p.name)
+        return sorted(insts)
+
+    def list_variantes(self, asset: str, task: str, instance: str = "") -> list[str]:
+        """VARIANTE tokens published for *asset*/*task* (optionally one *instance*).
+
+        Read from the layer file names (layer-aware, see ``_variante_of_layer_file``)
+        so a bare publish (no variante) contributes nothing to pick."""
+        try:
+            parent = self._publish_parent(asset, task)
+        except ResolveError:
+            return []
+        if not parent.exists():
+            return []
+        if instance:
+            leaf = parent / instance.lower()
+            roots = [leaf] if leaf.exists() else []
+        else:
+            roots = [parent] + [p for p in parent.iterdir() if p.is_dir()]
+        variantes: set[str] = set()
+        for r in roots:
+            if not r.exists():
+                continue
+            for f in r.rglob("*"):
+                if not f.is_file():
+                    continue
+                v = self._variante_of_layer_file(f.name)
+                if v:
+                    variantes.add(v)
+        return sorted(variantes)
+
     def resolve_layer(
-        self, asset: str, task: str, layer: str, version: str = "latest"
+        self,
+        asset: str,
+        task: str,
+        layer: str,
+        version: str = "latest",
+        instance: str = "",
+        variante: str = "",
     ) -> ResolvedAsset:
         """Freeze one layer file to a concrete published path.
 
         *layer* is a layer kind (model/skel/anim/cam/light). *version* is
         ``"latest"`` (follow the active LAST folder) or ``"vNNN"`` (locked).
+        *instance* / *variante* narrow the publish identity when several exist.
         Raises ResolveError when the version or the layer file is missing.
         """
         parent = self._publish_parent(asset, task)
-        scanned = self._scan_version_folders(parent)
+        scanned = self._scan_version_folders(parent, instance, variante)
         if not scanned:
             raise ResolveError(
                 f"no layered USD published for '{asset}' (task '{task}') in {parent}"

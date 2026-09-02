@@ -5,6 +5,7 @@ import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
   HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw, Lock,
+  Grid3x3, Grid2x2, Square,
 } from 'lucide-react'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
@@ -22,6 +23,26 @@ type NavLevel =
   | { kind: 'inside'; project: string; subpath: string[] }
 
 type SidebarTab = 'tous' | 'favoris' | 'recents' | 'archives'
+
+// Tile size for the explorer grid. Bigger tiles = larger icons + more room for
+// the label below. Persisted per-browser in localStorage.
+type TileSize = 'sm' | 'md' | 'lg'
+
+const TILE_SIZES: Record<TileSize, { col: number; folder: number; file: number; font: number; gap: number }> = {
+  sm: { col: 64,  folder: 30, file: 26, font: 9,  gap: 3 },
+  md: { col: 80,  folder: 40, file: 34, font: 10, gap: 4 },
+  lg: { col: 116, folder: 58, file: 50, font: 12, gap: 6 },
+}
+
+const TILE_SIZE_KEY = 'flux.folderManager.tileSize'
+
+function loadTileSize(): TileSize {
+  try {
+    const v = localStorage.getItem(TILE_SIZE_KEY)
+    if (v === 'sm' || v === 'md' || v === 'lg') return v
+  } catch { /* localStorage unavailable */ }
+  return 'md'
+}
 
 interface ExplorerItem { name: string; isDir: boolean }
 
@@ -117,13 +138,66 @@ function navigateTargetFor(s: SavedItem): NavLevel {
 
 // ── Icônes SVG ────────────────────────────────────────────────────────────────
 
-function FolderSvg({ size = 40, selected = false }: { size?: number; selected?: boolean }) {
+// Version badge colours: LAST is the active publish (green), a locked version is
+// a frozen snapshot (orange). Drawn on the file/folder icon itself.
+const VER_LAST_BG = '#1F9E6A'
+const VER_NUM_BG  = '#E8912A'
+
+// Parse the trailing "_<FORMAT>_<VERSION>" of a published name (file or folder),
+// e.g. CHAR_RIG_PATRICK_ALL_A_USD_LAST → { format: 'USD', version: 'LAST' } or
+// ..._USD_V003 → { format: 'USD', version: 'V003' }. Returns {} when the name is
+// not a versioned publish (plain assets/tasks/instances), so no badge is drawn.
+function parseVersionMeta(name: string): { version?: string; format?: string } {
+  // Drop a real file extension first so the version token is the last segment.
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const parts = stem.split('_')
+  if (parts.length < 2) return {}
+  const last = parts[parts.length - 1]
+  const m = /^(LAST|v\d+|V\d+)$/.exec(last)
+  if (!m) return {}
+  const version = last.toUpperCase()
+  const fmtTok = parts[parts.length - 2]
+  const format = /^[A-Za-z]{2,5}$/.test(fmtTok) ? fmtTok.toUpperCase() : undefined
+  return { version, format }
+}
+
+// Small version/format chips drawn inside an icon's SVG viewBox. `w` is the
+// viewBox width so the chips can be centred for both the file (30) and folder (40).
+function IconBadges({ version, format, w, versionY, formatY }: {
+  version?: string; format?: string; w: number; versionY: number; formatY?: number
+}) {
+  const bw = Math.min(28, w - 4)
+  const x = (w - bw) / 2
+  const cx = w / 2
+  return (
+    <>
+      {version && (
+        <>
+          <rect x={x} y={versionY} width={bw} height="10" rx="2" fill={version === 'LAST' ? VER_LAST_BG : VER_NUM_BG} />
+          <text x={cx} y={versionY + 7.5} textAnchor="middle" fontSize="6.5" fontWeight="700" fontFamily="monospace" fill="#fff" letterSpacing="0.2">{version}</text>
+        </>
+      )}
+      {format && formatY !== undefined && (
+        <>
+          <rect x={x} y={formatY} width={bw} height="10" rx="2" fill="rgba(18,18,18,0.55)" />
+          <text x={cx} y={formatY + 7.5} textAnchor="middle" fontSize="6.5" fontWeight="700" fontFamily="monospace" fill="#fff" letterSpacing="0.2">{format}</text>
+        </>
+      )}
+    </>
+  )
+}
+
+function FolderSvg({ size = 40, selected = false, version, format }: {
+  size?: number; selected?: boolean; version?: string; format?: string
+}) {
   const body = selected ? 'var(--accent)'    : '#F5A623'
   const tab  = selected ? 'var(--accent-hi)' : '#FFCA5C'
   return (
     <svg width={size} height={Math.round(size * 0.82)} viewBox="0 0 40 33" fill="none">
       <path d="M2 7 L2 4 Q2 2 4 2 L15 2 L18.5 7 Z" fill={tab} />
       <path d="M0 9 Q0 7 2 7 L38 7 Q40 7 40 9 L40 31 Q40 33 38 33 L2 33 Q0 33 0 31 Z" fill={body} />
+      <IconBadges version={version} format={format} w={40} versionY={10} formatY={21} />
     </svg>
   )
 }
@@ -145,7 +219,9 @@ function getExt(filename: string): string {
   return filename.split('.').pop()?.toLowerCase() ?? ''
 }
 
-function FileSvg({ size = 36, selected = false, ext = '' }: { size?: number; selected?: boolean; ext?: string }) {
+function FileSvg({ size = 36, selected = false, ext = '', version }: {
+  size?: number; selected?: boolean; ext?: string; version?: string
+}) {
   const body   = selected ? 'var(--accent)'    : 'var(--ink-2)'
   const corner = selected ? 'var(--accent-hi)' : 'var(--ink-3)'
   const badge  = EXT_BADGE[ext]
@@ -153,6 +229,8 @@ function FileSvg({ size = 36, selected = false, ext = '' }: { size?: number; sel
     <svg width={size} height={Math.round(size * 1.22)} viewBox="0 0 30 37" fill="none">
       <path d="M2 0 L20 0 L30 10 L30 35 Q30 37 28 37 L2 37 Q0 37 0 35 L0 2 Q0 0 2 0Z" fill={body} />
       <path d="M20 0 L20 10 L30 10Z" fill={corner} />
+      {/* version chip sits above the format badge */}
+      <IconBadges version={version} w={30} versionY={13} />
       {badge && (
         <>
           <rect x="2" y="25" width="26" height="10" rx="2" fill={badge.bg} />
@@ -1191,6 +1269,13 @@ export function Projects() {
   const [tab, setTab]             = useState<Tab>('project')
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
 
+  // Explorer tile size (small / medium / large), persisted per-browser
+  const [tileSize, setTileSize]   = useState<TileSize>(loadTileSize)
+  const changeTileSize = useCallback((s: TileSize) => {
+    setTileSize(s)
+    try { localStorage.setItem(TILE_SIZE_KEY, s) } catch { /* localStorage unavailable */ }
+  }, [])
+
   // Saved lists — persisted per-user on the Flux drive (USER/<user>/UserSettings/User.json)
   const [favorites, setFavorites] = useState<SavedItem[]>([])
   const [archived,  setArchived]  = useState<SavedItem[]>([])
@@ -2162,6 +2247,32 @@ export function Projects() {
             ))}
           </div>
 
+          <div style={{ height: 1, background: 'var(--rule)', margin: '10px 0 0' }} />
+
+          {/* Taille des tuiles de l'explorer */}
+          <div style={{ padding: '8px 12px 2px' }}>
+            <div className="cap" style={{ marginBottom: 6 }}>TAILLE</div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {([
+                { id: 'sm' as TileSize, icon: Grid3x3,    title: 'Petites tuiles' },
+                { id: 'md' as TileSize, icon: Grid2x2,    title: 'Tuiles moyennes' },
+                { id: 'lg' as TileSize, icon: Square,     title: 'Grandes tuiles' },
+              ]).map(({ id, icon: Icon, title }) => {
+                const active = tileSize === id
+                return (
+                  <div
+                    key={id}
+                    title={title}
+                    onClick={() => changeTileSize(id)}
+                    style={{ flex: 1, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, cursor: 'pointer', background: active ? 'var(--accent-soft)' : 'transparent', border: active ? '1px solid var(--accent)' : '1px solid var(--rule-2)', transition: 'background 0.08s' }}
+                  >
+                    <Icon size={14} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
           <div style={{ flex: 1 }} />
           <div style={{ padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
@@ -2264,7 +2375,7 @@ export function Projects() {
                       <X size={10} strokeWidth={2} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setDeleteError('')} />
                     </div>
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '4px', alignContent: 'start' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_SIZES[tileSize].col}px, 1fr))`, gap: `${TILE_SIZES[tileSize].gap}px`, alignContent: 'start' }}>
                     {items.filter(item => !isItemArchived(item)).map((item, i) => {
                       const isSel     = selectedNames.has(item.name)
                       const isHovered = hoveredName === item.name
@@ -2349,10 +2460,14 @@ export function Projects() {
                               <Lock size={9} strokeWidth={2} />
                             </div>
                           )}
-                          {item.isDir
-                            ? <FolderSvg size={40} selected={isSel} />
-                            : <FileSvg   size={34} selected={isSel} ext={getExt(item.name)} />}
-                          <div title={item.name} style={{ fontSize: 10, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                          {(() => {
+                            const meta = parseVersionMeta(item.name)
+                            return item.isDir
+                              ? <FolderSvg size={TILE_SIZES[tileSize].folder} selected={isSel} version={meta.version} format={meta.format} />
+                              : <FileSvg   size={TILE_SIZES[tileSize].file} selected={isSel} ext={getExt(item.name)} version={meta.version} />
+                          })()}
+                          {/* Full name, no truncation: long publish names wrap entirely */}
+                          <div title={item.name} style={{ fontSize: TILE_SIZES[tileSize].font, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%' }}>
                             {item.name}
                           </div>
                         </div>

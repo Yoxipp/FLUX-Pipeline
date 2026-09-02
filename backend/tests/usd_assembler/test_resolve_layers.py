@@ -89,5 +89,61 @@ class ResolveLayers(unittest.TestCase):
             self.resolver.resolve_layer("NOPE", _TASK, "model", "latest")
 
 
+class SuggestAndNarrow(unittest.TestCase):
+    """list_tasks / list_instances / list_variantes + instance/variante narrowing.
+
+    Layout under UTAH:
+      mod/null/CHAR_mod_UTAH_null_LAST/CHAR_mod_UTAH_null_model.usd     (no variante)
+      mod/head/CHAR_mod_UTAH_head_B_LAST/CHAR_mod_UTAH_head_B_model.usd (variante B)
+      mod/head/CHAR_mod_UTAH_head_crete_LAST/..._crete_model.usd        (variante crete)
+      rig/null/CHAR_rig_UTAH_null_LAST/CHAR_rig_UTAH_null_model.usd
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.project = root / "PROJ"
+        self.project.mkdir(parents=True, exist_ok=True)
+        tokens = tok.build_default_tokens()
+        tokens["NAME"][_ASSET] = _NAME_REL
+        tok.save_tokens(self.project, tokens)
+        base = self.project / _NAME_REL
+        _touch(base / "mod" / "null" / "CHAR_mod_UTAH_null_LAST" / "CHAR_mod_UTAH_null_model.usd")
+        _touch(base / "mod" / "head" / "CHAR_mod_UTAH_head_B_LAST" / "CHAR_mod_UTAH_head_B_model.usd")
+        _touch(base / "mod" / "head" / "CHAR_mod_UTAH_head_crete_LAST" / "CHAR_mod_UTAH_head_crete_model.usd")
+        _touch(base / "rig" / "null" / "CHAR_rig_UTAH_null_LAST" / "CHAR_rig_UTAH_null_model.usd")
+        self.resolver = FluxResolver(self.project)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_list_tasks(self) -> None:
+        self.assertEqual(self.resolver.list_tasks(_ASSET), ["mod", "rig"])
+
+    def test_list_tasks_unknown_asset(self) -> None:
+        self.assertEqual(self.resolver.list_tasks("NOPE"), [])
+
+    def test_list_instances_for_task(self) -> None:
+        self.assertEqual(self.resolver.list_instances(_ASSET, "mod"), ["head", "null"])
+        self.assertEqual(self.resolver.list_instances(_ASSET, "rig"), ["null"])
+
+    def test_list_instances_any_task(self) -> None:
+        # union across tasks, no version folders leaking in
+        self.assertEqual(self.resolver.list_instances(_ASSET), ["head", "null"])
+
+    def test_list_variantes(self) -> None:
+        # bare 'null' publish contributes no variante; 'head' has B + crete
+        self.assertEqual(self.resolver.list_variantes(_ASSET, "mod", "head"), ["B", "crete"])
+        self.assertEqual(self.resolver.list_variantes(_ASSET, "mod", "null"), [])
+
+    def test_resolve_narrows_to_variante(self) -> None:
+        r = self.resolver.resolve_layer(_ASSET, "mod", "model", "latest", instance="head", variante="crete")
+        self.assertIn("CHAR_mod_UTAH_head_crete_LAST", r.path.parts)
+
+    def test_resolve_wrong_variante_raises(self) -> None:
+        with self.assertRaises(ResolveError):
+            self.resolver.resolve_layer(_ASSET, "mod", "model", "latest", instance="head", variante="ghost")
+
+
 if __name__ == "__main__":
     unittest.main()

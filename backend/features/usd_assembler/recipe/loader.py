@@ -101,6 +101,8 @@ def _normalise(data: dict) -> Recipe:
                     params={
                         "asset": slot["asset"],
                         "task": slot["task"],
+                        "instance": slot.get("instance", ""),
+                        "variante": slot.get("variante", ""),
                         "layer": slot.get("layer", slot_kind),
                         "version": version,
                         "order": _SLOT_ORDER.get(slot_kind, 99),

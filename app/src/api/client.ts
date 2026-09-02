@@ -372,4 +372,22 @@ export const api = {
       versions: Record<string, { base: string; layers: string[] }>
     }>('GET', `/usd/layers?${qs}`)
   },
+
+  // Contextual suggestions for the assembler comboboxes, scanned from disk.
+  getUsdTasks: (project: string, asset: string) => {
+    const qs = new URLSearchParams({ project, asset })
+    return apiCall<{ project: string; asset: string; tasks: string[] }>('GET', `/usd/tasks?${qs}`)
+  },
+
+  getUsdInstances: (project: string, asset: string, task = '') => {
+    const qs = new URLSearchParams({ project, asset })
+    if (task) qs.set('task', task)
+    return apiCall<{ project: string; asset: string; task: string; instances: string[] }>('GET', `/usd/instances?${qs}`)
+  },
+
+  getUsdVariantes: (project: string, asset: string, task: string, instance = '') => {
+    const qs = new URLSearchParams({ project, asset, task })
+    if (instance) qs.set('instance', instance)
+    return apiCall<{ project: string; asset: string; task: string; instance: string; variantes: string[] }>('GET', `/usd/variantes?${qs}`)
+  },
 }

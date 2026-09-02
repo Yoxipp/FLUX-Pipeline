@@ -340,52 +340,82 @@ def update_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
 
 # ── Houdini HDA management ────────────────────────────────────────────────────
 
-def get_dcc_otls_dir(version: str) -> Path | None:
-    """Return Documents/houdiniX.Y/otls/, creating it if needed.
+def get_dcc_otls_dirs(version: str) -> list[Path]:
+    """Return every otls dir Houdini might scan for HDAs, for THIS version.
 
-    Respects HOUDINI_USER_PREF_DIR when set.
+    On Windows, Houdini's user prefs live under either the home directory
+    (``~/houdiniX.Y``) or a registry/OneDrive-redirected Documents folder, and
+    which one is active varies per machine. The autostart already writes to both
+    (``autostart._all_prefs_dirs``); the HDA install must match, otherwise it lands
+    in the wrong root and ``flux_importer`` never registers ("Invalid node type name" /
+    "HDA non installée"). We return the otls dir under every candidate prefs root whose
+    ``houdiniX.Y`` directory exists, so the HDA is installed wherever Houdini reads it.
+
+    Honors HOUDINI_USER_PREF_DIR when set (single authoritative root).
     """
     if "HOUDINI_USER_PREF_DIR" in os.environ:
-        return Path(os.environ["HOUDINI_USER_PREF_DIR"]) / "otls"
+        return [Path(os.environ["HOUDINI_USER_PREF_DIR"]) / "otls"]
+
+    dirs: list[Path] = []
+    home = Path.home()
     docs = _get_documents_dir()
-    if not docs.is_dir():
-        return None
-    return docs / f"houdini{version}" / "otls"
+    for base in (home, docs):   # home first: the plain ~/houdiniX.Y is Houdini's default
+        prefs = base / f"houdini{version}"
+        otls = prefs / "otls"
+        if prefs.is_dir() and otls not in dirs:
+            dirs.append(otls)
+    return dirs
+
+
+def get_dcc_otls_dir(version: str) -> Path | None:
+    """Primary otls dir for *version* (first candidate), or None if no prefs dir exists.
+
+    Kept for callers that need a single path; install/remove operate on all roots
+    via get_dcc_otls_dirs().
+    """
+    dirs = get_dcc_otls_dirs(version)
+    return dirs[0] if dirs else None
 
 
 def is_hda_installed(version: str) -> bool:
-    """Return True if all FLUX HDAs are present in houdiniX.Y/otls/."""
-    otls = get_dcc_otls_dir(version)
-    if otls is None:
+    """Return True if all FLUX HDAs are present in at least one houdiniX.Y/otls/."""
+    otls_dirs = get_dcc_otls_dirs(version)
+    if not otls_dirs:
         return False
     staged = list(_HDA_STAGING_DIR.glob("*.hda"))
     if not staged:
         return False
-    return all((otls / hda.name).is_file() for hda in staged)
+    return any(
+        all((otls / hda.name).is_file() for hda in staged)
+        for otls in otls_dirs
+    )
 
 
 def install_hdas(version: str) -> tuple[bool, str]:
-    """Copy FLUX HDAs from staging dir to houdiniX.Y/otls/.
+    """Copy FLUX HDAs from staging dir to EVERY houdiniX.Y/otls/ Houdini may read.
 
     Primary path: offline copy from %APPDATA%/FLUX/dcc/houdini/ (populated at first launch).
     Fallback: live build via houdini_client (requires Houdini connected).
     Returns (success, message).
     """
     hdas = list(_HDA_STAGING_DIR.glob("*.hda"))
-    otls = get_dcc_otls_dir(version)
+    otls_dirs = get_dcc_otls_dirs(version)
 
-    if hdas and otls is not None:
+    if hdas and otls_dirs:
+        installed_to: list[str] = []
         try:
-            otls.mkdir(parents=True, exist_ok=True)
-            for hda in hdas:
-                shutil.copy2(hda, otls / hda.name)
-                log.info("HDA installed: %s → %s", hda.name, otls)
-            return True, f"HDAs installed → {otls}"
+            for otls in otls_dirs:
+                otls.mkdir(parents=True, exist_ok=True)
+                for hda in hdas:
+                    shutil.copy2(hda, otls / hda.name)
+                    log.info("HDA installed: %s → %s", hda.name, otls)
+                installed_to.append(str(otls))
+            return True, f"HDAs installed → {', '.join(installed_to)}"
         except OSError as exc:
             return False, f"HDA copy failed: {exc}"
 
     # Live fallback — requires Houdini connected (import inside body to avoid circular deps)
-    if otls is not None:
+    if otls_dirs:
         try:
             from dcc.houdini.hda.flux_importer_hda import build_hda as build_importer
             from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
@@ -393,6 +423,7 @@ def install_hdas(version: str) -> tuple[bool, str]:
             return False, f"Cannot import HDA builders: {exc}"
 
         try:
+            otls = otls_dirs[0]
             otls.mkdir(parents=True, exist_ok=True)
             r = build_importer(str(otls / "flux_importer.hda"))
             if not r.get("ok"):
@@ -400,6 +431,14 @@ def install_hdas(version: str) -> tuple[bool, str]:
             r = build_exporter(str(otls / "flux_exporter.hda"))
             if not r.get("ok"):
                 return False, f"Live build (exporter) failed: {r.get('error')}"
+            # Mirror the freshly-built HDAs into any other candidate root.
+            for other in otls_dirs[1:]:
+                try:
+                    other.mkdir(parents=True, exist_ok=True)
+                    for built in ("flux_importer.hda", "flux_exporter.hda"):
+                        shutil.copy2(otls / built, other / built)
+                except OSError as exc:
+                    log.warning("Could not mirror live-built HDA to %s: %s", other, exc)
             return True, f"HDAs built live → {otls}"
         except Exception as exc:
             return False, f"Live build error: {exc}"
@@ -410,9 +449,9 @@ def install_hdas(version: str) -> tuple[bool, str]:
 
 
 def remove_hdas(version: str) -> tuple[bool, str]:
-    """Remove FLUX HDAs from houdiniX.Y/otls/. Returns (success, message)."""
-    otls = get_dcc_otls_dir(version)
-    if otls is None:
+    """Remove FLUX HDAs from every houdiniX.Y/otls/. Returns (success, message)."""
+    otls_dirs = get_dcc_otls_dirs(version)
+    if not otls_dirs:
         return False, f"Cannot resolve otls directory for Houdini {version}."
 
     staged = list(_HDA_STAGING_DIR.glob("*.hda"))
@@ -421,15 +460,16 @@ def remove_hdas(version: str) -> tuple[bool, str]:
 
     removed: list[str] = []
     errors: list[str] = []
-    for hda in staged:
-        target = otls / hda.name
-        if target.is_file():
-            try:
-                target.unlink()
-                removed.append(hda.name)
-                log.info("HDA removed: %s", target)
-            except OSError as exc:
-                errors.append(f"{hda.name}: {exc}")
+    for otls in otls_dirs:
+        for hda in staged:
+            target = otls / hda.name
+            if target.is_file():
+                try:
+                    target.unlink()
+                    removed.append(str(target))
+                    log.info("HDA removed: %s", target)
+                except OSError as exc:
+                    errors.append(f"{target}: {exc}")
 
     if errors:
         return False, f"Partial removal, errors: {'; '.join(errors)}"

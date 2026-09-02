@@ -124,6 +124,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'usd.col.task':            { fr: 'Task',                      en: 'Task' },
   'usd.col.version':         { fr: 'Version',                   en: 'Version' },
   'usd.col.instance':        { fr: 'Instance',                  en: 'Instance' },
+  'usd.col.variante':        { fr: 'Variante',                  en: 'Variant' },
   'usd.col.translate':       { fr: 'Translate (x y z)',         en: 'Translate (x y z)' },
   'usd.followLast':          { fr: 'Suivre LAST',               en: 'Follow LAST' },
   'usd.version.pick':        { fr: '(version)',                 en: '(version)' },

@@ -38,7 +38,7 @@ class _FakeResolver:
         self._root = publish_root
         self._missing = missing or set()
 
-    def resolve_layer(self, asset, task, layer, version="latest") -> ResolvedAsset:
+    def resolve_layer(self, asset, task, layer, version="latest", instance="", variante="") -> ResolvedAsset:
         if layer in self._missing:
             raise ResolveError(f"layer '{layer}' missing (fake)")
         ver = _LATEST if version in ("latest", "LAST") else version
