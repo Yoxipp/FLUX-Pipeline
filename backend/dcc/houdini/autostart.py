@@ -13,6 +13,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from core.logger import get_logger
+
+log = get_logger(__name__)
+
 # Markers used to locate the FLUX block in 123.py — never change these.
 _BLOCK_BEGIN = "# >>> FLUX autostart — do not edit manually"
 _BLOCK_END   = "# <<< FLUX autostart"
@@ -280,6 +284,41 @@ def _extract_version(houdini_exe_path: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def _resolve_version(houdini_exe_path: str | None) -> str | None:
+    """Best-effort Houdini X.Y version, from the exe path or the prefs dir names."""
+    v = _extract_version(houdini_exe_path)
+    if v:
+        return v
+    for d in _all_prefs_dirs(houdini_exe_path):
+        m = re.search(r"houdini(\d+\.\d+)", d.name)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _install_importer_hda(houdini_exe_path: str | None) -> dict:
+    """Install the Houdini importer/exporter HDAs (a pipeline dependency).
+
+    Called from install() so connecting Houdini via the Launcher's Autostart also
+    installs the HDA the FLUX importer needs. Idempotent: install_hdas copies to a
+    fixed filename in otls/, so reconnecting refreshes rather than duplicating.
+    Non-fatal — a failure here never blocks the autostart install itself.
+    """
+    version = _resolve_version(houdini_exe_path)
+    if not version:
+        log.info("HDA install skipped: could not resolve Houdini version")
+        return {"success": False, "message": "version_unresolved"}
+    try:
+        from features.shelf_manager.shelf_core import install_hdas
+        ok, msg = install_hdas(version)
+        if not ok:
+            log.warning("HDA install (autostart) failed (non-fatal): %s", msg)
+        return {"success": ok, "message": msg}
+    except Exception as exc:  # never break autostart on HDA issues
+        log.warning("HDA install (autostart) errored (non-fatal): %s", exc)
+        return {"success": False, "message": str(exc)}
+
+
 def _all_prefs_dirs(houdini_exe_path: str | None = None) -> list[Path]:
     """Every prefs dir Houdini might load 123.py from.
 
@@ -307,9 +346,13 @@ def _install_to(prefs_dir: Path) -> dict:
     except Exception as exc:
         return {"success": False, "message": f"Failed to deploy server: {exc}", "path": None}
 
-    # Neutralise the user-site USD clash (see _ENV_BLOCK). Best-effort: a failure here
-    # must not block the autostart install, which is the primary contract.
-    _write_env_block(prefs_dir)
+    # NOTE: PYTHONNOUSERSITE=1 was written here to neutralise the user-site USD
+    # clash, but on Houdini 22.0 (py3.13) it makes Houdini hard-crash at startup
+    # (loading panel then the process dies). It is disabled until a safer USD
+    # isolation is in place (see _remove_env_block, which also cleans up any block
+    # a previous version wrote). The user-site usd-core only breaks LOP viewer
+    # states, not the SOP usdimport the FLUX importer uses.
+    _remove_env_block(prefs_dir)
 
     startup = scripts / "123.py"
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
@@ -368,6 +411,9 @@ def install(houdini_exe_path: str | None = None) -> dict:
     extras = [r["path"] for r in results[1:] if r.get("path")]
     if extras:
         primary["also"] = extras
+
+    # Install the importer HDA dependency as part of connecting Houdini (non-fatal).
+    primary["hda"] = _install_importer_hda(houdini_exe_path)
     return primary
 
 
@@ -396,5 +442,16 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
             removed_any = True
         except OSError:
             continue
+
+    # Remove the importer HDA dependency too (symmetry with install; non-fatal).
+    version = _resolve_version(houdini_exe_path)
+    if version:
+        try:
+            from features.shelf_manager.shelf_core import remove_hdas
+            ok_hda, msg_hda = remove_hdas(version)
+            if not ok_hda:
+                log.warning("HDA removal (autostart) failed (non-fatal): %s", msg_hda)
+        except Exception as exc:
+            log.warning("HDA removal (autostart) errored (non-fatal): %s", exc)
 
     return {"success": True, "message": "uninstalled" if removed_any else "not_installed"}

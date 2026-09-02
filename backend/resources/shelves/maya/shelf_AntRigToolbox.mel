@@ -4,9 +4,9 @@
 
 global proc shelf_AntRigToolbox() {
     shelfButton
-        -label        "FluxRig"
+        -label        "RIG"
         -annotation   "Flux Rigging Tool — rigging tools suite"
-        -image1       "commandButton.png"
+        -image1       "flux_rig.png"
         -sourceType   "python"
         -command      "import adam_rig_toolbox; adam_rig_toolbox.show()"
     ;

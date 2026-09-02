@@ -2,34 +2,14 @@ import { useEffect, useState } from 'react'
 import { Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, Pill } from '../components/shared/ui'
+import { FluxLogo } from '../components/shared/Logo'
 import { api } from '../api/client'
 
-// ── Real Flux shelf icons (custom SVG, not generic lucide glyphs) ─────────────
-const IconExport = ({ c = 'currentColor' }: { c?: string }) => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 3v11" /><path d="M8 7l4-4 4 4" />
-    <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
-  </svg>
-)
-const IconImport = ({ c = 'currentColor' }: { c?: string }) => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 14V3" /><path d="M8 10l4 4 4-4" />
-    <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
-  </svg>
-)
-const IconTools = ({ c = 'currentColor' }: { c?: string }) => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14.5 5.5a3.5 3.5 0 0 0-4.9 4.2L3 16.3 5.7 19l6.6-6.6a3.5 3.5 0 0 0 4.2-4.9l-2 2-2.3-.6-.6-2.3z" />
-    <path d="M15.5 15.5 19 19" />
-  </svg>
-)
-const IconHda = ({ c = 'currentColor' }: { c?: string }) => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="M3 7l9 5 9-5" /><path d="M12 22V12" />
-  </svg>
-)
+// Shelf tool tints — ANIM (orange) / RIG (blue), matching the Maya shelf icons.
+const ANIM_COLOR = 'oklch(70% 0.15 52)'
+const RIG_COLOR  = 'oklch(60% 0.18 250)'
 
-const ShelfBtn = ({ icon, label, primary }: { icon: React.ReactNode; label: string; primary?: boolean }) => (
+const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: string; primary?: boolean }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
     <div style={{
       width: 40, height: 40, borderRadius: 9,
@@ -212,7 +192,7 @@ export function ShelfManager() {
               <div style={{ display: 'flex', gap: 16 }}>
                 <Badge ok={shelfOk} label={shelfOk ? 'Shelf installé' : 'Shelf absent'} />
                 {isHoudini && (
-                  <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés' : 'HDAs absents'} />
+                  <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés (Autostart)' : 'HDAs absents (via Autostart)'} />
                 )}
               </div>
             </div>
@@ -221,31 +201,45 @@ export function ShelfManager() {
           {/* aperçu shelf */}
           <div>
             <SecTitle>Aperçu du shelf</SecTitle>
-            <div className="card" style={{ padding: '14px 20px', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-              <ShelfBtn icon={<IconExport c="var(--accent-hi)" />} label="Exporter" primary />
-              <ShelfBtn icon={<IconImport />} label="Importer" />
-              {dcc === 'Maya' && <ShelfBtn icon={<IconTools />} label="Tools" />}
-              {isHoudini && <ShelfBtn icon={<IconHda />} label="HDAs" />}
+            <div className="card" style={{ padding: '14px 20px', display: 'flex', gap: 20, alignItems: 'center', minHeight: 62 }}>
+              {dcc === 'Maya' ? (
+                <>
+                  <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="ANIM" />
+                  <ShelfBtn icon={<FluxLogo size={20} color={RIG_COLOR} />} label="RIG" />
+                </>
+              ) : (
+                <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+                  Rien à installer sur le shelf. Le HDA de l'importer est géré par l'Autostart Houdini.
+                </div>
+              )}
             </div>
           </div>
 
-          {/* actions */}
+          {/* actions — Maya only. Houdini has no shelf tool to install: the importer
+              HDA is a pipeline dependency installed by the Houdini Autostart. */}
           <div>
             <SecTitle>Actions</SecTitle>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
-                <Zap size={12} strokeWidth={2} />
-                {isHoudini ? 'Installer shelf + HDAs' : 'Installer le shelf'}
-              </Btn>
-              <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
-                <RefreshCw size={11} strokeWidth={2} />
-                Màj
-              </Btn>
-              <Btn ghost disabled={!version || busy} style={{ height: 32, gap: 5 }} onClick={handleRemove}>
-                <Trash2 size={11} strokeWidth={2} />
-                Retirer
-              </Btn>
-            </div>
+            {dcc === 'Maya' ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
+                  <Zap size={12} strokeWidth={2} />
+                  Installer le shelf
+                </Btn>
+                <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
+                  <RefreshCw size={11} strokeWidth={2} />
+                  Màj
+                </Btn>
+                <Btn ghost disabled={!version || busy} style={{ height: 32, gap: 5 }} onClick={handleRemove}>
+                  <Trash2 size={11} strokeWidth={2} />
+                  Retirer
+                </Btn>
+              </div>
+            ) : (
+              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+                Aucune installation manuelle pour Houdini. Le HDA de l'importer s'installe
+                automatiquement quand tu connectes Houdini via l'Autostart du Launcher.
+              </div>
+            )}
           </div>
 
           {/* Catalogue de tools Maya (rig toolbox / anim tool / flux) — Maya only.

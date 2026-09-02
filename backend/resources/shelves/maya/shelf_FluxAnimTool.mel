@@ -4,9 +4,9 @@
 
 global proc shelf_FluxAnimTool() {
     shelfButton
-        -label        "FluxAnim"
+        -label        "ANIM"
         -annotation   "Flux Animation Tool — picker + anim/tech-anim suite"
-        -image1       "commandButton.png"
+        -image1       "flux_anim.png"
         -sourceType   "python"
         -command      "import flux_anim_tool; flux_anim_tool.show()"
     ;

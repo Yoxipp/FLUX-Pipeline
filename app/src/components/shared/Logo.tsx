@@ -1,17 +1,42 @@
 // Logo.tsx — the official FLUX logo. Single source of truth for the mark so it
-// can be swapped in one place. The image is used as-is (never recolored/retouched).
-// Vector source (SVG) so the mark stays crisp at every size instead of pixelating.
+// can be swapped in one place.
+//
+// The mark is rendered through a CSS mask (not an <img>) so it can be tinted
+// dynamically to any colour while keeping the original shape, transparency and
+// vector crispness. By default it follows the Hub accent colour (`--accent`),
+// so changing the accent in the settings recolours the logo automatically.
+// Pass an explicit `color` (e.g. "orange" / "blue") to force a fixed tint.
 
 import fluxLogo from '../../assets/flux_logo.svg'
 
-export function FluxLogo({ size = 24, style }: { size?: number; style?: React.CSSProperties }) {
+export function FluxLogo({
+  size = 24,
+  color = 'var(--accent)',
+  style,
+}: {
+  size?: number
+  color?: string
+  style?: React.CSSProperties
+}) {
   return (
-    <img
-      src={fluxLogo}
-      alt="FLUX"
-      width={size}
-      height={size}
-      style={{ width: size, height: size, objectFit: 'contain', display: 'block', ...style }}
+    <span
+      role="img"
+      aria-label="FLUX"
+      style={{
+        display: 'block',
+        width: size,
+        height: size,
+        backgroundColor: color,
+        WebkitMaskImage: `url(${fluxLogo})`,
+        maskImage: `url(${fluxLogo})`,
+        WebkitMaskRepeat: 'no-repeat',
+        maskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        maskPosition: 'center',
+        WebkitMaskSize: 'contain',
+        maskSize: 'contain',
+        ...style,
+      }}
     />
   )
 }

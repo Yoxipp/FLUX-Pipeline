@@ -192,9 +192,20 @@ def menu_name(node):
     return _flat(keys) if keys else ["", "no project"]
 
 def menu_instance(node):
-    toks = _tokens(node)
-    instances = list(toks.get("INSTANCE", {}).keys())
-    if "null" not in instances: instances = ["null"] + instances
+    # Real instance folders on disk (e.g. "allbody") — the INSTANCE token map
+    # usually only holds "null", so ask the backend which instances exist.
+    project = _pval(node, "project")
+    if not project:
+        return _flat(["null"])
+    cls  = _pval(node, "flux_class")
+    typ  = _pval(node, "flux_type")
+    name = _pval(node, "flux_name")
+    key  = f"instances:{project}:{cls}:{typ}:{name}"
+    r = _cached(key, lambda: _get(
+        "/dcc/houdini/importer/instances",
+        project=project, **{"class": cls}, type=typ, name=name,
+    ))
+    instances = r.get("instances") or ["null"]
     return _flat(instances)
 
 def menu_iter(node):
@@ -292,10 +303,15 @@ def _build_code(hda_path: str, python_module: str) -> str:
     # Escape the python_module so it can be embedded safely in a triple-quoted string
     pm_escaped = python_module.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
+    # FLUX logo used as the HDA node icon (embedded as a section → portable).
+    from pathlib import Path as _P
+    icon_path = str(_P(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.png")
+
     return f'''
 import hou
 
 _HDA_PATH = {hda_path!r}
+_ICON_PATH = {icon_path!r}
 _NODE_NAME = "flux_importer"
 _LABEL     = "FLUX Import"
 _CATEGORY  = hou.sopNodeTypeCategory()
@@ -320,7 +336,9 @@ def _menu_str(name, label, default, menu_fn, help_txt):
         string_type=hou.stringParmType.Regular,
         help=help_txt,
     )
-    t.setItemGeneratorScript(f"return hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
+    # Houdini 22 runs the bracketed Python item-generator as an EXPRESSION (it must
+    # evaluate to the flat menu list) — a leading `return` is a SyntaxError there.
+    t.setItemGeneratorScript(f"hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
     t.setItemGeneratorScriptLanguage(_PY)
     return t
 
@@ -402,7 +420,11 @@ def _bind_path(_n, _candidates):
     for _pn in _candidates:
         _p = _n.parm(_pn)
         if _p is not None:
-            _p.setExpression('ch("../../resolved_path")', hou.exprLanguage.Python)
+            # resolved_path lives on the HDA node itself (one level up from these
+            # internal SOPs). Use chs() in the HSCRIPT expression language: chs()
+            # in the PYTHON language does NOT resolve relative parm paths and would
+            # silently return "" (→ empty filepath, nothing imports).
+            _p.setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
             return _pn
     raise RuntimeError(
         "No file parm found on " + _n.type().name() + " (tried " + ", ".join(_candidates) + ")"
@@ -412,9 +434,17 @@ _bind_path(_usd,  ["filepath1", "filepath", "file"])
 _bind_path(_abc,  ["fileName", "filename", "file"])
 _bind_path(_file, ["file", "filename"])
 
-# Switch driven by file extension
+# Switch driven by file extension. This must be a PYTHON expression (it needs the
+# dict/branch logic), so it reads resolved_path via hou.pwd().parent().parm(...)
+# rather than chs() (chs() in Python does not resolve relative parm paths). The
+# None-guards are what stop the "'NoneType' object has no attribute 'eval'" crash:
+# hou.pwd() or the parm can be momentarily unavailable during cook — return 0 (USD)
+# instead of raising. resolved_path now always exists on the HDA (interface is
+# persisted into the definition below), so this resolves to the real path.
 _sw.parm("input").setExpression("""
-_ext = hou.pwd().parent().parm("resolved_path").eval().lower()
+_n = hou.pwd().parent() if hou.pwd() else None
+_p = _n.parm("resolved_path") if _n else None
+_ext = (_p.eval() if _p else "").lower()
 if _ext.endswith(".bgeo.sc"):
     _ext = ".bgeo.sc"
 else:
@@ -468,6 +498,32 @@ if "OnLoaded" in _hda_def.sections():
     _hda_def.sections()["OnLoaded"].setContents("hou.phm().on_loaded(kwargs[\\'node\\'])")
 else:
     _hda_def.addSection("OnLoaded", "hou.phm().on_loaded(kwargs[\\'node\\'])")
+
+# Persist the parameter interface into the definition. createDigitalAsset does
+# NOT reliably capture the subnet's spare parms in every Houdini build — it can
+# emit a default, EMPTY DialogScript, so the token parms and resolved_path go
+# missing and chs("../resolved_path") resolves to nothing (empty path → nothing
+# imports, and the old expression crashed on the missing parm). Set the group on
+# the definition explicitly and save so installFile loads the full interface.
+_hda_def.setParmTemplateGroup(_ptg)
+
+# Embed the FLUX logo as the node icon (portable: stored in the .hda itself).
+try:
+    import os as _os
+    if _ICON_PATH and _os.path.isfile(_ICON_PATH):
+        with open(_ICON_PATH, "rb") as _icf:
+            _icon_bytes = _icf.read()
+        # Houdini 22's HDASection has no setBinaryContents — setContents accepts the
+        # raw PNG bytes and stores them as the section payload.
+        if "IconImage" not in _hda_def.sections():
+            _hda_def.addSection("IconImage", _icon_bytes)
+        else:
+            _hda_def.sections()["IconImage"].setContents(_icon_bytes)
+        _hda_def.setIcon("opdef:.?IconImage")
+except Exception:
+    pass  # icon is cosmetic — never fail the build over it
+
+_hda_def.save(_HDA_PATH)
 
 # ── 7. Install and clean up ───────────────────────────────────────────────────
 hou.hda.installFile(_HDA_PATH, oplibraries_file=None, change_oplibraries_file=False)

@@ -1090,6 +1090,33 @@ async def houdini_importer_resolve(
     return result
 
 
+@router.get("/houdini/importer/instances")
+async def houdini_importer_instances(
+    project: str,
+    class_tok: str = Query("", alias="class"),
+    type: str = "",
+    name: str = "",
+) -> dict:
+    """Return the instance folders that exist on disk for the given tokens.
+
+    The INSTANCE token map usually only holds 'null', so the HDA menu reads the
+    real instance folders from disk (e.g. 'allbody') here.
+    """
+    from core.paths import get_project_path
+    from features.importer.importer_resolve import get_available_instances
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+    loop = asyncio.get_event_loop()
+    instances = await loop.run_in_executor(
+        None,
+        lambda: get_available_instances(project_path, class_tok, type, name),
+    )
+    return {"instances": instances}
+
+
 @router.get("/houdini/importer/iters")
 async def houdini_importer_iters(
     project: str,

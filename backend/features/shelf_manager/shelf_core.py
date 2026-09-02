@@ -181,10 +181,9 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
             except OSError as exc:
                 log.warning("Could not install shelf to Maya dir (non-fatal): %s", exc)
 
-    if dcc_name == "Houdini":
-        ok_hda, msg_hda = install_hdas(version)
-        if not ok_hda:
-            log.warning("HDA install failed (non-fatal): %s", msg_hda)
+    # NOTE: the Houdini importer/exporter HDAs are a technical dependency, not a
+    # shelf tool — they are installed by the Houdini autostart connection
+    # (dcc.houdini.autostart.install), so they are NOT installed here.
 
     return True, f"Installed → {dest}"
 
@@ -192,10 +191,13 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
 # ── Maya tools → single Flux shelf ────────────────────────────────────────────
 # ONE Flux shelf (shelf_Flux.mel) is generated from the SELECTED tools' buttons:
 # each tool source .mel contributes the shelfButtons inside its `global proc`.
+# Only two user-facing tools ship on the Flux shelf: ANIM (animation) and RIG
+# (rigging toolbox). Order matches the shelf layout [ ANIM ] [ RIG ]. The old
+# "flux" pipeline button is not a shelf tool; the Houdini importer HDA is a
+# technical dependency installed via the Houdini autostart, not from the shelf.
 MAYA_TOOLS: list[dict] = [
-    {"id": "flux",      "label": "Flux Pipeline",       "filename": "shelf_Flux.mel"},
-    {"id": "adam_rig",   "label": "Flux Rigging Tool",   "filename": "shelf_AntRigToolbox.mel"},
-    {"id": "flux_anim", "label": "Flux Animation Tool", "filename": "shelf_FluxAnimTool.mel"},
+    {"id": "flux_anim", "label": "ANIM", "filename": "shelf_FluxAnimTool.mel"},
+    {"id": "adam_rig",   "label": "RIG",  "filename": "shelf_AntRigToolbox.mel"},
 ]
 
 
@@ -258,6 +260,28 @@ def build_flux_shelf_mel(selected_ids: list[str]) -> str:
     )
 
 
+def _deploy_maya_icons(version: str) -> None:
+    """Copy the Flux shelf icons into Maya's prefs/icons dir (on XBMLANGPATH).
+
+    Maya resolves a shelfButton's -image1 by filename against XBMLANGPATH, which
+    includes ``<maya>/<version>/prefs/icons``. Copying the bundled PNGs there lets
+    the ANIM (orange) / RIG (blue) FLUX icons show without absolute paths. Best-effort.
+    """
+    shelf_dir = get_dcc_shelf_dir("Maya", version)
+    if shelf_dir is None:
+        return
+    icons_src = _RESOURCES_ROOT / "maya" / "icons"
+    if not icons_src.is_dir():
+        return
+    icons_dst = shelf_dir.parent / "icons"
+    try:
+        icons_dst.mkdir(parents=True, exist_ok=True)
+        for png in icons_src.glob("*.png"):
+            shutil.copy2(png, icons_dst / png.name)
+    except OSError as exc:
+        log.warning("Could not deploy Maya shelf icons (non-fatal): %s", exc)
+
+
 def install_flux_shelf(version: str, selected_ids: list[str] | None = None) -> tuple[bool, str]:
     """Generate + install the single Flux shelf from the given (or persisted) tools.
 
@@ -276,6 +300,8 @@ def install_flux_shelf(version: str, selected_ids: list[str] | None = None) -> t
         (dest_dir / "shelf_Flux.mel").write_text(mel, encoding="utf-8")
     except OSError as exc:
         return False, f"Erreur : {exc}"
+
+    _deploy_maya_icons(version)
 
     install_dir = _get_maya_install_shelf_dir(version)
     if install_dir is not None:
@@ -321,10 +347,8 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
                 except OSError as exc:
                     log.warning("Could not remove shelf from Maya dir (non-fatal): %s", exc)
 
-    if dcc_name == "Houdini":
-        ok_hda, msg_hda = remove_hdas(version)
-        if not ok_hda:
-            log.warning("HDA removal failed (non-fatal): %s", msg_hda)
+    # Houdini HDAs are removed by the autostart uninstall (they are a pipeline
+    # dependency, not a shelf tool), so they are NOT removed here.
 
     return True, f"Removed: {target}"
 
@@ -391,17 +415,79 @@ def is_hda_installed(version: str) -> bool:
     )
 
 
-def install_hdas(version: str) -> tuple[bool, str]:
-    """Copy FLUX HDAs from staging dir to EVERY houdiniX.Y/otls/ Houdini may read.
+def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
+    """Build the FLUX HDAs in the connected Houdini into otls_dirs[0], mirror the
+    resulting .hda files into the other otls dirs AND refresh the staging copy.
 
-    Primary path: offline copy from %APPDATA%/FLUX/dcc/houdini/ (populated at first launch).
-    Fallback: live build via houdini_client (requires Houdini connected).
+    A live build regenerates the HDA from source, so any fix to the builders
+    (e.g. the importer format_switch expression) propagates here — unlike a plain
+    copy of a possibly-stale staged .hda. Requires Houdini connected.
+    """
+    try:
+        from dcc.houdini.hda.flux_importer_hda import build_hda as build_importer
+        from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
+    except ImportError as exc:
+        return False, f"Cannot import HDA builders: {exc}"
+
+    try:
+        otls = otls_dirs[0]
+        otls.mkdir(parents=True, exist_ok=True)
+        r = build_importer(str(otls / "flux_importer.hda"))
+        if not r.get("ok"):
+            return False, f"Live build (importer) failed: {r.get('error')}"
+        r = build_exporter(str(otls / "flux_exporter.hda"))
+        if not r.get("ok"):
+            return False, f"Live build (exporter) failed: {r.get('error')}"
+
+        built_names = ("flux_importer.hda", "flux_exporter.hda")
+        # Mirror into the other otls roots so Houdini finds it wherever it reads.
+        for other in otls_dirs[1:]:
+            try:
+                other.mkdir(parents=True, exist_ok=True)
+                for built in built_names:
+                    shutil.copy2(otls / built, other / built)
+            except OSError as exc:
+                log.warning("Could not mirror live-built HDA to %s: %s", other, exc)
+        # Refresh the offline staging copy so later offline installs use the fix too.
+        try:
+            _HDA_STAGING_DIR.mkdir(parents=True, exist_ok=True)
+            for built in built_names:
+                shutil.copy2(otls / built, _HDA_STAGING_DIR / built)
+        except OSError as exc:
+            log.warning("Could not refresh HDA staging copy: %s", exc)
+        return True, f"HDAs built live → {otls}"
+    except Exception as exc:
+        return False, f"Live build error: {exc}"
+
+
+def install_hdas(version: str) -> tuple[bool, str]:
+    """Install the FLUX HDAs into EVERY houdiniX.Y/otls/ Houdini may read.
+
+    When Houdini is connected, the HDAs are BUILT LIVE from source so builder fixes
+    propagate (idempotent — same filenames, no duplicates). When Houdini is offline,
+    fall back to copying the staged .hda from %APPDATA%/FLUX/dcc/houdini/.
     Returns (success, message).
     """
-    hdas = list(_HDA_STAGING_DIR.glob("*.hda"))
     otls_dirs = get_dcc_otls_dirs(version)
+    if not otls_dirs:
+        return False, f"Cannot resolve otls directory for Houdini {version}."
 
-    if hdas and otls_dirs:
+    # Prefer a fresh live build when Houdini is reachable.
+    try:
+        from dcc.houdini.client import houdini_client
+        connected = houdini_client.is_connected()
+    except Exception:
+        connected = False
+
+    if connected:
+        ok, msg = _build_hdas_live(otls_dirs)
+        if ok:
+            return ok, msg
+        log.warning("Live HDA build failed, falling back to staged copy: %s", msg)
+
+    # Offline path — copy the staged HDAs.
+    hdas = list(_HDA_STAGING_DIR.glob("*.hda"))
+    if hdas:
         installed_to: list[str] = []
         try:
             for otls in otls_dirs:
@@ -414,38 +500,10 @@ def install_hdas(version: str) -> tuple[bool, str]:
         except OSError as exc:
             return False, f"HDA copy failed: {exc}"
 
-    # Live fallback — requires Houdini connected (import inside body to avoid circular deps)
-    if otls_dirs:
-        try:
-            from dcc.houdini.hda.flux_importer_hda import build_hda as build_importer
-            from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
-        except ImportError as exc:
-            return False, f"Cannot import HDA builders: {exc}"
-
-        try:
-            otls = otls_dirs[0]
-            otls.mkdir(parents=True, exist_ok=True)
-            r = build_importer(str(otls / "flux_importer.hda"))
-            if not r.get("ok"):
-                return False, f"Live build (importer) failed: {r.get('error')}"
-            r = build_exporter(str(otls / "flux_exporter.hda"))
-            if not r.get("ok"):
-                return False, f"Live build (exporter) failed: {r.get('error')}"
-            # Mirror the freshly-built HDAs into any other candidate root.
-            for other in otls_dirs[1:]:
-                try:
-                    other.mkdir(parents=True, exist_ok=True)
-                    for built in ("flux_importer.hda", "flux_exporter.hda"):
-                        shutil.copy2(otls / built, other / built)
-                except OSError as exc:
-                    log.warning("Could not mirror live-built HDA to %s: %s", other, exc)
-            return True, f"HDAs built live → {otls}"
-        except Exception as exc:
-            return False, f"Live build error: {exc}"
-
-    if not hdas:
-        return False, "No staged HDAs found. Run the installer first or build via scripts/build_hdas.py."
-    return False, f"Cannot resolve otls directory for Houdini {version}."
+    return False, (
+        "No staged HDAs found and Houdini is not connected. Open Houdini (so the "
+        "HDA can be built live) or run scripts/build_hdas.py, then retry."
+    )
 
 
 def remove_hdas(version: str) -> tuple[bool, str]:

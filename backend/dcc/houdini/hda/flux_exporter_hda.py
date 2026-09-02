@@ -226,10 +226,14 @@ def on_loaded(node):  _prefetch(node)
 def _build_code(hda_path: str, python_module: str) -> str:
     pm_escaped = python_module.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
+    from pathlib import Path as _P
+    icon_path = str(_P(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.png")
+
     return f'''
 import hou
 
 _HDA_PATH = {hda_path!r}
+_ICON_PATH = {icon_path!r}
 _NODE_NAME = "flux_exporter"
 _LABEL     = "FLUX Export"
 _CATEGORY  = hou.sopNodeTypeCategory()
@@ -253,7 +257,9 @@ def _menu_str(name, label, default, menu_fn, help_txt):
         string_type=hou.stringParmType.Regular,
         help=help_txt,
     )
-    t.setItemGeneratorScript(f"return hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
+    # Houdini 22 runs the bracketed Python item-generator as an EXPRESSION (it must
+    # evaluate to the flat menu list) — a leading `return` is a SyntaxError there.
+    t.setItemGeneratorScript(f"hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
     t.setItemGeneratorScriptLanguage(_PY)
     return t
 
@@ -332,6 +338,30 @@ if "OnLoaded" in _hda_def.sections():
     _hda_def.sections()["OnLoaded"].setContents("hou.phm().on_loaded(kwargs[\\'node\\'])")
 else:
     _hda_def.addSection("OnLoaded", "hou.phm().on_loaded(kwargs[\\'node\\'])")
+
+# Persist the parameter interface into the definition — createDigitalAsset does
+# not reliably capture the subnet's spare parms (it can emit a default, EMPTY
+# DialogScript), which would drop the token/format parms. Save so installFile
+# loads the full interface.
+_hda_def.setParmTemplateGroup(_ptg)
+
+# Embed the FLUX logo as the node icon (portable: stored in the .hda itself).
+try:
+    import os as _os
+    if _ICON_PATH and _os.path.isfile(_ICON_PATH):
+        with open(_ICON_PATH, "rb") as _icf:
+            _icon_bytes = _icf.read()
+        # Houdini 22's HDASection has no setBinaryContents — setContents accepts the
+        # raw PNG bytes and stores them as the section payload.
+        if "IconImage" not in _hda_def.sections():
+            _hda_def.addSection("IconImage", _icon_bytes)
+        else:
+            _hda_def.sections()["IconImage"].setContents(_icon_bytes)
+        _hda_def.setIcon("opdef:.?IconImage")
+except Exception:
+    pass  # icon is cosmetic — never fail the build over it
+
+_hda_def.save(_HDA_PATH)
 
 # ── 7. Install and clean up ───────────────────────────────────────────────────
 hou.hda.installFile(_HDA_PATH, oplibraries_file=None, change_oplibraries_file=False)

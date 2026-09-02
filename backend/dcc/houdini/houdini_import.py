@@ -266,8 +266,11 @@ def create_flux_importer_node(
             # Setting parms via .set() does NOT fire the HDA's resolve callback, and
             # OnCreated only prefetches menus — so resolved_path would stay empty and
             # nothing would import. Trigger the resolve explicitly now.
+            # Use the NODE's own module (_node.hdaModule()), not hou.phm(): hou.phm()
+            # returns the module of hou.pwd() (the current context, e.g. /obj), which
+            # has no resolve_path → the call raised and was silently swallowed.
             try:
-                hou.phm().resolve_path(_node)
+                _node.hdaModule().resolve_path(_node)
                 _rp = _node.parm("resolved_path")
                 _resolved = _rp.eval() if _rp is not None else ""
             except Exception as _re_exc:

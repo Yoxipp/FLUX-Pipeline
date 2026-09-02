@@ -85,12 +85,70 @@ def _resolve_folder(
     return resolve_publish_path(project_path, dummy)
 
 
+# ── instance scan ─────────────────────────────────────────────────────────────
+
+def get_available_instances(
+    project_path: Path,
+    class_tok: str,
+    type_tok: str,
+    name_tok: str,
+) -> list[str]:
+    """Return the instance folders that actually exist on disk for these tokens.
+
+    The INSTANCE token map often only lists 'null', but assets are published under
+    real instance folders (e.g. .../rig/allbody/). Those folders are the direct
+    children of the TYPE folder, so we list them from disk. DEFAULT_INSTANCE is kept
+    first so a fresh node still resolves the default layout when it exists.
+    """
+    key = f"instances:{project_path}:{class_tok}:{type_tok}:{name_tok}"
+    return _bcached(key, lambda: _scan_instances(project_path, class_tok, type_tok, name_tok), ttl=15.0)
+
+
+def _scan_instances(project_path: Path, class_tok: str, type_tok: str, name_tok: str) -> list[str]:
+    # Folder for a dummy instance → its parent is the TYPE folder holding instances.
+    folder = _resolve_folder(project_path, class_tok, type_tok, name_tok, DEFAULT_INSTANCE)
+    if folder is None:
+        return [DEFAULT_INSTANCE]
+    type_dir = folder.parent
+    try:
+        found = sorted(
+            d.name for d in type_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        )
+    except OSError:
+        return [DEFAULT_INSTANCE]
+    # DEFAULT_INSTANCE first, then the real instance folders (deduped).
+    result = [DEFAULT_INSTANCE]
+    for name in found:
+        if name != DEFAULT_INSTANCE:
+            result.append(name)
+    return result
+
+
 # ── iter scan ─────────────────────────────────────────────────────────────────
 
 def _extract_ext(p: Path) -> str:
     if p.name.endswith(".bgeo.sc"):
         return ".bgeo.sc"
     return p.suffix.lower()
+
+
+# Preference order when several formats exist for the same asset — pick the one a
+# DCC importer can actually load. USD (pipeline interchange) first, DCC-native
+# scenes (.ma/.mb/.hip) last. Lower rank = preferred.
+_IMPORT_EXT_ORDER = (
+    ".usd", ".usda", ".usdc", ".usdz",
+    ".abc", ".bgeo.sc", ".bgeo", ".geo", ".obj", ".fbx",
+)
+
+
+def _import_ext_rank(ext: str) -> int:
+    ext = ext.lower()
+    try:
+        return _IMPORT_EXT_ORDER.index(ext)
+    except ValueError:
+        # Unknown / DCC-native (.ma, .mb, .hip…) sort after all importable ones.
+        return len(_IMPORT_EXT_ORDER) + (1 if ext in (".ma", ".mb", ".hip", ".hiplc") else 0)
 
 
 def _extract_iter_stem(filename: str) -> tuple[str, str]:
@@ -190,11 +248,19 @@ def resolve_import_path(
                 "error": f"Pipeline folder does not exist: {folder}"}
 
     effective_instance = instance.strip() if instance.strip() else DEFAULT_INSTANCE
-    target_stem = f"{class_tok}_{type_tok}_{name_tok}_{effective_instance}_{iter_val}".upper()
+    iter_u = iter_val.upper()
+    # Exact stem (no variante) and the prefix/suffix used to also match a file that
+    # carries a VARIANTE token: build_asset_filename writes
+    # CLASS_TYPE_NAME_INSTANCE[_VARIANTE]_ITER, and the HDA has no variante field,
+    # so "CHAR_RIG_DOMINICK_ALLBODY_NORMAL_LAST" must resolve for these tokens.
+    exact_stem = f"{class_tok}_{type_tok}_{name_tok}_{effective_instance}_{iter_u}".upper()
+    prefix = f"{class_tok}_{type_tok}_{name_tok}_{effective_instance}_".upper()
+    suffix = f"_{iter_u}"
 
     # published_files descends into the nested <base>_<FMT>_{LAST,Vnnn}/ folders
     # as well as the legacy flat files, so import resolves under either layout.
     from features.publisher.publish_layout import published_files
+    candidates: list[Path] = []
     for p in published_files(folder):
         ext = _extract_ext(p)
         if ext == ".json":
@@ -203,11 +269,18 @@ def resolve_import_path(
             stem = p.name[: -len(".bgeo.sc")]
         else:
             stem = p.stem
-        if stem.upper() == target_stem:
-            return {"ok": True, "path": str(p), "ext": ext, "exists": True}
+        su = stem.upper()
+        # Exact stem, or the same stem with a VARIANTE token in the middle
+        # (e.g. CHAR_RIG_DOMINICK_ALLBODY_NORMAL_LAST).
+        if su == exact_stem or (su.startswith(prefix) and su.endswith(suffix)):
+            candidates.append(p)
+
+    if candidates:
+        best = min(candidates, key=lambda p: _import_ext_rank(_extract_ext(p)))
+        return {"ok": True, "path": str(best), "ext": _extract_ext(best), "exists": True}
 
     return {"ok": False, "path": None, "ext": "", "exists": False,
-            "error": f"File not found: {target_stem}.*"}
+            "error": f"File not found: {exact_stem}.* (nor a variante)"}
 
 
 # ── path → token reverse lookup ───────────────────────────────────────────────
