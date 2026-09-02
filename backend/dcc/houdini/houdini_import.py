@@ -19,9 +19,18 @@ KineFX character via create_character_import_node(): the imported mesh carries t
 
 from __future__ import annotations
 
+import re
 import shutil
 import textwrap
 from pathlib import Path
+
+
+def _node_name_from(file_path: str | Path) -> str:
+    """A Houdini-safe node name derived from the imported file's stem."""
+    stem = Path(str(file_path)).name
+    stem = stem.split(".")[0]  # drop all extensions (e.g. .bgeo.sc)
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", stem).strip("_")
+    return safe or "import"
 
 from core.logger import get_logger
 from dcc.houdini.client import houdini_client
@@ -73,6 +82,7 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
     node_type, parm_name = entry
     file_str = str(file_path).replace("\\", "/")
     candidates = repr([parm_name] + list(_FALLBACK_FILE_PARMS))
+    node_name = f"flux_import_{_node_name_from(file_path)}"
 
     # Create the node, then set the file on the first parm that actually exists
     # (parm names drift across Houdini versions, e.g. usdimport -> filepath1).
@@ -80,7 +90,7 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
         _net = hou.node({network_path!r})
         if _net is None:
             raise RuntimeError("Network not found: {network_path}")
-        _node = _net.createNode({node_type!r}, node_name="flux_import")
+        _node = _net.createNode({node_type!r}, node_name={node_name!r})
         _set = False
         for _pn in {candidates}:
             if _pn and _node.parm(_pn) is not None:
@@ -196,6 +206,7 @@ def create_flux_importer_node(
     """
     code = textwrap.dedent(f"""\
         import hou
+        import re as _re
         try:
             _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
             _pwd  = _pane.pwd() if _pane else hou.node("/obj")
@@ -203,16 +214,22 @@ def create_flux_importer_node(
             _pwd = hou.node("/obj")
         if _pwd is None:
             _pwd = hou.node("/obj")
+        # Node name derived from the import (asset/name), sanitised for Houdini.
+        _nm = _re.sub(r"[^A-Za-z0-9_]", "_", ({flux_name!r} or "import").strip()) or "import"
         _cat = _pwd.childTypeCategory()
+        # Import into the CURRENT context: /obj → new geo, SOP network → in place.
+        # Any other context (e.g. /stage LOP) is incompatible with the SOP importer:
+        # raise a clear error and create NO node rather than a node in the wrong place.
         if _cat == hou.objNodeTypeCategory():
-            _geo = _pwd.createNode("geo", node_name="flux_geo")
-            _target = _geo
+            _target = _pwd.createNode("geo", node_name="flux_" + _nm)
         elif _cat == hou.sopNodeTypeCategory():
             _target = _pwd
         else:
-            _geo = hou.node("/obj").createNode("geo", node_name="flux_geo")
-            _target = _geo
-        _node = _target.createNode("flux_importer", node_name="flux_import")
+            raise RuntimeError(
+                "Contexte '" + _pwd.path() + "' incompatible avec l'importer FLUX (SOP). "
+                "Place-toi dans /obj ou un réseau SOP (l'import USD /stage arrive bientôt)."
+            )
+        _node = _target.createNode("flux_importer", node_name="flux_import_" + _nm)
         if {project!r}:       _node.parm("project").set({project!r})
         if {flux_class!r}:    _node.parm("flux_class").set({flux_class!r})
         if {flux_type!r}:     _node.parm("flux_type").set({flux_type!r})
@@ -262,22 +279,42 @@ def set_import_path(node_path: str, file_path: str | Path) -> dict:
     return resp
 
 
-def move_to_local(file_path: str | Path) -> dict:
-    """Copy *file_path* into the current Houdini project directory ($HIP).
+def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) -> dict:
+    """Copy *file_path* into a local folder, conflict-safe.
 
-    The copy lands at $HIP/sourceimages/<filename> (created if needed).
-    Returns {"ok": True, "local_path": "$HIP/sourceimages/...", "abs_path": "..."} or {"ok": False, ...}.
+    *dest_folder* : an explicit local directory. When omitted, the copy lands in
+    the current Houdini project's ``$HIP/sourceimages/`` (created if needed).
+    On a name clash the copy is suffixed ``_1``, ``_2``… (never overwrites).
+
+    Returns {"ok": True, "local_path": "...", "abs_path": "..."} or {"ok": False, "error": "..."}.
     """
-    hip_resp = houdini_client.run("result = hou.hipFile.path()")
-    if not hip_resp.get("ok"):
-        return {"ok": False, "error": "Could not get $HIP: " + hip_resp.get("error", "unknown")}
-
-    hip_path = Path(hip_resp["result"]).parent
     src = Path(file_path)
+    if not src.is_file():
+        return {"ok": False, "error": f"Fichier introuvable : {src}"}
 
-    dest_dir = hip_path / "sourceimages"
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    rel_prefix: str | None = None
+    if dest_folder:
+        dest_dir = Path(dest_folder)
+    else:
+        hip_resp = houdini_client.run("result = hou.hipFile.path()")
+        if not hip_resp.get("ok"):
+            return {"ok": False, "error": "Impossible de lire $HIP : " + hip_resp.get("error", "inconnu")}
+        dest_dir = Path(hip_resp["result"]).parent / "sourceimages"
+        rel_prefix = "$HIP/sourceimages"
+
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "error": f"Dossier local invalide : {exc}"}
+
     dest = dest_dir / src.name
+    if dest.exists():
+        stem = src.name.split(".")[0]
+        suffix = src.name[len(stem):]   # keeps compound extensions (.bgeo.sc)
+        n = 1
+        while (dest_dir / f"{stem}_{n}{suffix}").exists():
+            n += 1
+        dest = dest_dir / f"{stem}_{n}{suffix}"
 
     try:
         shutil.copy2(src, dest)
@@ -285,6 +322,6 @@ def move_to_local(file_path: str | Path) -> dict:
         log.error("move_to_local copy failed: %s", exc)
         return {"ok": False, "error": str(exc)}
 
-    rel = f"$HIP/sourceimages/{src.name}"
-    log.info("Copied %s → %s", src.name, rel)
-    return {"ok": True, "local_path": rel, "abs_path": str(dest)}
+    local_path = f"{rel_prefix}/{dest.name}" if rel_prefix else str(dest)
+    log.info("Copied %s → %s", src.name, local_path)
+    return {"ok": True, "local_path": local_path, "abs_path": str(dest)}

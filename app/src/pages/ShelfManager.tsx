@@ -1,11 +1,35 @@
 import { useEffect, useState } from 'react'
-import { Upload, Download, Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2, Package } from 'lucide-react'
+import { Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, Pill } from '../components/shared/ui'
 import { api } from '../api/client'
-import type { LucideIcon } from 'lucide-react'
 
-const ShelfBtn = ({ icon: Icon, label, primary }: { icon: LucideIcon; label: string; primary?: boolean }) => (
+// ── Real Flux shelf icons (custom SVG, not generic lucide glyphs) ─────────────
+const IconExport = ({ c = 'currentColor' }: { c?: string }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v11" /><path d="M8 7l4-4 4 4" />
+    <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </svg>
+)
+const IconImport = ({ c = 'currentColor' }: { c?: string }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 14V3" /><path d="M8 10l4 4 4-4" />
+    <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </svg>
+)
+const IconTools = ({ c = 'currentColor' }: { c?: string }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.5 5.5a3.5 3.5 0 0 0-4.9 4.2L3 16.3 5.7 19l6.6-6.6a3.5 3.5 0 0 0 4.2-4.9l-2 2-2.3-.6-.6-2.3z" />
+    <path d="M15.5 15.5 19 19" />
+  </svg>
+)
+const IconHda = ({ c = 'currentColor' }: { c?: string }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="M3 7l9 5 9-5" /><path d="M12 22V12" />
+  </svg>
+)
+
+const ShelfBtn = ({ icon, label, primary }: { icon: React.ReactNode; label: string; primary?: boolean }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
     <div style={{
       width: 40, height: 40, borderRadius: 9,
@@ -16,7 +40,7 @@ const ShelfBtn = ({ icon: Icon, label, primary }: { icon: LucideIcon; label: str
       boxShadow: 'var(--shadow-sm)',
       transition: 'box-shadow 0.12s',
     }}>
-      <Icon size={16} strokeWidth={1.75} />
+      {icon}
     </div>
     <div className="lbl" style={{ fontSize: 9 }}>{label}</div>
   </div>
@@ -51,9 +75,11 @@ export function ShelfManager() {
   const [shelfData, setShelfData] = useState<AllShelvesResponse>({})
   const [log, setLog] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
-  const [tools, setTools] = useState<{ id: string; label: string; installed: Record<string, boolean> }[]>([])
+  const [tools, setTools] = useState<{ id: string; label: string; selected: boolean }[]>([])
   const [toolVersions, setToolVersions] = useState<string[]>([])
   const [toolVersion, setToolVersion] = useState('')
+  const [toolsInstalled, setToolsInstalled] = useState<Record<string, boolean>>({})
+  const [checked, setChecked] = useState<Record<string, boolean>>({})
 
   const currentData: ShelfData = shelfData[dcc] ?? { versions: [], installed: {}, hdas_installed: {} }
   const versions = currentData.versions
@@ -121,16 +147,20 @@ export function ShelfManager() {
       setTools(d.tools)
       setToolVersions(d.versions)
       setToolVersion(v => v || (d.versions[d.versions.length - 1] ?? ''))
+      setToolsInstalled(d.installed)
+      setChecked(Object.fromEntries(d.tools.map(t => [t.id, t.selected])))
     } catch { /* backend indispo : on ignore */ }
   }
   useEffect(() => { fetchTools() }, [])
 
-  async function handleTool(id: string, remove: boolean) {
+  // Install the single Flux shelf with the checked tools (selection persists backend-side).
+  async function handleApplyTools() {
     if (!toolVersion) return
     setBusy(true)
+    const ids = tools.filter(t => checked[t.id]).map(t => t.id)
+    addLog('info', `Installation shelf Flux (${ids.length} tool(s))…`)
     try {
-      const res = remove ? await api.removeTool(id, toolVersion)
-                         : await api.installTool(id, toolVersion)
+      const res = await api.applyTools(toolVersion, ids)
       addLog('ok', res.message)
       await fetchTools()
     } catch (e: any) {
@@ -192,14 +222,10 @@ export function ShelfManager() {
           <div>
             <SecTitle>Aperçu du shelf</SecTitle>
             <div className="card" style={{ padding: '14px 20px', display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-              <ShelfBtn icon={Upload}     label="Exporter" primary />
-              <ShelfBtn icon={Download}   label="Importer" />
-              {isHoudini && <ShelfBtn icon={Package} label="HDAs" />}
-              <div style={{ flex: 1 }} />
-              <div className="lbl" style={{ alignSelf: 'center', textAlign: 'right', lineHeight: 1.5 }}>
-                Rendu approximatif<br />
-                <span style={{ color: 'var(--ink-4)' }}>Icônes réelles dans le repo</span>
-              </div>
+              <ShelfBtn icon={<IconExport c="var(--accent-hi)" />} label="Exporter" primary />
+              <ShelfBtn icon={<IconImport />} label="Importer" />
+              {dcc === 'Maya' && <ShelfBtn icon={<IconTools />} label="Tools" />}
+              {isHoudini && <ShelfBtn icon={<IconHda />} label="HDAs" />}
             </div>
           </div>
 
@@ -226,7 +252,7 @@ export function ShelfManager() {
               Rigging/Anim toolboxes are Maya-specific; Houdini has no equivalent. */}
           {dcc === 'Maya' && (
           <div>
-            <SecTitle>Tools Maya (catalogue)</SecTitle>
+            <SecTitle>Tools de la shelf Flux</SecTitle>
             {toolVersions.length === 0 ? (
               <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
                 Aucune version Maya détectée
@@ -235,29 +261,40 @@ export function ShelfManager() {
               <>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
                   {toolVersions.map(v => (
-                    <Pill key={v} active={toolVersion === v} style={{ cursor: 'pointer' }}>
-                      <span onClick={() => setToolVersion(v)}>{v}</span>
-                    </Pill>
+                    <Pill key={v} active={toolVersion === v} onClick={() => setToolVersion(v)} style={{ cursor: 'pointer' }}>{v}</Pill>
                   ))}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {tools.map(t => {
-                    const ok = toolVersion ? (t.installed[toolVersion] ?? false) : false
-                    return (
-                      <div key={t.id} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ flex: 1, fontSize: 12, color: 'var(--ink)' }}>{t.label}</div>
-                        <Badge ok={ok} label={ok ? 'Installé' : 'Absent'} />
-                        <Btn primary disabled={busy || !toolVersion} style={{ height: 28, gap: 5 }} onClick={() => { void handleTool(t.id, false) }}>
-                          <Download size={11} strokeWidth={2} />
-                          Installer
-                        </Btn>
-                        <Btn ghost disabled={busy || !toolVersion || !ok} style={{ height: 28, gap: 5 }} onClick={() => { void handleTool(t.id, true) }}>
-                          <Trash2 size={11} strokeWidth={2} />
-                          Retirer
-                        </Btn>
+                  {tools.map(t => (
+                    <div
+                      key={t.id}
+                      className="card"
+                      onClick={() => setChecked(c => ({ ...c, [t.id]: !c[t.id] }))}
+                      style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                    >
+                      <div style={{
+                        width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                        border: '1.5px solid ' + (checked[t.id] ? 'var(--accent)' : 'var(--rule-2)'),
+                        background: checked[t.id] ? 'var(--accent)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {checked[t.id] && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                       </div>
-                    )
-                  })}
+                      <div style={{ flex: 1, fontSize: 12, color: 'var(--ink)' }}>{t.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center' }}>
+                  <Btn primary disabled={busy || !toolVersion} style={{ height: 30, gap: 6, justifyContent: 'center' }} onClick={() => { void handleApplyTools() }}>
+                    <Zap size={12} strokeWidth={2} />
+                    Installer les tools cochés
+                  </Btn>
+                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+                    {toolVersion && (toolsInstalled[toolVersion] ? `Shelf Flux installée · ${toolVersion}` : `Non installée · ${toolVersion}`)}
+                  </div>
+                </div>
+                <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 6 }}>
+                  Une seule shelf « Flux » regroupe les tools cochés. Ton choix est conservé pour les réinstallations.
                 </div>
               </>
             )}

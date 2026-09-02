@@ -12,6 +12,7 @@ DCC_PORTS: dict[str, int] = {
     "ZBrush":      9876,  # flux ZBrush bridge plugin port
     "Marvelous":   7007,
     "Photoshop":   7008,
+    "Mari":        7009,
 }
 
 # ── DCC connection status colors (hex, for QSS / QPalette) ───────────────────
@@ -24,6 +25,7 @@ DCC_COLORS: dict[str, str] = {
     "ZBrush":      "#7b5ea7",   # purple
     "Marvelous":   "#b34141",   # red
     "Photoshop":   "#00bcd4",   # cyan
+    "Mari":        "#c17a3a",   # amber
     "disconnected": "#9a9a9a",  # grey
 }
 
@@ -49,6 +51,7 @@ def _build_dcc_patterns() -> dict[str, list[str]]:
         "Marvelous":  [rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner.exe"],
         "Photoshop":  [rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
                        rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"],
+        "Mari":       [rf"{pf}\Mari*\Bundle\bin\Mari*.exe"],
     }
 
 DCC_EXE_PATTERNS: dict[str, list[str]] = _build_dcc_patterns()

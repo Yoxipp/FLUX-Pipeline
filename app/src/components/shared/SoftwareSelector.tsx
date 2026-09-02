@@ -1,13 +1,17 @@
 import { Pill } from './ui'
 
+// Supported DCCs + most recent supported version (detection itself is version-agnostic:
+// the real source is DCC_EXE_PATTERNS glob wildcards in backend/core/constants.py).
 const SW_DCC = [
-  { name: 'Maya',         v: '2025.3' },
-  { name: 'Houdini',      v: '20.5' },
-  { name: 'Nuke',         v: '15.0' },
-  { name: 'Substance P.', v: '10.1' },
-  { name: 'ZBrush',       v: '2024' },
-  { name: 'Marvelous',    v: '12.2' },
-  { name: 'Photoshop',    v: '2025' },
+  { name: 'Maya',      v: '2026' },
+  { name: 'Houdini',   v: '22.0' },
+  { name: 'Nuke',      v: '16.0' },
+  { name: 'Marvelous', v: '2025' },
+  { name: 'Painter',   v: '2024' },
+  { name: 'Designer',  v: '2024' },
+  { name: 'Mari',      v: '7.0' },
+  { name: 'ZBrush',    v: '2025' },
+  { name: 'Photoshop', v: '2025' },
 ]
 
 interface Props {
@@ -30,7 +34,7 @@ export function SoftwareSelector({ active = 'Maya', onChange, showLocal = true }
       <div style={{ display: 'flex', gap: 4, overflowX: 'auto', alignItems: 'center', paddingTop: 2, paddingBottom: 2 }}>
         {SW_DCC.map(s => (
           <Pill key={s.name} active={s.name === active} onClick={() => onChange?.(s.name)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            {s.name}
+            {s.name}<span style={{ marginLeft: 5, fontSize: 8, opacity: 0.55, fontFamily: 'var(--mono)' }}>{s.v}</span>
           </Pill>
         ))}
         {showLocal && (

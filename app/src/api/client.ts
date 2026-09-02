@@ -325,15 +325,12 @@ export const api = {
   removeShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', '/shelf', { dcc, version }),
 
-  // Maya tools catalog
+  // Maya tools → single Flux shelf (checkable, selection persisted)
   getTools: () =>
-    apiCall<{ versions: string[]; tools: { id: string; label: string; filename: string; installed: Record<string, boolean> }[] }>('GET', '/shelf/tools'),
+    apiCall<{ versions: string[]; tools: { id: string; label: string; selected: boolean }[]; installed: Record<string, boolean> }>('GET', '/shelf/tools'),
 
-  installTool: (tool_id: string, version: string) =>
-    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/install', { tool_id, version }),
-
-  removeTool: (tool_id: string, version: string) =>
-    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/remove', { tool_id, version }),
+  applyTools: (version: string, tool_ids: string[]) =>
+    apiCall<{ success: boolean; message: string }>('POST', '/shelf/tools/apply', { version, tool_ids }),
 
   // USD Assembler
   assembleRecipe: (recipe: unknown, project?: string, strict = true) =>

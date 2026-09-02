@@ -26,17 +26,19 @@ const DCC_STATUS_KEYS: Record<string, string> = {
   zbrush:             'ZBrush',
   marvelous:          'Marvelous',
   photoshop:          'Photoshop',
+  mari:               'Mari',
 }
 
 const SOFTWARE = [
-  { name: 'Maya',               key: 'maya' },
-  { name: 'Houdini',            key: 'houdini' },
-  { name: 'Nuke',               key: 'nuke' },
-  { name: 'Substance Painter',  key: 'substance_painter' },
-  { name: 'Substance Designer', key: 'substance_designer' },
-  { name: 'ZBrush',             key: 'zbrush' },
-  { name: 'Marvelous Designer', key: 'marvelous' },
-  { name: 'Photoshop',          key: 'photoshop' },
+  { name: 'Maya',      key: 'maya' },
+  { name: 'Houdini',   key: 'houdini' },
+  { name: 'Nuke',      key: 'nuke' },
+  { name: 'Marvelous', key: 'marvelous' },
+  { name: 'Painter',   key: 'substance_painter' },
+  { name: 'Designer',  key: 'substance_designer' },
+  { name: 'Mari',      key: 'mari' },
+  { name: 'ZBrush',    key: 'zbrush' },
+  { name: 'Photoshop', key: 'photoshop' },
 ]
 
 function dccDot(status: DccStatusMap, key: string): string {
@@ -101,6 +103,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
   const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
+  const [nukeServerOk,    setNukeServerOk]          = useState<boolean | null>(null)
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
@@ -122,6 +125,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('maya').then(p => setMayaServerOk(p.connected)).catch(() => setMayaServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('nuke').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, nuke: r.installed }))
+      if (r.installed) {
+        api.pingDcc('nuke').then(p => setNukeServerOk(p.connected)).catch(() => setNukeServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -141,6 +150,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.maya])
+
+  // Poll Nuke bridge every 5 s when autostart is installed
+  useEffect(() => {
+    if (!autostartInstalled.nuke) { setNukeServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('nuke').then(p => setNukeServerOk(p.connected)).catch(() => setNukeServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.nuke])
 
   // Poll ZBrush bridge when plugin is installed.
   // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
@@ -236,10 +254,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     if (key === 'houdini') setHoudiniServerOk(value)
     if (key === 'zbrush')  setZbrushServerOk(value)
     if (key === 'maya')    setMayaServerOk(value)
+    if (key === 'nuke')    setNukeServerOk(value)
   }
 
   const handleToggleAutostart = async (key: string) => {
-    if (key !== 'houdini' && key !== 'zbrush' && key !== 'maya') return
+    if (key !== 'houdini' && key !== 'zbrush' && key !== 'maya' && key !== 'nuke') return
     setAutostartLoading(prev => new Set(prev).add(key))
     try {
       if (autostartInstalled[key]) {
@@ -327,14 +346,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const isHoudini      = s.key === 'houdini'
           const isZBrush       = s.key === 'zbrush'
           const isMaya         = s.key === 'maya'
-          const hasPlug        = isHoudini || isZBrush || isMaya
+          const isNuke         = s.key === 'nuke'
+          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : null
-          // ZBrush: freeze-based, server only responds during publish → always accent when installed
-          // Houdini/Maya: always-on server → red when installed but unreachable
-          const plugOk         = hasPlug && autoInstalled && (isZBrush || serverOk === true)
-          const plugFailed     = hasPlug && autoInstalled && !isZBrush && serverOk === false
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : null
+          // AutoStart state colors: ORANGE = autostart installed but the software isn't
+          // launched/connected yet · GREEN = launched + connected. No red state anymore.
+          const plugConnected  = hasPlug && autoInstalled && serverOk === true
+          const plugWaiting    = hasPlug && autoInstalled && !plugConnected
 
           return (
             <div key={s.key} style={{
@@ -355,16 +375,14 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </Tooltip>
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
 
-              {/* feedback badge — hasPath permanent, puis find/ping éphémères */}
-              {hasPath
-                ? <span style={{ fontSize: 8, color: 'var(--ok)' }}>✓</span>
-                : findOk === false
-                  ? <span style={{ fontSize: 8, color: 'var(--err)' }}>✗</span>
-                  : pingResult[s.key]
-                    ? <span style={{ fontSize: 8, color: pingResult[s.key] === '✗' ? 'var(--err)' : 'var(--ok)' }}>
-                        {pingResult[s.key]}
-                      </span>
-                    : null
+              {/* feedback badge — find/ping éphémères (la coche verte permanente a été retirée) */}
+              {findOk === false
+                ? <span style={{ fontSize: 8, color: 'var(--err)' }}>✗</span>
+                : pingResult[s.key]
+                  ? <span style={{ fontSize: 8, color: pingResult[s.key] === '✗' ? 'var(--err)' : 'var(--ok)' }}>
+                      {pingResult[s.key]}
+                    </span>
+                  : null
               }
 
               {/* path picker — indicateur visuel : accent = path défini */}
@@ -400,11 +418,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (plugOk ? 'var(--accent)' : plugFailed ? 'var(--err)' : 'var(--rule-2)'),
+                  border: '1px solid ' + (plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--rule-2)'),
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
-                  background: plugOk ? 'var(--accent-soft)' : plugFailed ? 'color-mix(in oklch, var(--err) 8%, transparent)' : 'transparent',
-                  color: plugOk ? 'var(--accent-hi)' : plugFailed ? 'var(--err)' : 'var(--ink-4)',
+                  background: plugConnected ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : plugWaiting ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
+                  color: plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--ink-4)',
                   cursor: hasPlug ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
                   opacity: hasPlug ? 1 : 0.4,
                   transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
@@ -427,6 +445,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                      ? (autoInstalled
                          ? (serverOk === true ? 'Connecté · commandPort 7001 actif' : 'Autostart installé · clic pour désinstaller')
                          : 'Installer flux_bridge dans userSetup.py')
+                   : isNuke
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Nuke 7003' : 'Autostart installé · clic pour désinstaller')
+                         : 'Installer le bridge Nuke (init.py)')
                      : (autoInstalled
                          ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}

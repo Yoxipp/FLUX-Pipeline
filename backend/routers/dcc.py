@@ -13,6 +13,7 @@ from core.logger import get_logger
 from core.socket_manager import socket_manager
 from dcc.houdini import autostart as _houdini_autostart
 from dcc.maya    import autostart as _maya_autostart
+from dcc.nuke    import autostart as _nuke_autostart
 from dcc.zbrush  import autostart as _zbrush_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 
@@ -20,6 +21,7 @@ from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, la
 _AUTOSTART_MODULES: dict = {
     "houdini": _houdini_autostart,
     "maya":    _maya_autostart,
+    "nuke":    _nuke_autostart,
     "zbrush":  _zbrush_autostart,
 }
 
@@ -160,6 +162,11 @@ async def ping_dcc(dcc_key: str) -> dict:
         loop = asyncio.get_event_loop()
         ok = await loop.run_in_executor(None, is_server_running)
         return {"connected": ok, "version": None}
+    if dcc_key == "nuke":
+        from dcc.nuke.client import nuke_client
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, nuke_client.ping)
+        return {"connected": result.get("ok", False), "version": result.get("version")}
     raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
 
 
@@ -216,6 +223,7 @@ class HoudiniImportSetPathRequest(BaseModel):
 
 class HoudiniMoveToLocalRequest(BaseModel):
     file_path: str
+    dest_folder: str = ""   # explicit local dir; empty → $HIP/sourceimages/
 
 
 @router.post("/houdini/import/create")
@@ -250,7 +258,7 @@ async def houdini_import_move_to_local(req: HoudiniMoveToLocalRequest) -> dict:
     from dcc.houdini.houdini_import import move_to_local
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
-        None, lambda: move_to_local(req.file_path)
+        None, lambda: move_to_local(req.file_path, req.dest_folder or None)
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Move to local failed"))

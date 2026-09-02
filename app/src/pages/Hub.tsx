@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Upload, BookOpen, FolderOpen, Activity, SendHorizonal,
+  Upload, BookOpen, FolderOpen, Activity, SendHorizonal, Layers,
 } from 'lucide-react'
 import { useActivity }  from '../hooks/useActivity'
 import { useSettings }  from '../hooks/useSettings'
@@ -13,6 +13,7 @@ import type { LucideIcon } from 'lucide-react'
 const SHORTCUTS: { ic: LucideIcon; t: string; s: string; path: string; active?: boolean }[] = [
   { ic: FolderOpen, t: 'Folder Manager', s: 'Naviguer & importer', path: '/projects', active: true },
   { ic: Upload,     t: 'Publisher',      s: 'Exporter un asset',   path: '/publisher' },
+  { ic: Layers,     t: 'USD Assembler',  s: 'Composer des layers', path: '/usd' },
   { ic: BookOpen,   t: 'Shelf Manager',  s: 'Installer / màj',     path: '/shelf' },
   { ic: Activity,   t: 'Activité',       s: 'Historique équipe',   path: '/activity' },
 ]

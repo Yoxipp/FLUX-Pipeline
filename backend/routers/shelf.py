@@ -10,16 +10,13 @@ from pydantic import BaseModel
 from core.logger import get_logger
 from features.shelf_manager.shelf_core import (
     get_installed_versions,
-    install_hdas,
+    get_shelf_tool_selection,
+    install_flux_shelf,
     install_shelf,
-    install_tool_shelf,
     is_hda_installed,
     is_shelf_installed,
-    is_tool_installed,
     list_tools,
-    remove_hdas,
     remove_shelf,
-    remove_tool_shelf,
 )
 
 log = get_logger(__name__)
@@ -38,9 +35,9 @@ class ShelfRemoveRequest(BaseModel):
     version: str
 
 
-class ToolInstallRequest(BaseModel):
-    tool_id: str
+class ToolsApplyRequest(BaseModel):
     version: str
+    tool_ids: list[str]
 
 
 @router.get("")
@@ -101,40 +98,29 @@ async def remove(req: ShelfRemoveRequest) -> dict:
     return {"success": True, "message": msg}
 
 
-# ── Catalogue de tools Maya (rig toolbox / anim tool / flux) ──────────────────
+# ── Maya tools → single Flux shelf (checkable, selection persisted) ───────────
 @router.get("/tools")
 async def get_tools() -> dict:
-    """Catalogue des tools Maya installables + statut installé par version."""
+    """Return the Maya tools, their persisted selection, and shelf install status."""
     loop = asyncio.get_event_loop()
-    versions = await loop.run_in_executor(
-        None, lambda: get_installed_versions("Maya"))
+    versions = await loop.run_in_executor(None, lambda: get_installed_versions("Maya"))
+    selection = await loop.run_in_executor(None, get_shelf_tool_selection)
     tools = list_tools()
     for t in tools:
-        t["installed"] = {
-            v: await loop.run_in_executor(
-                None, lambda tid=t["id"], ver=v: is_tool_installed(tid, ver))
-            for v in versions
-        }
-    return {"versions": versions, "tools": tools}
+        t["selected"] = t["id"] in selection
+    installed = {
+        v: await loop.run_in_executor(None, lambda ver=v: is_shelf_installed("Maya", ver))
+        for v in versions
+    }
+    return {"versions": versions, "tools": tools, "installed": installed}
 
 
-@router.post("/tools/install")
-async def install_tool(req: ToolInstallRequest) -> dict:
-    """Installe le shelf d'un tool du catalogue pour une version Maya."""
+@router.post("/tools/apply")
+async def apply_tools(req: ToolsApplyRequest) -> dict:
+    """Install the single Flux shelf with the selected tools (persists the choice)."""
     loop = asyncio.get_event_loop()
     ok, msg = await loop.run_in_executor(
-        None, lambda: install_tool_shelf(req.tool_id, req.version))
-    if not ok:
-        raise HTTPException(status_code=500, detail=msg)
-    return {"success": True, "message": msg}
-
-
-@router.post("/tools/remove")
-async def remove_tool(req: ToolInstallRequest) -> dict:
-    """Retire le shelf d'un tool du catalogue pour une version Maya."""
-    loop = asyncio.get_event_loop()
-    ok, msg = await loop.run_in_executor(
-        None, lambda: remove_tool_shelf(req.tool_id, req.version))
+        None, lambda: install_flux_shelf(req.version, req.tool_ids))
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
     return {"success": True, "message": msg}

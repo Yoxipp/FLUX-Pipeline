@@ -26,6 +26,7 @@ _FRONTEND_KEY_MAP: dict[str, str] = {
     "zbrush":             "ZBrush",
     "marvelous":          "Marvelous",
     "photoshop":          "Photoshop",
+    "mari":               "Mari",
 }
 
 
