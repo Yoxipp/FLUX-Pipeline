@@ -47,3 +47,6 @@ INSTALLEURS/
 .flux_tmp_*.json
 backend_port
 flux_dev.log
+
+# Houdini HDA auto-backups (createDigitalAsset)
+backend/resources/shelves/houdini/backup/

@@ -253,7 +253,7 @@ def _menu_str(name, label, default, menu_fn, help_txt):
         string_type=hou.stringParmType.Regular,
         help=help_txt,
     )
-    t.setItemGeneratorScript(f"return hou.phm().{menu_fn}(kwargs[\\'node\\'])")
+    t.setItemGeneratorScript(f"return hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
     t.setItemGeneratorScriptLanguage(_PY)
     return t
 
@@ -285,14 +285,15 @@ _ptg.append(hou.StringParmTemplate(
 _sub.setParmTemplateGroup(_ptg)
 
 # ── 4. Internal passthrough node ──────────────────────────────────────────────
+# The subnet's indirect input (input connector) is not a node — it has no
+# display/render flag — so wire the null straight to it, no setFlag on the input.
 _null = _sub.createNode("null", "OUT")
-_sub.indirectInputs()[0].setFlag(hou.nodeFlag.Display, False)
 try:
     _null.setInput(0, _sub.indirectInputs()[0])
 except Exception:
     pass
-_null.setFlag(hou.nodeFlag.Display, True)
-_null.setFlag(hou.nodeFlag.Render, True)
+_null.setDisplayFlag(True)
+_null.setRenderFlag(True)
 _sub.layoutChildren()
 
 # ── 5. Convert subnet → HDA ───────────────────────────────────────────────────
@@ -307,7 +308,7 @@ _asset = _sub.createDigitalAsset(
 
 # ── 6. Inject PythonModule ────────────────────────────────────────────────────
 _hda_def = hou.hdaDefinition(_CATEGORY, _NODE_NAME, _HDA_PATH)
-_pm_code = """{python_module}"""
+_pm_code = """{{python_module}}"""
 if "PythonModule" in _hda_def.sections():
     _hda_def.sections()["PythonModule"].setContents(_pm_code)
 else:

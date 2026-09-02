@@ -320,7 +320,7 @@ def _menu_str(name, label, default, menu_fn, help_txt):
         string_type=hou.stringParmType.Regular,
         help=help_txt,
     )
-    t.setItemGeneratorScript(f"return hou.phm().{menu_fn}(kwargs[\\'node\\'])")
+    t.setItemGeneratorScript(f"return hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
     t.setItemGeneratorScriptLanguage(_PY)
     return t
 
@@ -442,7 +442,7 @@ _asset = _sub.createDigitalAsset(
 
 # ── 6. Inject PythonModule into the HDA definition ───────────────────────────
 _hda_def = hou.hdaDefinition(_CATEGORY, _NODE_NAME, _HDA_PATH)
-_pm_code = """{python_module}"""
+_pm_code = """{{python_module}}"""
 if "PythonModule" in _hda_def.sections():
     _hda_def.sections()["PythonModule"].setContents(_pm_code)
 else:
