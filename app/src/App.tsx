@@ -43,6 +43,9 @@ function MentionWatcher() {
               duration: 6000,
               action: { label: 'Voir', onClick: () => navigate('/') },
             })
+            // Native Windows notification (bottom-right + system sound), even when
+            // FLUX isn't the focused window.
+            void window.electronAPI?.showNotification?.(`${m.from_user} t'a mentionné`, m.text)
           }
         }
       } catch { /* backend down — retry next tick */ }

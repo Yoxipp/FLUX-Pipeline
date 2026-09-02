@@ -157,7 +157,8 @@ ipcMain.handle('dialog:openFile', async (_event, filters?: { name: string; exten
 ipcMain.handle('app:getVersion', () => app.getVersion())
 
 ipcMain.handle('notification:show', (_event, { title, body }: { title: string; body: string }) => {
-  new Notification({ title, body }).show()
+  // silent:false → Windows plays the default notification sound; icon = app mark.
+  new Notification({ title, body, icon: ICON, silent: false }).show()
 })
 
 ipcMain.handle('shell:openPath', (_event, filePath: string) => {
