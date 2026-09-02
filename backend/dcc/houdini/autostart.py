@@ -17,6 +17,23 @@ from pathlib import Path
 _BLOCK_BEGIN = "# >>> FLUX autostart — do not edit manually"
 _BLOCK_END   = "# <<< FLUX autostart"
 
+# Markers for the FLUX block in houdini.env — never change these.
+# ASCII-only on purpose: houdini.env is parsed by Houdini (not Python), avoid cp1252 risk.
+_ENV_BEGIN = "# >>> FLUX env - do not edit manually"
+_ENV_END   = "# <<< FLUX env"
+
+# houdini.env block. PYTHONNOUSERSITE=1 stops Houdini's embedded Python from adding
+# the per-user site-packages to sys.path. Without it, a pip-installed usd-core in the
+# user site (the FLUX backend runs on the same Python minor as Houdini) gets loaded on
+# top of Houdini's bundled USD → two USD builds → fatal Tf class-wrapper clash that
+# breaks every LOP/USD viewer state. houdini.env is read before Python starts, so the
+# user site is never added. This is the reliable, launch-path-independent fix.
+_ENV_BLOCK = (
+    f"{_ENV_BEGIN}\n"
+    f"PYTHONNOUSERSITE = 1\n"
+    f"{_ENV_END}"
+)
+
 
 # ---------------------------------------------------------------------------
 # Prefs / startup file location
@@ -180,6 +197,64 @@ def _deploy_server(scripts_dir: Path) -> None:
     shutil.copy2(src, scripts_dir / "flux_houdini_server.py")
 
 
+def _write_env_block(prefs_dir: Path) -> bool:
+    """Upsert the FLUX block in prefs_dir/houdini.env. Idempotent. Best-effort.
+
+    Returns True if the block is present after the call, False on write failure.
+    """
+    env_file = prefs_dir / "houdini.env"
+    try:
+        existing = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
+    except OSError:
+        existing = ""
+
+    if _ENV_BEGIN in existing:
+        b_start = existing.find(_ENV_BEGIN)
+        b_end   = existing.find(_ENV_END, b_start)
+        if b_end > b_start:
+            old_fragment = existing[b_start : b_end + len(_ENV_END)]
+            if old_fragment == _ENV_BLOCK:
+                return True  # already current
+            new_content = existing.replace(old_fragment, _ENV_BLOCK)
+        else:
+            new_content = existing  # malformed; fall through to append below
+            if _ENV_END not in existing:
+                new_content = existing + f"\n{_ENV_BLOCK}\n"
+    else:
+        sep = "" if existing.endswith("\n") or not existing else "\n"
+        new_content = f"{existing}{sep}\n{_ENV_BLOCK}\n"
+
+    try:
+        prefs_dir.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(new_content, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _remove_env_block(prefs_dir: Path) -> None:
+    """Remove the FLUX block from prefs_dir/houdini.env, if present."""
+    env_file = prefs_dir / "houdini.env"
+    if not env_file.exists():
+        return
+    try:
+        content = env_file.read_text(encoding="utf-8")
+    except OSError:
+        return
+    if _ENV_BEGIN not in content:
+        return
+    cleaned = re.sub(
+        rf"\n?{re.escape(_ENV_BEGIN)}.*?{re.escape(_ENV_END)}\n?",
+        "",
+        content,
+        flags=re.DOTALL,
+    )
+    try:
+        env_file.write_text(cleaned, encoding="utf-8")
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -231,6 +306,10 @@ def _install_to(prefs_dir: Path) -> dict:
         _deploy_server(scripts)
     except Exception as exc:
         return {"success": False, "message": f"Failed to deploy server: {exc}", "path": None}
+
+    # Neutralise the user-site USD clash (see _ENV_BLOCK). Best-effort: a failure here
+    # must not block the autostart install, which is the primary contract.
+    _write_env_block(prefs_dir)
 
     startup = scripts / "123.py"
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
@@ -296,6 +375,7 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
     """Remove the FLUX autostart block from 123.py in every prefs dir."""
     removed_any = False
     for prefs_dir in _all_prefs_dirs(houdini_exe_path):
+        _remove_env_block(prefs_dir)
         startup = prefs_dir / "scripts" / "123.py"
         if not startup.exists():
             continue
