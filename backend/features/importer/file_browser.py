@@ -6,7 +6,7 @@ from pathlib import Path
 
 from core.constants import JSON_MODIF_LOG
 from core.paths import is_subpath
-from features.publisher.modif_log import get_logs_for_file, read_logs
+from features.publisher.modif_log import get_logs_for_file
 from features.folder_manager.naming_validator import get_base_name
 from core.logger import get_logger
 

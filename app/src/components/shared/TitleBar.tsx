@@ -39,6 +39,15 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
 }
 
 
+// Console log levels the user can recolor + a theme-neutral swatch default shown
+// when there is no override yet (picking one writes the override).
+const LOG_LEVELS: { key: string; labelKey: string; def: string }[] = [
+  { key: 'debug',   labelKey: 'log.debug',   def: '#7a7f87' },
+  { key: 'info',    labelKey: 'log.info',    def: '#c8ccd4' },
+  { key: 'warning', labelKey: 'log.warning', def: '#f5a623' },
+  { key: 'error',   labelKey: 'log.error',   def: '#e5484d' },
+]
+
 /* ── popover paramètres ── */
 function SettingsPopover({ username }: { username: string }) {
   const { t, lang, setLang } = useI18n()
@@ -46,6 +55,7 @@ function SettingsPopover({ username }: { username: string }) {
   const [version, setVersion]       = useState('')
   const [changing, setChanging]     = useState(false)
   const [accentKey, setAccentKey]   = useState('orange')
+  const [logColors, setLogColors]   = useState<Record<string, string>>({})
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -53,6 +63,7 @@ function SettingsPopover({ username }: { username: string }) {
       const stored = s.theme?.accent ?? 'orange'
       const key = ACCENT_PRESETS.some(p => p.key === stored) ? stored : 'orange'
       setAccentKey(key)
+      setLogColors(s.log_colors ?? {})
     }).catch(() => {})
     window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
   }, [])
@@ -62,6 +73,15 @@ function SettingsPopover({ username }: { username: string }) {
     applyAccentPreset(key)
     void api.updateSettings({ theme_accent: key })
   }
+
+  // Persist + broadcast console log-color overrides so the Console updates live.
+  const pushLogColors = (next: Record<string, string>) => {
+    setLogColors(next)
+    window.dispatchEvent(new CustomEvent('flux:log-colors', { detail: next }))
+    void api.updateSettings({ log_colors: next })
+  }
+  const handleLogColor = (level: string, color: string) => pushLogColors({ ...logColors, [level]: color })
+  const handleResetLogColors = () => pushLogColors({})
 
   const handleResetUi = () => {
     try { localStorage.removeItem('flux.ui.publisherRightWidth') } catch { /* blocked storage */ }
@@ -165,6 +185,37 @@ function SettingsPopover({ username }: { username: string }) {
               />
             )
           })}
+        </div>
+      </div>
+
+      {/* couleurs des logs */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>{t('settings.logColors')}</div>
+          {Object.keys(logColors).length > 0 && (
+            <span
+              onClick={handleResetLogColors}
+              style={{ fontSize: 9, color: 'var(--ink-4)', cursor: 'pointer' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--accent-hi)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--ink-4)' }}
+            >{t('settings.logColorsReset')}</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {LOG_LEVELS.map(l => (
+            <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="color"
+                value={logColors[l.key] || l.def}
+                onChange={e => handleLogColor(l.key, e.target.value)}
+                style={{ width: 26, height: 20, padding: 0, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'transparent', cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--ink-2)', flex: 1 }}>{t(l.labelKey)}</span>
+              {logColors[l.key] && (
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>{logColors[l.key]}</span>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 

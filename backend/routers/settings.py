@@ -34,6 +34,7 @@ class SettingsUpdate(BaseModel):
     username: str | None = None
     workspace: str | None = None   # change le répertoire du pipe
     language: str | None = None    # UI language: "fr" | "en"
+    log_colors: dict | None = None  # console log-color overrides {level: color}
 
 
 @router.get("")
@@ -48,6 +49,7 @@ async def get_settings() -> dict:
 
     dcc_paths = await loop.run_in_executor(None, lambda: config.get("dcc_paths", {}))
     language = await loop.run_in_executor(None, lambda: config.get("language", "fr"))
+    log_colors = await loop.run_in_executor(None, config.get_log_colors)
 
     return {
         "first_launch": is_first,
@@ -57,6 +59,7 @@ async def get_settings() -> dict:
         "last_project": last_proj,
         "dcc_paths":    dcc_paths,
         "language":     language,
+        "log_colors":   log_colors,
     }
 
 
@@ -109,6 +112,9 @@ async def update_settings(req: SettingsUpdate) -> dict:
     if req.language:
         lang = req.language if req.language in ("fr", "en") else "fr"
         await loop.run_in_executor(None, lambda: config.set("language", lang))
+
+    if req.log_colors is not None:
+        await loop.run_in_executor(None, lambda: config.set_log_colors(req.log_colors))
 
     if req.dcc_path:
         for dcc_name, path in req.dcc_path.items():

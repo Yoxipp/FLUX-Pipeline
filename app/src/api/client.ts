@@ -8,7 +8,6 @@ import type {
   HoudiniPublishPayload,
   HoudiniPublishResult,
   HoudiniState,
-  ModifLog,
   PublishPayload,
   PublishResult,
   Settings,
@@ -84,6 +83,7 @@ export const api = {
     theme_bg: string; theme_surface: string; theme_fg: string; theme_accent: string
     last_project: string; dcc_path: Record<string, string>
     username: string; workspace: string; language: 'fr' | 'en'
+    log_colors: Record<string, string>
   }>) => apiCall<{ success: boolean }>('PUT', '/settings', patch),
 
   listUsers: () =>
@@ -205,10 +205,6 @@ export const api = {
   cancelZBrush: () =>
     apiCall<{ cancelled: boolean }>('POST', '/dcc/zbrush/cancel'),
 
-  // Importer — local-file → DCC import (folder browsing now lives in Folder Manager)
-  importFiles: (dcc: string, file_paths: string[], project_name?: string) =>
-    apiCall<{ results: { path: string; success: boolean }[] }>('POST', '/import', { dcc, file_paths, project_name }),
-
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
     const qs = new URLSearchParams()
@@ -240,9 +236,6 @@ export const api = {
   // Files
   browseProject: (project_name: string, subpath?: string) =>
     apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
-
-  getModifLogs: (project_name: string, subpath?: string) =>
-    apiCall<{ logs: ModifLog[] }>('GET', `/files/projects/${project_name}/logs${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
 
   // Folder Manager
   getTokens: (project: string) =>
@@ -286,9 +279,6 @@ export const api = {
 
   createShot: (project: string, seq_number: number, shot_number: number) =>
     apiCall<{ seq_number: number; shot_number: number; path: string }>('POST', '/folder/shots', { project, seq_number, shot_number }),
-
-  addToken: (payload: { project: string; token_type: string; token_value: string; rel_path?: string }) =>
-    apiCall<{ success: boolean; token_type: string; token_value: string }>('POST', '/folder/tokens', payload),
 
   createDirectory: (project: string, subpath: string[], name: string, token?: string, token_type?: string) =>
     apiCall<{ name: string; path: string; rel_path: string }>('POST', '/folder/directory', {

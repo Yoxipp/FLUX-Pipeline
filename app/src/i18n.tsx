@@ -41,7 +41,13 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'settings.interface':      { fr: 'INTERFACE',                en: 'INTERFACE' },
   'settings.resetUi':        { fr: "Réinitialiser l'interface", en: 'Reset the interface' },
   'settings.language':       { fr: 'LANGUE',                   en: 'LANGUAGE' },
+  'settings.logColors':      { fr: 'COULEURS DES LOGS',        en: 'LOG COLORS' },
+  'settings.logColorsReset': { fr: 'Réinitialiser',           en: 'Reset' },
   'settings.version':        { fr: 'VERSION',                  en: 'VERSION' },
+  'log.debug':               { fr: 'Debug',                    en: 'Debug' },
+  'log.info':                { fr: 'Info',                     en: 'Info' },
+  'log.warning':             { fr: 'Warning',                  en: 'Warning' },
+  'log.error':               { fr: 'Erreur',                   en: 'Error' },
 
   // nav / sidebar
   'nav.home':                { fr: 'Accueil',                  en: 'Home' },

@@ -16,12 +16,27 @@ const FILTERS: { key: FilterKey; label: string; min: number }[] = [
   { key: 'error', label: 'Erreur', min: 40 },
 ]
 
-function levelColor(levelno: number): string {
-  if (levelno >= 50) return '#ff5f57'          // critical
-  if (levelno >= 40) return '#e5484d'          // error
-  if (levelno >= 30) return '#f5a623'          // warning
-  if (levelno >= 20) return 'var(--ink-2)'     // info
-  return 'var(--ink-4)'                         // debug
+// Default level colors (theme-aware CSS vars for info/debug). User overrides from
+// Settings replace a level's color; critical stays fixed and non-configurable.
+const DEFAULT_LEVEL_COLORS: Record<LevelKey, string> = {
+  error:   '#e5484d',
+  warning: '#f5a623',
+  info:    'var(--ink-2)',
+  debug:   'var(--ink-4)',
+}
+type LevelKey = 'error' | 'warning' | 'info' | 'debug'
+
+function levelKey(levelno: number): LevelKey {
+  if (levelno >= 40) return 'error'
+  if (levelno >= 30) return 'warning'
+  if (levelno >= 20) return 'info'
+  return 'debug'
+}
+
+function levelColor(levelno: number, overrides: Record<string, string>): string {
+  if (levelno >= 50) return '#ff5f57'          // critical stays distinct
+  const key = levelKey(levelno)
+  return overrides[key] || DEFAULT_LEVEL_COLORS[key]
 }
 
 function fmtTime(ts: number): string {
@@ -36,6 +51,16 @@ export function Console() {
   const [filter, setFilter]     = useState<FilterKey>('all')
   const [copied, setCopied]     = useState(false)
   const [hov, setHov]           = useState(false)
+  const [logColors, setLogColors] = useState<Record<string, string>>({})
+
+  // Load console color overrides from settings; live-update when Settings edits them.
+  useEffect(() => {
+    let alive = true
+    api.getSettings().then(s => { if (alive) setLogColors(s.log_colors ?? {}) }).catch(() => {})
+    const onChange = (e: Event) => setLogColors(((e as CustomEvent).detail as Record<string, string>) ?? {})
+    window.addEventListener('flux:log-colors', onChange as EventListener)
+    return () => { alive = false; window.removeEventListener('flux:log-colors', onChange as EventListener) }
+  }, [])
 
   const lastId       = useRef(0)   // highest id fetched
   const seenErrorId  = useRef(0)   // highest id acknowledged (badge baseline)
@@ -217,7 +242,7 @@ export function Console() {
                 }}>
                   <span style={{ color: 'var(--ink-4)', flexShrink: 0 }}>{fmtTime(r.ts)}</span>
                   <span style={{
-                    color: levelColor(r.levelno), flexShrink: 0, width: 58,
+                    color: levelColor(r.levelno, logColors), flexShrink: 0, width: 58,
                     fontWeight: r.levelno >= 40 ? 600 : 400,
                   }}>{r.level}</span>
                   <span style={{ color: 'var(--ink)', flex: 1 }}>

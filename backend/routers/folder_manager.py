@@ -353,31 +353,6 @@ async def post_directory(req: DirectoryCreate) -> dict:
     return {"name": req.name, "path": str(dir_path), "rel_path": rel_created}
 
 
-# ── Tokens ────────────────────────────────────────────────────────────────────
-
-class TokenAdd(BaseModel):
-    project:     str
-    token_type:  str   # CLASS / TYPE / NAME / INSTANCE / custom
-    token_value: str   # formatted token key (e.g. "FX", "HERO")
-    rel_path:    str = ""   # relative path inside project; defaults to token_value.lower()
-
-
-@router.post("/tokens")
-async def post_token(req: TokenAdd) -> dict:
-    """Register a token entry in tokens.json without touching the filesystem."""
-    project_path = get_project_path(req.project)
-    if not project_path.exists():
-        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
-    if not req.token_value.strip():
-        raise HTTPException(status_code=400, detail="token_value est requis")
-    rel = req.rel_path.strip() or req.token_value.lower()
-    loop = asyncio.get_event_loop()
-    ok = await loop.run_in_executor(
-        None, lambda: add_token(project_path, req.token_type, req.token_value, rel)
-    )
-    return {"success": ok, "token_type": req.token_type, "token_value": req.token_value}
-
-
 # ── Rename / Move ─────────────────────────────────────────────────────────────
 
 class ItemPatch(BaseModel):

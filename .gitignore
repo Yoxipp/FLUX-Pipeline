@@ -15,6 +15,7 @@ build/
 
 # Electron / TypeScript build artifacts
 tsconfig.electron.tsbuildinfo
+dist-electron/
 
 # electron-builder output
 release/

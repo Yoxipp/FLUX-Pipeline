@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from core import config
 from core.logger import get_logger
-from routers import activity, dcc, files, folder_manager, importer, logs, publish, settings, shelf, usd_assembler
+from routers import activity, dcc, files, folder_manager, logs, publish, settings, shelf, usd_assembler
 
 log = get_logger("main")
 
@@ -57,7 +57,6 @@ app.add_middleware(
 
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])
 app.include_router(publish.router,        prefix="/publish",        tags=["Publisher"])
-app.include_router(importer.router,       prefix="/import",         tags=["Importer"])
 app.include_router(activity.router,       prefix="/activity",       tags=["Activity"])
 app.include_router(files.router,          prefix="/files",          tags=["Files"])
 app.include_router(settings.router,       prefix="/settings",       tags=["Settings"])

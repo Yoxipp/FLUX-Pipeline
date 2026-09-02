@@ -132,6 +132,34 @@ def set_theme(bg: str, surface: str, fg: str, accent: str) -> None:
     _save(cfg)
 
 
+# Log levels the console lets the user recolor. Anything else (e.g. critical)
+# falls back to the frontend's theme-driven default.
+_LOG_COLOR_LEVELS = ("debug", "info", "warning", "error")
+
+
+def get_log_colors() -> dict:
+    """Return the user's console log-color overrides, keyed by level name.
+
+    Empty when the user kept the defaults — the frontend then uses its own
+    theme-aware colors, so nothing is forced here.
+    """
+    raw = get("log_colors", {}) or {}
+    return {
+        k: v for k, v in raw.items()
+        if k in _LOG_COLOR_LEVELS and isinstance(v, str) and v
+    }
+
+
+def set_log_colors(colors: dict) -> None:
+    """Persist console log-color overrides (only known levels, non-empty strings)."""
+    cfg = _load()
+    cfg["log_colors"] = {
+        k: v for k, v in (colors or {}).items()
+        if k in _LOG_COLOR_LEVELS and isinstance(v, str) and v
+    }
+    _save(cfg)
+
+
 def get_dcc_exe(dcc_name: str) -> str | None:
     return get("dcc_paths", {}).get(dcc_name)
 

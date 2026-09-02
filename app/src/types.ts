@@ -47,15 +47,6 @@ export interface FileEntry {
   is_dir: boolean
 }
 
-export interface ModifLog {
-  name: string
-  date: string
-  time: string
-  version: string
-  modification: string
-  user: string
-}
-
 export interface Settings {
   first_launch: boolean
   workspace: string | null
@@ -69,6 +60,9 @@ export interface Settings {
   last_project: string | null
   dcc_paths: Record<string, string>
   language?: 'fr' | 'en'
+  // Console log-color overrides, keyed by level (debug/info/warning/error).
+  // Absent/empty means the console uses its own theme-aware defaults.
+  log_colors?: Record<string, string>
 }
 
 export interface PublishPayload {
