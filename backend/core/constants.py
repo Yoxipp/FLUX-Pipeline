@@ -85,9 +85,9 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
 }
 
 # Default TYPE token map (Task → asset-relative top-level sub-folder).
-# The Publisher exposes exactly these 6 coarse tasks (fixed order), matching the
+# The Publisher exposes exactly these coarse tasks (fixed order), matching the
 # CHAR asset scaffold (model / shading / groom / rig / CFX_Rig). "mult" is a
-# catch-all created on demand.
+# catch-all created on demand; "reference" holds reference files (photos, docs…).
 DEFAULT_TYPE_TOKENS: dict[str, str] = {
     "GEO":     "model",
     "SHADING": "shading",
@@ -95,6 +95,7 @@ DEFAULT_TYPE_TOKENS: dict[str, str] = {
     "RIG":     "rig",
     "CFX":     "CFX_Rig",
     "MULT":    "mult",
+    "REF":     "reference",
 }
 
 # Predefined anim instances (sub-folders inside /anim/)

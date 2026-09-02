@@ -76,12 +76,35 @@ function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRe
   )
 }
 
-function NavGroup({ title, children, open = true }: {
-  title: string; children: React.ReactNode; open?: boolean
+function NavGroup({ title, children, defaultOpen = true }: {
+  title: string; children: React.ReactNode; defaultOpen?: boolean
 }) {
+  // Collapsed state is per-group and persisted so it survives navigation/reload.
+  const lsKey = `flux.sidebar.group.${title}`
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem(lsKey)
+      if (v === 'open') return true
+      if (v === 'closed') return false
+    } catch { /* blocked storage */ }
+    return defaultOpen
+  })
+
+  const toggle = () => {
+    setOpen(prev => {
+      const next = !prev
+      try { localStorage.setItem(lsKey, next ? 'open' : 'closed') } catch { /* blocked */ }
+      return next
+    })
+  }
+
   return (
     <div style={{ marginTop: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px 3px' }}>
+      <div
+        onClick={toggle}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px 3px', cursor: 'pointer', userSelect: 'none' }}
+        title={open ? 'Replier' : 'Déplier'}
+      >
         <div className="cap" style={{ flex: 1 }}>{title}</div>
         {open
           ? <ChevronDown size={10} strokeWidth={2} color="var(--ink-4)" />

@@ -13,7 +13,6 @@ import { useDccStatus } from '../hooks/useDccStatus'
 
 // DCCs the backend can import into (from the Folder Manager). Others have no
 // import bridge yet, so they never appear in "Ouvrir dans…".
-const IMPORT_DCCS = ['Maya', 'Houdini'] as const
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -781,7 +780,7 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, onOpenInHoudini, onOpenInMaya, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, openInTargets, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -796,8 +795,8 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
   onMove:           () => void
   onDelete:         () => void
   onCopyPath?:      () => void
-  onOpenInHoudini?: () => void
-  onOpenInMaya?:    () => void
+  // Every currently-connected, import-capable DCC for this item (built from live status).
+  openInTargets?:   { dcc: string; onClick: () => void }[]
   onClose:          () => void
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -869,7 +868,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
           {!locked && row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
         </>
       )}
-      {(onOpenInHoudini || onOpenInMaya) && (
+      {openInTargets && openInTargets.length > 0 && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           <div
@@ -894,9 +893,10 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
                 borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 140,
                 overflow: 'hidden', paddingBlock: 4, zIndex: 1001,
               }}>
-                {onOpenInHoudini && (
+                {openInTargets.map(target => (
                   <div
-                    onClick={() => { onOpenInHoudini(); onClose() }}
+                    key={target.dcc}
+                    onClick={() => { target.onClick(); onClose() }}
                     style={{
                       padding: '6px 12px', fontSize: 11, cursor: 'pointer',
                       color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
@@ -905,23 +905,9 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
                     onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                   >
-                    Houdini
+                    {target.dcc}
                   </div>
-                )}
-                {onOpenInMaya && (
-                  <div
-                    onClick={() => { onOpenInMaya(); onClose() }}
-                    style={{
-                      padding: '6px 12px', fontSize: 11, cursor: 'pointer',
-                      color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
-                      transition: 'background 0.06s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    Maya
-                  </div>
-                )}
+                ))}
               </div>
             )}
           </div>
@@ -1106,9 +1092,6 @@ export function Projects() {
   const dccStatus = useDccStatus()
   const location = useLocation()
 
-  // Local-file → DCC import (migrated from the old Importer page)
-  const [localDcc, setLocalDcc]             = useState<string>('Maya')
-  const [localImporting, setLocalImporting] = useState(false)
   useEffect(() => {
     if (settings?.last_project) setActiveProject(settings.last_project)
   }, [settings?.last_project])
@@ -1671,6 +1654,23 @@ export function Projects() {
     }
   }, [nav])
 
+  // "Open in" targets = every currently-CONNECTED DCC that can import this file.
+  // Only Maya & Houdini have an import bridge today; add a branch here to onboard more.
+  const buildOpenInTargets = useCallback((items: ExplorerItem[]): { dcc: string; onClick: () => void }[] => {
+    if (nav.kind !== 'inside' || items.length !== 1) return []
+    const item = items[0]
+    if (item.isDir) return []
+    const ext = '.' + (item.name.split('.').pop() ?? '').toLowerCase()
+    const targets: { dcc: string; onClick: () => void }[] = []
+    if (dccStatus['Houdini']?.connected) {
+      targets.push({ dcc: 'Houdini', onClick: () => void handleOpenInHoudini(item) })
+    }
+    if (dccStatus['Maya']?.connected && MAYA_IMPORT_EXTS.has(ext)) {
+      targets.push({ dcc: 'Maya', onClick: () => void handleOpenInMaya(item) })
+    }
+    return targets
+  }, [nav, dccStatus, handleOpenInHoudini, handleOpenInMaya, MAYA_IMPORT_EXTS])
+
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
     const undoActions: UndoAction[] = []
@@ -1851,28 +1851,6 @@ export function Projects() {
     }
   }, [nav, settings?.workspace])
 
-  // Local-file import into a DCC (native picker → /import). Migrated from Importer.
-  const handleLocalImport = useCallback(async () => {
-    const picked = await window.electronAPI?.openFile?.([
-      { name: 'Fichiers 3D', extensions: ['mb', 'ma', 'abc', 'fbx', 'obj', 'usd', 'usda', 'usdc', 'usdz'] },
-      { name: 'Tous les fichiers', extensions: ['*'] },
-    ])
-    if (!picked) return
-    const proj = navProject || activeProject
-    setLocalImporting(true)
-    try {
-      const res = await api.importFiles(localDcc, [picked], proj || undefined)
-      const ok = res.results.filter(r => r.success).length
-      const name = picked.split(/[\\/]/).pop() ?? picked
-      if (ok > 0) toast.success(`${name} → ${localDcc}`)
-      else        toast.error(`Échec import : vérifie que ${localDcc} est connecté (bridge FLUX actif)`)
-    } catch (e) {
-      toast.error('Erreur : ' + (e instanceof Error ? e.message : 'inconnue'))
-    } finally {
-      setLocalImporting(false)
-    }
-  }, [localDcc, navProject, activeProject])
-
   const recentSidebarItems = recents.slice(0, 5)
 
   return (
@@ -1882,19 +1860,6 @@ export function Projects() {
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Folder Manager</div>
         <div style={{ flex: 1 }} />
-        {/* Import fichier local → DCC (migré de l'ancien Importer) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ width: 104 }}>
-            <SelectEl options={[...IMPORT_DCCS]} value={localDcc} onChange={setLocalDcc} />
-          </div>
-          <div
-            className="btn ghost"
-            onClick={() => { if (!localImporting) void handleLocalImport() }}
-            style={{ cursor: localImporting ? 'default' : 'pointer', opacity: localImporting ? 0.6 : 1, whiteSpace: 'nowrap' }}
-          >
-            {localImporting ? 'Import…' : 'Fichier local…'}
-          </div>
-        </div>
       </div>
 
       {/* Barre de navigation */}
@@ -2366,22 +2331,7 @@ export function Projects() {
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
-          onOpenInHoudini={
-            nav.kind === 'inside' &&
-            ctxMenu.items.length === 1 &&
-            !!dccStatus['Houdini']?.connected   // only when Houdini is actually available
-              ? () => void handleOpenInHoudini(ctxMenu.items[0])
-              : undefined
-          }
-          onOpenInMaya={
-            nav.kind === 'inside' &&
-            ctxMenu.items.length === 1 &&
-            !ctxMenu.items[0].isDir &&
-            !!dccStatus['Maya']?.connected &&   // only when Maya is actually available
-            MAYA_IMPORT_EXTS.has('.' + (ctxMenu.items[0].name.split('.').pop() ?? '').toLowerCase())
-              ? () => void handleOpenInMaya(ctxMenu.items[0])
-              : undefined
-          }
+          openInTargets={buildOpenInTargets(ctxMenu.items)}
           onClose={() => setCtxMenu(null)}
         />
       )}

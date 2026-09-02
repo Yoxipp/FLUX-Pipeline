@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2 } from 'lucide-react'
+import { Trash2, FolderOpen } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, FolderIcon, Check, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
@@ -216,6 +216,7 @@ const ASSET_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX'] as const
 const ASSET_TASKS: { value: string; label: string }[] = [
   { value: 'GEO', label: 'Geo' }, { value: 'SHADING', label: 'Shading' }, { value: 'GROOM', label: 'Groom' },
   { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' }, { value: 'MULT', label: 'Mult' },
+  { value: 'REF', label: 'Ref' },
 ]
 
 // Info popover copy for each token (explanation · expected · concrete example).
@@ -223,7 +224,7 @@ interface TokenInfo { title: string; desc: string; expected: string; example: st
 const TOKEN_INFO: Record<string, TokenInfo> = {
   category: { title: 'Catégorie', desc: "Le type d'asset dans le pipeline.", expected: 'CHAR, PROPS, ENV ou FX', example: 'CHAR → assets/chara' },
   name:     { title: 'Name', desc: "Le nom de l'asset. Seuls les noms de la catégorie choisie sont proposés.", expected: 'Nom court, sans espace', example: 'JEROME' },
-  task:     { title: 'Task', desc: "L'étape de production — détermine le sous-dossier de l'asset.", expected: 'Geo, Shading, Groom, Rig, Cfx ou Mult', example: 'Rig → assets/chara/JEROME/rig' },
+  task:     { title: 'Task', desc: "L'étape de production — détermine le sous-dossier de l'asset.", expected: 'Geo, Shading, Groom, Rig, Cfx, Mult ou Ref', example: 'Rig → assets/chara/JEROME/rig' },
   instance: { title: 'Instance', desc: 'Sous-variante fonctionnelle. Suggestions basées sur Catégorie + Name + Task.', expected: 'Champ libre (null par défaut)', example: 'CHAR_RIG_JEROME_null_LAST' },
   variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
   seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ###', example: 'SEQ001' },
@@ -1153,18 +1154,41 @@ export function Publisher() {
             ) : dcc === 'Fichier local' ? (
               <div>
                 <div className="cap" style={{ marginBottom: 6 }}>FICHIER SOURCE</div>
-                <input
-                  value={sourcePath}
-                  onChange={e => setSourcePath(e.target.value)}
-                  placeholder="Chemin absolu vers le fichier à publier…"
-                  style={{
-                    width: '100%', height: 28,
-                    background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
-                    boxShadow: 'var(--shadow-inset)', outline: 'none',
-                  }}
-                />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    value={sourcePath}
+                    onChange={e => setSourcePath(e.target.value)}
+                    placeholder="Chemin absolu vers le fichier à publier…  (tout type)"
+                    style={{
+                      flex: 1, minWidth: 0, height: 28,
+                      background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                      borderRadius: 5, padding: '0 8px',
+                      fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
+                      boxShadow: 'var(--shadow-inset)', outline: 'none',
+                    }}
+                  />
+                  <div
+                    onClick={async () => {
+                      // Native Windows file picker — any file type (photos, docs, 3D…).
+                      const picked = await window.electronAPI?.openFile?.([
+                        { name: 'Tous les fichiers', extensions: ['*'] },
+                      ])
+                      if (picked) setSourcePath(picked)
+                    }}
+                    className="scale-hover"
+                    title="Parcourir…"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+                      height: 28, padding: '0 10px', borderRadius: 5,
+                      border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
+                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 10,
+                      boxShadow: 'var(--shadow-xs)',
+                    }}
+                  >
+                    <FolderOpen size={12} strokeWidth={1.75} />
+                    Parcourir
+                  </div>
+                </div>
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
@@ -1232,7 +1256,9 @@ export function Publisher() {
             </div>
           )}
 
-          {/* FORMAT */}
+          {/* FORMAT — hidden for a local file: the format is the picked file's own
+              extension (backend infers it from source_path), so we never ask. */}
+          {dcc !== 'Fichier local' && (
           <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
             <SecTitle>FORMAT</SecTitle>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1248,6 +1274,7 @@ export function Publisher() {
               ))}
             </div>
           </div>
+          )}
 
           {/* SÉQUENCE ANIMÉE — ZBrush: never; Maya: .abc only; Houdini: always */}
           <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 0.35 : 1, pointerEvents: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 'none' : undefined }}>
