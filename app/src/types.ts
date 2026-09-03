@@ -184,9 +184,12 @@ export interface ProductionAssetGroup {
 export interface ProductionSequence {
   id: string
   name: string                    // SEQ001
+  label?: string                  // free-form user label (e.g. "opening bar")
   order: number
+  origin?: 'user' | 'auto'
   tasks: ProductionTask[]
   assets: { id: string; ref: string }[]
+  task_details?: Record<string, ProductionTaskDetail>
   notes?: string
 }
 
@@ -194,7 +197,9 @@ export interface ProductionShot {
   id: string
   seq_id: string
   name: string                    // SHOT010
+  label?: string                  // free-form user label
   order: number
+  origin?: 'user' | 'auto'
   inherit_tasks: boolean
   inherit_assets: boolean
   tasks: ProductionTask[]
@@ -224,7 +229,9 @@ export interface ProductionPublish {
 
 export interface ProductionPayload {
   production: ProductionState
-  publishes_by_task: Record<string, ProductionPublish[]>   // "<asset_id>|<task_id>"
+  publishes_by_task: Record<string, ProductionPublish[]>   // "<entity_id>|<task_id>"
   publishes_unmatched: ActivityEvent[]
+  sequences_on_disk?: string[]              // seq names present on disk
+  shots_on_disk?: Array<[string, string]>   // [seq_name, shot_name] pairs on disk
 }
 

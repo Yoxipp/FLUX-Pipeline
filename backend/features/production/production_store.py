@@ -98,6 +98,54 @@ def find_asset(data: dict, class_token: str, name: str) -> dict | None:
     return None
 
 
+def add_sequence(data: dict, name: str, origin: str = "user") -> dict:
+    seq = {
+        "id": new_id("seq"),
+        "name": name.upper(),
+        "order": len(data["sequences"]),
+        "origin": origin,
+        "tasks": [],
+        "assets": [],
+        "task_details": {},
+        "notes": "",
+    }
+    data["sequences"].append(seq)
+    return seq
+
+
+def find_sequence(data: dict, name: str) -> dict | None:
+    nm = name.upper()
+    for s in data["sequences"]:
+        if s.get("name") == nm:
+            return s
+    return None
+
+
+def add_shot(data: dict, seq_id: str, name: str, origin: str = "user") -> dict:
+    shot = {
+        "id": new_id("shot"),
+        "seq_id": seq_id,
+        "name": name.upper(),
+        "order": len([s for s in data["shots"] if s.get("seq_id") == seq_id]),
+        "origin": origin,
+        "inherit_tasks": True,
+        "inherit_assets": True,
+        "tasks": [],
+        "assets": [],
+        "task_details": {},
+    }
+    data["shots"].append(shot)
+    return shot
+
+
+def find_shot(data: dict, seq_id: str, name: str) -> dict | None:
+    nm = name.upper()
+    for s in data["shots"]:
+        if s.get("seq_id") == seq_id and s.get("name") == nm:
+            return s
+    return None
+
+
 def add_asset_group(data: dict, class_token: str, name: str) -> dict:
     grp = {
         "id": new_id("g"),

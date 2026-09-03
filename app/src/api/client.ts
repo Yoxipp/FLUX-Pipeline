@@ -449,6 +449,8 @@ export const api = {
     name?: string
     seq_number?: number
     shot_number?: number
+    update?: boolean
+    shot_numbers?: number[]
   }) =>
     apiCall<{ success: boolean; kind: string; path: string }>(
       'POST', `/production/${encodeURIComponent(project)}/materialize`, payload),

@@ -20,6 +20,8 @@ export interface UseProductionResult {
   setState: (patch: (prev: ProductionState) => ProductionState) => void
   publishesByTask: Record<string, ProductionPublish[]>
   publishesUnmatched: number
+  sequencesOnDisk: Set<string>
+  shotsOnDisk: Set<string>            // "SEQxxx|SHOTxxx"
   loading: boolean
   reload: () => Promise<void>
 }
@@ -28,6 +30,8 @@ export function useProduction(project: string | null | undefined): UseProduction
   const [state, setStateRaw]         = useState<ProductionState>(EMPTY_STATE)
   const [publishesByTask, setPublishesByTask] = useState<Record<string, ProductionPublish[]>>({})
   const [publishesUnmatched, setPublishesUnmatched] = useState<number>(0)
+  const [sequencesOnDisk, setSequencesOnDisk] = useState<Set<string>>(new Set())
+  const [shotsOnDisk, setShotsOnDisk] = useState<Set<string>>(new Set())
   const [loading, setLoading]        = useState(false)
   const loaded                       = useRef(false)
   const projectRef                   = useRef<string | null | undefined>(project)
@@ -40,12 +44,16 @@ export function useProduction(project: string | null | undefined): UseProduction
       setStateRaw(r.production)
       setPublishesByTask(r.publishes_by_task || {})
       setPublishesUnmatched((r.publishes_unmatched || []).length)
+      setSequencesOnDisk(new Set((r.sequences_on_disk || []).map(s => s.toUpperCase())))
+      setShotsOnDisk(new Set((r.shots_on_disk || []).map(([sq, sh]) => `${sq.toUpperCase()}|${sh.toUpperCase()}`)))
       loaded.current = true
     } catch {
       // backend down / project gone — leave empty state so UI never explodes
       setStateRaw(EMPTY_STATE)
       setPublishesByTask({})
       setPublishesUnmatched(0)
+      setSequencesOnDisk(new Set())
+      setShotsOnDisk(new Set())
     } finally {
       setLoading(false)
     }
@@ -60,6 +68,8 @@ export function useProduction(project: string | null | undefined): UseProduction
       setStateRaw(EMPTY_STATE)
       setPublishesByTask({})
       setPublishesUnmatched(0)
+      setSequencesOnDisk(new Set())
+      setShotsOnDisk(new Set())
       return
     }
     void reload()
@@ -90,5 +100,5 @@ export function useProduction(project: string | null | undefined): UseProduction
     return () => clearTimeout(t)
   }, [state, project])
 
-  return { state, setState, publishesByTask, publishesUnmatched, loading, reload }
+  return { state, setState, publishesByTask, publishesUnmatched, sequencesOnDisk, shotsOnDisk, loading, reload }
 }

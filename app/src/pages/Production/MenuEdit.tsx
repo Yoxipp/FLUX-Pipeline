@@ -3,14 +3,16 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Copy, FolderPlus, HardDriveDownload, Plus, Trash2 } from 'lucide-react'
+import { Check, Copy, FolderPlus, HardDriveDownload, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import type {
   ProductionAsset as Asset,
-  ProductionAssetGroup, ProductionPublish, ProductionState, ProductionTask,
+  ProductionAssetGroup, ProductionPublish,
+  ProductionSequence, ProductionShot,
+  ProductionState, ProductionTask,
 } from '../../types'
-import { CATEGORY_ORDER, categoryColor } from './util'
+import { CATEGORY_ORDER, categoryColor, categoryLabelKey } from './util'
 import { ProdBtn } from './ProdButtons'
 import type { Selection } from './Production'
 
@@ -23,6 +25,8 @@ interface Props {
   mode:            'asset' | 'shot'
   activeCategory:  string | null
   publishesByTask: Record<string, ProductionPublish[]>
+  sequencesOnDisk?: Set<string>
+  shotsOnDisk?:    Set<string>              // "SEQxxx|SHOTxxx"
 }
 
 const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`
@@ -30,6 +34,7 @@ const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2,
 export function MenuEdit({
   project, state, setState, selection, setSelection, mode,
   activeCategory, publishesByTask,
+  sequencesOnDisk, shotsOnDisk,
 }: Props) {
   // Load TASK/TYPE tokens from the project (defaults + custom in tokens.json).
   const [projectTaskTokens, setProjectTaskTokens] = useState<string[]>([])
@@ -47,10 +52,31 @@ export function MenuEdit({
   const selectedGroup = selection.kind === 'group'
     ? state.asset_groups.find(g => g.id === selection.id) ?? null
     : null
+  const selectedSeq = selection.kind === 'seq'
+    ? state.sequences.find(s => s.id === selection.id) ?? null
+    : null
+  const selectedShot = selection.kind === 'shot'
+    ? state.shots.find(s => s.id === selection.id) ?? null
+    : null
 
-  if (mode === 'shot') {
-    return <div style={_pad}><div style={_hint}>Éditeur SHOT — Phase 2</div></div>
-  }
+  // Shot task tokens: shot CLASS tokens (templated with {seq}{shot}).
+  const [shotClassTokens, setShotClassTokens] = useState<string[]>([])
+  useEffect(() => {
+    let alive = true
+    if (mode !== 'shot') return () => { alive = false }
+    api.getTokens(project)
+      .then(r => {
+        if (!alive) return
+        const cls = (r.tokens?.CLASS ?? {}) as Record<string, string>
+        const shotTokens = Object.entries(cls)
+          .filter(([, path]) => typeof path === 'string' && path.includes('{seq}') && path.includes('{shot}'))
+          .map(([k]) => k.toUpperCase())
+          .sort()
+        setShotClassTokens(shotTokens)
+      })
+      .catch(() => { if (alive) setShotClassTokens([]) })
+    return () => { alive = false }
+  }, [project, mode])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -58,7 +84,7 @@ export function MenuEdit({
         <div className="cap" style={{ fontSize: 9, letterSpacing: '0.09em', color: 'var(--ink-3)' }}>Edit</div>
       </div>
 
-      {selection.kind === 'none' && (
+      {mode === 'asset' && selection.kind === 'none' && (
         <CreateSection
           setState={setState}
           setSelection={setSelection}
@@ -66,7 +92,7 @@ export function MenuEdit({
         />
       )}
 
-      {selectedAsset && (
+      {mode === 'asset' && selectedAsset && (
         <AssetSection
           project={project}
           asset={selectedAsset}
@@ -78,8 +104,40 @@ export function MenuEdit({
         />
       )}
 
-      {selectedGroup && (
+      {mode === 'asset' && selectedGroup && (
         <GroupSection group={selectedGroup} setState={setState} setSelection={setSelection} />
+      )}
+
+      {mode === 'shot' && selection.kind === 'none' && (
+        <ShotCreateSection setState={setState} setSelection={setSelection} state={state} />
+      )}
+
+      {mode === 'shot' && selectedSeq && (
+        <SeqSection
+          project={project}
+          seq={selectedSeq}
+          state={state}
+          setState={setState}
+          setSelection={setSelection}
+          shotClassTokens={shotClassTokens}
+          onDisk={sequencesOnDisk?.has(selectedSeq.name.toUpperCase()) ?? false}
+        />
+      )}
+
+      {mode === 'shot' && selectedShot && (
+        <ShotSection
+          project={project}
+          shot={selectedShot}
+          state={state}
+          setState={setState}
+          setSelection={setSelection}
+          shotClassTokens={shotClassTokens}
+          onDisk={(() => {
+            const seq = state.sequences.find(s => s.id === selectedShot.seq_id)
+            if (!seq) return false
+            return shotsOnDisk?.has(`${seq.name.toUpperCase()}|${selectedShot.name.toUpperCase()}`) ?? false
+          })()}
+        />
       )}
     </div>
   )
@@ -377,6 +435,652 @@ function GroupSection({ group, setState, setSelection }: {
   )
 }
 
+// ── shot / seq sections ──────────────────────────────────────────────────────
+const padSeq = (n: number, len = 3) => String(n).padStart(len, '0')
+const parseSeqNum  = (name: string) => Number((name.match(/SEQ(\d+)/i) || [])[1] ?? NaN)
+const parseShotNum = (name: string) => Number((name.match(/SHOT(\d+)/i) || [])[1] ?? NaN)
+const ANIM_DEFAULT_SUBTASKS = ['BLOCK', 'SPLINE', 'POLISH']
+
+// Compute the .order value that inserts a new entity numerically-in-place
+// among *sortedNumbers* (values already sorted ascending). Entity is placed
+// right before the first entry with a strictly greater number; if none, at end.
+function computeInsertOrder(existing: Array<{ order: number; num: number }>, newNum: number): number {
+  const sorted = [...existing].sort((a, b) => a.order - b.order)
+  // Find the first item whose num > newNum → new order = that order (shift later items).
+  const idx = sorted.findIndex(x => x.num > newNum)
+  return idx === -1 ? sorted.length : sorted[idx].order
+}
+
+// After inserting an item at position *pos*, shift every order >= pos by +1 (for the "before N+1" semantic).
+function shiftOrders<T extends { id: string; order: number }>(list: T[], fromOrder: number, exceptId: string): T[] {
+  return list.map(x => (x.id !== exceptId && x.order >= fromOrder ? { ...x, order: x.order + 1 } : x))
+}
+
+function ShotCreateSection({ state, setState, setSelection }: {
+  state:        ProductionState
+  setState:     (patch: (prev: ProductionState) => ProductionState) => void
+  setSelection: (s: Selection) => void
+}) {
+  const { t } = useI18n()
+  const [num, setNum] = useState('')
+  const [label, setLabel] = useState('')
+  const create = () => {
+    const n = parseInt(num, 10)
+    if (Number.isNaN(n) || n <= 0) return
+    const nm = `SEQ${padSeq(n)}`
+    if (state.sequences.some(s => s.name === nm)) return
+    const id = nid('seq')
+    const pos = computeInsertOrder(
+      state.sequences.map(s => ({ order: s.order, num: parseSeqNum(s.name) })).filter(x => !Number.isNaN(x.num)),
+      n,
+    )
+    setState(prev => ({
+      ...prev,
+      sequences: [
+        ...shiftOrders(prev.sequences, pos, ''),
+        { id, name: nm, label: label.trim() || undefined,
+          order: pos, tasks: [], assets: [], notes: '', origin: 'user' },
+      ],
+    }))
+    setSelection({ kind: 'seq', id })
+    setNum(''); setLabel('')
+  }
+  return (
+    <div style={_pad}>
+      <div style={_lbl}>{t('prod.newSequence')}</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          value={num}
+          placeholder="N°"
+          onChange={e => setNum(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={e => { if (e.key === 'Enter') create() }}
+          style={{ ..._input, width: 70 }}
+        />
+        <input
+          value={label}
+          placeholder="Label (optionnel)"
+          onChange={e => setLabel(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') create() }}
+          style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
+        />
+      </div>
+      <ProdBtn full onClick={create} style={{ marginTop: 6 }} disabled={!num.trim()}>
+        <Plus size={12} strokeWidth={2} /> {t('prod.newSequence')}
+      </ProdBtn>
+    </div>
+  )
+}
+
+function SeqSection({ project, seq, state, setState, setSelection, shotClassTokens, onDisk }: {
+  project:         string
+  seq:             ProductionSequence
+  state:           ProductionState
+  setState:        (patch: (prev: ProductionState) => ProductionState) => void
+  setSelection:    (s: Selection) => void
+  shotClassTokens: string[]
+  onDisk:          boolean
+}) {
+  const { t }         = useI18n()
+  const [shotNum, setShotNum] = useState('')
+  const [shotLabelInput, setShotLabelInput] = useState('')
+  const [taskName, setTaskName] = useState('')
+  const [taskSubtask, setTaskSubtask] = useState('')
+
+  const seqNum = parseSeqNum(seq.name)
+  const patchSeq = (p: Partial<ProductionSequence>) => {
+    setState(prev => ({ ...prev, sequences: prev.sequences.map(s => s.id === seq.id ? { ...s, ...p, origin: 'user' } : s) }))
+  }
+  const changeSeqNumber = (v: string) => {
+    const n = parseInt(v, 10)
+    if (Number.isNaN(n) || n <= 0) return
+    const newName = `SEQ${padSeq(n)}`
+    if (newName === seq.name) return
+    if (state.sequences.some(s => s.id !== seq.id && s.name === newName)) {
+      toast.error(`SEQ${padSeq(n)} existe déjà`); return
+    }
+    patchSeq({ name: newName })
+  }
+  const remove = () => {
+    setState(prev => ({
+      ...prev,
+      sequences: prev.sequences.filter(s => s.id !== seq.id),
+      shots:     prev.shots.filter(s => s.seq_id !== seq.id),
+    }))
+    setSelection({ kind: 'none' })
+  }
+  const materialize = async () => {
+    if (Number.isNaN(seqNum)) { toast.error(`Séquence non numérique : ${seq.name}`); return }
+    const shotNums = state.shots
+      .filter(s => s.seq_id === seq.id)
+      .map(s => parseShotNum(s.name))
+      .filter(n => !Number.isNaN(n))
+    try {
+      const r = await api.materializeProductionEntity(project, {
+        kind: 'sequence', seq_number: seqNum, shot_numbers: shotNums, update: onDisk,
+      })
+      toast.success(onDisk ? `Séquence mise à jour : ${r.path}` : `Dossier créé : ${r.path}`)
+      window.dispatchEvent(new Event('flux:refresh'))
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+
+  const createShot = () => {
+    const n = parseInt(shotNum, 10)
+    if (Number.isNaN(n) || n <= 0) return
+    const nm = `SHOT${padSeq(n)}`
+    if (state.shots.some(s => s.seq_id === seq.id && s.name === nm)) return
+    const id = nid('shot')
+    const siblings = state.shots.filter(s => s.seq_id === seq.id)
+    const pos = computeInsertOrder(
+      siblings.map(s => ({ order: s.order, num: parseShotNum(s.name) })).filter(x => !Number.isNaN(x.num)),
+      n,
+    )
+    const shiftedInSeq = shiftOrders(siblings, pos, '')
+    const shiftedIds = new Set(shiftedInSeq.map(s => s.id))
+    setState(prev => ({
+      ...prev,
+      shots: [
+        ...prev.shots.map(s => shiftedIds.has(s.id) ? { ...s, order: s.order + 1 } : s),
+        { id, seq_id: seq.id, name: nm, label: shotLabelInput.trim() || undefined,
+          order: pos,
+          inherit_tasks: true, inherit_assets: true,
+          tasks: [], assets: [], task_details: {}, origin: 'user' },
+      ],
+    }))
+    setSelection({ kind: 'shot', id })
+    setShotNum(''); setShotLabelInput('')
+  }
+
+  const addTask = () => {
+    const label = taskName.trim().toUpperCase()
+    if (!label) return
+    const subtaskUp = taskSubtask.trim().toUpperCase()
+    const existing = seq.tasks.find(x =>
+      x.name.toUpperCase() === label || x.type_tokens.map(t => t.toUpperCase()).includes(label))
+    if (existing) {
+      setState(prev => ({
+        ...prev,
+        sequences: prev.sequences.map(s => s.id !== seq.id ? s : {
+          ...s,
+          tasks: s.tasks.map(x => x.id !== existing.id ? x : {
+            ...x,
+            known_subtasks: subtaskUp && !x.known_subtasks.map(k => k.toUpperCase()).includes(subtaskUp)
+              ? [...x.known_subtasks, subtaskUp]
+              : x.known_subtasks,
+          }),
+        }),
+      }))
+      setTaskName(''); setTaskSubtask('')
+      return
+    }
+    const known: string[] = []
+    if (subtaskUp) known.push(subtaskUp)
+    if (label === 'ANIM') for (const s of ANIM_DEFAULT_SUBTASKS) if (!known.includes(s)) known.push(s)
+    const newTask: ProductionTask = {
+      id: nid('t'), name: label, order: seq.tasks.length,
+      type_tokens: [label], known_subtasks: known, origin: 'user',
+    }
+    setState(prev => ({
+      ...prev,
+      sequences: prev.sequences.map(s => s.id === seq.id ? { ...s, tasks: [...s.tasks, newTask] } : s),
+    }))
+    setTaskName(''); setTaskSubtask('')
+  }
+
+  return (
+    <>
+      <div style={_pad}>
+        <div style={_lbl}>SÉQUENCE · {seq.name}{seq.label ? ` — ${seq.label}` : ''}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={Number.isNaN(seqNum) ? '' : String(seqNum)}
+            onChange={e => changeSeqNumber(e.target.value.replace(/[^0-9]/g, ''))}
+            placeholder="N°" style={{ ..._input, width: 70 }}
+          />
+          <input
+            value={seq.label ?? ''}
+            onChange={e => patchSeq({ label: e.target.value || undefined })}
+            placeholder="Label (optionnel)"
+            style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
+          />
+        </div>
+        <ProdBtn full variant="ghost" onClick={materialize} style={{ marginTop: 6 }}>
+          {onDisk
+            ? <><RefreshCw size={11} strokeWidth={1.75} /> Update sur disque</>
+            : <><HardDriveDownload size={11} strokeWidth={1.75} /> {t('prod.materializeSequence')}</>}
+        </ProdBtn>
+        <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
+          <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
+        </ProdBtn>
+      </div>
+
+      <AssetsPicker
+        state={state}
+        setState={setState}
+        entityKind="seq"
+        entity={seq}
+      />
+
+      <div style={_pad}>
+        <div style={_lbl}>{t('prod.newShot')}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={shotNum}
+            placeholder="N°"
+            onChange={e => setShotNum(e.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={e => { if (e.key === 'Enter') createShot() }}
+            style={{ ..._input, width: 70 }}
+          />
+          <input
+            value={shotLabelInput}
+            placeholder="Label (optionnel)"
+            onChange={e => setShotLabelInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') createShot() }}
+            style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
+          />
+        </div>
+        <ProdBtn full onClick={createShot} style={{ marginTop: 6 }} disabled={!shotNum.trim()}>
+          <Plus size={12} strokeWidth={2} /> {t('prod.newShot')}
+        </ProdBtn>
+      </div>
+
+      <div style={_pad}>
+        <div style={_lbl}>{t('prod.newTask')} (séquence)</div>
+        <input
+          value={taskName}
+          onChange={e => setTaskName(e.target.value.toUpperCase())}
+          list="prod-shot-task-tokens"
+          style={{ ..._input, width: '100%' }}
+        />
+        <datalist id="prod-shot-task-tokens">
+          {shotClassTokens.map(x => <option key={x} value={x} />)}
+        </datalist>
+        <div style={{ ..._lbl, marginTop: 6 }}>SUBTASK (optionnel)</div>
+        <input
+          value={taskSubtask}
+          onChange={e => setTaskSubtask(e.target.value.toUpperCase())}
+          onKeyDown={e => { if (e.key === 'Enter') addTask() }}
+          style={{ ..._input, width: '100%' }}
+        />
+        <ProdBtn full onClick={addTask} style={{ marginTop: 6 }} disabled={!taskName.trim()}>
+          <Plus size={12} strokeWidth={2} /> {t('prod.newTask')}
+        </ProdBtn>
+      </div>
+    </>
+  )
+}
+
+function ShotSection({ project, shot, state, setState, setSelection, shotClassTokens, onDisk }: {
+  project:         string
+  shot:            ProductionShot
+  state:           ProductionState
+  setState:        (patch: (prev: ProductionState) => ProductionState) => void
+  setSelection:    (s: Selection) => void
+  shotClassTokens: string[]
+  onDisk:          boolean
+}) {
+  const { t } = useI18n()
+  const seq = state.sequences.find(s => s.id === shot.seq_id) ?? null
+  const [taskName, setTaskName]     = useState('')
+  const [taskSubtask, setTaskSubtask] = useState('')
+
+  const shotNum = parseShotNum(shot.name)
+  const patchShot = (p: Partial<ProductionShot>) => {
+    setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === shot.id ? { ...s, ...p, origin: 'user' } : s) }))
+  }
+  const changeShotNumber = (v: string) => {
+    const n = parseInt(v, 10)
+    if (Number.isNaN(n) || n <= 0) return
+    const newName = `SHOT${padSeq(n)}`
+    if (newName === shot.name) return
+    if (state.shots.some(s => s.id !== shot.id && s.seq_id === shot.seq_id && s.name === newName)) {
+      toast.error(`${newName} existe déjà dans ${seq?.name ?? '?'}`); return
+    }
+    patchShot({ name: newName })
+  }
+  const remove = () => {
+    setState(prev => ({ ...prev, shots: prev.shots.filter(s => s.id !== shot.id) }))
+    setSelection({ kind: 'none' })
+  }
+  const materialize = async () => {
+    if (!seq) { toast.error('Séquence parente introuvable'); return }
+    const sn = parseSeqNum(seq.name); const shn = parseShotNum(shot.name)
+    if (Number.isNaN(sn) || Number.isNaN(shn)) { toast.error(`Numérotation invalide : ${seq.name}/${shot.name}`); return }
+    try {
+      const r = await api.materializeProductionEntity(project, {
+        kind: 'shot', seq_number: sn, shot_number: shn, update: onDisk,
+      })
+      toast.success(onDisk ? `Shot déjà présent : ${r.path}` : `Dossier créé : ${r.path}`)
+      window.dispatchEvent(new Event('flux:refresh'))
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+  const addTask = () => {
+    const label = taskName.trim().toUpperCase()
+    if (!label) return
+    const subtaskUp = taskSubtask.trim().toUpperCase()
+    const existing = shot.tasks.find(x =>
+      x.name.toUpperCase() === label || x.type_tokens.map(t => t.toUpperCase()).includes(label))
+    if (existing) {
+      setState(prev => ({
+        ...prev,
+        shots: prev.shots.map(s => s.id !== shot.id ? s : {
+          ...s,
+          tasks: s.tasks.map(x => x.id !== existing.id ? x : {
+            ...x,
+            known_subtasks: subtaskUp && !x.known_subtasks.map(k => k.toUpperCase()).includes(subtaskUp)
+              ? [...x.known_subtasks, subtaskUp]
+              : x.known_subtasks,
+          }),
+        }),
+      }))
+      setTaskName(''); setTaskSubtask('')
+      return
+    }
+    const known: string[] = []
+    if (subtaskUp) known.push(subtaskUp)
+    if (label === 'ANIM') for (const s of ANIM_DEFAULT_SUBTASKS) if (!known.includes(s)) known.push(s)
+    const newTask: ProductionTask = {
+      id: nid('t'), name: label, order: shot.tasks.length,
+      type_tokens: [label], known_subtasks: known, origin: 'user',
+    }
+    setState(prev => ({
+      ...prev,
+      shots: prev.shots.map(s => s.id === shot.id ? { ...s, tasks: [...s.tasks, newTask] } : s),
+    }))
+    setTaskName(''); setTaskSubtask('')
+  }
+
+  return (
+    <>
+      <div style={_pad}>
+        <div style={_lbl}>SHOT · {seq?.name ?? '?'} · {shot.name}{shot.label ? ` — ${shot.label}` : ''}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={Number.isNaN(shotNum) ? '' : String(shotNum)}
+            onChange={e => changeShotNumber(e.target.value.replace(/[^0-9]/g, ''))}
+            placeholder="N°" style={{ ..._input, width: 70 }}
+          />
+          <input
+            value={shot.label ?? ''}
+            onChange={e => patchShot({ label: e.target.value || undefined })}
+            placeholder="Label (optionnel)"
+            style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
+          />
+        </div>
+        <ProdBtn full variant="ghost" onClick={materialize} style={{ marginTop: 6 }}>
+          {onDisk
+            ? <><Check size={11} strokeWidth={1.75} /> Déjà sur disque</>
+            : <><HardDriveDownload size={11} strokeWidth={1.75} /> {t('prod.materializeShot')}</>}
+        </ProdBtn>
+        <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
+          <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
+        </ProdBtn>
+      </div>
+
+      <div style={_pad}>
+        <label style={{ ..._lbl, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
+          <input type="checkbox" checked={shot.inherit_tasks}
+                 onChange={e => patchShot({ inherit_tasks: e.target.checked })}
+                 style={{ accentColor: 'var(--accent)' }} />
+          <span>{t('prod.inheritTasks')}</span>
+        </label>
+        <label style={{ ..._lbl, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={shot.inherit_assets}
+                 onChange={e => patchShot({ inherit_assets: e.target.checked })}
+                 style={{ accentColor: 'var(--accent)' }} />
+          <span>{t('prod.inheritAssets')}</span>
+        </label>
+      </div>
+
+      {!shot.inherit_assets && (
+        <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot} />
+      )}
+
+      {!shot.inherit_tasks && (
+        <div style={_pad}>
+          <div style={_lbl}>{t('prod.newTask')}</div>
+          <input
+            value={taskName}
+            onChange={e => setTaskName(e.target.value.toUpperCase())}
+            list="prod-shot-task-tokens"
+            style={{ ..._input, width: '100%' }}
+          />
+          <datalist id="prod-shot-task-tokens">
+            {shotClassTokens.map(x => <option key={x} value={x} />)}
+          </datalist>
+          <div style={{ ..._lbl, marginTop: 6 }}>SUBTASK (optionnel — auto pour ANIM)</div>
+          <input
+            value={taskSubtask}
+            onChange={e => setTaskSubtask(e.target.value.toUpperCase())}
+            onKeyDown={e => { if (e.key === 'Enter') addTask() }}
+            style={{ ..._input, width: '100%' }}
+          />
+          <ProdBtn full onClick={addTask} style={{ marginTop: 6 }} disabled={!taskName.trim()}>
+            <Plus size={12} strokeWidth={2} /> {t('prod.newTask')}
+          </ProdBtn>
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── assets picker (button + modal box) ──────────────────────────────────────
+function AssetsPicker({ state, setState, entityKind, entity }: {
+  state:      ProductionState
+  setState:   (patch: (prev: ProductionState) => ProductionState) => void
+  entityKind: 'seq' | 'shot'
+  entity:     ProductionSequence | ProductionShot
+}) {
+  const { t } = useI18n()
+  const [modalOpen, setModalOpen] = useState(false)
+  const linked = entity.assets ?? []
+
+  const removeChip = (id: string) => {
+    setState(prev => {
+      const filt = (arr: { id: string; ref: string }[]) => arr.filter(x => x.id !== id)
+      if (entityKind === 'seq') {
+        return { ...prev, sequences: prev.sequences.map(s => s.id === entity.id ? { ...s, assets: filt(s.assets ?? []) } : s) }
+      }
+      return { ...prev, shots: prev.shots.map(s => s.id === entity.id ? { ...s, assets: filt(s.assets ?? []) } : s) }
+    })
+  }
+
+  return (
+    <div style={_pad}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <div style={_lbl}>{t('prod.tabAssets')}</div>
+        <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>· {linked.length}</span>
+        <span style={{ flex: 1 }} />
+        <ProdBtn size="sm" variant="ghost" onClick={() => setModalOpen(true)}>
+          <Plus size={10} strokeWidth={2} /> Ajouter
+        </ProdBtn>
+      </div>
+
+      {linked.length === 0 && (
+        <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>—</div>
+      )}
+      {linked.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {linked.map(l => {
+            const a = state.assets.find(x => x.id === l.id)
+            const color = a ? categoryColor(a.class) : 'var(--ink-4)'
+            return (
+              <span key={l.id} title={l.ref}
+                    onClick={() => removeChip(l.id)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '3px 8px', borderRadius: 999,
+                      background: color, color: 'var(--paper)',
+                      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.03em',
+                      cursor: 'pointer',
+                    }}>
+                {a?.name ?? l.ref} <span style={{ opacity: 0.75 }}>×</span>
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {modalOpen && (
+        <AssetsPickerModal
+          state={state}
+          setState={setState}
+          entityKind={entityKind}
+          entity={entity}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
+  state:      ProductionState
+  setState:   (patch: (prev: ProductionState) => ProductionState) => void
+  entityKind: 'seq' | 'shot'
+  entity:     ProductionSequence | ProductionShot
+  onClose:    () => void
+}) {
+  const { t } = useI18n()
+  const [query, setQuery] = useState('')
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onClose])
+
+  const linkedIds = new Set((entity.assets ?? []).map(l => l.id))
+  const toggle = (a: Asset) => {
+    const ref = `${a.class}/${a.name}`
+    setState(prev => {
+      const patchAssets = (existing: { id: string; ref: string }[]) => {
+        if (existing.some(x => x.id === a.id)) return existing.filter(x => x.id !== a.id)
+        return [...existing, { id: a.id, ref }]
+      }
+      if (entityKind === 'seq') {
+        return { ...prev, sequences: prev.sequences.map(s => s.id === entity.id ? { ...s, assets: patchAssets(s.assets ?? []) } : s) }
+      }
+      return { ...prev, shots: prev.shots.map(s => s.id === entity.id ? { ...s, assets: patchAssets(s.assets ?? []) } : s) }
+    })
+  }
+
+  const byCategory = useMemo(() => {
+    const q = query.trim().toUpperCase()
+    const m = new Map<string, Asset[]>()
+    for (const cls of CATEGORY_ORDER) m.set(cls, [])
+    for (const a of state.assets) {
+      if (q && !a.name.toUpperCase().includes(q) && !a.class.toUpperCase().includes(q)) continue
+      const c = a.class.toUpperCase()
+      const list = m.get(c) ?? []
+      list.push(a); m.set(c, list)
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.name.localeCompare(b.name))
+    return m
+  }, [state.assets, query])
+
+  const title = entityKind === 'seq'
+    ? `Assets — ${(entity as ProductionSequence).name}`
+    : `Assets — ${(entity as ProductionShot).name}`
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={{
+        background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 12,
+        boxShadow: 'var(--shadow)', width: 640, maxWidth: '92vw',
+        maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 18px', borderBottom: '1px solid var(--rule)',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+          <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+            {t('prod.tabAssets')} · {linkedIds.size} lié{linkedIds.size > 1 ? 's' : ''}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose} title="Fermer" style={{
+            width: 26, height: 22, borderRadius: 4, border: '1px solid var(--rule-2)',
+            background: 'var(--paper-2)', color: 'var(--ink-2)', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><X size={12} strokeWidth={1.75} /></button>
+        </div>
+
+        <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--rule)' }}>
+          <input
+            autoFocus
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Rechercher un asset…"
+            style={{
+              width: '100%', height: 32,
+              background: 'var(--paper-2)', color: 'var(--ink)',
+              border: '1px solid var(--rule-2)', borderRadius: 6,
+              padding: '0 10px', outline: 'none',
+              fontFamily: 'var(--sans)', fontSize: 11,
+            }}
+          />
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
+          {state.assets.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucun asset dans ce projet.</div>
+          )}
+          {CATEGORY_ORDER.map(cls => {
+            const arr = byCategory.get(cls) ?? []
+            if (arr.length === 0) return null
+            const color = categoryColor(cls)
+            return (
+              <div key={cls} style={{ marginBottom: 16 }}>
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8,
+                  padding: '3px 10px', borderRadius: 5,
+                  background: color, color: 'var(--paper)',
+                  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
+                }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
+                  {t(categoryLabelKey(cls)) || cls}
+                  <span style={{ opacity: 0.75 }}>· {arr.length}</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {arr.map(a => {
+                    const on = linkedIds.has(a.id)
+                    return (
+                      <button key={a.id} onClick={() => toggle(a)} title={`${a.class}/${a.name}`}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 5,
+                                padding: '6px 12px', borderRadius: 8,
+                                background: on ? color : 'var(--paper-2)',
+                                color: on ? 'var(--paper)' : 'var(--ink-2)',
+                                border: `1px solid ${on ? color : 'var(--rule-2)'}`,
+                                fontFamily: 'var(--sans)', fontSize: 11, fontWeight: on ? 600 : 500,
+                                cursor: 'pointer',
+                                boxShadow: on ? '0 2px 4px rgba(0,0,0,0.25)' : 'none',
+                              }}>
+                        {on && <Check size={11} strokeWidth={2.5} />}
+                        {a.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end', gap: 8,
+          padding: '12px 18px', borderTop: '1px solid var(--rule)',
+        }}>
+          <ProdBtn variant="ghost" onClick={onClose}>Fermer</ProdBtn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── inline styles ────────────────────────────────────────────────────────────
 const _pad: React.CSSProperties = { padding: '12px 12px 10px', borderBottom: '1px solid var(--rule)' }
 const _lbl: React.CSSProperties = {
@@ -389,4 +1093,3 @@ const _input: React.CSSProperties = {
   padding: '6px 9px', fontSize: 11, fontFamily: 'var(--mono)',
   letterSpacing: '0.04em', outline: 'none',
 }
-const _hint: React.CSSProperties = { padding: 20, fontSize: 11, color: 'var(--ink-4)', textAlign: 'center' }

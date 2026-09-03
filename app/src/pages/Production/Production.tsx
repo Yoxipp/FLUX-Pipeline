@@ -17,6 +17,7 @@ import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import { useProduction } from '../../hooks/useProduction'
 import { ProductionAsset } from './ProductionAsset'
+import { ProductionShot } from './ProductionShot'
 import { MenuEdit } from './MenuEdit'
 import { MenuSpec } from './MenuSpec'
 
@@ -159,14 +160,24 @@ export function Production() {
     setPendingFav(null)
   }, [pendingFav, project, prod.state.assets])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Open the spec panel whenever an asset is selected but the panel is closed.
+  // Open the spec panel whenever any entity is selected but the panel is closed.
   useEffect(() => {
-    if (selection.kind === 'asset' && !specOpen) setSpecOpen(true)
+    if (selection.kind !== 'none' && !specOpen) setSpecOpen(true)
   }, [selection.kind])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => {
     if (selection.kind === 'asset') return prod.state.assets.find(a => a.id === selection.id) ?? null
     if (selection.kind === 'group') return prod.state.asset_groups.find(g => g.id === selection.id) ?? null
+    if (selection.kind === 'seq')   {
+      const s = prod.state.sequences.find(x => x.id === selection.id) ?? null
+      return s ? { class: 'SEQ', name: s.name } : null
+    }
+    if (selection.kind === 'shot')  {
+      const sh = prod.state.shots.find(x => x.id === selection.id) ?? null
+      if (!sh) return null
+      const seq = prod.state.sequences.find(q => q.id === sh.seq_id)
+      return { class: seq?.name ?? '', name: sh.name }
+    }
     return null
   }, [selection, prod.state])
 
@@ -189,14 +200,16 @@ export function Production() {
           {(['asset', 'shot'] as Mode[]).map(m => (
             <button
               key={m}
-              onClick={() => setMode(m)}
-              disabled={m === 'shot'}
-              title={m === 'shot' ? 'Phase 2 — timeline SHOT à venir' : ''}
+              onClick={() => {
+                if (m === mode) return
+                setMode(m)
+                setSelection({ kind: 'none' })
+              }}
               style={{
                 background: mode === m ? 'var(--accent-soft)' : 'transparent',
-                color:      mode === m ? 'var(--accent-hi)' : m === 'shot' ? 'var(--ink-4)' : 'var(--ink-2)',
+                color:      mode === m ? 'var(--accent-hi)' : 'var(--ink-2)',
                 border: 'none', padding: '6px 14px', fontSize: 11,
-                cursor: m === 'shot' ? 'not-allowed' : 'pointer',
+                cursor: 'pointer',
                 borderRight: m === 'asset' ? '1px solid var(--rule-2)' : 'none',
               }}
             >{t(m === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>
@@ -242,9 +255,13 @@ export function Production() {
             />
           )}
           {mode === 'shot' && (
-            <div style={{ padding: 40, color: 'var(--ink-4)', fontSize: 12, textAlign: 'center' }}>
-              Timeline SHOT — Phase 2
-            </div>
+            <ProductionShot
+              state={prod.state}
+              setState={prod.setState}
+              selection={selection}
+              setSelection={setSelection}
+              onEntityClicked={() => setSpecOpen(true)}
+            />
           )}
         </div>
 
@@ -262,6 +279,8 @@ export function Production() {
               mode={mode}
               activeCategory={activeCategory}
               publishesByTask={prod.publishesByTask}
+              sequencesOnDisk={prod.sequencesOnDisk}
+              shotsOnDisk={prod.shotsOnDisk}
             />
           </div>
         )}

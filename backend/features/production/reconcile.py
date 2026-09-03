@@ -238,6 +238,37 @@ def match_or_create_asset_task(production: dict, tokens: dict) -> tuple[dict, di
     return asset, task
 
 
+def match_or_create_seq_shot_task(production: dict, tokens: dict) -> tuple[dict, dict, dict] | None:
+    """Locate (or create) the (sequence, shot, task) triple for a shot publish.
+
+    tokens['CLASS']    → shot task token (LAYOUT / ANIM / FX / CFX / LIGHT / COMP).
+    tokens['SEQ']      → SEQ###.
+    tokens['SHOT']     → SHOT###.
+
+    Returns (seq, shot, task), or None if the required fields are missing.
+    Mutates *production* when a seq / shot / task is auto-created.
+    """
+    seq_name  = (tokens.get("SEQ")  or "").upper()
+    shot_name = (tokens.get("SHOT") or "").upper()
+    task_tok  = (tokens.get("CLASS") or "").upper()
+    if not seq_name or not shot_name or not task_tok:
+        return None
+
+    seq = store.find_sequence(production, seq_name)
+    if seq is None:
+        seq = store.add_sequence(production, seq_name, origin="auto")
+
+    shot = store.find_shot(production, seq["id"], shot_name)
+    if shot is None:
+        shot = store.add_shot(production, seq["id"], shot_name, origin="auto")
+
+    task = store.find_task_by_type(shot, task_tok)
+    if task is None:
+        task = store.add_task(shot, name=task_tok, type_tokens=[task_tok], origin="auto")
+
+    return seq, shot, task
+
+
 # ── main entry ───────────────────────────────────────────────────────────────
 
 def reconcile(
@@ -245,16 +276,15 @@ def reconcile(
     events: list[dict],
     known_type_tokens: set[str] | None = None,
     disk_assets: list[dict] | None = None,
+    disk_shots: list[dict] | None = None,
 ) -> tuple[dict, dict[str, list[dict]], list[dict]]:
     """Enrich *production* in place, return (production, publishes_by_task, unmatched).
 
     - production           : same dict, with auto assets/tasks + mined subtasks.
-    - publishes_by_task    : { "<asset_id>|<task_id>": [event, ...] } newest-first.
+    - publishes_by_task    : { "<entity_id>|<task_id>": [event, ...] } newest-first.
+                             entity_id is either an asset id or a shot id — the
+                             frontend looks it up in state.assets / state.shots.
     - unmatched            : events that could not be parsed (kept for debug).
-
-    Only asset publishes are handled in Phase 1. Shot publishes are recognised
-    as `is_shot=True` and skipped — they surface in the unmatched list so the
-    caller can decide what to do with them.
     """
     publishes_by_task: dict[str, list[dict]] = {}
     unmatched: list[dict] = []
@@ -272,34 +302,45 @@ def reconcile(
             ovr = (t.get("path_override") or "").strip()
             if ovr:
                 override_tasks.append((a, t, _normalize_rel(ovr)))
+    for s in production["shots"]:
+        for t in s.get("tasks", []):
+            ovr = (t.get("path_override") or "").strip()
+            if ovr:
+                override_tasks.append((s, t, _normalize_rel(ovr)))
 
     for event in sorted_events:
         tokens = parse_publish_event(event, known_type_tokens)
-        if tokens is None or (tokens or {}).get("is_shot"):
-            # Try the override route even for shot / unparseable events, as long
-            # as the event carries a portable dest_folder.
-            matched_by_override = _try_override_match(event, override_tasks)
-            if matched_by_override is not None:
-                asset, task, sub = matched_by_override
-                if sub:
-                    store.add_known_subtask(task, sub)
-                key = f"{asset['id']}|{task['id']}"
-                publishes_by_task.setdefault(key, []).append({
-                    **event, "instance": sub, "task_token": task.get("name", ""),
-                })
-                continue
-            unmatched.append(event)
-            continue
 
         # ── override route first (explicit user choice wins over token match)
         matched_by_override = _try_override_match(event, override_tasks)
         if matched_by_override is not None:
-            asset, task, sub = matched_by_override
+            entity, task, sub = matched_by_override
             if sub:
                 store.add_known_subtask(task, sub)
-            key = f"{asset['id']}|{task['id']}"
+            key = f"{entity['id']}|{task['id']}"
             publishes_by_task.setdefault(key, []).append({
                 **event, "instance": sub, "task_token": task.get("name", ""),
+            })
+            continue
+
+        if tokens is None:
+            unmatched.append(event)
+            continue
+
+        if tokens.get("is_shot"):
+            matched = match_or_create_seq_shot_task(production, tokens)
+            if matched is None:
+                unmatched.append(event)
+                continue
+            _seq, shot, task = matched
+            instance = tokens.get("INSTANCE", "")
+            if _instance_is_meaningful(instance):
+                store.add_known_subtask(task, instance)
+            key = f"{shot['id']}|{task['id']}"
+            publishes_by_task.setdefault(key, []).append({
+                **event,
+                "instance": instance if _instance_is_meaningful(instance) else "",
+                "task_token": tokens.get("CLASS", ""),
             })
             continue
 
@@ -345,6 +386,32 @@ def reconcile(
             existing = store.find_task_by_type(asset, token)
             if existing is None:
                 existing = store.add_task(asset, name=token, type_tokens=[token], origin="auto")
+            for sub in tsk.get("subtasks", []):
+                if sub:
+                    store.add_known_subtask(existing, sub)
+
+    # ── disk-scan phase (shots) ───────────────────────────────────────────────
+    for ds in disk_shots or []:
+        seq_name  = (ds.get("seq")  or "").upper()
+        shot_name = (ds.get("shot") or "").upper() if ds.get("shot") else ""
+        if not seq_name:
+            continue
+        seq = store.find_sequence(production, seq_name)
+        if seq is None:
+            seq = store.add_sequence(production, seq_name, origin="auto")
+        if not shot_name:
+            # Sequence-only entry (no shot dir yet) — surface the seq alone.
+            continue
+        shot = store.find_shot(production, seq["id"], shot_name)
+        if shot is None:
+            shot = store.add_shot(production, seq["id"], shot_name, origin="auto")
+        for tsk in ds.get("tasks", []):
+            token = (tsk.get("token") or "").upper()
+            if not token:
+                continue
+            existing = store.find_task_by_type(shot, token)
+            if existing is None:
+                existing = store.add_task(shot, name=token, type_tokens=[token], origin="auto")
             for sub in tsk.get("subtasks", []):
                 if sub:
                     store.add_known_subtask(existing, sub)

@@ -96,6 +96,17 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.retakeReopen':       { fr: 'Rouvrir',                  en: 'Reopen' },
   'prod.publishesUnmatched': { fr: 'Publishs non reconnus',    en: 'Unrecognised publishes' },
   'prod.filter.fav':         { fr: 'Favoris',                  en: 'Favorites' },
+  'prod.newSequence':        { fr: 'Nouvelle séquence',        en: 'New sequence' },
+  'prod.newShot':            { fr: 'Nouveau shot',             en: 'New shot' },
+  'prod.materializeSequence':{ fr: 'Créer la séquence sur disque', en: 'Create sequence on disk' },
+  'prod.materializeShot':    { fr: 'Créer le shot sur disque', en: 'Create shot on disk' },
+  'prod.inheritTasks':       { fr: 'Hériter des tâches de la séquence', en: 'Inherit sequence tasks' },
+  'prod.inheritAssets':      { fr: 'Hériter des assets de la séquence', en: 'Inherit sequence assets' },
+  'prod.tabAssets':          { fr: 'Assets',                   en: 'Assets' },
+  'prod.emptyTimeline':      { fr: 'Aucune séquence. Utilise le menu Edit.', en: 'No sequences yet. Use the Edit menu.' },
+  'prod.seqNumber':          { fr: 'Numéro',                   en: 'Number' },
+  'prod.shotNumber':         { fr: 'Numéro',                   en: 'Number' },
+  'prod.zoom':               { fr: 'Zoom',                     en: 'Zoom' },
 
   // Template Editor (RETAKES-3)
   'te.title':        { fr: 'Éditeur de templates',            en: 'Template Editor' },

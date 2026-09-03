@@ -110,6 +110,66 @@ def create_shot(
     return shot_path
 
 
+def update_sequence(
+    project_path: Path,
+    seq_number: int,
+    shot_numbers: list[int] | None = None,
+    padding: int = DEFAULT_PADDING,
+) -> Path:
+    """Idempotent version of :func:`create_sequence`.
+
+    Ensures the sequence folder exists (creates it silently if not) and then
+    ensures each shot in *shot_numbers* is scaffolded. Never deletes,
+    overwrites, or touches any existing file — only creates what is missing.
+
+    Returns the sequence path.
+    """
+    seq_label = format_seq(seq_number, padding)
+    seq_rel   = f"shot/{seq_label}"
+    seq_path  = project_path / seq_rel
+
+    if not seq_path.exists():
+        ensure_dir(seq_path)
+        add_token(project_path, "SEQ", seq_label, seq_rel)
+        create_sequence_usd_template(seq_path, seq_label)
+        try:
+            create_sequence_hip_scene(seq_path, seq_label)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
+        log.info("Sequence created (via update): %s", seq_path)
+
+    for n in shot_numbers or []:
+        shot_label = format_shot(n, padding)
+        shot_path  = project_path / "shot" / seq_label / shot_label
+        if shot_path.exists():
+            continue
+        _scaffold_shot(shot_path)
+        token_key = f"{seq_label}/{shot_label}"
+        add_token(project_path, "SHOT", token_key, f"shot/{seq_label}/{shot_label}")
+        create_shot_usd_template(shot_path, seq_label, shot_label)
+        try:
+            create_shot_hip_scene(shot_path, seq_label, shot_label)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
+        log.info("Shot created (via seq update): %s", shot_path)
+    return seq_path
+
+
+def update_shot(
+    project_path: Path,
+    seq_number: int,
+    shot_number: int,
+    padding: int = DEFAULT_PADDING,
+) -> Path:
+    """Idempotent version of :func:`create_shot` — never errors if it exists."""
+    seq_label  = format_seq(seq_number, padding)
+    shot_label = format_shot(shot_number, padding)
+    shot_path  = project_path / "shot" / seq_label / shot_label
+    if shot_path.exists():
+        return shot_path
+    return create_shot(project_path, seq_number, shot_number, padding=padding)
+
+
 def sequence_exists(project_path: Path, seq_number: int, padding: int = DEFAULT_PADDING) -> bool:
     seq_label = format_seq(seq_number, padding)
     return (project_path / "shot" / seq_label).exists()

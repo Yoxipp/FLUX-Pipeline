@@ -19,11 +19,13 @@ from core.paths import get_project_path
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
 from features.folder_manager.asset_creator import create_asset as folder_create_asset
-from features.folder_manager.seq_shot_creator import create_sequence, create_shot
+from features.folder_manager.seq_shot_creator import (
+    create_sequence, create_shot, update_sequence, update_shot,
+)
 from features.folder_manager.tokens import load_tokens
 from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import production_store as store
-from features.production.disk_scan import scan_project_assets
+from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
 from utils import project_utils
 
@@ -49,6 +51,11 @@ class MaterializePayload(BaseModel):
     name: str | None = None          # asset name
     seq_number: int | None = None    # sequence / shot
     shot_number: int | None = None   # shot
+    # When True, use the idempotent path (skip if exists, add missing shots for
+    # a sequence). Also accepted implicitly whenever the target already exists.
+    update: bool = False
+    # For a sequence materialize, the shot numbers to ensure exist under it.
+    shot_numbers: list[int] | None = None
 
 
 def _ensure_project(project: str) -> None:
@@ -92,19 +99,30 @@ async def get_production(project: str) -> dict:
         try:
             disk_assets = scan_project_assets(get_project_path(project), merged_class_map, merged_type_map)
         except Exception as e:
-            log.warning("disk_scan failed: %s", e)
+            log.warning("disk_scan (assets) failed: %s", e)
             disk_assets = []
+        try:
+            disk_shots = scan_project_shots(get_project_path(project), merged_class_map)
+        except Exception as e:
+            log.warning("disk_scan (shots) failed: %s", e)
+            disk_shots = []
 
         production, publishes_by_task, unmatched = reconcile(
-            production, events, known_type_tokens, disk_assets,
+            production, events, known_type_tokens, disk_assets, disk_shots,
         )
         after = _fingerprint(production)
         if after != before:
             store.save_production(project, production)
+        seqs_on_disk = sorted({(d.get("seq") or "").upper() for d in disk_shots if d.get("seq")})
+        shots_on_disk = sorted({((d.get("seq") or "").upper(), (d.get("shot") or "").upper())
+                                for d in disk_shots
+                                if d.get("seq") and d.get("shot")})
         return {
             "production": production,
             "publishes_by_task": publishes_by_task,
             "publishes_unmatched": unmatched,
+            "sequences_on_disk": seqs_on_disk,
+            "shots_on_disk": [list(x) for x in shots_on_disk],
         }
 
     try:
@@ -116,6 +134,8 @@ async def get_production(project: str) -> dict:
             "production": store.default_schema(),
             "publishes_by_task": {},
             "publishes_unmatched": [],
+            "sequences_on_disk": [],
+            "shots_on_disk": [],
         }
 
 
@@ -172,12 +192,17 @@ async def materialize(project: str, payload: MaterializePayload) -> dict:
         if kind == "sequence":
             if payload.seq_number is None:
                 raise ValueError("seq_number requis pour une séquence")
-            path = create_sequence(project_path, payload.seq_number)
+            # Sequence materialize now always ensures the listed shots too
+            # (never overwrites — only creates what is missing).
+            path = update_sequence(project_path, payload.seq_number, payload.shot_numbers or [])
             return {"kind": "sequence", "path": str(path)}
         if kind == "shot":
             if payload.seq_number is None or payload.shot_number is None:
                 raise ValueError("seq_number et shot_number requis pour un shot")
-            path = create_shot(project_path, payload.seq_number, payload.shot_number)
+            if payload.update:
+                path = update_shot(project_path, payload.seq_number, payload.shot_number)
+            else:
+                path = create_shot(project_path, payload.seq_number, payload.shot_number)
             return {"kind": "shot", "path": str(path)}
         raise ValueError(f"kind inconnu : {payload.kind!r}")
 
@@ -204,4 +229,11 @@ def _fingerprint(production: dict) -> tuple[Any, ...]:
         for a in production.get("assets", [])
         for t in a.get("tasks", [])
     )
-    return (asset_ids, task_sigs)
+    seq_ids  = tuple(s.get("id") for s in production.get("sequences", []))
+    shot_ids = tuple((s.get("seq_id"), s.get("id")) for s in production.get("shots", []))
+    shot_task_sigs = tuple(
+        (s.get("id"), t.get("id"), tuple(t.get("known_subtasks", [])), tuple(t.get("type_tokens", [])))
+        for s in production.get("shots", [])
+        for t in s.get("tasks", [])
+    )
+    return (asset_ids, task_sigs, seq_ids, shot_ids, shot_task_sigs)

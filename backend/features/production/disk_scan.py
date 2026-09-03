@@ -77,6 +77,85 @@ def scan_project_assets(
     return out
 
 
+def scan_project_shots(
+    project_path: Path,
+    class_tokens: dict[str, str],
+) -> list[dict]:
+    """Walk the shot trees for every CLASS whose path template contains
+    ``{seq}`` and ``{shot}`` (LAYOUT / ANIM / FX / CFX …).
+
+    Returns a list of dicts, one per (seq, shot) pair found:
+        {"seq": "SEQ001", "shot": "SHOT010",
+         "tasks": [{"token": "ANIM", "subtasks": ["BLOCK", "SPLINE"]}, …]}
+
+    Multiple CLASS tokens can share a prefix like ``shot/{seq}/{shot}``; the
+    scanner deduplicates by (seq, shot) and merges tasks. A task is included
+    only when its folder holds at least one child (matches the artist's
+    "folder non-empty" rule). Subtasks are the child directories minus the
+    ``null`` placeholder.
+    """
+    # Group class tokens by the fixed prefix before ``{seq}`` so we walk each
+    # root at most once (LAYOUT and ANIM both live under ``shot`` in the
+    # defaults, but a project could override to different roots).
+    prefixes: set[str] = set()
+    class_task_map: dict[str, str] = {}   # last-segment dir name → CLASS token
+    for cls, rel in class_tokens.items():
+        if not rel or "{seq}" not in rel or "{shot}" not in rel:
+            continue
+        norm = rel.replace("\\", "/").strip("/")
+        # Expect "<root...>/{seq}/{shot}[/<task_dir>]".
+        parts = norm.split("/")
+        try:
+            seq_idx = parts.index("{seq}")
+        except ValueError:
+            continue
+        if seq_idx + 1 >= len(parts) or parts[seq_idx + 1] != "{shot}":
+            continue
+        root = "/".join(parts[:seq_idx]).strip("/")
+        if not root:
+            continue
+        prefixes.add(root)
+        # Optional task dir after {shot} — e.g. shot/{seq}/{shot}/anim.
+        if seq_idx + 2 < len(parts):
+            task_dir = parts[seq_idx + 2].lower()
+            class_task_map[task_dir] = cls.upper()
+
+    out_map: dict[tuple[str, str | None], dict] = {}
+    for root_rel in sorted(prefixes):
+        root_dir = (project_path / root_rel).resolve()
+        if not root_dir.is_dir():
+            continue
+        for seq_dir in _sorted_subdirs(root_dir):
+            if not seq_dir.name.upper().startswith("SEQ"):
+                continue
+            # Surface the seq even when it holds no shots yet.
+            seq_key: tuple[str, str | None] = (seq_dir.name.upper(), None)
+            out_map.setdefault(seq_key, {"seq": seq_key[0], "shot": None, "tasks": []})
+            for shot_dir in _sorted_subdirs(seq_dir):
+                if not shot_dir.name.upper().startswith("SHOT"):
+                    continue
+                key: tuple[str, str | None] = (seq_dir.name.upper(), shot_dir.name.upper())
+                entry = out_map.setdefault(key, {"seq": key[0], "shot": key[1], "tasks": []})
+                for task_dir in _sorted_subdirs(shot_dir):
+                    if not _dir_has_child(task_dir):
+                        continue
+                    token = class_task_map.get(task_dir.name.lower(), task_dir.name.upper())
+                    subtasks = [
+                        d.name.upper()
+                        for d in _sorted_subdirs(task_dir)
+                        if d.name.lower() not in _INSTANCE_IGNORED
+                    ]
+                    # Merge if two prefixes hit the same shot with same task token.
+                    existing = next((t for t in entry["tasks"] if t["token"] == token), None)
+                    if existing is None:
+                        entry["tasks"].append({"token": token, "subtasks": subtasks})
+                    else:
+                        for s in subtasks:
+                            if s not in existing["subtasks"]:
+                                existing["subtasks"].append(s)
+    return list(out_map.values())
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _walk_asset(asset_dir: Path, disk_to_type: dict[str, str]) -> list[dict]:
