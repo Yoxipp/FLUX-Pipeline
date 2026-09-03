@@ -9,6 +9,8 @@ import type {
   HoudiniPublishResult,
   HoudiniState,
   Preset,
+  ProductionPayload,
+  ProductionState,
   PublishPayload,
   PublishResult,
   Settings,
@@ -432,4 +434,35 @@ export const api = {
     if (instance) qs.set('instance', instance)
     return apiCall<{ project: string; asset: string; task: string; instance: string; variantes: string[] }>('GET', `/usd/variantes?${qs}`)
   },
+
+  // ── Production Tab ─────────────────────────────────────────────────────────
+  // GET returns production + reconciled publishes; PUT replaces the store.
+  getProduction: (project: string) =>
+    apiCall<ProductionPayload>('GET', `/production/${encodeURIComponent(project)}`),
+
+  setProduction: (project: string, production: ProductionState) =>
+    apiCall<{ success: boolean }>('PUT', `/production/${encodeURIComponent(project)}`, { production }),
+
+  materializeProductionEntity: (project: string, payload: {
+    kind: 'asset' | 'sequence' | 'shot'
+    class_token?: string
+    name?: string
+    seq_number?: number
+    shot_number?: number
+  }) =>
+    apiCall<{ success: boolean; kind: string; path: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/materialize`, payload),
+
+  // Fan out a "comment" activity event so favorited-task subscribers see it in
+  // Activity. Persistence of the comment itself is already in production.json
+  // (frontend's debounced PUT handles that side).
+  notifyProductionComment: (project: string, payload: {
+    class_token: string
+    name:        string
+    task:        string
+    subtask?:    string | null
+    text?:       string
+  }) =>
+    apiCall<{ success: boolean }>(
+      'POST', `/production/${encodeURIComponent(project)}/comment`, payload),
 }

@@ -121,8 +121,9 @@ JSON_CHAT: str      = "teamChat.json"
 JSON_MENTIONS: str  = "chatMentions.json"
 
 # Per-project JSON filenames
-JSON_TOKENS: str    = "tokens.json"        # project root
-JSON_MODIF_LOG: str = "modif_logs.json"    # inside each published folder
+JSON_TOKENS: str     = "tokens.json"        # project root
+JSON_PRODUCTION: str = "production.json"    # project root — Production Tab store
+JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
 
 # Per-user settings
 JSON_USER_SETTINGS: str = "User.json"      # USER/<name>/UserSettings/User.json

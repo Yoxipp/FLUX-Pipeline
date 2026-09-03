@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from core import config
 from core.logger import get_logger
-from routers import activity, dcc, files, folder_manager, logs, project, publish, settings, shelf, usd_assembler
+from routers import activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, usd_assembler
 
 log = get_logger("main")
 
@@ -83,6 +83,7 @@ app.include_router(shelf.router,          prefix="/shelf",          tags=["Shelf
 app.include_router(usd_assembler.router,  prefix="/usd",            tags=["UsdAssembler"])
 app.include_router(logs.router,           prefix="/logs",           tags=["Logs"])
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
+app.include_router(production.router,     prefix="/production",     tags=["Production"])
 
 
 if __name__ == "__main__":

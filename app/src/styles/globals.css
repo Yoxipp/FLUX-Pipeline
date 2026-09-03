@@ -29,6 +29,14 @@
   --warn: oklch(63% 0.10  70);
   --err:  oklch(50% 0.13  25);
 
+  /* ── palette catégorielle Production Tab (chroma faible, warm-dark friendly) ── */
+  --prod-chara: oklch(66% 0.08  30);
+  --prod-props: oklch(66% 0.08 150);
+  --prod-env:   oklch(66% 0.08 220);
+  --prod-fx:    oklch(66% 0.08 305);
+  --prod-seq:   oklch(66% 0.08  85);
+  --prod-shot:  oklch(66% 0.08 260);
+
   /* ── typographie ── */
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono', 'Cascadia Code', monospace;

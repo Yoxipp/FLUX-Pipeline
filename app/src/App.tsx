@@ -16,6 +16,7 @@ import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
 import { UsdAssembler }  from './pages/UsdAssembler'
 import { TemplateEditor } from './pages/TemplateEditor'
+import { Production }    from './pages/Production/Production'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
@@ -91,6 +92,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/shelf"     element={<ShelfManager />} />
               <Route path="/usd"       element={<UsdAssembler />} />
               <Route path="/templates" element={<TemplateEditor />} />
+              <Route path="/production" element={<Production />} />
             </Routes>
           </main>
         </div>

@@ -148,6 +148,11 @@ def get_project_tokens_path(project_name: str) -> Path:
     return get_project_path(project_name) / JSON_TOKENS
 
 
+def get_project_production_path(project_name: str) -> Path:
+    from core.constants import JSON_PRODUCTION
+    return get_project_path(project_name) / JSON_PRODUCTION
+
+
 # ── CONFIG / shared JSON paths ────────────────────────────────────────────────
 
 def get_activity_path() -> Path:

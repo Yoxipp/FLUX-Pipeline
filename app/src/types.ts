@@ -137,3 +137,93 @@ export interface ZBrushPublishResult {
   version_str: string
 }
 
+// ── Production Tab ───────────────────────────────────────────────────────────
+
+export interface ProductionComment {
+  id:     string
+  text:   string
+  author: string
+  date:   string                  // ISO YYYY-MM-DD
+  time:   string                  // HH:MM
+}
+
+export interface ProductionTaskDetail {
+  notes?:      string
+  completion?: number             // 0-100
+  comments?:   ProductionComment[]
+}
+
+export interface ProductionTask {
+  id: string
+  name: string                    // free-form label
+  order: number
+  type_tokens: string[]           // TYPE tokens (match key against publishes)
+  known_subtasks: string[]        // INSTANCE values seen/typed for this task
+  origin?: 'user' | 'auto'
+}
+
+export interface ProductionAsset {
+  id: string
+  class: string                   // CHAR / PROPS / ENV / FXRIG …
+  name: string
+  group_id: string | null
+  order: number
+  origin?: 'user' | 'auto'
+  tasks: ProductionTask[]
+  task_details?: Record<string, ProductionTaskDetail>
+}
+
+export interface ProductionAssetGroup {
+  id: string
+  class: string
+  name: string
+  order: number
+}
+
+export interface ProductionSequence {
+  id: string
+  name: string                    // SEQ001
+  order: number
+  tasks: ProductionTask[]
+  assets: { id: string; ref: string }[]
+  notes?: string
+}
+
+export interface ProductionShot {
+  id: string
+  seq_id: string
+  name: string                    // SHOT010
+  order: number
+  inherit_tasks: boolean
+  inherit_assets: boolean
+  tasks: ProductionTask[]
+  assets: { id: string; ref: string }[]
+  task_details?: Record<string, ProductionTaskDetail>
+}
+
+export interface ProductionState {
+  version: number
+  sequences: ProductionSequence[]
+  shots:     ProductionShot[]
+  assets:    ProductionAsset[]
+  asset_groups: ProductionAssetGroup[]
+}
+
+// Publish event enriched by reconcile — carries the parsed INSTANCE for grouping.
+export interface ProductionPublish {
+  id: string
+  user: string
+  file: string
+  dest_folder: string
+  date: string
+  time: string
+  instance?: string
+  task_token?: string
+}
+
+export interface ProductionPayload {
+  production: ProductionState
+  publishes_by_task: Record<string, ProductionPublish[]>   // "<asset_id>|<task_id>"
+  publishes_unmatched: ActivityEvent[]
+}
+
