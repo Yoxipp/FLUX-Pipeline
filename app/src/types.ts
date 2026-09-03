@@ -160,6 +160,7 @@ export interface ProductionTask {
   type_tokens: string[]           // TYPE tokens (match key against publishes)
   known_subtasks: string[]        // INSTANCE values seen/typed for this task
   origin?: 'user' | 'auto'
+  path_override?: string          // project-relative path replacing token-based matching
 }
 
 export interface ProductionAsset {

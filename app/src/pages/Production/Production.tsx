@@ -11,6 +11,7 @@
 // timeline lives behind the mode toggle so Phase 2 slots in without a rewrite.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -63,9 +64,18 @@ function useLocalStr<T extends string>(key: string, def: T): [T, (v: T) => void]
   return [v, set]
 }
 
+export interface FavoriteOpenTarget {
+  project: string
+  class:   string
+  name:    string
+  task:    string
+  subtask?: string
+}
+
 export function Production() {
   const { project } = useProject()
   const { t } = useI18n()
+  const location = useLocation() as { state?: { openFavorite?: FavoriteOpenTarget } | null }
   const prod = useProduction(project || null)
   const [mode, setMode]         = useLocalStr<Mode>(LS.mode, 'asset')
   const [editOpen, setEditOpen] = useLocalBool(LS.editOpen, true)
@@ -116,6 +126,43 @@ export function Production() {
 
   // Reset selection + category when the project switches so we never point at a stale id.
   useEffect(() => { setSelection({ kind: 'none' }); setActiveCategoryRaw(null) }, [project])
+
+  // Deep-link target from Activity (fav row click). Sits pending until the
+  // matching asset can be located in the loaded production state, then hands
+  // off to MenuSpec via `pendingSpec` so the right tab opens.
+  const [pendingFav, setPendingFav] = useState<FavoriteOpenTarget | null>(null)
+  useEffect(() => {
+    const target = location.state?.openFavorite ?? null
+    if (target) {
+      setPendingFav(target)
+      // Wipe the router state so a subsequent manual nav doesn't re-trigger.
+      window.history.replaceState({}, '')
+    }
+  }, [location.state])
+
+  // Apply the pending target once the target's project is active and the
+  // matching asset shows up in state.
+  const [pendingSpec, setPendingSpec] = useState<{ task: string; subtask?: string } | null>(null)
+  useEffect(() => {
+    if (!pendingFav) return
+    if (!project || pendingFav.project !== project) return
+    setMode('asset')
+    setActiveCategory(pendingFav.class.toUpperCase())
+    const asset = prod.state.assets.find(a =>
+      a.class.toUpperCase() === pendingFav.class.toUpperCase() &&
+      a.name.toUpperCase()  === pendingFav.name.toUpperCase(),
+    )
+    if (!asset) return   // still loading — try again on the next render
+    setSelection({ kind: 'asset', id: asset.id })
+    setSpecOpen(true)
+    setPendingSpec({ task: pendingFav.task, subtask: pendingFav.subtask })
+    setPendingFav(null)
+  }, [pendingFav, project, prod.state.assets])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Open the spec panel whenever an asset is selected but the panel is closed.
+  useEffect(() => {
+    if (selection.kind === 'asset' && !specOpen) setSpecOpen(true)
+  }, [selection.kind])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = useMemo(() => {
     if (selection.kind === 'asset') return prod.state.assets.find(a => a.id === selection.id) ?? null
@@ -191,6 +238,7 @@ export function Production() {
               setSelection={setSelection}
               activeCategory={activeCategory}
               setActiveCategory={setActiveCategory}
+              onAssetClicked={() => setSpecOpen(true)}
             />
           )}
           {mode === 'shot' && (
@@ -269,6 +317,9 @@ export function Production() {
               setState={prod.setState}
               selection={selection}
               publishesByTask={prod.publishesByTask}
+              loading={prod.loading}
+              initialOpen={pendingSpec}
+              onInitialOpenApplied={() => setPendingSpec(null)}
             />
           </div>
         )}

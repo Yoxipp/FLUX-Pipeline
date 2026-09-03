@@ -21,7 +21,9 @@ from features.activity.activity_writer import log_event
 from features.folder_manager.asset_creator import create_asset as folder_create_asset
 from features.folder_manager.seq_shot_creator import create_sequence, create_shot
 from features.folder_manager.tokens import load_tokens
+from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import production_store as store
+from features.production.disk_scan import scan_project_assets
 from features.production.reconcile import reconcile
 from utils import project_utils
 
@@ -76,11 +78,26 @@ async def get_production(project: str) -> dict:
         # old-vs-new nomenclature disambiguator in reconcile.
         try:
             project_tokens = load_tokens(get_project_path(project))
-            type_map = project_tokens.get("TYPE") or {}
+            type_map  = project_tokens.get("TYPE")  or {}
+            class_map = project_tokens.get("CLASS") or {}
         except Exception:
-            type_map = {}
-        known_type_tokens = {k.upper() for k in {*DEFAULT_TYPE_TOKENS.keys(), *type_map.keys()}}
-        production, publishes_by_task, unmatched = reconcile(production, events, known_type_tokens)
+            type_map, class_map = {}, {}
+        merged_type_map  = {**DEFAULT_TYPE_TOKENS,  **type_map}
+        merged_class_map = {**DEFAULT_CLASS_TOKENS, **class_map}
+        known_type_tokens = {k.upper() for k in merged_type_map.keys()}
+
+        # Disk-scan: surface assets scaffolded outside Production Tab so tasks
+        # with a non-empty folder + instance subdirs appear even before any
+        # publish exists.
+        try:
+            disk_assets = scan_project_assets(get_project_path(project), merged_class_map, merged_type_map)
+        except Exception as e:
+            log.warning("disk_scan failed: %s", e)
+            disk_assets = []
+
+        production, publishes_by_task, unmatched = reconcile(
+            production, events, known_type_tokens, disk_assets,
+        )
         after = _fingerprint(production)
         if after != before:
             store.save_production(project, production)

@@ -8,7 +8,9 @@ import { Sidebar }   from './components/shared/Sidebar'
 import { StatusBar } from './components/shared/StatusBar'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
+import { useFavorites, eventMatchesFavorite } from './hooks/useFavorites'
 import { useSettings }   from './hooks/useSettings'
+import { parseFluxFilename } from './pages/Production/util'
 import { Hub }           from './pages/Hub'
 import { Publisher }     from './pages/Publisher'
 import { Activity }      from './pages/Activity'
@@ -61,6 +63,60 @@ function MentionWatcher() {
   return null
 }
 
+// Polls the activity feed and pops a floating toast + native notification for
+// every NEW event whose parsed target matches one of the user's Production
+// favorites. Silent on the very first poll so the backlog isn't replayed.
+function FavoriteWatcher() {
+  const navigate = useNavigate()
+  const { favorites } = useFavorites()
+  const seen = useRef<Set<string> | null>(null)
+  const favRef = useRef<string[]>(favorites)
+  useEffect(() => { favRef.current = favorites }, [favorites])
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await api.getActivity({ limit: 100 })
+        if (!alive) return
+        if (seen.current === null) {
+          seen.current = new Set(r.events.map(e => e.id))
+          return
+        }
+        for (const e of r.events) {
+          if (seen.current.has(e.id)) continue
+          seen.current.add(e.id)
+          if (!e.file || !e.project) continue
+          const parsed = parseFluxFilename(e.file)
+          if (!parsed) continue
+          const favs = favRef.current
+          const match = favs.some(k => eventMatchesFavorite(k, {
+            project: e.project!, class: parsed.class, name: parsed.name,
+            task: parsed.task, instance: parsed.instance,
+          }))
+          if (!match) continue
+          const title = e.action === 'comment'
+            ? `${e.user} · commentaire sur favori`
+            : `${e.user} · ${e.action} sur favori`
+          const body  = e.file
+          toast(title, {
+            description: body,
+            position: 'bottom-right',
+            duration: 6000,
+            action: { label: 'Activity', onClick: () => navigate('/activity') },
+          })
+          void window.electronAPI?.showNotification?.(title, body)
+        }
+      } catch { /* backend down — retry next tick */ }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 10_000)
+    const onRefresh = () => void poll()
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => { alive = false; clearInterval(id); window.removeEventListener('flux:refresh', onRefresh) }
+  }, [navigate])
+  return null
+}
+
 // Inner shell — only mounted after first-launch wizard completes.
 // Hooks that poll the backend (useActivity, useDccStatus) live here so they
 // never fire while FLUX_ROOT is unset, which would cause backend 500s.
@@ -99,6 +155,7 @@ function AppShell({ settings }: { settings: Settings }) {
 
         <StatusBar dccStatus={dccStatus} />
         <MentionWatcher />
+        <FavoriteWatcher />
       </div>
       <Toaster
         position="top-center"

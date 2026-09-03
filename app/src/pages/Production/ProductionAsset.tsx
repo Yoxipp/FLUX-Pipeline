@@ -17,11 +17,12 @@ interface Props {
   setSelection: (s: Selection) => void
   activeCategory:    string | null
   setActiveCategory: (c: string | null) => void
+  onAssetClicked?:   () => void
 }
 
 export function ProductionAsset({
   state, setState, selection, setSelection,
-  activeCategory, setActiveCategory,
+  activeCategory, setActiveCategory, onAssetClicked,
 }: Props) {
   const { t } = useI18n()
 
@@ -96,18 +97,20 @@ export function ProductionAsset({
         setState={setState}
         selection={selection}
         setSelection={setSelection}
+        onAssetClicked={onAssetClicked}
       />
     </div>
   )
 }
 
 // ── contents of one category ────────────────────────────────────────────────
-function CategoryContent({ cls, state, setState, selection, setSelection }: {
-  cls:          string
-  state:        ProductionState
-  setState:     (patch: (prev: ProductionState) => ProductionState) => void
-  selection:    Selection
-  setSelection: (s: Selection) => void
+function CategoryContent({ cls, state, setState, selection, setSelection, onAssetClicked }: {
+  cls:            string
+  state:          ProductionState
+  setState:       (patch: (prev: ProductionState) => ProductionState) => void
+  selection:      Selection
+  setSelection:   (s: Selection) => void
+  onAssetClicked?: () => void
 }) {
   const color = categoryColor(cls)
 
@@ -155,6 +158,7 @@ function CategoryContent({ cls, state, setState, selection, setSelection }: {
           color={color}
           selection={selection}
           onSelect={setSelection}
+          onAssetClicked={onAssetClicked}
           onDrop={(id, i) => onDropAsset(id, i, g.id)}
         />
       ))}
@@ -164,6 +168,7 @@ function CategoryContent({ cls, state, setState, selection, setSelection }: {
         assets={loose}
         selection={selection}
         onSelect={setSelection}
+        onAssetClicked={onAssetClicked}
         onDrop={(id, i) => onDropAsset(id, i, null)}
       />
     </div>
@@ -171,13 +176,14 @@ function CategoryContent({ cls, state, setState, selection, setSelection }: {
 }
 
 // ── group box ────────────────────────────────────────────────────────────────
-function GroupBox({ group, assets, color, selection, onSelect, onDrop }: {
-  group:     ProductionAssetGroup
-  assets:    Asset[]
-  color:     string
-  selection: Selection
-  onSelect:  (s: Selection) => void
-  onDrop:    (draggedId: string, targetIdx: number) => void
+function GroupBox({ group, assets, color, selection, onSelect, onAssetClicked, onDrop }: {
+  group:          ProductionAssetGroup
+  assets:         Asset[]
+  color:          string
+  selection:      Selection
+  onSelect:       (s: Selection) => void
+  onAssetClicked?: () => void
+  onDrop:         (draggedId: string, targetIdx: number) => void
 }) {
   const active = selection.kind === 'group' && selection.id === group.id
   return (
@@ -197,18 +203,19 @@ function GroupBox({ group, assets, color, selection, onSelect, onDrop }: {
         <span style={{ width: 6, height: 6, borderRadius: 3, background: color }} />
         <span style={{ textTransform: 'uppercase' }}>{group.name}</span>
       </div>
-      <ChipRow color={color} assets={assets} selection={selection} onSelect={onSelect} onDrop={onDrop} />
+      <ChipRow color={color} assets={assets} selection={selection} onSelect={onSelect} onAssetClicked={onAssetClicked} onDrop={onDrop} />
     </div>
   )
 }
 
 // ── chip row ────────────────────────────────────────────────────────────────
-function ChipRow({ color, assets, selection, onSelect, onDrop }: {
-  color:     string
-  assets:    Asset[]
-  selection: Selection
-  onSelect:  (s: Selection) => void
-  onDrop:    (draggedId: string, targetIdx: number) => void
+function ChipRow({ color, assets, selection, onSelect, onAssetClicked, onDrop }: {
+  color:          string
+  assets:         Asset[]
+  selection:      Selection
+  onSelect:       (s: Selection) => void
+  onAssetClicked?: () => void
+  onDrop:         (draggedId: string, targetIdx: number) => void
 }) {
   return (
     <div
@@ -227,7 +234,7 @@ function ChipRow({ color, assets, selection, onSelect, onDrop }: {
           asset={a}
           color={color}
           active={selection.kind === 'asset' && selection.id === a.id}
-          onClick={() => onSelect({ kind: 'asset', id: a.id })}
+          onClick={() => { onSelect({ kind: 'asset', id: a.id }); onAssetClicked?.() }}
           onDragStart={e => {
             e.dataTransfer.effectAllowed = 'move'
             e.dataTransfer.setData('text/flux-asset-id', a.id)
@@ -248,7 +255,6 @@ function Chip({ asset, color, active, onClick, onDragStart, onDropBefore }: {
   onDragStart:  React.DragEventHandler
   onDropBefore: (draggedId: string) => void
 }) {
-  const isAuto = asset.origin === 'auto'
   return (
     <div
       draggable
@@ -260,7 +266,6 @@ function Chip({ asset, color, active, onClick, onDragStart, onDropBefore }: {
         if (id && id !== asset.id) onDropBefore(id)
       }}
       onClick={(e) => { e.stopPropagation(); onClick() }}
-      title={isAuto ? 'Adopté automatiquement depuis un publish' : ''}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 8,
         padding: '9px 16px', borderRadius: 10,
@@ -277,13 +282,6 @@ function Chip({ asset, color, active, onClick, onDragStart, onDropBefore }: {
       onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
     >
       <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.05em' }}>{asset.name}</span>
-      {isAuto && (
-        <span style={{
-          fontFamily: 'var(--mono)', fontSize: 8, padding: '1px 5px', borderRadius: 3,
-          background: 'rgba(0,0,0,0.32)', color: 'rgba(255,255,255,0.9)',
-          letterSpacing: '0.06em', textTransform: 'uppercase',
-        }}>auto</span>
-      )}
     </div>
   )
 }

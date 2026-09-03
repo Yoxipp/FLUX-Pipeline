@@ -149,6 +149,65 @@ def parse_publish_event(event: dict, known_type_tokens: set[str] | None = None) 
     return new
 
 
+# ── path-override matching ───────────────────────────────────────────────────
+# dest_folder is stored in activite.json as a portable "$FLUX/…" prefix; we
+# strip that and compare it against the task.path_override the user set. When
+# the event's folder sits under the override, the publish belongs to that
+# task. The immediate child folder (relative to the override) is used as
+# INSTANCE for subtask grouping.
+
+_FLUX_PREFIX = "$FLUX/"
+
+
+def _normalize_rel(p: str) -> str:
+    return p.replace("\\", "/").strip("/").lower()
+
+
+def _event_rel_path(event: dict) -> str | None:
+    """Return the project-relative posix path for *event.dest_folder*, or None.
+
+    dest_folder in activite.json looks like
+      "$FLUX/DOSSIER_PROJETS/<projectName>/<rel path inside project>"
+    We normalise to lowercase and drop the trailing slash for comparison.
+    """
+    dest = event.get("dest_folder") or ""
+    if not dest:
+        return None
+    norm = dest.replace("\\", "/")
+    if norm.startswith(_FLUX_PREFIX):
+        norm = norm[len(_FLUX_PREFIX):]
+    # Strip "DOSSIER_PROJETS/<project>/" — leave the intra-project relative part.
+    parts = norm.split("/")
+    if len(parts) >= 2 and parts[0].lower() == "dossier_projets":
+        parts = parts[2:]  # drop the project name segment too
+    inside = "/".join(parts).strip("/").lower()
+    return inside or None
+
+
+def _try_override_match(
+    event: dict,
+    override_tasks: list[tuple[dict, dict, str]],
+) -> tuple[dict, dict, str] | None:
+    """Return (asset, task, subtask_or_empty) if the event sits under any
+    task's path_override, else None."""
+    rel = _event_rel_path(event)
+    if rel is None:
+        return None
+    for asset, task, ovr in override_tasks:
+        if not ovr:
+            continue
+        if rel == ovr or rel.startswith(ovr + "/"):
+            # extract the subtask = first child segment after the override
+            sub = ""
+            if len(rel) > len(ovr):
+                tail = rel[len(ovr):].strip("/")
+                first = tail.split("/", 1)[0] if tail else ""
+                if first and first != "null":
+                    sub = first.upper()
+            return asset, task, sub
+    return None
+
+
 # ── matching ─────────────────────────────────────────────────────────────────
 
 def _instance_is_meaningful(instance: str) -> bool:
@@ -185,6 +244,7 @@ def reconcile(
     production: dict,
     events: list[dict],
     known_type_tokens: set[str] | None = None,
+    disk_assets: list[dict] | None = None,
 ) -> tuple[dict, dict[str, list[dict]], list[dict]]:
     """Enrich *production* in place, return (production, publishes_by_task, unmatched).
 
@@ -203,11 +263,44 @@ def reconcile(
     # chronology; we reverse for publishes_by_task afterwards.
     sorted_events = sorted(events, key=lambda e: (e.get("date", ""), e.get("time", "")))
 
+    # Snapshot every path_override-driven task so we can try them BEFORE the
+    # token-based route. If a publish matches an override, it belongs to that
+    # task exclusively (the user has explicitly rerouted it).
+    override_tasks: list[tuple[dict, dict, str]] = []
+    for a in production["assets"]:
+        for t in a.get("tasks", []):
+            ovr = (t.get("path_override") or "").strip()
+            if ovr:
+                override_tasks.append((a, t, _normalize_rel(ovr)))
+
     for event in sorted_events:
         tokens = parse_publish_event(event, known_type_tokens)
-        if tokens is None or tokens["is_shot"]:
-            # Shot publishes are Phase 2 territory — mark unmatched for now.
+        if tokens is None or (tokens or {}).get("is_shot"):
+            # Try the override route even for shot / unparseable events, as long
+            # as the event carries a portable dest_folder.
+            matched_by_override = _try_override_match(event, override_tasks)
+            if matched_by_override is not None:
+                asset, task, sub = matched_by_override
+                if sub:
+                    store.add_known_subtask(task, sub)
+                key = f"{asset['id']}|{task['id']}"
+                publishes_by_task.setdefault(key, []).append({
+                    **event, "instance": sub, "task_token": task.get("name", ""),
+                })
+                continue
             unmatched.append(event)
+            continue
+
+        # ── override route first (explicit user choice wins over token match)
+        matched_by_override = _try_override_match(event, override_tasks)
+        if matched_by_override is not None:
+            asset, task, sub = matched_by_override
+            if sub:
+                store.add_known_subtask(task, sub)
+            key = f"{asset['id']}|{task['id']}"
+            publishes_by_task.setdefault(key, []).append({
+                **event, "instance": sub, "task_token": task.get("name", ""),
+            })
             continue
 
         matched = match_or_create_asset_task(production, tokens)
@@ -231,5 +324,29 @@ def reconcile(
     # Newest-first per bucket
     for key in publishes_by_task:
         publishes_by_task[key].reverse()
+
+    # ── disk-scan phase ──────────────────────────────────────────────────────
+    # For each on-disk asset the artist created outside Production Tab, adopt
+    # the asset, materialise its non-empty tasks, and add every instance dir
+    # as a subtask. Publishes have already been processed above; this fills
+    # the gap for assets that were scaffolded but never published yet.
+    for da in disk_assets or []:
+        cls  = (da.get("class") or "").upper()
+        name = (da.get("name")  or "").upper()
+        if not cls or not name:
+            continue
+        asset = store.find_asset(production, cls, name)
+        if asset is None:
+            asset = store.add_asset(production, cls, name, origin="auto")
+        for tsk in da.get("tasks", []):
+            token = (tsk.get("token") or "").upper()
+            if not token:
+                continue
+            existing = store.find_task_by_type(asset, token)
+            if existing is None:
+                existing = store.add_task(asset, name=token, type_tokens=[token], origin="auto")
+            for sub in tsk.get("subtasks", []):
+                if sub:
+                    store.add_known_subtask(existing, sub)
 
     return production, publishes_by_task, unmatched

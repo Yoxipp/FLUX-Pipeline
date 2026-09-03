@@ -4,13 +4,14 @@
 // section is hidden and detail state (notes/completion/comments) writes into
 // `task_details[<taskName>|<subtask>]` — passed as `detailKey`.
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Copy, FolderOpen, FolderTree, Heart, Trash2 } from 'lucide-react'
+import { Check, Copy, FolderOpen, FolderTree, Heart, Pin, Trash2 } from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import { useProject } from '../../ProjectContext'
+import { useCommentReadState } from '../../hooks/useCommentReadState'
 import { useSettings } from '../../hooks/useSettings'
 import type {
   ProductionAsset as Asset,
@@ -25,6 +26,8 @@ interface Props {
   publishes:     ProductionPublish[]
   subtaskFilter: string | null
   detailKey:     string                         // task_details key : "<task>" or "<task>|<subtask>"
+  pinned?:       boolean
+  onTogglePin?:  () => void
   onPatchTask:   (patch: Partial<ProductionTask>) => void
   onPatchDetail: (patch: Partial<ProductionTaskDetail>) => void
   onDeleteTask:  () => void
@@ -34,12 +37,14 @@ const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2,
 
 export function TaskDetail({
   asset, task, publishes, subtaskFilter, detailKey,
+  pinned, onTogglePin,
   onPatchTask, onPatchDetail, onDeleteTask,
 }: Props) {
   const { t }        = useI18n()
   const navigate     = useNavigate()
   const { settings } = useSettings()
   const { project }  = useProject()
+  const readState    = useCommentReadState()
   const workspace    = settings?.workspace
   const color        = taskColorFromName(task.name)
 
@@ -124,6 +129,20 @@ export function TaskDetail({
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {/* pin — machine-wide, keeps this tab across restarts */}
+        {onTogglePin && (
+          <button
+            onClick={() => onTogglePin()}
+            title={pinned ? 'Désépingler' : 'Épingler cet onglet'}
+            style={_headerBtn}
+          >
+            <Pin
+              size={12} strokeWidth={1.75}
+              color={pinned ? 'var(--accent-hi)' : 'var(--ink-3)'}
+              fill={pinned ? 'var(--accent)' : 'none'}
+            />
+          </button>
+        )}
         {/* favorite heart — user-wide, wired below */}
         <FavoriteToggle detailKey={detailKey} asset={asset} task={task} subtask={subtaskFilter} />
         {!subtaskFilter && (
@@ -208,33 +227,65 @@ export function TaskDetail({
               >Envoyer</button>
             </div>
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(detail.comments || []).slice().reverse().map(c => (
-                <div key={c.id} style={{
-                  border: '1px solid var(--rule-2)', borderRadius: 6, padding: '6px 8px',
-                  background: 'var(--paper)',
-                }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2,
+              {(detail.comments || []).slice().reverse().map(c => {
+                const read = readState.isRead(c.id)
+                return (
+                  <div key={c.id} style={{
+                    border: '1px solid var(--rule-2)', borderRadius: 6, padding: '6px 8px 6px 10px',
+                    background: 'var(--paper)',
+                    borderLeft: read ? '1px solid var(--rule-2)' : '3px solid var(--accent)',
                   }}>
-                    <span style={{
-                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                      color: 'var(--accent-hi)', letterSpacing: '0.04em',
-                    }}>{c.author}</span>
-                    <span style={{ fontSize: 8, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
-                    <span style={{ flex: 1 }} />
-                    <button onClick={() => removeComment(c.id)}
-                            style={{ ..._miniBtn, color: 'var(--err)' }}
-                            title="Supprimer">×</button>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2,
+                    }}>
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                        color: 'var(--accent-hi)', letterSpacing: '0.04em',
+                      }}>{c.author}</span>
+                      <span style={{ fontSize: 8, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
+                      <span style={{ flex: 1 }} />
+                      <button
+                        onClick={() => void readState.setRead(c.id, !read)}
+                        title={read ? 'Marquer non lu' : 'Marquer lu'}
+                        style={{
+                          ..._miniIconBtn,
+                          borderColor: read ? 'var(--ok)' : 'var(--rule-2)',
+                          color: read ? 'var(--ok)' : 'var(--ink-3)',
+                          background: read ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : 'var(--paper-2)',
+                        }}
+                      >
+                        <Check size={9} strokeWidth={2.2} />
+                      </button>
+                      <button
+                        onClick={() => { void readState.setRead(c.id, false); removeComment(c.id) }}
+                        title="Supprimer"
+                        style={{
+                          ..._miniIconBtn,
+                          borderColor: 'color-mix(in oklch, var(--err) 40%, var(--rule-2))',
+                          color: 'var(--err)',
+                          background: 'var(--paper-2)',
+                        }}
+                      >×</button>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{c.text}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{c.text}</div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </Section>
         </div>
 
-        {/* Right: Recent Publishes grouped by subtask (Task view) or filtered (Subtask view) */}
+        {/* Right: Path browser + Recent Publishes grouped by subtask (Task view) or filtered (Subtask view) */}
         <div style={{ padding: '10px 14px', overflowY: 'auto' }}>
+          <PathBrowser
+            project={project || ''}
+            asset={asset}
+            task={task}
+            subtaskFilter={subtaskFilter}
+            color={color}
+            onPatchTask={onPatchTask}
+          />
+
           <div style={{ ..._lbl, marginBottom: 6 }}>
             {t('prod.recentPublishes')}
             {subtaskFilter && (
@@ -330,6 +381,198 @@ function FavoriteToggle({ detailKey, asset, task, subtask }: {
 // file remains self-contained; the real store lives in ../../hooks/useFavorites
 import { useFavoriteBinding } from '../../hooks/useFavorites'
 
+// ── path browser ─────────────────────────────────────────────────────────────
+// Publisher-style compact token composer. Four slots: CLASS / NAME / TASK /
+// INSTANCE. CLASS + NAME are pinned to the current asset; TASK and INSTANCE
+// are selectable dropdowns fed by the project's tokens.json (+ subtasks the
+// artist has actually seen on this task). The path input above the slots is
+// always editable; each slot change composes a new path into it and writes it
+// to task.path_override.
+function PathBrowser({ project, asset, task, subtaskFilter, color, onPatchTask }: {
+  project:       string
+  asset:         Asset
+  task:          ProductionTask
+  subtaskFilter: string | null
+  color:         string
+  onPatchTask:   (patch: Partial<ProductionTask>) => void
+}) {
+  const [tokens, setTokens] = useState<{
+    CLASS?:    Record<string, string>
+    TYPE?:     Record<string, string>
+    INSTANCE?: Record<string, string>
+    NAME?:     Record<string, string>
+  }>({})
+  useEffect(() => {
+    let ok = true
+    if (!project) { setTokens({}); return }
+    api.getTokens(project).then(r => { if (ok) setTokens(r.tokens || {}) }).catch(() => { if (ok) setTokens({}) })
+    return () => { ok = false }
+  }, [project])
+
+  // Effective selection: what the slots currently point at. TASK defaults to
+  // the task's first type_token; INSTANCE defaults to the subtask filter (in
+  // a subtask view) else empty.
+  const [selTask, setSelTask]         = useState<string>(() => (task.type_tokens[0] || task.name).toUpperCase())
+  const [selInstance, setSelInstance] = useState<string>(() => (subtaskFilter || '').toUpperCase())
+  useEffect(() => { setSelTask((task.type_tokens[0] || task.name).toUpperCase()) }, [task.id, task.type_tokens, task.name])
+  useEffect(() => { setSelInstance((subtaskFilter || '').toUpperCase()) }, [subtaskFilter, task.id])
+
+  // Helpers that turn a token pick into an absolute-in-project path segment.
+  const clsPath = useMemo(
+    () => (tokens.CLASS?.[asset.class.toUpperCase()] || '').replace(/\\/g, '/').replace(/^\/|\/$/g, ''),
+    [tokens.CLASS, asset.class],
+  )
+  const namePath = useMemo(() => {
+    const nameTok = tokens.NAME?.[asset.name.toUpperCase()]
+    return (nameTok ? nameTok.replace(/\\/g, '/') : (clsPath ? `${clsPath}/${asset.name.toUpperCase()}` : asset.name.toUpperCase()))
+      .replace(/^\/|\/$/g, '')
+  }, [tokens.NAME, asset.name, clsPath])
+
+  const composeFromSlots = (tk: string, inst: string): string => {
+    const typeSub  = tk ? (tokens.TYPE?.[tk] || tk.toLowerCase()).replace(/\\/g, '/').replace(/^\/|\/$/g, '') : ''
+    const instSub  = inst ? ((tokens.INSTANCE?.[inst.toLowerCase()] ?? tokens.INSTANCE?.[inst.toUpperCase()] ?? inst.toLowerCase())).replace(/\\/g, '/').replace(/^\/|\/$/g, '') : ''
+    const parts = [namePath, typeSub, instSub].filter(Boolean)
+    return parts.join('/')
+  }
+
+  // Menu populations from the project's tokens (+ this task's known subtasks).
+  const taskOptions = useMemo(
+    () => [...new Set(Object.keys(tokens.TYPE || {}).map(k => k.toUpperCase()))].sort(),
+    [tokens.TYPE],
+  )
+  const instanceOptions = useMemo(() => {
+    const s = new Set<string>()
+    for (const k of Object.keys(tokens.INSTANCE || {})) {
+      if (k.toLowerCase() === 'null') continue
+      s.add(k.toUpperCase())
+    }
+    for (const k of task.known_subtasks) s.add(k.toUpperCase())
+    return [...s].sort()
+  }, [tokens.INSTANCE, task.known_subtasks])
+
+  const override   = task.path_override ?? ''
+  const composed   = composeFromSlots(selTask, selInstance)
+  const overridden = !!override
+
+  // Writing a slot change: recompute + push to override.
+  const pickTask = (v: string) => {
+    setSelTask(v)
+    onPatchTask({ path_override: composeFromSlots(v, selInstance) })
+  }
+  const pickInstance = (v: string) => {
+    setSelInstance(v)
+    onPatchTask({ path_override: composeFromSlots(selTask, v) })
+  }
+  const typeFreeText = (v: string) => onPatchTask({ path_override: v })
+  const clearOverride = () => onPatchTask({ path_override: '' })
+
+  const shown = override || composed
+
+  return (
+    <div style={{
+      border: `1px solid ${overridden ? color : 'var(--rule-2)'}`,
+      borderRadius: 6, padding: '8px 10px', marginBottom: 10,
+      background: overridden ? `color-mix(in oklch, ${color} 8%, var(--paper))` : 'var(--paper)',
+    }}>
+      <div style={{ ..._lbl, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>Chemin</span>
+        {overridden ? (
+          <span style={{
+            padding: '1px 5px', borderRadius: 3, fontSize: 8,
+            background: color, color: 'var(--paper)', textTransform: 'uppercase', letterSpacing: '0.06em',
+          }}>override</span>
+        ) : (
+          <span style={{
+            padding: '1px 5px', borderRadius: 3, fontSize: 8,
+            background: 'var(--paper-2)', color: 'var(--ink-4)', border: '1px solid var(--rule-2)',
+            textTransform: 'uppercase', letterSpacing: '0.06em',
+          }}>défaut</span>
+        )}
+        <span style={{ flex: 1 }} />
+        {overridden && (
+          <button onClick={clearOverride} title="Rétablir le chemin par défaut" style={_pathClearBtn}>reset</button>
+        )}
+      </div>
+
+      <input
+        value={shown}
+        onChange={e => typeFreeText(e.target.value)}
+        placeholder={composed || 'chemin relatif au projet…'}
+        spellCheck={false}
+        style={{
+          width: '100%',
+          background: 'var(--paper)', color: overridden ? 'var(--ink)' : 'var(--ink-2)',
+          border: '1px solid var(--rule-2)', borderRadius: 5,
+          padding: '5px 8px', fontSize: 10, fontFamily: 'var(--mono)',
+          letterSpacing: '0.03em', outline: 'none',
+        }}
+      />
+
+      {/* four-slot token composer */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+        gap: 6, marginTop: 8,
+      }}>
+        <Slot label="CLASS" locked>
+          <span style={_slotLocked}>{asset.class}</span>
+        </Slot>
+
+        <Slot label="NAME" locked>
+          <span style={_slotLocked}>{asset.name}</span>
+        </Slot>
+
+        <Slot label="TASK">
+          <select value={selTask} onChange={e => pickTask(e.target.value)} style={_slotSelect}>
+            {!taskOptions.includes(selTask) && selTask && <option value={selTask}>{selTask}</option>}
+            {taskOptions.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </Slot>
+
+        <Slot label="INSTANCE">
+          <select value={selInstance} onChange={e => pickInstance(e.target.value)} style={_slotSelect}>
+            <option value="">—</option>
+            {!instanceOptions.includes(selInstance) && selInstance && <option value={selInstance}>{selInstance}</option>}
+            {instanceOptions.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </Slot>
+      </div>
+    </div>
+  )
+}
+
+function Slot({ label, locked, children }: { label: string; locked?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.08em',
+        color: locked ? 'var(--ink-4)' : 'var(--ink-3)', textTransform: 'uppercase',
+      }}>{label}</span>
+      {children}
+    </div>
+  )
+}
+
+const _slotSelect: React.CSSProperties = {
+  background: 'var(--paper)', color: 'var(--ink)',
+  border: '1px solid var(--rule-2)', borderRadius: 5,
+  padding: '4px 6px', fontSize: 10, fontFamily: 'var(--mono)',
+  letterSpacing: '0.03em', outline: 'none',
+  minWidth: 0, width: '100%',
+}
+const _slotLocked: React.CSSProperties = {
+  padding: '4px 8px', borderRadius: 5,
+  background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
+  color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontSize: 10,
+  letterSpacing: '0.04em',
+  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+}
+const _pathClearBtn: React.CSSProperties = {
+  padding: '1px 6px', borderRadius: 3, fontSize: 8,
+  background: 'transparent', color: 'var(--ink-3)',
+  border: '1px solid var(--rule-2)', cursor: 'pointer',
+  textTransform: 'uppercase', letterSpacing: '0.06em',
+}
+
 // ── local atoms ──────────────────────────────────────────────────────────────
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -367,10 +610,6 @@ const _headerBtn: React.CSSProperties = {
   width: 24, height: 22, borderRadius: 4, border: '1px solid var(--rule-2)',
   background: 'var(--paper)', color: 'var(--ink-2)', cursor: 'pointer',
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-}
-const _miniBtn: React.CSSProperties = {
-  padding: '1px 6px', borderRadius: 3, border: '1px solid var(--rule-2)',
-  background: 'var(--paper)', color: 'var(--ink-2)', fontSize: 10, cursor: 'pointer',
 }
 const _miniIconBtn: React.CSSProperties = {
   width: 20, height: 20, borderRadius: 3, border: '1px solid var(--rule-2)',

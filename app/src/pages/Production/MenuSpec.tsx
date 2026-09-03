@@ -1,15 +1,19 @@
 // MenuSpec — Houdini-style tabbed spec panel.
 //
-// Tab layout:  [Tasks | <task N> | <task N · subtask K> | …]
+// Tab layout:  [Tasks | <asset · task N> | <asset · task · subtask K> | …]
 //
-// - The first tab is always "Tasks" and shows the asset's task chips.
-// - A click on a task header opens a Task tab.
-// - A click on a subtask node (nested inside a task chip) opens a Subtask tab.
+// - The first tab is always "Tasks" and shows the CURRENTLY SELECTED asset's
+//   task chips.  It is the only tab bound to the selection.
+// - A click on a task header opens a Task tab. A click on a subtask node
+//   opens a Subtask tab. Both carry their own assetId and survive selection
+//   changes — you can browse a different asset without losing them.
 // - Tasks with no subtasks open the Task tab on any click.
-// - Each tab except the first can be closed with an X.
+// - Each non-root tab has a pin (persisted per project on this machine) and
+//   a close button. Pinned tabs come back after a restart.
 
-import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Pin, X } from 'lucide-react'
+import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import type { ProductionAsset as Asset, ProductionPublish, ProductionState, ProductionTask } from '../../types'
 import { TaskDetail } from './TaskDetail'
@@ -17,158 +21,402 @@ import { taskColorFromName } from './util'
 import type { Selection } from './Production'
 
 interface Props {
-  state:           ProductionState
-  setState:        (patch: (prev: ProductionState) => ProductionState) => void
-  selection:       Selection
-  publishesByTask: Record<string, ProductionPublish[]>
+  state:              ProductionState
+  setState:           (patch: (prev: ProductionState) => ProductionState) => void
+  selection:          Selection
+  publishesByTask:    Record<string, ProductionPublish[]>
+  // Prevents the tab GC from firing before the first successful fetch — otherwise
+  // pinned tabs would be wiped on Production remount, taking their store with them.
+  loading?:           boolean
+  // External deep-link: open a specific task (or subtask) tab automatically.
+  initialOpen?:       { task: string; subtask?: string } | null
+  onInitialOpenApplied?: () => void
 }
 
 type Tab =
   | { key: string; kind: 'root' }
-  | { key: string; kind: 'task';    taskId: string }
-  | { key: string; kind: 'subtask'; taskId: string; subtask: string }
+  | { key: string; kind: 'task';    assetId: string; taskId: string }
+  | { key: string; kind: 'subtask'; assetId: string; taskId: string; subtask: string }
+
+interface PinnedRef {
+  kind:    'task' | 'subtask'
+  assetId: string
+  taskId:  string
+  subtask?: string
+}
 
 const ROOT_TAB: Tab = { key: 'root', kind: 'root' }
+const taskKey = (assetId: string, taskId: string) => `task:${assetId}:${taskId}`
+const subKey  = (assetId: string, taskId: string, sub: string) => `sub:${assetId}:${taskId}:${sub}`
 
-export function MenuSpec({ state, setState, selection, publishesByTask }: Props) {
+const pinLsKey = (project: string) => `flux.production.pinned.${project}`
+
+function readPinned(project: string): PinnedRef[] {
+  if (!project) return []
+  try {
+    const raw = localStorage.getItem(pinLsKey(project))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x: unknown): x is PinnedRef => {
+      const p = x as PinnedRef
+      return !!p && (p.kind === 'task' || p.kind === 'subtask') && typeof p.assetId === 'string' && typeof p.taskId === 'string'
+    })
+  } catch { return [] }
+}
+function writePinned(project: string, list: PinnedRef[]) {
+  if (!project) return
+  try { localStorage.setItem(pinLsKey(project), JSON.stringify(list)) } catch { /* blocked */ }
+}
+
+export function MenuSpec({ state, setState, selection, publishesByTask, loading, initialOpen, onInitialOpenApplied }: Props) {
   const { t } = useI18n()
-  const [tabs, setTabs]         = useState<Tab[]>([ROOT_TAB])
+  const { project } = useProject()
+
+  const [tabs, setTabs]           = useState<Tab[]>([ROOT_TAB])
   const [activeKey, setActiveKey] = useState<string>('root')
 
-  const asset = selection.kind === 'asset' ? state.assets.find(a => a.id === selection.id) ?? null : null
+  const selectedAsset = selection.kind === 'asset' ? state.assets.find(a => a.id === selection.id) ?? null : null
 
-  // Reset tabs when the active asset changes.
+  // When the current context (asset selection) changes, close every tab that
+  // is not explicitly pinned. Root always stays. Runs after the pin-restore
+  // effect so restored pins survive the wipe.
   useEffect(() => {
-    setTabs([ROOT_TAB])
-    setActiveKey('root')
-  }, [asset?.id])
+    if (!project) return
+    const pinnedKeys = new Set(readPinned(project).map(refToKey))
+    setTabs(prev => {
+      const kept = prev.filter(tab => tab.kind === 'root' || pinnedKeys.has(tab.key))
+      if (kept.length === prev.length) return prev
+      if (!kept.some(x => x.key === activeKey)) setActiveKey('root')
+      return kept
+    })
+  }, [selectedAsset?.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!asset) {
-    return <div style={_hint}>{t('prod.selectEntity')}</div>
-  }
+  // ── restore pinned tabs whenever the active project changes ────────────────
+  useEffect(() => {
+    if (!project) { setTabs([ROOT_TAB]); setActiveKey('root'); return }
+    const pins = readPinned(project)
+    const restored: Tab[] = pins.map(p => (
+      p.kind === 'subtask' && p.subtask
+        ? { key: subKey(p.assetId, p.taskId, p.subtask), kind: 'subtask', assetId: p.assetId, taskId: p.taskId, subtask: p.subtask }
+        : { key: taskKey(p.assetId, p.taskId), kind: 'task', assetId: p.assetId, taskId: p.taskId }
+    ))
+    setTabs([ROOT_TAB, ...restored])
+    setActiveKey('root')
+  }, [project])
+
+  // ── garbage-collect tabs pointing at removed asset/task ────────────────────
+  // Skipped while the production store is still loading — otherwise the empty
+  // initial state would wipe pinned tabs and their persisted store.
+  useEffect(() => {
+    if (loading) return
+    setTabs(prev => {
+      const kept = prev.filter(tab => {
+        if (tab.kind === 'root') return true
+        const a = state.assets.find(x => x.id === tab.assetId)
+        if (!a) return false
+        return a.tasks.some(x => x.id === tab.taskId)
+      })
+      if (kept.length !== prev.length) {
+        // Sync pinned store — same predicate.
+        if (project) {
+          const stillPinned = readPinned(project).filter(p => {
+            const a = state.assets.find(x => x.id === p.assetId)
+            return !!a && a.tasks.some(x => x.id === p.taskId)
+          })
+          writePinned(project, stillPinned)
+        }
+        if (!kept.some(x => x.key === activeKey)) setActiveKey('root')
+      }
+      return kept
+    })
+  }, [state.assets, project, loading])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── consume external deep-link (fav row click) ─────────────────────────────
+  useEffect(() => {
+    if (!initialOpen || !selectedAsset) return
+    const target = selectedAsset.tasks.find(x => x.name.toUpperCase() === initialOpen.task.toUpperCase())
+    if (!target) return
+    if (initialOpen.subtask) {
+      const key = subKey(selectedAsset.id, target.id, initialOpen.subtask.toUpperCase())
+      setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, {
+        key, kind: 'subtask', assetId: selectedAsset.id, taskId: target.id, subtask: initialOpen.subtask!.toUpperCase(),
+      }]))
+      setActiveKey(key)
+    } else {
+      const key = taskKey(selectedAsset.id, target.id)
+      setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, {
+        key, kind: 'task', assetId: selectedAsset.id, taskId: target.id,
+      }]))
+      setActiveKey(key)
+    }
+    onInitialOpenApplied?.()
+  }, [initialOpen, selectedAsset?.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── tab management helpers ─────────────────────────────────────────────────
-  const openTaskTab = (taskId: string) => {
-    const key = `task:${taskId}`
-    setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'task', taskId }]))
+  const openTaskTab = (assetId: string, taskId: string) => {
+    const key = taskKey(assetId, taskId)
+    setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'task', assetId, taskId }]))
     setActiveKey(key)
   }
-  const openSubtaskTab = (taskId: string, subtask: string) => {
-    const key = `sub:${taskId}:${subtask}`
-    setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'subtask', taskId, subtask }]))
+  const openSubtaskTab = (assetId: string, taskId: string, subtask: string) => {
+    const key = subKey(assetId, taskId, subtask)
+    setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'subtask', assetId, taskId, subtask }]))
     setActiveKey(key)
   }
   const closeTab = (key: string) => {
     setTabs(prev => {
       const next = prev.filter(x => x.key !== key)
       if (activeKey === key) {
-        // fall back to the tab immediately left of the closed one, else root
         const idx = prev.findIndex(x => x.key === key)
         const fallback = next[Math.max(0, idx - 1)]?.key ?? 'root'
         setActiveKey(fallback)
       }
       return next
     })
+    // Un-pin if it was pinned.
+    if (project) writePinned(project, readPinned(project).filter(p => refToKey(p) !== key))
+  }
+  // Move *fromKey* before *toKey* in the tab strip. Root stays at index 0.
+  const reorderTab = (fromKey: string, toKey: string) => {
+    if (fromKey === toKey) return
+    setTabs(prev => {
+      const from = prev.findIndex(x => x.key === fromKey)
+      const to   = prev.findIndex(x => x.key === toKey)
+      if (from < 0 || to < 0) return prev
+      const src = prev[from]
+      if (src.kind === 'root') return prev
+      const next = prev.slice()
+      next.splice(from, 1)
+      const insertAt = Math.max(1, next.findIndex(x => x.key === toKey))
+      next.splice(insertAt, 0, src)
+      return next
+    })
+  }
+
+  const isPinned = (key: string): boolean => {
+    if (!project) return false
+    return readPinned(project).some(p => refToKey(p) === key)
+  }
+  const togglePin = (tab: Tab) => {
+    if (!project || tab.kind === 'root') return
+    const cur = readPinned(project)
+    const ref: PinnedRef = tab.kind === 'subtask'
+      ? { kind: 'subtask', assetId: tab.assetId, taskId: tab.taskId, subtask: tab.subtask }
+      : { kind: 'task',    assetId: tab.assetId, taskId: tab.taskId }
+    const key = refToKey(ref)
+    const next = cur.some(p => refToKey(p) === key)
+      ? cur.filter(p => refToKey(p) !== key)
+      : [...cur, ref]
+    writePinned(project, next)
+    // Force a re-render (isPinned reads from localStorage, not from state).
+    setTabs(prev => [...prev])
   }
 
   const active = tabs.find(x => x.key === activeKey) ?? ROOT_TAB
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      {/* tab strip */}
+      {/* tab strip — shrinks browser-style when it fills up */}
       <div style={{
         display: 'flex', alignItems: 'stretch',
         borderBottom: '1px solid var(--rule)', background: 'var(--paper)',
-        overflowX: 'auto', flexShrink: 0,
+        overflow: 'hidden', flexShrink: 0,
       }}>
-        {tabs.map(tab => {
-          const label = labelForTab(tab, asset)
-          const color = tabColor(tab, asset)
-          const isActive = tab.key === activeKey
-          return (
-            <div
-              key={tab.key}
-              onClick={() => setActiveKey(tab.key)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                padding: '7px 14px',
-                borderRight: '1px solid var(--rule)',
-                background: isActive ? 'var(--paper-2)' : 'transparent',
-                color: isActive ? 'var(--ink)' : 'var(--ink-3)',
-                cursor: 'pointer', userSelect: 'none',
-                borderTop: isActive ? `2px solid ${color}` : '2px solid transparent',
-                fontSize: 11, fontFamily: 'var(--sans)',
-                flexShrink: 0,
-              }}
-            >
-              {tab.kind !== 'root' && (
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-              )}
-              <span style={{
-                fontFamily: tab.kind === 'root' ? 'var(--sans)' : 'var(--mono)',
-                fontSize: tab.kind === 'root' ? 11 : 10, letterSpacing: '0.03em',
-              }}>{label}</span>
-              {tab.kind !== 'root' && (
-                <button
-                  onClick={e => { e.stopPropagation(); closeTab(tab.key) }}
-                  title="Fermer"
-                  style={{
-                    width: 15, height: 15, borderRadius: 3, border: 'none',
-                    background: 'transparent', color: 'var(--ink-3)', cursor: 'pointer',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <X size={9} strokeWidth={2} />
-                </button>
-              )}
-            </div>
-          )
-        })}
+        {tabs.map((tab, i) => (
+          <TabChip
+            key={tab.key}
+            tab={tab}
+            state={state}
+            selectedAsset={selectedAsset}
+            active={tab.key === activeKey}
+            pinned={isPinned(tab.key)}
+            onSelect={() => setActiveKey(tab.key)}
+            onClose={() => closeTab(tab.key)}
+            onTogglePin={() => togglePin(tab)}
+            onReorder={(fromKey, toKey) => reorderTab(fromKey, toKey)}
+            index={i}
+          />
+        ))}
       </div>
 
       {/* content */}
       {active.kind === 'root' && (
-        <TasksLanding
-          asset={asset}
-          publishesByTask={publishesByTask}
-          onOpenTask={openTaskTab}
-          onOpenSubtask={openSubtaskTab}
-        />
+        selectedAsset
+          ? <TasksLanding
+              asset={selectedAsset}
+              publishesByTask={publishesByTask}
+              onOpenTask={(taskId) => openTaskTab(selectedAsset.id, taskId)}
+              onOpenSubtask={(taskId, sub) => openSubtaskTab(selectedAsset.id, taskId, sub)}
+            />
+          : <div style={_hint}>{t('prod.selectEntity')}</div>
       )}
-      {active.kind === 'task' && (
-        <TaskDetail
-          asset={asset}
-          task={requireTask(asset, active.taskId)}
-          subtaskFilter={null}
-          detailKey={requireTask(asset, active.taskId).name}
-          publishes={publishesByTask[`${asset.id}|${active.taskId}`] || []}
-          onPatchTask={patch => patchTask(setState, asset.id, active.taskId, patch)}
-          onPatchDetail={patch => patchDetail(setState, asset.id, requireTask(asset, active.taskId).name, patch)}
-          onDeleteTask={() => {
-            setState(prev => ({
-              ...prev,
-              assets: prev.assets.map(a => a.id === asset.id ? {
-                ...a, tasks: a.tasks.filter(x => x.id !== active.taskId),
-              } : a),
-            }))
-            closeTab(active.key)
-          }}
-        />
+      {active.kind !== 'root' && (() => {
+        const asset = state.assets.find(a => a.id === active.assetId)
+        if (!asset) return <div style={_hint}>Asset introuvable</div>
+        const task = asset.tasks.find(x => x.id === active.taskId)
+        if (!task) return <div style={_hint}>Tâche introuvable</div>
+        const bucket = publishesByTask[`${asset.id}|${task.id}`] || []
+        if (active.kind === 'task') {
+          return (
+            <TaskDetail
+              asset={asset} task={task}
+              subtaskFilter={null}
+              detailKey={task.name}
+              publishes={bucket}
+              pinned={isPinned(active.key)}
+              onTogglePin={() => togglePin(active)}
+              onPatchTask={patch => patchTask(setState, asset.id, task.id, patch)}
+              onPatchDetail={patch => patchDetail(setState, asset.id, task.name, patch)}
+              onDeleteTask={() => {
+                setState(prev => ({
+                  ...prev,
+                  assets: prev.assets.map(a => a.id === asset.id ? {
+                    ...a, tasks: a.tasks.filter(x => x.id !== task.id),
+                  } : a),
+                }))
+                closeTab(active.key)
+              }}
+            />
+          )
+        }
+        // subtask
+        return (
+          <TaskDetail
+            asset={asset} task={task}
+            subtaskFilter={active.subtask}
+            detailKey={`${task.name}|${active.subtask}`}
+            publishes={bucket.filter(p => (p.instance || '').toUpperCase() === active.subtask.toUpperCase())}
+            pinned={isPinned(active.key)}
+            onTogglePin={() => togglePin(active)}
+            onPatchTask={patch => patchTask(setState, asset.id, task.id, patch)}
+            onPatchDetail={patch => patchDetail(setState, asset.id, `${task.name}|${active.subtask}`, patch)}
+            onDeleteTask={() => closeTab(active.key) /* not applicable in subtask view */}
+          />
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── tab chip ────────────────────────────────────────────────────────────────
+function TabChip({ tab, state, selectedAsset, active, pinned, onSelect, onClose, onTogglePin, onReorder, index }: {
+  tab:            Tab
+  state:          ProductionState
+  selectedAsset:  Asset | null
+  active:         boolean
+  pinned:         boolean
+  onSelect:       () => void
+  onClose:        () => void
+  onTogglePin:    () => void
+  onReorder:      (fromKey: string, toKey: string) => void
+  index:          number
+}) {
+  const { label, color, sub } = useMemo(() => {
+    if (tab.kind === 'root') {
+      return {
+        label: selectedAsset ? `${selectedAsset.class} · ${selectedAsset.name}` : 'Tasks',
+        color: 'var(--accent)', sub: '',
+      }
+    }
+    const a = state.assets.find(x => x.id === tab.assetId)
+    const tk = a?.tasks.find(x => x.id === tab.taskId)
+    const name = tk?.name ?? '—'
+    return {
+      label: a ? `${a.name} · ${name}` : name,
+      color: taskColorFromName(name),
+      sub: tab.kind === 'subtask' ? tab.subtask : '',
+    }
+  }, [tab, state.assets, selectedAsset])
+
+  const draggable = tab.kind !== 'root'
+  const [dragOver, setDragOver] = useState(false)
+
+  return (
+    <div
+      onClick={onSelect}
+      draggable={draggable}
+      onDragStart={e => {
+        if (!draggable) return
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/flux-tab-key', tab.key)
+      }}
+      onDragOver={e => {
+        if (!e.dataTransfer.types.includes('text/flux-tab-key')) return
+        if (tab.kind === 'root') return                    // never accept a drop on root
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+        setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={e => {
+        setDragOver(false)
+        const from = e.dataTransfer.getData('text/flux-tab-key')
+        if (from && from !== tab.key && tab.kind !== 'root') {
+          e.preventDefault(); e.stopPropagation()
+          onReorder(from, tab.key)
+        }
+      }}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '7px 12px',
+        borderRight: '1px solid var(--rule)',
+        background: active ? 'var(--paper-2)' : dragOver ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+        color: active ? 'var(--ink)' : 'var(--ink-3)',
+        cursor: draggable ? 'grab' : 'pointer',
+        userSelect: 'none',
+        borderTop: active ? `2px solid ${color}` : '2px solid transparent',
+        fontSize: 11, fontFamily: 'var(--sans)',
+        // browser-style shrink: root doesn't shrink so its label stays legible;
+        // task/subtask tabs share the remaining width and clamp to a max.
+        flex: tab.kind === 'root' ? '0 0 auto' : '1 1 100px',
+        minWidth: tab.kind === 'root' ? undefined : 60,
+        maxWidth: tab.kind === 'root' ? undefined : 200,
+        minHeight: 0, overflow: 'hidden',
+      }}
+      title={label + (sub ? ` · ${sub}` : '')}
+    >
+      {tab.kind !== 'root' && (
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
       )}
-      {active.kind === 'subtask' && (
-        <TaskDetail
-          asset={asset}
-          task={requireTask(asset, active.taskId)}
-          subtaskFilter={active.subtask}
-          detailKey={`${requireTask(asset, active.taskId).name}|${active.subtask}`}
-          publishes={(publishesByTask[`${asset.id}|${active.taskId}`] || []).filter(
-            p => (p.instance || '').toUpperCase() === active.subtask.toUpperCase()
-          )}
-          onPatchTask={patch => patchTask(setState, asset.id, active.taskId, patch)}
-          onPatchDetail={patch => patchDetail(setState, asset.id, `${requireTask(asset, active.taskId).name}|${active.subtask}`, patch)}
-          onDeleteTask={() => closeTab(active.key) /* not applicable in subtask view */}
-        />
+      <span style={{
+        fontFamily: tab.kind === 'root' ? 'var(--sans)' : 'var(--mono)',
+        fontSize: tab.kind === 'root' ? 11 : 10, letterSpacing: '0.03em',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        flex: '1 1 auto', minWidth: 0,
+      }}>
+        {label}{sub ? ` · ${sub}` : ''}
+      </span>
+      {tab.kind !== 'root' && (
+        <>
+          <button
+            onClick={e => { e.stopPropagation(); onTogglePin() }}
+            title={pinned ? 'Désépingler' : 'Épingler'}
+            style={{
+              width: 15, height: 15, borderRadius: 3, border: 'none',
+              background: 'transparent',
+              color: pinned ? 'var(--accent-hi)' : 'var(--ink-4)',
+              cursor: 'pointer', flexShrink: 0,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Pin size={9} strokeWidth={2} fill={pinned ? 'var(--accent)' : 'none'} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onClose() }}
+            title="Fermer"
+            style={{
+              width: 15, height: 15, borderRadius: 3, border: 'none',
+              background: 'transparent', color: 'var(--ink-3)', cursor: 'pointer',
+              flexShrink: 0,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <X size={9} strokeWidth={2} />
+          </button>
+        </>
       )}
+      {/* mute index unused-var */}
+      <span style={{ display: 'none' }}>{index}</span>
     </div>
   )
 }
@@ -218,7 +466,6 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
   const color = taskColorFromName(task.name)
   const hasSubs = task.known_subtasks.length > 0
 
-  // If no subtasks, any click opens the task tab directly.
   const onClickBody: React.MouseEventHandler = (e) => {
     if (!hasSubs) { e.stopPropagation(); onOpenHeader() }
   }
@@ -242,7 +489,6 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         transform: expanded ? 'scale(1.02)' : 'scale(1)',
       }}
     >
-      {/* header — always clickable to open Task tab */}
       <div
         onClick={(e) => { e.stopPropagation(); onOpenHeader() }}
         style={{
@@ -254,13 +500,6 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
       >
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.05em', color: 'var(--ink)' }}>{task.name}</span>
-        {task.origin === 'auto' && (
-          <span style={{
-            fontFamily: 'var(--mono)', fontSize: 8, padding: '1px 5px', borderRadius: 3,
-            background: 'color-mix(in oklch, var(--warn) 18%, transparent)',
-            color: 'var(--warn)', letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>auto</span>
-        )}
         <span style={{ flex: 1 }} />
         {publishCount > 0 && (
           <span style={{
@@ -270,7 +509,6 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         )}
       </div>
 
-      {/* completion mini-bar (always visible; hover just makes it larger) */}
       <div style={{
         height: expanded ? 5 : 3, marginTop: expanded ? 8 : 6, borderRadius: 3,
         background: 'color-mix(in oklch, var(--paper) 60%, transparent)',
@@ -282,11 +520,8 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         }} />
       </div>
 
-      {/* subtasks nested boxes — visible only when expanded */}
       {expanded && hasSubs && (
-        <div style={{
-          marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8,
-        }}>
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {task.known_subtasks.map(sub => {
             const subDone = subtaskCompletions[sub] ?? 0
             const isHovered = hoveredSub === sub
@@ -314,7 +549,6 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
                 >
                   {sub}
                 </button>
-                {/* subtask completion — hidden by default, shown at hover */}
                 <div style={{
                   height: 3, borderRadius: 2, width: 68,
                   background: 'color-mix(in oklch, var(--paper) 60%, transparent)',
@@ -337,26 +571,10 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-function requireTask(asset: Asset, taskId: string): ProductionTask {
-  const t = asset.tasks.find(x => x.id === taskId)
-  if (!t) {
-    // Fallback shell so React never crashes if the tab briefly outlives the task
-    return { id: taskId, name: '—', order: 0, type_tokens: [], known_subtasks: [] }
-  }
-  return t
-}
-
-function labelForTab(tab: Tab, asset: Asset): string {
-  if (tab.kind === 'root') return 'Tasks'
-  const task = asset.tasks.find(x => x.id === tab.taskId)
-  const base = task?.name ?? '—'
-  return tab.kind === 'subtask' ? `${base} · ${tab.subtask}` : base
-}
-
-function tabColor(tab: Tab, asset: Asset): string {
-  if (tab.kind === 'root') return 'var(--accent)'
-  const task = asset.tasks.find(x => x.id === tab.taskId)
-  return taskColorFromName(task?.name ?? '—')
+function refToKey(p: PinnedRef): string {
+  return p.kind === 'subtask' && p.subtask
+    ? subKey(p.assetId, p.taskId, p.subtask)
+    : taskKey(p.assetId, p.taskId)
 }
 
 function patchTask(
