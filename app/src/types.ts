@@ -47,6 +47,14 @@ export interface FileEntry {
   is_dir: boolean
 }
 
+// Template library preset (RETAKES-3): a reusable model file the team links once
+// and drops anywhere in the folder manager. `file` is null when the slot is empty.
+export interface Preset {
+  id: string
+  name: string
+  file: string | null
+}
+
 export interface Settings {
   first_launch: boolean
   workspace: string | null

@@ -8,6 +8,10 @@ from core.constants import ANIM_INSTANCES, DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_seq, format_shot
+from features.folder_manager.houdini_scene_template import (
+    create_sequence_hip_scene,
+    create_shot_hip_scene,
+)
 from features.folder_manager.sequence_template import (
     create_sequence_usd_template,
     create_shot_usd_template,
@@ -47,6 +51,12 @@ def create_sequence(
     # Author the sequence USD template (root layer + base light rig). Never an
     # empty .usd — a failure here only logs, the folder/token still stand.
     create_sequence_usd_template(seq_path, seq_label)
+    # Author the sequence lighting .hip (general light rig) next to the USD layers.
+    # Non-fatal exactly like the USD template: a missing Houdini only logs.
+    try:
+        create_sequence_hip_scene(seq_path, seq_label)
+    except Exception as exc:  # noqa: BLE001 — never let Houdini break folder creation
+        log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
     log.info("Sequence created: %s", seq_path)
     return seq_path
 
@@ -78,6 +88,10 @@ def create_shot(
         ensure_dir(seq_path)
         add_token(project_path, "SEQ", seq_label, seq_rel)
         create_sequence_usd_template(seq_path, seq_label)
+        try:
+            create_sequence_hip_scene(seq_path, seq_label)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
         log.debug("Auto-created parent sequence %s", seq_label)
 
     _scaffold_shot(shot_path)
@@ -87,6 +101,11 @@ def create_shot(
     add_token(project_path, "SHOT", token_key, shot_rel)
     # Author the shot USD template: strong shot light over the weak sequence rig.
     create_shot_usd_template(shot_path, seq_label, shot_label)
+    # Author the shot lighting .hip (refines/overrides the seq rig). Non-fatal.
+    try:
+        create_shot_hip_scene(shot_path, seq_label, shot_label)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
     log.info("Shot created: %s", shot_path)
     return shot_path
 

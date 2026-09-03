@@ -54,8 +54,31 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'nav.folderManager':       { fr: 'Folder Manager',           en: 'Folder Manager' },
   'nav.publisher':           { fr: 'Publisher',                en: 'Publisher' },
   'nav.usdAssembler':        { fr: 'USD Assembleur',           en: 'USD Assembler' },
+  'nav.templateEditor':      { fr: 'Éditeur de templates',     en: 'Template Editor' },
   'nav.shelfManager':        { fr: 'Shelf Manager',            en: 'Shelf Manager' },
   'nav.activity':            { fr: 'Activité',                 en: 'Activity' },
+
+  // Template Editor (RETAKES-3)
+  'te.title':        { fr: 'Éditeur de templates',            en: 'Template Editor' },
+  'te.subtitle':     { fr: 'Presets réutilisables déposables dans le folder manager', en: 'Reusable presets you can drop into the folder manager' },
+  'te.project':      { fr: 'Projet',                          en: 'Project' },
+  'te.noProject':    { fr: 'Aucun projet sélectionné',        en: 'No project selected' },
+  'te.add':          { fr: 'Ajouter un preset',               en: 'Add a preset' },
+  'te.empty':        { fr: 'Aucun preset. Ajoutes-en un.',    en: 'No presets yet. Add one.' },
+  'te.slotEmpty':    { fr: 'vide',                            en: 'empty' },
+  'te.linked':       { fr: 'linké',                           en: 'linked' },
+  'te.link':         { fr: 'Linker un fichier',               en: 'Link a file' },
+  'te.unlink':       { fr: 'Délinker',                        en: 'Unlink' },
+  'te.rename':       { fr: 'Renommer',                        en: 'Rename' },
+  'te.remove':       { fr: 'Supprimer le slot',               en: 'Remove slot' },
+  'te.dropInto':     { fr: 'Déposer dans…',                   en: 'Drop into…' },
+  'te.dropOk':       { fr: 'Déposé',                          en: 'Dropped' },
+  'te.linkOk':       { fr: 'Fichier linké',                   en: 'File linked' },
+  'te.err':          { fr: 'Échec',                           en: 'Failed' },
+
+  // Folder manager quick-drop (RETAKES-3)
+  'fm.presetDropOk': { fr: 'déposé ici',                      en: 'dropped here' },
+  'fm.presetHint':   { fr: 'Déposer un preset dans ce dossier', en: 'Drop a preset into this folder' },
 
   // hub
   'hub.hello':               { fr: 'Bonjour',                  en: 'Hello' },

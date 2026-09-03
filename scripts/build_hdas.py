@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 from dcc.houdini.hda.flux_importer_hda import build_hda as build_importer
 from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
+from dcc.houdini.hda.flux_lighting_hda import build_hda as build_lighting
 
 _OUT_DIR = Path(__file__).parent.parent / "backend" / "resources" / "shelves" / "houdini"
 
@@ -43,6 +44,15 @@ def main() -> None:
         print("  ✓ flux_exporter.hda built")
     else:
         print(f"  ✗ exporter build failed: {r.get('error')}")
+        sys.exit(1)
+
+    lighting_path = str(_OUT_DIR / "flux_lighting.hda")
+    print(f"Building lighting HDA → {lighting_path}")
+    r = build_lighting(lighting_path)
+    if r.get("ok"):
+        print("  ✓ flux_lighting.hda built")
+    else:
+        print(f"  ✗ lighting build failed: {r.get('error')}")
         sys.exit(1)
 
     print("Done — HDAs written to backend/resources/shelves/houdini/")

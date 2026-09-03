@@ -19,6 +19,7 @@ from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
 )
 from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
+from features.folder_manager import preset_manager
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -526,6 +527,99 @@ async def copy_item(req: ItemCopy) -> dict:
 
     log.info("Copied %s → %s", src_path, dst_path)
     return {"name": dst_name, "path": str(dst_path)}
+
+
+# ── Presets (template library, RETAKES-3) ──────────────────────────────────────
+
+class PresetAdd(BaseModel):
+    name: str = ""
+
+
+class PresetLink(BaseModel):
+    src_path: str   # absolute source file path (chosen via the OS file picker)
+
+
+class PresetRename(BaseModel):
+    name: str
+
+
+class PresetDrop(BaseModel):
+    dest_subpath: str = ""   # folder (relative from project root) to drop into; "" = root
+
+
+def _require_project(project_name: str) -> Path:
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    return project_path
+
+
+def _preset_or_400(result: dict) -> dict:
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "preset operation failed"))
+    return result
+
+
+@router.get("/projects/{project_name}/presets")
+async def get_presets(project_name: str) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    presets = await loop.run_in_executor(None, lambda: preset_manager.list_presets(project_path))
+    return {"presets": presets}
+
+
+@router.post("/projects/{project_name}/presets")
+async def post_preset(project_name: str, req: PresetAdd) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: preset_manager.add_preset_slot(project_path, req.name))
+    return _preset_or_400(res)
+
+
+@router.put("/projects/{project_name}/presets/{preset_id}/link")
+async def put_preset_link(project_name: str, preset_id: str, req: PresetLink) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: preset_manager.link_preset(project_path, preset_id, Path(req.src_path))
+    )
+    return _preset_or_400(res)
+
+
+@router.put("/projects/{project_name}/presets/{preset_id}/unlink")
+async def put_preset_unlink(project_name: str, preset_id: str) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: preset_manager.unlink_preset(project_path, preset_id))
+    return _preset_or_400(res)
+
+
+@router.put("/projects/{project_name}/presets/{preset_id}/rename")
+async def put_preset_rename(project_name: str, preset_id: str, req: PresetRename) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: preset_manager.rename_preset(project_path, preset_id, req.name)
+    )
+    return _preset_or_400(res)
+
+
+@router.delete("/projects/{project_name}/presets/{preset_id}")
+async def delete_preset(project_name: str, preset_id: str) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: preset_manager.remove_preset_slot(project_path, preset_id))
+    return _preset_or_400(res)
+
+
+@router.post("/projects/{project_name}/presets/{preset_id}/drop")
+async def post_preset_drop(project_name: str, preset_id: str, req: PresetDrop) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: preset_manager.drop_preset(project_path, preset_id, req.dest_subpath)
+    )
+    return _preset_or_400(res)
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────

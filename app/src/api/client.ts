@@ -8,6 +8,7 @@ import type {
   HoudiniPublishPayload,
   HoudiniPublishResult,
   HoudiniState,
+  Preset,
   PublishPayload,
   PublishResult,
   Settings,
@@ -320,6 +321,37 @@ export const api = {
       project, subpath: subpath.join('/'), name,
       new_name: newName ?? '', new_subpath: newSubpath !== undefined ? newSubpath.join('/') : '',
     }),
+
+  // Presets (template library — RETAKES-3)
+  listPresets: (project: string) =>
+    apiCall<{ presets: Preset[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/presets`),
+
+  addPreset: (project: string, name?: string) =>
+    apiCall<{ ok: boolean; preset: Preset; presets: Preset[] }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/presets`, { name: name ?? '' }),
+
+  linkPreset: (project: string, presetId: string, srcPath: string) =>
+    apiCall<{ ok: boolean; preset: Preset; presets: Preset[] }>(
+      'PUT', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/link`,
+      { src_path: srcPath }),
+
+  unlinkPreset: (project: string, presetId: string) =>
+    apiCall<{ ok: boolean; preset: Preset; presets: Preset[] }>(
+      'PUT', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/unlink`),
+
+  renamePreset: (project: string, presetId: string, name: string) =>
+    apiCall<{ ok: boolean; preset: Preset; presets: Preset[] }>(
+      'PUT', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/rename`,
+      { name }),
+
+  deletePreset: (project: string, presetId: string) =>
+    apiCall<{ ok: boolean; presets: Preset[] }>(
+      'DELETE', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}`),
+
+  dropPreset: (project: string, presetId: string, destSubpath: string) =>
+    apiCall<{ ok: boolean; name: string; path: string }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/drop`,
+      { dest_subpath: destSubpath }),
 
   // DCC
   getFluxTokensFromPath: (project: string, rel_path: string) =>

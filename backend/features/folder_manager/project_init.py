@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from core.logger import get_logger
@@ -27,7 +28,13 @@ _PROJECT_DIRS = (
     "comp",
     "assembly",
     "render",
+    # template/ holds the interchangeable Houdini lighting base scenes the
+    # seq/shot generators read. Seeded below; the team can swap the files freely.
+    "template",
 )
+
+# Pipeline seed for the interchangeable Houdini lighting template (versioned default).
+_SEED_HOUDINI_DIR = Path(__file__).parent.parent.parent / "resources" / "scenes" / "houdini"
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -53,6 +60,7 @@ def create_project(project_name: str, projects_root: Path | None = None) -> Path
         raise FileExistsError(f"Project '{safe_name}' already exists at {project_path}")
 
     _scaffold_directories(project_path)
+    _seed_template_dir(project_path)
     _write_initial_tokens(project_path)
 
     log.info("Project created: %s", project_path)
@@ -84,6 +92,33 @@ def _scaffold_directories(project_path: Path) -> None:
     for rel in _PROJECT_DIRS:
         ensure_dir(project_path / rel)
     log.debug("Scaffolded %d dirs under %s", len(_PROJECT_DIRS), project_path)
+
+
+def _seed_template_dir(project_path: Path) -> None:
+    """Seed <project>/template/ with the default Houdini lighting base scenes.
+
+    Copied from the pipeline seed resource. Idempotent: never overwrites files the
+    team may have customised. Non-fatal — a missing seed only logs, project stands.
+    The seed is .hipnc (Apprentice-authored); the team can drop .hip versions in,
+    which the generators resolve first (see houdini_scene_template.resolve_template).
+    """
+    tpl_dir = project_path / "template"
+    seed = _SEED_HOUDINI_DIR / "flux_template_sequence.hipnc"
+    if not seed.is_file():
+        log.warning("Houdini template seed missing (%s); template/ left empty.", seed)
+        return
+    # Seed both the sequence and shot base scenes (same scene at first — the shot
+    # scene refines the seq lighting, but starts from the identical rig).
+    targets = ("flux_template_sequence.hipnc", "flux_template_shot.hipnc")
+    for name in targets:
+        dest = tpl_dir / name
+        if dest.exists():
+            continue  # keep any customised file
+        try:
+            shutil.copy2(seed, dest)
+            log.info("Seeded Houdini template: %s", dest)
+        except OSError as exc:
+            log.warning("Could not seed Houdini template %s: %s", dest, exc)
 
 
 def _write_initial_tokens(project_path: Path) -> None:
