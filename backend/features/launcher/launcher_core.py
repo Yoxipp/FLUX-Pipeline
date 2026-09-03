@@ -13,8 +13,38 @@ from core.logger import get_logger
 
 log = get_logger(__name__)
 
-# Windows DETACHED_PROCESS flag — process keeps running after hub closes
+# Windows process-creation flags — DETACHED keeps the DCC alive after the hub closes.
 _DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+# Env vars FLUX's OWN runtime injects that must NOT leak into a launched DCC.
+# flux_backend.exe is a PyInstaller bundle (sets PYTHON*/_MEIPASS/SSL_CERT_*), and
+# FLUX may be started from a shell (e.g. Git Bash) that sets HOME. Inherited by a DCC
+# these break its startup — most visibly on Windows, where a stray HOME makes Houdini
+# read $HOME/houdiniX.Y instead of %USERPROFILE%/Documents/houdiniX.Y, so the user's
+# prefs, desktops, shelves and HDAs never load. FLUX_PORT is deliberately KEPT so the
+# Houdini importer HDA bootstrap can still find the backend.
+_ENV_LEAK_VARS: tuple[str, ...] = (
+    "_MEIPASS", "_MEIPASS2", "_PYI_ARCHIVE_FILE", "_PYI_APPLICATION_HOME_DIR",
+    "PYINSTALLER_RESET_ENVIRONMENT",
+    "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
+    "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE", "PYTHONHASHSEED",
+    "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
+)
+
+
+def _child_env() -> dict[str, str]:
+    """Return a copy of the environment cleaned of FLUX/PyInstaller/dev-shell leakage,
+    so a launched DCC starts exactly as a normal Start-menu launch would."""
+    env = dict(os.environ)
+    for var in _ENV_LEAK_VARS:
+        env.pop(var, None)
+    if os.name == "nt":
+        # HOME is non-standard on Windows (a normal login/Start-menu launch has none);
+        # only ever set by a dev shell, and it hijacks Houdini's pref-dir resolution.
+        env.pop("HOME", None)
+    return env
 
 # Map frontend lowercase keys → DCC_EXE_PATTERNS keys
 _FRONTEND_KEY_MAP: dict[str, str] = {
@@ -60,32 +90,31 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
 
     CRITICAL: the DCC must NOT be a descendant of the FastAPI backend, otherwise the
     hub's shutdown (taskkill /PID <backend> /T) tree-kills it — closing FLUX would kill
-    an open Maya/Houdini with unsaved work. On Windows we use os.startfile (ShellExecute),
-    which reparents the process to Explorer so it survives the hub closing; DETACHED_PROCESS
-    alone is NOT enough (taskkill /T walks parent->child links regardless). When a scene
-    is passed (os.startfile takes no args) we reparent via cmd's `start`, which spawns the
-    DCC as an independent process (not a child of cmd/backend) — same survival guarantee.
+    an open Maya/Houdini with unsaved work. On Windows we reparent via cmd's `start`,
+    which spawns the DCC as an independent process (not a child of cmd/backend), so it
+    survives the hub closing; DETACHED_PROCESS alone is NOT enough (taskkill /T walks
+    parent->child links regardless). `start` (unlike os.startfile) also lets us hand the
+    DCC a cleaned environment — see _child_env(): without it Houdini launches without the
+    user's prefs/desktops/shelves/HDAs because FLUX's env leaks a stray HOME.
     """
     exe = _resolve_exe(dcc_name)
     if exe is None:
         log.warning("No executable found for '%s'", dcc_name)
         return False
+    env = _child_env()
     try:
         if os.name == "nt":
-            if scene:
-                # `start "" "<exe>" "<scene>"` — the empty "" is start's window-title arg.
-                # The DCC is reparented away from the backend, so taskkill /T won't reach it.
-                subprocess.Popen(
-                    f'start "" "{exe}" "{scene}"',
-                    shell=True, close_fds=True,
-                    creationflags=_DETACHED_PROCESS | 0x00000200,  # +CREATE_NEW_PROCESS_GROUP
-                )
-            else:
-                os.startfile(exe)  # type: ignore[attr-defined]  # Windows only; reparents to Explorer
+            # `start "" "<exe>" [scene]` — the empty "" is start's window-title arg.
+            # The DCC is reparented away from the backend, so taskkill /T won't reach it.
+            cmd = f'start "" "{exe}"' + (f' "{scene}"' if scene else "")
+            subprocess.Popen(
+                cmd, shell=True, close_fds=True, env=env,
+                creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
+            )
         else:
             # POSIX: new session detaches from the hub's process group.
             args = [exe, scene] if scene else [exe]
-            subprocess.Popen(args, start_new_session=True, close_fds=True)
+            subprocess.Popen(args, start_new_session=True, close_fds=True, env=env)
         log.info("Launched %s — %s%s", dcc_name, exe, f" (scene: {scene})" if scene else "")
         return True
     except OSError as e:
