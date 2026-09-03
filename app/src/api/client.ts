@@ -353,6 +353,16 @@ export const api = {
       'POST', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/drop`,
       { dest_subpath: destSubpath }),
 
+  setPresetMeta: (project: string, presetId: string, task: string, soft: string) =>
+    apiCall<{ ok: boolean; preset: Preset; presets: Preset[] }>(
+      'PUT', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/meta`,
+      { task, soft }),
+
+  launchPreset: (project: string, presetId: string, dcc: string) =>
+    apiCall<{ ok: boolean; launched: boolean; dcc: string; scene: string }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/presets/${encodeURIComponent(presetId)}/launch`,
+      { dcc }),
+
   // DCC
   getFluxTokensFromPath: (project: string, rel_path: string) =>
     apiCall<{ CLASS: string; TYPE: string; NAME: string; INSTANCE: string }>(

@@ -53,6 +53,8 @@ export interface Preset {
   id: string
   name: string
   file: string | null
+  task: string | null   // TASK token (or 'DEFAULT') this preset is assigned to
+  soft: string | null   // target software key (maya, houdini, nuke…)
 }
 
 export interface Settings {

@@ -4,8 +4,14 @@
 # A preset is a reusable model file the team links once and drops anywhere in the
 # folder manager. The registry is <project>/template/presets.json:
 #
-#   {"presets": [{"id": "preset_1", "name": "layout_base", "file": "layout_base.hip"},
-#                {"id": "preset_2", "name": "present 2",    "file": null}]}
+#   {"presets": [{"id": "preset_1", "name": "layout_base", "file": "layout_base.hip",
+#                 "task": "RIG", "soft": "maya"},
+#                {"id": "preset_2", "name": "preset 2", "file": null,
+#                 "task": null, "soft": null}]}
+#
+# task = the TASK token (a TYPE token, or the sentinel DEFAULT / SEQ / SHOT / ENV / FX)
+# the preset is assigned to; soft = the target software key (maya, houdini…). Both may
+# be null, and several presets may share the same (task, soft).
 #
 # Contract (same as the rest of folder_manager): pure functions returning
 # {"ok": True, ...} or {"ok": False, "error": "..."}, atomic JSON writes, robust to
@@ -17,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from core.logger import get_logger
@@ -41,7 +48,15 @@ def _load(project_path: Path) -> list[dict]:
     try:
         data = json.loads(reg.read_text(encoding="utf-8"))
         presets = data.get("presets", [])
-        return presets if isinstance(presets, list) else []
+        if not isinstance(presets, list):
+            return []
+        # Forward-compat: older registries have no task/soft — default them so every
+        # returned preset carries the full shape ({id,name,file,task,soft}).
+        for p in presets:
+            if isinstance(p, dict):
+                p.setdefault("task", None)
+                p.setdefault("soft", None)
+        return presets
     except (OSError, json.JSONDecodeError) as exc:
         log.warning("presets.json unreadable for %s (%s); starting empty.", project_path.name, exc)
         return []
@@ -103,14 +118,59 @@ def list_presets(project_path: Path) -> list[dict]:
 
 
 def add_preset_slot(project_path: Path, name: str | None = None) -> dict:
-    """Append an empty preset slot. Default name 'present N'."""
+    """Append an empty preset slot. Default name 'preset N'."""
     presets = _load(project_path)
     pid = _next_id(presets)
-    label = (name or "").strip() or f"present {len(presets) + 1}"
-    presets.append({"id": pid, "name": label, "file": None})
+    label = (name or "").strip() or f"preset {len(presets) + 1}"
+    presets.append({"id": pid, "name": label, "file": None, "task": None, "soft": None})
     if not _save(project_path, presets):
         return {"ok": False, "error": "could not write presets.json"}
     return {"ok": True, "preset": presets[-1], "presets": presets}
+
+
+def prepare_new_scene(project_path: Path, preset_id: str) -> dict:
+    """Copy the preset's linked scene into a fresh temp dir; return that copy's path.
+
+    Non-destructive "New Scene": the DCC opens this throwaway copy, never the shared
+    template in <project>/template/, so saving over it can't corrupt the preset. Each
+    call gets its own temp dir, so the original filename (and its compound extension,
+    e.g. .bgeo.sc) is preserved for a clean DCC title with zero collisions.
+    """
+    presets = _load(project_path)
+    p = _find(presets, preset_id)
+    if p is None:
+        return {"ok": False, "error": f"unknown preset {preset_id}"}
+    fname = p.get("file")
+    if not fname:
+        return {"ok": False, "error": "preset has no linked file"}
+    src = project_path / TEMPLATE_SUBDIR / fname
+    if not src.is_file():
+        return {"ok": False, "error": f"linked file missing: {fname}"}
+    try:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="flux_newscene_"))
+        dest = tmp_dir / src.name
+        shutil.copy2(src, dest)
+    except OSError as exc:
+        return {"ok": False, "error": f"temp copy failed: {exc}"}
+    log.info("Prepared New Scene copy: %s -> %s", src, dest)
+    return {"ok": True, "path": str(dest), "name": src.name}
+
+
+def set_preset_meta(project_path: Path, preset_id: str, task: str = "", soft: str = "") -> dict:
+    """Assign the preset's TASK token (or DEFAULT) and target SOFT.
+
+    Empty string clears the field to null. Both are always set from the caller's
+    current selection. Multiple presets may share the same (task, soft).
+    """
+    presets = _load(project_path)
+    p = _find(presets, preset_id)
+    if p is None:
+        return {"ok": False, "error": f"unknown preset {preset_id}"}
+    p["task"] = (task or "").strip() or None
+    p["soft"] = (soft or "").strip() or None
+    if not _save(project_path, presets):
+        return {"ok": False, "error": "could not write presets.json"}
+    return {"ok": True, "preset": p, "presets": presets}
 
 
 def rename_preset(project_path: Path, preset_id: str, new_name: str) -> dict:

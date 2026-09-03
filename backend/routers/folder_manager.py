@@ -547,6 +547,15 @@ class PresetDrop(BaseModel):
     dest_subpath: str = ""   # folder (relative from project root) to drop into; "" = root
 
 
+class PresetMeta(BaseModel):
+    task: str = ""   # TASK token (or DEFAULT); "" clears
+    soft: str = ""   # target software key (maya, houdini…); "" clears
+
+
+class PresetLaunch(BaseModel):
+    dcc: str         # frontend software key to launch the linked scene with
+
+
 def _require_project(project_name: str) -> Path:
     project_path = get_project_path(project_name)
     if not project_path.exists():
@@ -620,6 +629,36 @@ async def post_preset_drop(project_name: str, preset_id: str, req: PresetDrop) -
         None, lambda: preset_manager.drop_preset(project_path, preset_id, req.dest_subpath)
     )
     return _preset_or_400(res)
+
+
+@router.put("/projects/{project_name}/presets/{preset_id}/meta")
+async def put_preset_meta(project_name: str, preset_id: str, req: PresetMeta) -> dict:
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: preset_manager.set_preset_meta(project_path, preset_id, req.task, req.soft)
+    )
+    return _preset_or_400(res)
+
+
+@router.post("/projects/{project_name}/presets/{preset_id}/launch")
+async def post_preset_launch(project_name: str, preset_id: str, req: PresetLaunch) -> dict:
+    """Launch *req.dcc* on a throwaway copy of the preset's scene ("New Scene").
+
+    The preset template is copied to a temp dir first so opening it is non-destructive
+    — saving over the New Scene can never corrupt the shared template.
+    """
+    from features.launcher.launcher_core import launch_dcc
+    project_path = _require_project(project_name)
+    loop = asyncio.get_event_loop()
+    prep = await loop.run_in_executor(
+        None, lambda: preset_manager.prepare_new_scene(project_path, preset_id)
+    )
+    if not prep.get("ok"):
+        raise HTTPException(status_code=400, detail=prep.get("error", "preset introuvable"))
+    scene = prep["path"]
+    ok = await loop.run_in_executor(None, lambda: launch_dcc(req.dcc, scene))
+    return {"ok": ok, "launched": ok, "dcc": req.dcc, "scene": scene}
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────

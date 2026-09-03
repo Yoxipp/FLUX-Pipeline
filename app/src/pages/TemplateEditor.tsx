@@ -11,101 +11,71 @@ import { api } from '../api/client'
 import { useI18n } from '../i18n'
 import type { Preset } from '../types'
 
-interface BrowseNode { name: string; path: string }
+// TASK options that are NOT real TASK(=TYPE) tokens but must appear in the selector.
+// The project's TYPE token keys are appended after these at runtime.
+const TASK_EXTRAS = ['DEFAULT', 'SEQ', 'SHOT', 'ENV', 'FX']
 
-// ── folder picker modal (browse the project tree, pick a destination) ──────────
-function DropModal({
-  project, onClose, onPick,
-}: {
-  project: string
-  onClose: () => void
-  onPick: (subpath: string) => void
-}) {
-  const { t } = useI18n()
-  const [stack, setStack] = useState<string[]>([])
-  const [folders, setFolders] = useState<BrowseNode[]>([])
-  const [loading, setLoading] = useState(false)
+// Software a preset/scene can target (frontend DCC keys, same set as the launcher).
+const SOFTS: { key: string; name: string }[] = [
+  { key: 'maya', name: 'Maya' },
+  { key: 'houdini', name: 'Houdini' },
+  { key: 'nuke', name: 'Nuke' },
+  { key: 'zbrush', name: 'ZBrush' },
+  { key: 'substance_painter', name: 'Painter' },
+  { key: 'substance_designer', name: 'Designer' },
+  { key: 'mari', name: 'Mari' },
+  { key: 'marvelous', name: 'Marvelous' },
+  { key: 'photoshop', name: 'Photoshop' },
+]
 
-  const sub = stack.join('/')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await api.browseProject(project, sub || undefined)
-      setFolders(r.folders ?? [])
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'browse failed')
-    } finally {
-      setLoading(false)
-    }
-  }, [project, sub])
-
-  useEffect(() => { void load() }, [load])
-
-  return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
-    }}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        width: 460, maxHeight: '70vh', background: 'var(--paper)', color: 'var(--ink)',
-        border: '1px solid var(--rule)', borderRadius: 10, boxShadow: 'var(--shadow-sm)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--rule)', fontWeight: 600 }}>
-          {t('te.dropInto')}
-        </div>
-        {/* breadcrumb */}
-        <div style={{ padding: '8px 14px', display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 12, color: 'var(--ink-3)' }}>
-          <button onClick={() => setStack([])} style={crumbBtn}>{project}</button>
-          {stack.map((seg, i) => (
-            <span key={i} style={{ display: 'flex', gap: 6 }}>
-              <span>/</span>
-              <button onClick={() => setStack(stack.slice(0, i + 1))} style={crumbBtn}>{seg}</button>
-            </span>
-          ))}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 8px' }}>
-          {loading && <div style={{ padding: 12, color: 'var(--ink-3)' }}>…</div>}
-          {!loading && folders.length === 0 && (
-            <div style={{ padding: 12, color: 'var(--ink-4)', fontSize: 13 }}>—</div>
-          )}
-          {folders.map((f) => (
-            <button key={f.path} onClick={() => setStack([...stack, f.name])} style={{
-              display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px',
-              background: 'transparent', border: 'none', color: 'var(--ink)', cursor: 'pointer',
-              borderRadius: 6, fontSize: 13,
-            }}>📁 {f.name}</button>
-          ))}
-        </div>
-        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--rule)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={btnGhost}>×</button>
-          <button onClick={() => onPick(sub)} style={btnAccent}>{t('te.dropInto')} {sub ? `/${sub}` : `/`}</button>
-        </div>
-      </div>
-    </div>
-  )
+// Guess the target SOFT from a file extension (only a suggestion; user can override).
+const _SOFT_BY_EXT: Record<string, string> = {
+  hip: 'houdini', hipnc: 'houdini', hiplc: 'houdini', hda: 'houdini', otl: 'houdini',
+  bgeo: 'houdini', geo: 'houdini',
+  ma: 'maya', mb: 'maya',
+  nk: 'nuke',
+  zpr: 'zbrush', ztl: 'zbrush', zbr: 'zbrush',
+  spp: 'substance_painter',
+  sbs: 'substance_designer', sbsar: 'substance_designer',
+  mra: 'mari',
+  zprj: 'marvelous',
+  psd: 'photoshop',
+}
+function inferSoftFromFile(file: string | null): string {
+  if (!file) return ''
+  const ext = file.toLowerCase().split('.').pop() ?? ''
+  return _SOFT_BY_EXT[ext] ?? ''
 }
 
 // ── one preset row ─────────────────────────────────────────────────────────────
 function PresetRow({
-  project, preset, onChange,
+  project, preset, taskOptions, onChange,
 }: {
   project: string
   preset: Preset
+  taskOptions: string[]
   onChange: (presets: Preset[]) => void
 }) {
   const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(preset.name)
-  const [dropOpen, setDropOpen] = useState(false)
 
   const link = async () => {
-    const src = await window.electronAPI?.openFile?.()
+    // Accept ANY file type (a preset can be a .hip, .ma, .nk, .usda, .zpr…), not
+    // just the exe/app default the picker uses for DCC executable paths.
+    const src = await window.electronAPI?.openFile?.([{ name: 'Tous les fichiers', extensions: ['*'] }])
     if (!src) return
     try {
       const r = await api.linkPreset(project, preset.id, src)
-      onChange(r.presets); toast.success(t('te.linkOk'))
+      let presets = r.presets
+      // Auto-suggest the SOFT from the file extension when none is set yet. This is
+      // only a suggestion — the user can override it via the SOFT selector.
+      const guess = inferSoftFromFile(r.preset.file)
+      if (guess && !r.preset.soft) {
+        const r2 = await api.setPresetMeta(project, preset.id, r.preset.task ?? '', guess)
+        presets = r2.presets
+      }
+      onChange(presets); toast.success(t('te.linkOk'))
     } catch (e) { toast.error(`${t('te.err')}: ${e instanceof Error ? e.message : ''}`) }
   }
   const unlink = async () => {
@@ -122,9 +92,10 @@ function PresetRow({
     try { const r = await api.deletePreset(project, preset.id); onChange(r.presets) }
     catch (e) { toast.error(e instanceof Error ? e.message : 'error') }
   }
-  const drop = async (subpath: string) => {
-    setDropOpen(false)
-    try { const r = await api.dropPreset(project, preset.id, subpath); toast.success(`${t('te.dropOk')}: ${r.name}`) }
+  // Assign the TASK token (or DEFAULT) and target SOFT. Both are sent together;
+  // the changed one is passed, the other keeps its current value.
+  const setMeta = async (task: string, soft: string) => {
+    try { const r = await api.setPresetMeta(project, preset.id, task, soft); onChange(r.presets); toast.success(t('te.metaOk')) }
     catch (e) { toast.error(`${t('te.err')}: ${e instanceof Error ? e.message : ''}`) }
   }
 
@@ -146,15 +117,32 @@ function PresetRow({
             font: 'inherit', fontWeight: 600, padding: 0,
           }}>{preset.name}</button>
         )}
-        <div style={{ fontSize: 12, marginTop: 2, color: preset.file ? 'var(--ok)' : 'var(--ink-4)' }}>
-          {preset.file ? `${t('te.linked')} → ${preset.file}` : t('te.slotEmpty')}
+        <div style={{ fontSize: 12, marginTop: 2, color: preset.file ? 'var(--accent-hi)' : 'var(--ink-4)' }}>
+          {preset.file ? preset.file : t('te.slotEmpty')}
+        </div>
+        {/* TASK token (or DEFAULT) + target SOFT — greyed placeholder inside the box */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <select
+            value={preset.task ?? ''}
+            onChange={(e) => void setMeta(e.target.value, preset.soft ?? '')}
+            style={{ ...metaSelect, flex: 1, color: preset.task ? 'var(--ink)' : 'var(--ink-4)' }}
+          >
+            <option value="" style={{ color: 'var(--ink-4)' }}>{t('te.task')}</option>
+            {taskOptions.map((tk) => <option key={tk} value={tk} style={{ color: 'var(--ink)' }}>{tk}</option>)}
+          </select>
+          <select
+            value={preset.soft ?? ''}
+            onChange={(e) => void setMeta(preset.task ?? '', e.target.value)}
+            style={{ ...metaSelect, flex: 1, color: preset.soft ? 'var(--ink)' : 'var(--ink-4)' }}
+          >
+            <option value="" style={{ color: 'var(--ink-4)' }}>{t('te.soft')}</option>
+            {SOFTS.map((s) => <option key={s.key} value={s.key} style={{ color: 'var(--ink)' }}>{s.name}</option>)}
+          </select>
         </div>
       </div>
       <button onClick={link} style={btnGhost}>{t('te.link')}</button>
       {preset.file && <button onClick={unlink} style={btnGhost}>{t('te.unlink')}</button>}
-      {preset.file && <button onClick={() => setDropOpen(true)} style={btnAccent}>{t('te.dropInto')}</button>}
       <button onClick={remove} title={t('te.remove')} style={{ ...btnGhost, color: 'var(--err)' }}>×</button>
-      {dropOpen && <DropModal project={project} onClose={() => setDropOpen(false)} onPick={drop} />}
     </div>
   )
 }
@@ -165,6 +153,7 @@ export function TemplateEditor() {
   const [projects, setProjects] = useState<string[]>([])
   const [project, setProject] = useState('')
   const [presets, setPresets] = useState<Preset[]>([])
+  const [taskOptions, setTaskOptions] = useState<string[]>(TASK_EXTRAS)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -178,17 +167,30 @@ export function TemplateEditor() {
   }, [])
 
   const load = useCallback(async (proj: string) => {
-    if (!proj) { setPresets([]); return }
+    if (!proj) { setPresets([]); setTaskOptions(TASK_EXTRAS); return }
     setLoading(true)
-    try { const r = await api.listPresets(proj); setPresets(r.presets) }
+    try {
+      const [pr, tk] = await Promise.all([api.listPresets(proj), api.getTokens(proj).catch(() => null)])
+      setPresets(pr.presets)
+      // TASK options = the fixed extras + the project's real TASK(=TYPE) token keys.
+      const typeKeys = tk ? Object.keys(tk.tokens?.TYPE ?? {}) : []
+      setTaskOptions([...TASK_EXTRAS, ...typeKeys.filter((k) => !TASK_EXTRAS.includes(k))])
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : 'error') }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { void load(project) }, [project, load])
 
+  // Apply an updated preset list AND notify the rest of the app (the launcher's
+  // "New Scene" buttons recolour when a soft gains/loses a linked preset).
+  const applyPresets = useCallback((next: Preset[]) => {
+    setPresets(next)
+    window.dispatchEvent(new Event('flux:refresh'))
+  }, [])
+
   const add = async () => {
-    try { const r = await api.addPreset(project); setPresets(r.presets) }
+    try { const r = await api.addPreset(project); applyPresets(r.presets) }
     catch (e) { toast.error(e instanceof Error ? e.message : 'error') }
   }
 
@@ -216,7 +218,7 @@ export function TemplateEditor() {
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {presets.map((p) => (
-          <PresetRow key={p.id} project={project} preset={p} onChange={setPresets} />
+          <PresetRow key={p.id} project={project} preset={p} taskOptions={taskOptions} onChange={applyPresets} />
         ))}
       </div>
     </div>
@@ -232,7 +234,7 @@ const btnAccent: React.CSSProperties = {
   font: 'inherit', fontSize: 12, color: 'var(--paper)', background: 'var(--accent)',
   border: '1px solid var(--accent)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontWeight: 600,
 }
-const crumbBtn: React.CSSProperties = {
-  font: 'inherit', fontSize: 12, color: 'var(--accent)', background: 'transparent',
-  border: 'none', padding: 0, cursor: 'pointer',
+const metaSelect: React.CSSProperties = {
+  font: 'inherit', fontSize: 11, color: 'var(--ink)', background: 'var(--paper)',
+  border: '1px solid var(--rule)', borderRadius: 5, padding: '3px 6px', cursor: 'pointer',
 }

@@ -5,11 +5,12 @@ import {
   Home, Upload, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate,
+  Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
 } from 'lucide-react'
-import type { DccStatusMap } from '../../types'
+import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
 import { useMentions } from '../../hooks/useMentions'
+import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui'
 
@@ -132,6 +133,27 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
   const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
   const [nukeServerOk,    setNukeServerOk]          = useState<boolean | null>(null)
+
+  // New Scene: the active project's presets drive the per-soft menu + button colour.
+  const { project: activeProject } = useProject()
+  const [presets, setPresets] = useState<Preset[]>([])
+  const [newScene, setNewScene] = useState<{ soft: string; x: number; y: number } | null>(null)
+  const [hoverTask, setHoverTask] = useState<string | null>(null)
+
+  // Load the active project's presets (for button colour + menu), refresh on edits.
+  useEffect(() => {
+    if (!activeProject) { setPresets([]); return }
+    let alive = true
+    const loadPresets = () => {
+      api.listPresets(activeProject)
+        .then(d => { if (alive) setPresets(d.presets) })
+        .catch(() => { if (alive) setPresets([]) })
+    }
+    loadPresets()
+    const onRefresh = () => loadPresets()
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => { alive = false; window.removeEventListener('flux:refresh', onRefresh) }
+  }, [activeProject])
 
   useEffect(() => {
     api.getSettings().then(s => setDccPaths(s.dcc_paths ?? {})).catch(() => {})
@@ -342,6 +364,31 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     }
   }
 
+  // ── New Scene ────────────────────────────────────────────────────────────────
+  // Open the per-soft menu of tasks that have presets in the active project.
+  const openNewScene = (soft: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!activeProject) { toast.error('Aucun projet actif — choisis-en un dans le Folder Manager'); return }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setHoverTask(null)
+    setNewScene({ soft, x: rect.left, y: rect.top })
+  }
+
+  // Launch the chosen preset (or the empty default scene) in *soft*.
+  const runNewScene = async (soft: string, preset: Preset | null) => {
+    setNewScene(null)
+    const name = SOFTWARE.find(s => s.key === soft)?.name ?? soft
+    try {
+      const res = preset
+        ? await api.launchPreset(activeProject, preset.id, soft)
+        : await api.launchDcc(soft)
+      if (res.launched) toast.success(`${name} lancé${preset ? ` · ${preset.name}` : ''}`, { duration: 4000 })
+      else toast.error(`${name} · introuvable`, { duration: 6000 })
+    } catch {
+      toast.error(`${name} · erreur de lancement`, { duration: 6000 })
+    }
+  }
+
   return (
     <div style={{
       width: 200, borderRight: '1px solid var(--rule)',
@@ -370,6 +417,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const dot       = dccDot(dccStatus, s.key)
           const connected = dot === 'ok'
           const isLoading = launching.has(s.key)
+          const hasPreset      = presets.some(p => p.soft === s.key && p.file)
           const hasPath        = !!dccPaths[s.key]
           const findOk         = findResult[s.key]
           const isHoudini      = s.key === 'houdini'
@@ -514,6 +562,29 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   {isLoading ? 'Lancement…' : connected ? 'Nouvelle instance' : 'Lancer'}
                 </TooltipContent>
               </Tooltip>
+
+              {/* New Scene — pick a task/preset (or default) to launch this soft with.
+                  Accent-coloured as soon as this soft has at least one linked preset. */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+              <div
+                onClick={(e) => openNewScene(s.key, e)}
+                className="scale-hover-lg"
+                style={{
+                  width: 16, height: 16, borderRadius: 4,
+                  border: '1px solid ' + (hasPreset ? 'var(--accent)' : 'var(--rule-2)'),
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                  background: hasPreset ? 'var(--accent-soft)' : 'transparent',
+                  color: hasPreset ? 'var(--accent-hi)' : 'var(--ink-3)', cursor: 'pointer',
+                  transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
+                }}
+              >
+                <FilePlus2 size={9} strokeWidth={2} />
+              </div>
+                </TooltipTrigger>
+                <TooltipContent side="top">New Scene</TooltipContent>
+              </Tooltip>
             </div>
           )
         })}
@@ -552,6 +623,95 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </NavGroup>
 
       <div style={{ flex: 1 }} />
+
+      {/* New Scene menu — one row per TASK token; hover a token to list its templates
+          (like "Open In >" in the folder manager). DEFAULT also offers the empty scene. */}
+      {newScene && (() => {
+        const soft = newScene.soft
+        const softName = SOFTWARE.find(s => s.key === soft)?.name ?? soft
+        const linked = presets.filter(p => p.soft === soft && p.file)
+        // Group linked presets by their TASK token (null → DEFAULT bucket).
+        const groups = new Map<string, Preset[]>()
+        for (const p of linked) {
+          const key = (p.task ?? '').toUpperCase() || 'DEFAULT'
+          groups.set(key, [...(groups.get(key) ?? []), p])
+        }
+        if (!groups.has('DEFAULT')) groups.set('DEFAULT', [])   // DEFAULT is always offered
+        const tasks = ['DEFAULT', ...[...groups.keys()].filter(k => k !== 'DEFAULT').sort()]
+
+        const row: React.CSSProperties = {
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+          padding: '6px 9px', background: 'transparent', border: 'none',
+          fontSize: 11, fontFamily: 'var(--sans)', cursor: 'pointer', borderRadius: 5,
+        }
+        const item: React.CSSProperties = { ...row, color: 'var(--ink-2)' }
+
+        return (
+          <>
+            <div onClick={() => setNewScene(null)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+            <div style={{
+              position: 'fixed', left: 8, bottom: Math.max(8, window.innerHeight - newScene.y),
+              width: 184, zIndex: 61, background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
+              borderRadius: 8, boxShadow: 'var(--shadow-md)', padding: 5,
+            }}>
+              <div style={{ padding: '4px 9px 6px', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                New Scene · {softName}
+              </div>
+              {tasks.map(task => {
+                const assigned = groups.get(task) ?? []
+                const items: { label: string; preset: Preset | null }[] =
+                  task === 'DEFAULT'
+                    ? [{ label: 'Scène vide', preset: null }, ...assigned.map(p => ({ label: p.name, preset: p }))]
+                    : assigned.map(p => ({ label: p.name, preset: p }))
+                const open = hoverTask === task
+                return (
+                  <div
+                    key={task}
+                    style={{ position: 'relative' }}
+                    onMouseEnter={() => setHoverTask(task)}
+                    onMouseLeave={() => setHoverTask(h => (h === task ? null : h))}
+                  >
+                    <div style={{ ...row, background: open ? 'var(--accent-soft)' : 'transparent', color: open ? 'var(--ink)' : 'var(--ink-2)' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)', flexShrink: 0 }}>{task}</span>
+                      <span style={{ flex: 1 }} />
+                      <ChevronRight size={11} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0 }} />
+                    </div>
+                    {open && (
+                      <div style={{
+                        // Flush against the row (no gap) + a transparent left bridge so the
+                        // pointer never crosses dead space between token and submenu.
+                        position: 'absolute', left: '100%', top: -1, minWidth: 150, maxWidth: 240,
+                        paddingLeft: 6, marginLeft: -2, zIndex: 62,
+                      }}>
+                        <div style={{
+                          background: 'var(--paper-2)', border: '1px solid var(--rule-2)', borderRadius: 8,
+                          boxShadow: 'var(--shadow-md)', padding: 5,
+                        }}>
+                        {items.map((it, i) => (
+                          <button
+                            key={i}
+                            onClick={() => void runNewScene(soft, it.preset)}
+                            title={it.preset?.file ?? ''}
+                            style={item}
+                            onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--ink)' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-2)' }}
+                          >
+                            {it.preset
+                              ? <FilePlus2 size={11} strokeWidth={2} color="var(--accent)" style={{ flexShrink: 0 }} />
+                              : <Play size={10} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0 }} />}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                          </button>
+                        ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )
+      })()}
     </div>
   )
 }

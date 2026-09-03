@@ -52,14 +52,19 @@ def get_installed_dccs() -> dict[str, str]:
     return found
 
 
-def launch_dcc(dcc_name: str) -> bool:
+def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
     """Launch *dcc_name* fully independent of the hub. Returns True on start.
+
+    *scene* : an optional scene file to open (e.g. a preset .hip / .ma). When set the
+    DCC is launched with the file as its command-line argument ("New Scene" flow).
 
     CRITICAL: the DCC must NOT be a descendant of the FastAPI backend, otherwise the
     hub's shutdown (taskkill /PID <backend> /T) tree-kills it — closing FLUX would kill
     an open Maya/Houdini with unsaved work. On Windows we use os.startfile (ShellExecute),
     which reparents the process to Explorer so it survives the hub closing; DETACHED_PROCESS
-    alone is NOT enough (taskkill /T walks parent->child links regardless).
+    alone is NOT enough (taskkill /T walks parent->child links regardless). When a scene
+    is passed (os.startfile takes no args) we reparent via cmd's `start`, which spawns the
+    DCC as an independent process (not a child of cmd/backend) — same survival guarantee.
     """
     exe = _resolve_exe(dcc_name)
     if exe is None:
@@ -67,11 +72,21 @@ def launch_dcc(dcc_name: str) -> bool:
         return False
     try:
         if os.name == "nt":
-            os.startfile(exe)  # type: ignore[attr-defined]  # Windows only; reparents to Explorer
+            if scene:
+                # `start "" "<exe>" "<scene>"` — the empty "" is start's window-title arg.
+                # The DCC is reparented away from the backend, so taskkill /T won't reach it.
+                subprocess.Popen(
+                    f'start "" "{exe}" "{scene}"',
+                    shell=True, close_fds=True,
+                    creationflags=_DETACHED_PROCESS | 0x00000200,  # +CREATE_NEW_PROCESS_GROUP
+                )
+            else:
+                os.startfile(exe)  # type: ignore[attr-defined]  # Windows only; reparents to Explorer
         else:
             # POSIX: new session detaches from the hub's process group.
-            subprocess.Popen([exe], start_new_session=True, close_fds=True)
-        log.info("Launched %s — %s", dcc_name, exe)
+            args = [exe, scene] if scene else [exe]
+            subprocess.Popen(args, start_new_session=True, close_fds=True)
+        log.info("Launched %s — %s%s", dcc_name, exe, f" (scene: {scene})" if scene else "")
         return True
     except OSError as e:
         log.error("Failed to launch %s: %s", dcc_name, e)

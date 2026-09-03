@@ -75,6 +75,11 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'te.dropOk':       { fr: 'Déposé',                          en: 'Dropped' },
   'te.linkOk':       { fr: 'Fichier linké',                   en: 'File linked' },
   'te.err':          { fr: 'Échec',                           en: 'Failed' },
+  'te.task':         { fr: 'TASK',                            en: 'TASK' },
+  'te.soft':         { fr: 'SOFT',                            en: 'SOFT' },
+  'te.taskNone':     { fr: '— aucune —',                      en: '— none —' },
+  'te.softNone':     { fr: '— aucun —',                       en: '— none —' },
+  'te.metaOk':       { fr: 'Assignation mise à jour',         en: 'Assignment updated' },
 
   // Folder manager quick-drop (RETAKES-3)
   'fm.presetDropOk': { fr: 'déposé ici',                      en: 'dropped here' },
