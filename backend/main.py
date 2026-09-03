@@ -46,6 +46,17 @@ async def lifespan(app: FastAPI):
         deploy_houdini_hdas()
     except Exception as exc:  # never block startup on a staging hiccup
         log.warning("[FLUX] HDA re-stage skipped: %s", exc)
+    # Auto-update already-installed DCC shelves/HDAs when FLUX now ships a newer
+    # copy (runs AFTER the re-stage above so it compares against fresh staging).
+    # This is what carries the importer format_switch fix onto machines with a
+    # stale flux_importer.hda, and keeps the Maya shelf in sync (ANIM + RIG only).
+    try:
+        from features.shelf_manager.shelf_core import reconcile_installed_dccs
+        updated = reconcile_installed_dccs()
+        if updated.get("maya") or updated.get("houdini"):
+            log.info("[FLUX] DCC auto-update: %s", updated)
+    except Exception as exc:  # never block startup on a reconcile hiccup
+        log.warning("[FLUX] DCC auto-update skipped: %s", exc)
     yield
     log.info("[FLUX] Backend shutting down")
 

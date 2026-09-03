@@ -5,10 +5,11 @@ import {
   ChevronLeft, ChevronRight, Search,
   Star, LayoutGrid, Clock, Archive,
   HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw, Lock,
-  Grid3x3, Grid2x2, Square,
+  Grid3x3, Grid2x2, Square, FileDown,
 } from 'lucide-react'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
+import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
@@ -1252,6 +1253,8 @@ export function Projects() {
   // project calls setActiveProject -> the explored project becomes active everywhere.
   const { project: activeProject, projects, setProject: setActiveProject, refreshProjects } = useProject()
   const [sequences, setSequences]         = useState<string[]>([])
+  // Preset quick-drop (RETAKES-3): the linked presets of the current project.
+  const [presets, setPresets]             = useState<Preset[]>([])
 
   const { settings } = useSettings()
   const dccStatus = useDccStatus()
@@ -1569,6 +1572,35 @@ export function Projects() {
   }, [nav])
 
   useEffect(() => { void loadItems() }, [loadItems])
+
+  // ── Presets (quick-drop into the current folder) ────────────────────────────
+  // Reload the project's presets when entering a project, and whenever the
+  // Template Editor edits them (global flux:refresh event).
+  const loadPresets = useCallback(async () => {
+    if (nav.kind !== 'inside') { setPresets([]); return }
+    try { const d = await api.listPresets(nav.project); setPresets(d.presets) }
+    catch { setPresets([]) }
+  }, [nav])
+
+  useEffect(() => { void loadPresets() }, [loadPresets])
+
+  useEffect(() => {
+    const onRefresh = () => void loadPresets()
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => window.removeEventListener('flux:refresh', onRefresh)
+  }, [loadPresets])
+
+  // Drop a preset's linked file into the folder currently being browsed.
+  const dropPresetHere = useCallback(async (p: Preset) => {
+    if (nav.kind !== 'inside') return
+    try {
+      const r = await api.dropPreset(nav.project, p.id, nav.subpath.join('/'))
+      toast.success(`${r.name} déposé ici`)
+      void loadItems()
+    } catch (e) {
+      toast.error(`Dépôt : ${e instanceof Error ? e.message : 'échec'}`)
+    }
+  }, [nav, loadItems])
 
   const loadSequences = useCallback(async () => {
     if (!activeProject) return
@@ -2229,6 +2261,36 @@ export function Projects() {
           </div>
 
           <div style={{ height: 1, background: 'var(--rule)', margin: '6px 0' }} />
+
+          {/* Presets — dépôt rapide dans le dossier courant (RETAKES-3) */}
+          {nav.kind === 'inside' && presets.some(p => p.file) && (
+            <>
+              <div style={{ padding: '2px 12px 0' }}>
+                <div className="cap" style={{ marginBottom: 6 }}>PRESETS</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {presets.filter(p => p.file).map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => void dropPresetHere(p)}
+                      title={`Déposer "${p.file}" dans le dossier courant`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
+                        padding: '6px 8px', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                        borderRadius: 6, color: 'var(--ink-2)', fontSize: 10, fontFamily: 'var(--sans)',
+                        cursor: 'pointer', boxShadow: 'var(--shadow-xs)',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--ink)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--rule-2)'; e.currentTarget.style.color = 'var(--ink-2)' }}
+                    >
+                      <FileDown size={12} strokeWidth={1.75} color="var(--accent)" style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ height: 1, background: 'var(--rule)', margin: '6px 0' }} />
+            </>
+          )}
 
           {/* Récents rapides */}
           <div style={{ padding: '2px 12px 0' }}>

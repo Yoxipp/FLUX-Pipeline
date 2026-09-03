@@ -510,6 +510,69 @@ def install_hdas(version: str) -> tuple[bool, str]:
     )
 
 
+def reconcile_installed_dccs() -> dict:
+    """Refresh already-installed FLUX shelves/HDAs when the bundled copy is newer.
+
+    Run at every FLUX launch (see main.lifespan). The rule is deliberately narrow:
+    only touch a DCC version that ALREADY has FLUX installed — never install where
+    the user never opted in — and only overwrite when the shipped content is newer.
+
+    Maya  : the Flux shelf is regenerated from the current tool catalogue; if its
+            content drifted from the installed shelf_Flux.mel (e.g. FLUX now ships
+            only ANIM + RIG), the shelf is rewritten so the next Maya launch is current.
+    Houdini: each FLUX .hda already present in a houdiniX.Y/otls/ is replaced by the
+            freshly-staged copy when the staged file is newer. This is what carries
+            the importer's format_switch fix onto machines that still have a stale
+            (crashing) flux_importer.hda from an older FLUX build.
+
+    Idempotent and best-effort — a failure never blocks startup.
+    Returns {"maya": [...], "houdini": [...]} describing what was updated.
+    """
+    report: dict = {"maya": [], "houdini": []}
+
+    # ── Maya: rewrite a drifted Flux shelf ────────────────────────────────────
+    for version in get_installed_versions("Maya"):
+        if not is_shelf_installed("Maya", version):
+            continue
+        dest_dir = get_dcc_shelf_dir("Maya", version)
+        if dest_dir is None:
+            continue
+        want = build_flux_shelf_mel(get_shelf_tool_selection())
+        try:
+            have = (dest_dir / "shelf_Flux.mel").read_text(encoding="utf-8")
+        except OSError:
+            have = ""
+        if have != want:
+            ok, msg = install_flux_shelf(version)
+            log.info("Auto-update Maya %s shelf: %s", version, msg)
+            report["maya"].append({"version": version, "ok": ok, "msg": msg})
+
+    # ── Houdini: replace stale HDAs already present in otls/ ───────────────────
+    staged = list(_HDA_STAGING_DIR.glob("*.hda"))
+    if staged:
+        for version in get_installed_versions("Houdini"):
+            updated: list[str] = []
+            for otls in get_dcc_otls_dirs(version):
+                for hda in staged:
+                    target = otls / hda.name
+                    # Only refresh HDAs the user already has installed here — do not
+                    # create new ones — and only when the staged copy is newer.
+                    if not target.is_file():
+                        continue
+                    if target.stat().st_mtime >= hda.stat().st_mtime:
+                        continue
+                    try:
+                        shutil.copy2(hda, target)
+                        updated.append(str(target))
+                        log.info("Auto-update Houdini HDA: %s → %s", hda.name, otls)
+                    except OSError as exc:
+                        log.warning("Auto-update HDA failed (non-fatal): %s", exc)
+            if updated:
+                report["houdini"].append({"version": version, "updated": updated})
+
+    return report
+
+
 def remove_hdas(version: str) -> tuple[bool, str]:
     """Remove FLUX HDAs from every houdiniX.Y/otls/. Returns (success, message)."""
     otls_dirs = get_dcc_otls_dirs(version)
