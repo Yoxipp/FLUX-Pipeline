@@ -192,8 +192,18 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   }, [project])
 
   // Garbage-collect tabs pointing at a removed entity/task.
+  //
+  // CRITICAL: never run against a not-yet-loaded store. On (re)mount the parent
+  // starts at an EMPTY_STATE with loading=false for one commit before its fetch
+  // flips loading→true; this child effect fires first, so without this guard it
+  // would "resolve" every pinned entity as missing and rewrite localStorage to
+  // [] — silently wiping valid pins on every visit to the Production tab. An
+  // empty store means "not loaded" (a genuinely empty project has nothing to GC
+  // anyway), so we skip entirely rather than prune.
   useEffect(() => {
     if (loading) return
+    const hasData = state.assets.length > 0 || state.shots.length > 0 || state.sequences.length > 0
+    if (!hasData) return
     setTabs(prev => {
       const kept = prev.filter(tab => {
         if (tab.kind === 'root' || tab.kind === 'assets') return true
