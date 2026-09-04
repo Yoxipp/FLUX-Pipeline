@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.json_manager import read_json, write_json
+from core.json_manager import cached_read_json, read_json, write_json
 from core.logger import get_logger
 from core.paths import get_activity_path
 
 log = get_logger(__name__)
 
 
-def _load(path: Path | None = None) -> list[dict]:
-    data = read_json(path or get_activity_path())
+def _load(path: Path | None = None, sig: tuple[int, int] | None = None) -> list[dict]:
+    # Read-only query path → goes through the short-lived cache. Writers below
+    # use write_json (uncached + cache-invalidating), so they still read fresh.
+    data = cached_read_json(path or get_activity_path(), sig=sig)
     return data if isinstance(data, list) else []
 
 
@@ -62,6 +64,7 @@ def get_events_and_unread(
     action: str | None = None,
     project: str | None = None,
     path: Path | None = None,
+    sig: tuple[int, int] | None = None,
 ) -> tuple[list[dict], int]:
     """Return (filtered+sorted events[:limit], total unread count) in ONE read.
 
@@ -69,8 +72,11 @@ def get_events_and_unread(
     reading the shared activite.json twice per poll (see Phase 1 of the
     server-load optimisation). The unread count reflects the whole file, not the
     filtered view, matching the previous unfiltered ``get_unread_count`` call.
+
+    *sig* (mtime_ns, size) may be passed by the router so the cache reuses the
+    stat already taken for the ETag rather than issuing a second one (Phase 4).
     """
-    events = _load(path)
+    events = _load(path, sig=sig)
     unread = sum(1 for e in events if not e.get("read", False))
 
     if user:
@@ -86,9 +92,16 @@ def get_events_and_unread(
 
 # ── mark read ─────────────────────────────────────────────────────────────────
 
+def _load_fresh(path: Path | None = None) -> list[dict]:
+    """Uncached read for read-modify-write callers (mark_*), which must not see
+    a cached snapshot and must own the objects they mutate."""
+    data = read_json(path or get_activity_path())
+    return data if isinstance(data, list) else []
+
+
 def mark_as_read(event_id: str, path: Path | None = None) -> bool:
     """Set read=True for the event with *event_id*. Returns True if found."""
-    events = _load(path)
+    events = _load_fresh(path)
     found = False
     for e in events:
         if e.get("id") == event_id:
@@ -101,7 +114,7 @@ def mark_as_read(event_id: str, path: Path | None = None) -> bool:
 
 
 def mark_all_as_read(path: Path | None = None) -> bool:
-    events = _load(path)
+    events = _load_fresh(path)
     for e in events:
         e["read"] = True
     return _save(events, path)

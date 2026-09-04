@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from core import config
-from core.json_manager import file_validator
+from core.json_manager import file_validator, sig_token, stat_sig
 from core.logger import get_logger
 from core.paths import get_activity_path, get_chat_path, get_mentions_path, get_users_dir
 from features.activity.activity_reader import (
@@ -90,15 +90,17 @@ async def get_activity(
     except RuntimeError:
         return {"events": [], "unread_count": 0}
 
-    validator = file_validator(path)
-    etag = _etag(validator, f"a:{limit}:{user}:{action}:{project}") if validator else None
+    sig = stat_sig(path)
+    etag = _etag(sig_token(sig), f"a:{limit}:{user}:{action}:{project}") if sig else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
     loop = asyncio.get_event_loop()
     events, unread = await loop.run_in_executor(
         None,
-        lambda: get_events_and_unread(limit=limit, user=user, action=action, project=project, path=path),
+        lambda: get_events_and_unread(
+            limit=limit, user=user, action=action, project=project, path=path, sig=sig,
+        ),
     )
     if etag:
         response.headers["ETag"] = etag
@@ -143,6 +145,7 @@ async def get_chat(request: Request, response: Response, limit: int = 100) -> di
         return Response(status_code=304, headers={"ETag": etag})
 
     loop = asyncio.get_event_loop()
+    # get_messages caches internally (burst window); the stat above is the ETag's.
     messages = await loop.run_in_executor(None, lambda: get_messages(limit=limit, path=chat_path))
     users = await loop.run_in_executor(None, get_user_list)
     if etag:
@@ -180,14 +183,14 @@ async def get_chat_mentions(
     except RuntimeError:
         return {"mentions": [], "unread_count": 0}
 
-    validator = file_validator(path)
-    etag = _etag(validator, f"m:{who}:{unread_only}") if validator else None
+    sig = stat_sig(path)
+    etag = _etag(sig_token(sig), f"m:{who}:{unread_only}") if sig else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
     loop = asyncio.get_event_loop()
     mentions, unread = await loop.run_in_executor(
-        None, lambda: get_mentions_and_unread(who, unread_only, path=path),
+        None, lambda: get_mentions_and_unread(who, unread_only, path=path, sig=sig),
     )
     if etag:
         response.headers["ETag"] = etag

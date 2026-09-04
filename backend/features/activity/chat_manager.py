@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from core.json_manager import read_json, write_json
+from core.json_manager import cached_read_json, read_json, write_json
 from core.logger import get_logger
 from core.paths import get_chat_path, get_mentions_path, get_users_dir
 
@@ -61,7 +61,7 @@ def send_message(user: str, message: str, path: Path | None = None) -> bool:
 
 def get_messages(limit: int = 100, path: Path | None = None) -> list[dict]:
     """Return up to *limit* messages in chronological order (oldest first)."""
-    data = read_json(path or get_chat_path())
+    data = cached_read_json(path or get_chat_path())   # read-only → cached
     messages = data if isinstance(data, list) else []
     messages.sort(key=lambda m: (m.get("date", ""), m.get("time", "")))
     return messages[-limit:]
@@ -126,7 +126,7 @@ def get_mentions(user: str, unread_only: bool = False, path: Path | None = None)
     to_user and the current user never silently drops notifications.
     """
     who = (user or "").upper()
-    data = read_json(path or get_mentions_path())
+    data = cached_read_json(path or get_mentions_path())   # read-only → cached
     mentions = data if isinstance(data, list) else []
     out = [m for m in mentions if str(m.get("to_user", "")).upper() == who and (not unread_only or not m.get("read"))]
     out.sort(key=lambda m: (m.get("date", ""), m.get("time", "")), reverse=True)
@@ -140,6 +140,7 @@ def get_unread_mention_count(user: str, path: Path | None = None) -> int:
 
 def get_mentions_and_unread(
     user: str, unread_only: bool = False, path: Path | None = None,
+    sig: tuple[int, int] | None = None,
 ) -> tuple[list[dict], int]:
     """Return (mentions[, newest first], unread count) for *user* in ONE read.
 
@@ -147,9 +148,12 @@ def get_mentions_and_unread(
     avoids reading the shared chatMentions.json twice per poll (Phase 1 of the
     server-load optimisation). The unread count always reflects every mention
     addressed to *user*, independent of *unread_only*.
+
+    *sig* (mtime_ns, size) may be passed by the router so the cache reuses the
+    stat already taken for the ETag rather than issuing a second one (Phase 4).
     """
     who = (user or "").upper()
-    data = read_json(path or get_mentions_path())
+    data = cached_read_json(path or get_mentions_path(), sig=sig)
     mentions = data if isinstance(data, list) else []
     mine = [m for m in mentions if str(m.get("to_user", "")).upper() == who]
     unread = sum(1 for m in mine if not m.get("read"))
