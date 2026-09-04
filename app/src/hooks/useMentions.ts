@@ -1,35 +1,12 @@
-// useMentions.ts — polling hook for the current user's unread @mentions.
-// The backend resolves "current user" from config, so no username is needed here.
+// useMentions.ts — thin subscriber to the shared mentions feed (see useFeeds).
+//
+// Polling now lives in FeedsProvider (one poller for the whole app); this
+// wrapper exposes just the unread count + a manual refresh so existing call
+// sites (Sidebar badge) are unchanged.
 
-import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api/client'
-
-const POLL_INTERVAL_MS = 10_000
+import { useMentionsFeed } from './useFeeds'
 
 export function useMentions() {
-  const [unreadCount, setUnreadCount] = useState(0)
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.getMentions(undefined, true)
-      setUnreadCount(data.unread_count)
-    } catch {
-      // backend not up — keep the previous count
-    }
-  }, [])
-
-  useEffect(() => {
-    void refresh()
-    const id = setInterval(() => { void refresh() }, POLL_INTERVAL_MS)
-    const onRefresh = () => { void refresh() }
-    window.addEventListener('flux:refresh', onRefresh)
-    window.addEventListener('flux:mentions', onRefresh)
-    return () => {
-      clearInterval(id)
-      window.removeEventListener('flux:refresh', onRefresh)
-      window.removeEventListener('flux:mentions', onRefresh)
-    }
-  }, [refresh])
-
-  return { unreadMentions: unreadCount, refreshMentions: refresh }
+  const { unreadMentions, refreshMentions } = useMentionsFeed()
+  return { unreadMentions, refreshMentions }
 }

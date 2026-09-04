@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
-import { api } from './api/client'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
 import { StatusBar } from './components/shared/StatusBar'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
+import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useFavorites, eventMatchesFavorite } from './hooks/useFavorites'
 import { useSettings }   from './hooks/useSettings'
 import { parseFluxFilename } from './pages/Production/util'
@@ -30,36 +30,27 @@ import { Toaster, toast } from 'sonner'
 // replays the backlog. Must live inside the router (uses navigate).
 function MentionWatcher() {
   const navigate = useNavigate()
+  const { mentions, loaded } = useMentionsFeed()
   const seen = useRef<Set<string> | null>(null)
   useEffect(() => {
-    let alive = true
-    const poll = async () => {
-      try {
-        const r = await api.getMentions(undefined, true)
-        if (!alive) return
-        if (seen.current === null) { seen.current = new Set(r.mentions.map(m => m.id)); return }
-        for (const m of r.mentions) {
-          if (!seen.current.has(m.id)) {
-            seen.current.add(m.id)
-            toast(`${m.from_user} t'a mentionné`, {
-              description: m.text,
-              position: 'bottom-right',
-              duration: 6000,
-              action: { label: 'Voir', onClick: () => navigate('/') },
-            })
-            // Native Windows notification (bottom-right + system sound), even when
-            // FLUX isn't the focused window.
-            void window.electronAPI?.showNotification?.(`${m.from_user} t'a mentionné`, m.text)
-          }
-        }
-      } catch { /* backend down — retry next tick */ }
+    if (!loaded) return
+    // First real snapshot seeds `seen` silently so the backlog isn't replayed.
+    if (seen.current === null) { seen.current = new Set(mentions.map(m => m.id)); return }
+    for (const m of mentions) {
+      if (seen.current.has(m.id)) continue
+      seen.current.add(m.id)
+      if (m.read) continue   // already-read history that scrolled in — don't toast
+      toast(`${m.from_user} t'a mentionné`, {
+        description: m.text,
+        position: 'bottom-right',
+        duration: 6000,
+        action: { label: 'Voir', onClick: () => navigate('/') },
+      })
+      // Native Windows notification (bottom-right + system sound), even when
+      // FLUX isn't the focused window.
+      void window.electronAPI?.showNotification?.(`${m.from_user} t'a mentionné`, m.text)
     }
-    void poll()
-    const id = setInterval(() => void poll(), 10_000)
-    const onRefresh = () => void poll()
-    window.addEventListener('flux:refresh', onRefresh)
-    return () => { alive = false; clearInterval(id); window.removeEventListener('flux:refresh', onRefresh) }
-  }, [navigate])
+  }, [mentions, loaded, navigate])
   return null
 }
 
@@ -69,51 +60,39 @@ function MentionWatcher() {
 function FavoriteWatcher() {
   const navigate = useNavigate()
   const { favorites } = useFavorites()
+  const { events, loaded } = useActivityFeed()
   const seen = useRef<Set<string> | null>(null)
   const favRef = useRef<string[]>(favorites)
   useEffect(() => { favRef.current = favorites }, [favorites])
   useEffect(() => {
-    let alive = true
-    const poll = async () => {
-      try {
-        const r = await api.getActivity({ limit: 100 })
-        if (!alive) return
-        if (seen.current === null) {
-          seen.current = new Set(r.events.map(e => e.id))
-          return
-        }
-        for (const e of r.events) {
-          if (seen.current.has(e.id)) continue
-          seen.current.add(e.id)
-          if (!e.file || !e.project) continue
-          const parsed = parseFluxFilename(e.file)
-          if (!parsed) continue
-          const favs = favRef.current
-          const match = favs.some(k => eventMatchesFavorite(k, {
-            project: e.project!, class: parsed.class, name: parsed.name,
-            task: parsed.task, instance: parsed.instance,
-          }))
-          if (!match) continue
-          const title = e.action === 'comment'
-            ? `${e.user} · commentaire sur favori`
-            : `${e.user} · ${e.action} sur favori`
-          const body  = e.file
-          toast(title, {
-            description: body,
-            position: 'bottom-right',
-            duration: 6000,
-            action: { label: 'Activity', onClick: () => navigate('/activity') },
-          })
-          void window.electronAPI?.showNotification?.(title, body)
-        }
-      } catch { /* backend down — retry next tick */ }
+    if (!loaded) return
+    // First real snapshot seeds `seen` silently so the backlog isn't replayed.
+    if (seen.current === null) { seen.current = new Set(events.map(e => e.id)); return }
+    for (const e of events) {
+      if (seen.current.has(e.id)) continue
+      seen.current.add(e.id)
+      if (!e.file || !e.project) continue
+      const parsed = parseFluxFilename(e.file)
+      if (!parsed) continue
+      const favs = favRef.current
+      const match = favs.some(k => eventMatchesFavorite(k, {
+        project: e.project!, class: parsed.class, name: parsed.name,
+        task: parsed.task, instance: parsed.instance,
+      }))
+      if (!match) continue
+      const title = e.action === 'comment'
+        ? `${e.user} · commentaire sur favori`
+        : `${e.user} · ${e.action} sur favori`
+      const body  = e.file
+      toast(title, {
+        description: body,
+        position: 'bottom-right',
+        duration: 6000,
+        action: { label: 'Activity', onClick: () => navigate('/activity') },
+      })
+      void window.electronAPI?.showNotification?.(title, body)
     }
-    void poll()
-    const id = setInterval(() => void poll(), 10_000)
-    const onRefresh = () => void poll()
-    window.addEventListener('flux:refresh', onRefresh)
-    return () => { alive = false; clearInterval(id); window.removeEventListener('flux:refresh', onRefresh) }
-  }, [navigate])
+  }, [events, loaded, navigate])
   return null
 }
 
@@ -219,5 +198,9 @@ export function App() {
     return <FirstLaunch />
   }
 
-  return <AppShell settings={settings} />
+  return (
+    <FeedsProvider>
+      <AppShell settings={settings} />
+    </FeedsProvider>
+  )
 }

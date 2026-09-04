@@ -138,6 +138,26 @@ def get_unread_mention_count(user: str, path: Path | None = None) -> int:
     return len(get_mentions(user, unread_only=True, path=path))
 
 
+def get_mentions_and_unread(
+    user: str, unread_only: bool = False, path: Path | None = None,
+) -> tuple[list[dict], int]:
+    """Return (mentions[, newest first], unread count) for *user* in ONE read.
+
+    Single-pass equivalent of ``get_mentions`` + ``get_unread_mention_count`` —
+    avoids reading the shared chatMentions.json twice per poll (Phase 1 of the
+    server-load optimisation). The unread count always reflects every mention
+    addressed to *user*, independent of *unread_only*.
+    """
+    who = (user or "").upper()
+    data = read_json(path or get_mentions_path())
+    mentions = data if isinstance(data, list) else []
+    mine = [m for m in mentions if str(m.get("to_user", "")).upper() == who]
+    unread = sum(1 for m in mine if not m.get("read"))
+    out = [m for m in mine if (not unread_only or not m.get("read"))]
+    out.sort(key=lambda m: (m.get("date", ""), m.get("time", "")), reverse=True)
+    return out, unread
+
+
 def mark_mentions_read(user: str, path: Path | None = None) -> bool:
     """Mark every mention addressed to *user* as read. Returns True on success."""
     who = (user or "").upper()

@@ -56,6 +56,34 @@ def get_unread_count(path: Path | None = None) -> int:
     return len(get_unread_events(path))
 
 
+def get_events_and_unread(
+    limit: int = 50,
+    user: str | None = None,
+    action: str | None = None,
+    project: str | None = None,
+    path: Path | None = None,
+) -> tuple[list[dict], int]:
+    """Return (filtered+sorted events[:limit], total unread count) in ONE read.
+
+    Single-pass equivalent of ``get_all_events`` + ``get_unread_count`` — avoids
+    reading the shared activite.json twice per poll (see Phase 1 of the
+    server-load optimisation). The unread count reflects the whole file, not the
+    filtered view, matching the previous unfiltered ``get_unread_count`` call.
+    """
+    events = _load(path)
+    unread = sum(1 for e in events if not e.get("read", False))
+
+    if user:
+        events = [e for e in events if e.get("user") == user]
+    if action:
+        events = [e for e in events if e.get("action") == action]
+    if project:
+        events = [e for e in events if e.get("project") == project]
+
+    events.sort(key=lambda e: (e.get("date", ""), e.get("time", "")), reverse=True)
+    return events[:limit], unread
+
+
 # ── mark read ─────────────────────────────────────────────────────────────────
 
 def mark_as_read(event_id: str, path: Path | None = None) -> bool:

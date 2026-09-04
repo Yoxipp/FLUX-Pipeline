@@ -10,10 +10,10 @@ from pydantic import BaseModel
 from core import config
 from core.logger import get_logger
 from features.activity.activity_reader import (
-    get_all_events, get_unread_count, mark_all_as_read, mark_as_read,
+    get_events_and_unread, mark_all_as_read, mark_as_read,
 )
 from features.activity.chat_manager import (
-    get_mentions, get_messages, get_unread_mention_count, get_user_list,
+    get_mentions_and_unread, get_messages, get_user_list,
     mark_mentions_read, send_message,
 )
 
@@ -47,10 +47,10 @@ async def get_activity(
     """
     loop = asyncio.get_event_loop()
     try:
-        events = await loop.run_in_executor(
-            None, lambda: get_all_events(limit=limit, user=user, action=action, project=project)
+        events, unread = await loop.run_in_executor(
+            None,
+            lambda: get_events_and_unread(limit=limit, user=user, action=action, project=project),
         )
-        unread = await loop.run_in_executor(None, get_unread_count)
     except RuntimeError:
         return {"events": [], "unread_count": 0}
     return {"events": events, "unread_count": unread}
@@ -104,8 +104,9 @@ async def get_chat_mentions(user: str | None = None, unread_only: bool = False) 
     who = user or config.get_current_user() or "unknown"
     loop = asyncio.get_event_loop()
     try:
-        mentions = await loop.run_in_executor(None, lambda: get_mentions(who, unread_only))
-        unread = await loop.run_in_executor(None, lambda: get_unread_mention_count(who))
+        mentions, unread = await loop.run_in_executor(
+            None, lambda: get_mentions_and_unread(who, unread_only),
+        )
     except RuntimeError:
         return {"mentions": [], "unread_count": 0}
     return {"mentions": mentions, "unread_count": unread}

@@ -8,6 +8,7 @@ import { useSettings }  from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
 import { Avatar, Tag } from '../components/shared/ui'
 import { api } from '../api/client'
+import { HUB_CHAT_POLL_INTERVAL_MS } from '../lib/pollIntervals'
 import { useI18n } from '../i18n'
 import type { LucideIcon } from 'lucide-react'
 
@@ -70,7 +71,7 @@ export function Hub() {
 
   useEffect(() => {
     void loadChat()
-    const id = setInterval(() => { void loadChat() }, 10_000)
+    const id = setInterval(() => { void loadChat() }, HUB_CHAT_POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [loadChat])
 
