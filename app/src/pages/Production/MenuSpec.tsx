@@ -310,7 +310,8 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{
-        display: 'flex', alignItems: 'stretch',
+        display: 'flex', alignItems: 'flex-end',
+        padding: '6px 6px 0',
         borderBottom: '1px solid var(--rule)', background: 'var(--paper)',
         overflow: 'hidden', flexShrink: 0,
       }}>
@@ -486,18 +487,25 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
       }}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: '7px 12px',
+        padding: '8px 12px 6px',
+        marginRight: 2, marginBottom: -1,
+        borderTopLeftRadius: 8, borderTopRightRadius: 8,
+        borderTop: `3px solid ${active ? color : 'transparent'}`,
+        borderLeft: '1px solid var(--rule)',
         borderRight: '1px solid var(--rule)',
-        background: active ? 'var(--paper-2)' : dragOver ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'transparent',
+        borderBottom: active ? '1px solid var(--paper-2)' : '1px solid var(--rule)',
+        background: active
+          ? 'var(--paper-2)'
+          : dragOver ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'var(--paper)',
         color: active ? 'var(--ink)' : 'var(--ink-3)',
         cursor: draggable ? 'grab' : 'pointer',
         userSelect: 'none',
-        borderTop: active ? `2px solid ${color}` : '2px solid transparent',
-        fontSize: 11, fontFamily: 'var(--sans)',
+        fontFamily: 'var(--sans)', fontSize: 11, fontWeight: active ? 600 : 500,
         flex: (tab.kind === 'root' || tab.kind === 'assets') ? '0 0 auto' : '1 1 100px',
-        minWidth: (tab.kind === 'root' || tab.kind === 'assets') ? undefined : 60,
+        minWidth: (tab.kind === 'root' || tab.kind === 'assets') ? undefined : 70,
         maxWidth: (tab.kind === 'root' || tab.kind === 'assets') ? undefined : 200,
         minHeight: 0, overflow: 'hidden',
+        position: 'relative', zIndex: active ? 2 : 1,
       }}
       title={label + (sub ? ` · ${sub}` : '')}
     >
@@ -505,8 +513,7 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
       )}
       <span style={{
-        fontFamily: (tab.kind === 'root' || tab.kind === 'assets') ? 'var(--sans)' : 'var(--mono)',
-        fontSize: (tab.kind === 'root' || tab.kind === 'assets') ? 11 : 10, letterSpacing: '0.03em',
+        fontFamily: 'var(--sans)', fontSize: 11, letterSpacing: '0.02em',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         flex: '1 1 auto', minWidth: 0,
       }}>
@@ -749,51 +756,54 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         minWidth: expanded ? 220 : 160,
         maxWidth: 360,
         padding: expanded ? '10px 12px 12px' : '9px 14px',
-        borderRadius: 12,
-        border: `1px solid ${color}`,
-        background: `color-mix(in oklch, ${color} ${inherited ? 10 : 16}%, var(--paper))`,
-        color: 'var(--ink)',
-        opacity: inherited ? 0.82 : 1,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+        borderRadius: 8,
+        border: `1px solid color-mix(in oklch, ${color} 70%, black 20%)`,
+        // Solid fill but visibly duller than the subtask chips below.
+        background: `color-mix(in oklch, ${color} 58%, var(--paper-2) 42%)`,
+        color: 'var(--paper)',
+        opacity: inherited ? 0.85 : 1,
+        boxShadow: 'var(--shadow-xs)',
         cursor: inherited ? 'default' : (hasSubs ? 'default' : 'pointer'),
-        transition: 'min-width 0.22s ease, padding 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease',
-        transform: expanded ? 'scale(1.02)' : 'scale(1)',
+        transition: 'min-width 0.22s ease, padding 0.22s ease',
+        fontFamily: 'var(--sans)',
       }}
     >
       <div
         onClick={(e) => { if (inherited) return; e.stopPropagation(); onOpenHeader() }}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          cursor: inherited ? 'default' : 'pointer', paddingBottom: expanded ? 8 : 0,
-          borderBottom: expanded ? '1px solid color-mix(in oklch, ' + color + ' 30%, transparent)' : 'none',
+          cursor: inherited ? 'default' : 'pointer',
+          paddingBottom: expanded ? 6 : 0,
         }}
         title={inherited ? 'Hérité de la séquence' : 'Ouvrir la tâche'}
       >
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.05em', color: 'var(--ink)' }}>{task.name}</span>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--paper)', flexShrink: 0, opacity: 0.9 }} />
+        <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--paper)' }}>{task.name}</span>
         {inherited && (
           <span style={{
-            fontFamily: 'var(--mono)', fontSize: 8, padding: '1px 5px', borderRadius: 3,
-            background: 'var(--paper-2)', color: 'var(--ink-3)', border: '1px solid var(--rule-2)',
+            fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 500,
+            padding: '1px 6px', borderRadius: 3,
+            background: 'rgba(255,255,255,0.18)', color: 'var(--paper)',
           }}>hérité</span>
         )}
         <span style={{ flex: 1 }} />
         {publishCount > 0 && (
           <span style={{
-            fontFamily: 'var(--mono)', fontSize: 8, padding: '1px 6px', borderRadius: 3,
-            background: 'var(--accent-soft)', color: 'var(--accent-hi)',
+            fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600,
+            padding: '1px 6px', borderRadius: 3,
+            background: 'rgba(0,0,0,0.3)', color: 'var(--paper)',
           }}>{publishCount}</span>
         )}
       </div>
 
       <div style={{
         height: expanded ? 5 : 3, marginTop: expanded ? 8 : 6, borderRadius: 3,
-        background: 'color-mix(in oklch, var(--paper) 60%, transparent)',
+        background: 'rgba(0,0,0,0.28)',
         overflow: 'hidden', transition: 'height 0.2s',
       }}>
         <div style={{
           width: `${Math.max(0, Math.min(100, completion))}%`, height: '100%',
-          background: color, transition: 'width 0.25s',
+          background: 'var(--accent)', transition: 'width 0.25s',
         }} />
       </div>
 
@@ -818,13 +828,12 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
                   onClick={(e) => { if (inherited) return; e.stopPropagation(); onOpenSubtask(sub) }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    padding: '4px 10px', borderRadius: 8,
-                    border: `1px solid ${color}`,
+                    padding: '5px 10px', borderRadius: 6,
+                    border: `1px solid color-mix(in oklch, ${color} 75%, black 25%)`,
                     background: color, color: 'var(--paper)',
-                    fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.05em',
+                    fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
                     cursor: inherited ? 'default' : 'pointer',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15)',
-                    transition: 'transform 0.12s, filter 0.12s',
+                    transition: 'filter 0.12s',
                     minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}
                 >

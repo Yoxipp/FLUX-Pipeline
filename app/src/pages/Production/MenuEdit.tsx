@@ -198,9 +198,9 @@ function CreateSection({ setState, setSelection, activeCategory }: {
         {activeCategory && (
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 6,
-            padding: '4px 8px', borderRadius: 5,
+            padding: '4px 10px', borderRadius: 5,
             background: categoryColor(activeCategory), color: 'var(--paper)',
-            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+            fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
           }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
             {activeCategory}
@@ -933,9 +933,9 @@ function AssetsPicker({ state, setState, entityKind, entity }: {
                     onClick={() => removeChip(l.id)}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4,
-                      padding: '3px 8px', borderRadius: 999,
+                      padding: '3px 9px', borderRadius: 999,
                       background: color, color: 'var(--paper)',
-                      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.03em',
+                      fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
                       cursor: 'pointer',
                     }}>
                 {a?.name ?? l.ref} <span style={{ opacity: 0.75 }}>×</span>
@@ -1061,9 +1061,9 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
               <div key={cls} style={{ marginBottom: 16 }}>
                 <div style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8,
-                  padding: '3px 10px', borderRadius: 5,
+                  padding: '4px 10px', borderRadius: 5,
                   background: color, color: 'var(--paper)',
-                  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
+                  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
                 }}>
                   <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
                   {t(categoryLabelKey(cls)) || cls}
@@ -1142,12 +1142,13 @@ function SeqColorPicker({ seq, onPick, onReset }: {
 // ── inline styles ────────────────────────────────────────────────────────────
 const _pad: React.CSSProperties = { padding: '12px 12px 10px', borderBottom: '1px solid var(--rule)' }
 const _lbl: React.CSSProperties = {
-  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
-  color: 'var(--ink-3)', textTransform: 'uppercase', marginBottom: 4,
+  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
+  letterSpacing: '0.05em', color: 'var(--ink-3)',
+  textTransform: 'uppercase', marginBottom: 5,
 }
 const _input: React.CSSProperties = {
   background: 'var(--paper)', color: 'var(--ink)',
   border: '1px solid var(--rule-2)', borderRadius: 6,
-  padding: '6px 9px', fontSize: 11, fontFamily: 'var(--mono)',
-  letterSpacing: '0.04em', outline: 'none',
+  padding: '6px 9px', fontSize: 11, fontFamily: 'var(--sans)',
+  outline: 'none',
 }

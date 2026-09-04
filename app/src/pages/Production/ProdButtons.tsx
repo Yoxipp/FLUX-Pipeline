@@ -27,9 +27,9 @@ export function ProdBtn({
 
   let bg: string, fg: string, bd: string
   if (variant === 'danger') {
-    bg = 'color-mix(in oklch, var(--err) 14%, var(--paper-2))'
-    fg = 'var(--err)'
-    bd = 'color-mix(in oklch, var(--err) 55%, var(--rule-2))'
+    bg = 'var(--err)'
+    fg = 'var(--paper)'
+    bd = 'var(--err)'
   } else if (variant === 'ghost') {
     bg = 'var(--paper-2)'
     fg = 'var(--ink-2)'
@@ -48,7 +48,7 @@ export function ProdBtn({
       title={title}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        font: 'inherit', fontSize: fs, fontWeight: variant === 'solid' ? 600 : 500,
+        fontFamily: 'var(--sans)', fontSize: fs, fontWeight: variant === 'ghost' ? 500 : 600,
         color: fg, background: bg,
         border: `1px solid ${bd}`,
         borderRadius: 6, padding: pad,

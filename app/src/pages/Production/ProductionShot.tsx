@@ -14,8 +14,9 @@
 // - Sequences and shots are ordered by their `order` field. Newly created seqs
 //   get an `order` that places them right before the next-higher SEQ number.
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Minus, MoveVertical, Plus } from 'lucide-react'
+import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import type {
@@ -49,25 +50,36 @@ const VZOOM_MAX = 3.0
 const VZOOM_DEF = 1.0
 const LS_VZOOM = 'flux.production.shot.vzoom'
 
-const LS_BOOKMARKS = 'flux.production.shot.bookmarks'
+// Bookmarks are per-user (stored in User.json via /settings/user-data under
+// `production.bookmarks.<project>`). Not scoped to the machine.
 type BookmarkKind = 'seq' | 'shot'
 interface Bookmark { kind: BookmarkKind; entityId: string }
-function readBookmarks(project: string): Bookmark[] {
+
+function sanitizeBookmarks(raw: unknown): Bookmark[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((b: unknown): b is Bookmark => {
+    const x = b as Bookmark
+    return !!x && (x.kind === 'seq' || x.kind === 'shot') && typeof x.entityId === 'string'
+  })
+}
+
+async function loadBookmarksForProject(project: string): Promise<Bookmark[]> {
   if (!project) return []
   try {
-    const raw = localStorage.getItem(`${LS_BOOKMARKS}.${project}`)
-    if (!raw) return []
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
-    return arr.filter((b: unknown): b is Bookmark => {
-      const x = b as Bookmark
-      return !!x && (x.kind === 'seq' || x.kind === 'shot') && typeof x.entityId === 'string'
-    })
+    const data = await api.getUserData()
+    const prod = (data.production ?? {}) as { bookmarks?: Record<string, unknown> }
+    return sanitizeBookmarks(prod.bookmarks?.[project])
   } catch { return [] }
 }
-function writeBookmarks(project: string, list: Bookmark[]) {
+
+async function saveBookmarksForProject(project: string, list: Bookmark[]) {
   if (!project) return
-  try { localStorage.setItem(`${LS_BOOKMARKS}.${project}`, JSON.stringify(list)) } catch { /* blocked */ }
+  try {
+    const data = await api.getUserData()
+    const prod = ((data.production ?? {}) as Record<string, unknown>)
+    const bookmarks = { ...(prod.bookmarks as Record<string, unknown> | undefined ?? {}), [project]: list }
+    await api.setUserData({ production: { ...prod, bookmarks } })
+  } catch { /* keep local optimistic state */ }
 }
 
 const HEADER_W = 118
@@ -160,14 +172,18 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     window.addEventListener('mouseup', onUp)
   }
 
-  // ── bookmarks ────────────────────────────────────────────────────────────
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => readBookmarks(project || ''))
-  // Refresh when project changes.
+  // ── bookmarks (per-user, stored in User.json) ────────────────────────────
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const projectKey = project || ''
-  useMemo(() => { setBookmarks(readBookmarks(projectKey)) }, [projectKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    let alive = true
+    if (!projectKey) { setBookmarks([]); return }
+    void loadBookmarksForProject(projectKey).then(list => { if (alive) setBookmarks(list) })
+    return () => { alive = false }
+  }, [projectKey])
   const persistBookmarks = (list: Bookmark[]) => {
-    setBookmarks(list)
-    writeBookmarks(projectKey, list)
+    setBookmarks(list)   // optimistic
+    void saveBookmarksForProject(projectKey, list)
   }
   // Compute the x coordinate (inside the scroll wrapper, after the sticky
   // HEADER_W) of a given bookmark. Returns null when the target no longer
