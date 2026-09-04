@@ -16,7 +16,9 @@ import {
   type ReactNode,
 } from 'react'
 import { api } from '../api/client'
-import { FEED_POLL_INTERVAL_MS } from '../lib/pollIntervals'
+import {
+  FEED_POLL_INTERVAL_MS, IDLE_AFTER_MS, IDLE_POLL_INTERVAL_MS,
+} from '../lib/pollIntervals'
 import type { ActivityEvent, ChatMention } from '../types'
 
 // Upper bound for the shared activity fetch. FavoriteWatcher needs a deep window
@@ -89,19 +91,68 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
     await refreshActivity()
   }, [refreshActivity])
 
+  // Self-scheduling poller gated by window visibility and real user activity:
+  //  • hidden window            → fully paused (no polling at all)
+  //  • visible + recent action  → normal cadence (FEED_POLL_INTERVAL_MS)
+  //  • visible + idle ≥ 20 min  → drastic slow-down (IDLE_POLL_INTERVAL_MS)
+  // "Idle" is measured ONLY against genuine user input (pointerdown/keydown),
+  // never mouse-move/scroll/focus and never our own polling, so it can't be
+  // bypassed: a visible-but-untouched window still sleeps at 20 min. Returning
+  // to the window, or the next real click/keypress, wakes it instantly with a
+  // catch-up fetch.
   useEffect(() => {
-    void refreshActivity()
-    void refreshMentions()
-    const id = setInterval(() => {
-      void refreshActivity()
-      void refreshMentions()
-    }, FEED_POLL_INTERVAL_MS)
-    const onRefresh  = () => { void refreshActivity(); void refreshMentions() }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let mode: 'active' | 'idle' | 'paused' = 'active'
+    let lastActivity = Date.now()
+    let stopped = false
+
+    const refetchAll = () => { void refreshActivity(); void refreshMentions() }
+    const clear = () => { if (timer) { clearTimeout(timer); timer = undefined } }
+
+    const schedule = () => {
+      clear()
+      if (stopped || document.hidden) { mode = 'paused'; return }
+      const idle = Date.now() - lastActivity >= IDLE_AFTER_MS
+      mode = idle ? 'idle' : 'active'
+      const delay = idle ? IDLE_POLL_INTERVAL_MS : FEED_POLL_INTERVAL_MS
+      timer = setTimeout(() => {
+        refetchAll()
+        schedule()   // recompute the mode AFTER each tick (may have gone idle)
+      }, delay)
+    }
+
+    const wakeFromDormant = () => {
+      // Only called when we were idle or paused → catch up now and resume cadence.
+      lastActivity = Date.now()
+      refetchAll()
+      schedule()
+    }
+
+    const onUserAction = () => {
+      // Capture-phase so a stopPropagation elsewhere can't hide the action.
+      if (mode === 'active') { lastActivity = Date.now(); return }  // keep the running timer
+      wakeFromDormant()                                             // idle → instant resume
+    }
+    const onVisibility = () => {
+      if (document.hidden) { clear(); mode = 'paused' }
+      else wakeFromDormant()   // returning to the window = wake + catch-up
+    }
+    const onRefresh  = () => refetchAll()
     const onMentions = () => { void refreshMentions() }
+
+    refetchAll()
+    schedule()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pointerdown', onUserAction, true)
+    window.addEventListener('keydown', onUserAction, true)
     window.addEventListener('flux:refresh', onRefresh)
     window.addEventListener('flux:mentions', onMentions)
     return () => {
-      clearInterval(id)
+      stopped = true
+      clear()
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pointerdown', onUserAction, true)
+      window.removeEventListener('keydown', onUserAction, true)
       window.removeEventListener('flux:refresh', onRefresh)
       window.removeEventListener('flux:mentions', onMentions)
     }
