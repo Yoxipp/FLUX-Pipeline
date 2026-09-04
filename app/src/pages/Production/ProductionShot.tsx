@@ -15,7 +15,8 @@
 //   get an `order` that places them right before the next-higher SEQ number.
 
 import { useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, Minus, MoveVertical, Plus } from 'lucide-react'
+import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Minus, MoveVertical, Plus } from 'lucide-react'
+import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import type {
   ProductionSequence, ProductionShot as Shot, ProductionState,
@@ -48,6 +49,27 @@ const VZOOM_MAX = 3.0
 const VZOOM_DEF = 1.0
 const LS_VZOOM = 'flux.production.shot.vzoom'
 
+const LS_BOOKMARKS = 'flux.production.shot.bookmarks'
+type BookmarkKind = 'seq' | 'shot'
+interface Bookmark { kind: BookmarkKind; entityId: string }
+function readBookmarks(project: string): Bookmark[] {
+  if (!project) return []
+  try {
+    const raw = localStorage.getItem(`${LS_BOOKMARKS}.${project}`)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    return arr.filter((b: unknown): b is Bookmark => {
+      const x = b as Bookmark
+      return !!x && (x.kind === 'seq' || x.kind === 'shot') && typeof x.entityId === 'string'
+    })
+  } catch { return [] }
+}
+function writeBookmarks(project: string, list: Bookmark[]) {
+  if (!project) return
+  try { localStorage.setItem(`${LS_BOOKMARKS}.${project}`, JSON.stringify(list)) } catch { /* blocked */ }
+}
+
 const HEADER_W = 118
 
 function parseNum(name: string, prefix: 'SEQ' | 'SHOT'): number {
@@ -70,6 +92,7 @@ function useLocalNumber(key: string, def: number, clampMin: number, clampMax: nu
 
 export function ProductionShot({ state, setState, selection, setSelection, onEntityClicked }: Props) {
   const { t } = useI18n()
+  const { project } = useProject()
 
   const [pxPerBlock, setZoom] = useLocalNumber(LS_ZOOM, ZOOM_DEF, ZOOM_MIN, ZOOM_MAX)
   const [seqRowH,   setSeqRowH]  = useLocalNumber(LS_SEQ_H,  SEQ_ROW_DEF,  ROW_MIN, ROW_MAX)
@@ -135,6 +158,83 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
+  }
+
+  // ── bookmarks ────────────────────────────────────────────────────────────
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => readBookmarks(project || ''))
+  // Refresh when project changes.
+  const projectKey = project || ''
+  useMemo(() => { setBookmarks(readBookmarks(projectKey)) }, [projectKey])   // eslint-disable-line react-hooks/exhaustive-deps
+  const persistBookmarks = (list: Bookmark[]) => {
+    setBookmarks(list)
+    writeBookmarks(projectKey, list)
+  }
+  // Compute the x coordinate (inside the scroll wrapper, after the sticky
+  // HEADER_W) of a given bookmark. Returns null when the target no longer
+  // exists in state.
+  const scrollWrapRef = useRef<HTMLDivElement | null>(null)
+  const bookmarkX = (bm: Bookmark): number | null => {
+    if (bm.kind === 'seq') {
+      const idx = sequences.findIndex(s => s.id === bm.entityId)
+      if (idx < 0) return null
+      const before = colWidths.slice(0, idx).reduce((a, b) => a + b, 0)
+      return HEADER_W + 10 + before
+    }
+    // shot
+    const shot = state.shots.find(s => s.id === bm.entityId)
+    if (!shot) return null
+    const seqIdx = sequences.findIndex(s => s.id === shot.seq_id)
+    if (seqIdx < 0) return null
+    const before = colWidths.slice(0, seqIdx).reduce((a, b) => a + b, 0)
+    const shotList = shotsBySeq.get(shot.seq_id) ?? []
+    const shotIdx = shotList.findIndex(s => s.id === shot.id)
+    if (shotIdx < 0) return null
+    return HEADER_W + 10 + before + shotIdx * (shotSquare + 4)
+  }
+  const bookmarkExistsFor = (kind: BookmarkKind, id: string) =>
+    bookmarks.some(b => b.kind === kind && b.entityId === id)
+  const toggleBookmarkOnSelection = () => {
+    if (selection.kind === 'seq') {
+      persistBookmarks(bookmarkExistsFor('seq', selection.id)
+        ? bookmarks.filter(b => !(b.kind === 'seq' && b.entityId === selection.id))
+        : [...bookmarks, { kind: 'seq', entityId: selection.id }])
+    } else if (selection.kind === 'shot') {
+      persistBookmarks(bookmarkExistsFor('shot', selection.id)
+        ? bookmarks.filter(b => !(b.kind === 'shot' && b.entityId === selection.id))
+        : [...bookmarks, { kind: 'shot', entityId: selection.id }])
+    }
+  }
+  const bookmarkActive =
+    (selection.kind === 'seq'  && bookmarkExistsFor('seq',  selection.id)) ||
+    (selection.kind === 'shot' && bookmarkExistsFor('shot', selection.id))
+  const canBookmark = selection.kind === 'seq' || selection.kind === 'shot'
+  // Sorted x-positions (with target ids) for prev/next navigation.
+  const bookmarkPositions = bookmarks
+    .map(b => ({ b, x: bookmarkX(b) }))
+    .filter((p): p is { b: Bookmark; x: number } => p.x !== null)
+    .sort((a, b) => a.x - b.x)
+  const scrollToBookmark = (x: number) => {
+    const el = scrollWrapRef.current
+    if (!el) return
+    // Bring the bookmark just after the sticky header cell.
+    el.scrollTo({ left: Math.max(0, x - HEADER_W - 6), behavior: 'smooth' })
+  }
+  const gotoBookmark = (dir: -1 | 1) => {
+    if (bookmarkPositions.length === 0) return
+    const el = scrollWrapRef.current
+    const curX = (el?.scrollLeft ?? 0) + HEADER_W + 8   // small tolerance
+    let next: { b: Bookmark; x: number } | undefined
+    if (dir === 1) {
+      next = bookmarkPositions.find(p => p.x > curX) ?? bookmarkPositions[0]
+    } else {
+      const prev = [...bookmarkPositions].reverse().find(p => p.x < curX - 6)
+      next = prev ?? bookmarkPositions[bookmarkPositions.length - 1]
+    }
+    if (!next) return
+    scrollToBookmark(next.x)
+    // Also focus the target so MenuEdit / MenuSpec reflect it.
+    setSelection({ kind: next.b.kind, id: next.b.entityId })
+    onEntityClicked?.()
   }
 
   const reorderSeq = (draggedId: string, targetId: string) => {
@@ -225,6 +325,45 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
           <button onClick={() => setVZ(vZoom + 0.1)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
         </div>
+
+        {/* Bookmarks */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <button
+            onClick={() => gotoBookmark(-1)}
+            disabled={bookmarkPositions.length === 0}
+            title="Bookmark précédent"
+            style={{ ..._zoomBtn, opacity: bookmarkPositions.length === 0 ? 0.4 : 1 }}
+          ><ChevronLeft size={12} strokeWidth={2} /></button>
+          <button
+            onClick={() => gotoBookmark(1)}
+            disabled={bookmarkPositions.length === 0}
+            title="Bookmark suivant"
+            style={{ ..._zoomBtn, opacity: bookmarkPositions.length === 0 ? 0.4 : 1 }}
+          ><ChevronRight size={12} strokeWidth={2} /></button>
+          <button
+            onClick={toggleBookmarkOnSelection}
+            disabled={!canBookmark}
+            title={
+              !canBookmark
+                ? 'Sélectionne une séquence ou un shot pour poser un bookmark'
+                : bookmarkActive ? 'Retirer le bookmark' : 'Poser un bookmark'
+            }
+            style={{
+              ..._zoomBtn,
+              width: 26,
+              background: bookmarkActive ? 'var(--accent-soft)' : 'var(--paper-2)',
+              color: bookmarkActive ? 'var(--accent-hi)' : (canBookmark ? 'var(--ink-2)' : 'var(--ink-4)'),
+              opacity: canBookmark ? 1 : 0.55,
+              borderColor: bookmarkActive ? 'var(--accent)' : 'var(--rule-2)',
+            }}
+          >
+            <Bookmark size={12} strokeWidth={2}
+                      fill={bookmarkActive ? 'var(--accent)' : 'none'} />
+          </button>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', minWidth: 18, textAlign: 'right' }}>
+            {bookmarks.length || ''}
+          </span>
+        </div>
       </div>
 
       {sequences.length === 0 && (
@@ -243,8 +382,25 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         }}>
           {/* Single horizontal scroll container. Header cells stick to the left
               via position:sticky so they stay visible while the lanes scroll. */}
-          <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-            <div style={{ minWidth: HEADER_W + contentW, display: 'flex', flexDirection: 'column' }}>
+          <div ref={scrollWrapRef} style={{ overflowX: 'auto', overflowY: 'hidden', position: 'relative' }}>
+            <div style={{ minWidth: HEADER_W + contentW, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+              {/* Bookmark overlay — vertical markers spanning ruler + tracks */}
+              {bookmarkPositions.map((p, i) => (
+                <div key={i} style={{
+                  position: 'absolute', top: 0, bottom: 0, left: p.x,
+                  width: 0, borderLeft: '2px solid var(--accent)',
+                  pointerEvents: 'none', zIndex: 4, opacity: 0.85,
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 2, left: -8,
+                    width: 16, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 3, background: 'var(--accent)', color: 'var(--paper)',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                  }}>
+                    <Bookmark size={8} strokeWidth={2.4} fill="var(--paper)" />
+                  </div>
+                </div>
+              ))}
               {/* Ruler row */}
               <div style={{ display: 'flex', alignItems: 'stretch', height: 26,
                             borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
