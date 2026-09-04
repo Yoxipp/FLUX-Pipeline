@@ -336,6 +336,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           ? <TasksLanding
               res={selectedRes}
               state={state}
+              setState={setState}
               publishesByTask={publishesByTask}
               onOpenTask={(taskId) => openTaskTab(selectedRes.entity.id, taskId)}
               onOpenSubtask={(taskId, sub) => openSubtaskTab(selectedRes.entity.id, taskId, sub)}
@@ -358,6 +359,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           <TasksLanding
             res={res}
             state={state}
+            setState={setState}
             publishesByTask={publishesByTask}
             onOpenTask={(taskId) => openTaskTab(res.entity.id, taskId)}
             onOpenSubtask={(taskId, sub) => openSubtaskTab(res.entity.id, taskId, sub)}
@@ -655,25 +657,47 @@ function classColor(cls: string): string {
 }
 
 // ── tasks landing (chips with hover-expand) ─────────────────────────────────
-function TasksLanding({ res, state, publishesByTask, onOpenTask, onOpenSubtask }: {
+function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtask }: {
   res:             ResolvedEntity
   state:           ProductionState
+  setState:        (patch: (prev: ProductionState) => ProductionState) => void
   publishesByTask: Record<string, ProductionPublish[]>
   onOpenTask:      (taskId: string) => void
   onOpenSubtask:   (taskId: string, subtask: string) => void
 }) {
-  // For a shot with inherit_tasks, show the sequence's tasks read-only under it.
-  const inheritedTasks: ProductionTask[] = useMemo(() => {
-    if (res.kind !== 'shot' || !res.entity.inherit_tasks || !res.seq) return []
-    const own = new Set(res.entity.tasks.map(x => x.name.toUpperCase()))
-    return res.seq.tasks.filter(t => !own.has(t.name.toUpperCase()))
-  }, [res, state])
+  // For a shot with inherit_tasks, mirror the seq's tasks into shot.tasks as
+  // fresh independent copies (idempotent — only adds missing ones by name).
+  // Once copied, each task lives on the shot and behaves like any other task.
+  useEffect(() => {
+    if (res.kind !== 'shot' || !res.entity.inherit_tasks || !res.seq) return
+    const shot = res.entity; const seq = res.seq
+    const ownNames = new Set(shot.tasks.map(t => t.name.toUpperCase()))
+    const missing = seq.tasks.filter(t => !ownNames.has(t.name.toUpperCase()))
+    if (missing.length === 0) return
+    setState(prev => ({
+      ...prev,
+      shots: prev.shots.map(s => s.id !== shot.id ? s : {
+        ...s,
+        tasks: [
+          ...s.tasks,
+          ...missing.map((t, i) => ({
+            id: `t_${Math.random().toString(36).slice(2, 12)}`,
+            name: t.name,
+            order: s.tasks.length + i,
+            type_tokens: [...(t.type_tokens || [])],
+            known_subtasks: [...(t.known_subtasks || [])],
+            origin: 'auto' as const,
+          })),
+        ],
+      }),
+    }))
+  }, [res.kind === 'shot' ? res.entity.id : null, res.kind === 'shot' ? res.entity.inherit_tasks : null, res.kind === 'shot' ? res.seq?.tasks.length : null])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const shim = toAssetShim(res)
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
-      {res.entity.tasks.length === 0 && inheritedTasks.length === 0 && (
+      {res.entity.tasks.length === 0 && (
         <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</div>
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
@@ -689,18 +713,6 @@ function TasksLanding({ res, state, publishesByTask, onOpenTask, onOpenSubtask }
               task.known_subtasks.map(s => [s, shim.task_details?.[`${task.name}|${s}`]?.completion ?? 0])
             )}
             inherited={false}
-          />
-        ))}
-        {inheritedTasks.map(task => (
-          <TaskNode
-            key={`inh-${task.id}`}
-            task={task}
-            publishCount={0}
-            onOpenHeader={() => { /* inherited: read-only landing */ }}
-            onOpenSubtask={() => { /* inherited: read-only landing */ }}
-            completion={0}
-            subtaskCompletions={{}}
-            inherited
           />
         ))}
       </div>
@@ -738,10 +750,10 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         maxWidth: 360,
         padding: expanded ? '10px 12px 12px' : '9px 14px',
         borderRadius: 12,
-        border: `1px ${inherited ? 'dashed' : 'solid'} ${color}`,
-        background: `color-mix(in oklch, ${color} ${inherited ? 6 : 16}%, var(--paper))`,
+        border: `1px solid ${color}`,
+        background: `color-mix(in oklch, ${color} ${inherited ? 10 : 16}%, var(--paper))`,
         color: 'var(--ink)',
-        opacity: inherited ? 0.75 : 1,
+        opacity: inherited ? 0.82 : 1,
         boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
         cursor: inherited ? 'default' : (hasSubs ? 'default' : 'pointer'),
         transition: 'min-width 0.22s ease, padding 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease',
@@ -786,7 +798,12 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
       </div>
 
       {expanded && hasSubs && (
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{
+          marginTop: 10,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: 8,
+        }}>
           {task.known_subtasks.map(sub => {
             const subDone = subtaskCompletions[sub] ?? 0
             const isHovered = hoveredSub === sub
@@ -795,12 +812,12 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
                 key={sub}
                 onMouseEnter={() => setHoveredSub(sub)}
                 onMouseLeave={() => setHoveredSub(prev => (prev === sub ? null : prev))}
-                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}
               >
                 <button
                   onClick={(e) => { if (inherited) return; e.stopPropagation(); onOpenSubtask(sub) }}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                     padding: '4px 10px', borderRadius: 8,
                     border: `1px solid ${color}`,
                     background: color, color: 'var(--paper)',
@@ -808,12 +825,13 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
                     cursor: inherited ? 'default' : 'pointer',
                     boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15)',
                     transition: 'transform 0.12s, filter 0.12s',
+                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}
                 >
                   {sub}
                 </button>
                 <div style={{
-                  height: 3, borderRadius: 2, width: 68,
+                  height: 3, borderRadius: 2, width: '100%',
                   background: 'color-mix(in oklch, var(--paper) 60%, transparent)',
                   overflow: 'hidden',
                   opacity: isHovered ? 1 : 0,

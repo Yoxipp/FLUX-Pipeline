@@ -12,7 +12,7 @@ import type {
   ProductionSequence, ProductionShot,
   ProductionState, ProductionTask,
 } from '../../types'
-import { CATEGORY_ORDER, categoryColor, categoryLabelKey } from './util'
+import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, shotColorFromSeqColor } from './util'
 import { ProdBtn } from './ProdButtons'
 import type { Selection } from './Production'
 
@@ -550,13 +550,30 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
   }
   const materialize = async () => {
     if (Number.isNaN(seqNum)) { toast.error(`Séquence non numérique : ${seq.name}`); return }
-    const shotNums = state.shots
+    // For each shot in this seq: compute its effective task list (own tasks
+    // if inherit_tasks is false, otherwise inherit from the seq) so the
+    // backend can create per-shot task + subtask folders.
+    const seqTasks = seq.tasks.map(t => ({
+      token: t.name.toUpperCase(),
+      subtasks: (t.known_subtasks || []).map(s => s.toUpperCase()),
+    }))
+    const shotsPayload = state.shots
       .filter(s => s.seq_id === seq.id)
-      .map(s => parseShotNum(s.name))
-      .filter(n => !Number.isNaN(n))
+      .map(s => {
+        const n = parseShotNum(s.name)
+        if (Number.isNaN(n)) return null
+        const tasks = s.inherit_tasks
+          ? seqTasks
+          : s.tasks.map(t => ({
+              token: t.name.toUpperCase(),
+              subtasks: (t.known_subtasks || []).map(x => x.toUpperCase()),
+            }))
+        return { number: n, tasks }
+      })
+      .filter((x): x is { number: number; tasks: Array<{ token: string; subtasks: string[] }> } => x !== null)
     try {
       const r = await api.materializeProductionEntity(project, {
-        kind: 'sequence', seq_number: seqNum, shot_numbers: shotNums, update: onDisk,
+        kind: 'sequence', seq_number: seqNum, shots: shotsPayload, update: onDisk,
       })
       toast.success(onDisk ? `Séquence mise à jour : ${r.path}` : `Dossier créé : ${r.path}`)
       window.dispatchEvent(new Event('flux:refresh'))
@@ -564,8 +581,15 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
   }
 
   const createShot = () => {
-    const n = parseInt(shotNum, 10)
-    if (Number.isNaN(n) || n <= 0) return
+    // No number entered → auto-pick max(existing shot num) + 1 (or 1 if none).
+    let n = parseInt(shotNum, 10)
+    if (Number.isNaN(n) || n <= 0) {
+      const nums = state.shots
+        .filter(s => s.seq_id === seq.id)
+        .map(s => parseShotNum(s.name))
+        .filter(x => !Number.isNaN(x))
+      n = nums.length ? Math.max(...nums) + 1 : 1
+    }
     const nm = `SHOT${padSeq(n)}`
     if (state.shots.some(s => s.seq_id === seq.id && s.name === nm)) return
     const id = nid('shot')
@@ -586,7 +610,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
           tasks: [], assets: [], task_details: {}, origin: 'user' },
       ],
     }))
-    setSelection({ kind: 'shot', id })
+    // Keep the seq focused; user is bulk-adding shots.
     setShotNum(''); setShotLabelInput('')
   }
 
@@ -630,11 +654,11 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     <>
       <div style={_pad}>
         <div style={_lbl}>SÉQUENCE · {seq.name}{seq.label ? ` — ${seq.label}` : ''}</div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
           <input
             value={Number.isNaN(seqNum) ? '' : String(seqNum)}
             onChange={e => changeSeqNumber(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="N°" style={{ ..._input, width: 70 }}
+            placeholder="N°" style={{ ..._input, width: 60 }}
           />
           <input
             value={seq.label ?? ''}
@@ -642,6 +666,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
             placeholder="Label (optionnel)"
             style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
           />
+          <SeqColorPicker seq={seq} onPick={c => patchSeq({ color: c })} onReset={() => patchSeq({ color: undefined })} />
         </div>
         <ProdBtn full variant="ghost" onClick={materialize} style={{ marginTop: 6 }}>
           {onDisk
@@ -678,7 +703,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
             style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
           />
         </div>
-        <ProdBtn full onClick={createShot} style={{ marginTop: 6 }} disabled={!shotNum.trim()}>
+        <ProdBtn full onClick={createShot} style={{ marginTop: 6 }}>
           <Plus size={12} strokeWidth={2} /> {t('prod.newShot')}
         </ProdBtn>
       </div>
@@ -1078,6 +1103,39 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
         </div>
       </div>
     </div>
+  )
+}
+
+// ── seq color picker ────────────────────────────────────────────────────────
+function SeqColorPicker({ seq, onPick, onReset }: {
+  seq:     ProductionSequence
+  onPick:  (hex: string) => void
+  onReset: () => void
+}) {
+  const effective = seq.color || defaultSeqColor(seq.id || seq.name)
+  const shotShade = shotColorFromSeqColor(effective)
+  const isCustom = !!seq.color
+  return (
+    <label
+      title={`Couleur de la séquence · shot: dérivé\nClic-droit : réinitialiser`}
+      onContextMenu={e => { e.preventDefault(); if (isCustom) onReset() }}
+      style={{
+        position: 'relative', width: 30, minHeight: 32,
+        borderRadius: 6, cursor: 'pointer',
+        border: '1px solid var(--rule-2)',
+        overflow: 'hidden', flexShrink: 0,
+        display: 'flex', flexDirection: 'column',
+      }}
+    >
+      <div style={{ flex: 3, background: effective }} />
+      <div style={{ flex: 1, background: shotShade, borderTop: '1px solid rgba(0,0,0,0.15)' }} />
+      <input
+        type="color"
+        value={effective}
+        onChange={e => onPick(e.target.value)}
+        style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+      />
+    </label>
   )
 }
 

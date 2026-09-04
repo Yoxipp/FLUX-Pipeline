@@ -185,6 +185,7 @@ export interface ProductionSequence {
   id: string
   name: string                    // SEQ001
   label?: string                  // free-form user label (e.g. "opening bar")
+  color?: string                  // user-chosen CSS color (auto-derived if absent)
   order: number
   origin?: 'user' | 'auto'
   tasks: ProductionTask[]

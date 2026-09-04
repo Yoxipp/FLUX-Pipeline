@@ -451,6 +451,7 @@ export const api = {
     shot_number?: number
     update?: boolean
     shot_numbers?: number[]
+    shots?: Array<{ number: number; tasks: Array<{ token: string; subtasks: string[] }> }>
   }) =>
     apiCall<{ success: boolean; kind: string; path: string }>(
       'POST', `/production/${encodeURIComponent(project)}/materialize`, payload),

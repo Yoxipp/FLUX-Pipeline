@@ -113,16 +113,20 @@ def create_shot(
 def update_sequence(
     project_path: Path,
     seq_number: int,
-    shot_numbers: list[int] | None = None,
+    shots: list[dict] | None = None,
+    class_tokens: dict[str, str] | None = None,
     padding: int = DEFAULT_PADDING,
 ) -> Path:
     """Idempotent version of :func:`create_sequence`.
 
-    Ensures the sequence folder exists (creates it silently if not) and then
-    ensures each shot in *shot_numbers* is scaffolded. Never deletes,
-    overwrites, or touches any existing file — only creates what is missing.
+    * Ensures the sequence folder exists.
+    * For each entry in *shots* (``[{'number': int, 'tasks': [{'token': str,
+      'subtasks': [str, ...]}]}]``), ensures the shot dir and — inside it —
+      each task folder plus its subtask subfolders. Task→folder resolution
+      uses *class_tokens* (e.g. ``ANIM → shot/{seq}/{shot}/anim``), falling
+      back to lowercased token names.
 
-    Returns the sequence path.
+    Never overwrites or deletes anything — only creates what is missing.
     """
     seq_label = format_seq(seq_number, padding)
     seq_rel   = f"shot/{seq_label}"
@@ -138,21 +142,58 @@ def update_sequence(
             log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
         log.info("Sequence created (via update): %s", seq_path)
 
-    for n in shot_numbers or []:
-        shot_label = format_shot(n, padding)
-        shot_path  = project_path / "shot" / seq_label / shot_label
-        if shot_path.exists():
+    for shot in shots or []:
+        n = shot.get("number") if isinstance(shot, dict) else shot
+        if n is None:
             continue
-        _scaffold_shot(shot_path)
-        token_key = f"{seq_label}/{shot_label}"
-        add_token(project_path, "SHOT", token_key, f"shot/{seq_label}/{shot_label}")
-        create_shot_usd_template(shot_path, seq_label, shot_label)
-        try:
-            create_shot_hip_scene(shot_path, seq_label, shot_label)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
-        log.info("Shot created (via seq update): %s", shot_path)
+        shot_label = format_shot(int(n), padding)
+        shot_path  = project_path / "shot" / seq_label / shot_label
+        if not shot_path.exists():
+            _scaffold_shot(shot_path)
+            token_key = f"{seq_label}/{shot_label}"
+            add_token(project_path, "SHOT", token_key, f"shot/{seq_label}/{shot_label}")
+            create_shot_usd_template(shot_path, seq_label, shot_label)
+            try:
+                create_shot_hip_scene(shot_path, seq_label, shot_label)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
+            log.info("Shot created (via seq update): %s", shot_path)
+
+        # Task + subtask folders inside the shot.
+        for tsk in (shot.get("tasks", []) if isinstance(shot, dict) else []):
+            token = (tsk.get("token") or "").strip().upper()
+            if not token:
+                continue
+            task_dir = _resolve_shot_task_dir(project_path, seq_label, shot_label, token, class_tokens)
+            if task_dir is None:
+                continue
+            if not task_dir.exists():
+                ensure_dir(task_dir)
+            for sub in tsk.get("subtasks", []) or []:
+                sub_label = str(sub).strip()
+                if not sub_label or sub_label.lower() == "null":
+                    continue
+                sub_dir = task_dir / sub_label.lower()
+                if not sub_dir.exists():
+                    ensure_dir(sub_dir)
+
     return seq_path
+
+
+def _resolve_shot_task_dir(
+    project_path: Path,
+    seq_label: str,
+    shot_label: str,
+    task_token: str,
+    class_tokens: dict[str, str] | None,
+) -> Path | None:
+    """Return the on-disk folder for a shot-level task, or None if unresolvable."""
+    tpl = (class_tokens or {}).get(task_token.upper())
+    if tpl:
+        rel = tpl.replace("{seq}", seq_label).replace("{shot}", shot_label)
+        return project_path / rel
+    # Fallback: assume shot/<seq>/<shot>/<token lower>
+    return project_path / "shot" / seq_label / shot_label / task_token.lower()
 
 
 def update_shot(

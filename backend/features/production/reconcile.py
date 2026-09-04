@@ -30,6 +30,87 @@ log = get_logger(__name__)
 _VERSION_RE = re.compile(r"^v(\d+)$", re.IGNORECASE)
 _SEQ_RE = re.compile(r"^SEQ\d+$", re.IGNORECASE)
 _SHOT_RE = re.compile(r"^SHOT\d+$", re.IGNORECASE)
+_SEQ_NUM_RE  = re.compile(r"^SEQ(\d+)",  re.IGNORECASE)
+_SHOT_NUM_RE = re.compile(r"^SHOT(\d+)", re.IGNORECASE)
+
+
+def _parse_num(name: str, kind: str) -> int | None:
+    rx = _SEQ_NUM_RE if kind == "SEQ" else _SHOT_NUM_RE
+    m = rx.match(name or "")
+    return int(m.group(1)) if m else None
+
+
+def _insert_seq_by_number(production: dict, name: str) -> dict:
+    """Create an auto sequence numerically placed among *other auto* siblings.
+
+    User-placed sequences (``origin='user'``) keep their exact order value;
+    the new auto seq slides in next to the first auto sibling with a
+    strictly greater SEQ number (or after every auto if none is greater).
+    Only auto orders shift — user positions never move.
+    """
+    n = _parse_num(name, "SEQ")
+    return _insert_entity_numerically(
+        production, "sequences", name, "SEQ", n,
+        make=lambda: {
+            "id": store.new_id("seq"), "name": name.upper(),
+            "tasks": [], "assets": [], "notes": "", "origin": "auto",
+        },
+    )
+
+
+def _insert_shot_by_number(production: dict, seq_id: str, name: str) -> dict:
+    n = _parse_num(name, "SHOT")
+    return _insert_entity_numerically(
+        production, "shots", name, "SHOT", n,
+        sibling_filter=lambda s: s.get("seq_id") == seq_id,
+        make=lambda: {
+            "id": store.new_id("shot"), "seq_id": seq_id, "name": name.upper(),
+            "inherit_tasks": True, "inherit_assets": True,
+            "tasks": [], "assets": [], "task_details": {}, "origin": "auto",
+        },
+    )
+
+
+def _insert_entity_numerically(
+    production: dict,
+    key: str,
+    name: str,
+    prefix: str,
+    num: int | None,
+    make,
+    sibling_filter=None,
+) -> dict:
+    entities = production.setdefault(key, [])
+    siblings = [e for e in entities if (sibling_filter is None or sibling_filter(e))]
+    if num is None or not siblings:
+        # No numeric hint or empty list: append at the end.
+        pos = max((e.get("order", 0) for e in siblings), default=-1) + 1
+        obj = make(); obj["order"] = pos
+        entities.append(obj)
+        return obj
+    # Position among AUTO siblings only, using order as the ranking axis.
+    autos = sorted(
+        [e for e in siblings if (e.get("origin") or "user") == "auto"],
+        key=lambda e: e.get("order", 0),
+    )
+    greater = next(
+        (a for a in autos if (_parse_num(a.get("name", ""), prefix) or 10**9) > num),
+        None,
+    )
+    if greater is not None:
+        pos = greater.get("order", 0)
+    else:
+        # No auto with a greater number → place after the last auto (if any),
+        # else at the very end.
+        pos = (autos[-1].get("order", -1) + 1) if autos else \
+              max((e.get("order", 0) for e in siblings), default=-1) + 1
+    sibling_ids = {e["id"] for e in siblings}
+    for e in entities:
+        if e["id"] in sibling_ids and e.get("order", 0) >= pos:
+            e["order"] = e.get("order", 0) + 1
+    obj = make(); obj["order"] = pos
+    entities.append(obj)
+    return obj
 
 
 # ── filename parsing (new order) ─────────────────────────────────────────────
@@ -256,11 +337,11 @@ def match_or_create_seq_shot_task(production: dict, tokens: dict) -> tuple[dict,
 
     seq = store.find_sequence(production, seq_name)
     if seq is None:
-        seq = store.add_sequence(production, seq_name, origin="auto")
+        seq = _insert_seq_by_number(production, seq_name)
 
     shot = store.find_shot(production, seq["id"], shot_name)
     if shot is None:
-        shot = store.add_shot(production, seq["id"], shot_name, origin="auto")
+        shot = _insert_shot_by_number(production, seq["id"], shot_name)
 
     task = store.find_task_by_type(shot, task_tok)
     if task is None:
@@ -398,13 +479,12 @@ def reconcile(
             continue
         seq = store.find_sequence(production, seq_name)
         if seq is None:
-            seq = store.add_sequence(production, seq_name, origin="auto")
+            seq = _insert_seq_by_number(production, seq_name)
         if not shot_name:
-            # Sequence-only entry (no shot dir yet) — surface the seq alone.
             continue
         shot = store.find_shot(production, seq["id"], shot_name)
         if shot is None:
-            shot = store.add_shot(production, seq["id"], shot_name, origin="auto")
+            shot = _insert_shot_by_number(production, seq["id"], shot_name)
         for tsk in ds.get("tasks", []):
             token = (tsk.get("token") or "").upper()
             if not token:

@@ -45,6 +45,11 @@ class CommentNotify(BaseModel):
     text:        str | None = None
 
 
+class MaterializeShotSpec(BaseModel):
+    number: int
+    tasks: list[dict] = []       # [{'token': 'ANIM', 'subtasks': ['BLOCK', 'SPLINE']}]
+
+
 class MaterializePayload(BaseModel):
     kind: str                    # "asset" | "sequence" | "shot"
     class_token: str | None = None   # asset only (CHAR / PROPS / ENV / FXRIG…)
@@ -54,8 +59,10 @@ class MaterializePayload(BaseModel):
     # When True, use the idempotent path (skip if exists, add missing shots for
     # a sequence). Also accepted implicitly whenever the target already exists.
     update: bool = False
-    # For a sequence materialize, the shot numbers to ensure exist under it.
+    # Legacy: just the shot numbers to ensure exist under the seq. Superseded by
+    # `shots` which also carries per-shot task+subtask specs.
     shot_numbers: list[int] | None = None
+    shots: list[MaterializeShotSpec] | None = None
 
 
 def _ensure_project(project: str) -> None:
@@ -192,9 +199,19 @@ async def materialize(project: str, payload: MaterializePayload) -> dict:
         if kind == "sequence":
             if payload.seq_number is None:
                 raise ValueError("seq_number requis pour une séquence")
-            # Sequence materialize now always ensures the listed shots too
-            # (never overwrites — only creates what is missing).
-            path = update_sequence(project_path, payload.seq_number, payload.shot_numbers or [])
+            # Merge tokens.json CLASS with defaults so we can resolve ANIM/LAYOUT/…
+            try:
+                project_tokens = load_tokens(project_path)
+                class_map = project_tokens.get("CLASS") or {}
+            except Exception:
+                class_map = {}
+            merged_class_map = {**DEFAULT_CLASS_TOKENS, **class_map}
+            # New shape wins; fall back to shot_numbers for older callers.
+            if payload.shots:
+                shots_arg = [s.model_dump() for s in payload.shots]
+            else:
+                shots_arg = [{"number": n, "tasks": []} for n in (payload.shot_numbers or [])]
+            path = update_sequence(project_path, payload.seq_number, shots_arg, merged_class_map)
             return {"kind": "sequence", "path": str(path)}
         if kind == "shot":
             if payload.seq_number is None or payload.shot_number is None:
