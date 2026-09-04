@@ -10,6 +10,26 @@ from pathlib import Path
 from typing import Any
 
 
+def file_validator(path: Path | str) -> str | None:
+    """Return a weak validator for *path* from a single ``stat()`` — no file read.
+
+    Combines mtime (ns) and size into a compact token suitable for building an
+    HTTP ETag so a poller can be answered with 304 Not Modified without reading
+    or serialising the file. Returns ``None`` when the file does not exist yet,
+    so callers treat that as "no validator → always fetch".
+
+    Weak by design: on network shares with coarse mtime resolution two writes in
+    the same tick *and* of the same size would share a token. Size guards the
+    common append case (the file always grows), and Phase 5's append-only JSONL
+    makes size strictly monotonic, so this is safe for the activity/chat feeds.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
 def read_json(path: Path | str) -> dict | list:
     """Read and parse a JSON file. Returns {} on missing file or parse error."""
     path = Path(path)

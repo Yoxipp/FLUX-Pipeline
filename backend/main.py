@@ -71,6 +71,10 @@ app.add_middleware(
     ],
     allow_methods=["*"],
     allow_headers=["*"],
+    # ETag is not a CORS-safelisted response header, so the renderer (different
+    # origin than 127.0.0.1:8765) cannot read it for conditional GETs unless it
+    # is explicitly exposed. Required by the Phase 2 304 short-circuit.
+    expose_headers=["ETag"],
 )
 
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])

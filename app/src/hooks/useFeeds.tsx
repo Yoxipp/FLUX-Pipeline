@@ -12,7 +12,7 @@
 // the idle cadence dropped to 30s.
 
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react'
 import { api } from '../api/client'
@@ -45,11 +45,21 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
   const [unreadMentions, setUnreadMentions] = useState(0)
   const [mentionsLoaded, setMentionsLoaded] = useState(false)
 
+  // Stored ETags (Phase 2): echoed back each tick so an unchanged file answers
+  // 304 and we skip both the transfer and a needless re-render.
+  const activityEtag = useRef<string | undefined>(undefined)
+  const mentionsEtag = useRef<string | undefined>(undefined)
+
   const refreshActivity = useCallback(async () => {
     try {
-      const data = await api.getActivity({ limit: ACTIVITY_LIMIT })
-      setEvents(data.events)
-      setUnreadCount(data.unread_count)
+      const r = await api.getActivityConditional(ACTIVITY_LIMIT, activityEtag.current)
+      activityEtag.current = r.etag
+      if (r.notModified || !r.data) {
+        setActivityLoaded(true)   // first tick may already be 304-clean
+        return                    // unchanged — keep state, no re-render
+      }
+      setEvents(r.data.events)
+      setUnreadCount(r.data.unread_count)
       setActivityLoaded(true)
     } catch {
       // backend non disponible — garde le state existant
@@ -60,9 +70,14 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
     try {
       // No unread_only filter: the full list feeds the Activity page display,
       // while unread_count + the read flag feed the badge and the watcher.
-      const data = await api.getMentions()
-      setMentions(data.mentions)
-      setUnreadMentions(data.unread_count)
+      const r = await api.getMentionsConditional(mentionsEtag.current)
+      mentionsEtag.current = r.etag
+      if (r.notModified || !r.data) {
+        setMentionsLoaded(true)
+        return                    // unchanged — keep state, no re-render
+      }
+      setMentions(r.data.mentions)
+      setUnreadMentions(r.data.unread_count)
       setMentionsLoaded(true)
     } catch {
       // backend not up — keep the previous state

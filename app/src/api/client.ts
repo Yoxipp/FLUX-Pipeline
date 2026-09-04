@@ -72,6 +72,40 @@ async function apiCall<T>(
   return response.json() as Promise<T>
 }
 
+// ── Conditional GET (ETag / 304) ────────────────────────────────────────────────
+
+export interface Conditional<T> {
+  /** true when the server answered 304 — `data` is absent, keep prior state. */
+  notModified: boolean
+  data?: T
+  /** ETag to echo back on the next request (unchanged on 304). */
+  etag?: string
+}
+
+// GET that participates in conditional requests: sends If-None-Match when an
+// ETag is known and reports 304 instead of throwing (304 is not `response.ok`).
+async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Conditional<T>> {
+  const headers: Record<string, string> = {}
+  if (etag) headers['If-None-Match'] = etag
+
+  const response = await fetch(`${BASE_URL}${endpoint}`, { method: 'GET', headers })
+
+  if (response.status === 304) return { notModified: true, etag }
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`
+    try {
+      const err = await response.json()
+      detail = err.detail ?? detail
+    } catch {}
+    throw new Error(detail)
+  }
+
+  const newEtag = response.headers.get('ETag') ?? undefined
+  const data = (await response.json()) as T
+  return { notModified: false, data, etag: newEtag }
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -217,6 +251,16 @@ export const api = {
     if (params?.project) qs.set('project', params.project)
     return apiCall<{ events: ActivityEvent[]; unread_count: number }>('GET', `/activity?${qs}`)
   },
+
+  // Conditional variants used by the shared feed poller (FeedsProvider): send
+  // the stored ETag, get a 304 (keep state) when nothing changed.
+  getActivityConditional: (limit: number, etag?: string) =>
+    apiGetConditional<{ events: ActivityEvent[]; unread_count: number }>(
+      `/activity?limit=${limit}`, etag),
+
+  getMentionsConditional: (etag?: string) =>
+    apiGetConditional<{ mentions: ChatMention[]; unread_count: number }>(
+      '/activity/chat/mentions', etag),
 
   markAllRead: () =>
     apiCall<{ success: boolean }>('POST', '/activity/read-all'),
