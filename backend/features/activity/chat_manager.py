@@ -7,9 +7,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from core.constants import ARCHIVE_STEM_MENTIONS
 from core.json_manager import cached_read_json, read_json, write_json
 from core.logger import get_logger
 from core.paths import get_chat_path, get_mentions_path, get_users_dir
+from features.activity.history import append_events
 
 log = get_logger(__name__)
 
@@ -101,11 +103,8 @@ def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: st
     if not targets:
         return
 
-    mpath = get_mentions_path()
-    data = read_json(mpath)
-    mentions = data if isinstance(data, list) else []
-    for to_user in targets:
-        mentions.append({
+    new_entries = [
+        {
             "id":        f"{msg_id}_{to_user}",
             "message_id": msg_id,
             "to_user":   to_user,
@@ -114,8 +113,12 @@ def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: st
             "date":      date,
             "time":      time,
             "read":      False,
-        })
-    if not write_json(mpath, mentions):
+        }
+        for to_user in targets
+    ]
+    mpath = get_mentions_path()
+    # Append + rotate: bounds the hot file and archives the overflow (Phase 3).
+    if not append_events(mpath, new_entries, ARCHIVE_STEM_MENTIONS):
         log.error("Failed to write chatMentions.json at %s", mpath)
 
 

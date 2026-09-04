@@ -9,12 +9,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from core import config
+from core.constants import ARCHIVE_STEM_ACTIVITY, ARCHIVE_STEM_MENTIONS
 from core.json_manager import file_validator, sig_token, stat_sig
 from core.logger import get_logger
 from core.paths import get_activity_path, get_chat_path, get_mentions_path, get_users_dir
 from features.activity.activity_reader import (
     get_events_and_unread, mark_all_as_read, mark_as_read,
 )
+from features.activity.history import read_archive_events
 from features.activity.chat_manager import (
     get_mentions_and_unread, get_messages, get_user_list,
     mark_mentions_read, send_message,
@@ -105,6 +107,25 @@ async def get_activity(
     if etag:
         response.headers["ETag"] = etag
     return {"events": events, "unread_count": unread}
+
+
+@router.get("/history")
+async def get_activity_history(limit: int = 200, offset: int = 0, kind: str = "activity") -> dict:
+    """Return older, rotated events from the cold archives — on demand only.
+
+    This never runs on the polling path; the Activity page calls it when the
+    user asks to load history beyond the bounded hot file. *kind* selects the
+    feed ("activity" or "mentions").
+    """
+    stem = ARCHIVE_STEM_MENTIONS if kind == "mentions" else ARCHIVE_STEM_ACTIVITY
+    loop = asyncio.get_event_loop()
+    try:
+        events, has_more = await loop.run_in_executor(
+            None, lambda: read_archive_events(stem, limit, offset),
+        )
+    except RuntimeError:
+        return {"events": [], "has_more": False}
+    return {"events": events, "has_more": has_more}
 
 
 @router.post("/read")

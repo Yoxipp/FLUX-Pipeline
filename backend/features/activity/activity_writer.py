@@ -6,9 +6,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from core.json_manager import read_json, write_json
+from core.constants import ARCHIVE_STEM_ACTIVITY
 from core.logger import get_logger
 from core.paths import get_activity_path, get_flux_root
+from features.activity.history import append_events
 
 log = get_logger(__name__)
 
@@ -78,12 +79,8 @@ def log_event(
     }
 
     act_path = path or get_activity_path()
-    events = read_json(act_path)
-    if not isinstance(events, list):
-        events = []
-    events.append(entry)
-
-    ok = write_json(act_path, events)
+    # Append + rotate: bounds the hot file and archives the overflow (Phase 3).
+    ok = append_events(act_path, [entry], ARCHIVE_STEM_ACTIVITY)
     if not ok:
         log.error("Failed to write activite.json at %s", act_path)
     return ok

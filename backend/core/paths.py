@@ -167,6 +167,18 @@ def get_mentions_path() -> Path:
     return get_config_dir() / JSON_MENTIONS
 
 
+# ── Cold history archives (CONFIG/archive/, Phase 3) ─────────────────────────
+
+def get_archive_dir() -> Path:
+    from core.constants import ARCHIVE_DIRNAME
+    return get_config_dir() / ARCHIVE_DIRNAME
+
+
+def get_archive_path(stem: str, yyyymm: str) -> Path:
+    """Return CONFIG/archive/<stem>_<YYYYMM>.json for a rotated month."""
+    return get_archive_dir() / f"{stem}_{yyyymm}.json"
+
+
 # ── FLUX_ROOT marker ──────────────────────────────────────────────────────────
 
 def get_flux_marker_path(root: Path | None = None) -> Path:

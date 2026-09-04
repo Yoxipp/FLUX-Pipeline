@@ -262,6 +262,12 @@ export const api = {
     apiGetConditional<{ mentions: ChatMention[]; unread_count: number }>(
       '/activity/chat/mentions', etag),
 
+  // Older, rotated events from the cold archives (Activity page "load older").
+  // On demand only — never polled.
+  getActivityHistory: (limit = 200, offset = 0, kind: 'activity' | 'mentions' = 'activity') =>
+    apiCall<{ events: ActivityEvent[]; has_more: boolean }>(
+      'GET', `/activity/history?limit=${limit}&offset=${offset}&kind=${kind}`),
+
   markAllRead: () =>
     apiCall<{ success: boolean }>('POST', '/activity/read-all'),
 

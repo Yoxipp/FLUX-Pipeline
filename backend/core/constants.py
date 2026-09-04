@@ -120,6 +120,23 @@ JSON_ACTIVITY: str  = "activite.json"
 JSON_CHAT: str      = "teamChat.json"
 JSON_MENTIONS: str  = "chatMentions.json"
 
+# ── Hot-history rotation (Phase 3) ────────────────────────────────────────────
+# The polled files (activite.json, chatMentions.json) are bounded so their
+# weight never drifts over time. Rotation keeps the newest HOT_HISTORY_MAX_EVENTS
+# entries (and, at rotation time, drops anything older than HOT_HISTORY_MAX_DAYS),
+# moving the surplus into monthly archives under CONFIG/archive/ that the polling
+# feed never reads. Rotation only fires once the file exceeds
+# MAX_EVENTS + ROTATE_SLACK, so appends stay cheap and archiving is batched.
+HOT_HISTORY_MAX_EVENTS: int = 2000
+HOT_HISTORY_MAX_DAYS:   int = 30
+HOT_HISTORY_ROTATE_SLACK: int = 200   # rotate at MAX+SLACK, trim back to MAX
+
+# Subdirectory (under CONFIG/) holding rotated cold history, and the per-feed
+# archive filename stems (files are <stem>_YYYYMM.json).
+ARCHIVE_DIRNAME: str        = "archive"
+ARCHIVE_STEM_ACTIVITY: str  = "activite"
+ARCHIVE_STEM_MENTIONS: str  = "chatMentions"
+
 # Per-project JSON filenames
 JSON_TOKENS: str     = "tokens.json"        # project root
 JSON_PRODUCTION: str = "production.json"    # project root — Production Tab store

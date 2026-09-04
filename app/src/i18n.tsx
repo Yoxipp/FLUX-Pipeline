@@ -154,6 +154,9 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   // activity page
   'activity.title':          { fr: 'Activité & Notifications', en: 'Activity & Notifications' },
   'activity.markAllRead':    { fr: 'Tout marquer lu',          en: 'Mark all read' },
+  'activity.loadOlder':      { fr: 'Charger l’historique plus ancien', en: 'Load older history' },
+  'activity.historyLoading': { fr: 'Chargement…',              en: 'Loading…' },
+  'activity.historyLoadFail':{ fr: 'Échec du chargement de l’historique', en: 'Failed to load history' },
   'activity.filter.all':     { fr: 'Tout',                     en: 'All' },
   'activity.filter.mentions': { fr: 'Mentions',                en: 'Mentions' },
   'activity.filter.publishes': { fr: 'Publishes',              en: 'Publishes' },
