@@ -24,7 +24,9 @@ from core.constants import (
     HOT_HISTORY_MAX_EVENTS,
     HOT_HISTORY_ROTATE_SLACK,
 )
-from core.json_manager import read_json, write_json
+from core.json_manager import (
+    append_jsonl, append_lock, read_json, read_jsonl, write_json, write_jsonl,
+)
 from core.logger import get_logger
 from core.paths import get_archive_dir, get_archive_path
 
@@ -44,27 +46,33 @@ def append_events(
     max_days: int = HOT_HISTORY_MAX_DAYS,
     slack: int = HOT_HISTORY_ROTATE_SLACK,
 ) -> bool:
-    """Append *new_entries* to the hot file at *path*, rotating if it grew too big.
+    """Append *new_entries* to the JSONL hot file at *path*, rotating if too big.
 
-    Reads fresh (uncached) — this is a writer — appends, and only when the file
-    exceeds ``max_events + slack`` splits off the surplus (events beyond the
-    newest ``max_events`` *or* older than ``max_days``) into monthly archives
-    before writing back the trimmed hot list. Returns the hot-file write result.
+    The append itself is an atomic O_APPEND single write (race-free across
+    instances). Only when the log then exceeds ``max_events + slack`` is a
+    rotation done: the surplus (events beyond the newest ``max_events`` *or*
+    older than ``max_days``) is moved into monthly archives and the hot file is
+    rewritten with the trimmed tail. The rewrite is an occasional read-modify-
+    write; a rotation racing a concurrent append can drop the just-appended
+    event of the loser — rare, best-effort, logged. Returns the append result.
     """
-    data = read_json(path)
-    events = data if isinstance(data, list) else []
-    events.extend(new_entries)
+    if not append_jsonl(path, list(new_entries)):
+        return False
 
-    if len(events) > max_events + slack:
-        try:
-            hot, cold = _split(events, max_events, max_days)
-            if cold:
-                _archive(archive_stem, cold)
-            events = hot
-        except Exception as exc:  # never fail the append because archiving hiccuped
-            log.warning("History rotation for %s skipped: %s", archive_stem, exc)
+    try:
+        # Rotation reads + rewrites the hot file, so hold the same append lock to
+        # stay atomic w.r.t. concurrent appends/rotations (no event dropped).
+        with append_lock(path):
+            events = read_jsonl(path)
+            if len(events) > max_events + slack:
+                hot, cold = _split(events, max_events, max_days)
+                if cold:
+                    _archive(archive_stem, cold)
+                write_jsonl(path, hot)
+    except Exception as exc:  # never let a rotation hiccup surface as an append failure
+        log.warning("History rotation for %s skipped: %s", archive_stem, exc)
 
-    return write_json(path, events)
+    return True
 
 
 def _split(events: list[dict], max_events: int, max_days: int) -> tuple[list[dict], list[dict]]:

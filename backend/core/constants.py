@@ -120,6 +120,12 @@ JSON_ACTIVITY: str  = "activite.json"
 JSON_CHAT: str      = "teamChat.json"
 JSON_MENTIONS: str  = "chatMentions.json"
 
+# Read-status side files (Phase 5): the append-only logs can't carry a mutable
+# "read" flag without a global rewrite, so read-status lives in these small
+# companion files (a set of read entry ids), merged in at read time.
+JSON_ACTIVITY_READ: str = "activite_read.json"
+JSON_MENTIONS_READ: str = "chatMentions_read.json"
+
 # ── Hot-history rotation (Phase 3) ────────────────────────────────────────────
 # The polled files (activite.json, chatMentions.json) are bounded so their
 # weight never drifts over time. Rotation keeps the newest HOT_HISTORY_MAX_EVENTS

@@ -1,28 +1,31 @@
-﻿# activity_reader.py — query and update-read-status for activite.json.
+# activity_reader.py — query + read-status for the append-only activity log.
+#
+# activite.json is an append-only JSONL log (Phase 5). Read-status lives in a
+# companion set-file (see read_state), so marking read never rewrites the log.
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from core.json_manager import cached_read_json, read_json, write_json
+from core.json_manager import cached_read_jsonl, read_jsonl
 from core.logger import get_logger
-from core.paths import get_activity_path
+from core.paths import get_activity_path, get_activity_read_path
+from features.activity.read_state import is_read, load_read_ids, mark_read
 
 log = get_logger(__name__)
 
 
 def _load(path: Path | None = None, sig: tuple[int, int] | None = None) -> list[dict]:
-    # Read-only query path → goes through the short-lived cache. Writers below
-    # use write_json (uncached + cache-invalidating), so they still read fresh.
-    data = cached_read_json(path or get_activity_path(), sig=sig)
-    return data if isinstance(data, list) else []
+    # Read-only query path → cached JSONL read (legacy array auto-detected).
+    return cached_read_jsonl(path or get_activity_path(), sig=sig)
 
 
-def _save(events: list[dict], path: Path | None = None) -> bool:
-    ok = write_json(path or get_activity_path(), events)
-    if not ok:
-        log.error("Failed to write activite.json")
-    return ok
+def _read_path(path: Path | None) -> Path:
+    """Companion read-status file for the log at *path* (or the default log)."""
+    if path is None:
+        return get_activity_read_path()
+    p = Path(path)
+    return p.with_name(f"{p.stem}_read.json")
 
 
 # ── read ──────────────────────────────────────────────────────────────────────
@@ -51,7 +54,8 @@ def get_all_events(
 
 def get_unread_events(path: Path | None = None) -> list[dict]:
     events = _load(path)
-    return [e for e in events if not e.get("read", False)]
+    read_ids = load_read_ids(_read_path(path))
+    return [e for e in events if not is_read(e, read_ids)]
 
 
 def get_unread_count(path: Path | None = None) -> int:
@@ -69,15 +73,17 @@ def get_events_and_unread(
     """Return (filtered+sorted events[:limit], total unread count) in ONE read.
 
     Single-pass equivalent of ``get_all_events`` + ``get_unread_count`` — avoids
-    reading the shared activite.json twice per poll (see Phase 1 of the
-    server-load optimisation). The unread count reflects the whole file, not the
-    filtered view, matching the previous unfiltered ``get_unread_count`` call.
+    reading the shared activite.json twice per poll (Phase 1). The unread count
+    reflects the whole file, not the filtered view. Read-status is overlaid from
+    the companion set-file (Phase 5), so returned events carry the correct
+    ``read`` value without mutating the cached objects.
 
     *sig* (mtime_ns, size) may be passed by the router so the cache reuses the
     stat already taken for the ETag rather than issuing a second one (Phase 4).
     """
     events = _load(path, sig=sig)
-    unread = sum(1 for e in events if not e.get("read", False))
+    read_ids = load_read_ids(_read_path(path))
+    unread = sum(1 for e in events if not is_read(e, read_ids))
 
     if user:
         events = [e for e in events if e.get("user") == user]
@@ -87,35 +93,27 @@ def get_events_and_unread(
         events = [e for e in events if e.get("project") == project]
 
     events.sort(key=lambda e: (e.get("date", ""), e.get("time", "")), reverse=True)
-    return events[:limit], unread
+    out = [{**e, "read": is_read(e, read_ids)} for e in events[:limit]]
+    return out, unread
 
 
 # ── mark read ─────────────────────────────────────────────────────────────────
 
-def _load_fresh(path: Path | None = None) -> list[dict]:
-    """Uncached read for read-modify-write callers (mark_*), which must not see
-    a cached snapshot and must own the objects they mutate."""
-    data = read_json(path or get_activity_path())
-    return data if isinstance(data, list) else []
-
-
 def mark_as_read(event_id: str, path: Path | None = None) -> bool:
-    """Set read=True for the event with *event_id*. Returns True if found."""
-    events = _load_fresh(path)
-    found = False
-    for e in events:
-        if e.get("id") == event_id:
-            e["read"] = True
-            found = True
-            break
-    if found:
-        return _save(events, path)
-    return False
+    """Mark the event with *event_id* read. Returns True if it exists in the log.
+
+    Only the tiny companion set-file is written — the append-only log is never
+    rewritten.
+    """
+    events = read_jsonl(path or get_activity_path())   # fresh: existence + live ids
+    live_ids = {str(e.get("id", "")) for e in events}
+    if event_id not in live_ids:
+        return False
+    return mark_read(_read_path(path), {event_id}, live_ids=live_ids)
 
 
 def mark_all_as_read(path: Path | None = None) -> bool:
-    events = _load_fresh(path)
-    for e in events:
-        e["read"] = True
-    return _save(events, path)
-
+    """Mark every event currently in the hot log read (companion set-file only)."""
+    events = read_jsonl(path or get_activity_path())
+    ids = {str(e.get("id", "")) for e in events}
+    return mark_read(_read_path(path), ids, live_ids=ids)

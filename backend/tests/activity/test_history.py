@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import core.json_manager as jm
+from core.json_manager import read_jsonl
 from features.activity import history
 
 
@@ -38,8 +39,7 @@ class RotationTest(unittest.TestCase):
             self.assertTrue(history.append_events(
                 hot, [_ev(i)], "activite", max_events=10, max_days=3650, slack=5))
 
-        import json
-        hot_events = json.loads(hot.read_text(encoding="utf-8"))
+        hot_events = read_jsonl(hot)
         # Bounded: never exceeds max_events + slack.
         self.assertLessEqual(len(hot_events), 15)
 
@@ -55,8 +55,7 @@ class RotationTest(unittest.TestCase):
         for i in range(50):
             history.append_events(hot, [_ev(i)], "activite",
                                   max_events=10, max_days=3650, slack=5)
-        import json
-        hot_events = json.loads(hot.read_text(encoding="utf-8"))
+        hot_events = read_jsonl(hot)
         # The most recent event must remain in the hot file (feed correctness).
         self.assertIn("e0049", {e["id"] for e in hot_events})
 
@@ -75,8 +74,7 @@ class RotationTest(unittest.TestCase):
                  for i in range(2)]
         history.append_events(hot, stale + recent, "activite",
                               max_events=10, max_days=30, slack=5)
-        import json
-        hot_events = json.loads(hot.read_text(encoding="utf-8"))
+        hot_events = read_jsonl(hot)
         # Stale (2020) events must not remain in the hot file.
         self.assertEqual({e["id"] for e in hot_events} & {"old0", "old1"}, set())
         archived, _ = history.read_archive_events("activite", limit=1000, offset=0)

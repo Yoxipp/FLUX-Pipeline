@@ -12,7 +12,10 @@ from core import config
 from core.constants import ARCHIVE_STEM_ACTIVITY, ARCHIVE_STEM_MENTIONS
 from core.json_manager import file_validator, sig_token, stat_sig
 from core.logger import get_logger
-from core.paths import get_activity_path, get_chat_path, get_mentions_path, get_users_dir
+from core.paths import (
+    get_activity_path, get_activity_read_path, get_chat_path,
+    get_mentions_path, get_mentions_read_path, get_users_dir,
+)
 from features.activity.activity_reader import (
     get_events_and_unread, mark_all_as_read, mark_as_read,
 )
@@ -93,7 +96,14 @@ async def get_activity(
         return {"events": [], "unread_count": 0}
 
     sig = stat_sig(path)
-    etag = _etag(sig_token(sig), f"a:{limit}:{user}:{action}:{project}") if sig else None
+    # Read-status lives in a companion file (Phase 5); fold its stat into the
+    # ETag so marking-read invalidates the cached 304 even though the log is
+    # unchanged.
+    read_sig = stat_sig(get_activity_read_path())
+    etag = (
+        _etag(sig_token(sig), f"a:{limit}:{user}:{action}:{project}:{sig_token(read_sig)}")
+        if sig else None
+    )
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
@@ -205,7 +215,8 @@ async def get_chat_mentions(
         return {"mentions": [], "unread_count": 0}
 
     sig = stat_sig(path)
-    etag = _etag(sig_token(sig), f"m:{who}:{unread_only}") if sig else None
+    read_sig = stat_sig(get_mentions_read_path())   # read-status companion (Phase 5)
+    etag = _etag(sig_token(sig), f"m:{who}:{unread_only}:{sig_token(read_sig)}") if sig else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 

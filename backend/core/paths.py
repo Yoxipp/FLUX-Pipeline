@@ -167,6 +167,18 @@ def get_mentions_path() -> Path:
     return get_config_dir() / JSON_MENTIONS
 
 
+# ── Read-status side files (Phase 5) ─────────────────────────────────────────
+
+def get_activity_read_path() -> Path:
+    from core.constants import JSON_ACTIVITY_READ
+    return get_config_dir() / JSON_ACTIVITY_READ
+
+
+def get_mentions_read_path() -> Path:
+    from core.constants import JSON_MENTIONS_READ
+    return get_config_dir() / JSON_MENTIONS_READ
+
+
 # ── Cold history archives (CONFIG/archive/, Phase 3) ─────────────────────────
 
 def get_archive_dir() -> Path:
