@@ -126,6 +126,22 @@ export function TaskDetail({
     )
   }
 
+  // Absolute path of this task/subtask's own folder (resolved via the selector).
+  const taskFolderAbs = refBasePath && project
+    ? expandFluxPath(`$FLUX/DOSSIER_PROJETS/${project}/${refBasePath}`, workspace)
+    : ''
+  const copyTaskFolder = () => {
+    if (!taskFolderAbs) { toast.error('Chemin non résolu'); return }
+    void navigator.clipboard.writeText(taskFolderAbs).then(
+      () => toast.success('Chemin copié'),
+      () => toast.error('Copie impossible'),
+    )
+  }
+  const openTaskFolder = () => {
+    if (!taskFolderAbs) { toast.error('Chemin non résolu'); return }
+    navigate('/projects', { state: { openPath: taskFolderAbs } })
+  }
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* header */}
@@ -141,9 +157,12 @@ export function TaskDetail({
           </span>
         )}
         <span style={{ flex: 1 }} />
-        {/* delete — the only entry point; confirmed before it runs */}
-        <button onClick={() => setConfirmOpen(true)} title={t('prod.delete')} style={_headerBtn}>
-          <Trash2 size={12} strokeWidth={1.75} color="var(--err)" />
+        {/* folder actions on this task/subtask's resolved folder */}
+        <button onClick={copyTaskFolder} title="Copier le chemin du dossier" style={_headerBtn}>
+          <Copy size={12} strokeWidth={1.75} />
+        </button>
+        <button onClick={openTaskFolder} title="Ouvrir dans le Folder Manager" style={_headerBtn}>
+          <FolderTree size={12} strokeWidth={1.75} />
         </button>
         {/* pin — machine-wide, keeps this tab across restarts */}
         {onTogglePin && (
@@ -161,6 +180,10 @@ export function TaskDetail({
         )}
         {/* favorite heart — user-wide, wired below */}
         <FavoriteToggle detailKey={detailKey} asset={asset} task={task} subtask={subtaskFilter} />
+        {/* delete — far right; the only entry point, confirmed before it runs */}
+        <button onClick={() => setConfirmOpen(true)} title={t('prod.delete')} style={_headerBtn}>
+          <Trash2 size={12} strokeWidth={1.75} color="var(--err)" />
+        </button>
       </div>
 
       {/* two-column body */}
