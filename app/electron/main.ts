@@ -154,6 +154,15 @@ ipcMain.handle('dialog:openFile', async (_event, filters?: { name: string; exten
   return result.canceled ? null : result.filePaths[0]
 })
 
+ipcMain.handle('dialog:saveFile', async (_event, opts?: { defaultName?: string; filters?: { name: string; extensions: string[] }[] }) => {
+  if (!win) return null
+  const result = await dialog.showSaveDialog(win, {
+    defaultPath: opts?.defaultName,
+    filters: opts?.filters ?? [{ name: 'All files', extensions: ['*'] }],
+  })
+  return result.canceled ? null : (result.filePath ?? null)
+})
+
 ipcMain.handle('app:getVersion', () => app.getVersion())
 
 ipcMain.handle('notification:show', (_event, { title, body }: { title: string; body: string }) => {

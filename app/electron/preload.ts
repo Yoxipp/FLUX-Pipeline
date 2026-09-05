@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFile: (filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openFile', filters),
 
+  saveFile: (defaultName?: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:saveFile', { defaultName, filters }),
+
   getAppVersion: (): Promise<string> =>
     ipcRenderer.invoke('app:getVersion'),
 

@@ -388,6 +388,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           return (
             <TaskDetail
               asset={shim} task={task}
+              entityKind={res.kind}
               subtaskFilter={null}
               detailKey={task.name}
               publishes={bucket}
@@ -405,6 +406,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         return (
           <TaskDetail
             asset={shim} task={task}
+            entityKind={res.kind}
             subtaskFilter={active.subtask}
             detailKey={`${task.name}|${active.subtask}`}
             publishes={bucket.filter(p => (p.instance || '').toUpperCase() === active.subtask.toUpperCase())}

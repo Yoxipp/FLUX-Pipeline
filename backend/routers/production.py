@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core import config
@@ -25,6 +27,7 @@ from features.folder_manager.seq_shot_creator import (
 from features.folder_manager.tokens import load_tokens
 from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import production_store as store
+from features.production import ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
 from utils import project_utils
@@ -231,6 +234,116 @@ async def materialize(project: str, payload: MaterializePayload) -> dict:
         log.exception("Materialize failed")
         raise HTTPException(status_code=500, detail=str(e))
     return {"success": True, **result}
+
+
+# ── Reference media (/ref embed zone) ─────────────────────────────────────────
+
+class RefExport(BaseModel):
+    rel_path: str = ""
+    name: str            # LAST.<ext> or vNNN.<ext>
+    dest_path: str       # absolute path chosen via the OS save dialog
+
+
+@router.get("/{project}/ref/resolve")
+async def resolve_ref(
+    project: str,
+    kind: str = "asset",
+    class_token: str = "",
+    name: str = "",
+    seq: str = "",
+    shot: str = "",
+    task: str = "",
+    subtask: str = "",
+) -> dict:
+    """Resolve the project-relative root of a task/subtask (where /ref lives)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+    rel = await loop.run_in_executor(
+        None,
+        lambda: ref_media.resolve_ref_root(
+            project_path, kind, class_token, name, seq, shot, task, subtask,
+        ),
+    )
+    return {"rel_path": rel}
+
+
+@router.post("/{project}/ref")
+async def deposit_ref(project: str, request: Request, rel_path: str = "", filename: str = "") -> dict:
+    """Store a dropped image/video as the next version and refresh LAST.
+
+    The body is the raw file bytes (the renderer POSTs the File directly);
+    `rel_path` is the project-relative root of the task/subtask.
+    """
+    _ensure_project(project)
+    data = await request.body()
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None, lambda: ref_media.deposit(project_path, rel_path, filename, data)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.exception("ref deposit failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return result
+
+
+@router.get("/{project}/ref/latest")
+async def latest_ref(project: str, rel_path: str = "") -> dict:
+    """Return info about the current LAST file, or {found: false} when empty."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+    try:
+        info = await loop.run_in_executor(
+            None, lambda: ref_media.latest(project_path, rel_path)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not info:
+        return {"found": False}
+    return {"found": True, **info}
+
+
+@router.get("/{project}/ref/file")
+async def stream_ref(project: str, rel_path: str = "", name: str = "") -> FileResponse:
+    """Stream a ref file (Range-enabled by FileResponse) for the <img>/<video> src."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+    try:
+        path = await loop.run_in_executor(
+            None, lambda: ref_media.resolve_file(project_path, rel_path, name)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type)
+
+
+@router.post("/{project}/ref/export")
+async def export_ref(project: str, payload: RefExport) -> dict:
+    """Copy a ref file to a user-chosen destination (download button)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+    try:
+        dest = await loop.run_in_executor(
+            None, lambda: ref_media.export_to(project_path, payload.rel_path, payload.name, payload.dest_path)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    except Exception as e:
+        log.exception("ref export failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "dest": str(dest)}
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

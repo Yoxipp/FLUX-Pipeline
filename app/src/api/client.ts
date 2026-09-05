@@ -518,4 +518,56 @@ export const api = {
   }) =>
     apiCall<{ success: boolean }>(
       'POST', `/production/${encodeURIComponent(project)}/comment`, payload),
+
+  // ── Reference media (/ref embed zone) ──────────────────────────────────────
+  // Resolve the project-relative root of a task/subtask (where /ref lives).
+  // Authoritative on the backend so shots (templated CLASS tokens) resolve right.
+  resolveRefPath: (project: string, params: {
+    kind: 'asset' | 'shot' | 'seq'
+    class_token?: string; name?: string
+    seq?: string; shot?: string
+    task?: string; subtask?: string
+  }) => {
+    const qs = new URLSearchParams({ kind: params.kind })
+    if (params.class_token) qs.set('class_token', params.class_token)
+    if (params.name)        qs.set('name', params.name)
+    if (params.seq)         qs.set('seq', params.seq)
+    if (params.shot)        qs.set('shot', params.shot)
+    if (params.task)        qs.set('task', params.task)
+    if (params.subtask)     qs.set('subtask', params.subtask)
+    return apiCall<{ rel_path: string }>(
+      'GET', `/production/${encodeURIComponent(project)}/ref/resolve?${qs}`)
+  },
+
+  // Deposit a dropped image/video as the next version; the raw File is the body.
+  depositRef: async (project: string, relPath: string, file: File) => {
+    const qs = new URLSearchParams({ rel_path: relPath, filename: file.name })
+    const res = await fetch(
+      `${BASE_URL}/production/${encodeURIComponent(project)}/ref?${qs}`,
+      { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file },
+    )
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try { detail = (await res.json()).detail ?? detail } catch {}
+      throw new Error(detail)
+    }
+    return res.json() as Promise<{ ok: boolean; version: string; file: string; ext: string; kind: string }>
+  },
+
+  getRefLatest: (project: string, relPath: string) => {
+    const qs = new URLSearchParams({ rel_path: relPath })
+    return apiCall<{ found: boolean; file?: string; ext?: string; kind?: string }>(
+      'GET', `/production/${encodeURIComponent(project)}/ref/latest?${qs}`)
+  },
+
+  // Streamable URL for the <img>/<video> src (Range-enabled backend).
+  refFileUrl: (project: string, relPath: string, name: string) => {
+    const qs = new URLSearchParams({ rel_path: relPath, name })
+    return `${BASE_URL}/production/${encodeURIComponent(project)}/ref/file?${qs}`
+  },
+
+  exportRef: (project: string, relPath: string, name: string, destPath: string) =>
+    apiCall<{ ok: boolean; dest: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/ref/export`,
+      { rel_path: relPath, name, dest_path: destPath }),
 }

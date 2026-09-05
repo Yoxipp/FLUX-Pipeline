@@ -4,10 +4,13 @@
 // section is hidden and detail state (notes/completion/comments) writes into
 // `task_details[<taskName>|<subtask>]` — passed as `detailKey`.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Check, Copy, FolderOpen, FolderTree, Heart, Pin, Trash2 } from 'lucide-react'
+import {
+  Check, Copy, Download, Film, FolderOpen, FolderTree, Heart,
+  Image as ImageIcon, Pin, Trash2, UploadCloud, X,
+} from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import { useProject } from '../../ProjectContext'
@@ -23,6 +26,7 @@ import { expandFluxPath, taskColorFromName } from './util'
 interface Props {
   asset:         Asset
   task:          ProductionTask
+  entityKind:    'asset' | 'shot' | 'seq'       // asset shim carries seq/shot names for shots
   publishes:     ProductionPublish[]
   subtaskFilter: string | null
   detailKey:     string                         // task_details key : "<task>" or "<task>|<subtask>"
@@ -36,7 +40,7 @@ interface Props {
 const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`
 
 export function TaskDetail({
-  asset, task, publishes, subtaskFilter, detailKey,
+  asset, task, entityKind, publishes, subtaskFilter, detailKey,
   pinned, onTogglePin,
   onPatchTask, onPatchDetail, onDeleteTask,
 }: Props) {
@@ -51,6 +55,10 @@ export function TaskDetail({
   const detail: ProductionTaskDetail = asset.task_details?.[detailKey] || { notes: '', completion: 0, comments: [] }
   const [subtaskInput, setSubtaskInput] = useState('')
   const [commentInput, setCommentInput] = useState('')
+  // Project-relative root of this task/subtask (from PathBrowser) — the /ref
+  // embed folder lives under it. Empty until tokens resolve.
+  const [refBasePath, setRefBasePath] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   // Group publishes by subtask (INSTANCE) — only meaningful in the Task view.
   const grouped: { key: string; items: ProductionPublish[] }[] = []
@@ -69,8 +77,12 @@ export function TaskDetail({
     }
     setSubtaskInput('')
   }
-  const removeSubtask = (v: string) => {
-    onPatchTask({ known_subtasks: task.known_subtasks.filter(s => s.toUpperCase() !== v.toUpperCase()) })
+  // Subtask deletion is now only reachable from the big delete button in the
+  // subtask view — removes it from the parent task and closes the tab.
+  const deleteCurrentSubtask = () => {
+    if (!subtaskFilter) return
+    onPatchTask({ known_subtasks: task.known_subtasks.filter(s => s.toUpperCase() !== subtaskFilter.toUpperCase()) })
+    onDeleteTask()
   }
 
   const postComment = () => {
@@ -129,6 +141,10 @@ export function TaskDetail({
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {/* delete — the only entry point; confirmed before it runs */}
+        <button onClick={() => setConfirmOpen(true)} title={t('prod.delete')} style={_headerBtn}>
+          <Trash2 size={12} strokeWidth={1.75} color="var(--err)" />
+        </button>
         {/* pin — machine-wide, keeps this tab across restarts */}
         {onTogglePin && (
           <button
@@ -145,11 +161,6 @@ export function TaskDetail({
         )}
         {/* favorite heart — user-wide, wired below */}
         <FavoriteToggle detailKey={detailKey} asset={asset} task={task} subtask={subtaskFilter} />
-        {!subtaskFilter && (
-          <button onClick={onDeleteTask} title={t('prod.delete')} style={_headerBtn}>
-            <Trash2 size={11} strokeWidth={1.75} color="var(--err)" />
-          </button>
-        )}
       </div>
 
       {/* two-column body */}
@@ -186,8 +197,8 @@ export function TaskDetail({
             <Section label={t('prod.subtasks')}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
                 {task.known_subtasks.map(s => (
-                  <span key={s} style={_tag} onClick={() => removeSubtask(s)} title={t('prod.delete')}>
-                    {s} <span style={{ opacity: 0.6 }}>×</span>
+                  <span key={s} style={_tag} title={s}>
+                    {s}
                   </span>
                 ))}
                 {task.known_subtasks.length === 0 && (
@@ -281,9 +292,10 @@ export function TaskDetail({
             project={project || ''}
             asset={asset}
             task={task}
+            entityKind={entityKind}
             subtaskFilter={subtaskFilter}
-            color={color}
             onPatchTask={onPatchTask}
+            onResolvedPath={setRefBasePath}
           />
 
           <div style={{ ..._lbl, marginBottom: 6 }}>
@@ -343,8 +355,18 @@ export function TaskDetail({
               ))}
             </div>
           ))}
+
+          <MediaEmbed project={project || ''} relPath={refBasePath} color={color} />
         </div>
       </div>
+
+      {confirmOpen && (
+        <ConfirmDelete
+          label={subtaskFilter ? `le subtask « ${subtaskFilter} »` : `la tâche « ${task.name} »`}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => { setConfirmOpen(false); subtaskFilter ? deleteCurrentSubtask() : onDeleteTask() }}
+        />
+      )}
     </div>
   )
 }
@@ -382,19 +404,20 @@ function FavoriteToggle({ detailKey, asset, task, subtask }: {
 import { useFavoriteBinding } from '../../hooks/useFavorites'
 
 // ── path browser ─────────────────────────────────────────────────────────────
-// Publisher-style compact token composer. Four slots: CLASS / NAME / TASK /
-// INSTANCE. CLASS + NAME are pinned to the current asset; TASK and INSTANCE
-// are selectable dropdowns fed by the project's tokens.json (+ subtasks the
-// artist has actually seen on this task). The path input above the slots is
-// always editable; each slot change composes a new path into it and writes it
-// to task.path_override.
-function PathBrowser({ project, asset, task, subtaskFilter, color, onPatchTask }: {
-  project:       string
-  asset:         Asset
-  task:          ProductionTask
-  subtaskFilter: string | null
-  color:         string
-  onPatchTask:   (patch: Partial<ProductionTask>) => void
+// Compact token selector. Four slots: CLASS / NAME / TASK / INSTANCE. CLASS +
+// NAME are pinned to the current asset; TASK and INSTANCE are selectable
+// dropdowns fed by the project's tokens.json (+ subtasks the artist has
+// actually seen on this task). Each slot change composes a new project-relative
+// path and writes it to task.path_override; the resolved path is bubbled up via
+// onResolvedPath so the /ref embed folder can be located.
+function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchTask, onResolvedPath }: {
+  project:        string
+  asset:          Asset
+  task:           ProductionTask
+  entityKind:     'asset' | 'shot' | 'seq'
+  subtaskFilter:  string | null
+  onPatchTask:    (patch: Partial<ProductionTask>) => void
+  onResolvedPath: (path: string) => void
 }) {
   const [tokens, setTokens] = useState<{
     CLASS?:    Record<string, string>
@@ -435,11 +458,20 @@ function PathBrowser({ project, asset, task, subtaskFilter, color, onPatchTask }
     return parts.join('/')
   }
 
-  // Menu populations from the project's tokens (+ this task's known subtasks).
-  const taskOptions = useMemo(
-    () => [...new Set(Object.keys(tokens.TYPE || {}).map(k => k.toUpperCase()))].sort(),
-    [tokens.TYPE],
-  )
+  // TASK options depend on the entity kind:
+  //  - shots/seqs → the templated CLASS tokens (ANIM, LAYOUT, LIGHTING, FX…),
+  //    i.e. CLASS entries whose path carries {seq}/{shot};
+  //  - assets     → the TYPE tokens.
+  const taskOptions = useMemo(() => {
+    if (entityKind === 'shot' || entityKind === 'seq') {
+      return [...new Set(
+        Object.entries(tokens.CLASS || {})
+          .filter(([, p]) => typeof p === 'string' && (p.includes('{seq}') || p.includes('{shot}')))
+          .map(([k]) => k.toUpperCase()),
+      )].sort()
+    }
+    return [...new Set(Object.keys(tokens.TYPE || {}).map(k => k.toUpperCase()))].sort()
+  }, [tokens.TYPE, tokens.CLASS, entityKind])
   const instanceOptions = useMemo(() => {
     const s = new Set<string>()
     for (const k of Object.keys(tokens.INSTANCE || {})) {
@@ -450,10 +482,6 @@ function PathBrowser({ project, asset, task, subtaskFilter, color, onPatchTask }
     return [...s].sort()
   }, [tokens.INSTANCE, task.known_subtasks])
 
-  const override   = task.path_override ?? ''
-  const composed   = composeFromSlots(selTask, selInstance)
-  const overridden = !!override
-
   // Writing a slot change: recompute + push to override.
   const pickTask = (v: string) => {
     setSelTask(v)
@@ -463,55 +491,34 @@ function PathBrowser({ project, asset, task, subtaskFilter, color, onPatchTask }
     setSelInstance(v)
     onPatchTask({ path_override: composeFromSlots(selTask, v) })
   }
-  const typeFreeText = (v: string) => onPatchTask({ path_override: v })
-  const clearOverride = () => onPatchTask({ path_override: '' })
 
-  const shown = override || composed
+  // Resolve the /ref root on the backend (authoritative — shots use templated
+  // CLASS tokens the client-side composer above can't reproduce). Driven by the
+  // current TASK/INSTANCE selection so the embed follows the selector.
+  useEffect(() => {
+    if (!project) { onResolvedPath(''); return }
+    let ok = true
+    const params = entityKind === 'asset'
+      ? { kind: 'asset' as const, class_token: asset.class, name: asset.name, task: selTask, subtask: selInstance }
+      : entityKind === 'shot'
+        ? { kind: 'shot' as const, seq: asset.class, shot: asset.name, task: selTask, subtask: selInstance }
+        : { kind: 'seq' as const,  seq: asset.name, task: selTask, subtask: selInstance }
+    api.resolveRefPath(project, params)
+      .then(r => { if (ok) onResolvedPath(r.rel_path || '') })
+      .catch(() => { if (ok) onResolvedPath('') })
+    return () => { ok = false }
+  }, [project, entityKind, asset.class, asset.name, selTask, selInstance])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{
-      border: `1px solid ${overridden ? color : 'var(--rule-2)'}`,
+      border: '1px solid var(--rule-2)',
       borderRadius: 6, padding: '8px 10px', marginBottom: 10,
-      background: overridden ? `color-mix(in oklch, ${color} 8%, var(--paper))` : 'var(--paper)',
+      background: 'var(--paper)',
     }}>
-      <div style={{ ..._lbl, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>Chemin</span>
-        {overridden ? (
-          <span style={{
-            padding: '1px 5px', borderRadius: 3, fontSize: 8,
-            background: color, color: 'var(--paper)', textTransform: 'uppercase', letterSpacing: '0.06em',
-          }}>override</span>
-        ) : (
-          <span style={{
-            padding: '1px 5px', borderRadius: 3, fontSize: 8,
-            background: 'var(--paper-2)', color: 'var(--ink-4)', border: '1px solid var(--rule-2)',
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-          }}>défaut</span>
-        )}
-        <span style={{ flex: 1 }} />
-        {overridden && (
-          <button onClick={clearOverride} title="Rétablir le chemin par défaut" style={_pathClearBtn}>reset</button>
-        )}
-      </div>
-
-      <input
-        value={shown}
-        onChange={e => typeFreeText(e.target.value)}
-        placeholder={composed || 'chemin relatif au projet…'}
-        spellCheck={false}
-        style={{
-          width: '100%',
-          background: 'var(--paper)', color: overridden ? 'var(--ink)' : 'var(--ink-2)',
-          border: '1px solid var(--rule-2)', borderRadius: 5,
-          padding: '5px 8px', fontSize: 10, fontFamily: 'var(--mono)',
-          letterSpacing: '0.03em', outline: 'none',
-        }}
-      />
-
-      {/* four-slot token composer */}
+      {/* four-slot token selector */}
       <div style={{
         display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-        gap: 6, marginTop: 8,
+        gap: 6,
       }}>
         <Slot label="CLASS" locked>
           <span style={_slotLocked}>{asset.class}</span>
@@ -566,11 +573,285 @@ const _slotLocked: React.CSSProperties = {
   letterSpacing: '0.04em',
   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
 }
-const _pathClearBtn: React.CSSProperties = {
-  padding: '1px 6px', borderRadius: 3, fontSize: 8,
-  background: 'transparent', color: 'var(--ink-3)',
-  border: '1px solid var(--rule-2)', cursor: 'pointer',
-  textTransform: 'uppercase', letterSpacing: '0.06em',
+
+// ── media embed (reference images / videos / playblasts, /ref folder) ────────
+// A single-slot viewer below the recent publishes: drop an image or video to
+// deposit a new version on disk; the newest (LAST) is always what shows. Videos
+// play on hover (muted, looping, no controls). Click opens a full-screen
+// overlay; clicking the greyed backdrop minimises it back.
+const _IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'apng', 'avif', 'svg']
+const _VIDEO_EXT = ['mp4', 'webm', 'ogv', 'ogg', 'm4v', 'mov', 'mkv']
+
+function isAcceptedMedia(file: File): boolean {
+  if (file.type.startsWith('audio/')) return false
+  if (file.type.startsWith('image/') || file.type.startsWith('video/')) return true
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  return _IMAGE_EXT.includes(ext) || _VIDEO_EXT.includes(ext)
+}
+
+function MediaEmbed({ project, relPath, color }: {
+  project: string
+  relPath: string
+  color:   string
+}) {
+  const [latest, setLatest] = useState<{ file: string; kind: string } | null>(null)
+  const [rev, setRev]       = useState(0)          // cache-buster: LAST.* is overwritten in place
+  const [dragOver, setDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [full, setFull]     = useState(false)
+
+  const canUse = !!project && !!relPath
+
+  const refresh = useCallback((): (() => void) | undefined => {
+    if (!canUse) { setLatest(null); return undefined }
+    let ok = true
+    api.getRefLatest(project, relPath)
+      .then(r => { if (ok) setLatest(r.found && r.file && r.kind ? { file: r.file, kind: r.kind } : null) })
+      .catch(() => { if (ok) setLatest(null) })
+    return () => { ok = false }
+  }, [project, relPath, canUse])
+
+  useEffect(() => refresh(), [refresh])
+
+  const doUpload = useCallback(async (files: FileList | File[]) => {
+    if (!canUse) { toast.error('Chemin non résolu — impossible de déposer'); return }
+    const list = Array.from(files).filter(isAcceptedMedia)
+    if (list.length === 0) { toast.error('Formats acceptés : images et vidéos (pas d’audio)'); return }
+    setUploading(true)
+    try {
+      // Deposit sequentially so the version numbering stays deterministic.
+      for (const f of list) await api.depositRef(project, relPath, f)
+      setRev(v => v + 1)
+      refresh()
+      toast.success(list.length > 1 ? `${list.length} fichiers déposés` : 'Fichier déposé')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUploading(false)
+    }
+  }, [project, relPath, canUse, refresh])
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    setDragOver(false)
+    if (e.dataTransfer.files?.length) void doUpload(e.dataTransfer.files)
+  }
+
+  const download = async () => {
+    if (!latest) return
+    const ext = latest.file.split('.').pop() ?? ''
+    const suggested = `${relPath.split('/').pop() || 'ref'}_${latest.file}`
+    const dest = await window.electronAPI?.saveFile?.(suggested, [
+      { name: latest.kind === 'video' ? 'Vidéo' : 'Image', extensions: [ext] },
+      { name: 'Tous les fichiers', extensions: ['*'] },
+    ])
+    if (!dest) return
+    try {
+      await api.exportRef(project, relPath, latest.file, dest)
+      toast.success('Téléchargé')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const src = latest ? `${api.refFileUrl(project, relPath, latest.file)}&rev=${rev}` : ''
+
+  return (
+    <>
+      <div style={{ ..._lbl, marginTop: 14, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>Références</span>
+        {uploading && <span style={{ fontSize: 8, color: 'var(--ink-4)', textTransform: 'none' }}>envoi…</span>}
+      </div>
+
+      <div
+        onDragOver={e => { if (canUse) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dragOver) setDragOver(true) } }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
+        onDrop={onDrop}
+        style={{
+          position: 'relative',
+          borderRadius: 8,
+          border: `1px ${latest ? 'solid' : 'dashed'} ${dragOver ? color : 'var(--rule-2)'}`,
+          background: dragOver ? `color-mix(in oklch, ${color} 12%, var(--paper))` : 'var(--paper)',
+          overflow: 'hidden',
+          minHeight: latest ? undefined : 90,
+          aspectRatio: latest ? '16 / 9' : undefined,
+          maxHeight: 320,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: latest ? 'pointer' : 'default',
+        }}
+        onClick={() => { if (latest) setFull(true) }}
+        title={latest ? 'Cliquer pour agrandir' : 'Glissez une image ou une vidéo ici'}
+      >
+        {latest ? (
+          <>
+            <HoverMedia src={src} kind={latest.kind} />
+            <button
+              onClick={e => { e.stopPropagation(); void download() }}
+              title="Télécharger"
+              style={{
+                position: 'absolute', top: 6, right: 6, zIndex: 2,
+                width: 26, height: 26, borderRadius: 6, border: '1px solid var(--rule-2)',
+                background: 'color-mix(in oklch, var(--paper) 80%, transparent)',
+                color: 'var(--ink-2)', cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                backdropFilter: 'blur(2px)',
+              }}
+            >
+              <Download size={13} strokeWidth={1.75} />
+            </button>
+            {dragOver && (
+              <div style={_dropHint}>Déposer pour remplacer (nouvelle version)</div>
+            )}
+          </>
+        ) : (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            color: 'var(--ink-4)', fontSize: 10, padding: 12, textAlign: 'center',
+          }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <ImageIcon size={16} strokeWidth={1.5} />
+              <Film size={16} strokeWidth={1.5} />
+            </div>
+            {canUse
+              ? <span><UploadCloud size={11} style={{ verticalAlign: '-2px' }} strokeWidth={1.75} /> Glissez une image ou une vidéo</span>
+              : <span>Chemin non résolu</span>}
+          </div>
+        )}
+      </div>
+
+      {full && latest && (
+        <FullscreenMedia src={src} kind={latest.kind} onClose={() => setFull(false)} />
+      )}
+    </>
+  )
+}
+
+// Video plays on hover only (muted / looping / no controls); images just show.
+function HoverMedia({ src, kind }: { src: string; kind: string }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  if (kind === 'video') {
+    return (
+      <video
+        ref={videoRef}
+        src={src}
+        muted loop playsInline preload="metadata"
+        onMouseEnter={() => { void videoRef.current?.play().catch(() => {}) }}
+        onMouseLeave={() => { const v = videoRef.current; if (v) { v.pause(); v.currentTime = 0 } }}
+        style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: 'block' }}
+      />
+    )
+  }
+  return (
+    <img src={src} alt="référence"
+         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+  )
+}
+
+// Full-screen overlay: greyed backdrop; the media fills the interface. Clicking
+// outside the media minimises. Video autoplays muted + loops (no controls).
+function FullscreenMedia({ src, kind, onClose }: { src: string; kind: string; onClose: () => void }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onClose])
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 3000,
+        background: 'rgba(0,0,0,0.72)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 40,
+      }}
+    >
+      {kind === 'video' ? (
+        <video
+          src={src} autoPlay muted loop playsInline
+          onClick={e => e.stopPropagation()}
+          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', boxShadow: 'var(--shadow)' }}
+        />
+      ) : (
+        <img
+          src={src} alt="référence"
+          onClick={e => e.stopPropagation()}
+          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', boxShadow: 'var(--shadow)' }}
+        />
+      )}
+      <button onClick={onClose} title="Fermer (Échap)" style={{
+        position: 'fixed', top: 18, right: 18, width: 34, height: 34, borderRadius: 8,
+        border: '1px solid var(--rule-2)', background: 'var(--paper)', color: 'var(--ink-2)',
+        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <X size={16} strokeWidth={1.75} />
+      </button>
+    </div>
+  )
+}
+
+const _dropHint: React.CSSProperties = {
+  position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'color-mix(in oklch, var(--paper) 55%, transparent)',
+  color: 'var(--ink)', fontSize: 11, fontWeight: 600, textAlign: 'center', padding: 12,
+}
+
+// ── confirm-before-delete dialog ─────────────────────────────────────────────
+function ConfirmDelete({ label, onCancel, onConfirm }: {
+  label:     string
+  onCancel:  () => void
+  onConfirm: () => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+      if (e.key === 'Enter') onConfirm()
+    }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onCancel, onConfirm])
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+    >
+      <div style={{
+        width: 340, maxWidth: '92vw',
+        background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 12,
+        boxShadow: 'var(--shadow)', padding: '18px 18px 14px',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+          fontSize: 13, fontWeight: 600, color: 'var(--ink)',
+        }}>
+          <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
+          Supprimer {label} ?
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16 }}>
+          Cette action est définitive.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onCancel} style={_confirmCancelBtn}>Annuler</button>
+          <button onClick={onConfirm} autoFocus style={_confirmDeleteBtn}>Supprimer</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const _confirmCancelBtn: React.CSSProperties = {
+  padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+  border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
+  color: 'var(--ink-2)', cursor: 'pointer',
+}
+const _confirmDeleteBtn: React.CSSProperties = {
+  padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+  border: '1px solid var(--err)', background: 'var(--err)',
+  color: 'var(--paper)', cursor: 'pointer',
 }
 
 // ── local atoms ──────────────────────────────────────────────────────────────
@@ -604,7 +885,7 @@ const _tag: React.CSSProperties = {
   padding: '2px 7px', borderRadius: 999,
   border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
   color: 'var(--ink-2)', fontSize: 9, fontFamily: 'var(--mono)',
-  letterSpacing: '0.05em', cursor: 'pointer',
+  letterSpacing: '0.05em',
 }
 const _headerBtn: React.CSSProperties = {
   width: 24, height: 22, borderRadius: 4, border: '1px solid var(--rule-2)',
