@@ -431,6 +431,45 @@ def publish_houdini_rop(
     project_path = Path(project_path)
     ext = _norm_ext(extension)
 
+    # 0. Scene publish (.hip/.hiplc/.hipnc): save the whole scene. There is no ROP
+    #    to cook, so NEVER wait on a node selection — any selected node is ignored.
+    if ext in _SCENE_EXTS:
+        output_path, next_ver = build_rop_output_path(
+            project_path, filename, extension, is_sequence=False, frame_padding=frame_padding
+        )
+        if output_path is None:
+            return {"ok": False, "error": f"Cannot resolve pipeline path for: {filename}{ext}"}
+
+        full_name   = f"{filename}{ext}"
+        dest_folder = resolve_publish_path(project_path, full_name)
+        base_name   = get_base_name(full_name)
+        fmt         = format_suffix(ext)
+        archived    = archive_last_folder(dest_folder, base_name, fmt, ext)
+        effective_ver = archived + 1 if archived is not None else next_ver
+        ensure_dir(output_path.parent)  # the <base>_<FMT>_LAST folder
+
+        exp_resp = export_scene(output_path, ext)
+        if not exp_resp.get("ok"):
+            return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
+
+        ver_str = format_version(effective_ver, DEFAULT_PADDING)
+        try:
+            log_publish(user or "unknown", output_path.name, project_path.name, dest_folder=output_path.parent)
+            from features.publisher.modif_log import append_log
+            append_log(dest_folder, base_name, ver_str, description, user)
+        except Exception as exc:
+            log.warning("Logging failed (non-fatal): %s", exc)
+
+        log.info("Houdini scene publish complete → %s (v%s)", output_path.name, ver_str)
+        return {
+            "ok": True,
+            "path": str(output_path),
+            "version": effective_ver,
+            "version_str": ver_str,
+            "rop_node": f"scène {ext}",
+            "is_sequence": False,
+        }
+
     # 1. Resolve ROP node path — use first selected node in Houdini if not provided
     if rop_node_path is None:
         state = houdini_client.state()

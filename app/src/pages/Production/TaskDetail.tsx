@@ -39,6 +39,11 @@ interface Props {
 
 const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`
 
+// Pipeline CLASS token → Publisher composer category ("FX" is the label for FXRIG).
+const CLASS_TO_PUBLISHER_CATEGORY: Record<string, string> = {
+  CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FXRIG: 'FX',
+}
+
 export function TaskDetail({
   asset, task, entityKind, publishes, subtaskFilter, detailKey,
   pinned, onTogglePin,
@@ -59,6 +64,8 @@ export function TaskDetail({
   // embed folder lives under it. Empty until tokens resolve.
   const [refBasePath, setRefBasePath] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // Current TASK/INSTANCE selection mirrored up from PathBrowser — feeds "Publish here".
+  const [sel, setSel] = useState<{ task: string; instance: string }>({ task: '', instance: '' })
 
   // Group publishes by subtask (INSTANCE) — only meaningful in the Task view.
   const grouped: { key: string; items: ProductionPublish[] }[] = []
@@ -142,6 +149,29 @@ export function TaskDetail({
     navigate('/projects', { state: { openPath: taskFolderAbs } })
   }
 
+  // Open the Publisher with the composer pre-filled from this task/subtask, ready
+  // to publish. Assets → asset mode; shots/seqs → shot mode (TASK → the shot's
+  // "Name", subtask → "Variante").
+  const goPublishHere = () => {
+    const taskTok = (sel.task || task.type_tokens[0] || task.name || '').toUpperCase()
+    const instTok = (sel.instance || subtaskFilter || '').toUpperCase()
+    if (entityKind === 'asset') {
+      const category = CLASS_TO_PUBLISHER_CATEGORY[asset.class.toUpperCase()] ?? asset.class.toUpperCase()
+      navigate('/publisher', { state: { prefill: {
+        project, mode: 'asset',
+        sel: { category, name: asset.name.toUpperCase(), task: taskTok, instance: instTok, variante: '' },
+      } } })
+    } else {
+      // shot: class = SEQxxx, name = SHOTxxx ; seq: name = SEQxxx (shot left blank)
+      const seqLabel  = (entityKind === 'shot' ? asset.class : asset.name).toUpperCase()
+      const shotLabel = (entityKind === 'shot' ? asset.name : '').toUpperCase()
+      navigate('/publisher', { state: { prefill: {
+        project, mode: 'shot',
+        sel: { seq: seqLabel, shot: shotLabel, name: taskTok, variante: instTok },
+      } } })
+    }
+  }
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* header */}
@@ -157,6 +187,10 @@ export function TaskDetail({
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {/* publish here — opens the Publisher with the composer pre-filled */}
+        <button onClick={goPublishHere} title="Faire un publish ici" style={_headerBtn}>
+          <UploadCloud size={12} strokeWidth={1.75} color="var(--accent-hi)" />
+        </button>
         {/* folder actions on this task/subtask's resolved folder */}
         <button onClick={copyTaskFolder} title="Copier le chemin du dossier" style={_headerBtn}>
           <Copy size={12} strokeWidth={1.75} />
@@ -319,6 +353,7 @@ export function TaskDetail({
             subtaskFilter={subtaskFilter}
             onPatchTask={onPatchTask}
             onResolvedPath={setRefBasePath}
+            onSelChange={(task, instance) => setSel({ task, instance })}
           />
 
           <div style={{ ..._lbl, marginBottom: 6 }}>
@@ -433,7 +468,7 @@ import { useFavoriteBinding } from '../../hooks/useFavorites'
 // actually seen on this task). Each slot change composes a new project-relative
 // path and writes it to task.path_override; the resolved path is bubbled up via
 // onResolvedPath so the /ref embed folder can be located.
-function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchTask, onResolvedPath }: {
+function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchTask, onResolvedPath, onSelChange }: {
   project:        string
   asset:          Asset
   task:           ProductionTask
@@ -441,6 +476,7 @@ function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchT
   subtaskFilter:  string | null
   onPatchTask:    (patch: Partial<ProductionTask>) => void
   onResolvedPath: (path: string) => void
+  onSelChange:    (task: string, instance: string) => void
 }) {
   const [tokens, setTokens] = useState<{
     CLASS?:    Record<string, string>
@@ -531,6 +567,9 @@ function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchT
       .catch(() => { if (ok) onResolvedPath('') })
     return () => { ok = false }
   }, [project, entityKind, asset.class, asset.name, selTask, selInstance])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bubble the current TASK/INSTANCE selection up so "Publish here" can prefill.
+  useEffect(() => { onSelChange(selTask, selInstance) }, [selTask, selInstance])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{

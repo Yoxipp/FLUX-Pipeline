@@ -553,6 +553,17 @@ export function Publisher() {
     api.getTokens(project).then(d => setTokens(d.tokens)).catch(() => setTokens({}))
   }, [project])
 
+  // "Publish here" from Production — prefill project + mode + composer once.
+  useEffect(() => {
+    const prefill = (location.state as {
+      prefill?: { project?: string; mode?: PublishMode; sel?: Record<string, string> }
+    } | null)?.prefill
+    if (!prefill) return
+    if (prefill.project && prefill.project !== project) setProject(prefill.project)
+    if (prefill.mode) setMode(prefill.mode)
+    if (prefill.sel) setSel({ ...EMPTY_SEL, ...prefill.sel })
+  }, [location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sequences (shot mode)
   useEffect(() => {
     if (!project || mode !== 'shot') { setSeqs([]); return }
