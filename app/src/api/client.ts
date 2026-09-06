@@ -149,6 +149,14 @@ export const api = {
   pingDcc: (dcc: string) =>
     apiCall<{ connected: boolean; version: string | null }>('GET', `/dcc/${dcc}/ping`),
 
+  // Detect a stuck ("zombie") Maya still holding the commandPort (port 7001).
+  getMayaPortStatus: () =>
+    apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),
+
+  // Terminate a stuck Maya holding the commandPort (re-verified server-side before killing).
+  reapMayaPort: () =>
+    apiCall<{ killed: boolean; pid: number | null; message: string }>('POST', '/dcc/maya/reap'),
+
   getDccAutostart: (dcc: string) =>
     apiCall<{ installed: boolean; startup_file: string | null }>('GET', `/dcc/${dcc}/autostart`),
 

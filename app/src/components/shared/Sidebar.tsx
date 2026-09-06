@@ -348,16 +348,44 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     setDccPaths(prev => ({ ...prev, [key]: path }))
   }
 
+  // Before launching Maya, check for a stuck ("zombie") Maya still holding the
+  // commandPort (port 7001). A close-before-ready or force-killed session can leave
+  // a headless maya.exe holding the port so every new Maya fails to bind it. When
+  // detected we don't launch silently — we ask first (a toast with a "close it &
+  // launch" action), then reap and proceed. For non-Maya, or a free port, launch now.
+  const guardMayaPort = async (key: string, proceed: () => Promise<void>): Promise<void> => {
+    if (key !== 'maya') { await proceed(); return }
+    let stuck = false
+    try { stuck = (await api.getMayaPortStatus()).stuck } catch { stuck = false }
+    if (!stuck) { await proceed(); return }
+    toast.warning('Une instance Maya bloquée occupe le port 7001', {
+      description: 'Ferme-la pour pouvoir lancer une nouvelle session Maya connectée à FLUX.',
+      duration: 12000,
+      action: {
+        label: 'La fermer et lancer',
+        onClick: () => { void (async () => {
+          try {
+            const r = await api.reapMayaPort()
+            if (r.killed) { toast.success('Instance Maya bloquée fermée'); await proceed() }
+            else toast.error('Impossible de fermer l’instance bloquée', { duration: 6000 })
+          } catch { toast.error('Impossible de fermer l’instance bloquée', { duration: 6000 }) }
+        })() },
+      },
+    })
+  }
+
   const handleLaunch = async (key: string) => {
     setLaunching(prev => new Set(prev).add(key))
     const name = SOFTWARE.find(s => s.key === key)?.name ?? key
     try {
-      const res = await api.launchDcc(key)
-      if (res.launched) {
-        toast.success(`${name} lancé`, { duration: 4000 })
-      } else {
-        toast.error(`${name} · introuvable`, { duration: 6000 })
-      }
+      await guardMayaPort(key, async () => {
+        const res = await api.launchDcc(key)
+        if (res.launched) {
+          toast.success(`${name} lancé`, { duration: 4000 })
+        } else {
+          toast.error(`${name} · introuvable`, { duration: 6000 })
+        }
+      })
     } catch {
       toast.error(`${name} · erreur de lancement`, { duration: 6000 })
     } finally {
@@ -380,11 +408,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     setNewScene(null)
     const name = SOFTWARE.find(s => s.key === soft)?.name ?? soft
     try {
-      const res = preset
-        ? await api.launchPreset(activeProject, preset.id, soft)
-        : await api.launchDcc(soft)
-      if (res.launched) toast.success(`${name} lancé${preset ? ` · ${preset.name}` : ''}`, { duration: 4000 })
-      else toast.error(`${name} · introuvable`, { duration: 6000 })
+      await guardMayaPort(soft, async () => {
+        const res = preset
+          ? await api.launchPreset(activeProject, preset.id, soft)
+          : await api.launchDcc(soft)
+        if (res.launched) toast.success(`${name} lancé${preset ? ` · ${preset.name}` : ''}`, { duration: 4000 })
+        else toast.error(`${name} · introuvable`, { duration: 6000 })
+      })
     } catch {
       toast.error(`${name} · erreur de lancement`, { duration: 6000 })
     }

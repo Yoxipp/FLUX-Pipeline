@@ -549,6 +549,33 @@ async def maya_connect_cmd() -> dict:
     return {"cmd": cmd, "backend": backend}
 
 
+@router.get("/maya/port_status")
+async def maya_port_status() -> dict:
+    """Report whether a stuck ('zombie') Maya is holding the commandPort.
+
+    Used by the launcher UI to offer a one-click reap before launching Maya.
+    Returns {"stuck": bool, "pid": int|None, "name": str|None}.
+    """
+    from dcc.maya.port_guard import find_stuck_maya
+    loop = asyncio.get_event_loop()
+    stuck = await loop.run_in_executor(None, find_stuck_maya)
+    if stuck is None:
+        return {"stuck": False, "pid": None, "name": None}
+    return {"stuck": True, "pid": stuck["pid"], "name": stuck["name"]}
+
+
+@router.post("/maya/reap")
+async def maya_reap() -> dict:
+    """Terminate a stuck Maya holding the commandPort (re-verified before killing).
+
+    Returns {"killed": bool, "pid": int|None, "message": str}.
+    """
+    from dcc.maya.port_guard import reap_stuck_maya
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, reap_stuck_maya)
+    return result
+
+
 @router.get("/maya/diag")
 async def maya_diag() -> dict:
     """Diagnostic — reports autostart install state and what's actually in userSetup.py."""
