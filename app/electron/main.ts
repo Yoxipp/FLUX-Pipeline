@@ -191,8 +191,28 @@ app.whenReady().then(async () => {
 
   // Backend en arrière-plan : ne bloque PAS l'ouverture de la fenêtre (le cold
   // start ~5s rendait l'app lente à ouvrir). Il se connecte quand il est prêt.
-  startPythonSidecar().catch((err) =>
-    console.error('[Electron] Failed to start Python sidecar:', err))
+  startPythonSidecar().catch((err) => {
+    console.error('[Electron] Failed to start Python sidecar:', err)
+    // The retry loop already exhausted its attempts, so this is a real failure.
+    // Most often an antivirus quarantined the unsigned backend on first launch.
+    // Tell the user plainly what to do instead of leaving a silent, empty window.
+    const opts = {
+      type: 'error' as const,
+      title: 'FLUX : service indisponible',
+      message: "Le service FLUX n'a pas pu demarrer.",
+      detail:
+        "Un antivirus (Avast, Windows Defender...) a peut-etre mis flux_backend.exe " +
+        "en quarantaine lors du premier lancement.\n\n" +
+        "Que faire :\n" +
+        "1. Ouvrez votre antivirus et autorisez ou restaurez FLUX " +
+        "(ou ajoutez le dossier d'installation en exclusion).\n" +
+        "2. Relancez FLUX.\n\n" +
+        "Journaux : %APPDATA%\\FLUX\\logs",
+      buttons: ['OK'],
+    }
+    if (win) dialog.showMessageBox(win, opts)
+    else dialog.showMessageBox(opts)
+  })
 
   // Create the window immediately (hidden); it retries the Vite URL on its own
   // and reveals itself once painted, so nothing here can block it opening.

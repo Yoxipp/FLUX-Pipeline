@@ -16,6 +16,12 @@ let shuttingDown = false
 let monitorTimer: NodeJS.Timeout | null = null
 const PYTHON_PORT = 8765
 
+// Set by the spawn 'error' handler when the OS refuses to launch the exe (most
+// commonly ENOENT because an antivirus quarantined the unsigned PyInstaller
+// backend on first run). Lets the ready-waiter fail fast instead of blocking the
+// full port timeout, so the retry loop can react in seconds.
+let spawnErrorCode: string | null = null
+
 function isPortAlreadyBound(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket()
@@ -62,6 +68,8 @@ function waitForPortFree(port: number, timeout: number): Promise<void> {
 }
 
 function spawnBackend(): void {
+  spawnErrorCode = null   // fresh attempt — clear any prior spawn failure
+
   if (app.isPackaged) {
     const execPath = path.join(process.resourcesPath, 'backend', 'flux_backend.exe')
     pythonProcess = spawn(execPath, [], {
@@ -78,11 +86,51 @@ function spawnBackend(): void {
     })
   }
 
+  // An unhandled 'error' on a ChildProcess throws in the main process, so this
+  // handler is mandatory. It fires when the OS cannot launch the exe at all —
+  // typically ENOENT after an antivirus quarantines the unsigned backend.
+  pythonProcess.on('error', (err: NodeJS.ErrnoException) => {
+    spawnErrorCode = err.code || String(err)
+    console.error('[Python] Failed to spawn backend:', spawnErrorCode)
+    pythonProcess = null
+  })
+
   pythonProcess.stdout?.on('data', (d: Buffer) => console.log('[Python]', d.toString().trim()))
   pythonProcess.stderr?.on('data', (d: Buffer) => console.error('[Python Error]', d.toString().trim()))
   pythonProcess.on('exit', (code) => {
     console.warn(`[Python] Process exited with code ${code}`)
     pythonProcess = null
+  })
+}
+
+/**
+ * Resolve once the backend answers on *port*, reject fast if the spawn errored
+ * (e.g. antivirus quarantine) or the timeout elapses. Short-circuits on
+ * spawnErrorCode so the retry loop does not wait the full timeout on an exe that
+ * never launched.
+ */
+function waitForBackendReady(port: number, timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now()
+    const interval = setInterval(() => {
+      if (spawnErrorCode) {
+        clearInterval(interval)
+        return reject(new Error(`spawn failed (${spawnErrorCode})`))
+      }
+      const socket = new net.Socket()
+      socket.connect(port, '127.0.0.1', () => {
+        socket.destroy()
+        clearInterval(interval)
+        resolve()
+      })
+      socket.on('error', () => {
+        socket.destroy()
+        if (Date.now() - start > timeout) {
+          clearInterval(interval)
+          reject(new Error(`Python backend timeout on port ${port}`))
+        }
+      })
+    }, 200)
   })
 }
 
@@ -96,9 +144,31 @@ export async function startPythonSidecar(): Promise<void> {
     await waitForPortFree(PYTHON_PORT, 5_000)
   }
 
-  spawnBackend()
-  await waitForPort(PYTHON_PORT, 15_000)
-  startHealthMonitor()
+  // Antivirus (Avast, Defender...) can briefly quarantine or lock the unsigned
+  // PyInstaller backend on first launch, so the first spawn fails. Rather than
+  // force the user to relaunch the whole app, retry a few times: the AV usually
+  // releases the exe within seconds once its scan finishes, and the next spawn
+  // succeeds on its own.
+  const MAX_ATTEMPTS = 4
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (shuttingDown) return
+    try {
+      spawnBackend()
+      await waitForBackendReady(PYTHON_PORT, 15_000)
+      startHealthMonitor()
+      return
+    } catch (err) {
+      lastError = err
+      console.warn(`[Python] Backend start attempt ${attempt}/${MAX_ATTEMPTS} failed: ${String(err)}`)
+      killPort(PYTHON_PORT)   // clear a half-spawned process before retrying
+      if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 2_000))
+    }
+  }
+
+  throw new Error(
+    `Le service FLUX n'a pas pu demarrer apres ${MAX_ATTEMPTS} tentatives (${String(lastError)}).`,
+  )
 }
 
 export async function stopPythonSidecar(): Promise<void> {
@@ -132,23 +202,3 @@ function startHealthMonitor(): void {
   }, 20_000)
 }
 
-export function waitForPort(port: number, timeout: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now()
-    const interval = setInterval(() => {
-      const socket = new net.Socket()
-      socket.connect(port, '127.0.0.1', () => {
-        socket.destroy()
-        clearInterval(interval)
-        resolve()
-      })
-      socket.on('error', () => {
-        socket.destroy()
-        if (Date.now() - start > timeout) {
-          clearInterval(interval)
-          reject(new Error(`Python backend timeout on port ${port}`))
-        }
-      })
-    }, 200)
-  })
-}
