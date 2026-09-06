@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from pydantic import BaseModel
 
 from core import config as _config
-from core.constants import DCC_COLORS, DCC_PORTS
+from core.constants import DCC_COLORS, DCC_PORT_RANGES, DCC_PORTS
+from core.dcc_instances import scan_instances
 from core.logger import get_logger
 from core.socket_manager import socket_manager
 from dcc.houdini import autostart as _houdini_autostart
@@ -59,6 +60,9 @@ def _invalidate_maya_stuck_cache() -> None:
 class CommandRequest(BaseModel):
     dcc: str
     command: str
+    # Multi-instance: target a specific instance by port. None → the DCC's base
+    # (legacy single-instance) port, preserving current behaviour.
+    port: int | None = None
 
 
 class CommandResult(BaseModel):
@@ -73,25 +77,34 @@ class LaunchRequest(BaseModel):
 
 
 async def _probe_all_dccs() -> dict:
-    """Probe all DCC ports in parallel. Returns status dict."""
+    """Discover every DCC's running instances in parallel. Returns status dict.
+
+    Multi-instance (cluster C): each DCC entry carries an `instances` list (one
+    record per reachable port in the DCC's range). `connected` and `port` are kept
+    for back-compat — `connected` is true when at least one instance is up, and
+    `port` is the lowest open instance port (or the base port when none is up).
+    """
     loop = asyncio.get_event_loop()
-    names = list(DCC_PORTS.keys())
-    ports = list(DCC_PORTS.values())
-    results = await asyncio.gather(
-        *[loop.run_in_executor(None, lambda p=port: socket_manager.probe_port(p)) for port in ports]
+    names = list(DCC_PORT_RANGES.keys())
+    # One executor task per DCC scans its whole port range; DCCs run in parallel.
+    scans = await asyncio.gather(
+        *[loop.run_in_executor(None, lambda d=name: scan_instances(d)) for name in names]
     )
-    status = {
-        name: {
-            "connected": reachable,
-            "port":      port,
+    status = {}
+    for name, instances in zip(names, scans):
+        base = DCC_PORTS[name]
+        status[name] = {
+            "connected": len(instances) > 0,
+            "port":      instances[0]["port"] if instances else base,
             "color":     DCC_COLORS.get(name, DCC_COLORS["disconnected"]),
+            "instances": instances,
         }
-        for name, port, reachable in zip(names, ports, results)
-    }
 
     # Continuous zombie detection: surface a stuck Maya (port bound by a headless
     # maya.exe that never accepts) so the UI can offer a reap without waiting for a
-    # launch. Only runs when Maya's port is unreachable, and is throttled internally.
+    # launch. Only runs when no Maya instance is up, and is throttled internally.
+    # (Still checks the base commandPort 7001 — per-instance zombie detection is a
+    # later phase, once the DCC side registers each instance's port.)
     maya = status.get("Maya")
     if maya is not None and not maya["connected"]:
         stuck, pid = await loop.run_in_executor(None, _maya_stuck_throttled)
@@ -107,41 +120,66 @@ async def get_dcc_status() -> dict:
     return await _probe_all_dccs()
 
 
+def _resolve_target_port(dcc: str, port: int | None) -> int:
+    """Resolve (dcc, optional port) to the concrete instance port to talk to.
+
+    A given port must fall inside the DCC's range; None falls back to the base
+    (legacy single-instance) port. Raises HTTPException(400) on a bad pairing.
+    """
+    if dcc not in DCC_PORT_RANGES:
+        raise HTTPException(status_code=400, detail=f"DCC inconnu : {dcc}")
+    if port is None:
+        return DCC_PORTS[dcc]
+    base, count = DCC_PORT_RANGES[dcc]
+    if not (base <= port < base + count):
+        raise HTTPException(status_code=400, detail=f"Port {port} hors de la plage de {dcc}")
+    return port
+
+
 @router.post("/execute", response_model=CommandResult)
 async def execute_command(req: CommandRequest) -> CommandResult:
-    """Send a Python command to a connected DCC via TCP socket."""
-    if req.dcc not in DCC_PORTS:
-        raise HTTPException(status_code=400, detail=f"DCC inconnu : {req.dcc}")
+    """Send a Python command to a connected DCC instance via TCP socket."""
+    target = _resolve_target_port(req.dcc, req.port)
 
     loop = asyncio.get_event_loop()
-    if not await loop.run_in_executor(None, lambda: socket_manager.is_connected(req.dcc)):
-        connected = await loop.run_in_executor(None, lambda: socket_manager.connect(req.dcc))
+    if not await loop.run_in_executor(None, lambda: socket_manager.is_port_connected(target)):
+        connected = await loop.run_in_executor(None, lambda: socket_manager.connect_port(target))
         if not connected:
-            raise HTTPException(status_code=503, detail=f"{req.dcc} non connecté")
+            raise HTTPException(status_code=503, detail=f"{req.dcc} non connecté (port {target})")
 
     result = await loop.run_in_executor(
-        None, lambda: socket_manager.send_command_safe(req.dcc, req.command)
+        None, lambda: socket_manager.send_command_port_safe(target, req.command)
     )
     if result is None:
         return CommandResult(success=False, result="Pas de réponse du DCC", dcc=req.dcc)
     return CommandResult(success=True, result=result, dcc=req.dcc)
 
 
-@router.post("/connect/{dcc_name}")
-async def connect_dcc(dcc_name: str) -> dict:
-    """Explicitly open a socket connection to a DCC."""
-    if dcc_name not in DCC_PORTS:
-        raise HTTPException(status_code=400, detail=f"DCC inconnu : {dcc_name}")
+@router.get("/instances/{dcc_key}")
+async def get_dcc_instances(dcc_key: str) -> dict:
+    """List the running instances of a single DCC (one record per open port)."""
+    if dcc_key not in DCC_PORT_RANGES:
+        raise HTTPException(status_code=400, detail=f"DCC inconnu : {dcc_key}")
     loop = asyncio.get_event_loop()
-    ok = await loop.run_in_executor(None, lambda: socket_manager.connect(dcc_name))
-    return {"dcc": dcc_name, "connected": ok}
+    instances = await loop.run_in_executor(None, lambda: scan_instances(dcc_key))
+    return {"dcc": dcc_key, "instances": instances}
+
+
+@router.post("/connect/{dcc_name}")
+async def connect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
+    """Explicitly open a socket connection to a DCC instance (base port if omitted)."""
+    target = _resolve_target_port(dcc_name, port)
+    loop = asyncio.get_event_loop()
+    ok = await loop.run_in_executor(None, lambda: socket_manager.connect_port(target))
+    return {"dcc": dcc_name, "port": target, "connected": ok}
 
 
 @router.post("/disconnect/{dcc_name}")
-async def disconnect_dcc(dcc_name: str) -> dict:
+async def disconnect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
+    target = _resolve_target_port(dcc_name, port)
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: socket_manager.disconnect(dcc_name))
-    return {"dcc": dcc_name, "connected": False}
+    await loop.run_in_executor(None, lambda: socket_manager.disconnect_port(target))
+    return {"dcc": dcc_name, "port": target, "connected": False}
 
 
 @router.get("/find/{dcc_key}")

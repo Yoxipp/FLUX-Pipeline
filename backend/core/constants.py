@@ -3,17 +3,47 @@
 import os as _os
 
 # ── DCC local ports ───────────────────────────────────────────────────────────
-DCC_PORTS: dict[str, int] = {
-    "Maya":        7001,
-    "Houdini":     48884,  # flux_houdini_server HTTP port
-    "Nuke":        7003,
-    "SubstanceP":  7004,
-    "SubstanceD":  7005,
-    "ZBrush":      9876,  # flux ZBrush bridge plugin port
-    "Marvelous":   7007,
-    "Photoshop":   7008,
-    "Mari":        7009,
+# Multi-instance (cluster C): each DCC owns a *range* of ports, not a single port,
+# so several instances of the same DCC can run at once. Each instance grabs the
+# first free port in its range at startup; FLUX scans the range to discover them.
+# The FIRST port of each range is the legacy single-instance port (Maya 7001,
+# Houdini 48884, ZBrush 9876) so a lone, not-yet-updated DCC still lands there.
+# Ranges are spaced apart so no two DCCs ever overlap.
+#
+# (base_port, instance_count) — ports are base .. base + count - 1.
+DCC_PORT_RANGES: dict[str, tuple[int, int]] = {
+    "Maya":        (7001, 8),    # 7001..7008
+    "Nuke":        (7020, 8),    # 7020..7027
+    "SubstanceP":  (7030, 8),    # 7030..7037
+    "SubstanceD":  (7040, 8),    # 7040..7047
+    "Marvelous":   (7050, 8),    # 7050..7057
+    "Photoshop":   (7060, 8),    # 7060..7067
+    "Mari":        (7070, 8),    # 7070..7077
+    "ZBrush":      (9876, 8),    # 9876..9883 — flux ZBrush bridge plugin port
+    "Houdini":     (48884, 8),   # 48884..48891 — flux_houdini_server HTTP port
 }
+
+# Legacy single-instance port map: the base port of each range. Kept so existing
+# code that targets "the DCC port" (probes, default connect) keeps working; the
+# instance-aware paths use DCC_PORT_RANGES / dcc_port_range() instead.
+DCC_PORTS: dict[str, int] = {name: base for name, (base, _count) in DCC_PORT_RANGES.items()}
+
+
+def dcc_port_range(dcc: str) -> range:
+    """Return the port range for *dcc* (empty range if the DCC is unknown)."""
+    spec = DCC_PORT_RANGES.get(dcc)
+    if spec is None:
+        return range(0)
+    base, count = spec
+    return range(base, base + count)
+
+
+def dcc_for_port(port: int) -> str | None:
+    """Reverse-map a port back to its owning DCC name, or None if out of range."""
+    for name, (base, count) in DCC_PORT_RANGES.items():
+        if base <= port < base + count:
+            return name
+    return None
 
 # ── DCC connection status colors (hex, for QSS / QPalette) ───────────────────
 DCC_COLORS: dict[str, str] = {
