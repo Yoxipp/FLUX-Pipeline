@@ -1827,10 +1827,13 @@ export function Projects() {
         flux_name:     tok.NAME,
         flux_instance: tok.INSTANCE,
         flux_iter:     'LAST',
+        rel_path,   // exact file selected → used to re-path a selected node
       })
       // Node is created but resolve can still find nothing (asset missing for these
       // tokens, or FLUX unreachable from Houdini) — warn instead of a false success.
-      if (res.result?.resolved_path) {
+      if (res.result?.mode === 'replaced') {
+        toast.success(`${item.name} : path mis à jour sur le node sélectionné`)
+      } else if (res.result?.resolved_path) {
         toast.success(`${item.name} importé dans Houdini`)
       } else {
         toast.warning(`Node créé mais fichier non résolu pour ${item.name} — clique ↺ Resolve dans le node`)

@@ -424,8 +424,9 @@ export const api = {
   createFluxImporterNode: (params: {
     project?: string; flux_class?: string; flux_type?: string;
     flux_name?: string; flux_instance?: string; flux_iter?: string;
+    rel_path?: string;
   }) =>
-    apiCall<{ ok: boolean; result?: { node_path?: string; resolved_path?: string } }>(
+    apiCall<{ ok: boolean; result?: { node_path?: string; resolved_path?: string; mode?: string } }>(
       'POST', '/dcc/houdini/importer/create_node', params,
     ),
 

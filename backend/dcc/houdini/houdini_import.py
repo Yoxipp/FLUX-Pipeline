@@ -358,6 +358,101 @@ def set_import_path(node_path: str, file_path: str | Path) -> dict:
     return resp
 
 
+# Native import node types that can be re-pathed in place, mapped to the file
+# extensions each one actually accepts. Keys are the node type's *core* name
+# (namespace/version stripped), so versioned KineFX types match too. The File SOP
+# set mirrors _EXT_MAP; flux_importer is intentionally absent — it is token-driven,
+# not path-driven, so a selected flux_importer falls back to the HDA method.
+_REPATHABLE_NODE_EXTS: dict[str, set[str]] = {
+    "file":               {".bgeo", ".bgeo.sc", ".geo", ".obj"},
+    "alembic":            {".abc"},
+    "usdimport":          {".usd", ".usda", ".usdc", ".usdz"},
+    "usdcharacterimport": {".usd", ".usda", ".usdc", ".usdz"},
+    "fbxcharacterimport": {".fbx"},
+}
+
+
+def set_path_on_selected_if_match(resolved_path: str | Path) -> dict:
+    """Re-path the currently selected Houdini node when it fits *resolved_path*.
+
+    "Open in Houdini" prefers this over creating a new node: if the user has an
+    import node selected whose type accepts the imported file's extension, we just
+    swap its file path instead of spawning a fresh node.
+
+    Match rule: the selected node's *core* type name (namespace/version stripped)
+    must be in ``_REPATHABLE_NODE_EXTS`` and the file's extension must be in that
+    type's accepted set (see the map above).
+
+    Returns:
+        {"ok": True, "matched": True,  "node_path", "node_type", "mode": "replaced"}
+            when a selected node matched and was re-pathed.
+        {"ok": True, "matched": False, "reason": "..."}
+            when there is no usable selection — caller then falls back to creating
+            a node (HDA / native).
+        {"ok": False, "error": "..."} on a Houdini communication error.
+
+    A too-narrow match here is safe: it merely defers to the create path. Only a
+    positively matched type is ever re-pathed, so an incompatible file is never set.
+    """
+    ext = _get_ext(resolved_path)
+    file_str = str(resolved_path).replace("\\", "/")
+    accept_map = repr({k: sorted(v) for k, v in _REPATHABLE_NODE_EXTS.items()})
+
+    code = textwrap.dedent(f"""\
+        _sel = hou.selectedNodes()
+        if not _sel:
+            result = {{"ok": True, "matched": False, "reason": "no selection"}}
+        else:
+            _node = _sel[0]
+            # Core type name without namespace/version (e.g. kinefx::fbxcharacterimport::2.0
+            # -> "fbxcharacterimport"), so versioned KineFX types still match.
+            try:
+                _core = _node.type().nameComponents()[2]
+            except Exception:
+                _core = _node.type().name()
+            _accept = {accept_map}
+            _exts = _accept.get(_core)
+            if not _exts or {ext!r} not in _exts:
+                result = {{"ok": True, "matched": False,
+                           "reason": "selected node %r does not accept %s" % (_core, {ext!r})}}
+            else:
+                # Version-agnostic file parm: a FileReference string parm first,
+                # else the first parm whose name mentions "file".
+                _fp = None
+                for _p in _node.parms():
+                    _t = _p.parmTemplate()
+                    try:
+                        if (_t.type() == hou.parmTemplateType.String
+                                and _t.stringType() == hou.stringParmType.FileReference):
+                            _fp = _p; break
+                    except Exception:
+                        pass
+                if _fp is None:
+                    for _p in _node.parms():
+                        if "file" in _p.name().lower():
+                            _fp = _p; break
+                if _fp is None:
+                    result = {{"ok": True, "matched": False,
+                               "reason": "no file parm on %s" % _node.path()}}
+                else:
+                    _fp.set({file_str!r})
+                    result = {{"ok": True, "matched": True, "node_path": _node.path(),
+                               "node_type": _core, "mode": "replaced"}}
+    """)
+
+    resp = houdini_client.run(code)
+    if not resp.get("ok"):
+        log.error("set_path_on_selected_if_match failed: %s", resp.get("error"))
+        return resp
+    r = resp.get("result") or {}
+    if r.get("matched"):
+        log.info("Re-pathed selected node %s → %s", r.get("node_path"), Path(file_str).name)
+    else:
+        log.info("No matching selected node to re-path (%s) — falling back to create",
+                 r.get("reason"))
+    return r
+
+
 def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) -> dict:
     """Copy *file_path* into a local folder, conflict-safe.
 

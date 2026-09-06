@@ -272,6 +272,11 @@ class HoudiniFluxImporterCreateRequest(BaseModel):
     flux_name:     str = ""
     flux_instance: str = ""
     flux_iter:     str = "LAST"
+    # Exact project-relative path of the file the user selected in the folder
+    # manager. Used to re-path a selected node with the file they actually picked
+    # (the token flow below resolves to a default format/iter and can pick a
+    # different category folder, e.g. .abc instead of the selected .obj).
+    rel_path:      str = ""
 
 
 @router.post("/houdini/importer/create_node")
@@ -281,7 +286,9 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
     Resolves the concrete file backend-side so the node can fall back to a native
     importer when the flux_importer HDA is not registered in the running Houdini.
     """
-    from dcc.houdini.houdini_import import create_flux_importer_node
+    from dcc.houdini.houdini_import import (
+        create_flux_importer_node, set_path_on_selected_if_match,
+    )
     from core.paths import get_project_path
     from features.importer.importer_resolve import resolve_import_path
 
@@ -297,7 +304,34 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
             if r.get("ok"):
                 resolved_path = r.get("path") or ""
 
+    # The exact file the user selected (project-relative → absolute). This is what
+    # a selected node should be re-pathed to — NOT the token-resolved path, which
+    # picks a default format/iter and can land in a different category folder.
+    selected_file = ""
+    if req.rel_path and req.project:
+        pp = get_project_path(req.project)
+        cand = pp / req.rel_path.replace("/", "\\")
+        if cand.exists():
+            selected_file = str(cand)
+
     loop = asyncio.get_event_loop()
+
+    # Prefer re-pathing a matching selected import node over creating a new one.
+    # Only possible when we know the concrete selected file; otherwise (and on any
+    # non-match) fall through to the create/HDA path below.
+    if selected_file:
+        sel = await loop.run_in_executor(
+            None, lambda: set_path_on_selected_if_match(selected_file)
+        )
+        if not sel.get("ok"):
+            raise HTTPException(status_code=503, detail=sel.get("error", "Set path failed"))
+        if sel.get("matched"):
+            return {"ok": True, "result": {
+                "node_path": sel.get("node_path"),
+                "resolved_path": selected_file,
+                "mode": sel.get("mode", "replaced"),
+            }}
+
     result = await loop.run_in_executor(
         None,
         lambda: create_flux_importer_node(
