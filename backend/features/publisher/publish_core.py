@@ -141,9 +141,10 @@ def publish_file(
 
     base_name = get_base_name(filename)
 
-    # New layout: each publish lands in its own per-version, per-format folder.
-    #   <dest>/<base>_<FMT>_LAST/<base>_LAST.ext   (active, one per format)
-    #   <dest>/<base>_<FMT>_Vnnn/<base>_vnnn.ext   (archived on the next publish)
+    # Flat single-file layout: the active version keeps a stable path and past
+    # versions are archived under versions/.
+    #   <dest>/<base>_LAST.ext            (active, one per format)
+    #   <dest>/versions/<base>_vNNN.ext   (archived on the next publish)
     try:
         dest_path, new_ver = publish_into_layout(source_path, dest_folder, base_name)
     except OSError as e:
@@ -152,8 +153,10 @@ def publish_file(
 
     # modif log stays at the shared publish folder (spans all versions/formats)
     append_log(dest_folder, base_name, format_version(new_ver), description, user)
-    # dest_path.parent is the LAST folder, so "open folder" lands next to the file
-    log_publish(user, dest_path.name, project_name or project_path.name, dest_folder=dest_path.parent)
+    # Log the VERSIONED name (not the _LAST alias) so the publish history shows each
+    # distinct version; dest_path.parent is the publish folder for the "open folder" UX.
+    versioned_name = f"{base_name}_{format_version(new_ver)}{dest_path.suffix}"
+    log_publish(user, versioned_name, project_name or project_path.name, dest_folder=dest_path.parent)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
     return dest_path

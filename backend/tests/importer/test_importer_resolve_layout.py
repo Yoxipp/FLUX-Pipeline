@@ -1,5 +1,6 @@
 # test_importer_resolve_layout.py — end-to-end token->folder->import over the
-# nested per-version / per-format publish layout, with a real tokens.json project.
+# flat single-file publish layout (active <base>_LAST.ext + versions/<base>_vNNN.ext),
+# with a real tokens.json project.
 
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ def _publish(project: Path, n: int) -> Path:
     return dest
 
 
-class ImporterResolveNestedLayout(unittest.TestCase):
+class ImporterResolveFlatLayout(unittest.TestCase):
     def setUp(self):
         ir._BCACHE.clear()  # backend TTL cache would otherwise hide fresh disk state
 
@@ -48,7 +49,7 @@ class ImporterResolveNestedLayout(unittest.TestCase):
         # and it matches what the importer resolves internally
         self.assertEqual(ir._resolve_folder(proj, _CLASS, _TYPE, _NAME, _INST), dest)
 
-    def test_first_publish_import_finds_nested_last(self):
+    def test_first_publish_import_finds_flat_last(self):
         proj = _project()
         dest = _publish(proj, 1)
         ir._BCACHE.clear()
@@ -56,10 +57,7 @@ class ImporterResolveNestedLayout(unittest.TestCase):
         res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["ext"], ".usd")
-        self.assertEqual(
-            Path(res["path"]),
-            dest / "USD" / f"{_BASE}_USD_LAST" / f"{_BASE}_LAST.usd",
-        )
+        self.assertEqual(Path(res["path"]), dest / f"{_BASE}_LAST.usd")
         self.assertEqual(Path(res["path"]).read_text(), "v1")
 
     def test_second_publish_exposes_last_and_v001(self):
@@ -70,17 +68,15 @@ class ImporterResolveNestedLayout(unittest.TestCase):
             ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST),
             ["LAST", "v001"],
         )
-        # LAST -> newest bytes
+        # LAST -> newest bytes at the stable flat path
         last = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(last["ok"], last)
+        self.assertEqual(Path(last["path"]), dest / f"{_BASE}_LAST.usd")
         self.assertEqual(Path(last["path"]).read_text(), "v2")
-        # v001 -> archived nested version folder
+        # v001 -> archived flat file under versions/
         v1 = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
         self.assertTrue(v1["ok"], v1)
-        self.assertEqual(
-            Path(v1["path"]),
-            dest / "USD" / f"{_BASE}_USD_V001" / f"{_BASE}_v001.usd",
-        )
+        self.assertEqual(Path(v1["path"]), dest / "versions" / f"{_BASE}_v001.usd")
         self.assertEqual(Path(v1["path"]).read_text(), "v1")
 
     def test_missing_iter_reports_not_found(self):

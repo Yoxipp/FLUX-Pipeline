@@ -1,20 +1,22 @@
-# publish_layout.py — folder-per-version publish layout, grouped by file format.
+# publish_layout.py — single-file publish layout with a STABLE active path.
 #
 # Layout produced inside the token-resolved publish folder <dest>:
-#   <dest>/<FMT>/<base>_<FMT>_V001/<base>_v001.ext   archived versions
-#   <dest>/<FMT>/<base>_<FMT>_LAST/<base>_LAST.ext    active version
+#   <dest>/<base>_LAST.ext            active version  (stable path, overwritten in place)
+#   <dest>/versions/<base>_vNNN.ext   archived versions
 #
-# A top-level per-format directory (USD/, FBX/, MA/ …) groups every version/LAST
-# folder of that format. Each format is an independent lineage: its own version
-# counter and its own LAST folder, so a USD publish and an FBX publish never share
-# a version line. Archiving is a folder rename plus an inner-file rename; the file
-# name never carries the format token (the extension already is the format) while
-# the version/LAST folder name does.
+# The active file keeps a permanent path so any downstream reference to
+# <base>_LAST.ext auto-updates to the newest bytes (no folder rename, no re-link —
+# this is the fix for "folder-per-file breaks LAST"). Versions are per-format (the
+# extension is the format token), so a USD publish and an FBX publish never share a
+# version line. Archiving copies the current active into versions/ before the new
+# active is written, so the LAST path never disappears.
 #
-# Readers below also accept the legacy flat layout (<base>_LAST.ext directly in
-# <dest>), the fmt-less light-export layout (<base>_LAST/<base>.ext), and layout
-# folders sitting directly under <dest> (no format dir) — so nothing that was
-# already on disk stops resolving.
+# Readers below ALSO accept, for backward compat / other publishers, the old nested
+# per-format layout (<dest>/<FMT>/<base>_<FMT>_{LAST,Vnnn}/…), the fmt-less
+# light-export layout (<base>_LAST/<base>.ext), and legacy flat archives sitting
+# directly under <dest> — so nothing already on disk stops resolving. The nested
+# writers (last_folder / version_folder / archive_last_folder) are retained for
+# reading that existing data.
 
 from __future__ import annotations
 
@@ -42,6 +44,66 @@ def format_suffix(ext: str) -> str:
 def format_root(dest_folder: Path, fmt: str) -> Path:
     """Top-level per-format directory grouping that format's version/LAST folders."""
     return dest_folder / fmt.upper()
+
+
+# ── flat single-file layout (active-in-place) ────────────────────────────────────
+# Single-file publishes keep the ACTIVE version at a STABLE flat path that is
+# overwritten in place, and archive past versions into a versions/ subfolder:
+#     <dest>/<base>_LAST.ext            active  (stable path — downstream refs auto-update)
+#     <dest>/versions/<base>_vNNN.ext   archived
+# The stable LAST path is the fix for the "folder-per-file breaks LAST" issue: the
+# path never changes across republishes, so a reference to it always resolves to the
+# newest bytes with no re-link. Version numbering is per-format (the extension is the
+# format token). Multi-file-per-version publishes (Houdini sequences, layered USD)
+# keep their own folders — a frame sequence cannot collapse to a single file.
+
+VERSIONS_SUBDIR = "versions"
+
+# Trailing _vNNN on a flat file stem (case-insensitive: a lowercase Houdini token or
+# an uppercase archive both count as one flat version).
+_FLAT_VER_RE = re.compile(r"_v(\d+)$", re.IGNORECASE)
+
+
+def versions_dir(dest_folder: Path) -> Path:
+    """Subfolder holding archived flat versions (<base>_vNNN.ext)."""
+    return dest_folder / VERSIONS_SUBDIR
+
+
+def flat_last_path(dest_folder: Path, base: str, ext: str) -> Path:
+    """Stable active path for a single-file publish: <dest>/<base>_LAST.ext."""
+    return dest_folder / f"{base}_{ACTIVE_VERSION_LABEL}{ext}"
+
+
+def flat_version_path(dest_folder: Path, base: str, ver: int, ext: str,
+                      padding: int = DEFAULT_PADDING) -> Path:
+    """Archived version path: <dest>/versions/<base>_vNNN.ext."""
+    return versions_dir(dest_folder) / f"{base}_{format_version(ver, padding)}{ext}"
+
+
+def highest_flat_version(dest_folder: Path, base: str, ext: str | None = None) -> int:
+    """Highest vNNN among archived flat files of *base* (0 when none).
+
+    Scans both the versions/ subfolder (current archive location) and the *dest*
+    folder itself (legacy flat archives / layered-publisher stale files), so
+    numbering stays continuous across layouts. With *ext* given, only that format's
+    archives count (independent per-format lineage).
+    """
+    n = 0
+    for d in (dest_folder, versions_dir(dest_folder)):
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if not p.is_file():
+                continue
+            if ext is not None and p.suffix.lower() != ext.lower():
+                continue
+            stem = p.name[: -len(p.suffix)] if p.suffix else p.name
+            if not stem.startswith(f"{base}_"):
+                continue
+            m = _FLAT_VER_RE.search(stem)
+            if m:
+                n = max(n, int(m.group(1)))
+    return n
 
 
 # ── writers ─────────────────────────────────────────────────────────────────────
@@ -109,32 +171,52 @@ def publish_into_layout(
     *,
     padding: int = DEFAULT_PADDING,
 ) -> tuple[Path, int]:
-    """Copy *source_path* into the per-format / per-version publish layout.
+    """Copy *source_path* into the flat single-file publish layout.
 
-    Archives the current LAST folder for this format (if any) to <FMT>/<base>_<FMT>_Vnnn,
-    then writes the new active version as <FMT>/<base>_<FMT>_LAST/<base>_LAST.ext.
-
-    Returns (dest_file_path, new_version_number). Raises OSError on copy failure.
+    The active version is written at a STABLE flat path and overwritten in place;
+    the previous active (if any) is first archived under versions/:
+        <dest>/<base>_LAST.ext            active  (stable — auto-updates downstream)
+        <dest>/versions/<base>_vNNN.ext   archived
+    Versions are per-format (the extension is the format token). Returns
+    (active_path, new_version_number). Raises OSError on copy failure.
     """
     ext = source_path.suffix
-    fmt = format_suffix(ext)
     ensure_dir(dest_folder)
 
-    active = last_folder(dest_folder, base_name, fmt)
-    next_ver = highest_version(dest_folder, base_name, fmt) + 1
+    active = flat_last_path(dest_folder, base_name, ext)
+    next_ver = highest_flat_version(dest_folder, base_name, ext) + 1
 
     if active.exists():
-        # The current LAST becomes v{next_ver}; the fresh publish is v{next_ver + 1}.
-        _archive_last(active, version_folder(dest_folder, base_name, fmt, next_ver, padding),
-                      base_name, next_ver, ext, padding)
+        # Archive the current LAST to versions/<base>_v{next_ver}.ext (copy, so the
+        # LAST path never disappears), then the fresh publish becomes v{next_ver+1}.
+        ensure_dir(versions_dir(dest_folder))
+        shutil.copy2(active, flat_version_path(dest_folder, base_name, next_ver, ext, padding))
         new_ver = next_ver + 1
     else:
         new_ver = next_ver  # first publish for this format -> v001
 
-    active.mkdir(parents=True, exist_ok=True)  # also creates the <FMT>/ dir
-    dest_file = active / f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
-    shutil.copy2(source_path, dest_file)
-    return dest_file, new_ver
+    # Overwrite the active file in place: its path is permanent, so any downstream
+    # reference to <base>_LAST.ext resolves to the newest bytes with no re-link.
+    shutil.copy2(source_path, active)
+    return active, new_ver
+
+
+def archive_flat_last(dest_folder: Path, base: str, ext: str,
+                      padding: int = DEFAULT_PADDING) -> int | None:
+    """Archive the current flat LAST file to versions/ before a writer overwrites it.
+
+    For writers that render straight into the active path (e.g. a Houdini ROP): call
+    this before the cook so the previous active version is preserved. Copies (does not
+    move) so a failed cook still leaves LAST intact. Returns the version number the
+    archived LAST took, or None when there was no LAST yet.
+    """
+    active = flat_last_path(dest_folder, base, ext)
+    if not active.exists():
+        return None
+    ver = highest_flat_version(dest_folder, base, ext) + 1
+    ensure_dir(versions_dir(dest_folder))
+    shutil.copy2(active, flat_version_path(dest_folder, base, ver, ext, padding))
+    return ver
 
 
 # ── readers (nested-layout discovery; used by resolvers/importer) ────────────────
@@ -207,6 +289,12 @@ def published_files(folder: Path, base: str | None = None):
         if p.is_file():
             if base is None or get_base_name(p.name) == base:
                 yield p
+    # archived flat versions live in the versions/ subfolder
+    vdir = versions_dir(folder)
+    if vdir.is_dir():
+        for p in sorted(vdir.iterdir()):
+            if p.is_file() and (base is None or get_base_name(p.name) == base):
+                yield p
     for d, info in _iter_layout_dirs(folder):
         if base is not None and info[0] != base:
             continue
@@ -246,8 +334,14 @@ def find_last_file(folder: Path, base: str, fmt: str | None = None) -> Path | No
 
 
 def find_version_file(folder: Path, base: str, version: str) -> Path | None:
-    """Return the inner file for a specific ``vNNN`` across nested version folders."""
+    """Return the file for a specific ``vNNN``, flat (versions/ or dest) or nested."""
     version = version.lower()
+    # flat archives: versions/<base>_vNNN.ext, or legacy <base>_vNNN.ext in dest
+    for d in (versions_dir(folder), folder):
+        if d.is_dir():
+            cand = sorted(d.glob(f"{base}_{version}.*"))
+            if cand:
+                return cand[0]
     for d, info in _iter_layout_dirs(folder):
         if info[0] == base and info[2].lower() == version:
             inner = _inner(d, f"{base}_{version}")
@@ -257,8 +351,12 @@ def find_version_file(folder: Path, base: str, version: str) -> Path | None:
 
 
 def highest_version_any(folder: Path, base: str) -> int:
-    """Highest archived version number for *base* across all formats (0 when none)."""
-    n = 0
+    """Highest archived version number for *base* across all formats (0 when none).
+
+    Counts both flat archives (versions/ + legacy flat files in *folder*) and the
+    nested per-format version folders, so numbering is continuous across layouts.
+    """
+    n = highest_flat_version(folder, base)
     for _d, info in _iter_layout_dirs(folder):
         if info[0] == base and info[2] != ACTIVE_VERSION_LABEL:
             n = max(n, int(info[2][1:]))

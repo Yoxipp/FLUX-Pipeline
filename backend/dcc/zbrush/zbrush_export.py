@@ -95,7 +95,7 @@ def publish_zbrush(
         pass
 
     # ── 4. Versioning (after export — temp path is safe to consume) ────────────
-    # New layout: <dest>/<base>_<FMT>_LAST/<base>_LAST.ext, previous LAST archived.
+    # Flat layout: <dest>/<base>_LAST.ext (active), previous LAST archived to versions/.
     try:
         dest_path, new_ver = publish_into_layout(temp_path, dest_folder, base_name)
     except OSError as exc:
@@ -130,9 +130,10 @@ def publish_zbrush(
         log.warning("modif_log failed: %s", exc)
 
     try:
+        # Log the versioned name (not the _LAST alias) so publish history shows versions.
         log_publish(
             user=user,
-            filename=dest_name,
+            filename=f"{base_name}_{ver_str}{dest_path.suffix}",
             project=project_name or project_path.name,
             dest_folder=dest_path.parent,
         )

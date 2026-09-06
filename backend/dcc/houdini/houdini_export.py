@@ -22,7 +22,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING
+from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from dcc.houdini.client import houdini_client
@@ -156,14 +156,14 @@ def build_rop_output_path(
     Reuses resolve_publish_path (tokens) + get_next_version (version_resolver).
     No duplication with publish_core.
 
-    Single file : dest_folder/basename_<FMT>_LAST/basename_LAST.ext
+    Single file : dest_folder/basename_LAST.ext            (flat, stable path)
     Sequence    : dest_folder/basename_v001/basename_v001.$F4.ext
 
     Returns (output_path, next_version) or (None, None) on failure.
     """
     from features.folder_manager.naming_validator import get_base_name
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import last_folder
+    from features.publisher.publish_layout import flat_last_path
     from features.publisher.version_resolver import get_next_version
 
     project_path = Path(project_path)
@@ -186,10 +186,9 @@ def build_rop_output_path(
         frame_token = f"$F{frame_padding}"
         output_path = seq_folder / f"{base_name}_{ver_str}.{frame_token}{ext}"
     else:
-        # Single file lands in its own <FMT>/<base>_<FMT>_LAST folder. The folder is
-        # created by publish_via_rop AFTER archiving the previous LAST (not here).
-        last_dir = last_folder(dest_folder, base_name, ext.lstrip("."))
-        output_path = last_dir / f"{base_name}_{ACTIVE_VERSION_LABEL}{ext}"
+        # Single file lands at a stable flat path <dest>/<base>_LAST.ext. The previous
+        # LAST is archived to versions/ by publish_via_rop before the cook overwrites it.
+        output_path = flat_last_path(dest_folder, base_name, ext)
 
     return output_path, next_ver
 
@@ -425,7 +424,7 @@ def publish_houdini_rop(
     """
     from features.activity.activity_writer import log_publish
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import archive_last_folder, format_suffix
+    from features.publisher.publish_layout import archive_flat_last
     from features.folder_manager.naming_validator import get_base_name, format_version
 
     project_path = Path(project_path)
@@ -443,10 +442,9 @@ def publish_houdini_rop(
         full_name   = f"{filename}{ext}"
         dest_folder = resolve_publish_path(project_path, full_name)
         base_name   = get_base_name(full_name)
-        fmt         = format_suffix(ext)
-        archived    = archive_last_folder(dest_folder, base_name, fmt, ext)
+        archived    = archive_flat_last(dest_folder, base_name, ext)
         effective_ver = archived + 1 if archived is not None else next_ver
-        ensure_dir(output_path.parent)  # the <base>_<FMT>_LAST folder
+        ensure_dir(output_path.parent)  # the publish folder holding <base>_LAST.ext
 
         exp_resp = export_scene(output_path, ext)
         if not exp_resp.get("ok"):
@@ -454,7 +452,8 @@ def publish_houdini_rop(
 
         ver_str = format_version(effective_ver, DEFAULT_PADDING)
         try:
-            log_publish(user or "unknown", output_path.name, project_path.name, dest_folder=output_path.parent)
+            # Log the versioned name (not the _LAST alias) so history shows each version.
+            log_publish(user or "unknown", f"{base_name}_{ver_str}{ext}", project_path.name, dest_folder=output_path.parent)
             from features.publisher.modif_log import append_log
             append_log(dest_folder, base_name, ver_str, description, user)
         except Exception as exc:
@@ -491,10 +490,9 @@ def publish_houdini_rop(
         full_name = f"{filename}{ext}"
         dest_folder = resolve_publish_path(project_path, full_name)
         base_name = get_base_name(full_name)
-        fmt = format_suffix(ext)
-        archived = archive_last_folder(dest_folder, base_name, fmt, ext)
+        archived = archive_flat_last(dest_folder, base_name, ext)
         effective_ver = archived + 1 if archived is not None else next_ver
-        ensure_dir(output_path.parent)  # the <base>_<FMT>_LAST folder
+        ensure_dir(output_path.parent)  # the publish folder holding <base>_LAST.ext
     else:
         effective_ver = next_ver
 
@@ -506,8 +504,11 @@ def publish_houdini_rop(
 
     # 6. Log
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
+    # Versioned display name so publish history shows each version (not the _LAST alias).
+    _log_base = get_base_name(f"{filename}{ext}")
+    _log_name = f"{_log_base}_{ver_str}{ext}"
     try:
-        log_publish(user or "unknown", output_path.name, project_path.name, dest_folder=output_path.parent)
+        log_publish(user or "unknown", _log_name, project_path.name, dest_folder=output_path.parent)
         from features.publisher.modif_log import append_log
         if not is_sequence:
             # modif log stays in the shared publish folder (spans all versions/formats)
