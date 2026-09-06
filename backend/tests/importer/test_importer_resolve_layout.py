@@ -1,6 +1,6 @@
 # test_importer_resolve_layout.py — end-to-end token->folder->import over the
-# flat single-file publish layout (active <base>_LAST.ext + versions/<base>_vNNN.ext),
-# with a real tokens.json project.
+# per-format single-file publish layout (active <ext>/<base>_LAST.ext + archived
+# <ext>/<base>_vNNN.ext), with a real tokens.json project.
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["ext"], ".usd")
-        self.assertEqual(Path(res["path"]), dest / f"{_BASE}_LAST.usd")
+        self.assertEqual(Path(res["path"]), dest / "usd" / f"{_BASE}_LAST.usd")
         self.assertEqual(Path(res["path"]).read_text(), "v1")
 
     def test_second_publish_exposes_last_and_v001(self):
@@ -71,12 +71,12 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         # LAST -> newest bytes at the stable flat path
         last = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(last["ok"], last)
-        self.assertEqual(Path(last["path"]), dest / f"{_BASE}_LAST.usd")
+        self.assertEqual(Path(last["path"]), dest / "usd" / f"{_BASE}_LAST.usd")
         self.assertEqual(Path(last["path"]).read_text(), "v2")
-        # v001 -> archived flat file under versions/
+        # v001 -> archived flat file inside the per-format usd/ subfolder
         v1 = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
         self.assertTrue(v1["ok"], v1)
-        self.assertEqual(Path(v1["path"]), dest / "versions" / f"{_BASE}_v001.usd")
+        self.assertEqual(Path(v1["path"]), dest / "usd" / f"{_BASE}_v001.usd")
         self.assertEqual(Path(v1["path"]).read_text(), "v1")
 
     def test_missing_iter_reports_not_found(self):

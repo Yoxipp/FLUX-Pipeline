@@ -113,6 +113,12 @@ def get_file_info(file_path: Path, project_path: Path) -> dict:
     base = get_base_name(file_path.name)
     entries = get_logs_for_file(folder, base)
 
+    # Per-format layout: the file sits in <instance>/<ext>/, but the modif log is
+    # written once at the instance leaf (<instance>/modif_logs.json). Fall back one
+    # level up so the info panel still finds the history for a format-nested file.
+    if not entries:
+        entries = get_logs_for_file(folder.parent, base)
+
     if not entries:
         empty["base_name"] = base
         return empty

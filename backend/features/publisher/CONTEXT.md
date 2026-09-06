@@ -25,7 +25,7 @@ When publishing files from disk to project folders, implementing version control
 
 - **Consumed by**: publish API endpoints, DCC export handlers (future), activity dashboard
 - **Reads**: Project structure, tokens.json (CLASS/NAME paths), modif_logs.json per folder
-- **Writes**: Published files (as _LAST.ext), versioned files (_v001.ext, _v002.ext), modif_logs.json, activite.json
+- **Writes**: Published files inside a per-format subfolder (`<dest>/<ext>/<base>_LAST.ext` active + `<dest>/<ext>/<base>_vNNN.ext` archives, side by side), modif_logs.json (at the instance leaf, shared across formats), activite.json. The `<ext>/` folder name is fixed, so the LAST path is stable and auto-updates downstream (see `publish_layout.py`).
 - **Depends on**: folder_manager (parse_filename, get_base_name, load_tokens), activity_writer (log_publish), core.paths (ensure_dir)
 
 ## 5. Module Entry Points
@@ -85,7 +85,7 @@ Return log entries for files with name starting with *base_name*, newest first.
 ## 7. Maintenance Notes
 
 - **Version naming**: Versions use padding=3 by default (v001, v002, ..., v999). Configured per publish folder scan.
-- **LAST file semantics**: _LAST.ext is always the "active" version. On publish, old LAST → vXXX, new source → LAST. Files without LAST status are treated as immutable archives.
+- **LAST file semantics**: `<ext>/<base>_LAST.ext` is always the "active" version, at a STABLE path (the per-format subfolder is never renamed). On publish, the current LAST is copied to `<ext>/<base>_vNNN.ext` and the new source overwrites LAST in place, so downstream references to the LAST path auto-update with no re-link. Files without LAST status are immutable archives. Legacy layouts (flat files / `versions/` / nested `<FMT>/<base>_<FMT>_LAST/` / light-export `<base>_LAST/`) still resolve on read — no migration.
 - **Path templates**: Asset destinations can use token templates (not yet used for shots). Shots may use {seq=SEQ, shot=SHOT} in CLASS token path.
 - **Modification log schema**: Each entry has name (base filename), version, date (YYYY-MM-DD), time (HH:MM), modification (user description), user (who published).
 - **Orphaned versions**: Old versioned files (_v001.ext) remain on disk; pruning is manual or via separate cleanup script.
