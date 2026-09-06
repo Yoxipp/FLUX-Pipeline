@@ -1,9 +1,26 @@
 // types.ts — shared TypeScript types for FLUX frontend.
 
+// One running instance of a DCC (cluster C: several can run at once, each on its
+// own port in the DCC's range). Rich identity fields stay null until the DCC-side
+// bridge reports them.
+export interface DccInstance {
+  id: string          // stable id, "<dcc>:<port>"
+  dcc: string
+  port: number
+  connected: boolean
+  pid: number | null
+  scene: string | null
+  version: string | null
+  label: string
+}
+
 export interface DccStatusEntry {
   connected: boolean
   port: number
   color: string
+  // Every reachable instance of this DCC. Empty when none is up. `connected`
+  // above is true when this list is non-empty, and `port` is the lowest open one.
+  instances?: DccInstance[]
   // Maya only: a headless ("zombie") instance holds the commandPort but never
   // accepts a connection. Present (and false) once the backend has checked.
   stuck?: boolean

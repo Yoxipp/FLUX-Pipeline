@@ -6,10 +6,11 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle,
+  ClipboardList, AlertTriangle, Check,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
+import { useActiveInstances } from '../../hooks/useActiveInstances'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -141,6 +142,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [presets, setPresets] = useState<Preset[]>([])
   const [newScene, setNewScene] = useState<{ soft: string; x: number; y: number } | null>(null)
   const [hoverTask, setHoverTask] = useState<string | null>(null)
+
+  // Multi-instance (cluster C): which instance each DCC targets. The selector row
+  // control only appears when a DCC exposes more than one running instance.
+  const { activePort, setActivePort } = useActiveInstances(dccStatus)
+  const [instMenu, setInstMenu] = useState<{ statusKey: string; name: string; y: number } | null>(null)
 
   // Load the active project's presets (for button colour + menu), refresh on edits.
   useEffect(() => {
@@ -485,6 +491,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           // Zombie Maya still holding the commandPort (continuous detection). Shown
           // as a persistent reap control on the Maya row, not just at launch time.
           const mayaStuck      = isMaya && !!dccStatus[DCC_STATUS_KEYS[s.key] ?? s.key]?.stuck
+          // Multi-instance: running instances of this DCC + the one currently targeted.
+          const statusKey      = DCC_STATUS_KEYS[s.key] ?? s.key
+          const instances      = dccStatus[statusKey]?.instances ?? []
+          const activeP        = activePort(statusKey)
 
           return (
             <div key={s.key} style={{
@@ -611,6 +621,37 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   </TooltipTrigger>
                   <TooltipContent side="top">
                     {reapingMaya ? 'Fermeture…' : 'Instance Maya bloquée sur le port 7001 · cliquer pour la fermer'}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* instance selector — visible seulement quand plusieurs instances tournent.
+                  Affiche le nb d'instances ; clic ouvre le menu de choix de la cible. */}
+              {instances.length > 1 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setInstMenu(instMenu?.statusKey === statusKey ? null : { statusKey, name: s.name, y: rect.top })
+                      }}
+                      className="scale-hover-lg"
+                      style={{
+                        minWidth: 16, height: 16, padding: '0 3px', borderRadius: 4,
+                        border: '1px solid var(--accent)',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 2,
+                        flexShrink: 0,
+                        background: 'var(--accent-soft)', color: 'var(--accent-hi)',
+                        fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 600, cursor: 'pointer',
+                        transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
+                      }}
+                    >
+                      <Layers size={7} strokeWidth={2} />{instances.length}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {instances.length} instances · cible : port {activeP ?? '—'}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -789,6 +830,53 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                       </div>
                     )}
                   </div>
+                )
+              })}
+            </div>
+          </>
+        )
+      })()}
+
+      {/* Instance picker — choose which running instance of a DCC the pipeline targets. */}
+      {instMenu && (() => {
+        const insts = dccStatus[instMenu.statusKey]?.instances ?? []
+        const current = activePort(instMenu.statusKey)
+        return (
+          <>
+            <div onClick={() => setInstMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+            <div style={{
+              position: 'fixed', left: 8, bottom: Math.max(8, window.innerHeight - instMenu.y),
+              width: 184, zIndex: 61, background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
+              borderRadius: 8, boxShadow: 'var(--shadow-md)', padding: 5,
+            }}>
+              <div style={{ padding: '4px 9px 6px', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                Instance · {instMenu.name}
+              </div>
+              {insts.map((inst) => {
+                const active = inst.port === current
+                return (
+                  <button
+                    key={inst.id}
+                    onClick={() => { setActivePort(instMenu.statusKey, inst.port); setInstMenu(null) }}
+                    title={inst.scene ?? ''}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                      padding: '6px 9px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                      fontSize: 11, fontFamily: 'var(--sans)',
+                      background: active ? 'var(--accent-soft)' : 'transparent',
+                      color: active ? 'var(--ink)' : 'var(--ink-2)',
+                    }}
+                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--accent-soft)' }}
+                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)', flexShrink: 0 }}>
+                      {inst.port}
+                    </span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {inst.scene ? inst.scene : inst.pid ? `pid ${inst.pid}` : inst.label}
+                    </span>
+                    {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
+                  </button>
                 )
               })}
             </div>

@@ -1,0 +1,77 @@
+// useActiveInstances.ts — per-DCC "active instance" selection (cluster C, phase 4).
+//
+// Multi-instance: a DCC can expose several running instances (each on its own
+// port). This hook remembers which instance the user targets for each DCC, keeps
+// that choice valid as instances come and go, and persists it across reloads.
+// One hook for the whole status map (never one per row) so hook order is stable.
+
+import { useCallback, useEffect, useState } from 'react'
+import type { DccStatusMap } from '../types'
+
+const LS_KEY = 'flux.activeInstance'   // { [dccStatusKey]: port }
+
+function readMap(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {}
+  } catch {
+    return {}   // private window / blocked storage — start empty
+  }
+}
+
+function writeMap(m: Record<string, number>): void {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(m)) } catch { /* blocked */ }
+}
+
+export interface ActiveInstances {
+  /** port currently targeted for a DCC, or null when it has no instance up. */
+  activePort: (dccKey: string) => number | null
+  /** choose the active instance port for a DCC. */
+  setActivePort: (dccKey: string, port: number) => void
+}
+
+export function useActiveInstances(status: DccStatusMap): ActiveInstances {
+  const [map, setMap] = useState<Record<string, number>>(readMap)
+
+  // Reconcile the stored choice against what is actually running: if the chosen
+  // port disappeared (instance closed) or none was chosen, fall back to the
+  // lowest open instance. Runs each status tick but only writes when it changes,
+  // so it never loops. `status` is a fresh object every WS message, hence the dep.
+  useEffect(() => {
+    let changed = false
+    const next = { ...map }
+    for (const [dccKey, entry] of Object.entries(status)) {
+      const insts = entry.instances ?? []
+      if (insts.length === 0) continue
+      const cur = next[dccKey]
+      if (cur == null || !insts.some((i) => i.port === cur)) {
+        next[dccKey] = insts[0].port   // instances are sorted ascending by port
+        changed = true
+      }
+    }
+    if (changed) {
+      setMap(next)
+      writeMap(next)
+    }
+  }, [status])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activePort = useCallback(
+    (dccKey: string): number | null => {
+      const insts = status[dccKey]?.instances ?? []
+      if (insts.length === 0) return null
+      const cur = map[dccKey]
+      return cur != null && insts.some((i) => i.port === cur) ? cur : insts[0].port
+    },
+    [status, map],
+  )
+
+  const setActivePort = useCallback((dccKey: string, port: number) => {
+    setMap((prev) => {
+      const nextMap = { ...prev, [dccKey]: port }
+      writeMap(nextMap)
+      return nextMap
+    })
+  }, [])
+
+  return { activePort, setActivePort }
+}
