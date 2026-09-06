@@ -28,6 +28,33 @@ _AUTOSTART_MODULES: dict = {
 log = get_logger(__name__)
 router = APIRouter()
 
+# ── Continuous Maya zombie detection (throttled) ──────────────────────────────
+# find_stuck_maya() shells out to netstat/tasklist, so it is far too heavy to run
+# on every 2s status push. We cache its verdict and only re-run it when the cache
+# is stale AND Maya's port is unreachable (a responsive Maya is never a zombie).
+import time as _time
+
+_MAYA_STUCK_CACHE: dict = {"ts": 0.0, "stuck": False, "pid": None}
+_MAYA_STUCK_TTL_S: float = 8.0
+
+
+def _maya_stuck_throttled() -> tuple[bool, int | None]:
+    """Return (stuck, pid) for the Maya commandPort, re-checking at most every TTL."""
+    now = _time.monotonic()
+    if now - _MAYA_STUCK_CACHE["ts"] < _MAYA_STUCK_TTL_S:
+        return _MAYA_STUCK_CACHE["stuck"], _MAYA_STUCK_CACHE["pid"]
+    from dcc.maya.port_guard import find_stuck_maya
+    stuck = find_stuck_maya()
+    _MAYA_STUCK_CACHE.update(
+        ts=now, stuck=stuck is not None, pid=(stuck["pid"] if stuck else None)
+    )
+    return _MAYA_STUCK_CACHE["stuck"], _MAYA_STUCK_CACHE["pid"]
+
+
+def _invalidate_maya_stuck_cache() -> None:
+    """Force the next status probe to re-check (used right after a reap)."""
+    _MAYA_STUCK_CACHE.update(ts=0.0, stuck=False, pid=None)
+
 
 class CommandRequest(BaseModel):
     dcc: str
@@ -53,7 +80,7 @@ async def _probe_all_dccs() -> dict:
     results = await asyncio.gather(
         *[loop.run_in_executor(None, lambda p=port: socket_manager.probe_port(p)) for port in ports]
     )
-    return {
+    status = {
         name: {
             "connected": reachable,
             "port":      port,
@@ -61,6 +88,17 @@ async def _probe_all_dccs() -> dict:
         }
         for name, port, reachable in zip(names, ports, results)
     }
+
+    # Continuous zombie detection: surface a stuck Maya (port bound by a headless
+    # maya.exe that never accepts) so the UI can offer a reap without waiting for a
+    # launch. Only runs when Maya's port is unreachable, and is throttled internally.
+    maya = status.get("Maya")
+    if maya is not None and not maya["connected"]:
+        stuck, pid = await loop.run_in_executor(None, _maya_stuck_throttled)
+        maya["stuck"] = stuck
+        maya["stuck_pid"] = pid
+
+    return status
 
 
 @router.get("/status")
@@ -573,6 +611,9 @@ async def maya_reap() -> dict:
     from dcc.maya.port_guard import reap_stuck_maya
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, reap_stuck_maya)
+    # Drop the cached verdict so the next status push reflects the reap immediately
+    # instead of showing a stale "stuck" banner for up to one TTL.
+    _invalidate_maya_stuck_cache()
     return result
 
 

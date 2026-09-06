@@ -95,14 +95,20 @@ def is_server_running(port: int = MAYA_PORT) -> bool:
         return _socket_manager.probe("Maya")  # type: ignore[union-attr]
     # Fallback: raw TCP probe (used inside Maya where PySide6 is unavailable)
     import socket as _socket
+    s: _socket.socket | None = None
     try:
         s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         s.settimeout(1.0)
         s.connect(("127.0.0.1", port))
-        s.close()
         return True
     except OSError:
         return False
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
 
 
 def execute_command(command: str) -> str | None:
@@ -125,16 +131,24 @@ def send_command_direct(command: str, timeout: float = 60.0) -> str | None:
     Returns the response string on success, None on any error.
     """
     import socket as _sock_mod
+    s: _sock_mod.socket | None = None
     try:
         s = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_STREAM)
         s.settimeout(timeout)
         s.connect(("127.0.0.1", MAYA_PORT))
         s.sendall((command + "\n").encode("utf-8"))
         response = s.recv(65536).decode("utf-8", errors="replace").strip()
-        s.close()
         log.debug("Maya command OK (len=%d)", len(response))
         return response
     except OSError as exc:
         log.error("send_command_direct failed: %s", exc)
         return None
+    finally:
+        # Always release the fd: on a connect() failure the socket is otherwise
+        # leaked, and rapid open/close/relaunch cycles hammer this path.
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
 

@@ -105,6 +105,22 @@ def _connect_ok(port: int, timeout: float = 2.0) -> bool:
         s.close()
 
 
+def _reachable(port: int, attempts: int = 3, gap: float = 0.3) -> bool:
+    """True if ANY of *attempts* quick TCP connects to *port* succeeds.
+
+    A live listener accepts a connection immediately; a zombie's bound socket never
+    accepts. We retry (not a single shot) so a Maya that JUST bound the port — but
+    whose commandPort thread is a beat away from accepting — is never mistaken for a
+    zombie. One accepted connection is enough to prove the instance is alive.
+    """
+    for i in range(attempts):
+        if _connect_ok(port, timeout=1.0):
+            return True
+        if i < attempts - 1:
+            time.sleep(gap)
+    return False
+
+
 def _is_maya(name: str) -> bool:
     return "maya" in name.lower()
 
@@ -112,14 +128,15 @@ def _is_maya(name: str) -> bool:
 def find_stuck_maya(port: int = MAYA_PORT) -> dict | None:
     """Return {'pid', 'name', 'port'} for a stuck Maya holding *port*, else None.
 
-    Stuck ⇔ a maya.exe process is LISTENING on the port AND a TCP connect fails.
-    Returns None when the port is free, held by a responsive Maya, or held by a
-    non-Maya process (we never propose to kill something that isn't Maya).
+    Stuck ⇔ a maya.exe process is LISTENING on the port AND a TCP connect fails
+    across several quick attempts. Returns None when the port is free, held by a
+    responsive (or still-initialising) Maya, or held by a non-Maya process (we never
+    propose to kill something that isn't Maya).
     """
     pids = _listener_pids(port)
     if not pids:
         return None
-    if _connect_ok(port):
+    if _reachable(port):
         return None  # a live listener accepts connections → not a zombie
     for pid in pids:
         name = _proc_name(pid)

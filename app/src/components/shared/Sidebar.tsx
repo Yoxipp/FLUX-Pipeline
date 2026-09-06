@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList,
+  ClipboardList, AlertTriangle,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -129,6 +129,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [findResult, setFindResult]           = useState<Record<string, boolean | null>>({})
   const [autostartInstalled, setAutostartInstalled] = useState<Record<string, boolean>>({})
   const [autostartLoading, setAutostartLoading]     = useState<Set<string>>(new Set())
+  const [reapingMaya, setReapingMaya]               = useState(false)
   const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
   const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
@@ -374,6 +375,23 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     })
   }
 
+  // Reap a stuck Maya from the persistent row indicator (independent of any launch).
+  // The status monitor surfaces `stuck` continuously, so this can be triggered even
+  // when Maya was launched outside FLUX or the user never relaunches from here.
+  const handleReapMaya = async (): Promise<void> => {
+    if (reapingMaya) return
+    setReapingMaya(true)
+    try {
+      const r = await api.reapMayaPort()
+      if (r.killed) toast.success('Instance Maya bloquée fermée')
+      else toast.error('Impossible de fermer l’instance bloquée', { duration: 6000 })
+    } catch {
+      toast.error('Impossible de fermer l’instance bloquée', { duration: 6000 })
+    } finally {
+      setReapingMaya(false)
+    }
+  }
+
   const handleLaunch = async (key: string) => {
     setLaunching(prev => new Set(prev).add(key))
     const name = SOFTWARE.find(s => s.key === key)?.name ?? key
@@ -464,6 +482,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           // launched/connected yet · GREEN = launched + connected. No red state anymore.
           const plugConnected  = hasPlug && autoInstalled && serverOk === true
           const plugWaiting    = hasPlug && autoInstalled && !plugConnected
+          // Zombie Maya still holding the commandPort (continuous detection). Shown
+          // as a persistent reap control on the Maya row, not just at launch time.
+          const mayaStuck      = isMaya && !!dccStatus[DCC_STATUS_KEYS[s.key] ?? s.key]?.stuck
 
           return (
             <div key={s.key} style={{
@@ -563,6 +584,36 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                          : 'Installer le plugin ZBrush')}
                 </TooltipContent>
               </Tooltip>
+
+              {/* zombie Maya — instance bloquée occupant le port 7001, reap au clic */}
+              {mayaStuck && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      onClick={() => { if (!reapingMaya) void handleReapMaya() }}
+                      className="scale-hover-lg"
+                      style={{
+                        width: 16, height: 16, borderRadius: 4,
+                        border: '1px solid var(--err)',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                        background: 'color-mix(in oklch, var(--err) 14%, transparent)',
+                        color: 'var(--err)',
+                        cursor: reapingMaya ? 'default' : 'pointer',
+                        transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
+                      }}
+                    >
+                      {reapingMaya
+                        ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+                        : <AlertTriangle size={8} strokeWidth={2} />
+                      }
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {reapingMaya ? 'Fermeture…' : 'Instance Maya bloquée sur le port 7001 · cliquer pour la fermer'}
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               {/* launch — toujours actif, relance une nouvelle instance si déjà connecté */}
               <Tooltip>

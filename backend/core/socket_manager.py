@@ -37,6 +37,7 @@ class SocketManager:
 
         with self._lock:
             self._close_socket(dcc_name)
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(SOCKET_TIMEOUT_S)
@@ -45,6 +46,12 @@ class SocketManager:
                 self._known.add(dcc_name)
                 self._connected[dcc_name] = True
             except OSError:
+                # Close the half-open socket so a failed connect never leaks an fd.
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
                 self._socks[dcc_name] = None
                 self._connected[dcc_name] = False
                 log.debug("Cannot connect to %s (port %d)", dcc_name, port)
@@ -66,25 +73,37 @@ class SocketManager:
         port = DCC_PORTS.get(dcc_name)
         if port is None:
             return False
+        s = None
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(SOCKET_TIMEOUT_S)
             s.connect(("127.0.0.1", port))
-            s.close()
             return True
         except OSError:
             return False
+        finally:
+            if s is not None:
+                try:
+                    s.close()
+                except OSError:
+                    pass
 
     def probe_port(self, port: int, timeout: float = 0.5) -> bool:
         """Probe a raw port number (used by FastAPI DCC router)."""
+        s = None
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(timeout)
             s.connect(("127.0.0.1", port))
-            s.close()
             return True
         except OSError:
             return False
+        finally:
+            if s is not None:
+                try:
+                    s.close()
+                except OSError:
+                    pass
 
     def known_dccs(self) -> set[str]:
         """Return the set of DCCs that have been explicitly connected at least once."""

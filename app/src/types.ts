@@ -4,6 +4,10 @@ export interface DccStatusEntry {
   connected: boolean
   port: number
   color: string
+  // Maya only: a headless ("zombie") instance holds the commandPort but never
+  // accepts a connection. Present (and false) once the backend has checked.
+  stuck?: boolean
+  stuck_pid?: number | null
 }
 
 export type DccStatusMap = Record<string, DccStatusEntry>
