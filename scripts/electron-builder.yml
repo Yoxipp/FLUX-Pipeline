@@ -45,4 +45,10 @@ directories:
 files:
   - dist/**
   - dist-electron/**
+  # Runtime app icon (window, taskbar while running, splash, notifications) is read
+  # at run time from scripts/icon.* by the main process. The whitelist above would
+  # otherwise exclude scripts/, so the packaged build showed the default Electron
+  # icon. These land in app.asar/scripts/ where main.ts already resolves them.
+  - scripts/icon.ico
+  - scripts/icon.png
   - "!**/{.git,.github,node_modules/__tests__}"
