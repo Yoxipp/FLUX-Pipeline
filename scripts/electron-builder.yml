@@ -11,20 +11,34 @@ extraResources:
 
 win:
   target:
-    - target: msi
+    - target: nsis
       arch:
         - x64
   requestedExecutionLevel: asInvoker   # Pas de droits admin requis
   signAndEditExecutable: false          # Désactiver pour builds sans cert (re-activer pour release finale)
+  icon: scripts/icon.ico
 
-msi:
-  oneClick: false                      # Wizard d'installation
+# Installeur assisté NSIS — détecte une version antérieure et propose la MAJ,
+# sinon installation neuve. Voir scripts/installer.nsh (macro customInit).
+nsis:
+  oneClick: false                      # Wizard d'installation (assisté)
   perMachine: false                    # Installation par utilisateur (sans admin)
+  allowElevation: false                # Jamais de demande admin
+  allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  shortcutName: FLUX
+  runAfterFinish: true
+  # Nom de l'installeur généré : FLUX-Setup-<version>.exe
+  artifactName: ${productName}-Setup-${version}.${ext}
+  # Hooks custom (message "mise à jour détectée" vs "installation neuve")
+  include: scripts/installer.nsh
+  # Icône de l'assistant d'installation / désinstallation
+  installerIcon: scripts/icon.ico
+  uninstallerIcon: scripts/icon.ico
 
 directories:
-  output: C:/Temp/flux-release
+  output: INSTALLEURS
   buildResources: scripts/
 
 
