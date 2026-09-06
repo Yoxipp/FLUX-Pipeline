@@ -226,6 +226,7 @@ export interface ProductionPublish {
   time: string
   instance?: string
   task_token?: string
+  description?: string   // publish comment, from the folder's modif log
 }
 
 export interface ProductionPayload {

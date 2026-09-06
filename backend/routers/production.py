@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core import config
-from core.constants import DEFAULT_TYPE_TOKENS
+from core.constants import DEFAULT_TYPE_TOKENS, JSON_MODIF_LOG
 from core.logger import get_logger
 from core.paths import get_project_path
 from features.activity.activity_reader import get_all_events
@@ -25,11 +25,13 @@ from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, update_sequence, update_shot,
 )
 from features.folder_manager.tokens import load_tokens
+from features.folder_manager.naming_validator import get_base_name
 from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import production_store as store
 from features.production import ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
+from features.publisher.modif_log import read_logs
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -71,6 +73,74 @@ class MaterializePayload(BaseModel):
 def _ensure_project(project: str) -> None:
     if not project_utils.project_exists(project):
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+
+# In-process cache of parsed modif_logs.json, keyed by folder path → (mtime,
+# logs). A modif log is only re-read from disk when its mtime changes (i.e. a
+# new publish landed), so repeated production GETs cost a cheap stat() instead
+# of an open+parse per folder. Survives across requests for the process life.
+_MODIF_LOG_CACHE: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _cached_modif_logs(folder) -> list[dict]:
+    """Return a folder's modif-log entries (newest first), cached by mtime."""
+    try:
+        mtime = (folder / JSON_MODIF_LOG).stat().st_mtime
+    except OSError:
+        return []                                  # no modif log in this folder
+    key = str(folder).lower()
+    hit = _MODIF_LOG_CACHE.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    logs = read_logs(folder)
+    _MODIF_LOG_CACHE[key] = (mtime, logs)
+    return logs
+
+
+def _attach_publish_comments(project_path, publishes_by_task: dict) -> None:
+    """Attach each publish's modif-log comment as event['description'] (in place).
+
+    The comment (the publish description) lives in modif_logs.json inside the
+    shared publish folder. An event's dest_folder may point at that folder or at
+    a ``<base>_<FMT>_LAST`` child, so we search the folder and up to two parents,
+    matching by base name and preferring the entry whose timestamp equals the
+    event's. Reads go through the mtime cache so disk is touched only on change.
+    Best-effort — any failure just leaves description unset.
+    """
+    flux_prefix = "$FLUX/"
+
+    def rel_for(ev: dict):
+        dest = (ev.get("dest_folder") or "").replace("\\", "/")
+        if not dest:
+            return None
+        if dest.startswith(flux_prefix):
+            dest = dest[len(flux_prefix):]
+        parts = dest.split("/")
+        if len(parts) >= 2 and parts[0].lower() == "dossier_projets":
+            parts = parts[2:]                      # drop DOSSIER_PROJETS/<project>
+        inside = "/".join(parts).strip("/")
+        return inside or None
+
+    for bucket in publishes_by_task.values():
+        for ev in bucket:
+            rel = rel_for(ev)
+            fname = ev.get("file") or ""
+            if not rel or not fname:
+                continue
+            base = get_base_name(fname)
+            if not base:
+                continue
+            folder = project_path / rel
+            for cand in (folder, folder.parent, folder.parent.parent):
+                logs = [e for e in _cached_modif_logs(cand) if str(e.get("name", "")).startswith(base)]
+                if not logs:
+                    continue
+                exact = next((e for e in logs
+                              if e.get("date") == ev.get("date") and e.get("time") == ev.get("time")), None)
+                desc = (exact or logs[0]).get("modification", "") or ""
+                if desc:
+                    ev["description"] = desc
+                break
 
 
 @router.get("/{project}")
@@ -120,6 +190,10 @@ async def get_production(project: str) -> dict:
         production, publishes_by_task, unmatched = reconcile(
             production, events, known_type_tokens, disk_assets, disk_shots,
         )
+        try:
+            _attach_publish_comments(get_project_path(project), publishes_by_task)
+        except Exception as e:
+            log.warning("attach_publish_comments failed: %s", e)
         after = _fingerprint(production)
         if after != before:
             store.save_production(project, production)

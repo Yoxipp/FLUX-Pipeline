@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Check, Copy, Download, Film, FolderOpen, FolderTree, Heart,
-  Image as ImageIcon, Pin, Trash2, UploadCloud, X,
+  Image as ImageIcon, List, Pin, Trash2, UploadCloud, X,
 } from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
@@ -64,17 +64,15 @@ export function TaskDetail({
   // embed folder lives under it. Empty until tokens resolve.
   const [refBasePath, setRefBasePath] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [publishListOpen, setPublishListOpen] = useState(false)
   // Current TASK/INSTANCE selection mirrored up from PathBrowser — feeds "Publish here".
   const [sel, setSel] = useState<{ task: string; instance: string }>({ task: '', instance: '' })
 
-  // Group publishes by subtask (INSTANCE) — only meaningful in the Task view.
-  const grouped: { key: string; items: ProductionPublish[] }[] = []
-  const seen = new Map<string, number>()
-  for (const p of publishes) {
-    const key = (p.instance || '—').toUpperCase()
-    if (!seen.has(key)) { seen.set(key, grouped.length); grouped.push({ key, items: [] }) }
-    grouped[seen.get(key)!].items.push(p)
-  }
+  // Newest first, by date+time (ISO date + HH:MM sort lexicographically).
+  const sortedPublishes = [...publishes].sort(
+    (a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`),
+  )
+  const latestPublish = sortedPublishes[0] ?? null
 
   const addSubtask = () => {
     const v = subtaskInput.trim().toUpperCase()
@@ -356,63 +354,38 @@ export function TaskDetail({
             onSelChange={(task, instance) => setSel({ task, instance })}
           />
 
-          <div style={{ ..._lbl, marginBottom: 6 }}>
-            {t('prod.recentPublishes')}
+          <div style={{ ..._lbl, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>{t('prod.recentPublishes')}</span>
             {subtaskFilter && (
-              <span style={{ marginLeft: 8, color: color, textTransform: 'none', letterSpacing: 0 }}>
+              <span style={{ color: color, textTransform: 'none', letterSpacing: 0 }}>
                 · {subtaskFilter}
               </span>
             )}
+            <span style={{ flex: 1 }} />
+            {sortedPublishes.length > 0 && (
+              <button
+                onClick={() => setPublishListOpen(true)}
+                title="Voir tous les publishs récents"
+                style={{
+                  border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
+                  color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center',
+                }}
+              >
+                <List size={15} strokeWidth={1.9} />
+              </button>
+            )}
           </div>
-          {grouped.length === 0 && (
+          {!latestPublish && (
             <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</div>
           )}
-          {grouped.map(g => (
-            <div key={g.key} style={{ marginBottom: 10 }}>
-              {!subtaskFilter && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4,
-                  fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', letterSpacing: '0.05em',
-                }}>
-                  <span style={{ width: 4, height: 4, borderRadius: 2, background: color }} />
-                  <span style={{ textTransform: 'uppercase' }}>{g.key}</span>
-                  <span style={{ color: 'var(--ink-4)' }}>· {g.items.length}</span>
-                </div>
-              )}
-              {g.items.map(p => (
-                <div key={p.id} style={{
-                  padding: '5px 8px', borderRadius: 5,
-                  border: '1px solid var(--rule-2)', background: 'var(--paper)',
-                  marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6,
-                  cursor: 'pointer',
-                }}
-                     onClick={() => openInFolderManager(p)}
-                     title={p.dest_folder}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 10, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>
-                      {p.file}
-                    </div>
-                    <div style={{ fontSize: 8, color: 'var(--ink-4)', marginTop: 1 }}>
-                      {p.user} · {p.date} {p.time}
-                    </div>
-                  </div>
-                  <button style={_miniIconBtn} title="Copier"
-                          onClick={e => { e.stopPropagation(); copyPath(p) }}>
-                    <Copy size={9} strokeWidth={1.75} />
-                  </button>
-                  <button style={_miniIconBtn} title="Folder Manager"
-                          onClick={e => { e.stopPropagation(); openInFolderManager(p) }}>
-                    <FolderTree size={9} strokeWidth={1.75} />
-                  </button>
-                  <button style={_miniIconBtn} title="Explorateur"
-                          onClick={e => { e.stopPropagation(); openInExplorer(p) }}>
-                    <FolderOpen size={9} strokeWidth={1.75} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ))}
+          {latestPublish && (
+            <PublishRow
+              p={latestPublish}
+              onOpen={() => openInFolderManager(latestPublish)}
+              onCopy={() => copyPath(latestPublish)}
+              onExplorer={() => openInExplorer(latestPublish)}
+            />
+          )}
 
           <MediaEmbed project={project || ''} relPath={refBasePath} color={color} />
         </div>
@@ -425,6 +398,137 @@ export function TaskDetail({
           onConfirm={() => { setConfirmOpen(false); subtaskFilter ? deleteCurrentSubtask() : onDeleteTask() }}
         />
       )}
+
+      {publishListOpen && (
+        <PublishListModal
+          title={`${t('prod.recentPublishes')}${subtaskFilter ? ` · ${subtaskFilter}` : ` · ${task.name}`}`}
+          publishes={sortedPublishes}
+          color={color}
+          onClose={() => setPublishListOpen(false)}
+          onOpen={openInFolderManager}
+          onCopy={copyPath}
+          onExplorer={openInExplorer}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── one recent-publish row (inline latest + modal list) ──────────────────────
+function PublishRow({ p, onOpen, onCopy, onExplorer }: {
+  p:          ProductionPublish
+  onOpen:     () => void
+  onCopy:     () => void
+  onExplorer: () => void
+}) {
+  // Publish comment on hover — positioned `fixed` at the cursor so it is never
+  // clipped by the surrounding overflow:auto containers.
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
+  const comment = (p.description || '').trim()
+  return (
+    <div
+      onClick={onOpen}
+      onMouseMove={e => { if (comment) setTip({ x: e.clientX, y: e.clientY }) }}
+      onMouseLeave={() => setTip(null)}
+      style={{
+        padding: '5px 8px', borderRadius: 5,
+        border: '1px solid var(--rule-2)', background: 'var(--paper)',
+        marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+      }}
+    >
+      {tip && comment && (
+        <div style={{
+          position: 'fixed', left: tip.x + 14, top: tip.y + 14, zIndex: 4000,
+          maxWidth: 320, padding: '7px 10px', borderRadius: 6, pointerEvents: 'none',
+          background: 'var(--paper)', border: '1px solid var(--rule-2)', boxShadow: 'var(--shadow-md)',
+          fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink)', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+        }}>
+          <span style={{
+            display: 'block', marginBottom: 2, fontFamily: 'var(--mono)', fontSize: 8,
+            color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em',
+          }}>Commentaire</span>
+          {comment}
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 10, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>
+          {p.file}
+        </div>
+        <div style={{ fontSize: 8, color: 'var(--ink-4)', marginTop: 1 }}>
+          {p.user} · {p.date} {p.time}
+        </div>
+      </div>
+      <button style={_miniIconBtn} title="Copier" onClick={e => { e.stopPropagation(); onCopy() }}>
+        <Copy size={9} strokeWidth={1.75} />
+      </button>
+      <button style={_miniIconBtn} title="Folder Manager" onClick={e => { e.stopPropagation(); onOpen() }}>
+        <FolderTree size={9} strokeWidth={1.75} />
+      </button>
+      <button style={_miniIconBtn} title="Explorateur" onClick={e => { e.stopPropagation(); onExplorer() }}>
+        <FolderOpen size={9} strokeWidth={1.75} />
+      </button>
+    </div>
+  )
+}
+
+// ── all-recent-publishes modal (newest first, by date) ───────────────────────
+function PublishListModal({ title, publishes, color, onClose, onOpen, onCopy, onExplorer }: {
+  title:      string
+  publishes:  ProductionPublish[]
+  color:      string
+  onClose:    () => void
+  onOpen:     (p: ProductionPublish) => void
+  onCopy:     (p: ProductionPublish) => void
+  onExplorer: (p: ProductionPublish) => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onClose])
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+    >
+      <div style={{
+        width: 720, maxWidth: '92vw', maxHeight: '82vh',
+        background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 12,
+        boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 18px', borderBottom: '1px solid var(--rule)',
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+          <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>· {publishes.length}</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose} title="Fermer" style={{
+            width: 26, height: 22, borderRadius: 4, border: '1px solid var(--rule-2)',
+            background: 'var(--paper-2)', color: 'var(--ink-2)', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}><X size={12} strokeWidth={1.75} /></button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 18px' }}>
+          {publishes.length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</div>
+          )}
+          {publishes.map(p => (
+            <PublishRow
+              key={p.id}
+              p={p}
+              onOpen={() => onOpen(p)}
+              onCopy={() => onCopy(p)}
+              onExplorer={() => onExplorer(p)}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
