@@ -7,7 +7,7 @@
     "dev:backend": "python backend/main.py",
     "dev": "tsc -p tsconfig.electron.json && concurrently -k -n vite,electron -c green,magenta \"vite\" \"electron .\"",
     "build:frontend": "vite build",
-    "build:backend": "pyinstaller scripts/backend.spec --distpath backend/dist --noconfirm",
+    "build:backend": "python -m PyInstaller scripts/backend.spec --distpath backend/dist --noconfirm",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run build:frontend && npm run build:backend && npm run build:electron && electron-builder --config scripts/electron-builder.yml",
     "dist": "npm run build",
