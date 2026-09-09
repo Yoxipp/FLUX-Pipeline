@@ -13,6 +13,7 @@ import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
+import { readActiveInstancePort } from '../hooks/useActiveInstances'
 
 // DCCs the backend can import into (from the Folder Manager). Others have no
 // import bridge yet, so they never appear in "Ouvrir dans…".
@@ -1853,7 +1854,7 @@ export function Projects() {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
     try {
-      await api.importFileInMaya(nav.project, rel_path)
+      await api.importFileInMaya(nav.project, rel_path, readActiveInstancePort('Maya') ?? undefined)
       toast.success(`${item.name} importé dans Maya`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'

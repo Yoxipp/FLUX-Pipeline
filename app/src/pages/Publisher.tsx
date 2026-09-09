@@ -9,6 +9,7 @@ import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
+import { readActiveInstancePort } from '../hooks/useActiveInstances'
 import { toast } from 'sonner'
 
 // ── Resizable right panel (per-viewer UI pref) ────────────────────────────────
@@ -798,6 +799,7 @@ export function Publisher() {
             include_anim:    lightInclude.anim,
             include_weights: lightInclude.weights,
             include_uv:      lightInclude.uv,
+            port:            readActiveInstancePort('Maya') ?? undefined,
           })
           toast.success(`USD léger ${res.version} → ${res.asset}`)
           return
@@ -813,6 +815,7 @@ export function Publisher() {
           export_options: mayaExportOpts,
           description:  description || undefined,
           user:         settings?.username ?? undefined,
+          port:         readActiveInstancePort('Maya') ?? undefined,
         })
         toast.success(`v${res.version_str} → Maya`)
       } else if (dcc === 'Houdini') {

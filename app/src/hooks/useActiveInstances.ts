@@ -23,6 +23,23 @@ function writeMap(m: Record<string, number>): void {
   try { localStorage.setItem(LS_KEY, JSON.stringify(m)) } catch { /* blocked */ }
 }
 
+/**
+ * Read the currently-selected instance port for a DCC without a hook or the
+ * status map — for callers (Publisher, Importer) that only need to route a
+ * command to the active instance. The Sidebar's useActiveInstances keeps this
+ * value valid as instances change. Returns null when nothing is selected (single
+ * instance), so the caller omits the port and the backend uses the base port.
+ */
+export function readActiveInstancePort(dccKey: string): number | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    const m = raw ? (JSON.parse(raw) as Record<string, number>) : {}
+    return typeof m[dccKey] === 'number' ? m[dccKey] : null
+  } catch {
+    return null
+  }
+}
+
 export interface ActiveInstances {
   /** port currently targeted for a DCC, or null when it has no instance up. */
   activePort: (dccKey: string) => number | null

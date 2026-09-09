@@ -190,8 +190,9 @@ export const api = {
   getMayaConnectCmd: () =>
     apiCall<{ cmd: string; backend: string }>('GET', '/dcc/maya/connect_cmd'),
 
-  importFileInMaya: (project_name: string, rel_path: string) =>
-    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path }),
+  // port targets a specific Maya instance (multi-instance); omit → base commandPort.
+  importFileInMaya: (project_name: string, rel_path: string, port?: number) =>
+    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path, port }),
 
   publishMaya: (payload: {
     project_name: string
@@ -203,6 +204,7 @@ export const api = {
     export_options?: Record<string, unknown>
     description?: string
     user?:        string
+    port?:        number
   }) =>
     apiCall<{ ok: boolean; version_str: string; dest: string }>('POST', '/dcc/maya/publish', payload),
 
@@ -221,6 +223,7 @@ export const api = {
     include_anim?:    boolean
     include_weights?: boolean
     include_uv?:      boolean
+    port?:            number
   }) =>
     apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
       'POST', '/dcc/maya/export-usd', payload),

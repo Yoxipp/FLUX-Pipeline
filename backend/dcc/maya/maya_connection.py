@@ -120,13 +120,17 @@ def execute_command(command: str) -> str | None:
     return send_command_direct(command)
 
 
-def send_command_direct(command: str, timeout: float = 60.0) -> str | None:
-    """Open a fresh TCP connection to Maya's commandPort, send *command*, return response.
+def send_command_direct(command: str, timeout: float = 60.0, port: int = MAYA_PORT) -> str | None:
+    """Open a fresh TCP connection to a Maya commandPort, send *command*, return response.
 
     Uses a dedicated socket (not the persistent socket_manager) so it:
       - Works without a prior socket_manager.connect() call.
       - Supports custom timeouts for long-running exports.
       - Avoids socket state issues between calls.
+
+    *port* selects which Maya instance to talk to (multi-instance, cluster C);
+    it defaults to the base commandPort so existing single-instance callers are
+    unchanged.
 
     Returns the response string on success, None on any error.
     """
@@ -135,7 +139,7 @@ def send_command_direct(command: str, timeout: float = 60.0) -> str | None:
     try:
         s = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_STREAM)
         s.settimeout(timeout)
-        s.connect(("127.0.0.1", MAYA_PORT))
+        s.connect(("127.0.0.1", port))
         s.sendall((command + "\n").encode("utf-8"))
         response = s.recv(65536).decode("utf-8", errors="replace").strip()
         log.debug("Maya command OK (len=%d)", len(response))

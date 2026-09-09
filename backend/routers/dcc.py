@@ -609,6 +609,7 @@ class MayaPublishRequest(BaseModel):
     export_options: dict | None = None      # per-format export options (see maya_export)
     description:  str = ""
     user:         str | None = None
+    port:         int | None = None  # target Maya instance (None → base commandPort)
 
 
 @router.get("/maya/connect_cmd")
@@ -686,6 +687,7 @@ async def maya_diag() -> dict:
 class MayaImportRequest(BaseModel):
     project_name: str
     rel_path: str  # project-relative path, e.g. "CHAR/RIG/HorseBody/adam/HorseBody_adam.fbx"
+    port: int | None = None  # target Maya instance (None → base commandPort)
 
 
 _MAYA_IMPORT_EXTS = {".obj", ".fbx", ".ma", ".mb", ".abc", ".usd", ".usda", ".usdc", ".usdz"}
@@ -800,9 +802,10 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
         f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'))"
     )
 
+    target_port = _resolve_target_port("Maya", req.port)
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0))
+        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0, port=target_port))
         if result is None:
             raise HTTPException(
                 status_code=503,
@@ -858,6 +861,7 @@ class MayaLightExportRequest(BaseModel):
     include_anim:    bool = True
     include_weights: bool = True   # UsdSkel skin binding (bone capture)
     include_uv:      bool = True
+    port:            int | None = None  # target Maya instance (None → base commandPort)
 
 
 @router.post("/maya/export-usd")
@@ -903,9 +907,10 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)})"
     )
 
+    target_port = _resolve_target_port("Maya", req.port)
     loop = asyncio.get_event_loop()
     try:
-        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=300.0))
+        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=300.0, port=target_port))
         if result is None:
             raise HTTPException(
                 status_code=503,
@@ -1060,8 +1065,9 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     # Timeout: 30s for static exports, 600s for animated ABC (100 frames can be slow)
     export_timeout = 600.0 if (ext == ".abc" and req.is_sequence) else 120.0
 
+    target_port = _resolve_target_port("Maya", req.port)
     try:
-        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=export_timeout))
+        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=export_timeout, port=target_port))
         if result is None:
             raise HTTPException(
                 status_code=503,
