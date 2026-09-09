@@ -77,6 +77,14 @@ app.add_middleware(
     expose_headers=["ETag"],
 )
 
+@app.get("/health", tags=["Health"])
+async def health() -> dict:
+    """Liveness probe. Dependency-free and instant, so the Electron shell (and the
+    renderer's reconnect banner) can tell a truly-ready backend from a port that is
+    merely bound but not serving yet. Returns as soon as the app can route."""
+    return {"ok": True}
+
+
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])
 app.include_router(publish.router,        prefix="/publish",        tags=["Publisher"])
 app.include_router(activity.router,       prefix="/activity",       tags=["Activity"])

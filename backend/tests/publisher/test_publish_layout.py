@@ -1,5 +1,5 @@
-# test_publish_layout.py — per-format single-file publish layout
-# (active-in-place + flat vNNN archives, both inside <dest>/<ext>/).
+# test_publish_layout.py — single-folder publish layout: every format's
+# active-in-place LAST + flat vNNN archives share one <dest>/ folder.
 
 from __future__ import annotations
 
@@ -36,11 +36,11 @@ class FlatPublishLayout(unittest.TestCase):
             dest = tmp / "all"
             path, ver = publish_into_layout(src, dest, _BASE)
             self.assertEqual(ver, 1)
-            # active lands inside the per-format subfolder at a stable path
-            self.assertEqual(path, dest / "usd" / f"{_BASE}_LAST.usd")
+            # active lands flat in the shared folder at a stable path
+            self.assertEqual(path, dest / f"{_BASE}_LAST.usd")
             self.assertTrue(path.exists())
             self.assertEqual(path.read_text(), "v1")
-            # no archived version yet (only LAST in usd/)
+            # no archived version yet (only LAST)
             self.assertEqual(highest_flat_version(dest, _BASE), 0)
             self.assertFalse(versions_dir(dest).exists())
 
@@ -52,12 +52,12 @@ class FlatPublishLayout(unittest.TestCase):
             p2, v2 = publish_into_layout(_src(tmp, "b.usd", "v2"), dest, _BASE)
             self.assertEqual(v1, 1)
             self.assertEqual(v2, 2)
-            # v001 archived flat inside usd/, beside the active LAST
-            arch = dest / "usd" / f"{_BASE}_v001.usd"
+            # v001 archived flat in the shared folder, beside the active LAST
+            arch = dest / f"{_BASE}_v001.usd"
             self.assertTrue(arch.exists())
             self.assertEqual(arch.read_text(), "v1")
-            # active LAST now holds v2 at a stable per-format path
-            active = dest / "usd" / f"{_BASE}_LAST.usd"
+            # active LAST now holds v2 at a stable flat path
+            active = dest / f"{_BASE}_LAST.usd"
             self.assertEqual(p2, active)
             self.assertTrue(active.exists())
             self.assertEqual(active.read_text(), "v2")
@@ -82,8 +82,8 @@ class FlatPublishLayout(unittest.TestCase):
             publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
             _, v3 = publish_into_layout(_src(tmp, "c.usd", "3"), dest, _BASE)
             self.assertEqual(v3, 3)
-            self.assertTrue((dest / "usd" / f"{_BASE}_v001.usd").exists())
-            self.assertTrue((dest / "usd" / f"{_BASE}_v002.usd").exists())
+            self.assertTrue((dest / f"{_BASE}_v001.usd").exists())
+            self.assertTrue((dest / f"{_BASE}_v002.usd").exists())
             self.assertEqual(highest_flat_version(dest, _BASE), 2)
 
     def test_formats_are_independent_lineages(self):
@@ -96,12 +96,12 @@ class FlatPublishLayout(unittest.TestCase):
             _, fv1 = publish_into_layout(_src(tmp, "c.fbx", "f1"), dest, _BASE)
             self.assertEqual(uv2, 2)
             self.assertEqual(fv1, 1)  # FBX starts its own line at v001
-            # each format keeps its own subfolder + independent LAST
-            self.assertTrue((dest / "usd" / f"{_BASE}_LAST.usd").exists())
-            self.assertTrue((dest / "fbx" / f"{_BASE}_LAST.fbx").exists())
+            # both formats share one folder, each with its own independent LAST
+            self.assertTrue((dest / f"{_BASE}_LAST.usd").exists())
+            self.assertTrue((dest / f"{_BASE}_LAST.fbx").exists())
             # USD has an archive, FBX does not yet
-            self.assertTrue((dest / "usd" / f"{_BASE}_v001.usd").exists())
-            self.assertFalse((dest / "fbx" / f"{_BASE}_v001.fbx").exists())
+            self.assertTrue((dest / f"{_BASE}_v001.usd").exists())
+            self.assertFalse((dest / f"{_BASE}_v001.fbx").exists())
             self.assertEqual(highest_flat_version(dest, _BASE, ".fbx"), 0)
 
 
@@ -135,8 +135,8 @@ class LayoutReaders(unittest.TestCase):
             publish_into_layout(_src(tmp, "a.usd", "1"), dest, _BASE)
             publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
             names = {p.name for p in published_files(dest, _BASE)}
-            self.assertIn(f"{_BASE}_LAST.usd", names)         # active
-            self.assertIn(f"{_BASE}_v001.usd", names)         # archived under versions/
+            self.assertIn(f"{_BASE}_LAST.usd", names)          # active
+            self.assertIn(f"{_BASE}_v001.usd", names)          # archived flat
             self.assertNotIn(f"{_BASE}_v001.0001.exr", names)  # sequence not slurped
 
     def test_get_next_version_counts_flat(self):
@@ -152,12 +152,12 @@ class LayoutReaders(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             dest = tmp / "all"
-            active = dest / "usd" / f"{_BASE}_LAST.usd"
+            active = dest / f"{_BASE}_LAST.usd"
             active.parent.mkdir(parents=True)
             active.write_text("old")
             ver = archive_flat_last(dest, _BASE, ".usd")
             self.assertEqual(ver, 1)
-            self.assertTrue((dest / "usd" / f"{_BASE}_v001.usd").exists())
+            self.assertTrue((dest / f"{_BASE}_v001.usd").exists())
             self.assertTrue(active.exists())            # copy, not move — LAST stays intact
             self.assertEqual(active.read_text(), "old")
             # nothing to archive when there is no active LAST

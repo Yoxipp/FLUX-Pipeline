@@ -3,7 +3,10 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import { startPythonSidecar, stopPythonSidecar } from './python_bridge'
+import {
+  startPythonSidecar, stopPythonSidecar, restartBackend,
+  getBackendStatus, onBackendStatus, type BackendStatus,
+} from './python_bridge'
 
 let win: BrowserWindow | null = null
 let splash: BrowserWindow | null = null
@@ -174,6 +177,19 @@ ipcMain.handle('shell:openPath', (_event, filePath: string) => {
   shell.openPath(filePath)
 })
 
+// ── Backend status / recovery ─────────────────────────────────────────────────
+// The renderer subscribes to 'flux:backend-status' pushes and can pull the
+// current value on mount, so its reconnect banner is always in sync even if a
+// status change fired before the window finished loading.
+ipcMain.handle('backend:getStatus', () => getBackendStatus())
+ipcMain.handle('backend:restart', async () => restartBackend())
+
+function broadcastBackendStatus(status: BackendStatus, detail?: string): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('flux:backend-status', { status, detail })
+  }
+}
+
 // ── Window controls (frameless) ───────────────────────────────────────────────
 
 ipcMain.on('window:minimize', () => win?.minimize())
@@ -189,29 +205,18 @@ app.whenReady().then(async () => {
   // Splash first — visible immediately, covers the Vite/backend startup gap.
   createSplash()
 
+  // Forward backend status to the renderer's reconnect banner. Registered before
+  // the sidecar starts so no transition is missed; the callback also fires once
+  // with the current status immediately.
+  onBackendStatus((status, detail) => broadcastBackendStatus(status, detail))
+
   // Backend en arrière-plan : ne bloque PAS l'ouverture de la fenêtre (le cold
   // start ~5s rendait l'app lente à ouvrir). Il se connecte quand il est prêt.
+  // startPythonSidecar ne rejette plus : si l'antivirus bloque l'exe, il passe en
+  // statut 'down' et une boucle de recovery le relance en arrière-plan dès que
+  // l'AV le libère — l'utilisateur voit une bannière et n'a plus à relancer FLUX.
   startPythonSidecar().catch((err) => {
-    console.error('[Electron] Failed to start Python sidecar:', err)
-    // The retry loop already exhausted its attempts, so this is a real failure.
-    // Most often an antivirus quarantined the unsigned backend on first launch.
-    // Tell the user plainly what to do instead of leaving a silent, empty window.
-    const opts = {
-      type: 'error' as const,
-      title: 'FLUX : service indisponible',
-      message: "Le service FLUX n'a pas pu demarrer.",
-      detail:
-        "Un antivirus (Avast, Windows Defender...) a peut-etre mis flux_backend.exe " +
-        "en quarantaine lors du premier lancement.\n\n" +
-        "Que faire :\n" +
-        "1. Ouvrez votre antivirus et autorisez ou restaurez FLUX " +
-        "(ou ajoutez le dossier d'installation en exclusion).\n" +
-        "2. Relancez FLUX.\n\n" +
-        "Journaux : %APPDATA%\\FLUX\\logs",
-      buttons: ['OK'],
-    }
-    if (win) dialog.showMessageBox(win, opts)
-    else dialog.showMessageBox(opts)
+    console.error('[Electron] Unexpected sidecar start error:', err)
   })
 
   // Create the window immediately (hidden); it retries the Vite URL on its own

@@ -11,16 +11,6 @@ from features.folder_manager.tokens import add_token, get_path_for_token, load_t
 
 log = get_logger(__name__)
 
-# Sub-folders generated per asset class at creation time.
-# CHAR includes its CFX_Rig sub-structure (moved from the old flat CFXRIG class):
-# assets/chara/<CHAR>/CFX_Rig/{fur,cloth,muscle}
-_ASSET_SUBDIRS: dict[str, tuple[str, ...]] = {
-    "CHAR":   ("model", "shading", "groom", "rig", "CFX_Rig/fur", "CFX_Rig/cloth", "CFX_Rig/muscle"),
-    "PROPS":  ("model", "shading", "groom", "rig"),
-    "ENV":    ("global",),
-    "FXRIG":  (),   # empty — setups added manually
-}
-
 
 # ── public API ────────────────────────────────────────────────────────────────
 
@@ -55,7 +45,10 @@ def create_asset(project_path: Path, class_token: str, asset_name: str) -> Path:
     if asset_path.exists():
         raise FileExistsError(f"Asset '{safe_name}' already exists at {asset_path}")
 
-    _scaffold_asset(asset_path, class_token)
+    # Minimal structure only: create the asset root and register the NAME token.
+    # No work sub-folders (model/rig/groom/…) are pre-invented — the artist (or a
+    # publish/materialize) creates the ones actually needed, when needed.
+    ensure_dir(asset_path)
 
     add_token(project_path, "NAME", safe_name, asset_rel)
     log.info("Asset created: %s", asset_path)
@@ -90,14 +83,4 @@ def list_assets(project_path: Path, class_token: str | None = None) -> list[str]
         except OSError:
             return []
     return sorted(tokens.get("NAME", {}).keys())
-
-
-# ── internals ─────────────────────────────────────────────────────────────────
-
-def _scaffold_asset(asset_path: Path, class_token: str) -> None:
-    subdirs = _ASSET_SUBDIRS.get(class_token, ())
-    ensure_dir(asset_path)
-    for sub in subdirs:
-        ensure_dir(asset_path / sub)
-    log.debug("Scaffolded asset at %s (%d sub-dirs)", asset_path, len(subdirs))
 

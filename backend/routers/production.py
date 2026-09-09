@@ -20,10 +20,6 @@ from core.logger import get_logger
 from core.paths import get_project_path
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
-from features.folder_manager.asset_creator import create_asset as folder_create_asset
-from features.folder_manager.seq_shot_creator import (
-    create_sequence, create_shot, update_sequence, update_shot,
-)
 from features.folder_manager.tokens import load_tokens
 from features.folder_manager.naming_validator import get_base_name
 from core.constants import DEFAULT_CLASS_TOKENS
@@ -31,6 +27,7 @@ from features.production import production_store as store
 from features.production import ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
+from features.production.sync import sync_production_to_disk
 from features.publisher.modif_log import read_logs
 from utils import project_utils
 
@@ -48,26 +45,6 @@ class CommentNotify(BaseModel):
     task:        str
     subtask:     str | None = None
     text:        str | None = None
-
-
-class MaterializeShotSpec(BaseModel):
-    number: int
-    tasks: list[dict] = []       # [{'token': 'ANIM', 'subtasks': ['BLOCK', 'SPLINE']}]
-
-
-class MaterializePayload(BaseModel):
-    kind: str                    # "asset" | "sequence" | "shot"
-    class_token: str | None = None   # asset only (CHAR / PROPS / ENV / FXRIG…)
-    name: str | None = None          # asset name
-    seq_number: int | None = None    # sequence / shot
-    shot_number: int | None = None   # shot
-    # When True, use the idempotent path (skip if exists, add missing shots for
-    # a sequence). Also accepted implicitly whenever the target already exists.
-    update: bool = False
-    # Legacy: just the shot numbers to ensure exist under the seq. Superseded by
-    # `shots` which also carries per-shot task+subtask specs.
-    shot_numbers: list[int] | None = None
-    shots: list[MaterializeShotSpec] | None = None
 
 
 def _ensure_project(project: str) -> None:
@@ -225,13 +202,30 @@ async def get_production(project: str) -> dict:
 
 @router.put("/{project}")
 async def put_production(project: str, payload: ProductionPayload) -> dict:
-    """Replace production.json with *payload.production* (atomic)."""
+    """Replace production.json with *payload.production* (atomic), then mirror the
+    planning to disk.
+
+    The disk mirror is the Production → Disk half of the bidirectional sync: every
+    asset / sequence / shot / task / subtask declared in production.json is ensured
+    to exist on disk. It is strictly CREATE-ONLY (see features/production/sync.py):
+    a save can add missing folders but can never delete, move or overwrite existing
+    files. A sync failure never fails the save — the planning is persisted first.
+    """
     _ensure_project(project)
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
-    return {"success": True}
+
+    synced = {}
+    try:
+        synced = await loop.run_in_executor(
+            None, lambda: sync_production_to_disk(get_project_path(project), payload.production)
+        )
+    except Exception as e:  # noqa: BLE001 — sync is best-effort, save already succeeded
+        log.warning("Production→disk sync failed for %r: %s", project, e)
+
+    return {"success": True, "synced": synced}
 
 
 @router.post("/{project}/comment")
@@ -258,56 +252,11 @@ async def notify_comment(project: str, payload: CommentNotify) -> dict:
     return {"success": True}
 
 
-@router.post("/{project}/materialize")
-async def materialize(project: str, payload: MaterializePayload) -> dict:
-    """Create the on-disk folder for an entity that only exists as planning."""
-    _ensure_project(project)
-    loop = asyncio.get_event_loop()
-    project_path = get_project_path(project)
-
-    kind = payload.kind.lower()
-
-    def _mat() -> dict:
-        if kind == "asset":
-            if not payload.class_token or not payload.name:
-                raise ValueError("class_token et name requis pour un asset")
-            path = folder_create_asset(project_path, payload.class_token.upper(), payload.name.upper())
-            return {"kind": "asset", "path": str(path)}
-        if kind == "sequence":
-            if payload.seq_number is None:
-                raise ValueError("seq_number requis pour une séquence")
-            # Merge tokens.json CLASS with defaults so we can resolve ANIM/LAYOUT/…
-            try:
-                project_tokens = load_tokens(project_path)
-                class_map = project_tokens.get("CLASS") or {}
-            except Exception:
-                class_map = {}
-            merged_class_map = {**DEFAULT_CLASS_TOKENS, **class_map}
-            # New shape wins; fall back to shot_numbers for older callers.
-            if payload.shots:
-                shots_arg = [s.model_dump() for s in payload.shots]
-            else:
-                shots_arg = [{"number": n, "tasks": []} for n in (payload.shot_numbers or [])]
-            path = update_sequence(project_path, payload.seq_number, shots_arg, merged_class_map)
-            return {"kind": "sequence", "path": str(path)}
-        if kind == "shot":
-            if payload.seq_number is None or payload.shot_number is None:
-                raise ValueError("seq_number et shot_number requis pour un shot")
-            if payload.update:
-                path = update_shot(project_path, payload.seq_number, payload.shot_number)
-            else:
-                path = create_shot(project_path, payload.seq_number, payload.shot_number)
-            return {"kind": "shot", "path": str(path)}
-        raise ValueError(f"kind inconnu : {payload.kind!r}")
-
-    try:
-        result = await loop.run_in_executor(None, _mat)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        log.exception("Materialize failed")
-        raise HTTPException(status_code=500, detail=str(e))
-    return {"success": True, **result}
+# NOTE: the old POST /{project}/materialize endpoint (manual "Create on Disk")
+# was removed. Disk structure is now created automatically and bidirectionally:
+#   * Production → Disk : PUT /{project} mirrors the planning to disk (create-only,
+#     see features/production/sync.py).
+#   * Disk → Production : GET /{project} adopts on-disk assets/shots via disk_scan.
 
 
 # ── Reference media (/ref embed zone) ─────────────────────────────────────────

@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Copy, FolderPlus, HardDriveDownload, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { Check, Copy, FolderPlus, Plus, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import type {
@@ -34,7 +34,6 @@ const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2,
 export function MenuEdit({
   project, state, setState, selection, setSelection, mode,
   activeCategory, publishesByTask,
-  sequencesOnDisk, shotsOnDisk,
 }: Props) {
   // Load TASK/TYPE tokens from the project (defaults + custom in tokens.json).
   const [projectTaskTokens, setProjectTaskTokens] = useState<string[]>([])
@@ -94,7 +93,6 @@ export function MenuEdit({
 
       {mode === 'asset' && selectedAsset && (
         <AssetSection
-          project={project}
           asset={selectedAsset}
           state={state}
           setState={setState}
@@ -114,29 +112,21 @@ export function MenuEdit({
 
       {mode === 'shot' && selectedSeq && (
         <SeqSection
-          project={project}
           seq={selectedSeq}
           state={state}
           setState={setState}
           setSelection={setSelection}
           shotClassTokens={shotClassTokens}
-          onDisk={sequencesOnDisk?.has(selectedSeq.name.toUpperCase()) ?? false}
         />
       )}
 
       {mode === 'shot' && selectedShot && (
         <ShotSection
-          project={project}
           shot={selectedShot}
           state={state}
           setState={setState}
           setSelection={setSelection}
           shotClassTokens={shotClassTokens}
-          onDisk={(() => {
-            const seq = state.sequences.find(s => s.id === selectedShot.seq_id)
-            if (!seq) return false
-            return shotsOnDisk?.has(`${seq.name.toUpperCase()}|${selectedShot.name.toUpperCase()}`) ?? false
-          })()}
         />
       )}
     </div>
@@ -234,8 +224,7 @@ function CreateSection({ setState, setSelection, activeCategory }: {
 }
 
 // ── asset actions ────────────────────────────────────────────────────────────
-function AssetSection({ project, asset, state, setState, setSelection, projectTaskTokens, publishesByTask }: {
-  project:           string
+function AssetSection({ asset, state, setState, setSelection, projectTaskTokens, publishesByTask }: {
   asset:             Asset
   state:             ProductionState
   setState:          (patch: (prev: ProductionState) => ProductionState) => void
@@ -336,18 +325,6 @@ function AssetSection({ project, asset, state, setState, setSelection, projectTa
     setTaskName(''); setSubtask('')
   }
 
-  const materialize = async () => {
-    try {
-      const r = await api.materializeProductionEntity(project, {
-        kind: 'asset', class_token: asset.class, name: asset.name,
-      })
-      toast.success(`Dossier créé : ${r.path}`)
-      window.dispatchEvent(new Event('flux:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
-  }
-
   return (
     <>
       <div style={_pad}>
@@ -365,9 +342,6 @@ function AssetSection({ project, asset, state, setState, setSelection, projectTa
             <Trash2 size={10} strokeWidth={1.75} /> {t('prod.delete')}
           </ProdBtn>
         </div>
-        <ProdBtn full variant="ghost" onClick={materialize} style={{ marginTop: 6 }}>
-          <HardDriveDownload size={11} strokeWidth={1.75} /> {t('prod.materializeAsset')}
-        </ProdBtn>
       </div>
 
       <div style={_pad}>
@@ -511,14 +485,12 @@ function ShotCreateSection({ state, setState, setSelection }: {
   )
 }
 
-function SeqSection({ project, seq, state, setState, setSelection, shotClassTokens, onDisk }: {
-  project:         string
+function SeqSection({ seq, state, setState, setSelection, shotClassTokens }: {
   seq:             ProductionSequence
   state:           ProductionState
   setState:        (patch: (prev: ProductionState) => ProductionState) => void
   setSelection:    (s: Selection) => void
   shotClassTokens: string[]
-  onDisk:          boolean
 }) {
   const { t }         = useI18n()
   const [shotNum, setShotNum] = useState('')
@@ -548,38 +520,6 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     }))
     setSelection({ kind: 'none' })
   }
-  const materialize = async () => {
-    if (Number.isNaN(seqNum)) { toast.error(`Séquence non numérique : ${seq.name}`); return }
-    // For each shot in this seq: compute its effective task list (own tasks
-    // if inherit_tasks is false, otherwise inherit from the seq) so the
-    // backend can create per-shot task + subtask folders.
-    const seqTasks = seq.tasks.map(t => ({
-      token: t.name.toUpperCase(),
-      subtasks: (t.known_subtasks || []).map(s => s.toUpperCase()),
-    }))
-    const shotsPayload = state.shots
-      .filter(s => s.seq_id === seq.id)
-      .map(s => {
-        const n = parseShotNum(s.name)
-        if (Number.isNaN(n)) return null
-        const tasks = s.inherit_tasks
-          ? seqTasks
-          : s.tasks.map(t => ({
-              token: t.name.toUpperCase(),
-              subtasks: (t.known_subtasks || []).map(x => x.toUpperCase()),
-            }))
-        return { number: n, tasks }
-      })
-      .filter((x): x is { number: number; tasks: Array<{ token: string; subtasks: string[] }> } => x !== null)
-    try {
-      const r = await api.materializeProductionEntity(project, {
-        kind: 'sequence', seq_number: seqNum, shots: shotsPayload, update: onDisk,
-      })
-      toast.success(onDisk ? `Séquence mise à jour : ${r.path}` : `Dossier créé : ${r.path}`)
-      window.dispatchEvent(new Event('flux:refresh'))
-    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
-  }
-
   const createShot = () => {
     // No number entered → auto-pick max(existing shot num) + 1 (or 1 if none).
     let n = parseInt(shotNum, 10)
@@ -668,11 +608,6 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
           />
           <SeqColorPicker seq={seq} onPick={c => patchSeq({ color: c })} onReset={() => patchSeq({ color: undefined })} />
         </div>
-        <ProdBtn full variant="ghost" onClick={materialize} style={{ marginTop: 6 }}>
-          {onDisk
-            ? <><RefreshCw size={11} strokeWidth={1.75} /> Update sur disque</>
-            : <><HardDriveDownload size={11} strokeWidth={1.75} /> {t('prod.materializeSequence')}</>}
-        </ProdBtn>
         <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
           <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
         </ProdBtn>
@@ -734,14 +669,12 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
   )
 }
 
-function ShotSection({ project, shot, state, setState, setSelection, shotClassTokens, onDisk }: {
-  project:         string
+function ShotSection({ shot, state, setState, setSelection, shotClassTokens }: {
   shot:            ProductionShot
   state:           ProductionState
   setState:        (patch: (prev: ProductionState) => ProductionState) => void
   setSelection:    (s: Selection) => void
   shotClassTokens: string[]
-  onDisk:          boolean
 }) {
   const { t } = useI18n()
   const seq = state.sequences.find(s => s.id === shot.seq_id) ?? null
@@ -765,18 +698,6 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
   const remove = () => {
     setState(prev => ({ ...prev, shots: prev.shots.filter(s => s.id !== shot.id) }))
     setSelection({ kind: 'none' })
-  }
-  const materialize = async () => {
-    if (!seq) { toast.error('Séquence parente introuvable'); return }
-    const sn = parseSeqNum(seq.name); const shn = parseShotNum(shot.name)
-    if (Number.isNaN(sn) || Number.isNaN(shn)) { toast.error(`Numérotation invalide : ${seq.name}/${shot.name}`); return }
-    try {
-      const r = await api.materializeProductionEntity(project, {
-        kind: 'shot', seq_number: sn, shot_number: shn, update: onDisk,
-      })
-      toast.success(onDisk ? `Shot déjà présent : ${r.path}` : `Dossier créé : ${r.path}`)
-      window.dispatchEvent(new Event('flux:refresh'))
-    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
   const addTask = () => {
     const label = taskName.trim().toUpperCase()
@@ -831,11 +752,6 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
             style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
           />
         </div>
-        <ProdBtn full variant="ghost" onClick={materialize} style={{ marginTop: 6 }}>
-          {onDisk
-            ? <><Check size={11} strokeWidth={1.75} /> Déjà sur disque</>
-            : <><HardDriveDownload size={11} strokeWidth={1.75} /> {t('prod.materializeShot')}</>}
-        </ProdBtn>
         <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
           <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
         </ProdBtn>

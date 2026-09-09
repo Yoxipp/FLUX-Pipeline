@@ -12,6 +12,11 @@ declare global {
       windowMinimize: () => void
       windowMaximize: () => void
       windowClose: () => void
+      getBackendStatus?: () => Promise<string>
+      restartBackend?: () => Promise<string>
+      onBackendStatus?: (cb: (payload: { status: BackendStatus; detail?: string }) => void) => (() => void)
     }
   }
+
+  type BackendStatus = 'starting' | 'ready' | 'retrying' | 'down'
 }

@@ -5,6 +5,8 @@ import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
 import { StatusBar } from './components/shared/StatusBar'
+import { BackendBanner } from './components/shared/BackendBanner'
+import { useBackendStatus } from './hooks/useBackendStatus'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
@@ -23,6 +25,7 @@ import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
 import { applyAccentPreset } from './lib/accentPresets'
+import { useI18n } from './i18n'
 import { Toaster, toast } from 'sonner'
 
 // Watches the current user's unread @mentions and pops a floating toast
@@ -115,6 +118,8 @@ function AppShell({ settings }: { settings: Settings }) {
           onUserChange={() => setShowLogin(true)}
         />
 
+        <BackendBanner />
+
         <div className="flex flex-1 min-h-0">
           <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />
 
@@ -159,6 +164,37 @@ function AppShell({ settings }: { settings: Settings }) {
   )
 }
 
+// Full-screen reconnect state, shown when settings can't load because the backend
+// is not reachable. Auto-recovers: useBackendStatus dispatches 'flux:refresh' on
+// 'ready', which makes useSettings re-fetch and this screen unmount.
+function BackendDownScreen() {
+  const { t } = useI18n()
+  const { status, restart } = useBackendStatus()
+  const reconnecting = status === 'starting' || status === 'retrying'
+  return (
+    <div className="flex flex-col items-center justify-center h-screen gap-3" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <span className="text-sm" style={{ color: reconnecting ? 'var(--ink, #cac8c5)' : '#e0836f' }}>
+        {reconnecting ? t('backend.retrying') : t('backend.down')}
+      </span>
+      <span className="text-xs text-gray-500" style={{ maxWidth: 440, textAlign: 'center', lineHeight: 1.5 }}>
+        {t('backend.downHint')}
+      </span>
+      <button
+        onClick={restart}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4,
+          padding: '6px 14px', borderRadius: 6, cursor: 'pointer',
+          background: 'var(--paper-2, #1b1a18)', color: 'var(--ink, #cac8c5)',
+          border: '1px solid var(--rule-2, #2a2826)', fontFamily: 'var(--sans)', fontSize: 12,
+        }}
+      >
+        {t('backend.retry')}
+      </button>
+      <span className="text-xs text-gray-600">Ctrl+Shift+I · DevTools · %APPDATA%\Flux\logs\</span>
+    </div>
+  )
+}
+
 export function App() {
   const { settings, loading } = useSettings()
 
@@ -182,15 +218,11 @@ export function App() {
     )
   }
 
-  // Backend injoignable — afficher l'erreur plutôt qu'une UI vide
+  // Backend injoignable : écran de reconnexion piloté par le statut du shell.
+  // Le hook redéclenche un refresh dès que le backend revient (recovery auto),
+  // donc cet écran se referme tout seul sans relancer FLUX.
   if (!settings) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen gap-3" style={{ backgroundColor: 'var(--color-bg)' }}>
-        <span className="text-sm text-red-400">Backend non disponible</span>
-        <span className="text-xs text-gray-500">Vérifier les logs : %APPDATA%\Flux\logs\</span>
-        <span className="text-xs text-gray-600">Ctrl+Shift+I pour les DevTools</span>
-      </div>
-    )
+    return <BackendDownScreen />
   }
 
   // Premier lancement — pas de workspace configuré

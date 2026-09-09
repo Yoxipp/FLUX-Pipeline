@@ -31,6 +31,14 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'titlebar.slideToClose':   { fr: 'Glisse pour fermer FLUX',  en: 'Slide to close FLUX' },
   'titlebar.cancel':         { fr: 'Annuler',                  en: 'Cancel' },
 
+  // backend status / reconnect banner
+  'backend.starting':        { fr: 'Démarrage du service FLUX…', en: 'Starting the FLUX service…' },
+  'backend.retrying':        { fr: 'Reconnexion au service FLUX…', en: 'Reconnecting to the FLUX service…' },
+  'backend.down':            { fr: 'Service FLUX indisponible', en: 'FLUX service unavailable' },
+  'backend.downHint':        { fr: "Un antivirus (Avast, Defender...) bloque peut-être le service au démarrage. FLUX réessaie automatiquement ; autorise FLUX dans ton antivirus si besoin.", en: 'An antivirus (Avast, Defender...) may be blocking the service at launch. FLUX keeps retrying automatically; allow FLUX in your antivirus if needed.' },
+  'backend.retry':           { fr: 'Réessayer maintenant',     en: 'Retry now' },
+  'backend.reconnected':     { fr: 'Service FLUX reconnecté',  en: 'FLUX service reconnected' },
+
   // settings popover
   'settings.title':          { fr: 'Paramètres',               en: 'Settings' },
   'settings.user':           { fr: 'UTILISATEUR',              en: 'USER' },
@@ -72,7 +80,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.assetName':          { fr: 'Nom',                      en: 'Name' },
   'prod.taskName':           { fr: 'Libellé',                  en: 'Label' },
   'prod.typeTokens':         { fr: 'Tokens TYPE liés',         en: 'Linked TYPE tokens' },
-  'prod.materializeAsset':   { fr: 'Créer le dossier sur disque', en: 'Create folder on disk' },
   'prod.rename':             { fr: 'Renommer',                 en: 'Rename' },
   'prod.duplicate':          { fr: 'Dupliquer',                en: 'Duplicate' },
   'prod.delete':             { fr: 'Supprimer',                en: 'Delete' },
@@ -98,8 +105,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.filter.fav':         { fr: 'Favoris',                  en: 'Favorites' },
   'prod.newSequence':        { fr: 'Nouvelle séquence',        en: 'New sequence' },
   'prod.newShot':            { fr: 'Nouveau shot',             en: 'New shot' },
-  'prod.materializeSequence':{ fr: 'Créer la séquence sur disque', en: 'Create sequence on disk' },
-  'prod.materializeShot':    { fr: 'Créer le shot sur disque', en: 'Create shot on disk' },
   'prod.inheritTasks':       { fr: 'Hériter des tâches de la séquence', en: 'Inherit sequence tasks' },
   'prod.inheritAssets':      { fr: 'Hériter des assets de la séquence', en: 'Inherit sequence assets' },
   'prod.tabAssets':          { fr: 'Assets',                   en: 'Assets' },

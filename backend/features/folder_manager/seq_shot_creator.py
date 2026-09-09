@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.constants import ANIM_INSTANCES, DEFAULT_PADDING
+from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_seq, format_shot
@@ -19,12 +19,6 @@ from features.folder_manager.sequence_template import (
 from features.folder_manager.tokens import add_token, load_tokens
 
 log = get_logger(__name__)
-
-# Shot sub-folders created at shot-init time
-_SHOT_SUBDIRS = ("layout", "fx", "cfx")
-
-# anim/<phase> folders generated under every shot
-_ANIM_SUBDIRS = ANIM_INSTANCES  # ("block", "spline", "polish")
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -246,11 +240,10 @@ def list_shots(project_path: Path, seq_number: int | None = None, padding: int =
 # ── internals ─────────────────────────────────────────────────────────────────
 
 def _scaffold_shot(shot_path: Path) -> None:
+    # Minimal structure only: create the shot root. Task sub-folders (layout / fx /
+    # cfx / anim…) are NOT pre-invented — they are created on demand (by a publish,
+    # a materialize from Production, or the artist). The USD/hip lighting templates
+    # authored by the callers are a separate feature and still land here.
     ensure_dir(shot_path)
-    for sub in _SHOT_SUBDIRS:
-        ensure_dir(shot_path / sub)
-    anim_root = shot_path / "anim"
-    for phase in _ANIM_SUBDIRS:
-        ensure_dir(anim_root / phase)
     log.debug("Scaffolded shot at %s", shot_path)
 

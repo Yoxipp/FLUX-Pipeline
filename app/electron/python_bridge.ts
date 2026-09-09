@@ -2,25 +2,58 @@
 //
 // Zombie-proof: on start we kill anything already bound to the port (a stale
 // backend from a crash or a previous run) and spawn a FRESH one, so the running
-// code is always current. On quit we force-kill the whole process tree. A light
-// health monitor respawns the backend if it dies while the app is up.
+// code is always current. On quit we force-kill the whole process tree.
+//
+// Antivirus-robust (the "Avast makes the backend not start on first launch" bug):
+// an AV can briefly quarantine or lock the unsigned PyInstaller exe while it
+// scans it, so the first few spawns fail. We NEVER give up permanently — after
+// the fast retry burst we drop into a slow recovery loop that keeps trying until
+// the exe is released, then brings the backend up and flips the status to
+// 'ready' on its own. The frontend never needs a full app relaunch: it watches
+// the status and reconnects automatically. A manual restartBackend() is also
+// exposed for a user-facing "retry" button.
 
 import { spawn, ChildProcess, execSync } from 'child_process'
 import path from 'path'
 import net from 'net'
+import http from 'http'
 
 import { app } from 'electron'
+
+export type BackendStatus = 'starting' | 'ready' | 'retrying' | 'down'
 
 let pythonProcess: ChildProcess | null = null
 let shuttingDown = false
 let monitorTimer: NodeJS.Timeout | null = null
+let recoveryTimer: NodeJS.Timeout | null = null
 const PYTHON_PORT = 8765
 
 // Set by the spawn 'error' handler when the OS refuses to launch the exe (most
-// commonly ENOENT because an antivirus quarantined the unsigned PyInstaller
-// backend on first run). Lets the ready-waiter fail fast instead of blocking the
-// full port timeout, so the retry loop can react in seconds.
+// commonly ENOENT because an antivirus quarantined the unsigned backend). Lets
+// the ready-waiter fail fast instead of blocking the full timeout.
 let spawnErrorCode: string | null = null
+
+// Backend status, broadcast to the renderer so it can show a clear state and a
+// retry affordance instead of silently talking to a dead backend.
+let currentStatus: BackendStatus = 'starting'
+let statusListener: ((s: BackendStatus, detail?: string) => void) | null = null
+
+/** Register the single status listener (main process forwards to the renderer).
+ *  Replays the current status immediately so a late subscriber is in sync. */
+export function onBackendStatus(cb: (s: BackendStatus, detail?: string) => void): void {
+  statusListener = cb
+  cb(currentStatus)
+}
+
+export function getBackendStatus(): BackendStatus {
+  return currentStatus
+}
+
+function setStatus(s: BackendStatus, detail?: string): void {
+  currentStatus = s
+  console.log(`[Python] status → ${s}${detail ? ` (${detail})` : ''}`)
+  try { statusListener?.(s, detail) } catch { /* never let a listener throw here */ }
+}
 
 function isPortAlreadyBound(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -32,6 +65,19 @@ function isPortAlreadyBound(port: number): Promise<boolean> {
     })
     socket.on('timeout', () => { socket.destroy(); resolve(false) })
     socket.on('error', () => { socket.destroy(); resolve(false) })
+  })
+}
+
+/** HTTP liveness probe. Truer than a raw TCP connect: it confirms the backend is
+ *  actually serving (/health answers 200), not merely that the port is bound. */
+function pingHealth(port: number, timeoutMs = 1500): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/health', timeout: timeoutMs }, (res) => {
+      res.resume()   // drain so the socket can close
+      resolve(res.statusCode === 200)
+    })
+    req.on('timeout', () => { req.destroy(); resolve(false) })
+    req.on('error', () => resolve(false))
   })
 }
 
@@ -104,38 +150,48 @@ function spawnBackend(): void {
 }
 
 /**
- * Resolve once the backend answers on *port*, reject fast if the spawn errored
- * (e.g. antivirus quarantine) or the timeout elapses. Short-circuits on
- * spawnErrorCode so the retry loop does not wait the full timeout on an exe that
- * never launched.
+ * Resolve once the backend answers /health on *port*, reject fast if the spawn
+ * errored (e.g. antivirus quarantine) or the timeout elapses.
  */
 function waitForBackendReady(port: number, timeout: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now()
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (spawnErrorCode) {
         clearInterval(interval)
         return reject(new Error(`spawn failed (${spawnErrorCode})`))
       }
-      const socket = new net.Socket()
-      socket.connect(port, '127.0.0.1', () => {
-        socket.destroy()
+      if (await pingHealth(port, 1000)) {
         clearInterval(interval)
-        resolve()
-      })
-      socket.on('error', () => {
-        socket.destroy()
-        if (Date.now() - start > timeout) {
-          clearInterval(interval)
-          reject(new Error(`Python backend timeout on port ${port}`))
-        }
-      })
-    }, 200)
+        return resolve()
+      }
+      if (Date.now() - start > timeout) {
+        clearInterval(interval)
+        reject(new Error(`Python backend timeout on port ${port}`))
+      }
+    }, 250)
   })
+}
+
+/** One spawn + wait-for-ready cycle. Returns true on success, false otherwise.
+ *  Clears a half-spawned process before returning false so the next attempt is
+ *  clean. */
+async function attemptStart(readyTimeout: number): Promise<boolean> {
+  if (shuttingDown) return false
+  try {
+    spawnBackend()
+    await waitForBackendReady(PYTHON_PORT, readyTimeout)
+    return true
+  } catch (err) {
+    console.warn(`[Python] Backend start attempt failed: ${String(err)}`)
+    killPort(PYTHON_PORT)   // clear a half-spawned process before retrying
+    return false
+  }
 }
 
 export async function startPythonSidecar(): Promise<void> {
   shuttingDown = false
+  setStatus('starting')
 
   // Never reuse a backend on the port — it may be a stale zombie running old code.
   if (await isPortAlreadyBound(PYTHON_PORT)) {
@@ -144,36 +200,82 @@ export async function startPythonSidecar(): Promise<void> {
     await waitForPortFree(PYTHON_PORT, 5_000)
   }
 
-  // Antivirus (Avast, Defender...) can briefly quarantine or lock the unsigned
-  // PyInstaller backend on first launch, so the first spawn fails. Rather than
-  // force the user to relaunch the whole app, retry a few times: the AV usually
-  // releases the exe within seconds once its scan finishes, and the next spawn
-  // succeeds on its own.
+  // Fast retry burst: the AV usually releases the exe within a few seconds.
   const MAX_ATTEMPTS = 4
-  let lastError: unknown = null
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (shuttingDown) return
-    try {
-      spawnBackend()
-      await waitForBackendReady(PYTHON_PORT, 15_000)
+    if (await attemptStart(15_000)) {
+      setStatus('ready')
       startHealthMonitor()
       return
-    } catch (err) {
-      lastError = err
-      console.warn(`[Python] Backend start attempt ${attempt}/${MAX_ATTEMPTS} failed: ${String(err)}`)
-      killPort(PYTHON_PORT)   // clear a half-spawned process before retrying
-      if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 2_000))
     }
+    console.warn(`[Python] Backend start attempt ${attempt}/${MAX_ATTEMPTS} failed`)
+    if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 2_000))
   }
 
-  throw new Error(
-    `Le service FLUX n'a pas pu demarrer apres ${MAX_ATTEMPTS} tentatives (${String(lastError)}).`,
-  )
+  // Fast burst exhausted. Do NOT give up — the exe may still be quarantined by
+  // the AV. Signal 'down' (the UI shows a reconnecting banner) and keep trying
+  // in the background so the backend comes up on its own, no app relaunch needed.
+  setStatus('down', 'backend unavailable (antivirus?) — retrying in background')
+  startRecoveryLoop()
+}
+
+/** Slow background loop that keeps trying to start the backend until it succeeds
+ *  (or the app quits). This is the fix for "must relaunch FLUX twice": once the
+ *  antivirus releases the exe, the very next cycle brings the backend up. */
+function startRecoveryLoop(): void {
+  if (recoveryTimer) return
+  const RECOVERY_INTERVAL = 4_000
+  recoveryTimer = setInterval(async () => {
+    if (shuttingDown) { stopRecoveryLoop(); return }
+    if (currentStatus !== 'down' && currentStatus !== 'retrying') return
+    // If something else already brought the port up, adopt it.
+    if (await pingHealth(PYTHON_PORT)) {
+      stopRecoveryLoop()
+      setStatus('ready')
+      startHealthMonitor()
+      return
+    }
+    killPort(PYTHON_PORT)
+    await waitForPortFree(PYTHON_PORT, 3_000)
+    if (await attemptStart(15_000)) {
+      stopRecoveryLoop()
+      setStatus('ready')
+      startHealthMonitor()
+    }
+  }, RECOVERY_INTERVAL)
+}
+
+function stopRecoveryLoop(): void {
+  if (recoveryTimer) { clearInterval(recoveryTimer); recoveryTimer = null }
+}
+
+/** Manual restart, driven by a renderer "retry" button. Kills any zombie, tries
+ *  a short burst, and falls back to the background recovery loop on failure. */
+export async function restartBackend(): Promise<BackendStatus> {
+  if (shuttingDown) return currentStatus
+  stopHealthMonitor()
+  stopRecoveryLoop()
+  setStatus('retrying', 'manual restart')
+  killPort(PYTHON_PORT)
+  await waitForPortFree(PYTHON_PORT, 5_000)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (await attemptStart(15_000)) {
+      setStatus('ready')
+      startHealthMonitor()
+      return currentStatus
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 1_500))
+  }
+  setStatus('down', 'restart failed — retrying in background')
+  startRecoveryLoop()
+  return currentStatus
 }
 
 export async function stopPythonSidecar(): Promise<void> {
   shuttingDown = true
-  if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null }
+  stopHealthMonitor()
+  stopRecoveryLoop()
 
   const pid = pythonProcess?.pid
   if (pid) {
@@ -188,17 +290,32 @@ export async function stopPythonSidecar(): Promise<void> {
   killPort(PYTHON_PORT)
 }
 
-/** Respawn the backend if it dies while the app is running. */
+/** Respawn the backend if it dies (or wedges) while the app is running. Uses the
+ *  HTTP probe so a bound-but-unresponsive backend is also caught. On a failed
+ *  respawn it hands off to the background recovery loop rather than looping here. */
 function startHealthMonitor(): void {
+  stopRecoveryLoop()
   if (monitorTimer) return
   monitorTimer = setInterval(async () => {
     if (shuttingDown) return
-    if (!(await isPortAlreadyBound(PYTHON_PORT))) {
-      console.warn('[Python] Backend not responding — respawning')
-      killPort(PYTHON_PORT)
-      await waitForPortFree(PYTHON_PORT, 3_000)
-      spawnBackend()
+    if (await pingHealth(PYTHON_PORT)) {
+      if (currentStatus !== 'ready') setStatus('ready')
+      return
+    }
+    console.warn('[Python] Backend not responding — respawning')
+    setStatus('retrying', 'backend not responding')
+    killPort(PYTHON_PORT)
+    await waitForPortFree(PYTHON_PORT, 3_000)
+    if (await attemptStart(15_000)) {
+      setStatus('ready')
+    } else {
+      setStatus('down', 'backend down — retrying in background')
+      stopHealthMonitor()
+      startRecoveryLoop()
     }
   }, 20_000)
 }
 
+function stopHealthMonitor(): void {
+  if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null }
+}

@@ -499,21 +499,12 @@ export const api = {
   getProduction: (project: string) =>
     apiCall<ProductionPayload>('GET', `/production/${encodeURIComponent(project)}`),
 
+  // Saving production.json also mirrors the planning to disk (create-only) on the
+  // backend — there is no separate "materialize" call any more; structure is kept
+  // in sync automatically in both directions.
   setProduction: (project: string, production: ProductionState) =>
-    apiCall<{ success: boolean }>('PUT', `/production/${encodeURIComponent(project)}`, { production }),
-
-  materializeProductionEntity: (project: string, payload: {
-    kind: 'asset' | 'sequence' | 'shot'
-    class_token?: string
-    name?: string
-    seq_number?: number
-    shot_number?: number
-    update?: boolean
-    shot_numbers?: number[]
-    shots?: Array<{ number: number; tasks: Array<{ token: string; subtasks: string[] }> }>
-  }) =>
-    apiCall<{ success: boolean; kind: string; path: string }>(
-      'POST', `/production/${encodeURIComponent(project)}/materialize`, payload),
+    apiCall<{ success: boolean; synced?: Record<string, number> }>(
+      'PUT', `/production/${encodeURIComponent(project)}`, { production }),
 
   // Fan out a "comment" activity event so favorited-task subscribers see it in
   // Activity. Persistence of the comment itself is already in production.json
