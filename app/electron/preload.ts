@@ -14,6 +14,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFiles: (filters?: { name: string; extensions: string[] }[]): Promise<string[]> =>
     ipcRenderer.invoke('dialog:openFiles', filters),
 
+  // Pick a folder, return every file inside it recursively (optionally filtered
+  // to the given lowercase extensions, no dot).
+  openFolderFiles: (extensions?: string[]): Promise<string[]> =>
+    ipcRenderer.invoke('dialog:openFolderFiles', extensions),
+
   saveFile: (defaultName?: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
     ipcRenderer.invoke('dialog:saveFile', { defaultName, filters }),
 

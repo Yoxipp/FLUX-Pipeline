@@ -120,6 +120,7 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
 # catch-all created on demand; "reference" holds reference files (photos, docs…).
 DEFAULT_TYPE_TOKENS: dict[str, str] = {
     "GEO":     "model",
+    "ANIM":    "anim",
     "SHADING": "shading",
     "GROOM":   "groom",
     "RIG":     "rig",

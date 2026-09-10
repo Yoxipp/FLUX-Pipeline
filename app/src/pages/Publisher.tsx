@@ -219,6 +219,11 @@ const MAP_TOKENS = [
   'METAL', 'SPEC', 'AO', 'EMISS', 'OPACITY', 'TRANS',
 ]
 
+// Image/texture extensions kept when importing a whole folder (no dot, lowercase).
+const TEXTURE_EXTS = [
+  'exr', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'tga', 'tx', 'hdr', 'bmp', 'webp', 'psd',
+]
+
 // Basename without directory or extension(s) — strips a UDIM/frame tail too
 // (Mesh_BCol.1001.exr -> "Mesh_BCol", Mesh_Disp.exr -> "Mesh_Disp").
 function fileStem(path: string): string {
@@ -243,9 +248,9 @@ const CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS'
 const ASSET_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX'] as const
 // Coarse task = TYPE token (fixed order); label shown title-cased, value uppercase.
 const ASSET_TASKS: { value: string; label: string }[] = [
-  { value: 'GEO', label: 'Geo' }, { value: 'SHADING', label: 'Shading' }, { value: 'GROOM', label: 'Groom' },
-  { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' }, { value: 'MULT', label: 'Mult' },
-  { value: 'REF', label: 'Ref' },
+  { value: 'GEO', label: 'Geo' }, { value: 'ANIM', label: 'Anim' }, { value: 'SHADING', label: 'Shading' },
+  { value: 'GROOM', label: 'Groom' }, { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' },
+  { value: 'MULT', label: 'Mult' }, { value: 'REF', label: 'Ref' },
 ]
 
 // Info popover copy for each token (explanation · expected · concrete example).
@@ -1398,6 +1403,31 @@ export function Publisher() {
                   >
                     <FolderOpen size={12} strokeWidth={1.75} />
                     Parcourir
+                  </div>
+                  <div
+                    onClick={async () => {
+                      // Import a whole texture folder (recursive), filtered to image
+                      // types so junk (thumbs, logs…) is skipped.
+                      const picked = await window.electronAPI?.openFolderFiles?.(TEXTURE_EXTS)
+                      if (picked && picked.length) {
+                        setLocalFiles(picked)
+                        setSourcePath(picked[0])
+                      } else if (picked) {
+                        toast.error('Aucune image trouvée dans ce dossier')
+                      }
+                    }}
+                    className="scale-hover"
+                    title="Importer un dossier de textures (récursif)"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+                      height: 28, padding: '0 10px', borderRadius: 5,
+                      border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
+                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 10,
+                      boxShadow: 'var(--shadow-xs)',
+                    }}
+                  >
+                    <FolderOpen size={12} strokeWidth={1.75} />
+                    Dossier
                   </div>
                 </div>
 

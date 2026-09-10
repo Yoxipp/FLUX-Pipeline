@@ -166,6 +166,37 @@ ipcMain.handle('dialog:openFiles', async (_event, filters?: { name: string; exte
   return result.canceled ? [] : result.filePaths
 })
 
+// Pick a FOLDER and return every file inside it (recursively). Used by the
+// Publisher's local source to import a whole texture folder at once. When
+// `extensions` is given (lowercase, no dot), only those file types are returned.
+ipcMain.handle('dialog:openFolderFiles', async (_event, extensions?: string[]) => {
+  if (!win) return []
+  const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+  if (result.canceled || !result.filePaths[0]) return []
+  const root = result.filePaths[0]
+  const allow = extensions && extensions.length ? new Set(extensions.map(e => e.toLowerCase())) : null
+  const out: string[] = []
+  const MAX = 5000  // guard against selecting a giant tree by accident
+  const walk = (dir: string) => {
+    if (out.length >= MAX) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (out.length >= MAX) return
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) { walk(full); continue }
+      if (!e.isFile()) continue
+      if (allow) {
+        const ext = path.extname(e.name).slice(1).toLowerCase()
+        if (!allow.has(ext)) continue
+      }
+      out.push(full)
+    }
+  }
+  walk(root)
+  return out.sort()
+})
+
 ipcMain.handle('dialog:saveFile', async (_event, opts?: { defaultName?: string; filters?: { name: string; extensions: string[] }[] }) => {
   if (!win) return null
   const result = await dialog.showSaveDialog(win, {
