@@ -1129,6 +1129,117 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
   )
 }
 
+// ── Archives browser (physical PROJECT/ARCHIVE/ folder, shared) ───────────────
+// The "Archivés" tab shows the real on-disk ARCHIVE folder each project holds
+// (where Production's delete-as-archive moves entities), not a per-user bookmark
+// list. Read-only browsing; "Ouvrir" jumps into the main explorer at that path.
+function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string[]) => void }) {
+  const [projects, setProjects] = useState<string[]>([])
+  const [cur, setCur]           = useState<{ project: string; sub: string[] } | null>(null)
+  const [entries, setEntries]   = useState<ExplorerItem[]>([])
+  const [loading, setLoading]   = useState(false)
+  const [err, setErr]           = useState('')
+
+  useEffect(() => {
+    let ok = true
+    api.getProjects().then(d => { if (ok) setProjects(d.projects) }).catch(() => { if (ok) setProjects([]) })
+    return () => { ok = false }
+  }, [])
+
+  useEffect(() => {
+    if (!cur) { setEntries([]); return }
+    let ok = true
+    setLoading(true); setErr('')
+    api.browseProject(cur.project, cur.sub.join('/'))
+      .then(d => {
+        if (!ok) return
+        setEntries([
+          ...d.folders.map(f => ({ name: f.name, isDir: true })),
+          ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
+        ])
+      })
+      .catch(() => { if (ok) { setEntries([]); setErr('Aucune archive pour ce projet.') } })
+      .finally(() => { if (ok) setLoading(false) })
+    return () => { ok = false }
+  }, [cur])
+
+  const _hdr: React.CSSProperties = {
+    padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0,
+    background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+    display: 'flex', alignItems: 'center', gap: 8,
+  }
+  const _row: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', borderRadius: 6,
+    cursor: 'pointer', marginBottom: 2, border: '1px solid transparent',
+  }
+
+  // Project list (each project's ARCHIVE root).
+  if (!cur) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={_hdr}>ARCHIVÉS · {projects.length} projet{projects.length > 1 ? 's' : ''}</div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
+          {projects.length === 0 ? (
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Aucun projet</div>
+          ) : projects.map(p => (
+            <div
+              key={p}
+              onClick={() => setCur({ project: p, sub: ['ARCHIVE'] })}
+              style={_row}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <Archive size={18} strokeWidth={1.75} color="var(--ink-3)" />
+              <span style={{ fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const goUp = () => {
+    if (cur.sub.length <= 1) setCur(null)                                   // back to project list
+    else setCur({ project: cur.project, sub: cur.sub.slice(0, -1) })
+  }
+  const relStr = cur.sub.slice(1).join('/')   // hide the leading "ARCHIVE"
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={_hdr}>
+        <span onClick={goUp} style={{ cursor: 'pointer', color: 'var(--accent-hi)' }}>‹ Retour</span>
+        <span style={{ color: 'var(--ink-2)' }}>{cur.project}</span>
+        {relStr && <span style={{ color: 'var(--ink-4)' }}>/ {relStr}</span>}
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
+        {loading ? (
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Chargement…</div>
+        ) : err ? (
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{err}</div>
+        ) : entries.length === 0 ? (
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Vide</div>
+        ) : entries.map((it, i) => (
+          <div
+            key={i}
+            onClick={() => { if (it.isDir) setCur({ project: cur.project, sub: [...cur.sub, it.name] }) }}
+            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default' }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+          >
+            {it.isDir ? <FolderSvg size={22} /> : <div style={{ width: 22, textAlign: 'center', color: 'var(--ink-4)', fontSize: 12 }}>·</div>}
+            <span style={{ flex: 1, fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+            <span
+              onClick={e => { e.stopPropagation(); onOpen(cur.project, it.isDir ? [...cur.sub, it.name] : cur.sub) }}
+              title="Ouvrir dans l'explorateur"
+              style={{ flexShrink: 0, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+            >Ouvrir</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Saved Items List (Favoris / Récents / Archivés) ───────────────────────────
 
 function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, onDeleteProject }: {
@@ -2376,12 +2487,11 @@ export function Projects() {
             />
           )}
           {sidebarTab === 'archives' && (
-            <SavedList
-              items={archived} label="ARCHIVÉS" emptyMsg="Aucun élément archivé"
-              removeLabel="Désarchiver"
-              onNavigate={navigateToSaved}
-              onRemove={s => removeFromSaved(s, 'archived')}
-              onDeleteProject={s => setDeleteProjectTarget(s)}
+            <ArchivesBrowser
+              onOpen={(project, subpath) => {
+                navigateTo({ kind: 'inside', project, subpath })
+                setSidebarTab('tous')
+              }}
             />
           )}
 
