@@ -33,7 +33,10 @@ interface Props {
   onEntityClicked?: () => void
 }
 
-const ZOOM_MIN = 60
+// H zoom == per-shot width. Min is intentionally tiny so a whole sequence can be
+// squashed to a compact overview (shots become thin slivers); the number/label
+// just clip out at small sizes.
+const ZOOM_MIN = 10
 const ZOOM_MAX = 260
 const ZOOM_DEF = 120
 const LS_ZOOM = 'flux.production.shot.zoom'
@@ -689,7 +692,10 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
       onClick={(e) => { e.stopPropagation(); onClick() }}
       title={title}
       style={{
-        width, height, minWidth: Math.min(width, 24),
+        // border-box so the given width INCLUDES padding/border — otherwise each
+        // clip renders ~16px wider than `width`, and the shot row overflows past
+        // the sequence clip (their widths both derive from the same colWidths).
+        width, height, minWidth: Math.min(width, 24), boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         borderRadius: 5,
         background: color,
