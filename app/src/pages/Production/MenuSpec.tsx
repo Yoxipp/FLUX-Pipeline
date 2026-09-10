@@ -59,6 +59,24 @@ interface PinnedRef {
 
 const ROOT_TAB:   Tab = { key: 'root',   kind: 'root' }
 const ASSETS_TAB: Tab = { key: 'assets', kind: 'assets' }
+
+// Last path segment of a publish's dest_folder (the on-disk instance directory),
+// e.g. "$FLUX/…/shading/mari_b_col" -> "MARI_B_COL". This is the source of truth
+// for which subtask a publish belongs to: the parsed filename INSTANCE token is
+// only a single token and drifts on multi-word or nested instances, whereas the
+// folder is exactly the subtask the artist published into.
+function publishFolderLeaf(p: ProductionPublish): string {
+  const dest = (p.dest_folder || '').replace(/\\/g, '/').replace(/\/+$/, '')
+  const leaf = dest.split('/').pop() || ''
+  return leaf.toUpperCase()
+}
+
+// A publish belongs to *subtask* when its parsed instance matches OR its on-disk
+// folder leaf matches — the latter catches instances the filename parser mangles.
+function publishMatchesSubtask(p: ProductionPublish, subtask: string): boolean {
+  const sub = subtask.toUpperCase()
+  return (p.instance || '').toUpperCase() === sub || publishFolderLeaf(p) === sub
+}
 const taskKey   = (entityId: string, taskId: string) => `task:${entityId}:${taskId}`
 const subKey    = (entityId: string, taskId: string, sub: string) => `sub:${entityId}:${taskId}:${sub}`
 const entityRootKey = (entityId: string) => `entityRoot:${entityId}`
@@ -409,7 +427,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
             entityKind={res.kind}
             subtaskFilter={active.subtask}
             detailKey={`${task.name}|${active.subtask}`}
-            publishes={bucket.filter(p => (p.instance || '').toUpperCase() === active.subtask.toUpperCase())}
+            publishes={bucket.filter(p => publishMatchesSubtask(p, active.subtask))}
             pinned={isPinned(active.key)}
             onTogglePin={() => togglePin(active)}
             onPatchTask={patch => patchEntityTask(setState, res, task.id, patch)}
@@ -781,13 +799,13 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
       }}
     >
       <div
-        onClick={(e) => { if (inherited) return; e.stopPropagation(); onOpenHeader() }}
+        onClick={(e) => { if (inherited || hasSubs) return; e.stopPropagation(); onOpenHeader() }}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          cursor: inherited ? 'default' : 'pointer',
+          cursor: (inherited || hasSubs) ? 'default' : 'pointer',
           paddingBottom: expanded ? 6 : 0,
         }}
-        title={inherited ? 'Hérité de la séquence' : 'Ouvrir la tâche'}
+        title={inherited ? 'Hérité de la séquence' : (hasSubs ? 'Survoler pour ouvrir un subtask' : 'Ouvrir la tâche')}
       >
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--paper)', flexShrink: 0, opacity: 0.9 }} />
         <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--paper)' }}>{task.name}</span>

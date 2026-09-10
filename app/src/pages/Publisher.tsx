@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen } from 'lucide-react'
+import { Trash2, FolderOpen, X } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, FolderIcon, Check, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
@@ -211,6 +211,33 @@ interface ComposerSel {
 
 const EMPTY_SEL: ComposerSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '' }
 
+// Texture-map tokens recognised for autogroup. A file named "<Mesh>_<Token>[...]"
+// (e.g. Mesh_BCol.exr, Mesh_ZDisp.1001.exr) publishes under INSTANCE = <Token>.
+// the maintainer's convention (extend freely): BCol, Rough, Disp, ZDisp, Bump, Norm, SSS, Iso.
+const MAP_TOKENS = [
+  'BCOL', 'ROUGH', 'ZDISP', 'DISP', 'BUMP', 'NORM', 'SSS', 'ISO',
+  'METAL', 'SPEC', 'AO', 'EMISS', 'OPACITY', 'TRANS',
+]
+
+// Basename without directory or extension(s) — strips a UDIM/frame tail too
+// (Mesh_BCol.1001.exr -> "Mesh_BCol", Mesh_Disp.exr -> "Mesh_Disp").
+function fileStem(path: string): string {
+  const base = path.replace(/\\/g, '/').split('/').pop() || path
+  return base.split('.')[0] || base
+}
+
+// Derive the INSTANCE (map token) for a texture file. Prefers a recognised
+// MAP_TOKENS match anywhere in the name; otherwise falls back to the last
+// underscore segment (so any suffix still groups sensibly). Uppercased.
+function parseMapToken(path: string): string {
+  const stem = fileStem(path).toUpperCase()
+  const segs = stem.split(/[_\-]/).filter(Boolean)
+  for (const tok of MAP_TOKENS) {
+    if (segs.includes(tok)) return tok
+  }
+  return segs.length > 1 ? segs[segs.length - 1] : (segs[0] || 'null')
+}
+
 // Publisher category → pipeline CLASS token. "FX" is a display label for FXRIG.
 const CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
 const ASSET_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX'] as const
@@ -280,9 +307,12 @@ function InfoDot({ info }: { info: TokenInfo }) {
 
 // A composer module: label + info dot, then a value box — a fixed dropdown or a
 // free-text combobox whose dropdown lists contextual suggestions (`options`).
-function ModuleBox({ label, info, value, placeholder, options, fixed, onChange }: {
+function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, onArchiveOption }: {
   label: string; info: TokenInfo; value: string; placeholder?: string
   options: string[]; fixed?: boolean; onChange: (v: string) => void
+  // When set, each option gets a small cross that archives that token (ghost or
+  // not) into ARCHIVE/ after confirmation. Only wired on per-project dropdowns.
+  onArchiveOption?: (v: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -343,8 +373,24 @@ function ModuleBox({ label, info, value, placeholder, options, fixed, onChange }
                   padding: '5px 8px', fontSize: 10, fontFamily: 'var(--mono)', cursor: 'pointer', whiteSpace: 'nowrap',
                   color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)',
                   background: o === value ? 'var(--accent-soft)' : 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 6,
                 }}
-              >{o}</div>
+              >
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o}</span>
+                {onArchiveOption && (
+                  <button
+                    title="Archiver ce token (déplace le dossier vers ARCHIVE/)"
+                    onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setOpen(false); onArchiveOption(o) }}
+                    style={{
+                      flexShrink: 0, width: 15, height: 15, borderRadius: 3, border: 'none',
+                      background: 'transparent', color: 'var(--ink-4)', cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = 'var(--err)')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
+                  ><X size={10} strokeWidth={2} /></button>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -362,9 +408,10 @@ interface ComposerProps {
   sel:     ComposerSel
   onModeSwitch: () => void
   onSelect:     (key: string, value: string) => void
+  onArchiveToken: (field: 'name' | 'instance' | 'seq' | 'shot', value: string) => void
 }
 
-function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch, onSelect }: ComposerProps) {
+function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch, onSelect, onArchiveToken }: ComposerProps) {
   // Asset names for the selected category (filtered by its CLASS path)
   const cls = CATEGORY_TO_CLASS[sel.category] ?? ''
   const classPath = (tokens.CLASS?.[cls] ?? '').replace(/\\/g, '/')
@@ -423,15 +470,31 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
       {mode === 'asset' ? (
         <>
           <ModuleBox label="Catégorie" info={TOKEN_INFO.category} value={sel.category} fixed options={[...ASSET_CATEGORIES]} placeholder="—" onChange={v => onSelect('category', v)} />
-          <ModuleBox label="Name" info={TOKEN_INFO.name} value={sel.name} options={names} placeholder={sel.category ? 'nom…' : 'catégorie ?'} onChange={v => onSelect('name', v)} />
+          <ModuleBox
+            label="Name" info={TOKEN_INFO.name} value={sel.name} options={names}
+            placeholder={sel.category ? 'nom…' : 'catégorie ?'} onChange={v => onSelect('name', v)}
+            onArchiveOption={sel.category ? (v => onArchiveToken('name', v)) : undefined}
+          />
           <ModuleBox label="Task" info={TOKEN_INFO.task} value={sel.task} fixed options={ASSET_TASKS.map(t => t.value)} placeholder="—" onChange={v => onSelect('task', v)} />
-          <ModuleBox label="Instance" info={TOKEN_INFO.instance} value={sel.instance} options={instanceSug} placeholder="null" onChange={v => onSelect('instance', v)} />
+          <ModuleBox
+            label="Instance" info={TOKEN_INFO.instance} value={sel.instance} options={instanceSug}
+            placeholder="null" onChange={v => onSelect('instance', v)}
+            onArchiveOption={(sel.category && sel.name && sel.task) ? (v => onArchiveToken('instance', v)) : undefined}
+          />
           <ModuleBox label="Variante" info={TOKEN_INFO.variante} value={sel.variante} options={varianteSug} placeholder="(option)" onChange={v => onSelect('variante', v)} />
         </>
       ) : (
         <>
-          <ModuleBox label="Sequence" info={TOKEN_INFO.seq} value={sel.seq} options={seqs} placeholder="SEQ001" onChange={v => onSelect('seq', v)} />
-          <ModuleBox label="Shot" info={TOKEN_INFO.shot} value={sel.shot} options={shots} placeholder="SHOT010" onChange={v => onSelect('shot', v)} />
+          <ModuleBox
+            label="Sequence" info={TOKEN_INFO.seq} value={sel.seq} options={seqs}
+            placeholder="SEQ001" onChange={v => onSelect('seq', v)}
+            onArchiveOption={v => onArchiveToken('seq', v)}
+          />
+          <ModuleBox
+            label="Shot" info={TOKEN_INFO.shot} value={sel.shot} options={shots}
+            placeholder="SHOT010" onChange={v => onSelect('shot', v)}
+            onArchiveOption={sel.seq ? (v => onArchiveToken('shot', v)) : undefined}
+          />
           <ModuleBox label="Name" info={TOKEN_INFO.shotName} value={sel.name} options={shotNameSug} placeholder="task…" onChange={v => onSelect('name', v)} />
           <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
         </>
@@ -513,6 +576,12 @@ export function Publisher() {
 
   // Source / description / state
   const [sourcePath, setSourcePath]   = useState('')
+  // Local-file source: multiple files can be picked at once (texture sets). The
+  // first also fills sourcePath so the single-file path/name UI still works.
+  const [localFiles, setLocalFiles]   = useState<string[]>([])
+  // Autogroup: derive each file's INSTANCE (map token) from its filename so a
+  // whole texture set publishes into one folder per map. Off = one instance for all.
+  const [autoGroup, setAutoGroup]     = useState(true)
   const [description, setDescription] = useState('')
   const [publishing, setPublishing]   = useState(false)
   // Optional published-name override (local file). null = follow the token composer.
@@ -549,10 +618,48 @@ export function Publisher() {
   // Projects come from the shared ProjectContext (useProject) — no local fetch.
 
   // Tokens for selected project
-  useEffect(() => {
+  const reloadTokens = useCallback(() => {
     if (!project) { setTokens({}); return }
     api.getTokens(project).then(d => setTokens(d.tokens)).catch(() => setTokens({}))
   }, [project])
+  useEffect(() => { reloadTokens() }, [reloadTokens])
+
+  // Ghost-token archive flow (composer cross): confirmation before moving the
+  // token's folder to ARCHIVE/ and dropping it from tokens.json.
+  const [tokenArchive, setTokenArchive] = useState<{
+    field: 'name' | 'instance' | 'seq' | 'shot'
+    params: { field: 'name' | 'instance' | 'seq' | 'shot'; class_token?: string; name?: string; task?: string; instance?: string; seq?: string; shot?: string }
+    label: string
+    info: { rel_path: string; exists: boolean; file_count: number } | null
+    busy: boolean
+  } | null>(null)
+
+  const requestTokenArchive = useCallback((
+    field: 'name' | 'instance' | 'seq' | 'shot',
+    params: { field: 'name' | 'instance' | 'seq' | 'shot'; class_token?: string; name?: string; task?: string; instance?: string; seq?: string; shot?: string },
+    label: string,
+  ) => {
+    setTokenArchive({ field, params, label, info: null, busy: false })
+    api.getTokenFolder(project, params)
+      .then(info => setTokenArchive(p => (p ? { ...p, info } : p)))
+      .catch(() => setTokenArchive(p => (p ? { ...p, info: { rel_path: '', exists: false, file_count: 0 } } : p)))
+  }, [project])
+
+  const confirmTokenArchive = useCallback(async () => {
+    setTokenArchive(p => (p ? { ...p, busy: true } : p))
+    let ok = true
+    try {
+      await api.archiveToken(project, tokenArchive!.params)
+    } catch (e) {
+      ok = false
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+    if (!ok) { setTokenArchive(p => (p ? { ...p, busy: false } : p)); return }
+    toast.success('Token archivé')
+    setTokenArchive(null)
+    reloadTokens()
+    window.dispatchEvent(new Event('flux:refresh'))
+  }, [project, tokenArchive, reloadTokens])
 
   // "Publish here" from Production — prefill project + mode + composer once.
   useEffect(() => {
@@ -877,21 +984,51 @@ export function Publisher() {
         setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
       } else if (dcc === 'Fichier local') {
-        if (!sourcePath.trim()) {
-          toast.error('Indique le fichier source')
+        const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
+        if (!files.length) {
+          toast.error('Indique le(s) fichier(s) source')
           return
         }
-        // The source file keeps any name (photo, doc…); the destination name is
-        // built from the token composer, so send it as target_name.
-        const res = await api.publish({
-          source_path:  sourcePath,
-          project_name: project,
-          description:  description || undefined,
-          user:         settings?.username ?? undefined,
-          target_name:  (nameOverride && nameOverride.trim()) || buildFilename(),
-        })
-        if (res.success) toast.success(res.message)
-        else toast.error(res.message)
+        const multi = files.length > 1
+        const cls   = CATEGORY_TO_CLASS[sel.category] ?? formatToken(sel.category)
+        // Each source keeps any name; the destination name is composed from the
+        // token composer. For a multi-file set, each file gets a DISTINCT instance
+        // so they never collapse onto one version: autogroup → the map token from
+        // the filename (Mesh_BCol → BCOL); bypass → the file's own stem.
+        const targetFor = (f: string): string => {
+          if (!multi) return (nameOverride && nameOverride.trim()) || buildFilename()
+          const distinct = (mode === 'asset' && autoGroup) ? parseMapToken(f) : formatToken(fileStem(f))
+          if (mode === 'asset') {
+            const varr = formatToken(sel.variante)
+            return `${cls}_${sel.task}_${formatToken(sel.name)}_${distinct}` + (varr ? `_${varr}` : '')
+          }
+          return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
+        }
+        let okCount = 0
+        const failed: string[] = []
+        for (const f of files) {
+          try {
+            const res = await api.publish({
+              source_path:  f,
+              project_name: project,
+              description:  description || undefined,
+              user:         settings?.username ?? undefined,
+              target_name:  targetFor(f),
+            })
+            if (res.success) okCount++
+            else failed.push(fileStem(f))
+          } catch {
+            failed.push(fileStem(f))
+          }
+        }
+        if (okCount) {
+          toast.success(
+            multi
+              ? `${okCount} fichier${okCount > 1 ? 's' : ''} publié${okCount > 1 ? 's' : ''}${failed.length ? ` · ${failed.length} échec(s)` : ''}`
+              : 'Publié',
+          )
+        }
+        if (failed.length && !okCount) toast.error(`Échec : ${failed.join(', ')}`)
       } else {
         toast.error(`Publication depuis ${dcc} non encore disponible`)
         return
@@ -904,7 +1041,7 @@ export function Publisher() {
   }, [
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
-    description, settings?.username, sourcePath, nameOverride,
+    description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbObjOptions, zbFbxOptions,
     mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
@@ -973,7 +1110,54 @@ export function Publisher() {
               sel={sel}
               onModeSwitch={handleModeSwitch}
               onSelect={handleSelect}
+              onArchiveToken={(field, value) => {
+                const cls = CATEGORY_TO_CLASS[sel.category] ?? formatToken(sel.category)
+                if (field === 'name') {
+                  requestTokenArchive('name', { field: 'name', class_token: cls, name: value }, `NAME · ${value}`)
+                } else if (field === 'instance') {
+                  requestTokenArchive('instance', { field: 'instance', class_token: cls, name: sel.name, task: sel.task, instance: value }, `INSTANCE · ${value}`)
+                } else if (field === 'seq') {
+                  requestTokenArchive('seq', { field: 'seq', seq: value }, `SEQ · ${value}`)
+                } else {
+                  requestTokenArchive('shot', { field: 'shot', seq: sel.seq, shot: value }, `SHOT · ${sel.seq}/${value}`)
+                }
+              }}
             />
+
+            {tokenArchive && (
+              <div
+                onClick={e => { if (e.target === e.currentTarget && !tokenArchive.busy) setTokenArchive(null) }}
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.55)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+                }}
+              >
+                <div style={{
+                  width: 360, maxWidth: '92vw', background: 'var(--paper)',
+                  border: '1px solid var(--rule-2)', borderRadius: 12, boxShadow: 'var(--shadow)', padding: '18px 18px 14px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                    <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
+                    Archiver {tokenArchive.label} ?
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
+                    {tokenArchive.info === null
+                      ? 'Analyse du dossier…'
+                      : tokenArchive.info.exists && tokenArchive.info.file_count > 0
+                        ? `Ce dossier contient ${tokenArchive.info.file_count} fichier${tokenArchive.info.file_count > 1 ? 's' : ''}. Il sera déplacé vers ARCHIVE/ (récupérable), pas supprimé.`
+                        : tokenArchive.info.exists
+                          ? 'Le dossier (vide) sera déplacé vers ARCHIVE/.'
+                          : "Aucun dossier sur disque : seul le token sera retiré."}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <Btn onClick={() => setTokenArchive(null)} disabled={tokenArchive.busy}>Annuler</Btn>
+                    <Btn onClick={confirmTokenArchive} disabled={tokenArchive.busy || tokenArchive.info === null}>
+                      {tokenArchive.busy ? 'Archivage…' : 'Archiver'}
+                    </Btn>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Source / DCC info */}
             {dcc === 'ZBrush' ? (
@@ -1191,14 +1375,19 @@ export function Publisher() {
                   />
                   <div
                     onClick={async () => {
-                      // Native Windows file picker — any file type (photos, docs, 3D…).
-                      const picked = await window.electronAPI?.openFile?.([
+                      // Native Windows multi-picker — any file type. Selecting several
+                      // files (a texture set, a folder's worth of maps) publishes them
+                      // in one go; each gets its own destination via autogroup.
+                      const picked = await window.electronAPI?.openFiles?.([
                         { name: 'Tous les fichiers', extensions: ['*'] },
                       ])
-                      if (picked) setSourcePath(picked)
+                      if (picked && picked.length) {
+                        setLocalFiles(picked)
+                        setSourcePath(picked[0])
+                      }
                     }}
                     className="scale-hover"
-                    title="Parcourir…"
+                    title="Parcourir… (sélection multiple possible)"
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
                       height: 28, padding: '0 10px', borderRadius: 5,
@@ -1212,8 +1401,39 @@ export function Publisher() {
                   </div>
                 </div>
 
-                {/* Published name — editable; defaults to the composed token name.
+                {/* Multi-file set: list + autogroup toggle. Each file publishes into
+                    its own map folder (INSTANCE from the filename) unless bypassed. */}
+                {localFiles.length > 1 && (
+                  <div style={{ marginTop: 8, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="cap">{localFiles.length} FICHIERS</span>
+                      <span style={{ flex: 1 }} />
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 10, color: 'var(--ink-2)' }}>
+                        <input type="checkbox" checked={autoGroup} onChange={e => setAutoGroup(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+                        Autogroup par map
+                      </label>
+                      <span
+                        onClick={() => { setLocalFiles([]); setSourcePath('') }}
+                        style={{ color: 'var(--accent-hi)', cursor: 'pointer', fontSize: 10 }}
+                      >Vider</span>
+                    </div>
+                    <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {localFiles.map(f => {
+                        const inst = (mode === 'asset' && autoGroup) ? parseMapToken(f) : formatToken(fileStem(f))
+                        return (
+                          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileStem(f)}</span>
+                            <span style={{ color: 'var(--accent-hi)', flexShrink: 0 }}>→ {inst}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Published name — single file only; multi-file names are auto per file.
                     Must stay token-parseable (it drives the destination folder). */}
+                {localFiles.length <= 1 && (<>
                 <div className="cap" style={{ margin: '10px 0 6px' }}>NOM PUBLIÉ</div>
                 <input
                   value={nameOverride ?? filename}
@@ -1235,6 +1455,7 @@ export function Publisher() {
                     </span>
                   )}
                 </div>
+                </>)}
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>

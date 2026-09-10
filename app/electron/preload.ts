@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFile: (filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
     ipcRenderer.invoke('dialog:openFile', filters),
 
+  // Multi-select variant: returns every chosen path (empty array on cancel).
+  openFiles: (filters?: { name: string; extensions: string[] }[]): Promise<string[]> =>
+    ipcRenderer.invoke('dialog:openFiles', filters),
+
   saveFile: (defaultName?: string, filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
     ipcRenderer.invoke('dialog:saveFile', { defaultName, filters }),
 

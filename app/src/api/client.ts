@@ -522,6 +522,52 @@ export const api = {
     apiCall<{ success: boolean }>(
       'POST', `/production/${encodeURIComponent(project)}/comment`, payload),
 
+  // Resolve a Production entity's on-disk folder + file count, to warn before
+  // archiving (prevention message). exists=false → nothing on disk (ghost).
+  getEntityFolder: (project: string, params: {
+    kind: 'asset' | 'shot' | 'seq'
+    class_token?: string; name?: string
+    seq?: string; shot?: string
+  }) => {
+    const qs = new URLSearchParams({ kind: params.kind })
+    if (params.class_token) qs.set('class_token', params.class_token)
+    if (params.name)        qs.set('name', params.name)
+    if (params.seq)         qs.set('seq', params.seq)
+    if (params.shot)        qs.set('shot', params.shot)
+    return apiCall<{ rel_path: string; exists: boolean; file_count: number }>(
+      'GET', `/production/${encodeURIComponent(project)}/entity-folder?${qs}`)
+  },
+
+  // Move an entity folder into <project>/ARCHIVE/<timestamp>/ (never hard-delete).
+  // The caller removes the logical entity from production.json after this resolves.
+  archiveEntity: (project: string, relPath: string) =>
+    apiCall<{ archived: boolean; archived_to?: string; reason?: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/archive`, { rel_path: relPath }),
+
+  // Composer ghost-token: resolve a token's folder + file count (to warn before
+  // archiving it from the Publisher).
+  getTokenFolder: (project: string, params: {
+    field: 'name' | 'instance' | 'seq' | 'shot'
+    class_token?: string; name?: string; task?: string
+    instance?: string; seq?: string; shot?: string
+  }) => {
+    const qs = new URLSearchParams({ field: params.field })
+    for (const k of ['class_token', 'name', 'task', 'instance', 'seq', 'shot'] as const) {
+      if (params[k]) qs.set(k, params[k] as string)
+    }
+    return apiCall<{ rel_path: string; exists: boolean; file_count: number }>(
+      'GET', `/production/${encodeURIComponent(project)}/token-folder?${qs}`)
+  },
+
+  // Archive a composer token's folder (into ARCHIVE/) and drop it from tokens.json.
+  archiveToken: (project: string, params: {
+    field: 'name' | 'instance' | 'seq' | 'shot'
+    class_token?: string; name?: string; task?: string
+    instance?: string; seq?: string; shot?: string
+  }) =>
+    apiCall<{ archived: boolean; archived_to?: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/archive-token`, params),
+
   // ── Reference media (/ref embed zone) ──────────────────────────────────────
   // Resolve the project-relative root of a task/subtask (where /ref lives).
   // Authoritative on the backend so shots (templated CLASS tokens) resolve right.

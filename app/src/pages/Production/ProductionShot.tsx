@@ -141,13 +141,17 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   // Shots are small fixed-size squares — they don't stretch with the horizontal
   // zoom (which controls seq width instead).
   const gap = 6
+  const shotGap = 4
   const shotSquare = Math.max(24, Math.min(42, Math.round(effShotH * 0.62)))
-  const shotBlockW = shotSquare
-  const seqBlockW  = pxPerBlock
+  // Timeline is purely visual (no create/delete by resize). The horizontal zoom
+  // slider sizes EACH SHOT directly; the sequence column is just the sum of its
+  // shots, so it grows both with the zoom and with the shot count — the sequence
+  // follows its shots. An empty sequence still shows one shot-wide block.
+  const shotW = pxPerBlock
   const colWidths = sequences.map(seq => {
-    const nShots = shotsBySeq.get(seq.id)?.length ?? 0
-    const shotsW = nShots > 0 ? nShots * shotBlockW + Math.max(0, nShots - 1) * 4 : seqBlockW
-    return Math.max(seqBlockW, shotsW) + gap
+    const n = shotsBySeq.get(seq.id)?.length ?? 0
+    const content = n > 0 ? n * shotW + (n - 1) * shotGap : shotW
+    return content + gap
   })
 
   // Drag handle between the two tracks
@@ -205,7 +209,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     const shotList = shotsBySeq.get(shot.seq_id) ?? []
     const shotIdx = shotList.findIndex(s => s.id === shot.id)
     if (shotIdx < 0) return null
-    return HEADER_W + 10 + before + shotIdx * (shotSquare + 4)
+    return HEADER_W + 10 + before + shotIdx * (shotW + shotGap)
   }
   const bookmarkExistsFor = (kind: BookmarkKind, id: string) =>
     bookmarks.some(b => b.kind === kind && b.entityId === id)
@@ -266,42 +270,6 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
       return { ...prev, sequences: prev.sequences.map(s => ({ ...s, order: orderMap.get(s.id) ?? s.order })) }
     })
   }
-  // Resize a seq clip by dragging its right edge → add / remove shots.
-  // Auto-created shots follow the SHOT010, SHOT020, … convention; removed
-  // shots are the trailing (highest-numbered) ones.
-  const resizeSeqShots = (seqId: string, targetShotCount: number) => {
-    setState(prev => {
-      const current = prev.shots.filter(s => s.seq_id === seqId).sort((a, b) => a.order - b.order)
-      const clamped = Math.max(0, targetShotCount)
-      if (clamped === current.length) return prev
-      if (clamped > current.length) {
-        const toAdd = clamped - current.length
-        // Next SHOT number: (max existing / 10 + 1) * 10 → 010, 020, 030…
-        const nums = current
-          .map(s => Number((s.name.match(/SHOT(\d+)/i) || [])[1] ?? NaN))
-          .filter(n => !Number.isNaN(n))
-        let nextNum = nums.length ? Math.max(...nums) + 1 : 1
-        const newShots: Shot[] = []
-        for (let i = 0; i < toAdd; i++) {
-          newShots.push({
-            id: `shot_${Math.random().toString(36).slice(2, 12)}`,
-            seq_id: seqId,
-            name: `SHOT${String(nextNum).padStart(3, '0')}`,
-            order: current.length + i,
-            inherit_tasks: true, inherit_assets: true,
-            tasks: [], assets: [], task_details: {}, origin: 'user',
-          })
-          nextNum += 1
-        }
-        return { ...prev, shots: [...prev.shots, ...newShots] }
-      }
-      // shrink: drop the last N
-      const toRemove = current.slice(clamped).map(s => s.id)
-      const removeSet = new Set(toRemove)
-      return { ...prev, shots: prev.shots.filter(s => !removeSet.has(s.id)) }
-    })
-  }
-
   const reorderShot = (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return
     setState(prev => {
@@ -475,8 +443,6 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                           if (from && from !== seq.id) { e.preventDefault(); reorderSeq(from, seq.id) }
                         }}
                         shotCount={shotCount}
-                        shotBlockW={shotBlockW}
-                        onResize={(nextShotCount) => resizeSeqShots(seq.id, nextShotCount)}
                       />
                     )
                   })}
@@ -512,12 +478,12 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                     const cellW = colWidths[i] - gap
                     const seqCol = effectiveSeqColor(seq)
                     return (
-                      <div key={seq.id} style={{ width: cellW, display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <div key={seq.id} style={{ width: cellW, display: 'flex', gap: shotGap, alignItems: 'center' }}>
                         {shots.map(shot => (
                           <ShotClip
                             key={shot.id}
                             shot={shot}
-                            width={shotSquare}
+                            width={shotW}
                             height={shotSquare}
                             seqColor={seqCol}
                             active={selection.kind === 'shot' && selection.id === shot.id}
@@ -621,8 +587,11 @@ function TrackRow({ title, color, subtitle, height, children, colWidths, gap, no
 const effectiveSeqColor = (seq: ProductionSequence): string =>
   seq.color || defaultSeqColor(seq.id || seq.name)
 
-// ── seq clip (with right-edge resize grip) ──────────────────────────────────
-function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, shotCount, shotBlockW, onResize }: {
+// ── seq clip ─────────────────────────────────────────────────────────────────
+// The timeline is purely visual now: sequences and shots are created/deleted
+// from the Edit menu, never by resizing a clip. So a seq clip is just a draggable
+// (reorder) colored block — no right-edge grip.
+function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, shotCount }: {
   seq:         ProductionSequence
   width:       number
   height:      number
@@ -631,76 +600,24 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
   onDragStart: React.DragEventHandler
   onDrop:      React.DragEventHandler
   shotCount:   number
-  shotBlockW:  number
-  onResize:    (nextShotCount: number) => void
 }) {
   const num = parseNum(seq.name, 'SEQ')
   const numStr = Number.isNaN(num) ? seq.name : String(num).padStart(3, '0')
   const seqColor = effectiveSeqColor(seq)
-  const [dragCount, setDragCount] = useState<number | null>(null)
-  const previewCount = dragCount ?? shotCount
-
-  const onGripDown = (e: React.MouseEvent) => {
-    e.stopPropagation(); e.preventDefault()
-    const startX = e.clientX
-    const startCount = shotCount
-    const onMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX
-      const next = Math.max(0, startCount + Math.round(delta / (shotBlockW + 4)))
-      setDragCount(next)
-    }
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      setDragCount(prev => {
-        if (prev !== null && prev !== shotCount) onResize(prev)
-        return null
-      })
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      <Clip
-        width={width} height={height}
-        color={seqColor}
-        big={numStr}
-        small={seq.label || ''}
-        active={active}
-        onClick={onClick}
-        onDragStart={onDragStart}
-        onDrop={onDrop}
-        acceptType="text/flux-seq-id"
-        title={`${seq.name}${seq.label ? ` — ${seq.label}` : ''} · ${shotCount} shot${shotCount > 1 ? 's' : ''}`}
-      />
-      {/* Right-edge resize grip */}
-      <div
-        onMouseDown={onGripDown}
-        title={`Étirer : ${previewCount} shot${previewCount > 1 ? 's' : ''}`}
-        style={{
-          position: 'absolute', top: 6, bottom: 6, right: -3, width: 6,
-          cursor: 'ew-resize', borderRadius: 3,
-          background: dragCount !== null ? 'var(--accent)' : 'transparent',
-          zIndex: 2,
-        }}
-        onMouseEnter={e => { if (dragCount === null) e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 50%, transparent)' }}
-        onMouseLeave={e => { if (dragCount === null) e.currentTarget.style.background = 'transparent' }}
-      />
-      {/* Preview tooltip while dragging */}
-      {dragCount !== null && dragCount !== shotCount && (
-        <div style={{
-          position: 'absolute', top: -22, right: -4,
-          padding: '2px 6px', borderRadius: 4,
-          background: 'var(--accent)', color: 'var(--paper)',
-          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
-          whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 4,
-        }}>
-          {dragCount > shotCount ? '+' : ''}{dragCount - shotCount} · {dragCount} SHOT{dragCount > 1 ? 'S' : ''}
-        </div>
-      )}
-    </div>
+    <Clip
+      width={width} height={height}
+      color={seqColor}
+      big={numStr}
+      small={seq.label || ''}
+      active={active}
+      onClick={onClick}
+      onDragStart={onDragStart}
+      onDrop={onDrop}
+      acceptType="text/flux-seq-id"
+      title={`${seq.name}${seq.label ? ` — ${seq.label}` : ''} · ${shotCount} shot${shotCount > 1 ? 's' : ''}`}
+    />
   )
 }
 

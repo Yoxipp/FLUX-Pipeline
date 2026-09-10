@@ -31,6 +31,123 @@ interface Props {
 
 const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`
 
+// ── delete = archive flow (asset / seq / shot) ───────────────────────────────
+// Deleting a disk-backed entity never hard-deletes: it moves the folder into
+// <project>/ARCHIVE/<timestamp>/ then removes the logical entity. A confirmation
+// is ALWAYS shown (Milo's spec); when the folder is non-empty it states how
+// many files will be moved. Cancel does nothing. If the folder is a ghost
+// (nothing on disk) we skip the move and just drop the logical entity.
+type ArchiveDescriptor =
+  | { kind: 'asset'; class_token: string; name: string }
+  | { kind: 'seq';   seq: string }
+  | { kind: 'shot';  seq: string; shot: string }
+
+function descToParams(d: ArchiveDescriptor) {
+  if (d.kind === 'asset') return { kind: 'asset' as const, class_token: d.class_token, name: d.name }
+  if (d.kind === 'seq')   return { kind: 'seq' as const, seq: d.seq }
+  return { kind: 'shot' as const, seq: d.seq, shot: d.shot }
+}
+
+interface PendingArchive {
+  label:     string
+  info:      { rel_path: string; exists: boolean; file_count: number } | null
+  onRemoved: () => void
+  busy:      boolean
+}
+
+function useArchiveDelete(project: string) {
+  const [pending, setPending] = useState<PendingArchive | null>(null)
+
+  const request = (desc: ArchiveDescriptor, label: string, onRemoved: () => void) => {
+    setPending({ label, info: null, onRemoved, busy: false })
+    api.getEntityFolder(project, descToParams(desc))
+      .then(info => setPending(p => (p ? { ...p, info } : p)))
+      .catch(() => setPending(p => (p ? { ...p, info: { rel_path: '', exists: false, file_count: 0 } } : p)))
+  }
+
+  const cancel = () => setPending(null)
+
+  const confirm = async () => {
+    setPending(p => (p ? { ...p, busy: true } : p))
+    let ok = true
+    const info = pending?.info
+    if (info?.exists && info.rel_path) {
+      try {
+        await api.archiveEntity(project, info.rel_path)
+      } catch (e) {
+        ok = false
+        toast.error(e instanceof Error ? e.message : String(e))
+      }
+    }
+    if (!ok) { setPending(p => (p ? { ...p, busy: false } : p)); return }
+    pending?.onRemoved()
+    setPending(null)
+  }
+
+  const modal = pending ? (
+    <ArchiveConfirm label={pending.label} info={pending.info} busy={pending.busy} onCancel={cancel} onConfirm={confirm} />
+  ) : null
+
+  return { request, modal }
+}
+
+function ArchiveConfirm({ label, info, busy, onCancel, onConfirm }: {
+  label:     string
+  info:      { rel_path: string; exists: boolean; file_count: number } | null
+  busy:      boolean
+  onCancel:  () => void
+  onConfirm: () => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onCancel])
+
+  const analyzing = info === null
+  const count = info?.file_count ?? 0
+  const nonEmpty = !!info?.exists && count > 0
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+    >
+      <div style={{
+        width: 360, maxWidth: '92vw',
+        background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 12,
+        boxShadow: 'var(--shadow)', padding: '18px 18px 14px',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
+          fontSize: 13, fontWeight: 600, color: 'var(--ink)',
+        }}>
+          <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
+          Archiver {label} ?
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
+          {analyzing
+            ? 'Analyse du dossier…'
+            : nonEmpty
+              ? `Ce dossier contient ${count} fichier${count > 1 ? 's' : ''}. Il sera déplacé vers ARCHIVE/ (récupérable), pas supprimé.`
+              : info?.exists
+                ? 'Le dossier (vide) sera déplacé vers ARCHIVE/.'
+                : "Aucun dossier sur disque : seule l'entrée logique sera retirée."}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <ProdBtn variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Annuler</ProdBtn>
+          <ProdBtn variant="danger" size="sm" onClick={onConfirm} disabled={busy || analyzing}>
+            <Trash2 size={10} strokeWidth={1.75} /> {busy ? 'Archivage…' : 'Archiver'}
+          </ProdBtn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MenuEdit({
   project, state, setState, selection, setSelection, mode,
   activeCategory, publishesByTask,
@@ -93,6 +210,7 @@ export function MenuEdit({
 
       {mode === 'asset' && selectedAsset && (
         <AssetSection
+          project={project}
           asset={selectedAsset}
           state={state}
           setState={setState}
@@ -112,6 +230,7 @@ export function MenuEdit({
 
       {mode === 'shot' && selectedSeq && (
         <SeqSection
+          project={project}
           seq={selectedSeq}
           state={state}
           setState={setState}
@@ -122,6 +241,7 @@ export function MenuEdit({
 
       {mode === 'shot' && selectedShot && (
         <ShotSection
+          project={project}
           shot={selectedShot}
           state={state}
           setState={setState}
@@ -224,7 +344,8 @@ function CreateSection({ setState, setSelection, activeCategory }: {
 }
 
 // ── asset actions ────────────────────────────────────────────────────────────
-function AssetSection({ asset, state, setState, setSelection, projectTaskTokens, publishesByTask }: {
+function AssetSection({ project, asset, state, setState, setSelection, projectTaskTokens, publishesByTask }: {
+  project:           string
   asset:             Asset
   state:             ProductionState
   setState:          (patch: (prev: ProductionState) => ProductionState) => void
@@ -277,9 +398,16 @@ function AssetSection({ asset, state, setState, setSelection, projectTaskTokens,
     setSelection({ kind: 'asset', id })
   }
 
+  const archiveDel = useArchiveDelete(project)
   const remove = () => {
-    setState(prev => ({ ...prev, assets: prev.assets.filter(a => a.id !== asset.id) }))
-    setSelection({ kind: 'none' })
+    archiveDel.request(
+      { kind: 'asset', class_token: asset.class, name: asset.name },
+      `${asset.class} · ${asset.name}`,
+      () => {
+        setState(prev => ({ ...prev, assets: prev.assets.filter(a => a.id !== asset.id) }))
+        setSelection({ kind: 'none' })
+      },
+    )
   }
 
   const addTask = () => {
@@ -372,6 +500,7 @@ function AssetSection({ asset, state, setState, setSelection, projectTaskTokens,
           <Plus size={12} strokeWidth={2} /> {t('prod.newTask')}
         </ProdBtn>
       </div>
+      {archiveDel.modal}
     </>
   )
 }
@@ -485,7 +614,8 @@ function ShotCreateSection({ state, setState, setSelection }: {
   )
 }
 
-function SeqSection({ seq, state, setState, setSelection, shotClassTokens }: {
+function SeqSection({ project, seq, state, setState, setSelection, shotClassTokens }: {
+  project:         string
   seq:             ProductionSequence
   state:           ProductionState
   setState:        (patch: (prev: ProductionState) => ProductionState) => void
@@ -512,13 +642,20 @@ function SeqSection({ seq, state, setState, setSelection, shotClassTokens }: {
     }
     patchSeq({ name: newName })
   }
+  const archiveDel = useArchiveDelete(project)
   const remove = () => {
-    setState(prev => ({
-      ...prev,
-      sequences: prev.sequences.filter(s => s.id !== seq.id),
-      shots:     prev.shots.filter(s => s.seq_id !== seq.id),
-    }))
-    setSelection({ kind: 'none' })
+    archiveDel.request(
+      { kind: 'seq', seq: seq.name },
+      `séquence ${seq.name}`,
+      () => {
+        setState(prev => ({
+          ...prev,
+          sequences: prev.sequences.filter(s => s.id !== seq.id),
+          shots:     prev.shots.filter(s => s.seq_id !== seq.id),
+        }))
+        setSelection({ kind: 'none' })
+      },
+    )
   }
   const createShot = () => {
     // No number entered → auto-pick max(existing shot num) + 1 (or 1 if none).
@@ -665,11 +802,13 @@ function SeqSection({ seq, state, setState, setSelection, shotClassTokens }: {
           <Plus size={12} strokeWidth={2} /> {t('prod.newTask')}
         </ProdBtn>
       </div>
+      {archiveDel.modal}
     </>
   )
 }
 
-function ShotSection({ shot, state, setState, setSelection, shotClassTokens }: {
+function ShotSection({ project, shot, state, setState, setSelection, shotClassTokens }: {
+  project:         string
   shot:            ProductionShot
   state:           ProductionState
   setState:        (patch: (prev: ProductionState) => ProductionState) => void
@@ -695,9 +834,16 @@ function ShotSection({ shot, state, setState, setSelection, shotClassTokens }: {
     }
     patchShot({ name: newName })
   }
+  const archiveDel = useArchiveDelete(project)
   const remove = () => {
-    setState(prev => ({ ...prev, shots: prev.shots.filter(s => s.id !== shot.id) }))
-    setSelection({ kind: 'none' })
+    archiveDel.request(
+      { kind: 'shot', seq: seq?.name ?? '', shot: shot.name },
+      `shot ${seq?.name ?? '?'} · ${shot.name}`,
+      () => {
+        setState(prev => ({ ...prev, shots: prev.shots.filter(s => s.id !== shot.id) }))
+        setSelection({ kind: 'none' })
+      },
+    )
   }
   const addTask = () => {
     const label = taskName.trim().toUpperCase()
@@ -800,6 +946,7 @@ function ShotSection({ shot, state, setState, setSelection, shotClassTokens }: {
           </ProdBtn>
         </div>
       )}
+      {archiveDel.modal}
     </>
   )
 }

@@ -20,9 +20,10 @@ from core.logger import get_logger
 from core.paths import get_project_path
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
-from features.folder_manager.tokens import load_tokens
+from features.folder_manager.tokens import load_tokens, remove_token
 from features.folder_manager.naming_validator import get_base_name
 from core.constants import DEFAULT_CLASS_TOKENS
+from features.production import archive as prod_archive
 from features.production import production_store as store
 from features.production import ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
@@ -167,6 +168,13 @@ async def get_production(project: str) -> dict:
         production, publishes_by_task, unmatched = reconcile(
             production, events, known_type_tokens, disk_assets, disk_shots,
         )
+        # Disk → logical: drop AUTO entities whose folder was deleted on disk.
+        # User-planned entities are never auto-pruned (guards against OneDrive/AV
+        # hiccups); they are removed explicitly from the Publisher instead.
+        try:
+            prod_archive.prune_absent_auto(get_project_path(project), production)
+        except Exception as e:
+            log.warning("prune_absent_auto failed: %s", e)
         try:
             _attach_publish_comments(get_project_path(project), publishes_by_task)
         except Exception as e:
@@ -250,6 +258,166 @@ async def notify_comment(project: str, payload: CommentNotify) -> dict:
         lambda: log_event(user, "comment", project, filename=filename, dest_folder=None),
     )
     return {"success": True}
+
+
+# ── Delete = archive (never hard-delete) ──────────────────────────────────────
+
+class ArchiveRequest(BaseModel):
+    rel_path: str
+
+
+@router.get("/{project}/entity-folder")
+async def entity_folder(
+    project: str,
+    kind: str = "asset",
+    class_token: str = "",
+    name: str = "",
+    seq: str = "",
+    shot: str = "",
+) -> dict:
+    """Resolve a Production entity's on-disk folder and report existence + file
+    count, so the UI can warn before archiving (prevention message)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+
+    def _do() -> dict:
+        rel = prod_archive.resolve_entity_rel(project_path, kind, class_token, name, seq, shot)
+        if rel is None:
+            return {"rel_path": "", "exists": False, "file_count": 0}
+        return prod_archive.inspect_folder(project_path, rel)
+
+    return await loop.run_in_executor(None, _do)
+
+
+@router.post("/{project}/archive")
+async def archive_entity(project: str, payload: ArchiveRequest) -> dict:
+    """Move an entity folder into <project>/ARCHIVE/<timestamp>/. The frontend
+    removes the logical entity from production.json AFTER this succeeds."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+    try:
+        archived = await loop.run_in_executor(
+            None, lambda: prod_archive.archive_folder(project_path, payload.rel_path)
+        )
+    except FileNotFoundError:
+        # Nothing on disk to archive — treat as success so the caller can still
+        # drop the (ghost) logical entity.
+        return {"archived": False, "reason": "not_found"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.exception("archive failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"archived": True, "archived_to": archived}
+
+
+# ── Composer token archive (Publisher ghost-token cross) ──────────────────────
+
+class ArchiveTokenRequest(BaseModel):
+    field:       str                 # 'name' | 'instance' | 'seq' | 'shot'
+    class_token: str = ""
+    name:        str = ""
+    task:        str = ""
+    instance:    str = ""
+    seq:         str = ""
+    shot:        str = ""
+
+
+def _resolve_token_rel(project_path, req_like) -> tuple[str | None, tuple[str, str] | None]:
+    """Return (project-relative folder, (token_section, token_value)) for a
+    composer token, or (None, None) when the field is unsupported.
+
+    The token tuple is what to drop from tokens.json after archiving (or None
+    when the field maps to no persisted token entry)."""
+    field = (getattr(req_like, "field", "") or "").lower()
+    cls   = getattr(req_like, "class_token", "") or ""
+    name  = getattr(req_like, "name", "") or ""
+    task  = getattr(req_like, "task", "") or ""
+    inst  = getattr(req_like, "instance", "") or ""
+    seq   = getattr(req_like, "seq", "") or ""
+    shot  = getattr(req_like, "shot", "") or ""
+
+    if field == "name":
+        rel = ref_media.resolve_ref_root(project_path, "asset", class_token=cls, name=name)
+        return rel or None, ("NAME", name.upper())
+    if field == "instance":
+        rel = ref_media.resolve_ref_root(project_path, "asset", class_token=cls, name=name, task=task, subtask=inst)
+        return rel or None, ("INSTANCE", inst.lower())
+    if field == "seq":
+        return prod_archive.resolve_entity_rel(project_path, "seq", seq=seq), ("SEQ", seq.upper())
+    if field == "shot":
+        rel = prod_archive.resolve_entity_rel(project_path, "shot", seq=seq, shot=shot)
+        return rel, ("SHOT", f"{seq.upper()}/{shot.upper()}")
+    return None, None
+
+
+@router.get("/{project}/token-folder")
+async def token_folder(
+    project: str,
+    field: str = "name",
+    class_token: str = "",
+    name: str = "",
+    task: str = "",
+    instance: str = "",
+    seq: str = "",
+    shot: str = "",
+) -> dict:
+    """Resolve a composer token's on-disk folder + file count, to warn before
+    archiving the token from the Publisher."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+
+    class _R:
+        pass
+    r = _R()
+    r.field, r.class_token, r.name = field, class_token, name
+    r.task, r.instance, r.seq, r.shot = task, instance, seq, shot
+
+    def _do() -> dict:
+        rel, _tok = _resolve_token_rel(project_path, r)
+        if not rel:
+            return {"rel_path": "", "exists": False, "file_count": 0}
+        return prod_archive.inspect_folder(project_path, rel)
+
+    return await loop.run_in_executor(None, _do)
+
+
+@router.post("/{project}/archive-token")
+async def archive_token(project: str, payload: ArchiveTokenRequest) -> dict:
+    """Archive a composer token's folder (into ARCHIVE/) and drop the token from
+    tokens.json. Never hard-deletes — mirrors the entity archive flow."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_event_loop()
+
+    def _do() -> dict:
+        rel, tok = _resolve_token_rel(project_path, payload)
+        if not rel:
+            raise HTTPException(status_code=400, detail=f"Token non résolu : {payload.field!r}")
+        archived_to = None
+        try:
+            archived_to = prod_archive.archive_folder(project_path, rel)
+        except FileNotFoundError:
+            pass  # ghost with no folder — still drop the token below
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if tok is not None:
+            try:
+                remove_token(project_path, tok[0], tok[1])
+            except Exception as e:  # noqa: BLE001 — token removal is best-effort
+                log.warning("remove_token %s/%s failed: %s", tok[0], tok[1], e)
+        return {"archived": archived_to is not None, "archived_to": archived_to}
+
+    try:
+        return await loop.run_in_executor(None, _do)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("archive_token failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # NOTE: the old POST /{project}/materialize endpoint (manual "Create on Disk")
