@@ -66,6 +66,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'nav.shelfManager':        { fr: 'Shelf Manager',            en: 'Shelf Manager' },
   'nav.production':          { fr: 'Production',               en: 'Production' },
   'nav.activity':            { fr: 'Activité',                 en: 'Activity' },
+  'nav.actionPublish':       { fr: 'Publish (action)',         en: 'Publish (action)' },
 
   // production tab
   'prod.mode.asset':         { fr: 'Assets',                   en: 'Assets' },

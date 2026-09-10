@@ -86,12 +86,17 @@ class ActionQuery:
             )
         return self._outputs[key][value.key]
 
-    async def execute(self) -> Status:
-        """Run every step in index order. Return the final action status.
+    async def execute(self, stop_after: Optional[str] = None) -> Status:
+        """Run steps in index order. Return the final action status.
 
         A command failure stops the run and marks the action ERROR, but never
         raises out of here: the graph reports its own failure instead of
         crashing the host process.
+
+        ``stop_after`` names the last step to run: execution stops once that
+        step completes and the remaining steps are left untouched. This drives
+        a preview (run selection + path resolution, skip the copy) without a
+        second, duplicated code path.
         """
 
         self.buffer.status = Status.PROCESSING
@@ -108,6 +113,8 @@ class ActionQuery:
                     return self.buffer.status
             step.status = Status.COMPLETED
             self._emit_diff()
+            if step.name == stop_after:
+                break
 
         self.buffer.status = Status.COMPLETED
         self._emit_diff()

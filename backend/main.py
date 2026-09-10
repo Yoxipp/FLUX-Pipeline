@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from core import config
 from core.logger import get_logger
-from routers import activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, usd_assembler
+from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, usd_assembler
 
 log = get_logger("main")
 
@@ -87,6 +87,7 @@ async def health() -> dict:
 
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])
 app.include_router(publish.router,        prefix="/publish",        tags=["Publisher"])
+app.include_router(actions.router,        prefix="/actions",        tags=["Actions"])
 app.include_router(activity.router,       prefix="/activity",       tags=["Activity"])
 app.include_router(files.router,          prefix="/files",          tags=["Files"])
 app.include_router(settings.router,       prefix="/settings",       tags=["Settings"])

@@ -15,6 +15,7 @@ import { useSettings }   from './hooks/useSettings'
 import { parseFluxFilename } from './pages/Production/util'
 import { Hub }           from './pages/Hub'
 import { Publisher }     from './pages/Publisher'
+import { ActionPublish } from './pages/ActionPublish'
 import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
@@ -127,6 +128,7 @@ function AppShell({ settings }: { settings: Settings }) {
             <Routes>
               <Route path="/"          element={<Hub />} />
               <Route path="/publisher" element={<Publisher />} />
+              <Route path="/action-publish" element={<ActionPublish />} />
               <Route path="/activity"  element={<Activity />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />

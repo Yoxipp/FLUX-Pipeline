@@ -458,6 +458,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       <NavGroup title="ASSETS">
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent onClick={() => navigate('/projects')} />
         <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
+        {/* Action engine test bench (Phase 2): route kept at /action-publish, hidden
+            from the menu on purpose. It is NOT a replacement for the Publisher; it
+            only proves the generic form + destination preview. Re-add when the rich
+            Publisher's logic is wired through the engine. */}
         <NavItem icon={Layers}     label={t('nav.usdAssembler')}  active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
       </NavGroup>
 

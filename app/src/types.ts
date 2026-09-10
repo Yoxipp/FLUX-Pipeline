@@ -110,6 +110,34 @@ export interface PublishResult {
   message: string
 }
 
+// ── Action engine (declarative YAML actions) ───────────────────────────────
+// One field the generic front form renders. Mirrors a backend ParameterBuffer
+// plus the (step, command) address that locates it inside the action.
+export interface ActionField {
+  step:     string
+  command:  string
+  name:     string
+  type:     string          // str | text | path | int | float | bool | select | ...
+  value:    unknown
+  label:    string
+  tooltip:  string | null
+  hide:     boolean
+  ask_user: boolean
+  prompt:   boolean
+  status:   string
+}
+
+export interface ActionFormResponse {
+  action: string
+  fields: ActionField[]
+}
+
+export interface ActionPreviewResponse {
+  resolved:  boolean
+  dest_path: string | null
+  message:   string
+}
+
 export interface HoudiniPublishPayload {
   project_name: string
   filename: string

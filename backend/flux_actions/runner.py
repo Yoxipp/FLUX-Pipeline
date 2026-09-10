@@ -4,21 +4,48 @@
 # still the default. run_publish_action reproduces that publish through the
 # declarative action engine instead, so both can be compared and validated
 # before anything is wired live.
+#
+# Phase 2 adds two read/preview helpers the generic front form consumes:
+#   build_publish_form   -> the visible parameters the front renders as fields
+#   preview_publish_action -> resolve the destination without copying anything
+# Both reuse the same action and command graph; no logic is duplicated.
 
 from __future__ import annotations
 
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from flux_core import ActionQuery, Status
+from flux_core import ActionQuery, OutputRef, Status
 
 # Importing the commands package populates the registry before the YAML loads.
 from flux_actions import commands as _commands  # noqa: F401
 
 # The bundled publish action shipped with Flux.
 PUBLISH_ACTION = Path(__file__).parent / "config" / "publish.yml"
+
+# The resolve step name inside publish.yml (last step of a preview run).
+_RESOLVE_STEP = "resolve"
+
+
+def _build_publish_query(
+    project_path: Path,
+    user: str,
+    project_name: str,
+    logger: Optional[logging.Logger],
+    on_diff: Optional[Callable[[Dict[str, Any]], None]],
+) -> ActionQuery:
+    """Load publish.yml with the production context snapshot applied."""
+    # Context is stored as plain strings so the buffers stay JSON-serialisable.
+    context = {
+        "project_path": str(project_path),
+        "project_name": project_name,
+        "user": user,
+    }
+    return ActionQuery.from_file(
+        PUBLISH_ACTION, context=context, logger=logger, on_diff=on_diff
+    )
 
 
 def run_publish_action(
@@ -37,16 +64,7 @@ def run_publish_action(
     routed through ``publish.yml``. Returns the LAST path on success, else None.
     ``on_diff`` receives buffer diffs for a future front; it may be omitted.
     """
-    # Context is stored as plain strings so the buffers stay JSON-serialisable.
-    context = {
-        "project_path": str(project_path),
-        "project_name": project_name,
-        "user": user,
-    }
-
-    query = ActionQuery.from_file(
-        PUBLISH_ACTION, context=context, logger=logger, on_diff=on_diff
-    )
+    query = _build_publish_query(project_path, user, project_name, logger, on_diff)
 
     # Feed the per-run inputs the action leaves open.
     query.set_parameter("select", "select", "source_path", str(source_path))
@@ -60,3 +78,56 @@ def run_publish_action(
 
     dest = query.buffer.steps["publish"].commands["publish"].outputs.get("dest_path")
     return Path(dest) if dest is not None else None
+
+
+def build_publish_form() -> List[Dict[str, Any]]:
+    """Return the user-facing fields of the publish action, in run order.
+
+    The front renders this list directly: one field per entry, driven by the
+    parameter's declared ``type``/``label`` with no per-feature form code. A
+    parameter is a user field when it is not hidden and its value is not wired
+    from another command's output (an OutputRef is machine-fed, never typed).
+    """
+    query = ActionQuery.from_file(PUBLISH_ACTION)
+    fields: List[Dict[str, Any]] = []
+    for step in query.buffer.ordered_steps():
+        for cmd_name, cmd in step.commands.items():
+            for param in cmd.parameters.values():
+                if param.hide or isinstance(param.value, OutputRef):
+                    continue
+                data = param.serialize()
+                # Address a field unambiguously: step / command / parameter.
+                data["step"] = step.name
+                data["command"] = cmd_name
+                fields.append(data)
+    return fields
+
+
+def preview_publish_action(
+    source_path: Path,
+    project_path: Path,
+    user: str,
+    project_name: str = "",
+    target_name: Optional[str] = None,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[Path]:
+    """Resolve where a publish would land, without copying anything.
+
+    Runs the same graph as ``run_publish_action`` but stops after the resolve
+    step, so this is the first real consumer of ``build_output_path``. Returns
+    the destination folder, or None when the inputs do not resolve yet.
+    """
+    query = _build_publish_query(project_path, user, project_name, logger, None)
+
+    query.set_parameter("select", "select", "source_path", str(source_path))
+    if target_name is not None:
+        query.set_parameter("select", "select", "target_name", target_name)
+
+    status = asyncio.run(query.execute(stop_after=_RESOLVE_STEP))
+    if status is not Status.COMPLETED:
+        return None
+
+    output_path = (
+        query.buffer.steps[_RESOLVE_STEP].commands["output"].outputs.get("output_path")
+    )
+    return Path(output_path) if output_path is not None else None

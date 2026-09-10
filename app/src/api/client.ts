@@ -1,6 +1,8 @@
 // client.ts — HTTP client vers FastAPI Python backend (127.0.0.1:8765).
 
 import type {
+  ActionFormResponse,
+  ActionPreviewResponse,
   ActivityEvent,
   ChatMention,
   ChatMessage,
@@ -179,6 +181,18 @@ export const api = {
   // Publisher
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
+
+  // Action engine (declarative): the generic form renders these fields, and the
+  // preview resolves the destination without copying anything.
+  getPublishForm: () =>
+    apiCall<ActionFormResponse>('GET', '/actions/publish/form'),
+
+  previewPublish: (payload: {
+    source_path: string
+    project_name: string
+    user?: string
+    target_name?: string
+  }) => apiCall<ActionPreviewResponse>('POST', '/actions/publish/preview', payload),
 
   getHoudiniState: () =>
     apiCall<HoudiniState>('GET', '/dcc/houdini/state'),
