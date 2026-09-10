@@ -132,23 +132,22 @@ def _validate(raw: Dict[str, Any]) -> _ActionModel:
 def _override_from_param(model: _ParameterModel) -> Dict[str, Any]:
     """Turn a validated parameter model into a build_buffer override spec.
 
-    A ``value: {from: "..."}`` mapping becomes an OutputRef kept unresolved.
+    Only the fields the YAML author actually wrote are emitted, so a block that
+    sets just ``value:`` never resets the command's declared ``type``/``hide``/…
+    back to their schema defaults. A ``value: {from: "..."}`` mapping becomes an
+    OutputRef kept unresolved.
     """
-    spec: Dict[str, Any] = {
-        "type": model.type,
-        "hide": model.hide,
-        "ask_user": model.ask_user,
-        "prompt": model.prompt,
-    }
-    if model.label is not None:
-        spec["label"] = model.label
-    if model.tooltip is not None:
-        spec["tooltip"] = model.tooltip
-    value = model.value
-    if isinstance(value, dict) and set(value.keys()) == {"from"}:
-        spec["value"] = OutputRef.parse(value["from"])
-    else:
-        spec["value"] = value
+    spec: Dict[str, Any] = {}
+    for field in model.model_fields_set:
+        if field == "value":
+            continue  # handled below (may need OutputRef parsing)
+        spec[field] = getattr(model, field)
+    if "value" in model.model_fields_set:
+        value = model.value
+        if isinstance(value, dict) and set(value.keys()) == {"from"}:
+            spec["value"] = OutputRef.parse(value["from"])
+        else:
+            spec["value"] = value
     return spec
 
 
