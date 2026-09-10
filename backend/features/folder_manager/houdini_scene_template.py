@@ -12,11 +12,16 @@
 # only logs a warning, the folders / tokens / USD layers still stand.
 #
 # Mechanism (see §3 of the RETAKES-2 spec):
-#   1. offline via `hython` (preferred: creating a sequence must not need an open
-#      Houdini session) — hython loads the base template, drops/repoints the FLUX
-#      Lighting HDA, saves a .hip;
-#   2. live fallback via houdini_client.run() if a Houdini is already connected;
-#   3. no Houdini at all → warn + {"ok": False}, never raise.
+#   1. offline via `hython` ONLY — a separate, isolated process. hython loads the
+#      base template, drops/repoints the FLUX Lighting HDA, and saves the .hip.
+#   2. no hython (or a save failure) → warn + {"ok": False}, never raise.
+#
+# IMPORTANT — never author in a live session. The generation script does
+# hou.hipFile.load()+save(); running that in the artist's connected Houdini would
+# REPLACE and clobber whatever scene they have open. Creating a seq/shot must never
+# touch a live DCC, so there is deliberately NO live fallback here (that fallback was
+# the "creating a shot wiped my open Houdini scene" bug). If hython is unavailable
+# the .hip is simply not generated — the folders / tokens / USD layers still stand.
 #
 # License note (§7): Houdini Apprentice can only save .hipnc, never .hip. When the
 # detected Houdini is Apprentice the save fails; we log a clear message asking for
@@ -171,44 +176,36 @@ def _run_offline(script: str) -> dict:
                 pass
 
 
-def _run_live(script: str) -> dict:
-    """Run *script* in a connected Houdini. Returns {"ok": bool, ...} or {"ok": False}."""
-    try:
-        from dcc.houdini.client import houdini_client
-        if not houdini_client.is_connected():
-            return {"ok": False, "error": "no live Houdini"}
-        resp = houdini_client.run(script)
-        if not resp.get("ok"):
-            return {"ok": False, "error": resp.get("error", "live run failed")}
-        return resp.get("result") or {"ok": False, "error": "live run gave no result"}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": str(exc)}
-
-
 def _generate(template: Path, dest_hip: Path, usd_input_rel: str, usd_output_rel: str) -> dict:
-    """Offline (hython) preferred, live fallback. Returns {"ok": bool, ...}."""
+    """Author the .hip via an ISOLATED hython process only — NEVER a live session.
+
+    The script does hou.hipFile.load()+save(); running it in a connected Houdini
+    would replace and clobber the artist's open scene. So there is no live fallback:
+    if hython is unavailable (or the save fails, e.g. Apprentice can't write .hip),
+    the .hip is simply not generated and we return {"ok": False}. Folders / tokens /
+    USD layers created by the caller still stand; nothing is ever raised.
+    """
     script = _gen_script(str(template), str(dest_hip), usd_input_rel, usd_output_rel)
 
     res = _run_offline(script)
     if res.get("ok"):
-        log.info("Houdini scene generated (offline): %s", dest_hip)
+        log.info("Houdini scene generated (offline hython): %s", dest_hip)
         return res
-    log.info("Offline hython generation unavailable (%s); trying live Houdini.", res.get("error"))
 
-    res_live = _run_live(script)
-    if res_live.get("ok"):
-        log.info("Houdini scene generated (live): %s", dest_hip)
-        return res_live
-
-    msg = res.get("error") or res_live.get("error") or "unknown"
+    msg = res.get("error") or "unknown"
     if "Apprentice" in msg or ".hip" in msg:
         log.warning(
             "Houdini scene NOT generated for %s: %s. Saving .hip requires an "
-            "Education / Indie / Commercial license (Apprentice only writes .hipnc).",
+            "Education / Indie / Commercial license (Apprentice only writes .hipnc). "
+            "Skipped — a live Houdini session is never touched.",
             dest_hip.name, msg,
         )
     else:
-        log.warning("Houdini scene NOT generated for %s: %s (Houdini introuvable ?)", dest_hip.name, msg)
+        log.warning(
+            "Houdini scene NOT generated for %s: %s (hython introuvable ?). "
+            "Skipped — a live Houdini session is never touched.",
+            dest_hip.name, msg,
+        )
     return {"ok": False, "error": msg}
 
 
