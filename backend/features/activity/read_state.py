@@ -58,5 +58,4 @@ def mark_read(path: Path, ids: set[str] | list[str], *, live_ids: set[str] | Non
         updated &= {str(i) for i in live_ids}
     if updated == current:
         return True
-    get_repository().set(_COLLECTION, str(path), {"read_ids": sorted(updated)})
-    return True
+    return get_repository().set(_COLLECTION, str(path), {"read_ids": sorted(updated)})

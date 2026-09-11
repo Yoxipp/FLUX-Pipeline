@@ -43,9 +43,12 @@ register_collection("read_state", lambda doc_id: Path(str(doc_id)))
 
 # modif_log: one JSON-array file per publish folder. doc_id = the folder path; the
 # filename join lives here (a first step of moving path building off the feature).
-from core.constants import JSON_MODIF_LOG  # noqa: E402  (kept next to its use)
+from core.constants import JSON_MODIF_LOG, JSON_TOKENS  # noqa: E402  (kept next to use)
 
 register_collection("modif_log", lambda doc_id: Path(str(doc_id)) / JSON_MODIF_LOG)
+
+# tokens: one tokens.json per project folder. doc_id = the project path.
+register_collection("tokens", lambda doc_id: Path(str(doc_id)) / JSON_TOKENS)
 
 
 _repository: JsonFileRepository | None = None

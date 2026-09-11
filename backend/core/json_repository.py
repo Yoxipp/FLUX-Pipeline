@@ -43,13 +43,13 @@ class JsonFileRepository:
         data = cached_read_json(path)
         return data if isinstance(data, (dict, list)) else None
 
-    def set(self, collection: str, doc_id: str, data: dict | list) -> None:
-        write_json(self._locate(collection, doc_id), data)
+    def set(self, collection: str, doc_id: str, data: dict | list) -> bool:
+        return write_json(self._locate(collection, doc_id), data)
 
-    def update(self, collection: str, doc_id: str, patch: dict) -> None:
+    def update(self, collection: str, doc_id: str, patch: dict) -> bool:
         current = self.get(collection, doc_id) or {}
         current.update(patch)
-        self.set(collection, doc_id, current)
+        return self.set(collection, doc_id, current)
 
     def delete(self, collection: str, doc_id: str) -> None:
         path = self._locate(collection, doc_id)
@@ -66,5 +66,5 @@ class JsonFileRepository:
     def list(self, collection: str) -> list[dict]:
         return cached_read_jsonl(self._locate(collection, None))
 
-    def append(self, collection: str, entry: dict) -> None:
-        append_jsonl(self._locate(collection, None), [entry])
+    def append(self, collection: str, entry: dict) -> bool:
+        return append_jsonl(self._locate(collection, None), [entry])

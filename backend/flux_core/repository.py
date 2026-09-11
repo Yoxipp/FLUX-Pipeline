@@ -30,11 +30,15 @@ class MetadataRepository(Protocol):
         """Return the document (dict or list), or None when it does not exist."""
         ...
 
-    def set(self, collection: str, doc_id: str, data: dict | list) -> None:
-        """Replace the whole document."""
+    def set(self, collection: str, doc_id: str, data: dict | list) -> bool:
+        """Replace the whole document. Return True on a successful write.
+
+        A bool (not None): several stores surface write failures to the user
+        (e.g. project creation), so the persistence layer must report success.
+        """
         ...
 
-    def update(self, collection: str, doc_id: str, patch: dict) -> None:
+    def update(self, collection: str, doc_id: str, patch: dict) -> bool:
         """Shallow-merge *patch* into a dict document (create it if absent)."""
         ...
 
@@ -47,6 +51,6 @@ class MetadataRepository(Protocol):
         """Return every entry of an append-only collection (empty when absent)."""
         ...
 
-    def append(self, collection: str, entry: dict) -> None:
-        """Append one entry to an append-only collection."""
+    def append(self, collection: str, entry: dict) -> bool:
+        """Append one entry to an append-only collection. True on success."""
         ...

@@ -9,18 +9,18 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS, JSON_TOKENS
-from core.json_manager import read_json, write_json
+from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS
 from core.logger import get_logger
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
 
 # All recognised token-type section keys in tokens.json
 _TOKEN_SECTIONS = ("CLASS", "TYPE", "NAME", "INSTANCE", "SEQ", "SHOT", "custom")
 
-
-def _tokens_path(project_path: Path) -> Path:
-    return project_path / JSON_TOKENS
+# Metadata frontier (V5): tokens.json goes through the repository. The document is
+# a dict, addressed by its project folder (the resolver appends the file name).
+_COLLECTION = "tokens"
 
 
 # ── bootstrap ─────────────────────────────────────────────────────────────────
@@ -46,10 +46,9 @@ def load_tokens(project_path: Path) -> dict:
     Falls back to defaults when the file is absent or malformed.
     Ensures all expected sections exist for forward-compatibility.
     """
-    path = _tokens_path(project_path)
-    raw = read_json(path)
+    raw = get_repository().get(_COLLECTION, str(project_path))
     if not isinstance(raw, dict) or "CLASS" not in raw:
-        log.warning("tokens.json missing or invalid at %s, using defaults", path)
+        log.warning("tokens.json missing or invalid for %s, using defaults", project_path)
         return build_default_tokens()
 
     defaults = build_default_tokens()
@@ -65,9 +64,9 @@ def load_tokens(project_path: Path) -> dict:
 
 def save_tokens(project_path: Path, tokens: dict) -> bool:
     """Write *tokens* to tokens.json atomically. Returns True on success."""
-    ok = write_json(_tokens_path(project_path), tokens)
+    ok = get_repository().set(_COLLECTION, str(project_path), tokens)
     if not ok:
-        log.error("Failed to write tokens.json at %s", _tokens_path(project_path))
+        log.error("Failed to write tokens.json for %s", project_path)
     return ok
 
 

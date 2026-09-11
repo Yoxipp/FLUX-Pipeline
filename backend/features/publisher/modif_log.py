@@ -47,8 +47,10 @@ def append_log(
     if not isinstance(logs, list):
         logs = []
     logs.append(entry)
-    get_repository().set(_COLLECTION, doc_id, logs)
-    return True
+    ok = get_repository().set(_COLLECTION, doc_id, logs)
+    if not ok:
+        log.error("Failed to write modif_logs.json for %s", folder_path)
+    return ok
 
 
 def read_logs(folder_path: Path) -> list[dict]:
