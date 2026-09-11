@@ -234,3 +234,52 @@ def is_subpath(child: Path, parent: Path) -> bool:
     except ValueError:
         return False
 
+
+# ── $FLUX portable token (priority n3) ────────────────────────────────────────
+# A path stored as "$FLUX/DOSSIER_PROJETS/..." is machine-independent: each user
+# resolves $FLUX to their own local pipeline root (get_flux_root). These helpers
+# convert at the backend <-> DCC boundary; they NEVER change how absolutes are
+# built on disk. Additive on purpose (paths.py is the single source of truth).
+
+FLUX_TOKEN = "$FLUX"
+
+
+def to_flux_token(path: Path | str, root: Path | None = None) -> str:
+    """Return *path* as a portable "$FLUX/..." string when it sits under the
+    local pipeline root, else the path unchanged (as a string).
+
+    A path outside the root (external asset, temp, other drive) is left absolute
+    on purpose: only pipeline paths get the token.
+    """
+    root = Path(root) if root else get_flux_root()
+    p = Path(path)
+    if root is None:
+        return str(p)
+    try:
+        rel = normalize_path(p).relative_to(normalize_path(root))
+    except (ValueError, OSError):
+        return str(p)
+    rel_posix = rel.as_posix()
+    return FLUX_TOKEN if rel_posix == "." else f"{FLUX_TOKEN}/{rel_posix}"
+
+
+def from_flux_token(token: Path | str, root: Path | None = None) -> Path:
+    """Resolve a "$FLUX/..." token back to an absolute Path on this machine.
+
+    Accepts "$FLUX" and "${FLUX}" forms. A value without the token is returned as
+    a Path unchanged. Raises if the token is used but FLUX_ROOT is not set.
+    """
+    s = str(token)
+    prefix = None
+    for form in (FLUX_TOKEN, "${FLUX}"):
+        if s == form or s.startswith(form + "/") or s.startswith(form + "\\"):
+            prefix = form
+            break
+    if prefix is None:
+        return Path(s)
+    root = Path(root) if root else get_flux_root()
+    if root is None:
+        raise RuntimeError("FLUX_ROOT is not set; cannot resolve $FLUX token.")
+    rest = s[len(prefix):].lstrip("/\\")
+    return root / rest if rest else root
+
