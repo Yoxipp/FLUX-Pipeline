@@ -33,6 +33,9 @@ PUBLISH_MAYA_ACTION = Path(__file__).parent / "config" / "publish_maya.yml"
 # direct-to-dest, so there is no temp file and no copy step (see publish_houdini.yml).
 PUBLISH_HOUDINI_ACTION = Path(__file__).parent / "config" / "publish_houdini.yml"
 
+# The texture conform action (conform a file / folder / UDIM set to .tx).
+CONFORM_TEXTURE_ACTION = Path(__file__).parent / "config" / "conform_texture.yml"
+
 # The resolve step name inside publish.yml (last step of a preview run).
 _RESOLVE_STEP = "resolve"
 
@@ -212,6 +215,42 @@ def run_houdini_publish_action(
         "rop_node": outputs.get("rop_node"),
         "is_sequence": outputs.get("is_sequence", is_sequence),
     }
+
+
+def run_conform_texture_action(
+    source: Path,
+    out_dir: Optional[Path] = None,
+    colorconvert: bool = True,
+    color_in: Optional[str] = None,
+    color_out: Optional[str] = None,
+    force: bool = False,
+    logger: Optional[logging.Logger] = None,
+    on_diff: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Conform a texture / UDIM set to .tx via the action engine.
+
+    ``source`` may be one file, a folder, or a UDIM pattern ("<UDIM>"). Returns
+    the conform command outputs (``tx_paths`` plus converted/skipped/ignored
+    counts), or None when the graph does not complete.
+    """
+    query = ActionQuery.from_file(
+        CONFORM_TEXTURE_ACTION, context={}, logger=logger, on_diff=on_diff
+    )
+
+    query.set_parameter("conform", "conform", "source", str(source))
+    if out_dir is not None:
+        query.set_parameter("conform", "conform", "out_dir", str(out_dir))
+    query.set_parameter("conform", "conform", "colorconvert", colorconvert)
+    if color_in is not None:
+        query.set_parameter("conform", "conform", "color_in", color_in)
+    if color_out is not None:
+        query.set_parameter("conform", "conform", "color_out", color_out)
+    query.set_parameter("conform", "conform", "force", force)
+
+    status = asyncio.run(query.execute())
+    if status is not Status.COMPLETED:
+        return None
+    return dict(query.buffer.steps["conform"].commands["conform"].outputs)
 
 
 def build_publish_form() -> List[Dict[str, Any]]:

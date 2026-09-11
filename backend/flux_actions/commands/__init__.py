@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from . import (  # noqa: F401
     build_output_path,
+    conform_texture,
     copy_publish,
     houdini_export,
     maya_export,
@@ -25,4 +26,5 @@ __all__ = [
     "maya_export",
     "houdini_export",
     "copy_publish",
+    "conform_texture",
 ]

@@ -1,0 +1,22 @@
+# conform_texture.yml - conform a texture / UDIM set to mipped, tiled .tx.
+#
+# One step, one command. The command expands the source (file, folder, or a
+# "<UDIM>" pattern), converts each tile to a Karma-friendly .tx via OpenImageIO,
+# and skips tiles whose source is unchanged. Colorspace is converted only for
+# color maps in an integer (sRGB-authored) container.
+#
+# source / out_dir are set at run time (UI or runner). Placement into the
+# versioned publish layout is wired in a later phase; here the source parameter
+# names the texture directly.
+
+name: conform_texture
+shelf: publish
+
+steps:
+
+  conform:
+    index: 10
+    commands:
+      conform:
+        command: conform_texture
+        # source is set at run time; colorconvert/force keep their defaults.
