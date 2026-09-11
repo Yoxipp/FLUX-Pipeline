@@ -17,7 +17,7 @@ When publishing files from disk to project folders, implementing version control
 
 | File | Type | Role | Public Exports / Elements |
 |---|---|---|---|
-| `publish_core.py` | module | Main publish pipeline: resolve, version, copy, log | `publish_file(source_path, project_path, description, user, project_name?)`, `resolve_publish_path(project_path, filename)`, `rename_last_to_versioned(dest_folder, base_name, next_version, padding?)`, `publish_from_dcc(dcc_name, ...)` |
+| `publish_core.py` | module | Publish pipeline split into resolve + copy halves | `publish_file(source_path, project_path, description, user, project_name?, target_name?)` (thin wrapper), `resolve_publish_filename(source_path, target_name?)`, `resolve_publish_path(project_path, filename)`, `copy_publish(source_path, dest_folder, filename, description, user, project_name)`, `rename_last_to_versioned(dest_folder, base_name, next_version, padding?)`, `publish_from_dcc(dcc_name, ...)` |
 | `version_resolver.py` | module | Compute next version number by scanning published files | `get_next_version(folder_path, base_name, padding?)`, `get_last_file(folder_path, base_name)` |
 | `modif_log.py` | module | Read/write modif_logs.json per publish folder | `append_log(folder_path, name, version, modification, user)`, `read_logs(folder_path)`, `get_logs_for_file(folder_path, base_name)` |
 
@@ -42,9 +42,17 @@ When publishing files from disk to project folders, implementing version control
 
 **Role:** End-to-end publish: filename parsing, path resolution, version archiving, file copy, metadata logging.
 
-#### `publish_file(source_path, project_path, description, user, project_name?)`
-Main entry point. Steps: parse filename, resolve dest folder, compute next version, rename old LAST → vXXX, copy source → dest as _LAST.ext, log to modif_logs.json and activite.json. Returns dest LAST Path or None on failure.
-→ used by: publish API endpoint, file upload handler
+#### `publish_file(source_path, project_path, description, user, project_name?, target_name?)`
+Thin wrapper over the two halves: compute the logical name (`resolve_publish_filename`), resolve the dest folder (`resolve_publish_path`), then run the copy (`copy_publish`). Behavior unchanged. Returns dest LAST Path or None on failure.
+→ used by: publish API endpoint (`routers/publish.py`), DCC publish (`routers/dcc.py`), Maya export (`dcc/maya/maya_publish.py`)
+
+#### `copy_publish(source_path, dest_folder, filename, description, user, project_name)`
+The copy half. Consumes an ALREADY-RESOLVED `dest_folder` (from `resolve_publish_path` / the `build_output_path` command) instead of recomputing it: archive old LAST → vXXX, copy source → dest as _LAST.ext, log to modif_logs.json and activite.json. Returns dest LAST Path or None on failure.
+→ used by: `publish_file` wrapper, the `copy_publish` action command
+
+#### `resolve_publish_filename(source_path, target_name?)`
+Return the logical FLUX filename to publish under. With `target_name`, uses it (adding the source extension if needed); otherwise the source filename must already be a FLUX name.
+→ used by: `publish_file`, the `select_publish` action command (same rule)
 
 #### `resolve_publish_path(project_path, filename)`
 Return destination folder Path for filename. Asset: project/<CLASS_path>/<NAME>/<type_subfolder>/. Shot: project/<CLASS_template{seq=SEQ, shot=SHOT}>/. Returns None if unparseable or missing tokens.

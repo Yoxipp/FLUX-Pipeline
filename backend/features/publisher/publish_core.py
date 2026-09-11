@@ -94,49 +94,50 @@ def rename_last_to_versioned(
         return None
 
 
-# ── main publish ───────────────────────────────────────────────────────────────
+# ── logical filename ─────────────────────────────────────────────────────────
 
-def publish_file(
-    source_path: Path,
-    project_path: Path,
-    description: str,
-    user: str,
-    project_name: str = "",
-    target_name: str | None = None,
-) -> Path | None:
-    """Publish *source_path* into the correct folder inside *project_path*.
-
-    Steps:
-      1. Parse the logical filename → tokens
-      2. Resolve destination folder from tokens.json
-      3. Compute next version number
-      4. Rename existing LAST → vXXX
-      5. Copy source → dest as *_LAST.ext
-      6. Append entry to modif_logs.json
-      7. Append event to activite.json
+def resolve_publish_filename(source_path: Path, target_name: str | None = None) -> str:
+    """Return the logical FLUX filename to publish under.
 
     *target_name* : when the source file is NOT named with FLUX tokens (e.g. a
     local image ``Capture.png``), the caller passes the composed token name
     (``CHAR_REF_HERO_null``). The source then only provides the bytes and its
     extension; the destination is named from *target_name*. When omitted, the
     source filename itself must be a valid FLUX name (DCC exports already are).
+    """
+    if target_name:
+        return target_name if Path(target_name).suffix else f"{target_name}{source_path.suffix}"
+    return source_path.name
+
+
+# ── copy half ──────────────────────────────────────────────────────────────────
+
+def copy_publish(
+    source_path: Path,
+    dest_folder: Path,
+    filename: str,
+    description: str,
+    user: str,
+    project_name: str,
+) -> Path | None:
+    """Archive the previous version and copy *source_path* into *dest_folder*.
+
+    This is the copy half of a publish. It does NOT resolve anything: it consumes
+    an already-resolved destination folder (the output of ``resolve_publish_path``
+    / ``build_output_path``) instead of recomputing the path itself.
+
+    Steps:
+      1. Compute next version number
+      2. Rename existing LAST → vXXX
+      3. Copy source → dest as *_LAST.ext
+      4. Append entry to modif_logs.json
+      5. Append event to activite.json
+
+    *filename* is the logical FLUX name; it only supplies the base name for the
+    archived/active files. *dest_folder* is where they land.
 
     Returns the destination LAST path on success, None on failure.
     """
-    if target_name:
-        filename = target_name if Path(target_name).suffix else f"{target_name}{source_path.suffix}"
-    else:
-        filename = source_path.name
-    parsed = parse_filename(filename)
-    if parsed is None:
-        log.error("Unparseable filename: %s", filename)
-        return None
-
-    dest_folder = resolve_publish_path(project_path, filename)
-    if dest_folder is None:
-        log.error("Cannot resolve publish path for: %s", filename)
-        return None
-
     ensure_dir(dest_folder)
 
     base_name = get_base_name(filename)
@@ -156,8 +157,48 @@ def publish_file(
     # Log the VERSIONED name (not the _LAST alias) so the publish history shows each
     # distinct version; dest_path.parent is the publish folder for the "open folder" UX.
     versioned_name = f"{base_name}_{format_version(new_ver)}{dest_path.suffix}"
-    log_publish(user, versioned_name, project_name or project_path.name, dest_folder=dest_path.parent)
+    log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
     return dest_path
+
+
+# ── main publish ───────────────────────────────────────────────────────────────
+
+def publish_file(
+    source_path: Path,
+    project_path: Path,
+    description: str,
+    user: str,
+    project_name: str = "",
+    target_name: str | None = None,
+) -> Path | None:
+    """Publish *source_path* into the correct folder inside *project_path*.
+
+    Thin wrapper over the two halves of a publish:
+      1. resolve  -> logical name + destination folder (no side effect)
+      2. copy     -> archive previous version, copy, write logs
+
+    *target_name* : see :func:`resolve_publish_filename`.
+
+    Returns the destination LAST path on success, None on failure.
+    """
+    filename = resolve_publish_filename(source_path, target_name)
+    if parse_filename(filename) is None:
+        log.error("Unparseable filename: %s", filename)
+        return None
+
+    dest_folder = resolve_publish_path(project_path, filename)
+    if dest_folder is None:
+        log.error("Cannot resolve publish path for: %s", filename)
+        return None
+
+    return copy_publish(
+        source_path,
+        dest_folder,
+        filename,
+        description,
+        user,
+        project_name or project_path.name,
+    )
 

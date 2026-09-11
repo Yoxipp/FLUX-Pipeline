@@ -37,6 +37,11 @@ FLUX_UPDATE/*.exe
 TEST/
 .flux
 
+# ...but flux_actions/config holds SOURCE action YAML, not runtime.
+# The CONFIG/ rule above catches it on case-insensitive filesystems; keep it.
+!backend/flux_actions/config/
+!backend/flux_actions/config/*.yml
+
 # OS
 .DS_Store
 Thumbs.db

@@ -7,6 +7,11 @@
 
 from __future__ import annotations
 
-from . import build_output_path, publish_file, select_publish  # noqa: F401
+from . import (  # noqa: F401
+    build_output_path,
+    copy_publish,
+    publish_file,
+    select_publish,
+)
 
-__all__ = ["select_publish", "build_output_path", "publish_file"]
+__all__ = ["select_publish", "build_output_path", "copy_publish", "publish_file"]

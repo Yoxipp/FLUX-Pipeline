@@ -5,9 +5,8 @@
 # (resolve_publish_path); it does not copy anything and does not re-implement
 # path logic.
 #
-# In Phase 1 this is a preview/inspection step: publish_file still resolves the
-# path internally when it copies. A later phase will split publish_file so the
-# copy consumes this output directly, removing the double resolution.
+# The copy step (copy_publish) consumes this output_path directly, so the
+# destination is resolved exactly once per publish and fed forward by reference.
 
 from __future__ import annotations
 
