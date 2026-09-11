@@ -12,7 +12,6 @@ from . import (  # noqa: F401
     copy_publish,
     houdini_export,
     maya_export,
-    publish_file,
     select_dcc_publish,
     select_houdini_publish,
     select_publish,
@@ -26,5 +25,4 @@ __all__ = [
     "maya_export",
     "houdini_export",
     "copy_publish",
-    "publish_file",
 ]
