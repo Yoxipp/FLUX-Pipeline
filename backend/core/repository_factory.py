@@ -70,6 +70,17 @@ from core.paths import get_project_production_path  # noqa: E402  (kept next to 
 
 register_collection("production", lambda doc_id: get_project_production_path(str(doc_id)))
 
+# user_settings: one User.json per artist, at USER/<name>/UserSettings/User.json.
+# doc_id = the user name; the path is resolved fresh each call (get_user_dir), so a
+# runtime set_flux_root still wins (matches the old direct read/write_json).
+from core.constants import JSON_USER_SETTINGS  # noqa: E402  (kept next to use)
+from core.paths import get_user_dir  # noqa: E402  (kept next to use)
+
+register_collection(
+    "user_settings",
+    lambda doc_id: get_user_dir(str(doc_id)) / "UserSettings" / JSON_USER_SETTINGS,
+)
+
 # feed logs (append-only JSONL: chat, mentions, activity) + their cold archives.
 # Addressed by their own path for now (doc_id IS the log/archive path the store
 # already computes, incl. the test-injected one), like the read_state pilot. The
