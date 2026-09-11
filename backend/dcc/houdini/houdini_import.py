@@ -462,7 +462,10 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
 
     Returns {"ok": True, "local_path": "...", "abs_path": "..."} or {"ok": False, "error": "..."}.
     """
-    src = Path(file_path)
+    # A caller may hand us a portable "$FLUX/..." token (F2). Resolve it back to a
+    # local absolute for the disk copy. from_flux_token is a no-op on plain paths.
+    from core.paths import from_flux_token
+    src = Path(from_flux_token(file_path))
     if not src.is_file():
         return {"ok": False, "error": f"Fichier introuvable : {src}"}
 

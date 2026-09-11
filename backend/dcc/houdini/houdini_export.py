@@ -502,6 +502,19 @@ def publish_houdini_rop(
     if not exp_resp.get("ok"):
         return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
 
+    # 5b. F2: rewrite the ROP output parm to a portable "$FLUX/..." token so the
+    #     saved .hip stays portable across machines. The cook already wrote to the
+    #     resolved absolute above; this only changes the value stored in the node.
+    #     Opt-in; Houdini expands $FLUX (F1 package) at the next cook.
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled():
+        from core.paths import to_flux_token
+        token = to_flux_token(output_path)
+        if token.startswith("$FLUX"):  # only when the output sits under the root
+            rop = (exp_resp.get("result") or {}).get("rop")
+            if rop:
+                set_rop_output(rop, token)
+
     # 6. Log
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
     # Versioned display name so publish history shows each version (not the _LAST alias).

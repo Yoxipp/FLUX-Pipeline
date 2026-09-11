@@ -390,6 +390,16 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
         if cand.exists():
             selected_file = str(cand)
 
+    # F2: store portable "$FLUX/..." tokens on the created / re-pathed node so the
+    # scene stays portable. Opt-in; Houdini expands $FLUX (F1 package) at cook.
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled():
+        from core.paths import to_flux_token
+        if resolved_path:
+            resolved_path = to_flux_token(resolved_path)
+        if selected_file:
+            selected_file = to_flux_token(selected_file)
+
     loop = asyncio.get_event_loop()
 
     # Prefer re-pathing a matching selected import node over creating a new one.
@@ -1296,6 +1306,13 @@ async def houdini_importer_resolve(
         None,
         lambda: resolve_import_path(project_path, class_tok, type, name, instance, iter),
     )
+    # F2: hand Houdini a portable "$FLUX/..." path so the HDA stores a token the
+    # scene can carry across machines. Houdini expands $FLUX (F1 package) at cook.
+    # Opt-in; the resolver itself stays absolute for backend-internal use.
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled() and result.get("ok") and result.get("path"):
+        from core.paths import to_flux_token
+        result["path"] = to_flux_token(result["path"])
     return result
 
 
