@@ -1044,6 +1044,40 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     else:
         version_str = "001"
 
+    # Opt-in engine path (FLUX_ENGINE_PUBLISH includes "maya" or "all"). Same UI,
+    # same endpoint, same response shape. The runner drives the SAME
+    # run_publish_export over the commandPort and reuses copy_publish, so both
+    # paths export and land identically. version_str stays the pre-flight number
+    # the legacy path returns. Placed before the legacy temp dir so nothing leaks.
+    from flux_actions.switch import engine_publish_enabled
+
+    if engine_publish_enabled("maya"):
+        from flux_actions.runner import run_maya_publish_action
+
+        scope = "scene" if req.scope == "scene" else "selection"
+        target_port = _resolve_target_port("Maya", req.port)
+        is_anim_abc = (
+            ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2
+        )
+        dest = await loop.run_in_executor(
+            None,
+            lambda: run_maya_publish_action(
+                base_name=req.filename,
+                extension=ext,
+                scope=scope,
+                project_path=project_path,
+                description=req.description,
+                user=user,
+                project_name=req.project_name,
+                port=target_port,
+                frame_range=list(req.frame_range) if is_anim_abc else None,
+                options=req.export_options,
+            ),
+        )
+        if dest is None:
+            raise HTTPException(status_code=503, detail="Publish Maya (moteur) échoué")
+        return {"ok": True, "version_str": version_str, "dest": str(dest)}
+
     # Build temp export path
     tmp_dir = await loop.run_in_executor(None, lambda: tempfile.mkdtemp(prefix="flux_maya_pub_"))
     tmp_path = str(tmp_dir).replace("\\", "/") + f"/{filename_with_ext}"
