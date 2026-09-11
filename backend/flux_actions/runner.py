@@ -158,14 +158,17 @@ def run_houdini_publish_action(
     attr_filter: Optional[Dict[str, Any]] = None,
     logger: Optional[logging.Logger] = None,
     on_diff: Optional[Callable[[Dict[str, Any]], None]] = None,
-) -> Optional[Path]:
-    """Publish the open Houdini scene via the action engine; return the dest path.
+) -> Optional[Dict[str, Any]]:
+    """Publish the open Houdini scene via the action engine; return the rich result.
 
     Runs publish_houdini.yml (select -> cook). The cook step reuses
     publish_houdini_rop whole: it resolves the versioned path, archives the
     previous LAST, sets the ROP output and cooks straight into the destination.
     There is no temp file to clean up (Houdini writes direct-to-dest).
-    Returns the published path on success, else None.
+
+    Returns the same shape the legacy endpoint sends the front, so the endpoint
+    can hand it back unchanged: ``{"ok", "path", "version", "version_str",
+    "rop_node", "is_sequence"}``. Returns None when the graph does not complete.
     """
     context = {
         "project_path": str(project_path),
@@ -193,8 +196,19 @@ def run_houdini_publish_action(
     if status is not Status.COMPLETED:
         return None
 
-    dest = query.buffer.steps["cook"].commands["cook"].outputs.get("dest_path")
-    return Path(dest) if dest is not None else None
+    # The cook command already carries the full legacy result in its outputs.
+    outputs = query.buffer.steps["cook"].commands["cook"].outputs
+    dest = outputs.get("dest_path")
+    if dest is None:
+        return None
+    return {
+        "ok": True,
+        "path": str(dest),
+        "version": outputs.get("version"),
+        "version_str": outputs.get("version_str"),
+        "rop_node": outputs.get("rop_node"),
+        "is_sequence": outputs.get("is_sequence", is_sequence),
+    }
 
 
 def build_publish_form() -> List[Dict[str, Any]]:

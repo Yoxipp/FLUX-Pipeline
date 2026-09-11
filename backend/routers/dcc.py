@@ -483,6 +483,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     from core import config
     from core.paths import get_project_path
     from dcc.houdini.houdini_export import publish_houdini_rop
+    from flux_actions.switch import engine_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
     project_path = get_project_path(req.project_name)
@@ -492,6 +493,33 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     frame_range = tuple(req.frame_range) if req.frame_range and len(req.frame_range) == 3 else None  # type: ignore[arg-type]
 
     loop = asyncio.get_event_loop()
+
+    # Opt-in engine path (FLUX_ENGINE_PUBLISH includes "houdini" or "all"). Same
+    # UI, same endpoint, same response shape — only the logic underneath changes.
+    # The runner reuses publish_houdini_rop whole, so both paths cook identically.
+    if engine_publish_enabled("houdini"):
+        from flux_actions.runner import run_houdini_publish_action
+
+        result = await loop.run_in_executor(
+            None,
+            lambda: run_houdini_publish_action(
+                base_name=req.filename,
+                extension=req.extension,
+                project_path=project_path,
+                description=req.description,
+                user=user,
+                project_name=req.project_name,
+                rop_node_path=req.rop_node_path,
+                is_sequence=req.is_sequence,
+                frame_range=list(req.frame_range) if req.frame_range else None,
+                options=req.export_options,
+                attr_filter=req.attr_filter,
+            ),
+        )
+        if result is None:
+            raise HTTPException(status_code=503, detail="Publish failed")
+        return result
+
     result = await loop.run_in_executor(
         None,
         lambda: publish_houdini_rop(
