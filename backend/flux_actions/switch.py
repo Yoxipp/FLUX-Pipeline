@@ -1,35 +1,37 @@
-# switch.py — the opt-in toggle that routes a publish through the engine.
+# switch.py — routes a publish through the engine, with a legacy escape hatch.
 #
-# Phase 4 wires the engine UNDER the existing Publisher endpoints without
-# replacing the legacy logic. Legacy stays the default. One environment
-# variable, read fresh each call, flips a given DCC over to the engine runner.
+# The engine now runs UNDER the Publisher endpoints by default. The legacy logic
+# (publish_file, publish_houdini_rop, run_publish_export) stays in the tree as a
+# fallback, reachable per DCC through one environment variable, read fresh each
+# call so the switch flips without restarting the backend.
 #
-# FLUX_ENGINE_PUBLISH is a comma-separated list of DCC keys, or "all":
-#   ""                -> legacy everywhere (default)
-#   "houdini"         -> engine for Houdini only
-#   "maya,houdini"    -> engine for Maya and Houdini
-#   "all"             -> engine everywhere
+# FLUX_LEGACY_PUBLISH is a comma-separated list of DCC keys, or "all":
+#   ""                -> engine everywhere (default)
+#   "houdini"         -> legacy for Houdini only, engine elsewhere
+#   "maya,houdini"    -> legacy for Maya and Houdini, engine elsewhere
+#   "all"             -> legacy everywhere (full rollback)
 #
-# YAGNI: no request field, no settings UI. Set the env var to validate a DCC in
-# the real app, unset it to fall straight back to legacy.
+# YAGNI: no request field, no settings UI. Set the env var only to fall back to
+# legacy for a DCC; unset it for the engine everywhere.
 
 from __future__ import annotations
 
 import os
 
-_ENV_VAR = "FLUX_ENGINE_PUBLISH"
+_ENV_VAR = "FLUX_LEGACY_PUBLISH"
 
 
 def engine_publish_enabled(dcc: str) -> bool:
     """Return True when the engine should handle a publish for this DCC.
 
-    ``dcc`` is a lowercase key: "local", "maya" or "houdini". The env var is
-    read every call so the switch can flip without restarting the backend.
+    ``dcc`` is a lowercase key: "local", "maya" or "houdini". The engine is the
+    default; the env var names the DCCs that must fall back to legacy. It is read
+    every call so the switch can flip without restarting the backend.
     """
     raw = os.environ.get(_ENV_VAR, "")
-    tokens = {t.strip().lower() for t in raw.split(",") if t.strip()}
-    if not tokens:
-        return False
-    if "all" in tokens:
+    legacy = {t.strip().lower() for t in raw.split(",") if t.strip()}
+    if not legacy:
         return True
-    return dcc.strip().lower() in tokens
+    if "all" in legacy:
+        return False
+    return dcc.strip().lower() not in legacy

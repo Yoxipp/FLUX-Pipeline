@@ -494,8 +494,8 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
 
     loop = asyncio.get_event_loop()
 
-    # Opt-in engine path (FLUX_ENGINE_PUBLISH includes "houdini" or "all"). Same
-    # UI, same endpoint, same response shape — only the logic underneath changes.
+    # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
+    # same endpoint, same response shape — only the logic underneath changes.
     # The runner reuses publish_houdini_rop whole, so both paths cook identically.
     if engine_publish_enabled("houdini"):
         from flux_actions.runner import run_houdini_publish_action
@@ -1045,7 +1045,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     else:
         version_str = "001"
 
-    # Opt-in engine path (FLUX_ENGINE_PUBLISH includes "maya" or "all"). Same UI,
+    # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape. The runner drives the SAME
     # run_publish_export over the commandPort and reuses copy_publish, so both
     # paths export and land identically. version_str stays the pre-flight number

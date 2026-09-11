@@ -46,7 +46,7 @@ async def publish(req: PublishRequest) -> PublishResult:
 
     loop = asyncio.get_event_loop()
 
-    # Opt-in engine path (FLUX_ENGINE_PUBLISH includes "local" or "all"). Same UI,
+    # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape. The runner runs publish.yml, which
     # resolves then reuses copy_publish, so both paths land the file identically.
     from flux_actions.switch import engine_publish_enabled
