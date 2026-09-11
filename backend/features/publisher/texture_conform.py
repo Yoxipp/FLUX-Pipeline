@@ -35,6 +35,16 @@ import OpenImageIO as oiio
 # Image extensions we accept as conform sources.
 _IMAGE_EXTS = {".exr", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".tga", ".hdr", ".bmp"}
 
+
+def is_texture_source(path: Path) -> bool:
+    """True if a path is a conformable texture (by extension), and not a .tx.
+
+    Lets a publish decide whether a just-published file is worth conforming
+    without importing the private extension set.
+    """
+    suffix = Path(path).suffix.lower()
+    return suffix in _IMAGE_EXTS and suffix != ".tx"
+
 # Filename tokens that mark a DATA map (kept raw, never gamma-converted).
 _DATA_TOKENS = (
     "normal", "nrm", "nml", "nor", "roughness", "rough", "rgh",

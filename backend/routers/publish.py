@@ -29,6 +29,8 @@ class PublishResult(BaseModel):
     success: bool
     dest_path: str | None
     message: str
+    # Populated only when texture conform is enabled and the file was a texture.
+    tx_paths: list[str] | None = None
 
 
 @router.post("", response_model=PublishResult)
@@ -68,4 +70,43 @@ async def publish(req: PublishRequest) -> PublishResult:
 
     if dest is None:
         return PublishResult(success=False, dest_path=None, message="Publish échoué, voir les logs")
-    return PublishResult(success=True, dest_path=str(dest), message="Publish réussi")
+
+    # Post-publish texture conform (opt-in). Pre-generate a mipped/tiled .tx next
+    # to the published texture so Karma stops re-mipmapping it at render time.
+    # Best-effort: a conform failure never fails the publish itself.
+    tx_paths = await _maybe_conform_texture(Path(dest), loop)
+
+    return PublishResult(
+        success=True, dest_path=str(dest), message="Publish réussi", tx_paths=tx_paths
+    )
+
+
+async def _maybe_conform_texture(dest: Path, loop) -> list[str] | None:
+    """Conform the just-published file to .tx when the opt-in flag is on.
+
+    Returns the .tx paths, or None when conform is off / the file is not a
+    texture / conform failed (the publish already succeeded either way).
+    """
+    from flux_actions.switch import conform_tx_colorconvert, conform_tx_enabled
+    from features.publisher.texture_conform import is_texture_source
+
+    if not conform_tx_enabled() or not is_texture_source(dest):
+        return None
+    try:
+        from flux_actions.runner import run_conform_texture_action
+
+        result = await loop.run_in_executor(
+            None,
+            lambda: run_conform_texture_action(
+                dest, out_dir=dest.parent, colorconvert=conform_tx_colorconvert()
+            ),
+        )
+    except Exception:  # noqa: BLE001 - conform must never break a publish
+        log.exception("Texture conform .tx a échoué pour %s", dest)
+        return None
+    if not result:
+        log.warning("Texture conform .tx sans résultat pour %s", dest)
+        return None
+    tx_paths = result.get("tx_paths") or None
+    log.info("Texture conform .tx: %s -> %s", dest.name, tx_paths)
+    return tx_paths

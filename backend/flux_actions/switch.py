@@ -20,6 +20,37 @@ import os
 
 _ENV_VAR = "FLUX_LEGACY_PUBLISH"
 
+# Texture conform (.tx) at publish time. OPT-IN: off by default, exactly like the
+# publish engine was before it became the default. It stays off until the maintainer has
+# validated the gain (and the colorspace choice) with a Karma control render.
+_CONFORM_ENV = "FLUX_CONFORM_TX"
+# When conform is on, whether to bake the colorspace of color maps (sRGB->linear)
+# into the .tx. This is the point to validate with Karma: some pipelines prefer
+# to keep the source space + tag and let the render OCIO convert. Set this env to
+# a falsey value ("0"/"off"/"no"/"false") to keep source pixels; default converts.
+_CONFORM_COLORCONVERT_ENV = "FLUX_CONFORM_TX_COLORCONVERT"
+
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off", ""}
+
+
+def conform_tx_enabled() -> bool:
+    """Return True when a texture publish should also generate a mipped .tx.
+
+    Opt-in and read fresh each call, so the switch flips without a restart.
+    """
+    return os.environ.get(_CONFORM_ENV, "").strip().lower() in _TRUE
+
+
+def conform_tx_colorconvert() -> bool:
+    """Return True when color maps should be colorspace-converted in the .tx.
+
+    Defaults to True (the maketx-style workflow); set FLUX_CONFORM_TX_COLORCONVERT
+    to a falsey value to keep the source space instead. Only meaningful when
+    conform_tx_enabled() is True.
+    """
+    return os.environ.get(_CONFORM_COLORCONVERT_ENV, "1").strip().lower() not in _FALSE
+
 
 def engine_publish_enabled(dcc: str) -> bool:
     """Return True when the engine should handle a publish for this DCC.
