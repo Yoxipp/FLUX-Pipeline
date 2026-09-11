@@ -12,15 +12,19 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from core.json_manager import (
     append_jsonl,
+    append_lock,
     cached_read_json,
     cached_read_jsonl,
     invalidate_cache,
+    read_jsonl,
     write_json,
+    write_jsonl,
 )
 
 # locate(collection, doc_id) -> Path. doc_id is None for the collection's own
@@ -61,10 +65,33 @@ class JsonFileRepository:
             pass
         invalidate_cache(path)
 
-    # ── collection / log ops ─────────────────────────────────────────────────
+    # ── log ops (append-only JSONL feeds) ─────────────────────────────────────
+    # Straight delegation to json_manager so the cache, the O_APPEND atomic write
+    # and the cross-instance file lock behave EXACTLY as the direct calls these
+    # replace: rerouting a feed through here changes nothing observable on disk.
 
-    def list(self, collection: str) -> list[dict]:
-        return cached_read_jsonl(self._locate(collection, None))
+    def read_log(
+        self,
+        collection: str,
+        doc_id: str,
+        *,
+        fresh: bool = False,
+        sig: tuple[int, int] | None = None,
+    ) -> list[dict]:
+        path = self._locate(collection, doc_id)
+        if fresh:
+            return read_jsonl(path)              # uncached: live ids for mark-read
+        return cached_read_jsonl(path, sig=sig)  # polling path: cached (+ ETag sig)
 
-    def append(self, collection: str, entry: dict) -> bool:
-        return append_jsonl(self._locate(collection, None), [entry])
+    def append_log(self, collection: str, doc_id: str, entries: list[dict]) -> bool:
+        return append_jsonl(self._locate(collection, doc_id), list(entries))
+
+    def replace_log(self, collection: str, doc_id: str, entries: list[dict]) -> bool:
+        return write_jsonl(self._locate(collection, doc_id), list(entries))
+
+    @contextmanager
+    def log_transaction(self, collection: str, doc_id: str) -> Iterator[None]:
+        # Same OS advisory lock append_jsonl takes, so a read_log(fresh) +
+        # replace_log inside the block is atomic w.r.t. concurrent appends.
+        with append_lock(self._locate(collection, doc_id)):
+            yield

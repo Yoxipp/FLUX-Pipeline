@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import ContextManager, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -46,11 +46,44 @@ class MetadataRepository(Protocol):
         """Remove the document. A no-op when it does not exist."""
         ...
 
-    # ── collection / log ops (append-only JSONL form) ────────────────────────
-    def list(self, collection: str) -> list[dict]:
-        """Return every entry of an append-only collection (empty when absent)."""
+    # ── log ops (append-only JSONL feeds: chat, mentions, activity) ──────────
+    # A log is an append-only sequence of entries addressed by (collection,
+    # doc_id). These map cleanly onto any backend: append = INSERT, read = SELECT,
+    # replace = the rare bounded rewrite (rotation/prune), a transaction = the
+    # atomic scope that guards a read-modify-write. The JSON backend implements
+    # them over JSONL files (cache + cross-instance file lock); a future SQLite /
+    # remote backend implements the same surface with a table + real transaction.
+    def read_log(
+        self,
+        collection: str,
+        doc_id: str,
+        *,
+        fresh: bool = False,
+        sig: tuple[int, int] | None = None,
+    ) -> list[dict]:
+        """Return every entry of the log (oldest→newest), empty when absent.
+
+        *fresh* bypasses any read cache — needed when the caller must see the
+        live set of ids right now (e.g. marking read). *sig* is an optional
+        (mtime_ns, size) the caller already stat'd (ETag path); a backend may
+        reuse it to skip a stat, and one that has no such cache ignores it.
+        """
         ...
 
-    def append(self, collection: str, entry: dict) -> bool:
-        """Append one entry to an append-only collection. True on success."""
+    def append_log(self, collection: str, doc_id: str, entries: list[dict]) -> bool:
+        """Append *entries* to the log as one atomic write. True on success."""
+        ...
+
+    def replace_log(self, collection: str, doc_id: str, entries: list[dict]) -> bool:
+        """Rewrite the whole log atomically (rotation / prune). True on success."""
+        ...
+
+    def log_transaction(self, collection: str, doc_id: str) -> ContextManager[None]:
+        """Atomic scope over one log, for a read-modify-write (rotation).
+
+        Everything done inside the ``with`` block is serialised against other
+        writers of the same log — across instances, not just threads — so a
+        read_log(fresh) + replace_log pair never loses a racing append. The JSON
+        backend holds an OS advisory file lock; SQLite would open a transaction.
+        """
         ...

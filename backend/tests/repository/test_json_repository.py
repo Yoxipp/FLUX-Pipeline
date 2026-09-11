@@ -70,14 +70,40 @@ class JsonRepositoryContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             _repo_in(Path(d)).delete("things", "ghost")  # must not raise
 
-    def test_list_and_append(self):
+    def test_read_and_append_log(self):
         with tempfile.TemporaryDirectory() as d:
             repo = _repo_in(Path(d))
-            self.assertEqual(repo.list("events"), [])
-            repo.append("events", {"id": "e1"})
-            repo.append("events", {"id": "e2"})
-            ids = [e["id"] for e in repo.list("events")]
-            self.assertEqual(ids, ["e1", "e2"])
+            self.assertEqual(repo.read_log("events", "feed"), [])
+            repo.append_log("events", "feed", [{"id": "e1"}])
+            repo.append_log("events", "feed", [{"id": "e2"}, {"id": "e3"}])
+            ids = [e["id"] for e in repo.read_log("events", "feed")]
+            self.assertEqual(ids, ["e1", "e2", "e3"])
+
+    def test_replace_log_rewrites(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = _repo_in(Path(d))
+            repo.append_log("events", "feed", [{"id": "e1"}, {"id": "e2"}])
+            repo.replace_log("events", "feed", [{"id": "e2"}])   # trim
+            ids = [e["id"] for e in repo.read_log("events", "feed")]
+            self.assertEqual(ids, ["e2"])
+
+    def test_read_log_fresh_matches_cached(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = _repo_in(Path(d))
+            repo.append_log("events", "feed", [{"id": "e1"}])
+            self.assertEqual(repo.read_log("events", "feed", fresh=True),
+                             repo.read_log("events", "feed"))
+
+    def test_log_transaction_read_modify_write(self):
+        # The rotation shape: read fresh + replace, atomically, inside the scope.
+        with tempfile.TemporaryDirectory() as d:
+            repo = _repo_in(Path(d))
+            repo.append_log("events", "feed", [{"id": "e1"}, {"id": "e2"}, {"id": "e3"}])
+            with repo.log_transaction("events", "feed"):
+                entries = repo.read_log("events", "feed", fresh=True)
+                repo.replace_log("events", "feed", entries[-2:])
+            ids = [e["id"] for e in repo.read_log("events", "feed", fresh=True)]
+            self.assertEqual(ids, ["e2", "e3"])
 
 
 if __name__ == "__main__":

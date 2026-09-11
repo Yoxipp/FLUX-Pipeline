@@ -64,6 +64,15 @@ from core.paths import get_project_production_path  # noqa: E402  (kept next to 
 
 register_collection("production", lambda doc_id: get_project_production_path(str(doc_id)))
 
+# feed logs (append-only JSONL: chat, mentions, activity) + their cold archives.
+# Addressed by their own path for now (doc_id IS the log/archive path the store
+# already computes, incl. the test-injected one), like the read_state pilot. The
+# collections stay distinct so a SQLite backend keys each feed by its own table.
+register_collection("chat_log", lambda doc_id: Path(str(doc_id)))
+register_collection("mentions_log", lambda doc_id: Path(str(doc_id)))
+register_collection("activity_log", lambda doc_id: Path(str(doc_id)))
+register_collection("feed_archive", lambda doc_id: Path(str(doc_id)))
+
 
 _repository: JsonFileRepository | None = None
 
