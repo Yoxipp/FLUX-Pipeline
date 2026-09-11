@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,6 +25,9 @@ from flux_actions import commands as _commands  # noqa: F401
 
 # The bundled publish action shipped with Flux.
 PUBLISH_ACTION = Path(__file__).parent / "config" / "publish.yml"
+
+# The Maya scene publish action (select -> resolve -> export -> copy).
+PUBLISH_MAYA_ACTION = Path(__file__).parent / "config" / "publish_maya.yml"
 
 # The resolve step name inside publish.yml (last step of a preview run).
 _RESOLVE_STEP = "resolve"
@@ -78,6 +82,62 @@ def run_publish_action(
 
     dest = query.buffer.steps["publish"].commands["publish"].outputs.get("dest_path")
     return Path(dest) if dest is not None else None
+
+
+def run_maya_publish_action(
+    base_name: str,
+    extension: str,
+    scope: str,
+    project_path: Path,
+    description: str,
+    user: str,
+    project_name: str = "",
+    port: Optional[int] = None,
+    frame_range: Optional[List[int]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    logger: Optional[logging.Logger] = None,
+    on_diff: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Optional[Path]:
+    """Publish the open Maya scene via the action engine; return the dest path.
+
+    Runs publish_maya.yml (select -> resolve -> export -> copy). The scene is
+    exported to a temp file by the export step and copied by the same copy step
+    the local publish uses. The temp export dir is always removed afterwards.
+    Returns the LAST path on success, else None.
+    """
+    context = {
+        "project_path": str(project_path),
+        "project_name": project_name,
+        "user": user,
+    }
+    query = ActionQuery.from_file(
+        PUBLISH_MAYA_ACTION, context=context, logger=logger, on_diff=on_diff
+    )
+
+    query.set_parameter("select", "select", "base_name", base_name)
+    query.set_parameter("select", "select", "extension", extension)
+    query.set_parameter("select", "select", "scope", scope)
+    if port is not None:
+        query.set_parameter("export", "export", "port", port)
+    if frame_range is not None:
+        query.set_parameter("export", "export", "frame_range", frame_range)
+    if options is not None:
+        query.set_parameter("export", "export", "options", options)
+    query.set_parameter("publish", "publish", "description", description)
+
+    try:
+        status = asyncio.run(query.execute())
+        if status is not Status.COMPLETED:
+            return None
+        dest = query.buffer.steps["publish"].commands["publish"].outputs.get("dest_path")
+        return Path(dest) if dest is not None else None
+    finally:
+        # The export step created a temp dir; remove it once the copy has read it.
+        export_cmd = query.buffer.steps.get("export")
+        if export_cmd is not None:
+            export_dir = export_cmd.commands["export"].outputs.get("export_dir")
+            if export_dir is not None:
+                shutil.rmtree(export_dir, ignore_errors=True)
 
 
 def build_publish_form() -> List[Dict[str, Any]]:

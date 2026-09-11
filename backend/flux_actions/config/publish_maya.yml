@@ -1,0 +1,61 @@
+# publish_maya.yml — publish the open Maya scene as a declarative action.
+#
+# Four ordered steps, one command each:
+#   select  -> select_dcc_publish : validate the scene name + format
+#   resolve -> build_output_path  : resolve the destination folder
+#   export  -> maya_export        : export the scene to a temp file (over the port)
+#   publish -> copy_publish       : versioned copy + logs into the resolved folder
+#
+# Same engine and same copy step as the local publish; only the source changes:
+# here the source_path is produced by the export step, not picked by the user.
+# Data flows by named reference (value: {from: "step.command.output_key"}).
+# Production context (project_path, user, project_name) is injected at run time.
+
+name: publish_maya
+shelf: publish
+
+steps:
+
+  select:
+    index: 10
+    commands:
+      select:
+        command: select_dcc_publish
+        # base_name / extension / scope are set at run time (UI or runner).
+
+  resolve:
+    index: 20
+    commands:
+      output:
+        command: build_output_path
+        parameters:
+          filename:
+            value: {from: "select.select.filename"}
+
+  export:
+    index: 30
+    commands:
+      export:
+        command: maya_export
+        parameters:
+          filename:
+            value: {from: "select.select.filename"}
+          extension:
+            value: {from: "select.select.extension"}
+          scope:
+            value: {from: "select.select.scope"}
+          # port / frame_range / options are set at run time when needed.
+
+  publish:
+    index: 40
+    commands:
+      publish:
+        command: copy_publish
+        parameters:
+          source_path:
+            value: {from: "export.export.source_path"}
+          output_path:
+            value: {from: "resolve.output.output_path"}
+          filename:
+            value: {from: "select.select.filename"}
+          # description is set at run time (UI or runner).
