@@ -45,10 +45,26 @@ async def publish(req: PublishRequest) -> PublishResult:
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
     loop = asyncio.get_event_loop()
-    dest = await loop.run_in_executor(
-        None,
-        lambda: publish_file(source, project_path, req.description, user, req.project_name, req.target_name),
-    )
+
+    # Opt-in engine path (FLUX_ENGINE_PUBLISH includes "local" or "all"). Same UI,
+    # same endpoint, same response shape. The runner runs publish.yml, which
+    # resolves then reuses copy_publish, so both paths land the file identically.
+    from flux_actions.switch import engine_publish_enabled
+
+    if engine_publish_enabled("local"):
+        from flux_actions.runner import run_publish_action
+
+        dest = await loop.run_in_executor(
+            None,
+            lambda: run_publish_action(
+                source, project_path, req.description, user, req.project_name, req.target_name
+            ),
+        )
+    else:
+        dest = await loop.run_in_executor(
+            None,
+            lambda: publish_file(source, project_path, req.description, user, req.project_name, req.target_name),
+        )
 
     if dest is None:
         return PublishResult(success=False, dest_path=None, message="Publish échoué, voir les logs")
