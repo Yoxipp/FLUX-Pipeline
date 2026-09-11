@@ -50,6 +50,13 @@ register_collection("modif_log", lambda doc_id: Path(str(doc_id)) / JSON_MODIF_L
 # tokens: one tokens.json per project folder. doc_id = the project path.
 register_collection("tokens", lambda doc_id: Path(str(doc_id)) / JSON_TOKENS)
 
+# config: the single per-user prefs file (config.json next to the exe). doc_id is a
+# fixed label; the path is get_prefs_path() resolved fresh each call, so a runtime
+# paths.set_flux_root still wins (matches the old direct read_json(get_prefs_path())).
+from core.paths import get_prefs_path  # noqa: E402  (kept next to use)
+
+register_collection("config", lambda doc_id: get_prefs_path())
+
 
 _repository: JsonFileRepository | None = None
 
