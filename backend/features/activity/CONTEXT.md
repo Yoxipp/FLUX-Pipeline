@@ -3,7 +3,7 @@
 > Domain: backend
 > Path: backend/features/activity/
 > Last updated: 2026-05-13
-> Key internal dependencies: core.json_manager, core.paths, core.logger
+> Key internal dependencies: core.repository_factory (MetadataRepository), core.paths, core.logger
 
 ## 1. Module Role
 
@@ -26,7 +26,7 @@ When implementing user activity feeds, logging publish/import operations, sendin
 - **Consumed by**: `/activity` REST endpoints (feed, chat, mentions, history), DCC bridge (log_connect, log_publish), importer/publisher (activity logging)
 - **Reads**: FLUX_ROOT/CONFIG/{activite.json, teamChat.json, chatMentions.json} (all JSONL), the `*_read.json` read-status companions, and CONFIG/archive/ on demand
 - **Writes**: activite.json / chatMentions.json / teamChat.json via atomic O_APPEND JSONL (see `history.append_events`, `json_manager.append_jsonl`)
-- **Depends on**: core.paths (get_activity_path, get_chat_path, get_mentions_path, get_*_read_path, get_archive_*), core.json_manager (read_jsonl / append_jsonl / cached_read_jsonl / file_validator / append_lock), features.activity.history, features.activity.read_state
+- **Depends on**: core.paths (get_activity_path, get_chat_path, get_mentions_path, get_*_read_path, get_archive_*), core.repository_factory (V5: the feed logs go through `get_repository()`'s log ops — `read_log`/`append_log`/`replace_log`/`log_transaction` — instead of json_manager directly; the JSON backend still delegates to json_manager, so the on-disk JSONL + cache + append_lock behaviour is identical), features.activity.history, features.activity.read_state
 
 ## 5. Module Entry Points
 
