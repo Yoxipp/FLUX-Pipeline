@@ -36,6 +36,9 @@ PUBLISH_HOUDINI_ACTION = Path(__file__).parent / "config" / "publish_houdini.yml
 # The texture conform action (conform a file / folder / UDIM set to .tx).
 CONFORM_TEXTURE_ACTION = Path(__file__).parent / "config" / "conform_texture.yml"
 
+# The USD proxy generation action (decimate render meshes to purpose=proxy).
+GENERATE_PROXY_ACTION = Path(__file__).parent / "config" / "generate_proxy.yml"
+
 # The resolve step name inside publish.yml (last step of a preview run).
 _RESOLVE_STEP = "resolve"
 
@@ -251,6 +254,39 @@ def run_conform_texture_action(
     if status is not Status.COMPLETED:
         return None
     return dict(query.buffer.steps["conform"].commands["conform"].outputs)
+
+
+def run_generate_proxy_action(
+    source: Path,
+    out: Optional[Path] = None,
+    target_reduction: Optional[float] = None,
+    min_tris: Optional[int] = None,
+    force: bool = False,
+    logger: Optional[logging.Logger] = None,
+    on_diff: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Generate USD purpose=proxy geometry via the action engine.
+
+    Returns the proxy command outputs (``proxy_path`` plus mesh / triangle
+    counts), or None when the graph does not complete.
+    """
+    query = ActionQuery.from_file(
+        GENERATE_PROXY_ACTION, context={}, logger=logger, on_diff=on_diff
+    )
+
+    query.set_parameter("proxy", "proxy", "source", str(source))
+    if out is not None:
+        query.set_parameter("proxy", "proxy", "out", str(out))
+    if target_reduction is not None:
+        query.set_parameter("proxy", "proxy", "target_reduction", target_reduction)
+    if min_tris is not None:
+        query.set_parameter("proxy", "proxy", "min_tris", min_tris)
+    query.set_parameter("proxy", "proxy", "force", force)
+
+    status = asyncio.run(query.execute())
+    if status is not Status.COMPLETED:
+        return None
+    return dict(query.buffer.steps["proxy"].commands["proxy"].outputs)
 
 
 def build_publish_form() -> List[Dict[str, Any]]:

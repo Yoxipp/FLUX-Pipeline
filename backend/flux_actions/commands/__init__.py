@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     build_output_path,
     conform_texture,
     copy_publish,
+    generate_proxy,
     houdini_export,
     maya_export,
     select_dcc_publish,
@@ -27,4 +28,5 @@ __all__ = [
     "houdini_export",
     "copy_publish",
     "conform_texture",
+    "generate_proxy",
 ]

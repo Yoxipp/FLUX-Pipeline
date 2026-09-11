@@ -52,6 +52,34 @@ def conform_tx_colorconvert() -> bool:
     return os.environ.get(_CONFORM_COLORCONVERT_ENV, "1").strip().lower() not in _FALSE
 
 
+# USD proxy generation at publish time. OPT-IN, same posture as texture conform:
+# off until the maintainer has validated the proxy quality on real assets.
+_PROXY_ENV = "FLUX_PROXY_USD"
+_PROXY_REDUCTION_ENV = "FLUX_PROXY_REDUCTION"
+_DEFAULT_PROXY_REDUCTION = 0.9
+
+
+def proxy_usd_enabled() -> bool:
+    """Return True when a USD asset publish should also author proxy geometry.
+
+    Opt-in and read fresh each call, so the switch flips without a restart.
+    """
+    return os.environ.get(_PROXY_ENV, "").strip().lower() in _TRUE
+
+
+def proxy_usd_reduction() -> float:
+    """Fraction of triangles removed for publish-time proxies (default 0.9).
+
+    Set FLUX_PROXY_REDUCTION to override; a bad value falls back to the default.
+    """
+    raw = os.environ.get(_PROXY_REDUCTION_ENV, "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_PROXY_REDUCTION
+    return value if 0.0 < value < 1.0 else _DEFAULT_PROXY_REDUCTION
+
+
 def engine_publish_enabled(dcc: str) -> bool:
     """Return True when the engine should handle a publish for this DCC.
 

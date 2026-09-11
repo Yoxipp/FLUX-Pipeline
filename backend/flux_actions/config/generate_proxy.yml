@@ -1,0 +1,20 @@
+# generate_proxy.yml - author lightweight USD proxy geometry (purpose=proxy).
+#
+# One step, one command. The command reads the render meshes of a published USD
+# asset, decimates each with fast-simplification, and writes a proxy layer that
+# sublayers the source and adds a "<name>_proxy" Mesh (purpose=proxy) per mesh.
+# No Houdini, no license token.
+#
+# source / out are set at run time (UI or runner); reduction keeps its default.
+
+name: generate_proxy
+shelf: publish
+
+steps:
+
+  proxy:
+    index: 10
+    commands:
+      proxy:
+        command: generate_proxy
+        # source is set at run time; target_reduction/min_tris keep defaults.
