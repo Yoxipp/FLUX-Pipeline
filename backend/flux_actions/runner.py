@@ -154,6 +154,7 @@ def run_houdini_publish_action(
     rop_node_path: Optional[str] = None,
     is_sequence: bool = False,
     frame_range: Optional[List[int]] = None,
+    frame_padding: Optional[int] = None,
     options: Optional[Dict[str, Any]] = None,
     attr_filter: Optional[Dict[str, Any]] = None,
     logger: Optional[logging.Logger] = None,
@@ -186,6 +187,8 @@ def run_houdini_publish_action(
     query.set_parameter("select", "select", "is_sequence", is_sequence)
     if frame_range is not None:
         query.set_parameter("cook", "cook", "frame_range", frame_range)
+    if frame_padding is not None:
+        query.set_parameter("cook", "cook", "frame_padding", frame_padding)
     if options is not None:
         query.set_parameter("cook", "cook", "options", options)
     if attr_filter is not None:

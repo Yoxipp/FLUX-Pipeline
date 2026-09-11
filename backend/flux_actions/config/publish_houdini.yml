@@ -37,4 +37,5 @@ steps:
             value: {from: "select.select.rop_node_path"}
           is_sequence:
             value: {from: "select.select.is_sequence"}
-          # frame_range / options / attr_filter / description set at run time when needed.
+          # frame_range / frame_padding / options / attr_filter / description
+          # set at run time when needed (fed by the runner, like frame_range).

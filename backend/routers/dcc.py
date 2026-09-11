@@ -512,6 +512,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
                 rop_node_path=req.rop_node_path,
                 is_sequence=req.is_sequence,
                 frame_range=list(req.frame_range) if req.frame_range else None,
+                frame_padding=req.frame_padding,
                 options=req.export_options,
                 attr_filter=req.attr_filter,
             ),

@@ -64,6 +64,14 @@ class HoudiniExport(CommandBase):
             "value": None,
             "hide": True,
         },
+        # Optional frame token width for sequences ($F4 -> 0001). None keeps the
+        # publish block's own default, so the constant lives in one place only.
+        "frame_padding": {
+            "type": "int",
+            "label": "Largeur du token image",
+            "value": None,
+            "hide": True,
+        },
         # Optional per-format ROP options (see houdiniExportOptions.ts).
         "options": {
             "type": "dict",
@@ -108,6 +116,13 @@ class HoudiniExport(CommandBase):
         if frame_range and len(frame_range) >= 2:
             fr = tuple(int(v) for v in frame_range)
 
+        # Forward the padding only when the caller set one; None lets the publish
+        # block apply its own default (FRAME_PADDING), keeping a single source.
+        frame_padding = parameters.get("frame_padding")
+        extra: Dict[str, Any] = {}
+        if frame_padding is not None:
+            extra["frame_padding"] = int(frame_padding)
+
         resp = publish_houdini_rop(
             project_path,
             base_name,
@@ -119,6 +134,7 @@ class HoudiniExport(CommandBase):
             user=user,
             options=options,
             attr_filter=attr_filter,
+            **extra,
         )
         if not resp.get("ok"):
             raise ValueError(f"publish Houdini echoue: {resp.get('error', 'inconnu')}")
