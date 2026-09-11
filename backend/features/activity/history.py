@@ -24,13 +24,15 @@ from core.constants import (
     HOT_HISTORY_MAX_EVENTS,
     HOT_HISTORY_ROTATE_SLACK,
 )
-from core.json_manager import (
-    append_jsonl, append_lock, read_json, read_jsonl, write_json, write_jsonl,
-)
 from core.logger import get_logger
 from core.paths import get_archive_dir, get_archive_path
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
+
+# Cold archives are plain JSON-array documents, keyed by their own path (the
+# monthly file under CONFIG/archive/). One collection for every feed's archives.
+_ARCHIVE_COLLECTION = "feed_archive"
 
 
 def _sort_key(e: dict) -> tuple[str, str]:
@@ -41,12 +43,16 @@ def append_events(
     path: Path,
     new_entries: list[dict],
     archive_stem: str,
+    collection: str,
     *,
     max_events: int = HOT_HISTORY_MAX_EVENTS,
     max_days: int = HOT_HISTORY_MAX_DAYS,
     slack: int = HOT_HISTORY_ROTATE_SLACK,
 ) -> bool:
-    """Append *new_entries* to the JSONL hot file at *path*, rotating if too big.
+    """Append *new_entries* to the JSONL hot log, rotating if too big.
+
+    *collection* is the feed's repository collection ("activity_log" /
+    "mentions_log"); *path* is its log file (the transitional doc_id).
 
     The append itself is an atomic O_APPEND single write (race-free across
     instances). Only when the log then exceeds ``max_events + slack`` is a
@@ -56,19 +62,21 @@ def append_events(
     write; a rotation racing a concurrent append can drop the just-appended
     event of the loser — rare, best-effort, logged. Returns the append result.
     """
-    if not append_jsonl(path, list(new_entries)):
+    repo = get_repository()
+    doc_id = str(path)
+    if not repo.append_log(collection, doc_id, list(new_entries)):
         return False
 
     try:
-        # Rotation reads + rewrites the hot file, so hold the same append lock to
+        # Rotation reads + rewrites the hot log, so hold the log transaction to
         # stay atomic w.r.t. concurrent appends/rotations (no event dropped).
-        with append_lock(path):
-            events = read_jsonl(path)
+        with repo.log_transaction(collection, doc_id):
+            events = repo.read_log(collection, doc_id, fresh=True)
             if len(events) > max_events + slack:
                 hot, cold = _split(events, max_events, max_days)
                 if cold:
                     _archive(archive_stem, cold)
-                write_jsonl(path, hot)
+                repo.replace_log(collection, doc_id, hot)
     except Exception as exc:  # never let a rotation hiccup surface as an append failure
         log.warning("History rotation for %s skipped: %s", archive_stem, exc)
 
@@ -99,11 +107,12 @@ def _archive(archive_stem: str, cold: list[dict]) -> None:
         yyyymm = d[:7].replace("-", "") if len(d) >= 7 else "000000"
         by_month.setdefault(yyyymm, []).append(e)
 
+    repo = get_repository()
     for yyyymm, batch in by_month.items():
-        apath = get_archive_path(archive_stem, yyyymm)
-        existing = read_json(apath)
+        apath = str(get_archive_path(archive_stem, yyyymm))
+        existing = repo.get(_ARCHIVE_COLLECTION, apath)
         merged = (existing if isinstance(existing, list) else []) + batch
-        if not write_json(apath, merged):
+        if not repo.set(_ARCHIVE_COLLECTION, apath, merged):
             log.error("Failed to write archive %s (%d events may be unarchived)", apath, len(batch))
 
 
@@ -123,9 +132,10 @@ def read_archive_events(archive_stem: str, limit: int = 200, offset: int = 0) ->
 
     files = sorted(adir.glob(f"{archive_stem}_*.json"), reverse=True)  # newest month first
     need = offset + limit
+    repo = get_repository()
     collected: list[dict] = []
     for f in files:
-        data = read_json(f)
+        data = repo.get(_ARCHIVE_COLLECTION, str(f))
         evs = data if isinstance(data, list) else []
         evs.sort(key=_sort_key, reverse=True)
         collected.extend(evs)

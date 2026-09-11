@@ -7,17 +7,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.json_manager import cached_read_jsonl, read_jsonl
 from core.logger import get_logger
 from core.paths import get_activity_path, get_activity_read_path
+from core.repository_factory import get_repository
 from features.activity.read_state import is_read, load_read_ids, mark_read
 
 log = get_logger(__name__)
 
+# Metadata frontier (V5): the activity log goes through the repository. Addressed
+# by its own path (transitional doc_id) so callers keep passing the path they
+# already compute (default or test-injected).
+_COLLECTION = "activity_log"
+
 
 def _load(path: Path | None = None, sig: tuple[int, int] | None = None) -> list[dict]:
     # Read-only query path → cached JSONL read (legacy array auto-detected).
-    return cached_read_jsonl(path or get_activity_path(), sig=sig)
+    return get_repository().read_log(_COLLECTION, str(path or get_activity_path()), sig=sig)
 
 
 def _read_path(path: Path | None) -> Path:
@@ -105,7 +110,9 @@ def mark_as_read(event_id: str, path: Path | None = None) -> bool:
     Only the tiny companion set-file is written — the append-only log is never
     rewritten.
     """
-    events = read_jsonl(path or get_activity_path())   # fresh: existence + live ids
+    events = get_repository().read_log(
+        _COLLECTION, str(path or get_activity_path()), fresh=True,
+    )   # fresh: existence + live ids
     live_ids = {str(e.get("id", "")) for e in events}
     if event_id not in live_ids:
         return False
@@ -114,6 +121,8 @@ def mark_as_read(event_id: str, path: Path | None = None) -> bool:
 
 def mark_all_as_read(path: Path | None = None) -> bool:
     """Mark every event currently in the hot log read (companion set-file only)."""
-    events = read_jsonl(path or get_activity_path())
+    events = get_repository().read_log(
+        _COLLECTION, str(path or get_activity_path()), fresh=True,
+    )
     ids = {str(e.get("id", "")) for e in events}
     return mark_read(_read_path(path), ids, live_ids=ids)
