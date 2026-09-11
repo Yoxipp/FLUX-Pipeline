@@ -57,6 +57,13 @@ from core.paths import get_prefs_path  # noqa: E402  (kept next to use)
 
 register_collection("config", lambda doc_id: get_prefs_path())
 
+# production: one production.json per project. doc_id = the project name; the path
+# is resolved fresh each call (get_project_production_path), so a runtime
+# set_flux_root still wins (matches the old direct read/write_json).
+from core.paths import get_project_production_path  # noqa: E402  (kept next to use)
+
+register_collection("production", lambda doc_id: get_project_production_path(str(doc_id)))
+
 
 _repository: JsonFileRepository | None = None
 
