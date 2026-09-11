@@ -1,14 +1,13 @@
 # loader.py — read an action YAML, validate it, resolve inheritance, build a buffer.
 #
-# Design choices taken straight from the conversion prompt (anti-patterns to
-# avoid from Silex):
+# Design choices that avoid the usual action-engine anti-patterns:
 #   * Standard YAML only. No custom ``!inherit`` / ``!command-output`` tags.
 #     Inheritance is ``extends: <action_name>``; a data-flow reference is
 #     ``value: {from: "step.command.output_key"}``. Both are resolved by code
 #     here, so any IDE and static analysis can read the files.
 #   * Every action is validated against a pydantic schema at load. A typo like
 #     ``lavel:`` fails loudly with the exact field path, instead of being
-#     silently ignored the way it was in Silex.
+#     silently ignored the way a custom-tag loader would.
 
 from __future__ import annotations
 

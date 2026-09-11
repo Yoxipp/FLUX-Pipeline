@@ -6,8 +6,7 @@
 #
 # Buffers serialise to plain dicts. The front never receives the full state on
 # every change: it receives only the diff between the previous and current
-# serialisation (see ``diff_dicts``). This keeps the websocket traffic small,
-# exactly like the Silex buffer/diff model.
+# serialisation (see ``diff_dicts``). This keeps the websocket traffic small.
 
 from __future__ import annotations
 

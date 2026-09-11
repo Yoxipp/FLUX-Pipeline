@@ -1,8 +1,8 @@
 # select_publish.py — pick the source file and derive its logical FLUX name.
 #
 # Single responsibility: turn "what the user handed us" into a validated set of
-# publish inputs. No side effect, no disk write. It mirrors Silex's "select"
-# command: it only selects and validates, it never copies.
+# publish inputs. No side effect, no disk write. It follows the "select"
+# pattern: it only selects and validates, it never copies.
 #
 # Outputs feed the later steps by named reference:
 #   source_path -> the file whose bytes will be published

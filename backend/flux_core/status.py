@@ -1,6 +1,6 @@
 # status.py — execution status shared by every buffer in the action engine.
 #
-# Mirrors the Silex status model but stays independent of any DCC. A status is
+# A generic execution status model, independent of any DCC. A status is
 # carried by parameters, commands, steps and the whole action so the UI can show
 # progress and errors without the graph crashing.
 

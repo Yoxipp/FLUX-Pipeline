@@ -1,7 +1,7 @@
 # registry.py — stable-key command registry.
 #
-# Silex referenced commands by dotted import path (``pkg.mod.Class``), which is
-# fragile to renames and invisible to static analysis. Flux instead resolves a
+# Referencing commands by dotted import path (``pkg.mod.Class``) is fragile to
+# renames and invisible to static analysis. Flux instead resolves a
 # command by a stable string key set with the ``@register`` decorator. Renaming
 # the class never changes the key, and every key is discoverable here.
 
