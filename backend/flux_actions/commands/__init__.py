@@ -10,17 +10,21 @@ from __future__ import annotations
 from . import (  # noqa: F401
     build_output_path,
     copy_publish,
+    houdini_export,
     maya_export,
     publish_file,
     select_dcc_publish,
+    select_houdini_publish,
     select_publish,
 )
 
 __all__ = [
     "select_publish",
     "select_dcc_publish",
+    "select_houdini_publish",
     "build_output_path",
     "maya_export",
+    "houdini_export",
     "copy_publish",
     "publish_file",
 ]

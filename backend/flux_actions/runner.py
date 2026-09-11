@@ -29,6 +29,10 @@ PUBLISH_ACTION = Path(__file__).parent / "config" / "publish.yml"
 # The Maya scene publish action (select -> resolve -> export -> copy).
 PUBLISH_MAYA_ACTION = Path(__file__).parent / "config" / "publish_maya.yml"
 
+# The Houdini scene publish action (select -> cook). Houdini writes big caches
+# direct-to-dest, so there is no temp file and no copy step (see publish_houdini.yml).
+PUBLISH_HOUDINI_ACTION = Path(__file__).parent / "config" / "publish_houdini.yml"
+
 # The resolve step name inside publish.yml (last step of a preview run).
 _RESOLVE_STEP = "resolve"
 
@@ -138,6 +142,59 @@ def run_maya_publish_action(
             export_dir = export_cmd.commands["export"].outputs.get("export_dir")
             if export_dir is not None:
                 shutil.rmtree(export_dir, ignore_errors=True)
+
+
+def run_houdini_publish_action(
+    base_name: str,
+    extension: str,
+    project_path: Path,
+    description: str,
+    user: str,
+    project_name: str = "",
+    rop_node_path: Optional[str] = None,
+    is_sequence: bool = False,
+    frame_range: Optional[List[int]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    attr_filter: Optional[Dict[str, Any]] = None,
+    logger: Optional[logging.Logger] = None,
+    on_diff: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Optional[Path]:
+    """Publish the open Houdini scene via the action engine; return the dest path.
+
+    Runs publish_houdini.yml (select -> cook). The cook step reuses
+    publish_houdini_rop whole: it resolves the versioned path, archives the
+    previous LAST, sets the ROP output and cooks straight into the destination.
+    There is no temp file to clean up (Houdini writes direct-to-dest).
+    Returns the published path on success, else None.
+    """
+    context = {
+        "project_path": str(project_path),
+        "project_name": project_name,
+        "user": user,
+    }
+    query = ActionQuery.from_file(
+        PUBLISH_HOUDINI_ACTION, context=context, logger=logger, on_diff=on_diff
+    )
+
+    query.set_parameter("select", "select", "base_name", base_name)
+    query.set_parameter("select", "select", "extension", extension)
+    if rop_node_path is not None:
+        query.set_parameter("select", "select", "rop_node_path", rop_node_path)
+    query.set_parameter("select", "select", "is_sequence", is_sequence)
+    if frame_range is not None:
+        query.set_parameter("cook", "cook", "frame_range", frame_range)
+    if options is not None:
+        query.set_parameter("cook", "cook", "options", options)
+    if attr_filter is not None:
+        query.set_parameter("cook", "cook", "attr_filter", attr_filter)
+    query.set_parameter("cook", "cook", "description", description)
+
+    status = asyncio.run(query.execute())
+    if status is not Status.COMPLETED:
+        return None
+
+    dest = query.buffer.steps["cook"].commands["cook"].outputs.get("dest_path")
+    return Path(dest) if dest is not None else None
 
 
 def build_publish_form() -> List[Dict[str, Any]]:
