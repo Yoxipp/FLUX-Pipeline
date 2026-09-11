@@ -177,6 +177,7 @@ ARCHIVE_STEM_MENTIONS: str  = "chatMentions"
 # Per-project JSON filenames
 JSON_TOKENS: str     = "tokens.json"        # project root
 JSON_PRODUCTION: str = "production.json"    # project root — Production Tab store
+JSON_LOCKS: str      = "locks.json"         # project root — folder lock registry
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
 
 # Per-user settings

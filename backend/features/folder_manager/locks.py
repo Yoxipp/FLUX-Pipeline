@@ -11,16 +11,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.json_manager import read_json, write_json
 from core.logger import get_logger
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
 
-_LOCKS_FILENAME = "locks.json"
-
-
-def _locks_path(project_path: Path) -> Path:
-    return project_path / _LOCKS_FILENAME
+# Metadata frontier (V5): locks.json goes through the repository. The document is
+# a dict {"locked": [...]}, addressed by its project folder (the resolver appends
+# the file name), exactly like tokens.json.
+_COLLECTION = "locks"
 
 
 def _norm(rel_path: str) -> str:
@@ -29,7 +28,7 @@ def _norm(rel_path: str) -> str:
 
 def load_locks(project_path: Path) -> list[str]:
     """Return the sorted list of locked relative paths for a project."""
-    data = read_json(_locks_path(project_path))
+    data = get_repository().get(_COLLECTION, str(project_path))
     if isinstance(data, dict):
         locked = data.get("locked", [])
         if isinstance(locked, list):
@@ -51,6 +50,6 @@ def set_lock(project_path: Path, rel_path: str, locked: bool) -> list[str]:
     else:
         current.discard(rel)
     ordered = sorted(current)
-    if not write_json(_locks_path(project_path), {"locked": ordered}):
+    if not get_repository().set(_COLLECTION, str(project_path), {"locked": ordered}):
         log.warning("Could not write locks.json for %s", project_path)
     return ordered
