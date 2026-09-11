@@ -459,7 +459,7 @@ def publish_houdini_rop(
         except Exception as exc:
             log.warning("Logging failed (non-fatal): %s", exc)
 
-        log.info("Houdini scene publish complete → %s (v%s)", output_path.name, ver_str)
+        log.info("Houdini scene publish complete → %s (%s)", output_path.name, ver_str)
         return {
             "ok": True,
             "path": str(output_path),
@@ -516,7 +516,7 @@ def publish_houdini_rop(
     except Exception as exc:
         log.warning("Logging failed (non-fatal): %s", exc)
 
-    log.info("Houdini publish complete → %s (v%s)", output_path.name, ver_str)
+    log.info("Houdini publish complete → %s (%s)", output_path.name, ver_str)
     return {
         "ok": True,
         "path": str(output_path),
