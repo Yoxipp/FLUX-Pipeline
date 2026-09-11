@@ -20,15 +20,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.json_manager import cached_read_json, write_json
 from core.logger import get_logger
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
+
+# Metadata frontier (V5): read-status goes through the repository instead of
+# json_manager directly. The companion set-file is addressed by its own path
+# (transitional doc_id) so callers keep passing the path they already compute.
+_COLLECTION = "read_state"
 
 
 def load_read_ids(path: Path) -> set[str]:
     """Return the set of read entry ids from the companion file (cached)."""
-    data = cached_read_json(path)
+    data = get_repository().get(_COLLECTION, str(path))
     if isinstance(data, dict):
         ids = data.get("read_ids", [])
         if isinstance(ids, list):
@@ -53,4 +58,5 @@ def mark_read(path: Path, ids: set[str] | list[str], *, live_ids: set[str] | Non
         updated &= {str(i) for i in live_ids}
     if updated == current:
         return True
-    return write_json(path, {"read_ids": sorted(updated)})
+    get_repository().set(_COLLECTION, str(path), {"read_ids": sorted(updated)})
+    return True
