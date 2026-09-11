@@ -12,6 +12,13 @@ import { useSettings } from '../hooks/useSettings'
 import { readActiveInstancePort } from '../hooks/useActiveInstances'
 import { toast } from 'sonner'
 
+// Publish endpoints return version_str already prefixed with "v" (format_version
+// -> "v001"), but the fallback path can return a bare "001". Normalise to exactly
+// one leading "v" so toasts never show "vv001" (nor a bare "001").
+function versionLabel(versionStr: string): string {
+  return `v${String(versionStr ?? '').replace(/^v/i, '')}`
+}
+
 // ── Resizable right panel (per-viewer UI pref) ────────────────────────────────
 const RIGHT_WIDTH_KEY = 'flux.ui.publisherRightWidth'
 const RIGHT_WIDTH_DEFAULT = 460
@@ -929,7 +936,7 @@ export function Publisher() {
           user:         settings?.username ?? undefined,
           port:         readActiveInstancePort('Maya') ?? undefined,
         })
-        toast.success(`v${res.version_str} → Maya`)
+        toast.success(`${versionLabel(res.version_str)} → Maya`)
       } else if (dcc === 'Houdini') {
         if (!houdiniConnected) {
           toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
@@ -967,7 +974,7 @@ export function Publisher() {
           description:   description || undefined,
           user:          settings?.username ?? undefined,
         })
-        toast.success(`v${res.version_str} → ${res.rop_node}`)
+        toast.success(`${versionLabel(res.version_str)} → ${res.rop_node}`)
       } else if (dcc === 'ZBrush') {
         if (!zbrushConnected) {
           toast.error('ZBrush non connecté : active le bridge FLUX dans ZBrush')
@@ -984,7 +991,7 @@ export function Publisher() {
           description:    description || undefined,
           user:           settings?.username ?? undefined,
         })
-        toast.success(`v${res.version_str} → ZBrush`)
+        toast.success(`${versionLabel(res.version_str)} → ZBrush`)
         setZbrushConnected(false)
         setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
