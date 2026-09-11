@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from core.logger import get_logger
+from core.paths import get_flux_root
 
 log = get_logger(__name__)
 
@@ -37,6 +38,15 @@ _ENV_BLOCK = (
     f"PYTHONNOUSERSITE = 1\n"
     f"{_ENV_END}"
 )
+
+# Houdini package file that injects $FLUX (priority n3, F1).
+# A Houdini package (JSON under <prefs>/packages/) is the SideFX-native way to set
+# environment variables per install. We use it instead of houdini.env on purpose:
+# houdini.env is the file whose PYTHONNOUSERSITE line hard-crashed Houdini 22.0, so
+# it stays untouched (see _install_to). $FLUX = the local pipeline root, so a .hip
+# saved as "$FLUX/DOSSIER_PROJETS/..." stays portable across machines with different
+# roots. A plain FLUX variable is inert and cannot cause the user-site USD clash.
+_PACKAGE_FILENAME = "flux.json"
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +269,51 @@ def _remove_env_block(prefs_dir: Path) -> None:
         pass
 
 
+def _flux_package_text(root: Path) -> str:
+    """Return the flux.json package content that sets $FLUX to *root*.
+
+    Forward slashes on purpose: valid JSON on every OS and Houdini's preferred
+    path form (no backslash escaping). Two-space indent for readability.
+    """
+    import json
+    payload = {"env": [{"FLUX": root.as_posix()}]}
+    return json.dumps(payload, indent=2) + "\n"
+
+
+def _write_flux_package(prefs_dir: Path, root: Path | None) -> bool:
+    """Upsert <prefs_dir>/packages/flux.json so Houdini resolves $FLUX. Best-effort.
+
+    Idempotent: rewrites only when the content changed (root moved). Returns True
+    if the package is present and current after the call. When *root* is unknown
+    (workspace not set yet) nothing is written and False is returned — we never
+    inject an empty or guessed root.
+    """
+    if root is None:
+        return False
+    pkg_file = prefs_dir / "packages" / _PACKAGE_FILENAME
+    desired = _flux_package_text(root)
+    try:
+        if pkg_file.exists() and pkg_file.read_text(encoding="utf-8") == desired:
+            return True  # already current
+    except OSError:
+        pass
+    try:
+        pkg_file.parent.mkdir(parents=True, exist_ok=True)
+        pkg_file.write_text(desired, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _remove_flux_package(prefs_dir: Path) -> None:
+    """Remove <prefs_dir>/packages/flux.json, if present. Best-effort."""
+    pkg_file = prefs_dir / "packages" / _PACKAGE_FILENAME
+    try:
+        pkg_file.unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -354,6 +409,10 @@ def _install_to(prefs_dir: Path) -> dict:
     # states, not the SOP usdimport the FLUX importer uses.
     _remove_env_block(prefs_dir)
 
+    # Inject $FLUX via a Houdini package (separate file, never houdini.env). Best-effort:
+    # a package write failure must not block the autostart install itself.
+    _write_flux_package(prefs_dir, get_flux_root())
+
     startup = scripts / "123.py"
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
@@ -422,6 +481,7 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
     removed_any = False
     for prefs_dir in _all_prefs_dirs(houdini_exe_path):
         _remove_env_block(prefs_dir)
+        _remove_flux_package(prefs_dir)
         startup = prefs_dir / "scripts" / "123.py"
         if not startup.exists():
             continue
