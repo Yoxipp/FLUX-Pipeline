@@ -36,14 +36,14 @@ class JsonFileRepository:
 
     # ── document ops ─────────────────────────────────────────────────────────
 
-    def get(self, collection: str, doc_id: str) -> dict | None:
+    def get(self, collection: str, doc_id: str) -> dict | list | None:
         path = self._locate(collection, doc_id)
         if not path.exists():
             return None
         data = cached_read_json(path)
-        return data if isinstance(data, dict) else None
+        return data if isinstance(data, (dict, list)) else None
 
-    def set(self, collection: str, doc_id: str, data: dict) -> None:
+    def set(self, collection: str, doc_id: str, data: dict | list) -> None:
         write_json(self._locate(collection, doc_id), data)
 
     def update(self, collection: str, doc_id: str, patch: dict) -> None:

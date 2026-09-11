@@ -52,6 +52,13 @@ class JsonRepositoryContractTests(unittest.TestCase):
             repo.update("things", "new", {"a": 1})
             self.assertEqual(repo.get("things", "new"), {"a": 1})
 
+    def test_list_document_roundtrip(self):
+        # A document may be a JSON array (e.g. modif_log), not only a dict.
+        with tempfile.TemporaryDirectory() as d:
+            repo = _repo_in(Path(d))
+            repo.set("logs", "folderA", [{"v": "v001"}, {"v": "v002"}])
+            self.assertEqual(repo.get("logs", "folderA"), [{"v": "v001"}, {"v": "v002"}])
+
     def test_delete_removes(self):
         with tempfile.TemporaryDirectory() as d:
             repo = _repo_in(Path(d))

@@ -7,8 +7,9 @@
 #
 # Generic on purpose (document / collection, not projects/assets/tasks): the domain
 # already lives in the stores, so duplicating it here would blur the layering. A
-# document is one JSON blob addressed by (collection, doc_id); a collection also
-# has an append-only log form (list / append) for JSONL feeds.
+# document is one JSON value addressed by (collection, doc_id) - a dict (config,
+# read-state) or a list (a per-folder log array); a collection also has an
+# append-only log form (list / append) for JSONL feeds.
 #
 # Pure contract: typing only, zero dependency on any DCC or FastAPI, like the rest
 # of flux_core. Treat it like pipe_core.py — never break the surface without
@@ -24,17 +25,17 @@ class MetadataRepository(Protocol):
     """Persistence frontier for small metadata. Implementations must be swappable
     (JSON files today, SQLite / remote later) behind this exact surface."""
 
-    # ── document ops (one JSON blob per doc_id) ──────────────────────────────
-    def get(self, collection: str, doc_id: str) -> dict | None:
-        """Return the document, or None when it does not exist."""
+    # ── document ops (one JSON value per doc_id: a dict or a list) ───────────
+    def get(self, collection: str, doc_id: str) -> dict | list | None:
+        """Return the document (dict or list), or None when it does not exist."""
         ...
 
-    def set(self, collection: str, doc_id: str, data: dict) -> None:
+    def set(self, collection: str, doc_id: str, data: dict | list) -> None:
         """Replace the whole document."""
         ...
 
     def update(self, collection: str, doc_id: str, patch: dict) -> None:
-        """Shallow-merge *patch* into the document (create it if absent)."""
+        """Shallow-merge *patch* into a dict document (create it if absent)."""
         ...
 
     def delete(self, collection: str, doc_id: str) -> None:

@@ -41,6 +41,12 @@ def _locate(collection: str, doc_id: str | None) -> Path:
 # store can pass the path it already computes. Path building moves here in Phase 1c.
 register_collection("read_state", lambda doc_id: Path(str(doc_id)))
 
+# modif_log: one JSON-array file per publish folder. doc_id = the folder path; the
+# filename join lives here (a first step of moving path building off the feature).
+from core.constants import JSON_MODIF_LOG  # noqa: E402  (kept next to its use)
+
+register_collection("modif_log", lambda doc_id: Path(str(doc_id)) / JSON_MODIF_LOG)
+
 
 _repository: JsonFileRepository | None = None
 
