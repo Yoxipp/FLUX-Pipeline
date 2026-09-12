@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check,
+  ClipboardList, AlertTriangle, Check, Info,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -136,6 +136,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
   const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
   const [nukeServerOk,    setNukeServerOk]          = useState<boolean | null>(null)
+  const [painterServerOk, setPainterServerOk]       = useState<boolean | null>(null)
+  const [mariServerOk,    setMariServerOk]          = useState<boolean | null>(null)
 
   // New Scene: the active project's presets drive the per-soft menu + button colour.
   const { project: activeProject } = useProject()
@@ -189,6 +191,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('nuke').then(p => setNukeServerOk(p.connected)).catch(() => setNukeServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('substance_painter').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, substance_painter: r.installed }))
+      if (r.installed) {
+        api.pingDcc('substance_painter').then(p => setPainterServerOk(p.connected)).catch(() => setPainterServerOk(false))
+      }
+    }).catch(() => {})
+    api.getDccAutostart('mari').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, mari: r.installed }))
+      if (r.installed) {
+        api.pingDcc('mari').then(p => setMariServerOk(p.connected)).catch(() => setMariServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -217,6 +231,24 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.nuke])
+
+  // Poll Painter bridge every 5 s when the plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.substance_painter) { setPainterServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('substance_painter').then(p => setPainterServerOk(p.connected)).catch(() => setPainterServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.substance_painter])
+
+  // Poll Mari bridge every 5 s when the plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.mari) { setMariServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('mari').then(p => setMariServerOk(p.connected)).catch(() => setMariServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.mari])
 
   // Poll ZBrush bridge when plugin is installed.
   // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
@@ -313,10 +345,14 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     if (key === 'zbrush')  setZbrushServerOk(value)
     if (key === 'maya')    setMayaServerOk(value)
     if (key === 'nuke')    setNukeServerOk(value)
+    if (key === 'substance_painter') setPainterServerOk(value)
+    if (key === 'mari')    setMariServerOk(value)
   }
 
+  const PLUG_KEYS = ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari']
+
   const handleToggleAutostart = async (key: string) => {
-    if (key !== 'houdini' && key !== 'zbrush' && key !== 'maya' && key !== 'nuke') return
+    if (!PLUG_KEYS.includes(key)) return
     setAutostartLoading(prev => new Set(prev).add(key))
     try {
       if (autostartInstalled[key]) {
@@ -484,10 +520,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const isZBrush       = s.key === 'zbrush'
           const isMaya         = s.key === 'maya'
           const isNuke         = s.key === 'nuke'
-          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke
+          const isPainter      = s.key === 'substance_painter'
+          const isMari         = s.key === 'mari'
+          const isPhotoshop    = s.key === 'photoshop'
+          // Plug slot has three kinds: a 'toggle' installs/removes an in-app bridge
+          // (Houdini/Maya/Nuke/ZBrush/Painter/Mari); Photoshop has no plugin (external
+          // COM) so it shows a one-line hint instead; Designer/Marvelous are Level-1
+          // file ingest with no bridge → no control at all (no dead button).
+          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke || isPainter || isMari
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : null
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : isPainter ? painterServerOk : isMari ? mariServerOk : null
           // AutoStart state colors: ORANGE = autostart installed but the software isn't
           // launched/connected yet · GREEN = launched + connected. No red state anymore.
           const plugConnected  = hasPlug && autoInstalled && serverOk === true
@@ -554,11 +597,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 </TooltipContent>
               </Tooltip>
 
-              {/* port local — plugin/autostart toggle (Houdini + ZBrush) ou placeholder */}
+              {/* port local — bridge toggle (Houdini/Maya/Nuke/ZBrush/Painter/Mari) */}
+              {hasPlug && (
               <Tooltip>
                 <TooltipTrigger asChild>
               <div
-                onClick={() => { if (hasPlug && !autoLoading) void handleToggleAutostart(s.key) }}
+                onClick={() => { if (!autoLoading) void handleToggleAutostart(s.key) }}
                 className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
@@ -567,8 +611,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   flexShrink: 0,
                   background: plugConnected ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : plugWaiting ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
                   color: plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--ink-4)',
-                  cursor: hasPlug ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
-                  opacity: hasPlug ? 1 : 0.4,
+                  cursor: autoLoading ? 'default' : 'pointer',
                   transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
                 }}
               >
@@ -581,8 +624,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </div>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {!hasPlug ? 'Connexion port local · prochainement' :
-                   autoLoading ? '…' :
+                  {autoLoading ? '…' :
                    isHoudini
                      ? (autoInstalled ? 'Autostart installé · clic pour désinstaller' : "Installer l'autostart dans 123.py")
                    : isMaya
@@ -593,11 +635,42 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                      ? (autoInstalled
                          ? (serverOk === true ? 'Connecté · bridge Nuke 7003' : 'Autostart installé · clic pour désinstaller')
                          : 'Installer le bridge Nuke (init.py)')
+                   : isPainter
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Painter' : 'Bridge installé · clic pour désinstaller')
+                         : 'Installer le bridge Painter (dossier plugins)')
+                   : isMari
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Mari' : 'Bridge installé · clic pour désinstaller')
+                         : 'Installer le bridge Mari (dossier Scripts)')
                      : (autoInstalled
                          ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}
                 </TooltipContent>
               </Tooltip>
+              )}
+
+              {/* Photoshop — no in-app plugin (external COM). Hint how to enable it. */}
+              {isPhotoshop && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    style={{
+                      width: 16, height: 16, borderRadius: 4,
+                      border: '1px solid var(--rule-2)',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0, background: 'transparent', color: 'var(--ink-4)',
+                      cursor: 'help',
+                    }}
+                  >
+                    <Info size={8} strokeWidth={2} />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  Photoshop · pas de plugin à installer. Lance : pip install photoshop-python-api, puis ouvre un document (connexion COM vérifiée au publish).
+                </TooltipContent>
+              </Tooltip>
+              )}
 
               {/* zombie Maya — instance bloquée occupant le port 7001, reap au clic */}
               {mayaStuck && (
