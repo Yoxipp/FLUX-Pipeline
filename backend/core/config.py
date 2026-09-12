@@ -63,9 +63,17 @@ def _save(data: dict) -> None:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def is_first_launch() -> bool:
-    """Return True if config.json is missing workspace or username."""
-    cfg = _load()
-    return not (cfg.get("workspace") and cfg.get("username"))
+    """Return True only when config.json (the FILE) lacks workspace or username.
+
+    Bootstrap keys (workspace, username) belong to config.json, never the metadata
+    repository: the repository's own location depends on the workspace, so a workspace
+    stored inside it can drift, and a momentarily unreadable backend (e.g. a SQLite db
+    on a synced OneDrive folder that is offloaded at startup) must NOT make a configured
+    install look fresh and re-prompt for the workspace. Reading the file directly keeps
+    the first-launch verdict independent of the backend's availability.
+    """
+    from core import paths
+    return not (paths.get_flux_root() and paths.get_config_username())
 
 
 def create_user(name: str, workspace: str | Path) -> None:
