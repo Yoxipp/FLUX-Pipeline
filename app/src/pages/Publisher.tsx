@@ -1165,7 +1165,10 @@ export function Publisher() {
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx })
         const n = res.published?.length ?? 0
         toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
-      } else if (dcc === 'Fichier local') {
+      } else if (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') {
+        // File ingest (Level 1): local files, Substance Designer (.sbsar/maps) and
+        // Marvelous (.abc/.zprj/.obj). Same token-composed naming; the dedicated DCC
+        // endpoints route through the same publish_file as "Fichier local".
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
           toast.error('Indique le(s) fichier(s) source')
@@ -1186,18 +1189,21 @@ export function Publisher() {
           }
           return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
         }
+        // Route to the soft's endpoint; all return truthy on success.
+        const publishOne = async (f: string, target: string): Promise<boolean> => {
+          const base = { project_name: project, source_path: f, target_name: target,
+                         description: description || undefined, user: settings?.username ?? undefined }
+          if (dcc === 'Designer')  return (await api.publishDesigner(base)).ok
+          if (dcc === 'Marvelous') return (await api.publishMarvelous(base)).ok
+          return (await api.publish({ source_path: f, project_name: project,
+                   description: description || undefined, user: settings?.username ?? undefined,
+                   target_name: target })).success
+        }
         let okCount = 0
         const failed: string[] = []
         for (const f of files) {
           try {
-            const res = await api.publish({
-              source_path:  f,
-              project_name: project,
-              description:  description || undefined,
-              user:         settings?.username ?? undefined,
-              target_name:  targetFor(f),
-            })
-            if (res.success) okCount++
+            if (await publishOne(f, targetFor(f))) okCount++
             else failed.push(fileStem(f))
           } catch {
             failed.push(fileStem(f))
@@ -1207,7 +1213,7 @@ export function Publisher() {
           toast.success(
             multi
               ? `${okCount} fichier${okCount > 1 ? 's' : ''} publié${okCount > 1 ? 's' : ''}${failed.length ? ` · ${failed.length} échec(s)` : ''}`
-              : 'Publié',
+              : `Publié → ${dcc}`,
           )
         }
         if (failed.length && !okCount) toast.error(`Échec : ${failed.join(', ')}`)
@@ -1439,9 +1445,13 @@ export function Publisher() {
                   </div>
                 )}
               </div>
-            ) : dcc === 'Fichier local' ? (
+            ) : (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') ? (
               <div>
-                <div className="cap" style={{ marginBottom: 6 }}>FICHIER SOURCE</div>
+                <div className="cap" style={{ marginBottom: 6 }}>
+                  {dcc === 'Designer' ? 'FICHIER DESIGNER (.sbsar / maps)'
+                    : dcc === 'Marvelous' ? 'FICHIER MARVELOUS (.abc / .zprj / .obj)'
+                    : 'FICHIER SOURCE'}
+                </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
                     value={sourcePath}

@@ -337,6 +337,19 @@ export const api = {
   }) =>
     apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null }>('POST', '/dcc/mari/publish', payload),
 
+  // Level 1 file ingest (Substance Designer / Marvelous Designer): the artist
+  // exports a file from the app; FLUX ingests it under FLUX naming. One method per
+  // soft for a clear per-DCC entry point.
+  publishDesigner: (payload: {
+    project_name: string; source_path: string; target_name: string
+    description?: string; user?: string
+  }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/designer/publish', payload),
+
+  publishMarvelous: (payload: {
+    project_name: string; source_path: string; target_name: string
+    description?: string; user?: string
+  }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/marvelous/publish', payload),
+
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
     const qs = new URLSearchParams()
