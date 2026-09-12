@@ -16,6 +16,10 @@ from core.constants import JSON_LOCKS
 from features.folder_manager import locks as lk
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class LocksViaRepositoryTests(unittest.TestCase):
     def test_load_missing_returns_empty(self):
         with tempfile.TemporaryDirectory() as d:

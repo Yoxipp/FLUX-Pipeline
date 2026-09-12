@@ -26,6 +26,10 @@ def _patch_user_dir(user_dir: Path):
     )
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class UserSettingsViaRepositoryTests(unittest.TestCase):
     def test_read_missing_returns_empty_dict(self):
         with tempfile.TemporaryDirectory() as d:

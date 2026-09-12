@@ -15,6 +15,10 @@ from core.constants import JSON_MODIF_LOG
 from features.publisher import modif_log
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class ModifLogViaRepositoryTests(unittest.TestCase):
     def test_append_then_read_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:

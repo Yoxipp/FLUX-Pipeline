@@ -16,6 +16,10 @@ from core.constants import JSON_TOKENS
 from features.folder_manager import tokens as tk
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class TokensViaRepositoryTests(unittest.TestCase):
     def test_save_then_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:

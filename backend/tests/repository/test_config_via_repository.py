@@ -21,6 +21,10 @@ def _patch_prefs(path: Path):
     return mock.patch("core.repository_factory.get_prefs_path", return_value=path)
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class ConfigViaRepositoryTests(unittest.TestCase):
     def test_missing_file_reads_as_empty(self):
         with tempfile.TemporaryDirectory() as d:

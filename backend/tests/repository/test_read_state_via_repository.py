@@ -13,6 +13,10 @@ from pathlib import Path
 from features.activity import read_state
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class ReadStateViaRepositoryTests(unittest.TestCase):
     def test_mark_then_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:

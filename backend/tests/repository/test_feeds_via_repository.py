@@ -27,6 +27,10 @@ def _ev(i: int) -> dict:
             "date": "2026-09-01", "time": f"10:0{i}", "read": False}
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class FeedsViaRepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = Path(tempfile.mkdtemp())

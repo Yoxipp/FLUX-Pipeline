@@ -25,6 +25,10 @@ def _patch_path(path: Path):
     )
 
 
+# Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
+
 class ProductionViaRepositoryTests(unittest.TestCase):
     def test_missing_file_returns_default_schema(self):
         with tempfile.TemporaryDirectory() as d:
