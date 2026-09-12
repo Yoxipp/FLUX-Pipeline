@@ -9,6 +9,8 @@ import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { zbrushSchemaForExt, defaultZbrushOptions } from '../lib/zbrushExportOptions'
 import { nukeSchemaForExt, defaultNukeOptions } from '../lib/nukeExportOptions'
 import { photoshopSchemaForExt, defaultPhotoshopOptions } from '../lib/photoshopExportOptions'
+import { PAINTER_OPTIONS, defaultPainterOptions } from '../lib/painterExportOptions'
+import { MARI_OPTIONS, defaultMariOptions } from '../lib/mariExportOptions'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
@@ -649,6 +651,11 @@ export function Publisher() {
     () => defaultPhotoshopOptions('.psd'),
   )
 
+  // Painter / Mari options (preset / bit depth / conform_tx). These map to typed
+  // request fields, not a Write-knob dict; the format comes from the shared picker.
+  const [painterOpts, setPainterOpts] = useState<Record<string, unknown>>(() => defaultPainterOptions())
+  const [mariOpts, setMariOpts] = useState<Record<string, unknown>>(() => defaultMariOptions())
+
   // Generic connection status for socket-bridge DCCs (Nuke/Painter/Mari/Photoshop):
   // one polling effect pings the active DCC's key with retry, like Maya/ZBrush, so a
   // single cold ping never shows "non connecté".
@@ -1128,6 +1135,36 @@ export function Publisher() {
           user:           settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → Photoshop`)
+      } else if (dcc === 'Painter' || dcc === 'Mari') {
+        if (!bridgeStatus.connected) {
+          toast.error(`${dcc} non connecté : ouvre ${dcc} avec le bridge FLUX actif`)
+          return
+        }
+        if (mode !== 'asset') {
+          toast.error('Le texturing se publie en mode Asset (Catégorie / Task / Name)')
+          return
+        }
+        // Tokens from the asset composer (same derivation as buildFilename).
+        const tokens = {
+          project_name: project,
+          class_token:  CATEGORY_TO_CLASS[sel.category] ?? formatToken(sel.category),
+          task_token:   sel.task,
+          name_token:   formatToken(sel.name),
+          instance:     formatToken(sel.instance) || 'null',
+          file_format:  exportExt.replace('.', ''),
+          description:  description || undefined,
+          user:         settings?.username ?? undefined,
+        }
+        const res = dcc === 'Painter'
+          ? await api.publishSubstance({
+              ...tokens,
+              preset:     String(painterOpts.preset ?? 'PBR Metallic Roughness'),
+              bit_depth:  String(painterOpts.bit_depth ?? '8'),
+              conform_tx: !!painterOpts.conform_tx,
+            })
+          : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx })
+        const n = res.published?.length ?? 0
+        toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
       } else if (dcc === 'Fichier local') {
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
@@ -1188,7 +1225,7 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
-    bridgeStatus.connected, nukeExportOpts, psExportOpts,
+    bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts,
     mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
@@ -1744,6 +1781,30 @@ export function Publisher() {
                 schema={photoshopSchemaForExt(exportExt)}
                 values={psExportOpts}
                 onChange={(k, v) => setPsExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Painter (preset / bit depth / conform .tx). */}
+          {dcc === 'Painter' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={PAINTER_OPTIONS}
+                values={painterOpts}
+                onChange={(k, v) => setPainterOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Mari (conform .tx). */}
+          {dcc === 'Mari' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>channels {exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={MARI_OPTIONS}
+                values={mariOpts}
+                onChange={(k, v) => setMariOpts(prev => ({ ...prev, [k]: v }))}
               />
             </div>
           )}

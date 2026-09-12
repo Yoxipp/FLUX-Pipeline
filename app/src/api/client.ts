@@ -305,6 +305,38 @@ export const api = {
     apiCall<{ ok: boolean; path: string; version: number; version_str: string }>(
       'POST', '/dcc/photoshop/publish', payload),
 
+  // Substance Painter — export maps via the in-app bridge, ingest under FLUX tokens,
+  // optionally conform to .tx. Token-driven (class/task/name/instance).
+  publishSubstance: (payload: {
+    project_name: string
+    class_token:  string
+    task_token:   string
+    name_token:   string
+    instance?:    string
+    preset?:      string
+    file_format?: string
+    bit_depth?:   string
+    conform_tx?:  boolean
+    description?: string
+    user?:        string
+  }) =>
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null }>('POST', '/dcc/substance/publish', payload),
+
+  // Mari — export channels via the in-app bridge, ingest under FLUX tokens,
+  // optionally conform to .tx.
+  publishMari: (payload: {
+    project_name: string
+    class_token:  string
+    task_token:   string
+    name_token:   string
+    instance?:    string
+    file_format?: string
+    conform_tx?:  boolean
+    description?: string
+    user?:        string
+  }) =>
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null }>('POST', '/dcc/mari/publish', payload),
+
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
     const qs = new URLSearchParams()
