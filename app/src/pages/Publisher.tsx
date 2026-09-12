@@ -8,6 +8,7 @@ import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { zbrushSchemaForExt, defaultZbrushOptions } from '../lib/zbrushExportOptions'
 import { nukeSchemaForExt, defaultNukeOptions } from '../lib/nukeExportOptions'
+import { photoshopSchemaForExt, defaultPhotoshopOptions } from '../lib/photoshopExportOptions'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
@@ -197,7 +198,7 @@ const EXPORT_FORMATS_BY_DCC: Record<string, string[]> = {
   ZBrush:    ['.ztl', '.obj', '.fbx'],
   Designer:  ['.sbsar', '.png', '.exr', '.tif', '.jpg', '.tga'],
   Marvelous: ['.obj', '.fbx', '.abc', '.zprj'],
-  Photoshop: ['.psd', '.png', '.tif', '.jpg', '.exr'],
+  Photoshop: ['.psd', '.psb', '.png', '.jpg', '.tif', '.tga'],
 }
 
 // Fallback (e.g. "Fichier local"): a broad, DCC-agnostic superset.
@@ -643,6 +644,11 @@ export function Publisher() {
     () => defaultNukeOptions('.exr'),
   )
 
+  // Photoshop per-format export options (COM save-option fields).
+  const [psExportOpts, setPsExportOpts] = useState<Record<string, unknown>>(
+    () => defaultPhotoshopOptions('.psd'),
+  )
+
   // Generic connection status for socket-bridge DCCs (Nuke/Painter/Mari/Photoshop):
   // one polling effect pings the active DCC's key with retry, like Maya/ZBrush, so a
   // single cold ping never shows "non connecté".
@@ -823,6 +829,7 @@ export function Publisher() {
     setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
     setZbrushExportOpts(defaultZbrushOptions(exportExt))
     setNukeExportOpts(defaultNukeOptions(exportExt))
+    setPsExportOpts(defaultPhotoshopOptions(exportExt))
   }, [exportExt])
 
   // Generic bridge-DCC connection polling (Nuke/Painter/Mari/Photoshop). Pings the
@@ -1107,6 +1114,20 @@ export function Publisher() {
           user:           settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → Nuke`)
+      } else if (dcc === 'Photoshop') {
+        if (!bridgeStatus.connected) {
+          toast.error('Photoshop non connecté : ouvre Photoshop (photoshop-python-api requis)')
+          return
+        }
+        const res = await api.publishPhotoshop({
+          project_name:   project,
+          filename,
+          extension:      exportExt,
+          export_options: psExportOpts,
+          description:    description || undefined,
+          user:           settings?.username ?? undefined,
+        })
+        toast.success(`${versionLabel(res.version_str)} → Photoshop`)
       } else if (dcc === 'Fichier local') {
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
@@ -1167,7 +1188,7 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
-    bridgeStatus.connected, nukeExportOpts,
+    bridgeStatus.connected, nukeExportOpts, psExportOpts,
     mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
@@ -1711,6 +1732,18 @@ export function Publisher() {
                 schema={nukeSchemaForExt(exportExt)}
                 values={nukeExportOpts}
                 onChange={(k, v) => setNukeExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Photoshop, per-format (COM save-option fields). */}
+          {dcc === 'Photoshop' && photoshopSchemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={photoshopSchemaForExt(exportExt)}
+                values={psExportOpts}
+                onChange={(k, v) => setPsExportOpts(prev => ({ ...prev, [k]: v }))}
               />
             </div>
           )}

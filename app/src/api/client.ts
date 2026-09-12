@@ -293,6 +293,18 @@ export const api = {
     apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean }>(
       'POST', '/dcc/nuke/publish', payload),
 
+  // Photoshop — save the active document into the FLUX layout over COM.
+  publishPhotoshop: (payload: {
+    project_name:   string
+    filename:       string
+    extension:      string
+    export_options?: Record<string, unknown>
+    description?:   string
+    user?:          string
+  }) =>
+    apiCall<{ ok: boolean; path: string; version: number; version_str: string }>(
+      'POST', '/dcc/photoshop/publish', payload),
+
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
     const qs = new URLSearchParams()
