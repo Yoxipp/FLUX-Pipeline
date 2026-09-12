@@ -249,13 +249,28 @@ interface ComposerSel {
 
 const EMPTY_SEL: ComposerSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '' }
 
-// Texture-map tokens recognised for autogroup. A file named "<Mesh>_<Token>[...]"
-// (e.g. Mesh_BCol.exr, Mesh_ZDisp.1001.exr) publishes under INSTANCE = <Token>.
-// the maintainer's convention (extend freely): BCol, Rough, Disp, ZDisp, Bump, Norm, SSS, Iso.
-const MAP_TOKENS = [
-  'BCOL', 'ROUGH', 'ZDISP', 'DISP', 'BUMP', 'NORM', 'SSS', 'ISO',
-  'METAL', 'SPEC', 'AO', 'EMISS', 'OPACITY', 'TRANS',
-]
+// Texture-map nomenclature: many real-world aliases -> ONE canonical token. A file
+// whose name contains any alias as a segment (e.g. Mesh_basecolor, Mesh_nrm.1001)
+// is tagged with the canonical token (BCOL, NORM, ...). Extend freely.
+const MAP_ALIASES: Record<string, string[]> = {
+  BCOL:    ['bcol', 'basecolor', 'base_color', 'albedo', 'diffuse', 'diff', 'color', 'col'],
+  ROUGH:   ['rough', 'roughness', 'rgh'],
+  METAL:   ['metal', 'metallic', 'metalness', 'mtl'],
+  SPEC:    ['spec', 'specular'],
+  NORM:    ['norm', 'normal', 'nrm', 'nml', 'nor'],
+  BUMP:    ['bump'],
+  DISP:    ['disp', 'displacement', 'displace', 'height'],
+  ZDISP:   ['zdisp'],
+  AO:      ['ao', 'occlusion'],
+  OPACITY: ['opacity', 'alpha', 'mask'],
+  EMISS:   ['emiss', 'emissive', 'emission', 'emit'],
+  SSS:     ['sss', 'subsurface', 'scatter'],
+  GLOSS:   ['gloss', 'glossiness'],
+  TRANS:   ['trans', 'translucency'],
+  CAVITY:  ['cavity'],
+  CURV:    ['curv', 'curvature'],
+  ISO:     ['iso'],
+}
 
 // Image/texture extensions kept when importing a whole folder (no dot, lowercase).
 const TEXTURE_EXTS = [
@@ -269,16 +284,24 @@ function fileStem(path: string): string {
   return base.split('.')[0] || base
 }
 
-// Derive the INSTANCE (map token) for a texture file. Prefers a recognised
-// MAP_TOKENS match anywhere in the name; otherwise falls back to the last
-// underscore segment (so any suffix still groups sensibly). Uppercased.
-function parseMapToken(path: string): string {
-  const stem = fileStem(path).toUpperCase()
-  const segs = stem.split(/[_\-]/).filter(Boolean)
-  for (const tok of MAP_TOKENS) {
-    if (segs.includes(tok)) return tok
+// Detect the canonical MAP token for a texture file, or '' when the name carries
+// no recognised map nomenclature. Segments are matched exactly (case-insensitive),
+// so a number or a random suffix (e.g. "07", "sc060712") is NEVER mistaken for a map.
+function detectMapToken(path: string): string {
+  const segs = fileStem(path).toLowerCase().split(/[_\-.]/).filter(Boolean)
+  const segSet = new Set(segs)
+  for (const [canon, aliases] of Object.entries(MAP_ALIASES)) {
+    if (aliases.some(a => segSet.has(a))) return canon
   }
-  return segs.length > 1 ? segs[segs.length - 1] : (segs[0] || 'null')
+  return ''
+}
+
+// The suffix that distinguishes each file of a multi-file set, appended AFTER the
+// composer INSTANCE (which is always honoured). Prefer the canonical map token;
+// when no map is recognised, keep the file stem so files stay distinct instead of
+// fabricating a bogus instance from a trailing number.
+function mapSuffix(path: string): string {
+  return detectMapToken(path) || formatToken(fileStem(path))
 }
 
 // Publisher category → pipeline CLASS token. "FX" is a display label for FXRIG.
@@ -1182,10 +1205,14 @@ export function Publisher() {
         // the filename (Mesh_BCol → BCOL); bypass → the file's own stem.
         const targetFor = (f: string): string => {
           if (!multi) return (nameOverride && nameOverride.trim()) || buildFilename()
-          const distinct = (mode === 'asset' && autoGroup) ? parseMapToken(f) : formatToken(fileStem(f))
+          // Multi-file set: every file lands under the composer INSTANCE, distinguished
+          // by a suffix. Autogroup -> canonical map token (basecolor->BCOL, nrm->NORM...),
+          // else the file stem. The instance the artist typed is always honoured.
+          const distinct = (mode === 'asset' && autoGroup) ? mapSuffix(f) : formatToken(fileStem(f))
           if (mode === 'asset') {
+            const inst = formatToken(sel.instance) || 'null'
             const varr = formatToken(sel.variante)
-            return `${cls}_${sel.task}_${formatToken(sel.name)}_${distinct}` + (varr ? `_${varr}` : '')
+            return `${cls}_${sel.task}_${formatToken(sel.name)}_${inst}_${distinct}` + (varr ? `_${varr}` : '')
           }
           return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
         }
@@ -1518,8 +1545,9 @@ export function Publisher() {
                   </div>
                 </div>
 
-                {/* Multi-file set: list + autogroup toggle. Each file publishes into
-                    its own map folder (INSTANCE from the filename) unless bypassed. */}
+                {/* Multi-file set: list + autogroup toggle. Every file publishes UNDER
+                    the composer INSTANCE; autogroup distinguishes them by canonical map
+                    token (basecolor->BCOL...), else by the file stem. */}
                 {localFiles.length > 1 && (
                   <div style={{ marginTop: 8, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: '8px 10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -1536,11 +1564,14 @@ export function Publisher() {
                     </div>
                     <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {localFiles.map(f => {
-                        const inst = (mode === 'asset' && autoGroup) ? parseMapToken(f) : formatToken(fileStem(f))
+                        const distinct = (mode === 'asset' && autoGroup) ? mapSuffix(f) : formatToken(fileStem(f))
+                        const instLabel = mode === 'asset'
+                          ? (formatToken(sel.instance) || 'null')
+                          : `${formatSeqLabel(sel.seq)}/${formatShotLabel(sel.shot)}`
                         return (
                           <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileStem(f)}</span>
-                            <span style={{ color: 'var(--accent-hi)', flexShrink: 0 }}>→ {inst}</span>
+                            <span style={{ color: 'var(--accent-hi)', flexShrink: 0 }}>→ {instLabel} · {distinct}</span>
                           </div>
                         )
                       })}
