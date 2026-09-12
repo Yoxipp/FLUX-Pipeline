@@ -217,7 +217,7 @@ function formatsForDcc(dcc: string): string[] {
 // Marvelous are Level 1 (file ingest, no live connection) and are absent on purpose.
 const DCC_PING_KEY: Record<string, string> = {
   Nuke:      'nuke',
-  Painter:   'substance',
+  Painter:   'substance_painter',
   Mari:      'mari',
   Photoshop: 'photoshop',
 }

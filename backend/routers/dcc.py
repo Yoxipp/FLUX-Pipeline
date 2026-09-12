@@ -21,12 +21,15 @@ from dcc.mari    import autostart as _mari_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 
 # Maps dcc_key (lowercase) → autostart module. Extend here when adding new DCCs.
+# Keys are the ONE canonical frontend key per soft (matches Sidebar SOFTWARE,
+# launcher _FRONTEND_KEY_MAP and exe detection). Painter is "substance_painter"
+# everywhere — the old "substance" key here was the plug-button mismatch.
 _AUTOSTART_MODULES: dict = {
     "houdini": _houdini_autostart,
     "maya":    _maya_autostart,
     "nuke":    _nuke_autostart,
     "zbrush":  _zbrush_autostart,
-    "substance": _substance_autostart,
+    "substance_painter": _substance_autostart,
     "mari":    _mari_autostart,
 }
 
@@ -252,7 +255,7 @@ async def ping_dcc(dcc_key: str) -> dict:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, ps_ping)
         return {"connected": result.get("ok", False), "version": result.get("version")}
-    if dcc_key == "substance":
+    if dcc_key == "substance_painter":
         from dcc.substance_painter.client import substance_client
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, substance_client.ping)
