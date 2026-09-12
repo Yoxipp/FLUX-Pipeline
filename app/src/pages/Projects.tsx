@@ -1139,6 +1139,10 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   const [entries, setEntries]   = useState<ExplorerItem[]>([])
   const [loading, setLoading]   = useState(false)
   const [err, setErr]           = useState('')
+  // Permanent-delete selection (only inside a project's ARCHIVE folder).
+  const [selected, setSelected]   = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting]   = useState(false)
 
   useEffect(() => {
     let ok = true
@@ -1147,6 +1151,9 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   }, [])
 
   useEffect(() => {
+    // Reset the delete selection whenever we change folder.
+    setSelected(new Set())
+    setConfirming(false)
     if (!cur) { setEntries([]); return }
     let ok = true
     setLoading(true); setErr('')
@@ -1204,6 +1211,42 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   }
   const relStr = cur.sub.slice(1).join('/')   // hide the leading "ARCHIVE"
 
+  const toggle = (name: string) => {
+    setConfirming(false)
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  // Permanent hard-delete of the selected archive entries (backend is
+  // Windows-safe: force_rmtree/force_remove). Two-step confirm before firing.
+  const doDelete = async () => {
+    if (selected.size === 0 || deleting) return
+    setDeleting(true)
+    try {
+      for (const name of selected) {
+        await api.deleteItem(cur.project, cur.sub, name)
+      }
+      const removed = selected.size
+      setSelected(new Set())
+      setConfirming(false)
+      // Reload the current folder.
+      const d = await api.browseProject(cur.project, cur.sub.join('/'))
+      setEntries([
+        ...d.folders.map(f => ({ name: f.name, isDir: true })),
+        ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
+      ])
+      toast.success(`${removed} élément${removed > 1 ? 's' : ''} supprimé${removed > 1 ? 's' : ''}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Suppression échouée')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={_hdr}>
@@ -1211,6 +1254,35 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
         <span style={{ color: 'var(--ink-2)' }}>{cur.project}</span>
         {relStr && <span style={{ color: 'var(--ink-4)' }}>/ {relStr}</span>}
       </div>
+      {selected.size > 0 && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+            {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
+          </span>
+          <span style={{ flex: 1 }} />
+          {confirming ? (
+            <>
+              <span
+                onClick={() => !deleting && setConfirming(false)}
+                style={{ fontSize: 10, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
+              >Annuler</span>
+              <span
+                onClick={doDelete}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
+              >
+                <Trash2 size={11} strokeWidth={1.75} /> {deleting ? 'Suppression…' : 'Confirmer la suppression définitive'}
+              </span>
+            </>
+          ) : (
+            <span
+              onClick={() => setConfirming(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+            >
+              <Trash2 size={11} strokeWidth={1.75} /> Supprimer
+            </span>
+          )}
+        </div>
+      )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
         {loading ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Chargement…</div>
@@ -1218,14 +1290,23 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{err}</div>
         ) : entries.length === 0 ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Vide</div>
-        ) : entries.map((it, i) => (
+        ) : entries.map((it, i) => {
+          const isSel = selected.has(it.name)
+          return (
           <div
             key={i}
             onClick={() => { if (it.isDir) setCur({ project: cur.project, sub: [...cur.sub, it.name] }) }}
-            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default' }}
+            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default', background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            onMouseLeave={e => (e.currentTarget.style.background = isSel ? 'var(--accent-soft)' : 'transparent')}
           >
+            <input
+              type="checkbox"
+              checked={isSel}
+              onClick={e => e.stopPropagation()}
+              onChange={() => toggle(it.name)}
+              style={{ flexShrink: 0, accentColor: 'var(--accent)', cursor: 'pointer' }}
+            />
             {it.isDir ? <FolderSvg size={22} /> : <div style={{ width: 22, textAlign: 'center', color: 'var(--ink-4)', fontSize: 12 }}>·</div>}
             <span style={{ flex: 1, fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
             <span
@@ -1234,7 +1315,8 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
               style={{ flexShrink: 0, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
             >Ouvrir</span>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
