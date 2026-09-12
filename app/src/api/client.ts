@@ -350,6 +350,12 @@ export const api = {
     description?: string; user?: string
   }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/marvelous/publish', payload),
 
+  // Marmoset Toolbag — Level 1: ingest a render/bake image under FLUX naming.
+  publishMarmoset: (payload: {
+    project_name: string; source_path: string; target_name: string
+    description?: string; user?: string
+  }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/marmoset/publish', payload),
+
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
     const qs = new URLSearchParams()

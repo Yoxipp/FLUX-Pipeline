@@ -1511,6 +1511,21 @@ async def marvelous_publish(req: FilePublishRequest) -> dict:
     return result
 
 
+@router.post("/marmoset/publish")
+async def marmoset_publish(req: FilePublishRequest) -> dict:
+    """Ingest a Marmoset Toolbag render/bake (.png / .jpg / .tif / .exr / .tga) into FLUX.
+
+    Level 1 (V6 B5): the artist renders in Toolbag and FLUX ingests the image under
+    FLUX naming. Pilot baking via the `mset` API is a deferred phase 2 (see
+    docs/CORRECT_BUG_V6/DECISION_marmoset.md).
+    """
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: _ingest_file(req, "Marmoset"))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Marmoset publish failed"))
+    return result
+
+
 # ── Houdini Importer HDA endpoints ───────────────────────────────────────────
 
 
