@@ -20,8 +20,20 @@ def list_projects() -> list[str]:
 
 
 def get_current_project() -> str | None:
-    """Return the last used project name from config, or None."""
-    return config.get_last_project()
+    """Return the active project, validated against what exists on disk.
+
+    The stored ``last_project`` can point at a project that no longer exists (renamed,
+    deleted, or a stale value carried over from an older config / migration). Returning
+    a dead name leaves the app stuck on an empty screen, so when the stored project is
+    missing we fall back to the first available project. Returns None only when the
+    workspace genuinely holds no project. Pure getter: it does not rewrite config here;
+    the corrected name is persisted when the user (or the frontend) selects a project.
+    """
+    stored = config.get_last_project()
+    if stored and project_exists(stored):
+        return stored
+    available = list_projects()
+    return available[0] if available else None
 
 
 def set_current_project(name: str) -> None:
