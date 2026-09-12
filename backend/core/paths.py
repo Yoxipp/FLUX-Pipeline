@@ -111,6 +111,28 @@ def get_sqlite_path() -> Path | None:
     return Path(value) if value else None
 
 
+# ── Storage backend selection (config.json, big-files frontier) ──────────────
+# Which StorageLocator the storage factory builds, and where the big files live.
+# Read from config.json directly, like the metadata backend. Defaults keep today's
+# behaviour: the local backend, rooted at the projects dir, until the maintainer sets a root.
+
+def get_storage_backend() -> str:
+    """Return the configured storage backend name ("local" by default)."""
+    value = _read_config_json().get("storage_backend")
+    return str(value).strip().lower() if value else "local"
+
+
+def get_storage_root() -> Path | None:
+    """Return the configured big-files root, or None to use the projects dir.
+
+    None means "default to DOSSIER_PROJETS", so the resolved paths match today's
+    layout. An explicit value (local dir, UNC NAS, synced cloud folder) redirects
+    every resolved path under it, without touching any feature.
+    """
+    value = _read_config_json().get("storage_root")
+    return Path(value) if value else None
+
+
 # ── Install username (config.json, chosen at first launch) ───────────────────
 
 def get_config_username() -> str | None:

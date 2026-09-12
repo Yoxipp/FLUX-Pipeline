@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.json_repository import JsonFileRepository
-from flux_core import MetadataRepository
+from flux_core import MetadataRepository, StorageLocator
 
 # resolver(doc_id) -> Path. doc_id is None for a collection's append-only log file.
 _Resolver = Callable[[str | None], Path]
@@ -143,3 +143,46 @@ def reset_repository() -> None:
     """
     global _repository
     _repository = None
+
+
+# ── storage frontier (big files) ──────────────────────────────────────────────
+# Sibling of the metadata repository, second axis: where the heavy bytes live.
+# get_storage() picks the StorageLocator from config ("storage_backend"): the local
+# backend (default), or the object-store backend (skeleton). One point flips local
+# -> web; no feature is touched. Default "local" rooted at the projects dir keeps
+# today's paths byte-for-byte.
+
+_storage: StorageLocator | None = None
+
+
+def _build_storage() -> StorageLocator:
+    from core import paths  # local: avoid a bootstrap import cycle
+
+    backend = paths.get_storage_backend()
+
+    if backend == "object":
+        from core.object_storage import ObjectStorage
+        base_url = paths._read_config_json().get("remote_url", "")
+        return ObjectStorage(base_url)
+
+    # Default and explicit "local": rooted at the configured root, or the projects
+    # dir (root=None) so the resolved paths match today's layout exactly.
+    from core.local_storage import LocalStorage
+    return LocalStorage(paths.get_storage_root())
+
+
+def get_storage() -> StorageLocator:
+    """Return the process-wide active storage locator, chosen by config (default local)."""
+    global _storage
+    if _storage is None:
+        _storage = _build_storage()
+    return _storage
+
+
+def reset_storage() -> None:
+    """Drop the cached storage locator so the next get_storage() rebuilds from config.
+
+    For tests and a possible in-app backend switch; not used on the hot path.
+    """
+    global _storage
+    _storage = None

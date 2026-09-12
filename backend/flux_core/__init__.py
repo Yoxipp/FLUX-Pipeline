@@ -25,6 +25,7 @@ from .loader import (
 )
 from .parameters import ParameterCastError, cast_value, is_known_type
 from .repository import MetadataRepository
+from .storage import StorageLocator
 from .registry import (
     CommandNotFound,
     all_commands,
@@ -56,5 +57,6 @@ __all__ = [
     "is_known_type",
     "ParameterCastError",
     "MetadataRepository",
+    "StorageLocator",
     "Status",
 ]
