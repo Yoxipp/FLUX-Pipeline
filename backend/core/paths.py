@@ -260,6 +260,57 @@ def path_exists_safe(path: Path) -> bool:
         return False
 
 
+def _clear_readonly_and_retry(func, path) -> None:
+    """rmtree error handler: drop the read-only bit, then retry the failed op.
+
+    On Windows shutil.rmtree raises PermissionError (WinError 5, "Accès refusé") the
+    moment it hits a read-only file or directory — common in archived publishes. We
+    chmod +write and re-run the exact op that failed (unlink / rmdir).
+    """
+    import os as _os
+    import stat as _stat
+    try:
+        _os.chmod(path, _stat.S_IWRITE)
+        func(path)
+    except OSError:
+        # Genuinely locked/held elsewhere: let the final rmtree raise so the caller
+        # surfaces a real error instead of silently leaving a half-deleted tree.
+        pass
+
+
+def force_rmtree(path: Path | str) -> None:
+    """Recursively delete *path*, clearing read-only bits that block Windows.
+
+    Plain shutil.rmtree fails with WinError 5 on read-only entries; this retries each
+    failing entry after making it writable. No-op when the path does not exist.
+    """
+    import shutil as _shutil
+    import sys as _sys
+    p = Path(path)
+    if not p.exists():
+        return
+    if _sys.version_info >= (3, 12):
+        # onexc replaced the deprecated onerror in 3.12; signature is (func, path, exc).
+        _shutil.rmtree(p, onexc=lambda func, pth, _exc: _clear_readonly_and_retry(func, pth))
+    else:
+        _shutil.rmtree(p, onerror=lambda func, pth, _exc: _clear_readonly_and_retry(func, pth))
+
+
+def force_remove(path: Path | str) -> None:
+    """Delete a file or a whole directory tree, clearing read-only bits (Windows-safe)."""
+    import os as _os
+    import stat as _stat
+    p = Path(path)
+    if p.is_dir():
+        force_rmtree(p)
+        return
+    try:
+        p.unlink()
+    except PermissionError:
+        _os.chmod(p, _stat.S_IWRITE)
+        p.unlink()
+
+
 def normalize_path(path: Path | str) -> Path:
     """Resolve to absolute, normalise separators (handles UNC and OneDrive paths)."""
     return Path(path).resolve()

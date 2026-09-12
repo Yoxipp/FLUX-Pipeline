@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.logger import get_logger
-from core.paths import get_project_path, get_projects_dir, is_subpath
+from core.paths import force_remove, force_rmtree, get_project_path, get_projects_dir, is_subpath
 from features.folder_manager.asset_creator import create_asset, list_assets
 from features.folder_manager.locks import is_locked, load_locks, set_lock
 from features.folder_manager.project_init import create_project, list_projects, project_exists
@@ -91,7 +91,7 @@ async def delete_project(project_name: str) -> dict:
 
     loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(None, lambda: shutil.rmtree(project_path))
+        await loop.run_in_executor(None, lambda: force_rmtree(project_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -689,10 +689,9 @@ async def delete_item(req: ItemDelete) -> dict:
 
     loop = asyncio.get_event_loop()
     try:
-        if item_path.is_dir():
-            await loop.run_in_executor(None, lambda: shutil.rmtree(item_path))
-        else:
-            await loop.run_in_executor(None, item_path.unlink)
+        # force_remove clears read-only bits first: archived publishes are often
+        # read-only, so a plain rmtree/unlink fails with WinError 5 on Windows.
+        await loop.run_in_executor(None, lambda: force_remove(item_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
