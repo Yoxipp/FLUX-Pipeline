@@ -21,7 +21,14 @@ from features.publisher.publish_core import resolve_publish_path
 
 @register("build_output_path")
 class BuildOutputPath(CommandBase):
-    """Resolve the destination folder for a FLUX filename in the project."""
+    """Resolve the destination folder for a FLUX filename in the project.
+
+    V5 storage frontier (Phase 1b, Unite 4): when a ``storage_root`` is configured,
+    the destination is resolved through the ``StorageLocator`` (the single point
+    that can send publishes to a NAS / synced folder). With no ``storage_root``
+    (the default), the existing token resolution runs unchanged, byte-for-byte, so
+    nothing moves until the maintainer sets a root.
+    """
 
     # project_path comes from the production context snapshot, not from a param.
     required_metadata = ["project_path"]
@@ -37,9 +44,29 @@ class BuildOutputPath(CommandBase):
     async def run(
         self, parameters: Dict[str, Any], action_query: Any, logger: logging.Logger
     ) -> Dict[str, Any]:
-        project_path = Path(action_query.buffer.context["project_path"])
+        from core import paths  # local: keep flux_core import direction one-way
+
+        context = action_query.buffer.context
+        project_path = Path(context["project_path"])
         filename: str = parameters["filename"]
 
+        storage_root = paths.get_storage_root()
+        if storage_root is not None:
+            # Redirect mode: the StorageLocator owns the root; the project name
+            # addresses it. project_name is in the run context; fall back to the
+            # project folder name so this never needs a wider context.
+            from core.repository_factory import get_storage
+
+            project_name = context.get("project_name") or project_path.name
+            try:
+                output_path = Path(get_storage().resolve_dir(project_name, filename))
+            except (ValueError, NotImplementedError) as exc:
+                raise ValueError(
+                    f"chemin de publication introuvable pour: {filename!r}"
+                ) from exc
+            return {"output_path": output_path}
+
+        # Default: the existing token resolution, unchanged.
         output_path = resolve_publish_path(project_path, filename)
         if output_path is None:
             raise ValueError(f"chemin de publication introuvable pour: {filename!r}")
