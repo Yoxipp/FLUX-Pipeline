@@ -243,6 +243,11 @@ async def ping_dcc(dcc_key: str) -> dict:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, nuke_client.ping)
         return {"connected": result.get("ok", False), "version": result.get("version")}
+    if dcc_key == "photoshop":
+        from dcc.photoshop.client import ping as ps_ping
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, ps_ping)
+        return {"connected": result.get("ok", False), "version": result.get("version")}
     raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
 
 
@@ -1327,6 +1332,40 @@ async def nuke_publish_write(req: NukePublishRequest) -> dict:
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Nuke publish failed"))
+    return result
+
+
+# ── Photoshop endpoints (V6 B6) ──────────────────────────────────────────────
+# Backend-driven COM: FLUX resolves the FLUX destination and tells Photoshop to
+# save the active document there. No in-app plugin (COM connects from outside).
+
+
+class PhotoshopPublishRequest(BaseModel):
+    project_name:   str
+    filename:       str
+    extension:      str
+    export_options: dict = {}
+    description:    str | None = None
+    user:           str | None = None
+
+
+@router.post("/photoshop/publish")
+async def photoshop_publish(req: PhotoshopPublishRequest) -> dict:
+    """Save the active Photoshop document into the FLUX layout (PSD, PNG, JPG, TIF...)."""
+    from core import config
+    from dcc.photoshop.photoshop_export import publish_photoshop
+
+    user = req.user or config.get_current_user() or "unknown"
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_photoshop(
+            req.project_name, req.filename, req.extension, req.export_options,
+            req.description or "", user,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Photoshop publish failed"))
     return result
 
 

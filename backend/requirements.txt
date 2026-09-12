@@ -10,3 +10,4 @@ OpenImageIO>=3.1.17  # texture conform to mipped/tiled .tx (make_texture), BSD/A
 numpy>=1.26          # array bridge for texture conform + USD proxy decimation
 fast-simplification>=0.2.0  # USD proxy (purpose=proxy) quadric decimation, MIT, no DCC token
 import-linter>=2.0          # dev/CI: architecture guard, stores must not import core.json_manager (see .importlinter)
+photoshop-python-api>=0.22.0; sys_platform == "win32"  # Photoshop COM bridge (V6), MIT, Windows-only, optional (lazy-imported)
