@@ -86,15 +86,15 @@ def delete_user(name: str) -> tuple[bool, str]:
 
     Refuses to delete the currently active user (switch first). Returns (ok, message).
     """
-    import shutil
-
     name = (name or "").strip().upper()
     if not user_exists(name):
         return False, f"Artiste introuvable : {name}"
     if get_current_user() == name:
         return False, "Impossible de supprimer l'artiste actif — change d'utilisateur d'abord."
     try:
-        shutil.rmtree(paths.get_user_dir(name))
+        # force_rmtree clears read-only bits first (UserSettings files are often
+        # read-only), otherwise Windows fails the delete with WinError 5.
+        paths.force_rmtree(paths.get_user_dir(name))
     except OSError as exc:
         log.error("delete_user %s failed: %s", name, exc)
         return False, f"Échec de la suppression : {exc}"
