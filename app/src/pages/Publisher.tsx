@@ -7,6 +7,7 @@ import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
 import { zbrushSchemaForExt, defaultZbrushOptions } from '../lib/zbrushExportOptions'
+import { nukeSchemaForExt, defaultNukeOptions } from '../lib/nukeExportOptions'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
@@ -185,14 +186,18 @@ function resolveNodeExt(rawType: string): string | undefined {
 // USD comes in three flavours: .usd (auto), .usda (ascii), .usdc (binary crate).
 const USD_FORMATS = ['.usd', '.usda', '.usdc']
 
+// Keys must match the SoftwareSelector names exactly (Painter/Mari/Designer), or the
+// DCC falls back to DEFAULT_EXPORT_FORMATS.
 const EXPORT_FORMATS_BY_DCC: Record<string, string[]> = {
-  Maya:           ['.abc', '.fbx', '.obj', '.ma', '.mb', ...USD_FORMATS],
-  Houdini:        ['.abc', '.bgeo', '.vdb', '.obj', '.fbx', '.exr', '.hip', ...USD_FORMATS],
-  Nuke:           ['.exr', '.dpx', '.tif', '.png', '.mov', '.nk'],
-  'Substance P.': ['.png', '.exr', '.tga', '.tif', '.jpg'],
-  ZBrush:         ['.ztl', '.obj', '.fbx'],
-  Marvelous:      ['.obj', '.fbx', '.abc', '.zprj'],
-  Photoshop:      ['.psd', '.png', '.tif', '.jpg', '.exr'],
+  Maya:      ['.abc', '.fbx', '.obj', '.ma', '.mb', ...USD_FORMATS],
+  Houdini:   ['.abc', '.bgeo', '.vdb', '.obj', '.fbx', '.exr', '.hip', ...USD_FORMATS],
+  Nuke:      ['.exr', '.dpx', '.tif', '.png', '.mov', '.nk'],
+  Painter:   ['.png', '.exr', '.tga', '.tif', '.jpg'],
+  Mari:      ['.tif', '.exr', '.png', '.tga', '.jpg'],
+  ZBrush:    ['.ztl', '.obj', '.fbx'],
+  Designer:  ['.sbsar', '.png', '.exr', '.tif', '.jpg', '.tga'],
+  Marvelous: ['.obj', '.fbx', '.abc', '.zprj'],
+  Photoshop: ['.psd', '.png', '.tif', '.jpg', '.exr'],
 }
 
 // Fallback (e.g. "Fichier local"): a broad, DCC-agnostic superset.
@@ -200,6 +205,17 @@ const DEFAULT_EXPORT_FORMATS = ['.abc', '.fbx', '.obj', '.exr', '.png', '.tif', 
 
 function formatsForDcc(dcc: string): string[] {
   return EXPORT_FORMATS_BY_DCC[dcc] ?? DEFAULT_EXPORT_FORMATS
+}
+
+// Socket-bridge DCCs (Level 2) whose connection FLUX polls by HTTP ping. The value
+// is the backend ping key (/dcc/<key>/ping). Maya/Houdini/ZBrush keep their own
+// bespoke polling; these share one generic effect (bridgeStatus below). Designer and
+// Marvelous are Level 1 (file ingest, no live connection) and are absent on purpose.
+const DCC_PING_KEY: Record<string, string> = {
+  Nuke:      'nuke',
+  Painter:   'substance',
+  Mari:      'mari',
+  Photoshop: 'photoshop',
 }
 
 // ZBrush connection message: distinguish "installed but not answering" (ZBrush
@@ -622,6 +638,18 @@ export function Publisher() {
     () => defaultZbrushOptions('.obj'),
   )
 
+  // Nuke per-format export options (Write knobs), rendered via <ExportOptions>.
+  const [nukeExportOpts, setNukeExportOpts] = useState<Record<string, unknown>>(
+    () => defaultNukeOptions('.exr'),
+  )
+
+  // Generic connection status for socket-bridge DCCs (Nuke/Painter/Mari/Photoshop):
+  // one polling effect pings the active DCC's key with retry, like Maya/ZBrush, so a
+  // single cold ping never shows "non connecté".
+  const [bridgeStatus, setBridgeStatus] = useState<{ connected: boolean; checking: boolean; version: string | null }>(
+    { connected: false, checking: false, version: null },
+  )
+
 
   // Houdini-specific
   const [ropNodePath, setRopNodePath]             = useState('')
@@ -794,7 +822,30 @@ export function Publisher() {
     setMayaExportOpts(defaultOptions(schemaForExt(exportExt)))
     setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
     setZbrushExportOpts(defaultZbrushOptions(exportExt))
+    setNukeExportOpts(defaultNukeOptions(exportExt))
   }, [exportExt])
+
+  // Generic bridge-DCC connection polling (Nuke/Painter/Mari/Photoshop). Pings the
+  // active DCC's key every 3.5 s with retry; stays in "Vérification..." until the
+  // first answer so a cold socket never reads as "non connecté".
+  useEffect(() => {
+    const key = DCC_PING_KEY[dcc]
+    if (!key) { setBridgeStatus({ connected: false, checking: false, version: null }); return }
+    let cancelled = false
+    setBridgeStatus(s => ({ ...s, checking: true }))
+    const poll = async () => {
+      try {
+        const p = await api.pingDcc(key)
+        if (cancelled) return
+        setBridgeStatus({ connected: p.connected, checking: false, version: p.version ?? null })
+      } catch {
+        if (!cancelled) setBridgeStatus({ connected: false, checking: false, version: null })
+      }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 3500)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dcc])
 
   // Houdini polling — connection + selected node + auto-format
   useEffect(() => {
@@ -1035,6 +1086,27 @@ export function Publisher() {
         setZbrushConnected(false)
         setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
+      } else if (dcc === 'Nuke') {
+        if (!bridgeStatus.connected) {
+          toast.error('Nuke non connecté : lance le serveur FLUX dans Nuke (menu FLUX)')
+          return
+        }
+        // colorspace is a top-level arg of the backend (not a Write knob): pull it
+        // out of the options map and send the rest as Write knobs.
+        const { colorspace, ...writeKnobs } = nukeExportOpts as { colorspace?: string } & Record<string, unknown>
+        const isSeq = isSequence && exportExt !== '.nk'
+        const res = await api.publishNuke({
+          project_name:   project,
+          filename,
+          extension:      exportExt,
+          export_options: writeKnobs,
+          is_sequence:    isSeq,
+          frame_range:    isSeq ? [frameStart, frameEnd] : undefined,
+          colorspace:     typeof colorspace === 'string' ? colorspace : undefined,
+          description:    description || undefined,
+          user:           settings?.username ?? undefined,
+        })
+        toast.success(`${versionLabel(res.version_str)} → Nuke`)
       } else if (dcc === 'Fichier local') {
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
@@ -1095,6 +1167,7 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
+    bridgeStatus.connected, nukeExportOpts,
     mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
@@ -1433,6 +1506,23 @@ export function Publisher() {
                 </div>
                 </>)}
               </div>
+            ) : DCC_PING_KEY[dcc] ? (
+              <div>
+                <div className="cap" style={{ marginBottom: 6 }}>CONNEXION {dcc.toUpperCase()}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{
+                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                    background: bridgeStatus.connected ? 'var(--ok)' : bridgeStatus.checking ? 'var(--ink-4)' : 'var(--err)',
+                  }} />
+                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                    {bridgeStatus.connected
+                      ? `Connecté${bridgeStatus.version ? ` · ${bridgeStatus.version}` : ''}`
+                      : bridgeStatus.checking
+                        ? 'Vérification...'
+                        : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
+                  </div>
+                </div>
+              </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
                 <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ink-4)', flexShrink: 0 }} />
@@ -1609,6 +1699,18 @@ export function Publisher() {
                 schema={zbrushSchemaForExt(exportExt)}
                 values={zbrushExportOpts}
                 onChange={(k, v) => setZbrushExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Nuke, per-format (Write node knobs + colorspace). */}
+          {dcc === 'Nuke' && nukeSchemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={nukeSchemaForExt(exportExt)}
+                values={nukeExportOpts}
+                onChange={(k, v) => setNukeExportOpts(prev => ({ ...prev, [k]: v }))}
               />
             </div>
           )}

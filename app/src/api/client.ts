@@ -276,6 +276,23 @@ export const api = {
   cancelZBrush: () =>
     apiCall<{ cancelled: boolean }>('POST', '/dcc/zbrush/cancel'),
 
+  // Nuke — publish acts on the selected node: FLUX builds a Write with the chosen
+  // options, renders it into the versioned layout, removes it (.nk = scriptSaveAs).
+  publishNuke: (payload: {
+    project_name:   string
+    filename:       string
+    extension:      string
+    export_options?: Record<string, unknown>
+    is_sequence?:   boolean
+    frame_range?:   [number, number]
+    node_name?:     string
+    colorspace?:    string
+    description?:   string
+    user?:          string
+  }) =>
+    apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean }>(
+      'POST', '/dcc/nuke/publish', payload),
+
   // Activity
   getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
     const qs = new URLSearchParams()

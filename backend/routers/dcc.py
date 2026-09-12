@@ -1323,6 +1323,7 @@ class NukePublishRequest(BaseModel):
     is_sequence:   bool = False
     frame_range:   tuple[int, int] | None = None
     node_name:     str | None = None      # None -> the selected node in Nuke
+    colorspace:    str | None = None      # None -> project default (color_picking)
     description:   str | None = None
     user:          str | None = None
 
@@ -1341,7 +1342,7 @@ async def nuke_publish_write(req: NukePublishRequest) -> dict:
         lambda: publish_from_nuke(
             req.project_name, req.filename, req.extension, req.export_options,
             req.is_sequence, req.frame_range, req.node_name,
-            req.description or "", user,
+            req.description or "", user, req.colorspace,
         ),
     )
     if not result.get("ok"):
