@@ -73,6 +73,15 @@ class ZBrushClient:
         Used for user-initiated cancels so the UI doesn't hang if ZBrush isn't frozen."""
         return self._send({"action": "cancel"}, timeout=3.0)
 
+    def release(self, timeout: float = 3.0) -> dict:
+        """Force-release ZBrush from the freeze loop by sending 'stop'.
+
+        Used by the user-initiated cancel and by the app-close release hook. Sends
+        'stop' (breaks the freeze immediately) with a short timeout so the caller
+        never hangs when ZBrush is closed or not frozen (the bridge acks stop when
+        idle). Idempotent: safe to call repeatedly."""
+        return self._send({"action": "stop"}, timeout=timeout)
+
     # ------------------------------------------------------------------
     # Low-level
     # ------------------------------------------------------------------

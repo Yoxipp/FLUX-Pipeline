@@ -908,10 +908,16 @@ export function Publisher() {
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
-  const handleCancelZBrush = useCallback(() => {
+  const handleCancelZBrush = useCallback(async () => {
+    try {
+      await api.cancelZBrush()          // sends stop; the bridge acks even when idle
+      toast.success('ZBrush libéré')
+    } catch {
+      // ZBrush not reachable (closed / already released): nothing to free.
+      toast('ZBrush déjà libre')
+    }
     setZbrushConnected(false)
     setZbrushVersion(null)
-    api.cancelZBrush().catch(() => {}) // fire-and-forget — ZBrush may not be in freeze
   }, [])
 
   const reset = useCallback(() => {

@@ -3,6 +3,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import http from 'http'
 import {
   startPythonSidecar, stopPythonSidecar, restartBackend,
   getBackendStatus, onBackendStatus, type BackendStatus,
@@ -264,7 +265,25 @@ app.whenReady().then(async () => {
   await createWindow()
 })
 
+// Best-effort: release ZBrush from its freeze loop before the backend is hard-
+// killed, so closing FLUX never leaves ZBrush frozen (the backend is taskkilled on
+// quit, so its own shutdown hook may not run). Short timeout, always resolves.
+function releaseZBrush(): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const req = http.request(
+        { host: '127.0.0.1', port: 8765, path: '/dcc/zbrush/cancel', method: 'POST', timeout: 1500 },
+        (res) => { res.resume(); res.on('end', () => resolve()) },
+      )
+      req.on('error', () => resolve())
+      req.on('timeout', () => { req.destroy(); resolve() })
+      req.end()
+    } catch { resolve() }
+  })
+}
+
 app.on('window-all-closed', async () => {
+  await releaseZBrush()   // free ZBrush before the backend goes away
   await stopPythonSidecar()
   app.quit()
 })
@@ -272,6 +291,7 @@ app.on('window-all-closed', async () => {
 // Belt-and-suspenders: also kill the backend on any quit path (menu, taskbar,
 // signal) so no zombie backend survives on port 8765.
 app.on('before-quit', () => {
+  void releaseZBrush()
   void stopPythonSidecar()
 })
 

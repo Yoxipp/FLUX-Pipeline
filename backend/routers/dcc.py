@@ -1250,10 +1250,13 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
 
 @router.post("/zbrush/cancel")
 async def cancel_zbrush() -> dict:
-    """Release ZBrush from the freeze loop (user cancelled the publish)."""
+    """Release ZBrush from the freeze loop (user cancelled, or FLUX is closing).
+
+    Sends 'stop' so the freeze loop breaks immediately; the bridge acks it even
+    when idle, so this never hangs and is safe to call at app shutdown."""
     from dcc.zbrush.client import zbrush_client
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, zbrush_client.cancel)
+    result = await loop.run_in_executor(None, zbrush_client.release)
     return {"cancelled": result.get("ok", False)}
 
 

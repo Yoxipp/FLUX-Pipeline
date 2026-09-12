@@ -58,6 +58,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # never block startup on a reconcile hiccup
         log.warning("[FLUX] DCC auto-update skipped: %s", exc)
     yield
+    # Best-effort: release ZBrush if a freeze is active, so a graceful shutdown never
+    # leaves it frozen. Electron hard-kills the sidecar on quit (this may not run),
+    # so the app-close release also fires from the Electron side before the kill.
+    try:
+        from dcc.zbrush.client import zbrush_client
+        zbrush_client.release(timeout=1.0)
+    except Exception as exc:  # never block shutdown on a ZBrush hiccup
+        log.debug("[FLUX] ZBrush release on shutdown skipped: %s", exc)
     log.info("[FLUX] Backend shutting down")
 
 
