@@ -1260,6 +1260,68 @@ async def cancel_zbrush() -> dict:
     return {"cancelled": result.get("ok", False)}
 
 
+# ── Nuke endpoints (V6 B1) ───────────────────────────────────────────────────
+# Level 2 both ways: import a published EXR as a Read node; publish by ingesting
+# the active Write node's already-rendered output (FLUX never re-renders).
+
+
+class NukeImportRequest(BaseModel):
+    project_name: str
+    class_token:  str
+    type_token:   str
+    name_token:   str
+    instance:     str = "null"
+    iter:         str = "LAST"
+    first:        int | None = None
+    last:         int | None = None
+    colorspace:   str | None = None
+
+
+@router.post("/nuke/import")
+async def nuke_import_read(req: NukeImportRequest) -> dict:
+    """Create a Read node in Nuke for a FLUX-published file resolved from tokens."""
+    from dcc.nuke.nuke_import import DEFAULT_READ_COLORSPACE, import_into_nuke
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: import_into_nuke(
+            req.project_name, req.class_token, req.type_token, req.name_token,
+            req.instance, req.iter, req.first, req.last,
+            req.colorspace or DEFAULT_READ_COLORSPACE,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Nuke import failed"))
+    return result
+
+
+class NukePublishRequest(BaseModel):
+    project_name: str
+    description:  str | None = None
+    user:         str | None = None
+    target_name:  str | None = None
+
+
+@router.post("/nuke/publish")
+async def nuke_publish_write(req: NukePublishRequest) -> dict:
+    """Ingest the active Write node's output into the FLUX layout (no re-render)."""
+    from core import config
+    from dcc.nuke.nuke_publish import publish_from_nuke
+
+    user = req.user or config.get_current_user() or "unknown"
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_from_nuke(
+            req.project_name, req.description or "", user, req.target_name
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Nuke publish failed"))
+    return result
+
+
 # ── Houdini Importer HDA endpoints ───────────────────────────────────────────
 
 
