@@ -9,6 +9,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { toast } from 'sonner'
 import { api } from './api/client'
 
 const LS_KEY = 'flux.project'
@@ -90,10 +91,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch {
       /* blocked storage */
     }
-    // fire-and-forget persist; the UI already reflects the change
-    void api.setCurrentProject(name).catch(() => {
-      /* keep local choice even if the backend rejects it */
-    })
+    // persist; the UI already reflects the change. Confirm with a discreet
+    // toast on success, mirroring the publish feedback pattern.
+    void api
+      .setCurrentProject(name)
+      .then(() => {
+        if (name) toast.success(`Projet : ${name}`)
+      })
+      .catch(() => {
+        /* keep local choice even if the backend rejects it */
+      })
   }, [])
 
   return (
