@@ -16,6 +16,8 @@ from dcc.houdini import autostart as _houdini_autostart
 from dcc.maya    import autostart as _maya_autostart
 from dcc.nuke    import autostart as _nuke_autostart
 from dcc.zbrush  import autostart as _zbrush_autostart
+from dcc.substance_painter import autostart as _substance_autostart
+from dcc.mari    import autostart as _mari_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 
 # Maps dcc_key (lowercase) → autostart module. Extend here when adding new DCCs.
@@ -24,6 +26,8 @@ _AUTOSTART_MODULES: dict = {
     "maya":    _maya_autostart,
     "nuke":    _nuke_autostart,
     "zbrush":  _zbrush_autostart,
+    "substance": _substance_autostart,
+    "mari":    _mari_autostart,
 }
 
 log = get_logger(__name__)
@@ -247,6 +251,16 @@ async def ping_dcc(dcc_key: str) -> dict:
         from dcc.photoshop.client import ping as ps_ping
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, ps_ping)
+        return {"connected": result.get("ok", False), "version": result.get("version")}
+    if dcc_key == "substance":
+        from dcc.substance_painter.client import substance_client
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, substance_client.ping)
+        return {"connected": result.get("ok", False), "version": result.get("version")}
+    if dcc_key == "mari":
+        from dcc.mari.client import mari_client
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, mari_client.ping)
         return {"connected": result.get("ok", False), "version": result.get("version")}
     raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
 
@@ -1366,6 +1380,133 @@ async def photoshop_publish(req: PhotoshopPublishRequest) -> dict:
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Photoshop publish failed"))
+    return result
+
+
+# ── Substance Painter endpoints (V6 B2) ──────────────────────────────────────
+
+
+class SubstancePublishRequest(BaseModel):
+    project_name: str
+    class_token:  str
+    task_token:   str
+    name_token:   str
+    instance:     str = "null"
+    preset:       str = "PBR Metallic Roughness"
+    file_format:  str = "png"
+    bit_depth:    str = "8"
+    conform_tx:   bool = False
+    description:  str | None = None
+    user:         str | None = None
+
+
+@router.post("/substance/publish")
+async def substance_publish(req: SubstancePublishRequest) -> dict:
+    """Export Substance Painter maps and ingest them into FLUX (opt .tx conform)."""
+    from core import config
+    from dcc.substance_painter.substance_export import publish_painter
+
+    user = req.user or config.get_current_user() or "unknown"
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_painter(
+            req.project_name, req.class_token, req.task_token, req.name_token,
+            req.instance, req.preset, req.file_format, req.bit_depth,
+            req.conform_tx, req.description or "", user,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Substance publish failed"))
+    return result
+
+
+# ── Mari endpoints (V6 B7) ────────────────────────────────────────────────────
+
+
+class MariPublishRequest(BaseModel):
+    project_name: str
+    class_token:  str
+    task_token:   str
+    name_token:   str
+    instance:     str = "null"
+    file_format:  str = "tif"
+    conform_tx:   bool = False
+    description:  str | None = None
+    user:         str | None = None
+
+
+@router.post("/mari/publish")
+async def mari_publish(req: MariPublishRequest) -> dict:
+    """Export Mari channels and ingest them into FLUX (opt .tx conform)."""
+    from core import config
+    from dcc.mari.mari_export import publish_mari
+
+    user = req.user or config.get_current_user() or "unknown"
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_mari(
+            req.project_name, req.class_token, req.task_token, req.name_token,
+            req.instance, req.file_format, req.conform_tx, req.description or "", user,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Mari publish failed"))
+    return result
+
+
+# ── File-based DCC publish (Substance Designer, Marvelous) — Level 1 (V6 B3/B4) ─
+# The artist exports a file from the app; FLUX ingests it under FLUX naming, for any
+# type. Reuses the tested publisher (publish_file). One endpoint per soft for a clear
+# per-DCC entry point in the UI.
+
+
+class FilePublishRequest(BaseModel):
+    project_name: str
+    source_path:  str          # the file the artist exported from the app
+    target_name:  str          # composed FLUX name (tokens); ext taken from source
+    description:  str | None = None
+    user:         str | None = None
+
+
+def _ingest_file(req: "FilePublishRequest", soft: str) -> dict:
+    from pathlib import Path as _Path
+    from core import config
+    from core.paths import get_project_path
+    from features.publisher.publish_core import publish_file
+
+    user = req.user or config.get_current_user() or "unknown"
+    source = _Path(req.source_path)
+    if not source.exists():
+        return {"ok": False, "error": f"Fichier source introuvable : {source}"}
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        return {"ok": False, "error": f"Projet introuvable : {req.project_name}"}
+    dest = publish_file(source, project_path, req.description or "", user,
+                        req.project_name, req.target_name)
+    if dest is None:
+        return {"ok": False, "error": f"Publish {soft} échoué (nom FLUX invalide ?)"}
+    return {"ok": True, "path": str(dest)}
+
+
+@router.post("/designer/publish")
+async def designer_publish(req: FilePublishRequest) -> dict:
+    """Ingest a Substance Designer file (.sbsar / maps) into FLUX."""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: _ingest_file(req, "Designer"))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Designer publish failed"))
+    return result
+
+
+@router.post("/marvelous/publish")
+async def marvelous_publish(req: FilePublishRequest) -> dict:
+    """Ingest a Marvelous Designer file (.zprj / .abc / .obj / .fbx) into FLUX."""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: _ingest_file(req, "Marvelous"))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Marvelous publish failed"))
     return result
 
 
