@@ -201,7 +201,6 @@ const EXPORT_FORMATS_BY_DCC: Record<string, string[]> = {
   Designer:  ['.sbsar', '.png', '.exr', '.tif', '.jpg', '.tga'],
   Marvelous: ['.obj', '.fbx', '.abc', '.zprj'],
   Photoshop: ['.psd', '.psb', '.png', '.jpg', '.tif', '.tga'],
-  Marmoset:  ['.png', '.jpg', '.tif', '.exr', '.tga'],
 }
 
 // Fallback (e.g. "Fichier local"): a broad, DCC-agnostic superset.
@@ -1166,10 +1165,10 @@ export function Publisher() {
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx })
         const n = res.published?.length ?? 0
         toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
-      } else if (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous' || dcc === 'Marmoset') {
-        // File ingest (Level 1): local files, Substance Designer (.sbsar/maps),
-        // Marvelous (.abc/.zprj/.obj) and Marmoset (render images). Same token-composed
-        // naming; the dedicated DCC endpoints route through the same publish_file.
+      } else if (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') {
+        // File ingest (Level 1): local files, Substance Designer (.sbsar/maps) and
+        // Marvelous (.abc/.zprj/.obj). Same token-composed naming; the dedicated DCC
+        // endpoints route through the same publish_file.
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
           toast.error('Indique le(s) fichier(s) source')
@@ -1196,7 +1195,6 @@ export function Publisher() {
                          description: description || undefined, user: settings?.username ?? undefined }
           if (dcc === 'Designer')  return (await api.publishDesigner(base)).ok
           if (dcc === 'Marvelous') return (await api.publishMarvelous(base)).ok
-          if (dcc === 'Marmoset')  return (await api.publishMarmoset(base)).ok
           return (await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
                    target_name: target })).success
@@ -1447,12 +1445,11 @@ export function Publisher() {
                   </div>
                 )}
               </div>
-            ) : (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous' || dcc === 'Marmoset') ? (
+            ) : (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') ? (
               <div>
                 <div className="cap" style={{ marginBottom: 6 }}>
                   {dcc === 'Designer' ? 'FICHIER DESIGNER (.sbsar / maps)'
                     : dcc === 'Marvelous' ? 'FICHIER MARVELOUS (.abc / .zprj / .obj)'
-                    : dcc === 'Marmoset' ? 'RENDU MARMOSET (.png / .exr / .tif…)'
                     : 'FICHIER SOURCE'}
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>

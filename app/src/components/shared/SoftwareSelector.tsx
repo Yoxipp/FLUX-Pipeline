@@ -12,7 +12,6 @@ const SW_DCC = [
   { name: 'Mari',      v: '7.0' },
   { name: 'ZBrush',    v: '2025' },
   { name: 'Photoshop', v: '2025' },
-  { name: 'Marmoset',  v: '5' },
 ]
 
 interface Props {
