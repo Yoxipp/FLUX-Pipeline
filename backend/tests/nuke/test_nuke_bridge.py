@@ -58,38 +58,59 @@ class ImportIntoNuke(unittest.TestCase):
         run.assert_not_called()
 
 
-class NukePublish(unittest.TestCase):
-    def test_active_write_path_ok(self):
-        with mock.patch.object(nuke_publish.nuke_client, "run",
-                               return_value={"ok": True, "result": "/r/out.exr"}):
-            self.assertEqual(nuke_publish.get_active_write_path(),
-                             {"ok": True, "path": "/r/out.exr"})
+class BuildWriteExportCode(unittest.TestCase):
+    def test_creates_write_on_selected_node_and_executes(self):
+        code = nuke_publish.build_write_export_code("/p/x_LAST.exr")
+        self.assertIn("nuke.selectedNodes()", code)             # acts on the selection
+        self.assertIn("nuke.nodes.Write(inputs=[_src]", code)   # creates a Write
+        self.assertIn("/p/x_LAST.exr", code)
+        self.assertIn('"color_picking"', code)                  # project default colorspace
+        self.assertIn("nuke.execute(_w", code)                  # renders it
+        self.assertIn("nuke.delete(_w)", code)                  # cleans up the temp Write
 
-    def test_active_write_path_none(self):
-        with mock.patch.object(nuke_publish.nuke_client, "run",
-                               return_value={"ok": True, "result": None}):
-            out = nuke_publish.get_active_write_path()
-        self.assertFalse(out["ok"])
+    def test_named_node_and_options(self):
+        code = nuke_publish.build_write_export_code(
+            "/p/x.exr", options={"datatype": "16 bit half", "compression": "Zip (1 scanline)"},
+            first=1001, last=1010, node_name="Merge1",
+        )
+        self.assertIn('nuke.toNode("Merge1")', code)
+        self.assertIn('_w["datatype"].setValue("16 bit half")', code)
+        self.assertIn("nuke.execute(_w, 1001, 1010)", code)
 
-    def test_publish_ingests_write_output(self):
-        src = "/r/out.exr"
-        with mock.patch.object(nuke_publish, "get_active_write_path",
-                               return_value={"ok": True, "path": src}), \
+    def test_script_save_for_nk(self):
+        code = nuke_publish.build_script_save_code("/p/comp_LAST.nk")
+        self.assertIn("nuke.scriptSaveAs(", code)
+        self.assertIn("/p/comp_LAST.nk", code)
+
+
+class PublishFromNuke(unittest.TestCase):
+    def test_resolves_dest_and_runs_write(self):
+        with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
              mock.patch("pathlib.Path.exists", return_value=True), \
-             mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
-             mock.patch("features.publisher.publish_core.publish_file",
-                        return_value=Path("/proj/dest/x_LAST.exr")) as pf:
-            out = nuke_publish.publish_from_nuke("PROJ", "desc", "adam")
-        self.assertTrue(out["ok"])
+             mock.patch.object(nuke_publish, "build_nuke_output_path",
+                               return_value=(Path("/proj/dest/x_LAST.exr"), 3)), \
+             mock.patch("features.publisher.publish_core.resolve_publish_path",
+                        return_value=Path("/proj/dest")), \
+             mock.patch("features.publisher.publish_layout.archive_flat_last", return_value=2), \
+             mock.patch("features.folder_manager.naming_validator.get_base_name",
+                        return_value="X_REN_HERO_null"), \
+             mock.patch("features.activity.activity_writer.log_publish"), \
+             mock.patch("features.publisher.modif_log.append_log"), \
+             mock.patch.object(nuke_publish.nuke_client, "run",
+                               return_value={"ok": True, "result": "/proj/dest/x_LAST.exr"}) as run:
+            out = nuke_publish.publish_from_nuke("PROJ", "X_REN_HERO_null", ".exr")
+        self.assertTrue(out["ok"], out)
         self.assertEqual(out["path"], str(Path("/proj/dest/x_LAST.exr")))
-        # the resolved Write output is what gets ingested
-        self.assertEqual(str(pf.call_args[0][0]), str(Path(src)))
+        self.assertIn("nuke.nodes.Write", run.call_args[0][0])   # a Write was authored
 
-    def test_publish_no_write_returns_error(self):
-        with mock.patch.object(nuke_publish, "get_active_write_path",
-                               return_value={"ok": False, "error": "No Write node"}):
-            out = nuke_publish.publish_from_nuke("PROJ")
+    def test_unresolved_path_does_not_run(self):
+        with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
+             mock.patch("pathlib.Path.exists", return_value=True), \
+             mock.patch.object(nuke_publish, "build_nuke_output_path", return_value=(None, None)), \
+             mock.patch.object(nuke_publish.nuke_client, "run") as run:
+            out = nuke_publish.publish_from_nuke("PROJ", "bad", ".exr")
         self.assertFalse(out["ok"])
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1297,15 +1297,21 @@ async def nuke_import_read(req: NukeImportRequest) -> dict:
 
 
 class NukePublishRequest(BaseModel):
-    project_name: str
-    description:  str | None = None
-    user:         str | None = None
-    target_name:  str | None = None
+    project_name:  str
+    filename:      str
+    extension:     str
+    export_options: dict = {}
+    is_sequence:   bool = False
+    frame_range:   tuple[int, int] | None = None
+    node_name:     str | None = None      # None -> the selected node in Nuke
+    description:   str | None = None
+    user:          str | None = None
 
 
 @router.post("/nuke/publish")
 async def nuke_publish_write(req: NukePublishRequest) -> dict:
-    """Ingest the active Write node's output into the FLUX layout (no re-render)."""
+    """Publish from Nuke like Houdini: build a Write on the selected node with the
+    requested options, render it into the FLUX layout (Write outputs direct-to-dest)."""
     from core import config
     from dcc.nuke.nuke_publish import publish_from_nuke
 
@@ -1314,7 +1320,9 @@ async def nuke_publish_write(req: NukePublishRequest) -> dict:
     result = await loop.run_in_executor(
         None,
         lambda: publish_from_nuke(
-            req.project_name, req.description or "", user, req.target_name
+            req.project_name, req.filename, req.extension, req.export_options,
+            req.is_sequence, req.frame_range, req.node_name,
+            req.description or "", user,
         ),
     )
     if not result.get("ok"):
