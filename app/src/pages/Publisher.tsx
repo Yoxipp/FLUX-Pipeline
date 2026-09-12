@@ -6,6 +6,7 @@ import { Btn, SecTitle, FolderIcon, Check, Pill, Select, SelectTrigger, SelectCo
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
+import { zbrushSchemaForExt, defaultZbrushOptions } from '../lib/zbrushExportOptions'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
@@ -602,14 +603,11 @@ export function Publisher() {
   // ZBrush-specific
   const [zbrushConnected, setZbrushConnected] = useState(false)
   const [zbrushVersion, setZbrushVersion]     = useState<string | null>(null)
-  const [zbObjOptions, setZbObjOptions] = useState({
-    uvs: true, normals: true, flip_v: false, groups: false, materials: false,
-    scope: 'selected' as 'all' | 'selected' | 'visible',
-  })
-  const [zbFbxOptions, setZbFbxOptions] = useState({
-    fbx_version: '2019', animation: false, materials: true,
-    scope: 'all' as 'all' | 'selected' | 'visible',
-  })
+  // Per-format ZBrush export options, rendered via <ExportOptions> in the right
+  // panel like Maya/Houdini. Reset to the format defaults when the format changes.
+  const [zbrushExportOpts, setZbrushExportOpts] = useState<Record<string, unknown>>(
+    () => defaultZbrushOptions('.obj'),
+  )
 
 
   // Houdini-specific
@@ -757,6 +755,7 @@ export function Publisher() {
   useEffect(() => {
     setMayaExportOpts(defaultOptions(schemaForExt(exportExt)))
     setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
+    setZbrushExportOpts(defaultZbrushOptions(exportExt))
   }, [exportExt])
 
   // Houdini polling — connection + selected node + auto-format
@@ -980,14 +979,11 @@ export function Publisher() {
           toast.error('ZBrush non connecté : active le bridge FLUX dans ZBrush')
           return
         }
-        const exportOptions =
-          exportExt === '.obj' ? zbObjOptions :
-          exportExt === '.fbx' ? zbFbxOptions : {}
         const res = await api.publishZBrush({
           project_name:   project,
           filename,
           extension:      exportExt,
-          export_options: exportOptions,
+          export_options: zbrushExportOpts,
           description:    description || undefined,
           user:           settings?.username ?? undefined,
         })
@@ -1054,7 +1050,7 @@ export function Publisher() {
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
-    zbrushConnected, zbObjOptions, zbFbxOptions,
+    zbrushConnected, zbrushExportOpts,
     mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
@@ -1190,105 +1186,6 @@ export function Publisher() {
                   </div>
                 </div>
 
-                {/* OBJ options */}
-                {exportExt === '.obj' && (
-                  <div>
-                    <div className="cap" style={{ marginBottom: 6 }}>OPTIONS OBJ</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginBottom: 8 }}>
-                      {([
-                        ['uvs',       'UVs'],
-                        ['normals',   'Normales'],
-                        ['flip_v',    'Flip V'],
-                        ['groups',    'Groupes subtools'],
-                        ['materials', 'Matériaux (.mtl)'],
-                      ] as [keyof typeof zbObjOptions, string][]).map(([key, label]) => (
-                        <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            checked={zbObjOptions[key] as boolean}
-                            onChange={e => setZbObjOptions(prev => ({ ...prev, [key]: e.target.checked }))}
-                            style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
-                          />
-                          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{label}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>SCOPE</span>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        {(['selected', 'visible', 'all'] as const).map(s => (
-                          <div key={s} onClick={() => setZbObjOptions(prev => ({ ...prev, scope: s }))} style={{
-                            padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
-                            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: zbObjOptions.scope === s ? 600 : 400,
-                            border: zbObjOptions.scope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                            background: zbObjOptions.scope === s ? 'var(--accent-soft)' : 'transparent',
-                            color: zbObjOptions.scope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
-                            transition: 'all 0.1s',
-                          }}>{s}</div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* FBX options */}
-                {exportExt === '.fbx' && (
-                  <div>
-                    <div className="cap" style={{ marginBottom: 6 }}>OPTIONS FBX</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>VERSION</span>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          {(['2019', '2020', '2022'] as const).map(v => (
-                            <div
-                              key={v}
-                              onClick={() => setZbFbxOptions(prev => ({ ...prev, fbx_version: v }))}
-                              style={{
-                                padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
-                                fontFamily: 'var(--mono)', fontSize: 9, fontWeight: zbFbxOptions.fbx_version === v ? 600 : 400,
-                                border: zbFbxOptions.fbx_version === v ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                                background: zbFbxOptions.fbx_version === v ? 'var(--accent-soft)' : 'transparent',
-                                color: zbFbxOptions.fbx_version === v ? 'var(--accent-hi)' : 'var(--ink-3)',
-                                transition: 'all 0.1s',
-                              }}
-                            >{v}</div>
-                          ))}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>SCOPE</span>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          {(['all', 'selected', 'visible'] as const).map(s => (
-                            <div key={s} onClick={() => setZbFbxOptions(prev => ({ ...prev, scope: s }))} style={{
-                              padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
-                              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: zbFbxOptions.scope === s ? 600 : 400,
-                              border: zbFbxOptions.scope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                              background: zbFbxOptions.scope === s ? 'var(--accent-soft)' : 'transparent',
-                              color: zbFbxOptions.scope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
-                              transition: 'all 0.1s',
-                            }}>{s}</div>
-                          ))}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 14 }}>
-                        {([
-                          ['animation', 'Animation'],
-                          ['materials', 'Matériaux'],
-                        ] as [keyof typeof zbFbxOptions, string][]).filter(([k]) => typeof zbFbxOptions[k] === 'boolean').map(([key, label]) => (
-                          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={zbFbxOptions[key] as boolean}
-                              onChange={e => setZbFbxOptions(prev => ({ ...prev, [key]: e.target.checked }))}
-                              style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
-                            />
-                            <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             ) : dcc === 'Maya' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1658,6 +1555,18 @@ export function Publisher() {
                 schema={houdiniSchemaForExt(exportExt)}
                 values={houExportOpts}
                 onChange={(k, v) => setHouExportOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — ZBrush, per-format (Tool:Export sliders / FBX plugin). */}
+          {dcc === 'ZBrush' && zbrushSchemaForExt(exportExt).length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={zbrushSchemaForExt(exportExt)}
+                values={zbrushExportOpts}
+                onChange={(k, v) => setZbrushExportOpts(prev => ({ ...prev, [k]: v }))}
               />
             </div>
           )}
