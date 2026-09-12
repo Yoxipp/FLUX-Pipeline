@@ -7,7 +7,7 @@ from pathlib import Path
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_token, validate_token
-from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
+from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens, save_tokens
 
 log = get_logger(__name__)
 
@@ -64,6 +64,66 @@ def asset_exists(project_path: Path, class_token: str, asset_name: str) -> bool:
         return False
     safe_name = format_token(asset_name)
     return (project_path / class_rel / safe_name).exists()
+
+
+def heal_tokens_from_disk(project_path: Path) -> int:
+    """Register on-disk assets / sequences / shots that have no token yet.
+
+    An asset folder can exist on disk (scaffolded by hand, or from before the token
+    store was populated) with no entry in tokens.json. Token-driven pickers — the
+    Publisher NAME composer, the importer dropdowns — read tokens.json, so those assets
+    never appear even though their folders are right there. This scans the static CLASS
+    folders and the shot tree and adds the missing NAME / SEQ / SHOT tokens, using the
+    exact value formats the creators write (NAME → "<class_rel>/<name>", SEQ →
+    "shot/<SEQ###>", SHOT → "shot/<SEQ###>/<SHOT###>").
+
+    Idempotent and non-destructive: only absent keys are added, existing tokens (a
+    user's real entries) are never overwritten. Returns the number of tokens added.
+    """
+    tokens = load_tokens(project_path)
+    name_map = tokens.setdefault("NAME", {})
+    seq_map = tokens.setdefault("SEQ", {})
+    shot_map = tokens.setdefault("SHOT", {})
+    added = 0
+
+    # NAME: each static CLASS folder holds one subfolder per asset.
+    for _cls, rel in tokens.get("CLASS", {}).items():
+        if not rel or "{" in rel:
+            continue
+        class_dir = project_path / rel
+        try:
+            subdirs = [d for d in class_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        except OSError:
+            continue
+        for d in subdirs:
+            if d.name not in name_map:
+                name_map[d.name] = f"{rel}/{d.name}".replace("\\", "/")
+                added += 1
+
+    # SEQ / SHOT: the shot tree convention is shot/<SEQ###>/<SHOT###> (seq_shot_creator).
+    shot_root = project_path / "shot"
+    try:
+        seq_dirs = [d for d in shot_root.iterdir() if d.is_dir() and d.name.upper().startswith("SEQ")]
+    except OSError:
+        seq_dirs = []
+    for sd in seq_dirs:
+        if sd.name not in seq_map:
+            seq_map[sd.name] = f"shot/{sd.name}"
+            added += 1
+        try:
+            shot_dirs = [d for d in sd.iterdir() if d.is_dir() and d.name.upper().startswith("SHOT")]
+        except OSError:
+            shot_dirs = []
+        for shd in shot_dirs:
+            key = f"{sd.name}/{shd.name}"
+            if key not in shot_map:
+                shot_map[key] = f"shot/{sd.name}/{shd.name}"
+                added += 1
+
+    if added:
+        save_tokens(project_path, tokens)
+        log.info("Token auto-heal: added %d missing NAME/SEQ/SHOT token(s) for %s", added, project_path)
+    return added
 
 
 def list_assets(project_path: Path, class_token: str | None = None) -> list[str]:

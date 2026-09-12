@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from core.logger import get_logger
 from core.paths import force_remove, force_rmtree, get_project_path, get_projects_dir, is_subpath
-from features.folder_manager.asset_creator import create_asset, list_assets
+from features.folder_manager.asset_creator import create_asset, heal_tokens_from_disk, list_assets
 from features.folder_manager.locks import is_locked, load_locks, set_lock
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
@@ -47,6 +47,13 @@ async def get_project_tokens(project_name: str) -> dict:
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_event_loop()
+    # Auto-heal first: adopt on-disk assets/shots that have no token yet so the
+    # composer's NAME/SEQ/SHOT pickers list everything that exists on disk. Idempotent
+    # and non-destructive; a scan hiccup must never block returning the tokens.
+    try:
+        await loop.run_in_executor(None, lambda: heal_tokens_from_disk(project_path))
+    except Exception as exc:  # noqa: BLE001 — heal is best-effort, never fatal
+        log.warning("Token auto-heal skipped for %s: %s", project_name, exc)
     tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
     return {"tokens": tokens}
 
