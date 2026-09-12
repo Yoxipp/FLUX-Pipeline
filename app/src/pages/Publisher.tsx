@@ -202,6 +202,17 @@ function formatsForDcc(dcc: string): string[] {
   return EXPORT_FORMATS_BY_DCC[dcc] ?? DEFAULT_EXPORT_FORMATS
 }
 
+// ZBrush connection message: distinguish "installed but not answering" (ZBrush
+// closed or busy) from "plugin not installed", instead of always blaming install.
+function zbrushStatusText(
+  connected: boolean, checking: boolean, installed: boolean | null, version: string | null,
+): string {
+  if (connected) return `Connecté${version ? ` · ${version}` : ''}`
+  if (checking) return 'Vérification...'
+  if (installed === false) return 'Plugin non installé : bouton Plug dans la sidebar'
+  return 'Plugin installé, ZBrush ne répond pas (fermé ou occupé)'
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PublishMode = 'asset' | 'shot'
@@ -603,6 +614,8 @@ export function Publisher() {
   // ZBrush-specific
   const [zbrushConnected, setZbrushConnected] = useState(false)
   const [zbrushVersion, setZbrushVersion]     = useState<string | null>(null)
+  const [zbrushChecking, setZbrushChecking]   = useState(false)
+  const [zbrushPluginInstalled, setZbrushPluginInstalled] = useState<boolean | null>(null)
   // Per-format ZBrush export options, rendered via <ExportOptions> in the right
   // panel like Maya/Houdini. Reset to the format defaults when the format changes.
   const [zbrushExportOpts, setZbrushExportOpts] = useState<Record<string, unknown>>(
@@ -696,23 +709,48 @@ export function Publisher() {
       .catch(() => setShots([]))
   }, [project, mode, sel.seq])
 
-  // ZBrush connection — single effect handles both navigation state and manual DCC switch.
-  // Merged to avoid race condition where the dcc-change cleanup (→ false) overwrites
-  // the navigation-state set (→ true) that fired in the same render cycle.
+  // ZBrush plugin install status — drives the "installed vs reachable" message,
+  // re-checked whenever the ZBrush panel becomes active (catches Sidebar install).
   useEffect(() => {
-    // Sidebar navigated here after detecting the freeze — mark connected immediately, no ping.
+    if (dcc !== 'ZBrush') return
+    api.getDccAutostart('zbrush')
+      .then(r => setZbrushPluginInstalled(r.installed))
+      .catch(() => setZbrushPluginInstalled(null))
+  }, [dcc])
+
+  // ZBrush connection — poll with retry while the ZBrush panel is active, like Maya.
+  // A single failed ping never sticks: the bridge now answers pings even outside a
+  // publish, but the socket can still be cold for a moment, so we keep polling
+  // instead of concluding "not connected" on the first miss. Navigation-state
+  // (Sidebar detected a freeze) still wins instantly with no ping.
+  useEffect(() => {
     if (location.state?.zbrushConnected) {
       setDcc('ZBrush')
       setZbrushConnected(true)
+      setZbrushChecking(false)
       return
     }
-    // Manual DCC switch — one-shot ping, no polling interval.
-    if (dcc !== 'ZBrush') { setZbrushConnected(false); setZbrushVersion(null); return }
+    if (dcc !== 'ZBrush') {
+      setZbrushConnected(false); setZbrushVersion(null); setZbrushChecking(false)
+      return
+    }
     let cancelled = false
-    api.pingDcc('zbrush')
-      .then(p => { if (!cancelled) { setZbrushConnected(p.connected); setZbrushVersion(p.version ?? null) } })
-      .catch(() => { if (!cancelled) setZbrushConnected(false) })
-    return () => { cancelled = true }
+    setZbrushChecking(true)
+    const poll = async () => {
+      try {
+        const p = await api.pingDcc('zbrush')
+        if (cancelled) return
+        setZbrushConnected(p.connected)
+        setZbrushVersion(p.version ?? null)
+      } catch {
+        if (!cancelled) setZbrushConnected(false)
+      } finally {
+        if (!cancelled) setZbrushChecking(false)
+      }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 3500)
+    return () => { cancelled = true; clearInterval(id) }
   }, [dcc, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch the Maya connect command once on mount (backend path is stable)
@@ -1176,12 +1214,10 @@ export function Publisher() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <div style={{
                       width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                      background: zbrushConnected ? 'var(--ok)' : 'var(--err)',
+                      background: zbrushConnected ? 'var(--ok)' : zbrushChecking ? 'var(--ink-4)' : 'var(--err)',
                     }} />
                     <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                      {zbrushConnected
-                        ? `Connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}`
-                        : 'Non connecté : installe le plugin via le bouton Plug dans la sidebar'}
+                      {zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
                     </div>
                   </div>
                 </div>
@@ -1694,8 +1730,10 @@ export function Publisher() {
                 </div>
               )}
               {dcc === 'ZBrush' && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : 'var(--err)' }}>
-                  {zbrushConnected ? `● ZBrush connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}` : '✕ ZBrush non connecté'}
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : zbrushChecking ? 'var(--ink-4)' : 'var(--err)' }}>
+                  {zbrushConnected
+                    ? `● ZBrush connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}`
+                    : `${zbrushChecking ? '…' : '✕'} ${zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}`}
                 </div>
               )}
             </div>

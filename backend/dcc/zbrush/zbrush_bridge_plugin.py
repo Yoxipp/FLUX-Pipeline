@@ -236,7 +236,9 @@ def _dispatch(cmd: dict) -> dict:
 # without rebinding (prevents WSAEADDRINUSE / CLOSE_WAIT accumulation).
 
 _server_sock: "socket.socket | None" = None
-FREEZE_TIMEOUT = int(os.environ.get("FLUX_ZBRUSH_TIMEOUT", "300"))  # 5 min default
+# Safety deadline for the freeze loop: ZBrush never stays frozen past this even if
+# every stop/release fails. Kept short (3 min) so a stuck publish self-releases.
+FREEZE_TIMEOUT = int(os.environ.get("FLUX_ZBRUSH_TIMEOUT", "180"))  # 3 min default
 
 
 def _init_server_socket() -> bool:
@@ -308,6 +310,66 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
     finally:
         conn.close()
     return False
+
+
+# ── Background ping responder (served OUTSIDE the freeze loop) ─────────────────
+# The freeze loop owns the socket only during a publish, so outside a publish the
+# OS accepts the TCP connection but nobody reads it and a ping just times out —
+# which left FLUX showing "not connected" until the user clicked Publish. This
+# daemon accepts + answers pings while idle so FLUX can detect ZBrush any time.
+# It only ever does socket I/O + a static ping reply: NO zbc.* call runs off the
+# main thread. It yields to the freeze loop via the _in_freeze guard.
+
+def _serve_idle(conn: "socket.socket") -> None:
+    """Answer one request while idle. Only ping (and a stop/cancel ack) are safe;
+    a real export received while idle is refused so the client fails fast."""
+    import struct as _struct
+    _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
+    except OSError:
+        pass
+    conn.settimeout(2.0)
+    buf = b""
+    try:
+        while b"\n" not in buf:
+            chunk = conn.recv(4096)
+            if not chunk:
+                return
+            buf += chunk
+        action = json.loads(buf.split(b"\n")[0].decode("utf-8")).get("action", "")
+        if action == "ping":
+            resp = {"status": "ok", "version": "ZBrush 2026"}
+        elif action in ("stop", "cancel"):
+            resp = {"status": "ok"}  # nothing to release when idle — ack anyway
+        else:
+            resp = {"status": "error", "msg": "ZBrush idle: click Publish to FLUX first"}
+        conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _bg_accept_loop() -> None:
+    """Daemon thread: accept + answer pings while ZBrush is NOT publishing."""
+    if _server_sock is None:
+        return
+    _log("Background ping responder loop started")
+    while True:
+        try:
+            if _in_freeze:
+                time.sleep(0.1)
+                continue
+            ready, _, _ = select.select([_server_sock], [], [], 0.2)
+            if ready and not _in_freeze:
+                conn, _addr = _server_sock.accept()
+                _serve_idle(conn)
+        except Exception:
+            time.sleep(0.2)
 
 
 # ── Freeze loop (T3) ──────────────────────────────────────────────────────────
@@ -493,6 +555,16 @@ def _register_zbrush_ui() -> None:
 try:
     if _init_server_socket():
         _register_zbrush_ui()
+        # Start the idle ping responder once (survives plugin reload via the guard).
+        try:
+            if not getattr(sys, "_flux_zbrush_bg_started", False):
+                threading.Thread(
+                    target=_bg_accept_loop, daemon=True, name="flux-zbrush-ping"
+                ).start()
+                sys._flux_zbrush_bg_started = True
+                _log("Background ping responder thread started")
+        except Exception as _te:
+            _log(f"BG ping thread start failed (non-critical): {_te!r}")
         _log("=== PLUGIN INIT COMPLETE ===")
     else:
         _log("=== SOCKET INIT FAILED — plugin disabled ===")
