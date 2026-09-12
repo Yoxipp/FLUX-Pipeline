@@ -20,7 +20,12 @@ from core import config
 from core.logger import get_logger
 from core.paths import get_project_path
 
-from flux_actions import build_publish_form, preview_publish_action
+from flux_actions import (
+    build_action_graph,
+    build_publish_form,
+    list_action_names,
+    preview_publish_action,
+)
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -81,3 +86,30 @@ async def publish_preview(req: PreviewRequest) -> PreviewResponse:
             message="Destination non résolue, vérifie le nom du fichier",
         )
     return PreviewResponse(resolved=True, dest_path=str(dest), message="Destination résolue")
+
+
+# ── node flow (read-only graph view, V5 Phase 2) ─────────────────────────────
+# The front renders these as React Flow nodes/edges. Read only: the YAML stays the
+# single source of truth; nothing here runs an action or writes to disk.
+
+
+class GraphResponse(BaseModel):
+    name: str
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+
+
+@router.get("/graph/list", response_model=list[str])
+async def action_graph_list() -> list[str]:
+    """Return the action names a graph can be requested for."""
+    return list_action_names()
+
+
+@router.get("/{name}/graph", response_model=GraphResponse)
+async def action_graph(name: str) -> GraphResponse:
+    """Return the read-only node/edge graph of the named action's YAML."""
+    try:
+        graph = build_action_graph(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Action inconnue : {name}")
+    return GraphResponse(**graph)
