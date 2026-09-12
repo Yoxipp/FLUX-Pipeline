@@ -2,6 +2,7 @@
 
 import type {
   ActionFormResponse,
+  ActionGraph,
   ActionPreviewResponse,
   ActivityEvent,
   ChatMention,
@@ -193,6 +194,14 @@ export const api = {
     user?: string
     target_name?: string
   }) => apiCall<ActionPreviewResponse>('POST', '/actions/publish/preview', payload),
+
+  // Node flow (read-only): the graph of a YAML action, rendered with React Flow.
+  // On demand only (opened from the hidden bench page); never polled.
+  getActionGraphList: () =>
+    apiCall<string[]>('GET', '/actions/graph/list'),
+
+  getActionGraph: (name: string) =>
+    apiCall<ActionGraph>('GET', `/actions/${encodeURIComponent(name)}/graph`),
 
   getHoudiniState: () =>
     apiCall<HoudiniState>('GET', '/dcc/houdini/state'),

@@ -138,6 +138,44 @@ export interface ActionPreviewResponse {
   message:   string
 }
 
+// ── Node flow (read-only graph view of a YAML action) ────────────────────────
+
+export interface ActionGraphParam {
+  name:  string
+  type:  string
+  label: string
+  value: unknown
+  wired: boolean          // fed from another command's output (never user-typed)
+  hide:  boolean
+}
+
+export interface ActionGraphNode {
+  id:       string        // "step.command"
+  position: { x: number; y: number }
+  data: {
+    label:   string
+    command: string       // registry key
+    step:    string
+    index:   number
+    status:  string
+    params:  ActionGraphParam[]
+  }
+}
+
+export interface ActionGraphEdge {
+  id:     string
+  source: string
+  target: string
+  kind:   'order' | 'dataflow'
+  label?: string
+}
+
+export interface ActionGraph {
+  name:  string
+  nodes: ActionGraphNode[]
+  edges: ActionGraphEdge[]
+}
+
 export interface HoudiniPublishPayload {
   project_name: string
   filename: string
