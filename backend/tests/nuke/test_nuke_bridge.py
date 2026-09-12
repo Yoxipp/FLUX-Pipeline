@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from dcc.nuke import nuke_import, nuke_publish
+from dcc.nuke import flux_nuke_menu, nuke_import, nuke_publish
 
 
 class BuildReadNodeCode(unittest.TestCase):
@@ -111,6 +111,26 @@ class PublishFromNuke(unittest.TestCase):
             out = nuke_publish.publish_from_nuke("PROJ", "bad", ".exr")
         self.assertFalse(out["ok"])
         run.assert_not_called()
+
+
+class NukeMenuHelpers(unittest.TestCase):
+    def test_backend_url(self):
+        self.assertEqual(flux_nuke_menu.backend_url("/dcc/nuke/publish"),
+                         "http://127.0.0.1:8765/dcc/nuke/publish")
+        self.assertEqual(flux_nuke_menu.backend_url("dcc/nuke/import"),
+                         "http://127.0.0.1:8765/dcc/nuke/import")
+
+    def test_compose_asset_filename(self):
+        self.assertEqual(
+            flux_nuke_menu.compose_asset_filename("char", "ren", "hero", "null"),
+            "CHAR_REN_HERO_NULL",
+        )
+
+    def test_compose_defaults_instance(self):
+        self.assertEqual(
+            flux_nuke_menu.compose_asset_filename("CHAR", "REN", "HERO", ""),
+            "CHAR_REN_HERO_NULL",
+        )
 
 
 if __name__ == "__main__":
