@@ -279,8 +279,118 @@ def resolve_import_path(
         best = min(candidates, key=lambda p: _import_ext_rank(_extract_ext(p)))
         return {"ok": True, "path": str(best), "ext": _extract_ext(best), "exists": True}
 
+    # No flat file matched — try the sequence layout. Nuke/Houdini publish a frame
+    # sequence as a versioned SUBFOLDER <base>_<ITER>/ holding <base>_<ITER>.<frame>.<ext>
+    # files (there is no _LAST sequence, so iter=LAST maps to the newest version).
+    seq = _resolve_sequence(folder, prefix, suffix, exact_stem, iter_u)
+    if seq is not None:
+        return seq
+
     return {"ok": False, "path": None, "ext": "", "exists": False,
-            "error": f"File not found: {exact_stem}.* (nor a variante)"}
+            "error": f"File not found: {exact_stem}.* (nor a variante, nor a sequence)"}
+
+
+_FRAME_RE = re.compile(r"^\d+$")
+
+
+def _resolve_sequence(
+    folder: Path,
+    prefix: str,
+    suffix: str,
+    exact_stem: str,
+    iter_u: str,
+) -> dict | None:
+    """Resolve a frame-sequence version folder for the given tokens.
+
+    Sequences live in a versioned subfolder ``<base>_<ITER>/`` next to the flat
+    files, holding ``<base>_<ITER>.<frame>.<ext>`` frames. There is never a _LAST
+    sequence folder, so ``iter=LAST`` maps to the highest ``vNNN`` version.
+
+    Returns a resolve dict with ``is_sequence=True`` plus ``first``/``last`` and a
+    ``frame_pattern`` (path with a printf ``%0Nd`` frame token). ``path`` stays a
+    real first-frame file so callers that only read ``path`` still get a valid file.
+    Returns None when no matching sequence folder exists.
+    """
+    try:
+        subdirs = [d for d in folder.iterdir() if d.is_dir()]
+    except OSError:
+        return None
+
+    # Keep the version folders whose name matches the token stem (exact or variante),
+    # mapping each to its trailing ITER label (LAST / vNNN).
+    versioned: list[tuple[str, Path]] = []
+    for d in subdirs:
+        du = d.name.upper()
+        if du == exact_stem or (du.startswith(prefix) and du.endswith(suffix)):
+            versioned.append((iter_u, d))
+        elif du.startswith(prefix):
+            iter_label = du[len(prefix):].split("_")[-1]
+            if iter_label == ACTIVE_VERSION_LABEL or _VERSION_RE.match(iter_label):
+                versioned.append((iter_label, d))
+    if not versioned:
+        return None
+
+    if iter_u == ACTIVE_VERSION_LABEL:
+        # LAST → the newest version (a real _LAST folder wins if one exists).
+        last_dirs = [d for lbl, d in versioned if lbl == ACTIVE_VERSION_LABEL]
+        if last_dirs:
+            chosen = last_dirs[0]
+        else:
+            numbered = [(int(lbl[1:]), d) for lbl, d in versioned if _VERSION_RE.match(lbl)]
+            if not numbered:
+                return None
+            chosen = max(numbered, key=lambda t: t[0])[1]
+    else:
+        matches = [d for lbl, d in versioned if lbl == iter_u]
+        if not matches:
+            return None
+        chosen = matches[0]
+
+    return _sequence_from_folder(chosen)
+
+
+def _sequence_from_folder(seq_dir: Path) -> dict | None:
+    """Build the sequence resolve dict from a version folder of frame files."""
+    seq_stem = seq_dir.name
+    prefix = seq_stem + "."
+    frames: list[int] = []
+    ext = ""
+    for p in seq_dir.iterdir():
+        if not p.is_file() or not p.name.startswith(prefix):
+            continue
+        remainder = p.name[len(prefix):]           # "<frame>.<ext...>"
+        frame_str, dot, ext_rest = remainder.partition(".")
+        if not dot or not _FRAME_RE.match(frame_str):
+            continue
+        frames.append(int(frame_str))
+        ext = "." + ext_rest
+    if not frames:
+        return None
+
+    frames.sort()
+    # Padding comes from the on-disk frame token width (e.g. 0001 → 4) so the pattern
+    # matches exactly what was written.
+    pad_width = 4
+    for p in seq_dir.iterdir():
+        if p.is_file() and p.name.startswith(prefix):
+            digits = p.name[len(prefix):].partition(".")[0]
+            if digits.isdigit():
+                pad_width = len(digits)
+                break
+
+    frame_token = f"%0{pad_width}d"
+    frame_pattern = seq_dir / f"{seq_stem}.{frame_token}{ext}"
+    first_file = seq_dir / f"{seq_stem}.{frames[0]:0{pad_width}d}{ext}"
+    return {
+        "ok": True,
+        "path": str(first_file),
+        "ext": ext,
+        "exists": True,
+        "is_sequence": True,
+        "first": frames[0],
+        "last": frames[-1],
+        "frame_pattern": str(frame_pattern),
+    }
 
 
 # ── path → token reverse lookup ───────────────────────────────────────────────

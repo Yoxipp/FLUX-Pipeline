@@ -72,7 +72,18 @@ def import_into_nuke(
     if not resolved.get("ok"):
         return {"ok": False, "error": resolved.get("error", "path not resolved")}
 
-    code = build_read_node_code(resolved["path"], first, last, colorspace)
+    # For a frame sequence, feed Nuke the printf frame pattern (base.%04d.ext) and the
+    # resolved first/last so the Read reads the whole range, not a single frame. The
+    # caller's explicit first/last still win when provided.
+    read_path = resolved["path"]
+    if resolved.get("is_sequence"):
+        read_path = resolved.get("frame_pattern", read_path)
+        if first is None:
+            first = resolved.get("first")
+        if last is None:
+            last = resolved.get("last")
+
+    code = build_read_node_code(read_path, first, last, colorspace)
     res = nuke_client.run(code)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error", "Nuke run failed")}

@@ -87,5 +87,44 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         self.assertFalse(res["ok"])
 
 
+class ImporterResolveSequenceLayout(unittest.TestCase):
+    """Frame-sequence import: <base>_vNNN/<base>_vNNN.<frame>.<ext> (Nuke/Houdini)."""
+
+    def setUp(self):
+        ir._BCACHE.clear()
+
+    def _publish_sequence(self, project: Path, ver: int, frames: range) -> None:
+        """Lay a Nuke-style EXR version folder <base>_vNNN/<base>_vNNN.<frame>.exr."""
+        dest = resolve_publish_path(project, f"{_BASE}_LAST.exr")
+        seq_dir = dest / f"{_BASE}_v{ver:03d}"
+        seq_dir.mkdir(parents=True, exist_ok=True)
+        for f in frames:
+            (seq_dir / f"{_BASE}_v{ver:03d}.{f:04d}.exr").write_text("x")
+
+    def test_last_maps_to_newest_version_sequence(self):
+        proj = _project()
+        # Two published sequence versions; LAST must resolve the newest (v002).
+        self._publish_sequence(proj, 1, range(1001, 1004))
+        self._publish_sequence(proj, 2, range(1001, 1006))
+        ir._BCACHE.clear()
+        res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
+        self.assertTrue(res["ok"], res)
+        self.assertTrue(res["is_sequence"])
+        self.assertEqual((res["first"], res["last"]), (1001, 1005))
+        self.assertTrue(res["frame_pattern"].endswith("_v002.%04d.exr"))
+        # path stays a real first-frame file for callers that only read `path`.
+        self.assertTrue(Path(res["path"]).exists())
+
+    def test_explicit_version_sequence(self):
+        proj = _project()
+        self._publish_sequence(proj, 1, range(1001, 1004))
+        self._publish_sequence(proj, 2, range(1001, 1006))
+        ir._BCACHE.clear()
+        res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual((res["first"], res["last"]), (1001, 1003))
+        self.assertTrue(res["frame_pattern"].endswith("_v001.%04d.exr"))
+
+
 if __name__ == "__main__":
     unittest.main()
