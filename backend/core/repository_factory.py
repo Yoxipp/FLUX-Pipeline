@@ -1,12 +1,16 @@
 # repository_factory.py — the single place that decides the active repository.
 #
 # V5 wiring: features/stores never build a repository themselves; they ask here.
-# Today it always returns the JSON-file backend (the current behaviour). When the
-# SqliteRepository / RemoteRepository land, only this file changes — the config
-# read here picks the backend, and no store/feature is touched.
+# get_repository() picks the backend from config ("metadata_backend"): the JSON
+# file backend (default), the local SQLite backend, or the remote server backend
+# (skeleton). This is the ONE point that flips local -> server; no store/feature
+# is touched. Default stays "json" so nothing changes until the maintainer validates the
+# migration and flips it explicitly.
 #
 # `locate(collection, doc_id)` maps a logical (collection, doc_id) to a file path.
 # Each collection registers a resolver so the on-disk layout stays in one place.
+# Resolvers matter to the JSON backend only; the SQLite / remote backends key by
+# the logical (collection, doc_id) and ignore paths entirely.
 # The "read_state" pilot is addressed by path (doc_id IS the companion path): a
 # transitional shape that lets the store route through the repository now, with the
 # path-building moved into a resolver later (Phase 1c), without changing this seam.
@@ -17,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.json_repository import JsonFileRepository
+from flux_core import MetadataRepository
 
 # resolver(doc_id) -> Path. doc_id is None for a collection's append-only log file.
 _Resolver = Callable[[str | None], Path]
@@ -91,12 +96,50 @@ register_collection("activity_log", lambda doc_id: Path(str(doc_id)))
 register_collection("feed_archive", lambda doc_id: Path(str(doc_id)))
 
 
-_repository: JsonFileRepository | None = None
+_repository: MetadataRepository | None = None
 
 
-def get_repository() -> JsonFileRepository:
-    """Return the process-wide active repository (JSON-file backend for now)."""
+def _build_repository() -> MetadataRepository:
+    """Build the backend the config selects. Default "json" keeps today's
+    behaviour; "sqlite" / "remote" are explicit opt-ins.
+
+    The selection is read from config.json directly (core.paths), NOT through the
+    repository - the config store itself asks get_repository(), so reading it here
+    via a repository would recurse.
+    """
+    from core import paths  # local: avoid a bootstrap import cycle
+
+    backend = paths.get_metadata_backend()
+
+    if backend == "sqlite":
+        from core.sqlite_repository import SqliteRepository
+        db_path = paths.get_sqlite_path()
+        if db_path is None:
+            # No explicit path: default to CONFIG/metadata.db (needs FLUX_ROOT).
+            db_path = paths.get_config_dir() / "metadata.db"
+        return SqliteRepository(db_path)
+
+    if backend == "remote":
+        from core.remote_repository import RemoteRepository
+        base_url = paths._read_config_json().get("remote_url", "")
+        return RemoteRepository(base_url)
+
+    # Default and explicit "json": the file backend with the registered resolvers.
+    return JsonFileRepository(_locate)
+
+
+def get_repository() -> MetadataRepository:
+    """Return the process-wide active repository, chosen by config (default JSON)."""
     global _repository
     if _repository is None:
-        _repository = JsonFileRepository(_locate)
+        _repository = _build_repository()
     return _repository
+
+
+def reset_repository() -> None:
+    """Drop the cached repository so the next get_repository() rebuilds from config.
+
+    For tests and a possible in-app backend switch; not used on the hot path.
+    """
+    global _repository
+    _repository = None

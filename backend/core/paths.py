@@ -94,6 +94,23 @@ def set_flux_root(path: Path | str) -> None:
     _update_config_json("workspace", str(Path(path)))
 
 
+# ── Metadata backend selection (config.json, bootstrap) ──────────────────────
+# Which persistence backend the repository factory builds. Read from config.json
+# directly (NOT through the repository - the factory would recurse). Default
+# "json" so nothing changes until the maintainer flips it after validating the migration.
+
+def get_metadata_backend() -> str:
+    """Return the configured metadata backend name ("json" by default)."""
+    value = _read_config_json().get("metadata_backend")
+    return str(value).strip().lower() if value else "json"
+
+
+def get_sqlite_path() -> Path | None:
+    """Return the configured SQLite base path, or None when unset."""
+    value = _read_config_json().get("sqlite_path")
+    return Path(value) if value else None
+
+
 # ── Install username (config.json, chosen at first launch) ───────────────────
 
 def get_config_username() -> str | None:
