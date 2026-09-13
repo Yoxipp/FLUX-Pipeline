@@ -9,8 +9,12 @@ import json
 import socket
 from typing import Any
 
+from core.constants import DCC_PORTS
+
 SUBSTANCE_BRIDGE_HOST = "127.0.0.1"
-SUBSTANCE_BRIDGE_PORT = 9880
+# Canonical Painter port: the base of its assigned range in DCC_PORT_RANGES, so
+# the status scan (scan_instances) and this ping hit the same port.
+SUBSTANCE_BRIDGE_PORT = DCC_PORTS.get("SubstanceP", 7030)
 
 
 def _send(payload: dict, timeout: float = 120.0) -> dict:

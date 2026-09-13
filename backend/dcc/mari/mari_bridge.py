@@ -27,7 +27,9 @@ except Exception:  # noqa: BLE001 - importable from the backend for a syntax che
     _MARI_AVAILABLE = False
 
 HOST = "127.0.0.1"
-PORT = 9881
+# Base of Mari's assigned range (DCC_PORT_RANGES["Mari"]); env override for
+# multi-instance. Must match the backend client / status scan port.
+PORT = int(os.environ.get("FLUX_MARI_PORT", "7070"))
 
 _server_sock: "socket.socket | None" = None
 

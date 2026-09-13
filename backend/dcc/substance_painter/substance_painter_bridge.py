@@ -17,6 +17,7 @@ below is defensive and must be verified against the installed Painter version.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 
@@ -30,7 +31,9 @@ except Exception:  # noqa: BLE001 - importable from the backend for a syntax che
     _SP_AVAILABLE = False
 
 HOST = "127.0.0.1"
-PORT = 9880
+# Base of Painter's assigned range (DCC_PORT_RANGES["SubstanceP"]); env override
+# for multi-instance. Must match the backend client / status scan port.
+PORT = int(os.environ.get("FLUX_SUBSTANCE_PORT", "7030"))
 
 _server_sock: "socket.socket | None" = None
 
