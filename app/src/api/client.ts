@@ -152,6 +152,15 @@ export const api = {
   pingDcc: (dcc: string) =>
     apiCall<{ connected: boolean; version: string | null }>('GET', `/dcc/${dcc}/ping`),
 
+  // Photoshop (COM, no in-app plugin): actionable state + library bootstrap.
+  photoshopStatus: () =>
+    apiCall<{ reason: 'ok' | 'lib_missing' | 'not_running'; lib_installed: boolean; connected: boolean; version: string | null; error: string | null }>(
+      'GET', '/dcc/photoshop/status'),
+
+  photoshopInstall: () =>
+    apiCall<{ ok: boolean; already: boolean; installed: boolean; frozen: boolean; message: string }>(
+      'POST', '/dcc/photoshop/install'),
+
   // Detect a stuck ("zombie") Maya still holding the commandPort (port 7001).
   getMayaPortStatus: () =>
     apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),

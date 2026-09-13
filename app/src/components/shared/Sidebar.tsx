@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check, Info,
+  ClipboardList, AlertTriangle, Check,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -138,6 +138,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [nukeServerOk,    setNukeServerOk]          = useState<boolean | null>(null)
   const [painterServerOk, setPainterServerOk]       = useState<boolean | null>(null)
   const [mariServerOk,    setMariServerOk]          = useState<boolean | null>(null)
+  // Photoshop (COM, no plugin): reason drives the row control state.
+  const [psReason, setPsReason]                     = useState<'ok' | 'lib_missing' | 'not_running' | null>(null)
+  const [psBusy,   setPsBusy]                        = useState(false)
 
   // New Scene: the active project's presets drive the per-soft menu + button colour.
   const { project: activeProject } = useProject()
@@ -249,6 +252,36 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.mari])
+
+  // Poll Photoshop COM state every 5 s (no plugin; state = lib/running/ok).
+  useEffect(() => {
+    const poll = () =>
+      api.photoshopStatus().then(s => setPsReason(s.reason)).catch(() => setPsReason(null))
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Photoshop control click: install the lib when missing, else refresh state.
+  const handlePhotoshop = useCallback(async () => {
+    if (psBusy) return
+    setPsBusy(true)
+    try {
+      if (psReason === 'lib_missing') {
+        const r = await api.photoshopInstall()
+        if (r.ok) toast.success('photoshop-python-api installé')
+        else toast.error(r.message)
+      }
+      const s = await api.photoshopStatus()
+      setPsReason(s.reason)
+      if (s.reason === 'ok') toast.success(`Photoshop connecté${s.version ? ` (${s.version})` : ''}`)
+      else if (s.reason === 'not_running') toast('Ouvre Photoshop pour connecter')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Vérification Photoshop échouée')
+    } finally {
+      setPsBusy(false)
+    }
+  }, [psBusy, psReason])
 
   // Poll ZBrush bridge when plugin is installed.
   // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
@@ -650,24 +683,40 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </Tooltip>
               )}
 
-              {/* Photoshop — no in-app plugin (external COM). Hint how to enable it. */}
+              {/* Photoshop — no in-app plugin (external COM). Actionable state:
+                  GREEN = connected · ORANGE = lib present but PS not running ·
+                  grey = lib missing (click installs it). */}
               {isPhotoshop && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
+                    onClick={() => { if (!psBusy) void handlePhotoshop() }}
+                    className="scale-hover-lg"
                     style={{
                       width: 16, height: 16, borderRadius: 4,
-                      border: '1px solid var(--rule-2)',
+                      border: '1px solid ' + (psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--rule-2)'),
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0, background: 'transparent', color: 'var(--ink-4)',
-                      cursor: 'help',
+                      flexShrink: 0,
+                      background: psReason === 'ok' ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : psReason === 'not_running' ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
+                      color: psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--ink-4)',
+                      cursor: psBusy ? 'default' : 'pointer',
+                      transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
                     }}
                   >
-                    <Info size={8} strokeWidth={2} />
+                    {psBusy
+                      ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+                      : psReason === 'lib_missing'
+                        ? <ArrowDownToLine size={8} strokeWidth={2} />
+                        : <Plug size={8} strokeWidth={2} />
+                    }
                   </div>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  Photoshop · pas de plugin à installer. Lance : pip install photoshop-python-api, puis ouvre un document (connexion COM vérifiée au publish).
+                  {psBusy ? '…' :
+                   psReason === 'ok' ? 'Photoshop connecté (COM)'
+                   : psReason === 'not_running' ? 'Lib OK · ouvre Photoshop pour connecter'
+                   : psReason === 'lib_missing' ? 'Clic : installer photoshop-python-api'
+                   : 'Vérifier Photoshop'}
                 </TooltipContent>
               </Tooltip>
               )}

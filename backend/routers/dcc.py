@@ -1367,6 +1367,22 @@ class PhotoshopPublishRequest(BaseModel):
     user:           str | None = None
 
 
+@router.get("/photoshop/status")
+async def photoshop_status() -> dict:
+    """Actionable Photoshop state: lib_missing / not_running / ok (+ version)."""
+    from dcc.photoshop.client import status as ps_status
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, ps_status)
+
+
+@router.post("/photoshop/install")
+async def photoshop_install() -> dict:
+    """Install photoshop-python-api into the backend env when missing (dev)."""
+    from dcc.photoshop.client import ensure_library
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, ensure_library)
+
+
 @router.post("/photoshop/publish")
 async def photoshop_publish(req: PhotoshopPublishRequest) -> dict:
     """Save the active Photoshop document into the FLUX layout (PSD, PNG, JPG, TIF...)."""

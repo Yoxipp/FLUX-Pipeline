@@ -1,24 +1,125 @@
-# client.py — connection check for Photoshop over COM (V6 B6).
+# client.py — connection check + library bootstrap for Photoshop over COM (V6 B6).
 #
 # Photoshop is driven from outside via COM, so there is no socket/plugin: "connected"
-# means Photoshop is running and COM answers. Lazy-imports the library so the backend
-# runs without it (returns not-connected).
+# means Photoshop is running and COM answers. The photoshop-python-api library is
+# lazy-imported so the backend runs without it (status = lib_missing). Because COM
+# can auto-launch Photoshop, the status check attaches to an already-running
+# instance (GetActiveObject) instead of Dispatch, so polling never starts Photoshop.
 
 from __future__ import annotations
+
+import subprocess
+import sys
 
 from core.logger import get_logger
 
 log = get_logger(__name__)
 
+# The pip requirement, kept in one place so the install path and the user hint match.
+_PIP_PACKAGE = "photoshop-python-api"
+
+
+def library_available() -> bool:
+    """True when photoshop-python-api can be imported in the backend env."""
+    try:
+        import photoshop.api  # noqa: F401 - import probe only
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def status() -> dict:
+    """Report Photoshop connectivity as an actionable state.
+
+    Returns a dict with:
+      reason: "ok" | "lib_missing" | "not_running"
+      lib_installed: bool
+      connected: bool
+      version: str | None
+      error: str | None
+    """
+    if not library_available():
+        return {
+            "reason": "lib_missing",
+            "lib_installed": False,
+            "connected": False,
+            "version": None,
+            "error": f"{_PIP_PACKAGE} indisponible dans l'env backend",
+        }
+    # Attach to a running Photoshop only (never launch it from a poll).
+    try:
+        import win32com.client  # bundled with pywin32, a dep of photoshop-python-api
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "reason": "lib_missing",
+            "lib_installed": True,
+            "connected": False,
+            "version": None,
+            "error": f"pywin32 indisponible: {exc}",
+        }
+    try:
+        app = win32com.client.GetActiveObject("Photoshop.Application")
+        return {
+            "reason": "ok",
+            "lib_installed": True,
+            "connected": True,
+            "version": str(getattr(app, "version", "")),
+            "error": None,
+        }
+    except Exception as exc:  # noqa: BLE001 - Photoshop not running / COM not answering
+        return {
+            "reason": "not_running",
+            "lib_installed": True,
+            "connected": False,
+            "version": None,
+            "error": "Photoshop n'est pas lancé (ou COM ne répond pas)",
+        }
+
 
 def ping() -> dict:
-    """Return {ok, version} when Photoshop is reachable over COM, else {ok: False}."""
+    """Return {ok, version} when Photoshop is reachable over COM, else {ok: False}.
+
+    Kept for the generic /{dcc}/ping route. Delegates to status()."""
+    st = status()
+    return {"ok": st["connected"], "version": st["version"], "error": st["error"]}
+
+
+def ensure_library() -> dict:
+    """Install photoshop-python-api into the backend env when missing.
+
+    the maintainer's choice: auto-install. In a frozen exe pip has no target, so fall back to
+    a clear hint instead of failing silently.
+    Returns {ok, already, installed, frozen, message}.
+    """
+    if library_available():
+        return {"ok": True, "already": True, "installed": False, "frozen": False,
+                "message": f"{_PIP_PACKAGE} déjà installé"}
+
+    # A PyInstaller-frozen backend has no pip to install into: guide instead.
+    if getattr(sys, "frozen", False):
+        return {
+            "ok": False, "already": False, "installed": False, "frozen": True,
+            "message": (f"Installe {_PIP_PACKAGE} dans l'env Python de FLUX : "
+                        f"pip install {_PIP_PACKAGE}"),
+        }
+
     try:
-        import photoshop.api as ps  # lazy: Windows + Photoshop only
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "install", _PIP_PACKAGE],
+            capture_output=True, text=True, timeout=300,
+        )
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"photoshop-python-api indisponible: {exc}"}
-    try:
-        app = ps.Application()
-        return {"ok": True, "version": str(getattr(app, "version", ""))}
-    except Exception as exc:  # noqa: BLE001 - Photoshop not running
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "already": False, "installed": False, "frozen": False,
+                "message": f"pip a échoué: {exc}"}
+
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+        log.warning("photoshop lib install failed: %s", " | ".join(tail))
+        return {"ok": False, "already": False, "installed": False, "frozen": False,
+                "message": f"pip install {_PIP_PACKAGE} a échoué (voir logs)"}
+
+    ok = library_available()
+    return {
+        "ok": ok, "already": False, "installed": ok, "frozen": False,
+        "message": f"{_PIP_PACKAGE} installé" if ok else "Installé mais import toujours KO",
+    }
