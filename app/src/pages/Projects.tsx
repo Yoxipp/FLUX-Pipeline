@@ -2057,6 +2057,34 @@ export function Projects() {
     }
   }, [nav])
 
+  // Nuke Read supports image/plate formats; Photoshop opens raster/PSD files.
+  const NUKE_IMPORT_EXTS = new Set(['.exr', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.dpx', '.mov', '.psd', '.hdr', '.tga'])
+  const PS_OPEN_EXTS     = new Set(['.psd', '.psb', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif'])
+
+  const handleOpenInNuke = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    try {
+      await api.nukeImportPath(nav.project, rel_path)
+      toast.success(`${item.name} → Nuke (Read)`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      toast.error(`Import Nuke échoué : ${msg}`)
+    }
+  }, [nav])
+
+  const handleOpenInPhotoshop = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    try {
+      await api.photoshopOpen(nav.project, rel_path)
+      toast.success(`${item.name} ouvert dans Photoshop`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      toast.error(`Ouverture Photoshop échouée : ${msg}`)
+    }
+  }, [nav])
+
   // "Open in" targets = every currently-CONNECTED DCC that can import this file.
   // Only Maya & Houdini have an import bridge today; add a branch here to onboard more.
   const buildOpenInTargets = useCallback((items: ExplorerItem[]): { dcc: string; onClick: () => void }[] => {
@@ -2071,8 +2099,15 @@ export function Projects() {
     if (dccStatus['Maya']?.connected && MAYA_IMPORT_EXTS.has(ext)) {
       targets.push({ dcc: 'Maya', onClick: () => void handleOpenInMaya(item) })
     }
+    if (dccStatus['Nuke']?.connected && NUKE_IMPORT_EXTS.has(ext)) {
+      targets.push({ dcc: 'Nuke', onClick: () => void handleOpenInNuke(item) })
+    }
+    // Photoshop is external COM (no scan entry); offer it for raster/PSD files.
+    if (PS_OPEN_EXTS.has(ext)) {
+      targets.push({ dcc: 'Photoshop', onClick: () => void handleOpenInPhotoshop(item) })
+    }
     return targets
-  }, [nav, dccStatus, handleOpenInHoudini, handleOpenInMaya, MAYA_IMPORT_EXTS])
+  }, [nav, dccStatus, handleOpenInHoudini, handleOpenInMaya, handleOpenInNuke, handleOpenInPhotoshop, MAYA_IMPORT_EXTS, NUKE_IMPORT_EXTS, PS_OPEN_EXTS])
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return

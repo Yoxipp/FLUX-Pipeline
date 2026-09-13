@@ -1318,6 +1318,32 @@ async def nuke_import_read(req: NukeImportRequest) -> dict:
     return result
 
 
+class NukeImportPathRequest(BaseModel):
+    project_name: str
+    rel_path:     str
+    first:        int | None = None
+    last:         int | None = None
+    colorspace:   str | None = None
+
+
+@router.post("/nuke/import_path")
+async def nuke_import_path(req: NukeImportPathRequest) -> dict:
+    """Create a Read node in Nuke from a project-relative file (Folder Manager)."""
+    from dcc.nuke.nuke_import import DEFAULT_READ_COLORSPACE, import_path_into_nuke
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: import_path_into_nuke(
+            req.project_name, req.rel_path, req.first, req.last,
+            req.colorspace or DEFAULT_READ_COLORSPACE,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Nuke import failed"))
+    return result
+
+
 class NukePublishRequest(BaseModel):
     project_name:  str
     filename:      str
@@ -1365,6 +1391,25 @@ class PhotoshopPublishRequest(BaseModel):
     export_options: dict = {}
     description:    str | None = None
     user:           str | None = None
+
+
+class PhotoshopOpenRequest(BaseModel):
+    project_name: str
+    rel_path:     str
+
+
+@router.post("/photoshop/open")
+async def photoshop_open(req: PhotoshopOpenRequest) -> dict:
+    """Open a project-relative file in Photoshop over COM (Folder Manager)."""
+    from core.paths import get_project_path
+    from dcc.photoshop.client import open_document
+
+    file_path = get_project_path(req.project_name) / req.rel_path.replace("/", "\\")
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: open_document(str(file_path)))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Photoshop open failed"))
+    return result
 
 
 @router.get("/photoshop/status")

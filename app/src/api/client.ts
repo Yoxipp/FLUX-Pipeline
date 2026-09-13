@@ -161,6 +161,13 @@ export const api = {
     apiCall<{ ok: boolean; already: boolean; installed: boolean; frozen: boolean; message: string }>(
       'POST', '/dcc/photoshop/install'),
 
+  photoshopOpen: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; error: string | null }>('POST', '/dcc/photoshop/open', { project_name, rel_path }),
+
+  // Create a Read node in Nuke from a project-relative file (Folder Manager).
+  nukeImportPath: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; node: string; path: string }>('POST', '/dcc/nuke/import_path', { project_name, rel_path }),
+
   // Detect a stuck ("zombie") Maya still holding the commandPort (port 7001).
   getMayaPortStatus: () =>
     apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),

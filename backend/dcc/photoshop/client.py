@@ -84,6 +84,27 @@ def ping() -> dict:
     return {"ok": st["connected"], "version": st["version"], "error": st["error"]}
 
 
+def open_document(abs_path: str) -> dict:
+    """Open a file in Photoshop over COM (launches Photoshop if needed).
+
+    Unlike status(), this uses Dispatch so it starts Photoshop when closed, which
+    is what the artist wants from a "Ouvrir dans Photoshop" action.
+    Returns {ok, error}.
+    """
+    if not library_available():
+        return {"ok": False, "error": f"{_PIP_PACKAGE} indisponible dans l'env backend"}
+    try:
+        import photoshop.api as ps
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+    try:
+        app = ps.Application()
+        app.open(abs_path)
+        return {"ok": True, "error": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
 def ensure_library() -> dict:
     """Install photoshop-python-api into the backend env when missing.
 

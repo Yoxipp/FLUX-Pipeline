@@ -49,6 +49,32 @@ def build_read_node_code(
     return "\n".join(lines)
 
 
+def import_path_into_nuke(
+    project: str,
+    rel_path: str,
+    first: int | None = None,
+    last: int | None = None,
+    colorspace: str = DEFAULT_READ_COLORSPACE,
+) -> dict:
+    """Create a Read node in Nuke for a project-relative file path.
+
+    Used by the Folder Manager right-click ("Envoyer vers Nuke"), which has a
+    concrete file rather than tokens. Returns {ok, node, path} or {ok: False, error}.
+    """
+    from core.paths import get_project_path
+
+    project_path = get_project_path(project)
+    file_path = project_path / rel_path.replace("/", "\\")
+    if not file_path.exists():
+        return {"ok": False, "error": f"fichier introuvable: {rel_path}"}
+
+    code = build_read_node_code(str(file_path), first, last, colorspace)
+    res = nuke_client.run(code)
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error", "Nuke run failed")}
+    return {"ok": True, "node": res.get("result"), "path": str(file_path)}
+
+
 def import_into_nuke(
     project: str,
     class_tok: str,
