@@ -108,5 +108,7 @@ def start() -> None:
         print(f"[FLUX] Mari bridge bind failed: {exc}")
 
 
-if __name__ == "__main__":
+# Mari imports every script of its Scripts folders at startup: start the server on
+# import inside Mari, not only when run as __main__ (it never is there).
+if __name__ == "__main__" or _MARI_AVAILABLE:
     start()

@@ -74,18 +74,22 @@ def _save_active_document(dest_path: str, extension: str, options: dict | None) 
         import photoshop.api as ps  # lazy: Windows + Photoshop only
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"photoshop-python-api indisponible: {exc}"}
+    from dcc.photoshop.client import com_apartment
     try:
-        app = ps.Application()
-        doc = app.activeDocument
-        opts_cls = getattr(ps, cls_name)
-        opts = opts_cls()
-        for key, value in kwargs.items():
-            try:
-                setattr(opts, key, value)
-            except Exception:  # noqa: BLE001 - unknown field never aborts the save
-                pass
-        doc.saveAs(str(dest_path), opts, asCopy=True)
-        return {"ok": True, "version": str(getattr(app, "version", ""))}
+        with com_apartment():   # executor thread: COM must be initialised here
+            app = ps.Application()
+            doc = app.activeDocument
+            opts_cls = getattr(ps, cls_name)
+            opts = opts_cls()
+            for key, value in kwargs.items():
+                try:
+                    setattr(opts, key, value)
+                except Exception:  # noqa: BLE001 - unknown field never aborts the save
+                    pass
+            doc.saveAs(str(dest_path), opts, asCopy=True)
+            version = str(getattr(app, "version", ""))
+            del doc, opts, app
+        return {"ok": True, "version": version}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Photoshop save failed: {exc}"}
 

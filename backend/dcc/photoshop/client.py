@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from contextlib import contextmanager
 
 from core.logger import get_logger
 
@@ -26,6 +27,38 @@ def library_available() -> bool:
         return True
     except Exception:  # noqa: BLE001
         return False
+
+
+@contextmanager
+def com_apartment():
+    """Initialise COM for the current thread.
+
+    FastAPI runs these calls in executor threads, where COM is not initialised:
+    every COM call then fails and Photoshop reads as "not running".
+    """
+    try:
+        import comtypes
+    except Exception:  # noqa: BLE001 - no comtypes: nothing to initialise
+        yield
+        return
+    comtypes.CoInitialize()
+    try:
+        yield
+    finally:
+        comtypes.CoUninitialize()
+
+
+def _active_photoshop():
+    """Attach to a running Photoshop (never launches it). Raises when not running.
+
+    photoshop-python-api is built on comtypes; pywin32 is only a fallback.
+    """
+    try:
+        import comtypes.client
+    except Exception:  # noqa: BLE001
+        import win32com.client
+        return win32com.client.GetActiveObject("Photoshop.Application")
+    return comtypes.client.GetActiveObject("Photoshop.Application", dynamic=True)
 
 
 def status() -> dict:
@@ -48,25 +81,27 @@ def status() -> dict:
         }
     # Attach to a running Photoshop only (never launch it from a poll).
     try:
-        import win32com.client  # bundled with pywin32, a dep of photoshop-python-api
-    except Exception as exc:  # noqa: BLE001
+        with com_apartment():
+            app = _active_photoshop()
+            version = str(getattr(app, "version", ""))
+            del app
+        return {
+            "reason": "ok",
+            "lib_installed": True,
+            "connected": True,
+            "version": version,
+            "error": None,
+        }
+    except ImportError as exc:
         return {
             "reason": "lib_missing",
             "lib_installed": True,
             "connected": False,
             "version": None,
-            "error": f"pywin32 indisponible: {exc}",
-        }
-    try:
-        app = win32com.client.GetActiveObject("Photoshop.Application")
-        return {
-            "reason": "ok",
-            "lib_installed": True,
-            "connected": True,
-            "version": str(getattr(app, "version", "")),
-            "error": None,
+            "error": f"comtypes indisponible: {exc}",
         }
     except Exception as exc:  # noqa: BLE001 - Photoshop not running / COM not answering
+        log.debug("Photoshop COM attach failed: %s", exc)
         return {
             "reason": "not_running",
             "lib_installed": True,
@@ -98,8 +133,10 @@ def open_document(abs_path: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
     try:
-        app = ps.Application()
-        app.open(abs_path)
+        with com_apartment():
+            app = ps.Application()
+            app.open(abs_path)
+            del app
         return {"ok": True, "error": None}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
