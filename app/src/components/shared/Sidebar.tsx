@@ -11,6 +11,8 @@ import {
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
 import { useActiveInstances } from '../../hooks/useActiveInstances'
+import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { DCC_STATUS_KEYS, SOFTWARE } from '../../lib/dccs'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -21,30 +23,6 @@ interface Props {
   unreadCount: number
 }
 
-// Mapping frontend key → backend DCC_PORTS key (backend uses capitalized/abbreviated names)
-const DCC_STATUS_KEYS: Record<string, string> = {
-  maya:               'Maya',
-  houdini:            'Houdini',
-  nuke:               'Nuke',
-  substance_painter:  'SubstanceP',
-  substance_designer: 'SubstanceD',
-  zbrush:             'ZBrush',
-  marvelous:          'Marvelous',
-  photoshop:          'Photoshop',
-  mari:               'Mari',
-}
-
-const SOFTWARE = [
-  { name: 'Maya',      key: 'maya' },
-  { name: 'Houdini',   key: 'houdini' },
-  { name: 'Nuke',      key: 'nuke' },
-  { name: 'Marvelous', key: 'marvelous' },
-  { name: 'Painter',   key: 'substance_painter' },
-  { name: 'Designer',  key: 'substance_designer' },
-  { name: 'Mari',      key: 'mari' },
-  { name: 'ZBrush',    key: 'zbrush' },
-  { name: 'Photoshop', key: 'photoshop' },
-]
 
 function dccDot(status: DccStatusMap, key: string): string {
   const entry = status[DCC_STATUS_KEYS[key] ?? key]
@@ -124,6 +102,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const { pathname } = useLocation()
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
   const [findingAll, setFindingAll]           = useState(false)
@@ -542,7 +521,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
-        {SOFTWARE.map(s => {
+        {SOFTWARE.filter(s => isDccEnabled(s.key)).map(s => {
           const dot       = dccDot(dccStatus, s.key)
           const connected = dot === 'ok'
           const isLoading = launching.has(s.key)

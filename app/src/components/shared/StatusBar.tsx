@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DccStatusMap } from '../../types'
+import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { DCC_FRONTEND_KEYS } from '../../lib/dccs'
 
 interface Props {
   dccStatus: DccStatusMap
@@ -7,12 +9,13 @@ interface Props {
 
 export function StatusBar({ dccStatus }: Props) {
   const [version, setVersion] = useState('')
+  const { isEnabled } = useEnabledDccs()
   useEffect(() => {
     window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
   }, [])
 
   const items = Object.entries(dccStatus)
-    .filter(([, entry]) => entry?.connected)
+    .filter(([key, entry]) => entry?.connected && isEnabled(DCC_FRONTEND_KEYS[key] ?? key))
     .map(([key]) => ({ key, label: key }))
 
   return (

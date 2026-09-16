@@ -59,6 +59,9 @@ _FRONTEND_KEY_MAP: dict[str, str] = {
     "mari":               "Mari",
 }
 
+# Public list of launcher keys (per-user enabled_dccs validation, V8 U10).
+DCC_FRONTEND_KEYS: frozenset[str] = frozenset(_FRONTEND_KEY_MAP)
+
 
 # ── public API ────────────────────────────────────────────────────────────────
 

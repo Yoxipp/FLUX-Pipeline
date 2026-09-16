@@ -203,3 +203,43 @@ async def put_user_data(patch: dict) -> dict:
 
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _merge)
+
+
+# ── Enabled DCCs per user (V8 U10) ────────────────────────────────────────────
+
+class EnabledDccsUpdate(BaseModel):
+    enabled: list[str] | None = None   # None = reset (all DCCs enabled)
+
+
+def _known_dcc_keys() -> set[str]:
+    from features.launcher.launcher_core import DCC_FRONTEND_KEYS
+    return set(DCC_FRONTEND_KEYS)
+
+
+@router.get("/enabled-dccs")
+async def get_enabled_dccs() -> dict:
+    """Return {known, enabled}; enabled is None when the user never chose (= all)."""
+    user = config.get_current_user()
+    known = sorted(_known_dcc_keys())
+    if not user:
+        return {"known": known, "enabled": None}
+    loop = asyncio.get_running_loop()
+    enabled = await loop.run_in_executor(None, lambda: user_utils.get_enabled_dccs(user))
+    return {"known": known, "enabled": enabled}
+
+
+@router.put("/enabled-dccs")
+async def put_enabled_dccs(req: EnabledDccsUpdate) -> dict:
+    """Persist the active user's enabled DCC keys in USER/<user>/ (User.json)."""
+    user = config.get_current_user()
+    if not user:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
+    known = _known_dcc_keys()
+    loop = asyncio.get_running_loop()
+    try:
+        enabled = await loop.run_in_executor(
+            None, lambda: user_utils.set_enabled_dccs(user, req.enabled, known)
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"known": sorted(known), "enabled": enabled}

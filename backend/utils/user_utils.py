@@ -127,3 +127,35 @@ def write_user_data(name: str, data: dict) -> bool:
     except (RuntimeError, OSError):
         return False
 
+
+# ── Enabled DCCs (V8 U10) ─────────────────────────────────────────────────────
+# Per-user list of launcher keys ("maya", "houdini", ...) stored in User.json under
+# "enabled_dccs". Absent key = every DCC enabled (compat with existing users).
+_ENABLED_DCCS_KEY = "enabled_dccs"
+
+
+def get_enabled_dccs(name: str) -> list[str] | None:
+    """Return the user's enabled DCC keys, or None when not set (= all enabled)."""
+    value = read_user_data(name).get(_ENABLED_DCCS_KEY)
+    if not isinstance(value, list):
+        return None
+    return [k for k in value if isinstance(k, str)]
+
+
+def set_enabled_dccs(name: str, keys: list[str] | None, known: set[str]) -> list[str] | None:
+    """Persist the enabled DCC keys (unknown keys dropped, sorted, deduplicated).
+
+    None removes the preference (back to all enabled). Returns the stored value.
+    """
+    data = read_user_data(name)
+    if keys is None:
+        data.pop(_ENABLED_DCCS_KEY, None)
+        stored = None
+    else:
+        wanted = {k for k in keys if isinstance(k, str)}
+        stored = [k for k in sorted(known) if k in wanted]
+        data[_ENABLED_DCCS_KEY] = stored
+    if not write_user_data(name, data):
+        raise OSError(f"cannot write user settings for '{name}'")
+    return stored
+

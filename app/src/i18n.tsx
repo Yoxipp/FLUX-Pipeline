@@ -46,6 +46,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'settings.changeDir':      { fr: 'Changer de répertoire…',   en: 'Change directory…' },
   'settings.changing':       { fr: 'Changement…',              en: 'Changing…' },
   'settings.accent':         { fr: "COULEUR D'ACCENT",         en: 'ACCENT COLOR' },
+  'settings.dccs':           { fr: 'LOGICIELS',                en: 'SOFTWARE' },
   'settings.interface':      { fr: 'INTERFACE',                en: 'INTERFACE' },
   'settings.resetUi':        { fr: "Réinitialiser l'interface", en: 'Reset the interface' },
   'settings.language':       { fr: 'LANGUE',                   en: 'LANGUAGE' },

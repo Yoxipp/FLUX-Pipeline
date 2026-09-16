@@ -8,6 +8,8 @@ import { Console } from './Console'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
+import { SOFTWARE } from '../../lib/dccs'
+import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 
 interface Props {
   username: string | null
@@ -56,6 +58,14 @@ function SettingsPopover({ username }: { username: string }) {
   const [changing, setChanging]     = useState(false)
   const [accentKey, setAccentKey]   = useState('orange')
   const [logColors, setLogColors]   = useState<Record<string, string>>({})
+  const { isEnabled: isDccEnabled, setEnabled: setEnabledDccs } = useEnabledDccs()
+
+  // Every DCC stays listed here; unchecked ones are hidden from Launcher + StatusBar.
+  const toggleDcc = (key: string) => {
+    const current = SOFTWARE.map(s => s.key).filter(isDccEnabled)
+    const next = current.includes(key) ? current.filter(k => k !== key) : [...current, key]
+    void setEnabledDccs(next).catch(() => {})
+  }
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -215,6 +225,24 @@ function SettingsPopover({ username }: { username: string }) {
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>{logColors[l.key]}</span>
               )}
             </div>
+          ))}
+        </div>
+      </div>
+
+      {/* logiciels (per-user enabled DCCs) */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.dccs')}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 8px' }}>
+          {SOFTWARE.map(s => (
+            <label key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={isDccEnabled(s.key)}
+                onChange={() => toggleDcc(s.key)}
+                style={{ accentColor: 'var(--accent)', cursor: 'pointer', margin: 0 }}
+              />
+              {s.name}
+            </label>
           ))}
         </div>
       </div>

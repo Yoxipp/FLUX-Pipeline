@@ -142,6 +142,13 @@ export const api = {
   setUserData: (patch: Record<string, unknown>) =>
     apiCall<Record<string, unknown>>('PUT', '/settings/user-data', patch),
 
+  // Per-user enabled DCCs (null = all enabled)
+  getEnabledDccs: () =>
+    apiCall<{ known: string[]; enabled: string[] | null }>('GET', '/settings/enabled-dccs'),
+
+  setEnabledDccs: (enabled: string[] | null) =>
+    apiCall<{ known: string[]; enabled: string[] | null }>('PUT', '/settings/enabled-dccs', { enabled }),
+
   // DCC
   findDccExe: (dcc: string) =>
     apiCall<{ dcc: string; path: string | null; found: boolean }>('GET', `/dcc/find/${dcc}`),
