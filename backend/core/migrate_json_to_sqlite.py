@@ -38,6 +38,7 @@ from core.constants import (
 )
 from core.json_repository import JsonFileRepository
 from core.logger import get_logger
+from core.doc_keys import to_logical
 from core.sqlite_repository import SqliteRepository
 
 log = get_logger(__name__)
@@ -197,11 +198,15 @@ def migrate_to_sqlite(
         projects_dir, users_dir, config_dir, prefs_path, include_modif_log
     )
 
+    # The base stores logical keys (ADR 0004, V8 U2), like the runtime wrapper does.
+    def key(collection: str, doc_id: str) -> str:
+        return to_logical(collection, doc_id, flux_root=config_dir.parent, projects_dir=projects_dir)
+
     for collection, doc_id in doc_items:
         data = src.get(collection, doc_id)
         if data is None:
             continue  # unreadable / vanished between scan and read: skip, never crash
-        if dst.set(collection, doc_id, data):  # INSERT OR REPLACE -> idempotent
+        if dst.set(collection, key(collection, doc_id), data):  # INSERT OR REPLACE -> idempotent
             report._bump(report.documents, collection)
         else:
             log.error("Failed to migrate document %s/%s", collection, doc_id)
@@ -209,7 +214,7 @@ def migrate_to_sqlite(
     for collection, doc_id in log_items:
         entries = src.read_log(collection, doc_id)
         # REPLACE, not append: a second run mirrors the source with no duplicates.
-        if dst.replace_log(collection, doc_id, entries):
+        if dst.replace_log(collection, key(collection, doc_id), entries):
             report._bump(report.logs, collection)
         else:
             log.error("Failed to migrate log %s/%s", collection, doc_id)

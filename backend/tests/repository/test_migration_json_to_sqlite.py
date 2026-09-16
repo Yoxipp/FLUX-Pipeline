@@ -24,6 +24,7 @@ from core.constants import (
     JSON_USER_SETTINGS,
 )
 from core.migrate_json_to_sqlite import migrate_to_sqlite
+from core.doc_keys import LogicalKeyRepository, to_logical
 from core.sqlite_repository import SqliteRepository
 
 
@@ -77,6 +78,14 @@ class MigrationTests(unittest.TestCase):
         self.archive = self.config / ARCHIVE_DIRNAME / "activite_202608.json"
         jm.write_json(self.archive, [{"id": "old1"}, {"id": "old2"}])
 
+    def _db(self):
+        # Read like the runtime does (V8 U2): store keys translated to logical keys.
+        root = Path(self._tmp.name)
+        return LogicalKeyRepository(
+            SqliteRepository(self.db),
+            key_fn=lambda c, d: to_logical(c, d, flux_root=root, projects_dir=self.projects),
+        )
+
     def _migrate(self):
         return migrate_to_sqlite(
             self.db,
@@ -90,7 +99,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_documents_migrate_identically(self):
         self._migrate()
-        db = SqliteRepository(self.db)
+        db = self._db()
         # tokens/locks keyed by project PATH
         self.assertEqual(db.get("tokens", str(self.proj_a)),
                          {"CLASS": {"CH": "chara"}, "NAME": {"HERO": "assets/HERO"}})
@@ -108,7 +117,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_logs_migrate_identically(self):
         self._migrate()
-        db = SqliteRepository(self.db)
+        db = self._db()
         self.assertEqual([e["id"] for e in db.read_log("activity_log", str(self.act))], ["a1", "a2"])
         self.assertEqual([e["id"] for e in db.read_log("chat_log", str(self.chat))], ["c1"])
         self.assertEqual([e["id"] for e in db.read_log("mentions_log", str(self.men))], ["m1"])
@@ -132,7 +141,7 @@ class MigrationTests(unittest.TestCase):
     def test_re_migration_is_idempotent(self):
         self._migrate()
         self._migrate()  # second run must not duplicate anything
-        db = SqliteRepository(self.db)
+        db = self._db()
         # documents unchanged
         self.assertEqual(db.get("tokens", str(self.proj_a)),
                          {"CLASS": {"CH": "chara"}, "NAME": {"HERO": "assets/HERO"}})

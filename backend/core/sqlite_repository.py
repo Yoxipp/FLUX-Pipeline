@@ -299,6 +299,55 @@ class SqliteRepository:
             return "0"
         return f"l{count:x}-{(int(max_seq) + 1):x}"
 
+    # ── key migration (ADR 0004, V8 U2) ─────────────────────────────────────────
+
+    def rekey(self, key_fn) -> dict[str, list]:
+        """Rename every (collection, doc_id) to key_fn(collection, doc_id), in place.
+
+        One transaction. Idempotent: a key already logical maps to itself. Never
+        overwrites: when the target key already holds data, the old row is left
+        as is and reported in "conflicts". Returns {"moved": [...], "conflicts": [...]}.
+        """
+        moved: list[tuple[str, str, str]] = []
+        conflicts: list[tuple[str, str, str]] = []
+        with self.log_transaction("*", "*"):
+            with self._write() as conn:
+                doc_rows = conn.execute("SELECT collection, doc_id FROM documents").fetchall()
+                for collection, old in doc_rows:
+                    new = key_fn(collection, old)
+                    if new == old:
+                        continue
+                    exists = conn.execute(
+                        "SELECT 1 FROM documents WHERE collection=? AND doc_id=?",
+                        (collection, new),
+                    ).fetchone()
+                    if exists:
+                        conflicts.append((collection, old, new))
+                        continue
+                    conn.execute(
+                        "UPDATE documents SET doc_id=? WHERE collection=? AND doc_id=?",
+                        (new, collection, old),
+                    )
+                    moved.append((collection, old, new))
+                log_rows = conn.execute("SELECT DISTINCT collection, doc_id FROM logs").fetchall()
+                for collection, old in log_rows:
+                    new = key_fn(collection, old)
+                    if new == old:
+                        continue
+                    exists = conn.execute(
+                        "SELECT 1 FROM logs WHERE collection=? AND doc_id=? LIMIT 1",
+                        (collection, new),
+                    ).fetchone()
+                    if exists:
+                        conflicts.append((collection, old, new))
+                        continue
+                    conn.execute(
+                        "UPDATE logs SET doc_id=? WHERE collection=? AND doc_id=?",
+                        (new, collection, old),
+                    )
+                    moved.append((collection, old, new))
+        return {"moved": moved, "conflicts": conflicts}
+
     # ── internals ──────────────────────────────────────────────────────────────
 
     @staticmethod

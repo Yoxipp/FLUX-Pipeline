@@ -144,8 +144,11 @@ def _build_repository() -> MetadataRepository:
     if backend == "sqlite":
         reason = sqlite_refusal_reason()
         if reason is None:
+            from core.doc_keys import LogicalKeyRepository
             from core.sqlite_repository import SqliteRepository
-            return SqliteRepository(_sqlite_db_path())
+            base = SqliteRepository(_sqlite_db_path())
+            rekey_logical(base)
+            return LogicalKeyRepository(base)
         # Never crash the startup: fall back to the file backend and say why.
         # Export the base first (core.export_sqlite_to_json) or its writes stay hidden.
         from core.logger import get_logger
@@ -155,12 +158,45 @@ def _build_repository() -> MetadataRepository:
         )
 
     if backend == "remote":
+        from core.doc_keys import LogicalKeyRepository
         from core.remote_repository import RemoteRepository
         base_url = paths._read_config_json().get("remote_url", "")
-        return RemoteRepository(base_url)
+        return LogicalKeyRepository(RemoteRepository(base_url))
 
     # Default and explicit "json": the file backend with the registered resolvers.
     return JsonFileRepository(_locate)
+
+
+def rekey_logical(base) -> dict | None:
+    """Automatic, idempotent key migration of a SQLite base: store keys -> logical
+    keys (ADR 0004, V8 U2). Non destructive (JSON files untouched, conflicts kept and
+    logged). Never raises: a failure only logs, the stores keep working.
+    """
+    from core.logger import get_logger
+
+    log = get_logger(__name__)
+    rekey = getattr(base, "rekey", None)
+    if rekey is None:
+        return None
+    try:
+        from core.doc_keys import to_logical
+        report = rekey(to_logical)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Logical key migration skipped: %s", exc)
+        return None
+    if report["moved"]:
+        log.info("Logical key migration: %d key(s) moved", len(report["moved"]))
+    for collection, old, new in report["conflicts"]:
+        log.warning("Logical key conflict kept as is: %s %s (target %s exists)", collection, old, new)
+    return report
+
+
+def on_project_identity_created() -> None:
+    """A project.json was just created: move that project's keys (U1 -> U2)."""
+    repo = _repository
+    inner = getattr(repo, "inner", None)
+    if inner is not None:
+        rekey_logical(inner)
 
 
 def get_repository() -> MetadataRepository:

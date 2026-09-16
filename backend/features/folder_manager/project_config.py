@@ -113,8 +113,9 @@ def ensure_project_config(project_path: Path) -> tuple[dict, list[str]]:
     path = project_config_path(project_path)
     warnings: list[str] = []
 
+    created = False
     if not path.is_file():
-        _create_exclusive(path, default_project_config())
+        created = _create_exclusive(path, default_project_config())
 
     data = read_project_config(project_path)
     if data is None:
@@ -126,7 +127,7 @@ def ensure_project_config(project_path: Path) -> tuple[dict, list[str]]:
         except OSError as exc:
             warnings.append(f"project.json illisible et non deplacable : {exc}")
             return default_project_config(), warnings
-        _create_exclusive(path, default_project_config())
+        created = _create_exclusive(path, default_project_config()) or created
         data = read_project_config(project_path) or default_project_config()
 
     healed = _heal(data)
@@ -141,10 +142,21 @@ def ensure_project_config(project_path: Path) -> tuple[dict, list[str]]:
     warnings.extend(f"project.json invalide : {e}" for e in errors)
     for w in warnings:
         log.warning("%s (%s)", w, project_path.name)
+    if created or adopted:
+        _notify_identity_created()
     return healed, warnings
 
 
 # ── internals ─────────────────────────────────────────────────────────────────
+
+def _notify_identity_created() -> None:
+    """New project identity: let a logical-key backend move this project's keys (U2)."""
+    try:
+        from core.repository_factory import on_project_identity_created
+        on_project_identity_created()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Logical key migration after project.json creation skipped: %s", exc)
+
 
 def _stamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")

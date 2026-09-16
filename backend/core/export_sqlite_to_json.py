@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from core.doc_keys import to_store
 from core.json_manager import invalidate_cache, read_jsonl, write_json, write_jsonl
 from core.logger import get_logger
 from core.migrate_json_to_sqlite import _json_locate_factory
@@ -120,7 +121,13 @@ def export_to_json(
 ) -> ExportReport:
     """Export every document/log of the base at *db_path* back to JSON files.
     With *workspace_root*, targets outside it (another workspace) are skipped."""
-    locate = _json_locate_factory(Path(projects_dir), Path(users_dir), Path(prefs_path))
+    json_locate = _json_locate_factory(Path(projects_dir), Path(users_dir), Path(prefs_path))
+
+    # Logical keys (V8 U2) back to this machine's store keys; legacy path keys pass through.
+    def locate(coll: str, doc_id: str) -> Path:
+        store_key = to_store(coll, doc_id, flux_root=Path(projects_dir).parent, projects_dir=Path(projects_dir))
+        return json_locate(coll, store_key)
+
     report = ExportReport()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 

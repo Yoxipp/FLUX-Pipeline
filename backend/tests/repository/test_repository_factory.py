@@ -38,7 +38,7 @@ class FactorySelectionTests(unittest.TestCase):
                  mock.patch("core.paths.get_sqlite_path", return_value=db), \
                  mock.patch("core.paths.get_flux_root", return_value=None):
                 rf.reset_repository()
-                self.assertIsInstance(rf.get_repository(), SqliteRepository)
+                self.assertIsInstance(rf.get_repository().inner, SqliteRepository)
 
     def test_repository_is_cached(self):
         with mock.patch("core.paths.get_metadata_backend", return_value="json"):
@@ -57,7 +57,7 @@ class FactorySelectionTests(unittest.TestCase):
                 rf.reset_repository()
                 second = rf.get_repository()
         self.assertIsInstance(first, JsonFileRepository)
-        self.assertIsInstance(second, SqliteRepository)
+        self.assertIsInstance(second.inner, SqliteRepository)
 
 
 class TokensStoreOnBothBackendsTests(unittest.TestCase):

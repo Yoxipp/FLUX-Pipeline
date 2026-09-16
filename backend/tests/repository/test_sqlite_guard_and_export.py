@@ -71,7 +71,7 @@ class FactoryGuardTests(unittest.TestCase):
                  mock.patch("core.paths.get_sqlite_path", return_value=Path(d) / "m.db"), \
                  mock.patch("core.paths.get_flux_root", return_value=Path(d)):
                 rf.reset_repository()
-                self.assertIsInstance(rf.get_repository(), SqliteRepository)
+                self.assertIsInstance(rf.get_repository().inner, SqliteRepository)
                 rf.reset_repository()
 
 
