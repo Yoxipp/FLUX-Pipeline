@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import copy
 from pathlib import Path
 
 from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS
@@ -86,11 +85,6 @@ def resolve_path(project_path: Path, tokens: dict, token_type: str, token_value:
     if rel is None:
         return None
     return project_path / rel
-
-
-def get_all_tokens(project_path: Path) -> dict:
-    """Return a deep copy of the full tokens dict (safe for mutation by callers)."""
-    return copy.deepcopy(load_tokens(project_path))
 
 
 # ── mutate ────────────────────────────────────────────────────────────────────

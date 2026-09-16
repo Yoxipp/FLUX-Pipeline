@@ -122,11 +122,6 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
         return False
 
 
-def get_custom_exe_path(dcc_name: str) -> str | None:
-    """Return user-configured exe path for *dcc_name*, or None."""
-    return config.get_dcc_exe(dcc_name)
-
-
 def set_custom_exe_path(dcc_name: str, path: str) -> None:
     """Persist a custom exe path for *dcc_name* in user settings."""
     config.set_dcc_exe(dcc_name, path)

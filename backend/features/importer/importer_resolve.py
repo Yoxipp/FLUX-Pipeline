@@ -482,28 +482,3 @@ def _extract_type_instance(segs: list[str], type_by_subpath: dict[str, str]) -> 
 
 # ── file listing ──────────────────────────────────────────────────────────────
 
-def list_import_files(
-    project_path: Path,
-    class_filter: str | None = None,
-    name_filter: str | None = None,
-    last_only: bool = True,
-) -> list[dict]:
-    """List pipeline files with basic metadata for the HDA file browser."""
-    from features.importer.file_browser import list_files
-
-    paths = list_files(
-        project_path,
-        class_filter=class_filter,
-        name_filter=name_filter,
-        last_only=last_only,
-    )
-    result = []
-    for p in paths:
-        ext = _extract_ext(p)
-        result.append({
-            "name":    p.name,
-            "path":    str(p),
-            "ext":     ext,
-            "version": ACTIVE_VERSION_LABEL if f"_{ACTIVE_VERSION_LABEL}." in p.name else "",
-        })
-    return result

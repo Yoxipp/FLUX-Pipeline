@@ -190,37 +190,6 @@ def _resolve_shot_task_dir(
     return project_path / "shot" / seq_label / shot_label / task_token.lower()
 
 
-def update_shot(
-    project_path: Path,
-    seq_number: int,
-    shot_number: int,
-    padding: int = DEFAULT_PADDING,
-) -> Path:
-    """Idempotent version of :func:`create_shot` — never errors if it exists."""
-    seq_label  = format_seq(seq_number, padding)
-    shot_label = format_shot(shot_number, padding)
-    shot_path  = project_path / "shot" / seq_label / shot_label
-    if shot_path.exists():
-        return shot_path
-    return create_shot(project_path, seq_number, shot_number, padding=padding)
-
-
-def sequence_exists(project_path: Path, seq_number: int, padding: int = DEFAULT_PADDING) -> bool:
-    seq_label = format_seq(seq_number, padding)
-    return (project_path / "shot" / seq_label).exists()
-
-
-def shot_exists(
-    project_path: Path,
-    seq_number: int,
-    shot_number: int,
-    padding: int = DEFAULT_PADDING,
-) -> bool:
-    seq_label  = format_seq(seq_number, padding)
-    shot_label = format_shot(shot_number, padding)
-    return (project_path / "shot" / seq_label / shot_label).exists()
-
-
 def list_sequences(project_path: Path) -> list[str]:
     """Return sorted SEQ token keys found in tokens.json."""
     tokens = load_tokens(project_path)

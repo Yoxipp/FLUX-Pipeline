@@ -222,11 +222,6 @@ def set_shelf_tool_selection(ids: list[str]) -> None:
     config.set(_SHELF_TOOLS_KEY, [i for i in ids if _tool(i)])
 
 
-def is_shelf_tool_active(tool_id: str, version: str) -> bool:
-    """A tool is 'active' when it's selected AND the Flux shelf is installed."""
-    return tool_id in get_shelf_tool_selection() and is_shelf_installed("Maya", version)
-
-
 def _extract_shelf_body(mel_text: str) -> str:
     """Return the shelfButton block between the proc's first '{' and last '}'."""
     start = mel_text.find("{")
@@ -353,15 +348,6 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     return True, f"Removed: {target}"
 
 
-def update_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
-    """Remove then reinstall the shelf. Returns (success, message)."""
-    if is_shelf_installed(dcc_name, version):
-        ok, msg = remove_shelf(dcc_name, version)
-        if not ok:
-            return False, f"Update aborted, remove failed: {msg}"
-    return install_shelf(dcc_name, version)
-
-
 # ── Houdini HDA management ────────────────────────────────────────────────────
 
 def get_dcc_otls_dirs(version: str) -> list[Path]:
@@ -389,16 +375,6 @@ def get_dcc_otls_dirs(version: str) -> list[Path]:
         if prefs.is_dir() and otls not in dirs:
             dirs.append(otls)
     return dirs
-
-
-def get_dcc_otls_dir(version: str) -> Path | None:
-    """Primary otls dir for *version* (first candidate), or None if no prefs dir exists.
-
-    Kept for callers that need a single path; install/remove operate on all roots
-    via get_dcc_otls_dirs().
-    """
-    dirs = get_dcc_otls_dirs(version)
-    return dirs[0] if dirs else None
 
 
 def is_hda_installed(version: str) -> bool:

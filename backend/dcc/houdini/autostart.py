@@ -26,18 +26,8 @@ _BLOCK_END   = "# <<< FLUX autostart"
 # ASCII-only on purpose: houdini.env is parsed by Houdini (not Python), avoid cp1252 risk.
 _ENV_BEGIN = "# >>> FLUX env - do not edit manually"
 _ENV_END   = "# <<< FLUX env"
-
-# houdini.env block. PYTHONNOUSERSITE=1 stops Houdini's embedded Python from adding
-# the per-user site-packages to sys.path. Without it, a pip-installed usd-core in the
-# user site (the FLUX backend runs on the same Python minor as Houdini) gets loaded on
-# top of Houdini's bundled USD → two USD builds → fatal Tf class-wrapper clash that
-# breaks every LOP/USD viewer state. houdini.env is read before Python starts, so the
-# user site is never added. This is the reliable, launch-path-independent fix.
-_ENV_BLOCK = (
-    f"{_ENV_BEGIN}\n"
-    f"PYTHONNOUSERSITE = 1\n"
-    f"{_ENV_END}"
-)
+# FLUX no longer writes a houdini.env block (it used to set PYTHONNOUSERSITE=1);
+# the markers stay so _remove_env_block can clean up blocks left by older versions.
 
 # Houdini package file that injects $FLUX (priority n3, F1).
 # A Houdini package (JSON under <prefs>/packages/) is the SideFX-native way to set
@@ -209,41 +199,6 @@ def _deploy_server(scripts_dir: Path) -> None:
     src = Path(__file__).parent / "flux_houdini_server.py"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, scripts_dir / "flux_houdini_server.py")
-
-
-def _write_env_block(prefs_dir: Path) -> bool:
-    """Upsert the FLUX block in prefs_dir/houdini.env. Idempotent. Best-effort.
-
-    Returns True if the block is present after the call, False on write failure.
-    """
-    env_file = prefs_dir / "houdini.env"
-    try:
-        existing = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
-    except OSError:
-        existing = ""
-
-    if _ENV_BEGIN in existing:
-        b_start = existing.find(_ENV_BEGIN)
-        b_end   = existing.find(_ENV_END, b_start)
-        if b_end > b_start:
-            old_fragment = existing[b_start : b_end + len(_ENV_END)]
-            if old_fragment == _ENV_BLOCK:
-                return True  # already current
-            new_content = existing.replace(old_fragment, _ENV_BLOCK)
-        else:
-            new_content = existing  # malformed; fall through to append below
-            if _ENV_END not in existing:
-                new_content = existing + f"\n{_ENV_BLOCK}\n"
-    else:
-        sep = "" if existing.endswith("\n") or not existing else "\n"
-        new_content = f"{existing}{sep}\n{_ENV_BLOCK}\n"
-
-    try:
-        prefs_dir.mkdir(parents=True, exist_ok=True)
-        env_file.write_text(new_content, encoding="utf-8")
-        return True
-    except OSError:
-        return False
 
 
 def _remove_env_block(prefs_dir: Path) -> None:

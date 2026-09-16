@@ -16,10 +16,6 @@ export const Avatar = ({ ch, size = 20 }: { ch: string; size?: number }) => (
   }}>{ch}</div>
 )
 
-export const Cap = ({ children, style }: { children: React.ReactNode; style?: CSSProperties }) => (
-  <div className="cap" style={style}>{children}</div>
-)
-
 export const SecTitle = ({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0 7px' }}>
     <div className="cap" style={{ whiteSpace: 'nowrap' }}>{children}</div>
@@ -66,25 +62,6 @@ export const Field = ({ value, placeholder, w = 240, tinted, glyph, suffix, styl
 
 export const Tag = ({ children, kind = '' }: { children: React.ReactNode; kind?: string }) => (
   <span className={`tag${kind ? ' ' + kind : ''}`}>{children}</span>
-)
-
-export const Toggle = ({ on }: { on: boolean }) => (
-  <div style={{
-    width: 32, height: 18, borderRadius: 999,
-    border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
-    background: on ? 'var(--accent-soft)' : 'var(--bg-deep)',
-    position: 'relative', display: 'inline-block',
-    boxShadow: on ? 'var(--shadow-xs)' : 'var(--shadow-inset)',
-    transition: 'background 0.18s, border-color 0.18s, box-shadow 0.18s',
-  }}>
-    <div style={{
-      position: 'absolute', top: 3, left: on ? 15 : 2,
-      width: 10, height: 10, borderRadius: '50%',
-      background: on ? 'var(--accent-hi)' : 'var(--ink-4)',
-      boxShadow: 'var(--shadow-xs)',
-      transition: 'left 0.18s, background 0.18s',
-    }} />
-  </div>
 )
 
 export const Check = ({ on }: { on: boolean }) => (

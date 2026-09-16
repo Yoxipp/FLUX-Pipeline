@@ -297,13 +297,6 @@ def get_plugin_status() -> dict:
     }
 
 
-def get_zbrush_plugin_dir() -> Path | None:
-    """Return the primary ZBrush plugin directory (first existing install location)."""
-    status = get_plugin_status()
-    dest   = status.get("dest_path")
-    return Path(dest).parent if dest else None
-
-
 # ── Router-compatible interface ───────────────────────────────────────────────
 # The generic DCC router passes the exe path to every autostart module, but
 # ZBrush derives its plugin directory from %APPDATA% (independent of the exe).

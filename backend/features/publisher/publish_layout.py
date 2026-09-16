@@ -186,33 +186,6 @@ def highest_version(dest_folder: Path, base: str, fmt: str) -> int:
     return n
 
 
-def _archive_last(active: Path, archived: Path, base: str, ver: int, ext: str, padding: int) -> None:
-    """Rename the LAST folder to its versioned name and rename its inner file too."""
-    active.rename(archived)
-    old_inner = archived / f"{base}_{ACTIVE_VERSION_LABEL}{ext}"
-    if old_inner.exists():
-        old_inner.rename(archived / f"{base}_{format_version(ver, padding)}{ext}")
-    else:
-        log.warning("Archived LAST folder %s had no inner %s_LAST%s", archived.name, base, ext)
-
-
-def archive_last_folder(dest_folder: Path, base: str, fmt: str, ext: str,
-                        padding: int = DEFAULT_PADDING) -> int | None:
-    """Archive the current LAST folder for *base*/*fmt* to ``<FMT>/<base>_<FMT>_Vnnn``.
-
-    For writers that render straight into the LAST folder (e.g. a Houdini ROP): call
-    this before the render so the previous active version is preserved. Returns the
-    version number the archived LAST took, or None when there was no LAST yet.
-    """
-    active = last_folder(dest_folder, base, fmt)
-    if not active.exists():
-        return None
-    ver = highest_version(dest_folder, base, fmt) + 1
-    _archive_last(active, version_folder(dest_folder, base, fmt, ver, padding),
-                  base, ver, ext, padding)
-    return ver
-
-
 def publish_into_layout(
     source_path: Path,
     dest_folder: Path,

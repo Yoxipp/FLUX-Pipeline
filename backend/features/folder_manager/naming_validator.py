@@ -17,7 +17,6 @@ from core.constants import (
 _FORBIDDEN = re.compile(r'[\\/:*?"<>|&\s]')
 _VERSION_RE = re.compile(r'^v(\d+)$', re.IGNORECASE)
 _SEQ_RE  = re.compile(r'^SEQ(\d+)$', re.IGNORECASE)
-_SHOT_RE = re.compile(r'^SHOT(\d+)$', re.IGNORECASE)
 
 
 # ── token formatting ──────────────────────────────────────────────────────────
@@ -77,25 +76,6 @@ def build_asset_filename(
     if variante:
         parts.append(format_token(variante))
     parts.append(version.upper())
-    name = "_".join(parts)
-    return f"{name}.{extension.lstrip('.')}" if extension else name
-
-
-def build_shot_filename(
-    class_token: str,
-    seq_token: str,
-    shot_token: str,
-    instance: str = DEFAULT_INSTANCE,
-    version: str = ACTIVE_VERSION_LABEL,
-    extension: str = "",
-) -> str:
-    parts = [
-        format_token(class_token),
-        seq_token.upper(),
-        shot_token.upper(),
-        format_token(instance) if instance else DEFAULT_INSTANCE,
-        version.upper(),
-    ]
     name = "_".join(parts)
     return f"{name}.{extension.lstrip('.')}" if extension else name
 

@@ -55,17 +55,6 @@ def create_asset(project_path: Path, class_token: str, asset_name: str) -> Path:
     return asset_path
 
 
-def asset_exists(project_path: Path, class_token: str, asset_name: str) -> bool:
-    """Return True if the asset folder already exists."""
-    tokens = load_tokens(project_path)
-    class_token = format_token(class_token)
-    class_rel = get_path_for_token(tokens, "CLASS", class_token)
-    if class_rel is None:
-        return False
-    safe_name = format_token(asset_name)
-    return (project_path / class_rel / safe_name).exists()
-
-
 def heal_tokens_from_disk(project_path: Path) -> int:
     """Register on-disk assets / sequences / shots that have no token yet.
 

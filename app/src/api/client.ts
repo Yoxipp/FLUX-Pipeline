@@ -367,15 +367,6 @@ export const api = {
   }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/marvelous/publish', payload),
 
   // Activity
-  getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
-    const qs = new URLSearchParams()
-    if (params?.limit)   qs.set('limit', String(params.limit))
-    if (params?.user)    qs.set('user', params.user)
-    if (params?.action)  qs.set('action', params.action)
-    if (params?.project) qs.set('project', params.project)
-    return apiCall<{ events: ActivityEvent[]; unread_count: number }>('GET', `/activity?${qs}`)
-  },
-
   // Conditional variants used by the shared feed poller (FeedsProvider): send
   // the stored ETag, get a 304 (keep state) when nothing changed.
   getActivityConditional: (limit: number, etag?: string) =>
@@ -400,12 +391,6 @@ export const api = {
 
   sendChat: (message: string, user?: string) =>
     apiCall<{ success: boolean }>('POST', '/activity/chat', { message, user }),
-
-  getMentions: (user?: string, unread_only?: boolean) =>
-    apiCall<{ mentions: ChatMention[]; unread_count: number }>(
-      'GET',
-      `/activity/chat/mentions${user || unread_only ? `?${user ? `user=${encodeURIComponent(user)}` : ''}${user && unread_only ? '&' : ''}${unread_only ? 'unread_only=true' : ''}` : ''}`,
-    ),
 
   markMentionsRead: (user?: string) =>
     apiCall<{ success: boolean }>('POST', '/activity/chat/mentions/read', { user }),
