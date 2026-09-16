@@ -20,7 +20,7 @@ When adding new user or project endpoints, implementing features that need user/
 
 ## 4. Useful Relations
 **Depends on:** config (user/project config state), paths (directory resolution), core.publish (for publish context).
-**Consumed by:** Hub routers, DCC bridges, features, installer/first_launch.
+**Consumed by:** Hub routers, DCC bridges, features.
 **Parallel modules:** backend/core (lower-level services).
 
 ## 5. Module Entry Points

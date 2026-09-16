@@ -486,6 +486,33 @@ def install_hdas(version: str) -> tuple[bool, str]:
     )
 
 
+def deploy_houdini_hdas() -> None:
+    """Stage bundled Houdini HDAs from resources/ to %APPDATA%/FLUX/dcc/houdini/.
+
+    Copy-if-newer: a file is (re)copied only when it is missing in the staging dir
+    or the bundled source is newer. Cheap and idempotent, so it runs on every backend
+    startup: a dev who pulls updated .hda gets them re-staged automatically, so the
+    offline shelf install picks up the fresh copy without a live Houdini rebuild.
+    """
+    src_dir = _RESOURCES_ROOT / "houdini"
+    hdas = list(src_dir.glob("*.hda"))
+    if not hdas:
+        log.warning("deploy_houdini_hdas: no .hda files found in %s, skipping", src_dir)
+        return
+
+    try:
+        _HDA_STAGING_DIR.mkdir(parents=True, exist_ok=True)
+        for hda in hdas:
+            dst = _HDA_STAGING_DIR / hda.name
+            # Skip when the staged copy is present and at least as new as the source.
+            if dst.is_file() and dst.stat().st_mtime >= hda.stat().st_mtime:
+                continue
+            shutil.copy2(hda, dst)
+            log.info("HDA staged: %s -> %s", hda.name, _HDA_STAGING_DIR)
+    except OSError as exc:
+        log.error("deploy_houdini_hdas failed: %s", exc)
+
+
 def reconcile_installed_dccs() -> dict:
     """Refresh already-installed FLUX shelves/HDAs when the bundled copy is newer.
 

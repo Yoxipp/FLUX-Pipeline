@@ -4,19 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
-
-# Lazily imported to avoid circular deps at module level
-_installer_paths = None
-
-
-def _get_installer_paths():
-    global _installer_paths
-    if _installer_paths is None:
-        from installer import installer_paths as _ip
-        _installer_paths = _ip
-    return _installer_paths
 
 from core.constants import (
     FLUX_ROOT_DIRS,
@@ -36,6 +26,12 @@ def _get_exe_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _frozen_appdata_dir() -> Path:
+    """Return %APPDATA%/FluxPipeline/, the user-writable data dir of the installed app."""
+    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return Path(appdata) / "FluxPipeline"
+
+
 def get_config_json_path() -> Path:
     """Return the config.json path.
 
@@ -44,7 +40,7 @@ def get_config_json_path() -> Path:
     Dev (non-frozen):  project root / config.json (existing behaviour).
     """
     if getattr(sys, "frozen", False):
-        return _get_installer_paths().get_appdata_dir() / "config.json"
+        return _frozen_appdata_dir() / "config.json"
     return _get_exe_dir() / "config.json"
 
 
@@ -55,7 +51,7 @@ def get_prefs_path() -> Path:
     Dev (non-frozen):  config.json next-to-project-root (existing behavior)
     """
     if getattr(sys, "frozen", False):
-        return _get_installer_paths().get_prefs_path()
+        return _frozen_appdata_dir() / "prefs.json"
     return get_config_json_path()
 
 
