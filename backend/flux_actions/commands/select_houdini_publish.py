@@ -13,7 +13,7 @@
 #   base_name     -> the FLUX stem (resolves the destination, names the output)
 #   extension     -> the target format, selects the ROP output parameter
 #   rop_node_path -> the node to cook; None means "use the selected node"
-#   is_sequence   -> single flat _LAST file vs a per-version frame sequence folder
+#   is_sequence   -> single vNNN file (LAST derived) vs a per-version frame sequence folder
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class SelectHoudiniPublish(CommandBase):
             "value": None,
             "ask_user": True,
         },
-        # A frame sequence writes a per-version folder; a single file is flat _LAST.
+        # A frame sequence writes a per-version folder; a single file is a flat vNNN.
         "is_sequence": {
             "type": "bool",
             "label": "Sequence",

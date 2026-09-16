@@ -13,5 +13,5 @@ Zone a risque (tous les DCC + projets existants). Le layout par sous-dossier de 
 * Formes : `.usd`/`.usda` pointeur texte, `.usdc` pointeur crate (pxr, sinon copie), autres = copie + `<base>_LAST.ext.flux.json`, lien = `<base>_LAST.ext.link` (JSON `{target, version, published_at, user[, pattern]}`).
 * Classement : taille > `storage.last_link_threshold_gb` (hors USD) -> link ; sequence / `.vdb` -> link ; `storage.last_mode` du `project.json` (`{".abc": "link"}`) ; USD -> layer ; reste -> copie.
 * LAST verrouille : 3 essais, puis warning ; le `vNNN` reste valide, la fonction retourne le fichier version.
-* Ecrivains ROP (Houdini, Nuke, Photoshop) : encore `archive_flat_last` + ecriture directe dans LAST (U3b). `archive_flat_last` sur un LAST derive retire seulement la metadonnee.
+* Ecrivains directs (ROP Houdini + scene `.hip`, Nuke Write/script, Photoshop), U3b : `reserve_version` (archive un LAST legacy, premier NNN libre fichier + dossier sequence) -> le DCC ecrit `<base>_vNNN.ext` ou `<base>_vNNN/` -> `finalize_rendered_version` derive LAST (sequence = `.link` avec `pattern`). Echec : `discard_rendered_version`. `archive_flat_last` reste pour compat (plus d'appelant).
 * Lecteurs : `read_last`, `find_last_file` (suit `.link`), `published_files` (cache `.flux.json` et temporaires), `next_publish_version` (preflight), `last_version_label`.

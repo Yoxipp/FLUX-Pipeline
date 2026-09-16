@@ -224,6 +224,88 @@ def archive_legacy_last(dest_folder: Path, base: str, ext: str,
     return ver
 
 
+def highest_sequence_version(dest_folder: Path, base: str, ext: str | None = None) -> int:
+    """Highest <base>_vNNN/ sequence folder (0 when none). With *ext*, only folders
+    holding frames of that extension count (empty folders always count)."""
+    rx = re.compile(re.escape(base) + r"_v(\d+)$", re.IGNORECASE)
+    n = 0
+    if not dest_folder.is_dir():
+        return 0
+    for d in dest_folder.iterdir():
+        m = rx.match(d.name)
+        if not m or not d.is_dir():
+            continue
+        if ext is not None:
+            names = [p.name.lower() for p in d.iterdir()]
+            if names and not any(name.endswith(ext.lower()) for name in names):
+                continue
+        n = max(n, int(m.group(1)))
+    return n
+
+
+def reserve_version(dest_folder: Path, base: str, ext: str, *,
+                    padding: int = DEFAULT_PADDING) -> int:
+    """Version number for a writer that renders straight to disk (ROP, script save).
+
+    Archives a legacy LAST first, then returns the first NNN whose <base>_vNNN.ext file
+    and <base>_vNNN/ sequence folder are both free. The writer targets that path, then
+    calls finalize_rendered_version.
+    """
+    ensure_dir(dest_folder)
+    archive_legacy_last(dest_folder, base, ext, padding)
+    ver = max(highest_flat_version(dest_folder, base, ext),
+              highest_sequence_version(dest_folder, base, ext)) + 1
+    while (flat_version_path(dest_folder, base, ver, ext, padding).exists()
+           or (dest_folder / f"{base}_{format_version(ver, padding)}").exists()):
+        ver += 1
+    return ver
+
+
+def sequence_folder(dest_folder: Path, base: str, ver: int,
+                    padding: int = DEFAULT_PADDING) -> Path:
+    """Frame sequence version folder <dest>/<base>_vNNN/."""
+    return dest_folder / f"{base}_{format_version(ver, padding)}"
+
+
+def finalize_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, *,
+                              is_sequence: bool = False, pattern: str | None = None,
+                              user: str = "", padding: int = DEFAULT_PADDING) -> Path | None:
+    """Derive LAST once a writer has rendered version *ver* in place (ADR 0017).
+
+    Single file: <base>_vNNN.ext ; sequence: <base>_vNNN/ with *pattern* as the frame
+    file name. Returns the active path (LAST, or the version when LAST is a .link or
+    locked), or None when the version is missing on disk (failed cook).
+    """
+    version_path = (sequence_folder(dest_folder, base, ver, padding) if is_sequence
+                    else flat_version_path(dest_folder, base, ver, ext, padding))
+    if not version_path.exists() or (is_sequence and not any(version_path.iterdir())):
+        log.warning("Rendered version missing, LAST not updated: %s", version_path)
+        return None
+    settings = lp.load_storage_settings(dest_folder)
+    mode = lp.classify(ext, lp.path_size(version_path), is_sequence=is_sequence,
+                       settings=settings)
+    last = lp.write_last(dest_folder, base, ext, version_path, ver, mode,
+                         user=user, padding=padding, pattern=pattern)
+    if last is None or mode == lp.MODE_LINK:
+        return version_path
+    return last
+
+
+def discard_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, *,
+                             is_sequence: bool = False, padding: int = DEFAULT_PADDING) -> None:
+    """Remove the partial output of a failed writer for a reserved version."""
+    target = (sequence_folder(dest_folder, base, ver, padding) if is_sequence
+              else flat_version_path(dest_folder, base, ver, ext, padding))
+    try:
+        if target.is_dir():
+            import shutil
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink()
+    except OSError as exc:
+        log.warning("Could not remove failed output %s: %s", target, exc)
+
+
 def next_publish_version(dest_folder: Path, base: str, ext: str) -> int:
     """Version number the next publish of *ext* will take (preflight label)."""
     ext = ext if ext.startswith(".") else f".{ext}"

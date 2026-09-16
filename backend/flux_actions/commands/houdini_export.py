@@ -7,8 +7,8 @@
 #
 # The publish logic is NOT reimplemented here. This command dispatches to
 # dcc.houdini.houdini_export.publish_houdini_rop, which already resolves the
-# versioned path, archives the previous LAST, sets the output parm on the ROP,
-# cooks, and logs — all over the HTTP client that runs on Houdini's main thread.
+# immutable vNNN path, sets the output parm on the ROP, cooks into it, derives LAST
+# and logs — all over the HTTP client that runs on Houdini's main thread.
 # Keeping that one block whole avoids double resolution and any drift from the
 # legacy path (routers/dcc.py), which calls the same function.
 
@@ -50,7 +50,7 @@ class HoudiniExport(CommandBase):
             "value": None,
             "hide": True,
         },
-        # Single flat _LAST file vs a per-version frame sequence folder (from select).
+        # Single flat vNNN file vs a per-version frame sequence folder (from select).
         "is_sequence": {
             "type": "bool",
             "label": "Sequence",

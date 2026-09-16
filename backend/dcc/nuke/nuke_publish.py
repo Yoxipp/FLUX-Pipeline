@@ -46,14 +46,15 @@ def build_nuke_output_path(
 ) -> tuple[Path, int] | tuple[None, None]:
     """Resolve the versioned output path a Nuke Write should render to.
 
-    Single file : dest/<base>_LAST.ext
+    Single file : dest/<base>_vNNN.ext  (immutable, LAST derived after the render)
     Sequence    : dest/<base>_vNNN/<base>_vNNN.%0Nd.ext  (Nuke printf frame token)
-    Returns (path, next_version) or (None, None).
+    Returns (path, version) or (None, None).
     """
     from features.folder_manager.naming_validator import get_base_name
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import flat_last_path
-    from features.publisher.version_resolver import get_next_version
+    from features.publisher.publish_layout import (
+        flat_version_path, reserve_version, sequence_folder,
+    )
 
     project_path = Path(project_path)
     ext = _norm_ext(extension)
@@ -66,18 +67,17 @@ def build_nuke_output_path(
     dest_folder.mkdir(parents=True, exist_ok=True)
 
     base_name = get_base_name(full_name)
-    next_ver = get_next_version(dest_folder, base_name)
+    ver = reserve_version(dest_folder, base_name, ext)
 
     if is_sequence:
-        ver_str = f"v{next_ver:0{DEFAULT_PADDING}d}"
-        seq_folder = dest_folder / f"{base_name}_{ver_str}"
+        seq_folder = sequence_folder(dest_folder, base_name, ver)
         seq_folder.mkdir(parents=True, exist_ok=True)
         frame_token = f"%0{frame_padding}d"  # Nuke uses printf-style frame padding
-        output_path = seq_folder / f"{base_name}_{ver_str}.{frame_token}{ext}"
+        output_path = seq_folder / f"{seq_folder.name}.{frame_token}{ext}"
     else:
-        output_path = flat_last_path(dest_folder, base_name, ext)
+        output_path = flat_version_path(dest_folder, base_name, ver, ext)
 
-    return output_path, next_ver
+    return output_path, ver
 
 
 # ── Nuke code builders (pure) ─────────────────────────────────────────────────
@@ -153,7 +153,9 @@ def publish_from_nuke(
     from features.folder_manager.naming_validator import format_version, get_base_name
     from features.publisher.modif_log import append_log
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import archive_flat_last
+    from features.publisher.publish_layout import (
+        discard_rendered_version, finalize_rendered_version,
+    )
     from core.paths import get_project_path
 
     ext = _norm_ext(extension)
@@ -169,12 +171,8 @@ def publish_from_nuke(
     dest_folder = resolve_publish_path(project_path, full_name)
     base_name = get_base_name(full_name)
 
-    # Single file: archive the previous LAST before the render overwrites it.
+    # The Write renders straight into the reserved immutable version (ADR 0017).
     effective_ver = next_ver
-    if not is_sequence:
-        archived = archive_flat_last(dest_folder, base_name, ext)
-        if archived is not None:
-            effective_ver = archived + 1
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cs = colorspace or DEFAULT_WRITE_COLORSPACE
@@ -190,7 +188,13 @@ def publish_from_nuke(
 
     res = nuke_client.run(code)
     if not res.get("ok"):
+        discard_rendered_version(dest_folder, base_name, ext, effective_ver, is_sequence=is_sequence)
         return {"ok": False, "error": res.get("error", "Nuke run failed")}
+
+    active = finalize_rendered_version(
+        dest_folder, base_name, ext, effective_ver, is_sequence=is_sequence,
+        pattern=output_path.name if is_sequence else None, user=user,
+    ) or output_path
 
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
     try:
@@ -201,7 +205,7 @@ def publish_from_nuke(
 
     return {
         "ok": True,
-        "path": str(output_path),
+        "path": str(output_path if is_sequence else active),
         "version": effective_ver,
         "version_str": ver_str,
         "is_sequence": is_sequence,

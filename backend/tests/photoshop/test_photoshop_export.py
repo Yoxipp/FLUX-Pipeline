@@ -44,10 +44,11 @@ class PublishPhotoshop(unittest.TestCase):
             mock.patch("pathlib.Path.exists", return_value=True),
             mock.patch("features.publisher.publish_core.resolve_publish_path",
                        return_value=Path("/proj/dest")),
-            mock.patch("features.publisher.publish_layout.flat_last_path",
+            mock.patch("pathlib.Path.mkdir"),
+            mock.patch("features.publisher.publish_layout.reserve_version", return_value=2),
+            mock.patch("features.publisher.publish_layout.finalize_rendered_version",
                        return_value=Path("/proj/dest/X_TEX_HERO_null_LAST.png")),
-            mock.patch("features.publisher.publish_layout.archive_flat_last", return_value=1),
-            mock.patch("features.publisher.version_resolver.get_next_version", return_value=2),
+            mock.patch("features.publisher.publish_layout.discard_rendered_version"),
             mock.patch("features.folder_manager.naming_validator.get_base_name",
                        return_value="X_TEX_HERO_null"),
             mock.patch("features.activity.activity_writer.log_publish"),
@@ -61,12 +62,15 @@ class PublishPhotoshop(unittest.TestCase):
             p.start()
         try:
             out = pe.publish_photoshop("PROJ", "X_TEX_HERO_null", ".png", {}, "d", "adam")
+            saved_to = pe._save_active_document.call_args[0][0]
         finally:
             for p in ctx:
                 p.stop()
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["path"], str(Path("/proj/dest/X_TEX_HERO_null_LAST.png")))
-        self.assertEqual(out["version"], 2)   # archived 1 -> effective 2
+        self.assertEqual(out["version"], 2)
+        # Photoshop saves the immutable version, not LAST (ADR 0017)
+        self.assertEqual(Path(saved_to), Path("/proj/dest/X_TEX_HERO_null_v002.png"))
 
     def test_unsupported_format_fails_fast(self):
         with mock.patch("core.paths.get_project_path", return_value=Path("/proj")):

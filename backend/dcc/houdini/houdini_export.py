@@ -153,18 +153,19 @@ def build_rop_output_path(
 ) -> tuple[Path, int] | tuple[None, None]:
     """Build the versioned output path to set on a Houdini ROP.
 
-    Reuses resolve_publish_path (tokens) + get_next_version (version_resolver).
-    No duplication with publish_core.
+    Reuses resolve_publish_path (tokens) + reserve_version (publish_layout).
+    The ROP writes the immutable version; LAST is derived after the cook (ADR 0017).
 
-    Single file : dest_folder/basename_LAST.ext            (flat, stable path)
-    Sequence    : dest_folder/basename_v001/basename_v001.$F4.ext
+    Single file : dest_folder/basename_vNNN.ext
+    Sequence    : dest_folder/basename_vNNN/basename_vNNN.$F4.ext
 
-    Returns (output_path, next_version) or (None, None) on failure.
+    Returns (output_path, version) or (None, None) on failure.
     """
     from features.folder_manager.naming_validator import get_base_name
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import flat_last_path
-    from features.publisher.version_resolver import get_next_version
+    from features.publisher.publish_layout import (
+        flat_version_path, reserve_version, sequence_folder,
+    )
 
     project_path = Path(project_path)
     ext = _norm_ext(extension)
@@ -177,20 +178,17 @@ def build_rop_output_path(
 
     ensure_dir(dest_folder)
     base_name = get_base_name(full_name)
-    next_ver = get_next_version(dest_folder, base_name)
+    ver = reserve_version(dest_folder, base_name, ext)
 
     if is_sequence:
-        ver_str = f"v{next_ver:0{DEFAULT_PADDING}d}"
-        seq_folder = dest_folder / f"{base_name}_{ver_str}"
+        seq_folder = sequence_folder(dest_folder, base_name, ver)
         ensure_dir(seq_folder)
         frame_token = f"$F{frame_padding}"
-        output_path = seq_folder / f"{base_name}_{ver_str}.{frame_token}{ext}"
+        output_path = seq_folder / f"{seq_folder.name}.{frame_token}{ext}"
     else:
-        # Single file lands at a stable flat path <dest>/<base>_LAST.ext. The previous
-        # LAST is archived to versions/ by publish_via_rop before the cook overwrites it.
-        output_path = flat_last_path(dest_folder, base_name, ext)
+        output_path = flat_version_path(dest_folder, base_name, ver, ext)
 
-    return output_path, next_ver
+    return output_path, ver
 
 
 def set_rop_output(rop_node_path: str, output_path: str | Path) -> dict:
@@ -414,17 +412,17 @@ def publish_houdini_rop(
     """Full Houdini publish workflow via a ROP node.
 
     1. Get selected ROP if rop_node_path is None
-    2. Build versioned output path (reuses publish_core + version_resolver)
-    3. Archive existing LAST → vXXX  (single file only)
-    4. Set output path on the ROP
-    5. Cook the ROP
-    6. Log publish activity
+    2. Reserve the version and build its output path (ADR 0017)
+    3. Set output path on the ROP and cook it into the immutable version
+    4. Derive LAST (layer / copy / .link); a failed cook removes its partial output
+    5. Log publish activity
 
     Returns {"ok": True, "path": "...", "version": N} or {"ok": False, "error": "..."}.
     """
     from features.activity.activity_writer import log_publish
-    from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import archive_flat_last
+    from features.publisher.publish_layout import (
+        discard_rendered_version, finalize_rendered_version,
+    )
     from features.folder_manager.naming_validator import get_base_name, format_version
 
     project_path = Path(project_path)
@@ -440,15 +438,16 @@ def publish_houdini_rop(
             return {"ok": False, "error": f"Cannot resolve pipeline path for: {filename}{ext}"}
 
         full_name   = f"{filename}{ext}"
-        dest_folder = resolve_publish_path(project_path, full_name)
+        dest_folder = output_path.parent
         base_name   = get_base_name(full_name)
-        archived    = archive_flat_last(dest_folder, base_name, ext)
-        effective_ver = archived + 1 if archived is not None else next_ver
-        ensure_dir(output_path.parent)  # the publish folder holding <base>_LAST.ext
+        effective_ver = next_ver
 
         exp_resp = export_scene(output_path, ext)
         if not exp_resp.get("ok"):
+            discard_rendered_version(dest_folder, base_name, ext, effective_ver)
             return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
+        active = finalize_rendered_version(dest_folder, base_name, ext, effective_ver,
+                                           user=user) or output_path
 
         ver_str = format_version(effective_ver, DEFAULT_PADDING)
         try:
@@ -462,7 +461,7 @@ def publish_houdini_rop(
         log.info("Houdini scene publish complete → %s (%s)", output_path.name, ver_str)
         return {
             "ok": True,
-            "path": str(output_path),
+            "path": str(active),
             "version": effective_ver,
             "version_str": ver_str,
             "rop_node": f"scène {ext}",
@@ -484,23 +483,24 @@ def publish_houdini_rop(
     if output_path is None:
         return {"ok": False, "error": f"Cannot resolve pipeline path for: {filename}{ext}"}
 
-    # 3. For single files: archive the previous LAST folder before the cook writes
-    #    the new one, then (re)create the empty LAST folder the ROP will render into.
-    if not is_sequence:
-        full_name = f"{filename}{ext}"
-        dest_folder = resolve_publish_path(project_path, full_name)
-        base_name = get_base_name(full_name)
-        archived = archive_flat_last(dest_folder, base_name, ext)
-        effective_ver = archived + 1 if archived is not None else next_ver
-        ensure_dir(output_path.parent)  # the publish folder holding <base>_LAST.ext
-    else:
-        effective_ver = next_ver
+    # 3. The ROP renders straight into the reserved immutable version.
+    full_name = f"{filename}{ext}"
+    base_name = get_base_name(full_name)
+    dest_folder = output_path.parent.parent if is_sequence else output_path.parent
+    effective_ver = next_ver
 
     # 4+5. Export: reuse the node if it is a ROP, else auto-create the right output ROP
     # as a child, wire it, set the path and cook — so any selected node can be exported.
     exp_resp = export_via_node(rop_node_path, ext, output_path, frame_range, options, attr_filter)
     if not exp_resp.get("ok"):
+        discard_rendered_version(dest_folder, base_name, ext, effective_ver, is_sequence=is_sequence)
         return {"ok": False, "error": "export: " + exp_resp.get("error", "unknown")}
+
+    # 4. Derive LAST from the cooked version (.link for sequences, ADR 0017).
+    active = finalize_rendered_version(
+        dest_folder, base_name, ext, effective_ver, is_sequence=is_sequence,
+        pattern=output_path.name if is_sequence else None, user=user,
+    ) or output_path
 
     # 5b. F2: rewrite the ROP output parm to a portable "$FLUX/..." token so the
     #     saved .hip stays portable across machines. The cook already wrote to the
@@ -523,16 +523,15 @@ def publish_houdini_rop(
     try:
         log_publish(user or "unknown", _log_name, project_path.name, dest_folder=output_path.parent)
         from features.publisher.modif_log import append_log
-        if not is_sequence:
-            # modif log stays in the shared publish folder (spans all versions/formats)
-            append_log(dest_folder, get_base_name(f"{filename}{ext}"), ver_str, description, user)
+        # modif log stays in the shared publish folder (spans all versions/formats)
+        append_log(dest_folder, base_name, ver_str, description, user)
     except Exception as exc:
         log.warning("Logging failed (non-fatal): %s", exc)
 
     log.info("Houdini publish complete → %s (%s)", output_path.name, ver_str)
     return {
         "ok": True,
-        "path": str(output_path),
+        "path": str(output_path if is_sequence else active),
         "version": effective_ver,
         "version_str": ver_str,
         "rop_node": rop_node_path,

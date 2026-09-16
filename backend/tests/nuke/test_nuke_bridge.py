@@ -88,20 +88,42 @@ class PublishFromNuke(unittest.TestCase):
         with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
              mock.patch("pathlib.Path.exists", return_value=True), \
              mock.patch.object(nuke_publish, "build_nuke_output_path",
-                               return_value=(Path("/proj/dest/x_LAST.exr"), 3)), \
+                               return_value=(Path("/proj/dest/x_v003.exr"), 3)), \
              mock.patch("features.publisher.publish_core.resolve_publish_path",
                         return_value=Path("/proj/dest")), \
-             mock.patch("features.publisher.publish_layout.archive_flat_last", return_value=2), \
+             mock.patch("pathlib.Path.mkdir"), \
+             mock.patch("features.publisher.publish_layout.finalize_rendered_version",
+                        return_value=Path("/proj/dest/x_LAST.exr")) as fin, \
              mock.patch("features.folder_manager.naming_validator.get_base_name",
                         return_value="X_REN_HERO_null"), \
              mock.patch("features.activity.activity_writer.log_publish"), \
              mock.patch("features.publisher.modif_log.append_log"), \
              mock.patch.object(nuke_publish.nuke_client, "run",
-                               return_value={"ok": True, "result": "/proj/dest/x_LAST.exr"}) as run:
+                               return_value={"ok": True, "result": "/proj/dest/x_v003.exr"}) as run:
             out = nuke_publish.publish_from_nuke("PROJ", "X_REN_HERO_null", ".exr")
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["path"], str(Path("/proj/dest/x_LAST.exr")))
+        self.assertEqual(out["version"], 3)
         self.assertIn("nuke.nodes.Write", run.call_args[0][0])   # a Write was authored
+        self.assertIn("/proj/dest/x_v003.exr", run.call_args[0][0])  # renders the version
+        fin.assert_called_once()
+
+    def test_failed_render_discards_version(self):
+        with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
+             mock.patch("pathlib.Path.exists", return_value=True), \
+             mock.patch.object(nuke_publish, "build_nuke_output_path",
+                               return_value=(Path("/proj/dest/x_v003.exr"), 3)), \
+             mock.patch("features.publisher.publish_core.resolve_publish_path",
+                        return_value=Path("/proj/dest")), \
+             mock.patch("pathlib.Path.mkdir"), \
+             mock.patch("features.publisher.publish_layout.discard_rendered_version") as disc, \
+             mock.patch("features.publisher.publish_layout.finalize_rendered_version") as fin, \
+             mock.patch.object(nuke_publish.nuke_client, "run",
+                               return_value={"ok": False, "error": "boom"}):
+            out = nuke_publish.publish_from_nuke("PROJ", "X_REN_HERO_null", ".exr")
+        self.assertFalse(out["ok"])
+        disc.assert_called_once()
+        fin.assert_not_called()
 
     def test_unresolved_path_does_not_run(self):
         with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \

@@ -169,8 +169,8 @@ def run_houdini_publish_action(
     """Publish the open Houdini scene via the action engine; return the rich result.
 
     Runs publish_houdini.yml (select -> cook). The cook step reuses
-    publish_houdini_rop whole: it resolves the versioned path, archives the
-    previous LAST, sets the ROP output and cooks straight into the destination.
+    publish_houdini_rop whole: it reserves the
+    immutable vNNN, sets the ROP output, cooks into it and derives LAST.
     There is no temp file to clean up (Houdini writes direct-to-dest).
 
     Returns the same shape the legacy endpoint sends the front, so the endpoint

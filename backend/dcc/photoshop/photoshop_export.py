@@ -107,8 +107,9 @@ def publish_photoshop(
     from features.folder_manager.naming_validator import format_version, get_base_name
     from features.publisher.modif_log import append_log
     from features.publisher.publish_core import resolve_publish_path
-    from features.publisher.publish_layout import archive_flat_last, flat_last_path
-    from features.publisher.version_resolver import get_next_version
+    from features.publisher.publish_layout import (
+        discard_rendered_version, finalize_rendered_version, flat_version_path, reserve_version,
+    )
 
     ext = _norm_ext(extension)
     try:
@@ -127,18 +128,20 @@ def publish_photoshop(
     dest_folder.mkdir(parents=True, exist_ok=True)
 
     base_name = get_base_name(full_name)
-    next_ver = get_next_version(dest_folder, base_name)
-    archived = archive_flat_last(dest_folder, base_name, ext)
-    effective_ver = archived + 1 if archived is not None else next_ver
-    dest_path = flat_last_path(dest_folder, base_name, ext)
+    # Photoshop saves the immutable version, LAST is derived from it (ADR 0017).
+    effective_ver = reserve_version(dest_folder, base_name, ext)
+    version_path = flat_version_path(dest_folder, base_name, effective_ver, ext)
 
-    saved = _save_active_document(str(dest_path), ext, options)
+    saved = _save_active_document(str(version_path), ext, options)
     if not saved.get("ok"):
+        discard_rendered_version(dest_folder, base_name, ext, effective_ver)
         return saved
+    dest_path = finalize_rendered_version(dest_folder, base_name, ext, effective_ver,
+                                          user=user) or version_path
 
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
     try:
-        log_publish(user, f"{base_name}_{ver_str}{ext}", project, dest_folder=dest_path.parent)
+        log_publish(user, f"{base_name}_{ver_str}{ext}", project, dest_folder=dest_folder)
         append_log(dest_folder, base_name, ver_str, description, user)
     except Exception as exc:  # logging must never fail a publish
         log.warning("Photoshop publish logging failed (non-fatal): %s", exc)
