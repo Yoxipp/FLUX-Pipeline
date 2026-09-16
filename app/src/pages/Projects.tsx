@@ -150,12 +150,13 @@ const VER_NUM_BG  = '#E8912A'
 // ..._USD_V003 → { format: 'USD', version: 'V003' }. Returns {} when the name is
 // not a versioned publish (plain assets/tasks/instances), so no badge is drawn.
 function parseVersionMeta(name: string): { version?: string; format?: string } {
-  // Drop a real file extension first so the version token is the last segment.
-  const dot = name.lastIndexOf('.')
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const parts = stem.split('_')
-  if (parts.length < 2) return {}
-  const last = parts[parts.length - 1]
+  // The version token is the last "_" segment up to its first dot, so multi-dot
+  // names keep their badge: X_LAST.bgeo.sc, X_LAST.bgeo.sc.link (ADR 0017).
+  const us = name.lastIndexOf('_')
+  if (us <= 0) return {}
+  const parts = name.slice(0, us).split('_')
+  const last = name.slice(us + 1).split('.')[0]
+  parts.push(last)
   const m = /^(LAST|v\d+|V\d+)$/.exec(last)
   if (!m) return {}
   const version = last.toUpperCase()
@@ -215,10 +216,33 @@ const EXT_BADGE: Record<string, { bg: string; fg: string }> = {
   ma:   { bg: '#1E88C8', fg: '#fff' },
   mb:   { bg: '#1565A8', fg: '#fff' },
   ztl:  { bg: '#D03030', fg: '#fff' },
+  hip:   { bg: '#C8541E', fg: '#fff' },
+  hiplc: { bg: '#C8541E', fg: '#fff' },
+  hipnc: { bg: '#C8541E', fg: '#fff' },
+  bgeo:  { bg: '#B8661E', fg: '#fff' },
+  'bgeo.sc': { bg: '#B8661E', fg: '#fff' },
+  vdb:   { bg: '#4A6FA5', fg: '#fff' },
+  exr:   { bg: '#6A4FA0', fg: '#fff' },
+  nk:    { bg: '#D0A020', fg: '#1a1a1a' },
+  psd:   { bg: '#2A6FC0', fg: '#fff' },
+  fbx:   { bg: '#5E6B78', fg: '#fff' },
 }
+// Any other format still gets a neutral chip.
+const EXT_BADGE_DEFAULT = { bg: '#4A4A4A', fg: '#fff' }
+// Chip text for extensions too long for the 26px chip.
+const EXT_LABEL: Record<string, string> = { 'bgeo.sc': 'BGEO', 'bgeo.gz': 'BGEO', hiplc: 'HIPLC', hipnc: 'HIPNC' }
 
+// Format of a publish entry: a LAST .link / .flux.json reports its target's format and
+// compound extensions stay whole (X_LAST.bgeo.sc.link -> 'bgeo.sc', ADR 0017).
 function getExt(filename: string): string {
-  return filename.split('.').pop()?.toLowerCase() ?? ''
+  let name = filename.toLowerCase()
+  if (name.endsWith('.flux.json')) name = name.slice(0, -'.flux.json'.length)
+  else if (name.endsWith('.link')) name = name.slice(0, -'.link'.length)
+  for (const comp of ['.bgeo.sc', '.bgeo.gz', '.geo.sc', '.geo.gz']) {
+    if (name.endsWith(comp)) return comp.slice(1)
+  }
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot + 1) : ''
 }
 
 function FileSvg({ size = 36, selected = false, ext = '', version }: {
@@ -226,7 +250,7 @@ function FileSvg({ size = 36, selected = false, ext = '', version }: {
 }) {
   const body   = selected ? 'var(--accent)'    : 'var(--ink-2)'
   const corner = selected ? 'var(--accent-hi)' : 'var(--ink-3)'
-  const badge  = EXT_BADGE[ext]
+  const badge  = ext ? (EXT_BADGE[ext] ?? EXT_BADGE_DEFAULT) : undefined
   return (
     <svg width={size} height={Math.round(size * 1.22)} viewBox="0 0 30 37" fill="none">
       <path d="M2 0 L20 0 L30 10 L30 35 Q30 37 28 37 L2 37 Q0 37 0 35 L0 2 Q0 0 2 0Z" fill={body} />
@@ -238,7 +262,7 @@ function FileSvg({ size = 36, selected = false, ext = '', version }: {
           <rect x="2" y="25" width="26" height="10" rx="2" fill={badge.bg} />
           <text x="15" y="33" textAnchor="middle" fontSize="6.5" fontWeight="700"
             fontFamily="monospace" fill={badge.fg} letterSpacing="0.3">
-            {ext.toUpperCase()}
+            {(EXT_LABEL[ext] ?? ext.toUpperCase()).slice(0, 5)}
           </text>
         </>
       )}
