@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -33,8 +34,25 @@ except Exception:
     pass
 
 
+class _QuietPollingFilter(logging.Filter):
+    """Drop uvicorn access lines of the endpoints the UI polls every few seconds
+    (DCC pings, log tail, CORS preflights of the log tail): they drowned real events."""
+
+    _QUIET_SUFFIXES = ("/ping", "/status")
+    _QUIET_PREFIXES = ("/logs", "/health")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 3:
+            return True
+        path = str(args[2]).split("?", 1)[0]
+        return not (path.endswith(self._QUIET_SUFFIXES) or path.startswith(self._QUIET_PREFIXES))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Added here, after uvicorn configured its loggers, so the filter is not reset.
+    logging.getLogger("uvicorn.access").addFilter(_QuietPollingFilter())
     log.info("[FLUX] Backend starting on port %d", PORT)
     saved_user = config.get("username")
     if saved_user:

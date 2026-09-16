@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -227,45 +228,82 @@ async def houdini_state() -> dict:
     return result
 
 
+def _ping_houdini() -> dict:
+    from dcc.houdini.client import houdini_client
+    return houdini_client.ping()
+
+
+def _ping_zbrush() -> dict:
+    from dcc.zbrush.client import zbrush_client
+    return zbrush_client.ping()
+
+
+def _ping_maya() -> dict:
+    from dcc.maya.maya_connection import is_server_running
+    return {"ok": is_server_running(), "version": None}
+
+
+def _ping_nuke() -> dict:
+    from dcc.nuke.client import nuke_client
+    return nuke_client.ping()
+
+
+def _ping_photoshop() -> dict:
+    from dcc.photoshop.client import ping as ps_ping
+    return ps_ping()
+
+
+def _ping_painter() -> dict:
+    from dcc.substance_painter.client import substance_client
+    return substance_client.ping()
+
+
+def _ping_mari() -> dict:
+    from dcc.mari.client import mari_client
+    return mari_client.ping()
+
+
+_PING_PROBES = {
+    "houdini": _ping_houdini,
+    "zbrush": _ping_zbrush,
+    "maya": _ping_maya,
+    "nuke": _ping_nuke,
+    "photoshop": _ping_photoshop,
+    "substance_painter": _ping_painter,
+    "mari": _ping_mari,
+}
+
+# The Sidebar and the Publisher poll the same DCCs every few seconds: one probe per
+# DCC per _PING_TTL_S serves them all, and a lock keeps concurrent polls from each
+# opening a socket (a closed DCC holds an executor thread for the connect timeout).
+_PING_TTL_S = 2.0
+_ping_cache: dict[str, tuple[float, dict]] = {}
+_ping_locks: dict[str, asyncio.Lock] = {}
+
+
 @router.get("/{dcc_key}/ping")
 async def ping_dcc(dcc_key: str) -> dict:
-    """HTTP-level ping — confirms the DCC server module is actually running."""
-    if dcc_key == "houdini":
-        from dcc.houdini.client import houdini_client
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, houdini_client.ping)
-        return {"connected": result.get("ok", False), "version": result.get("version")}
-    if dcc_key == "zbrush":
-        from dcc.zbrush.client import zbrush_client
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, zbrush_client.ping)
-        return {"connected": result.get("ok", False), "version": result.get("version")}
-    if dcc_key == "maya":
-        from dcc.maya.maya_connection import is_server_running
-        loop = asyncio.get_event_loop()
-        ok = await loop.run_in_executor(None, is_server_running)
-        return {"connected": ok, "version": None}
-    if dcc_key == "nuke":
-        from dcc.nuke.client import nuke_client
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, nuke_client.ping)
-        return {"connected": result.get("ok", False), "version": result.get("version")}
-    if dcc_key == "photoshop":
-        from dcc.photoshop.client import ping as ps_ping
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, ps_ping)
-        return {"connected": result.get("ok", False), "version": result.get("version")}
-    if dcc_key == "substance_painter":
-        from dcc.substance_painter.client import substance_client
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, substance_client.ping)
-        return {"connected": result.get("ok", False), "version": result.get("version")}
-    if dcc_key == "mari":
-        from dcc.mari.client import mari_client
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, mari_client.ping)
-        return {"connected": result.get("ok", False), "version": result.get("version")}
-    raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
+    """HTTP-level ping: confirms the DCC server module is actually running (cached 2 s)."""
+    probe = _PING_PROBES.get(dcc_key)
+    if probe is None:
+        raise HTTPException(status_code=400, detail=f"Ping not implemented for: {dcc_key}")
+    hit = _ping_cache.get(dcc_key)
+    if hit and time.monotonic() - hit[0] < _PING_TTL_S:
+        return hit[1]
+    lock = _ping_locks.setdefault(dcc_key, asyncio.Lock())
+    async with lock:
+        hit = _ping_cache.get(dcc_key)
+        if hit and time.monotonic() - hit[0] < _PING_TTL_S:
+            return hit[1]
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(None, probe)
+        except Exception as exc:  # noqa: BLE001 - a probe never breaks the poll
+            log.debug("Ping %s failed: %s", dcc_key, exc)
+            result = {}
+        answer = {"connected": bool(result.get("ok", False)), "version": result.get("version")}
+        _ping_cache[dcc_key] = (time.monotonic(), answer)
+    return answer
 
 
 @router.get("/{dcc_key}/autostart")

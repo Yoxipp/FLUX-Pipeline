@@ -257,5 +257,6 @@ APP_VERSION: str = "0.1.0"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out
+CONNECT_TIMEOUT_S:   float = 0.5    # localhost connect: a closed bridge port must fail fast
 MONITOR_INTERVAL_MS: int   = 2000   # connection monitor polling interval (ms)
 CHAT_POLL_INTERVAL_MS: int = 2000   # team chat refresh interval (ms)

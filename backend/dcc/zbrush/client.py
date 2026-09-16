@@ -18,6 +18,8 @@ import json
 import socket
 from typing import Any
 
+from core.constants import CONNECT_TIMEOUT_S
+
 ZBRUSH_BRIDGE_PORT = 9876
 ZBRUSH_BRIDGE_HOST = "127.0.0.1"
 
@@ -90,8 +92,9 @@ class ZBrushClient:
         """Send a JSON command and receive the JSON response (newline-framed)."""
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(timeout)
+                s.settimeout(min(timeout, CONNECT_TIMEOUT_S))
                 s.connect((self.host, self.port))
+                s.settimeout(timeout)
                 s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
 
                 # Read until newline (response may be chunked)

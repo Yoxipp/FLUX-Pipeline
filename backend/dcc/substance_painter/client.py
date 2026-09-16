@@ -9,7 +9,7 @@ import json
 import socket
 from typing import Any
 
-from core.constants import DCC_PORTS
+from core.constants import CONNECT_TIMEOUT_S, DCC_PORTS
 
 SUBSTANCE_BRIDGE_HOST = "127.0.0.1"
 # Canonical Painter port: the base of its assigned range in DCC_PORT_RANGES, so
@@ -20,8 +20,9 @@ SUBSTANCE_BRIDGE_PORT = DCC_PORTS.get("SubstanceP", 7030)
 def _send(payload: dict, timeout: float = 120.0) -> dict:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
+            s.settimeout(min(timeout, CONNECT_TIMEOUT_S))
             s.connect((SUBSTANCE_BRIDGE_HOST, SUBSTANCE_BRIDGE_PORT))
+            s.settimeout(timeout)
             s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             buf = b""
             while b"\n" not in buf:

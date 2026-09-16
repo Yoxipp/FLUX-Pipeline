@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import socket
 
-from core.constants import DCC_PORTS, SOCKET_TIMEOUT_S
+from core.constants import CONNECT_TIMEOUT_S, DCC_PORTS, SOCKET_TIMEOUT_S
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -15,9 +15,10 @@ _PORT = DCC_PORTS.get("Nuke", 7003)
 
 def _send(payload: dict, timeout: float = SOCKET_TIMEOUT_S) -> dict:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
+    sock.settimeout(min(timeout, CONNECT_TIMEOUT_S))
     try:
         sock.connect(("127.0.0.1", _PORT))
+        sock.settimeout(timeout)
         sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         buf = b""
         while b"\n" not in buf:

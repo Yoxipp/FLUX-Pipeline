@@ -9,7 +9,7 @@ import json
 import socket
 from typing import Any
 
-from core.constants import DCC_PORTS
+from core.constants import CONNECT_TIMEOUT_S, DCC_PORTS
 
 MARI_BRIDGE_HOST = "127.0.0.1"
 # Canonical Mari port: the base of its assigned range in DCC_PORT_RANGES, so the
@@ -20,8 +20,9 @@ MARI_BRIDGE_PORT = DCC_PORTS.get("Mari", 7070)
 def _send(payload: dict, timeout: float = 120.0) -> dict:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
+            s.settimeout(min(timeout, CONNECT_TIMEOUT_S))
             s.connect((MARI_BRIDGE_HOST, MARI_BRIDGE_PORT))
+            s.settimeout(timeout)
             s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             buf = b""
             while b"\n" not in buf:
