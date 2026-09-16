@@ -602,6 +602,16 @@ export const api = {
     return apiCall<{ project: string; asset: string; task: string; instance: string; variantes: string[] }>('GET', `/usd/variantes?${qs}`)
   },
 
+  // Existing components (ADR 0018) and assemblies of the project (assembler default view).
+  getUsdLibrary: (project: string) => {
+    const qs = new URLSearchParams({ project })
+    return apiCall<UsdLibrary>('GET', `/usd/library?${qs}`)
+  },
+
+  refreshUsdComponent: (project: string, name: string) =>
+    apiCall<{ ok: boolean; changed: boolean; version: string | null; last?: string }>(
+      'POST', '/usd/component/refresh', { project, name }),
+
   // ── Production Tab ─────────────────────────────────────────────────────────
   // GET returns production + reconciled publishes; PUT replaces the store.
   getProduction: (project: string) =>
@@ -725,3 +735,22 @@ export const api = {
       'POST', `/production/${encodeURIComponent(project)}/ref/export`,
       { rel_path: relPath, name, dest_path: destPath }),
 }
+
+// USD assembler library (GET /usd/library)
+export interface UsdSlotRef { task: string | null; version: string | null }
+export interface UsdComponentInfo {
+  name: string
+  state: 'ok' | 'stale' | 'missing' | 'incomplete'
+  version: string | null
+  versions: string[]
+  slots: Record<string, UsdSlotRef>
+  published: Record<string, UsdSlotRef>
+  dir: string
+  last: string | null
+  used_by: string[]
+}
+export interface UsdAssemblyInstance {
+  prim: string; asset_path: string; component: string | null; broken: boolean; follows_last: boolean
+}
+export interface UsdAssemblyInfo { name: string; file: string; instances: UsdAssemblyInstance[]; broken: number }
+export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }

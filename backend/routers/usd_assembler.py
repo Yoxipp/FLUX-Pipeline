@@ -193,3 +193,46 @@ async def list_usd_variantes(
         "project": name, "asset": asset, "task": task,
         "instance": instance, "variantes": variantes,
     }
+
+
+class ComponentRefreshRequest(BaseModel):
+    name: str
+    project: str | None = None
+
+
+def _library(project_path: Path) -> dict:
+    from features.usd_assembler.library import build_library
+
+    ns = config.get("usd_assembler", {}) or {}
+    return build_library(project_path, ns.get("output_subdir", _DEFAULT_OUTPUT_SUBDIR))
+
+
+@router.get("/library")
+async def get_usd_library(project: str | None = None) -> dict:
+    """Existing components (ADR 0018) and assemblies of the project (A2 default view)."""
+    name, project_path = _resolve_project(project)
+    loop = asyncio.get_event_loop()
+    try:
+        lib = await loop.run_in_executor(None, lambda: _library(project_path))
+    except Exception as exc:
+        log.exception("USD library failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"project": name, **lib}
+
+
+@router.post("/component/refresh")
+async def refresh_usd_component(req: ComponentRefreshRequest) -> dict:
+    """(Re)generate one asset's component from its latest GEO / RIG / SHADING publishes."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.component_auto import refresh_component
+
+    loop = asyncio.get_event_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: refresh_component(project_path, req.name))
+    except Exception as exc:
+        log.exception("component refresh failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    if res is None:
+        return {"ok": True, "changed": False, "version": None}
+    log.info("USD component %s -> %s", req.name, res["version"])
+    return {"ok": True, "changed": True, "version": res["version"], "last": str(res["last"] or "")}
