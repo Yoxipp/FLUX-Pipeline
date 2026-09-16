@@ -5,4 +5,4 @@
 
 Socle : `config.py`, `paths.py` (FLUX_ROOT, mode frozen, `$FLUX`), `constants.py` (plages de ports DCC), `api_auth.py` (S1), `logger.py`, `dcc_instances.py`, `socket_manager.py`, frontiere metadonnees (`json_repository`, `sqlite_repository`, `remote_repository` squelette, `repository_factory`, `migrate_json_to_sqlite`), stockage (`local_storage`, `object_storage` squelette), `json_manager.py` (I/O atomiques bas niveau).
 
-Zone a risque : `paths.py` et bootstrap `config.py`. Les stores passent par `get_repository()`, pas par `json_manager` (`.importlinter`).
+Zone a risque : `paths.py` et bootstrap `config.py`. Les stores passent par `get_repository()`, pas par `json_manager` (`backend/.importlinter`).
