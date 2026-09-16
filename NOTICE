@@ -1,0 +1,7 @@
+FLUX Pipeline
+Copyright 2026 The FLUX Pipeline authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party components keep their own licenses (Python and npm dependencies,
+OpenUSD / usd-core, OpenImageIO). See the package metadata of each dependency.
