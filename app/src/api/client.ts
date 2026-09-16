@@ -608,9 +608,15 @@ export const api = {
     return apiCall<UsdLibrary>('GET', `/usd/library?${qs}`)
   },
 
-  refreshUsdComponent: (project: string, name: string) =>
+  // pins: {slot: {task, instance, version} | {exclude: true} | null (automatic again)}
+  refreshUsdComponent: (project: string, name: string, pins?: Record<string, UsdSlotPin | null>) =>
     apiCall<{ ok: boolean; changed: boolean; version: string | null; last?: string }>(
-      'POST', '/usd/component/refresh', { project, name }),
+      'POST', '/usd/component/refresh', { project, name, pins }),
+
+  // Point one assembly instance at a component LAST or a frozen vNNN.
+  relinkUsdInstance: (project: string, file: string, prim: string, component: string, version: string) =>
+    apiCall<{ ok: boolean; prim: string; asset_path: string }>(
+      'POST', '/usd/assembly/relink', { project, file, prim, component, version }),
 
   // ── Production Tab ─────────────────────────────────────────────────────────
   // GET returns production + reconciled publishes; PUT replaces the store.
@@ -737,7 +743,8 @@ export const api = {
 }
 
 // USD assembler library (GET /usd/library)
-export interface UsdSlotRef { task: string | null; version: string | null }
+export interface UsdSlotPin { task?: string; instance?: string; version?: string; exclude?: boolean }
+export interface UsdSlotRef { task: string | null; version: string | null; pin?: UsdSlotPin | null }
 export interface UsdComponentInfo {
   name: string
   state: 'ok' | 'stale' | 'missing' | 'incomplete'

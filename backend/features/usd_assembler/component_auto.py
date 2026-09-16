@@ -64,25 +64,52 @@ def component_dir(project_path: str | Path, name: str) -> Path | None:
 
 
 def collect_slots(project_path: str | Path, name: str,
-                  instance: str = _DEFAULT_INSTANCE) -> dict[str, dict]:
-    """Return {slot: {"task", "path": Path, "prim", "version"}} for published slots."""
+                  instance: str = _DEFAULT_INSTANCE,
+                  pins: dict[str, dict] | None = None) -> dict[str, dict]:
+    """Return {slot: {"task", "path": Path, "prim", "version"[, "pin"]}} for published slots.
+
+    *pins* fixes a slot by hand: ``{"task", "instance", "version"}`` (version ``latest``
+    keeps following that task's LAST) or ``{"exclude": True}`` to leave the slot out.
+    A pin that no longer resolves raises ResolveError (never silently replaced).
+    """
     resolver = FluxResolver(project_path)
     slots: dict[str, dict] = {}
     for slot, sources in SLOT_SOURCES.items():
-        hit = _resolve_slot(resolver, name, sources, instance)
-        if hit is None:
+        pin = (pins or {}).get(slot)
+        if pin and pin.get("exclude"):
             continue
-        task, resolved = hit
+        if pin:
+            resolved = resolver.resolve_layer(name, pin["task"], slot, pin.get("version") or "latest",
+                                              instance=pin.get("instance") or "")
+            task = pin["task"]
+        else:
+            hit = _resolve_slot(resolver, name, sources, instance)
+            if hit is None:
+                continue
+            task, resolved = hit
         slots[slot] = {"task": task, "path": Path(resolved.path),
                        "prim": resolved.default_prim, "version": resolved.version}
+        if pin:
+            slots[slot]["pin"] = _clean_pin(pin)
     return slots
+
+
+def _clean_pin(pin: dict) -> dict:
+    if pin.get("exclude"):
+        return {"exclude": True}
+    return {"task": str(pin["task"]), "instance": str(pin.get("instance") or ""),
+            "version": str(pin.get("version") or "latest")}
 
 
 def _slot_signature(slots: dict[str, dict], folder_depth_ref: Path) -> dict[str, dict]:
     """Relative, comparable description of *slots* (stored in customLayerData)."""
-    return {slot: {"task": s["task"], "path": _rel(s["path"], folder_depth_ref),
-                   "prim": s["prim"], "version": s["version"]}
-            for slot, s in slots.items()}
+    out = {}
+    for slot, s in slots.items():
+        out[slot] = {"task": s["task"], "path": _rel(s["path"], folder_depth_ref),
+                     "prim": s["prim"], "version": s["version"]}
+        if s.get("pin"):
+            out[slot]["pin"] = dict(s["pin"])
+    return out
 
 
 def _current_signature(parent: Path, name: str) -> dict | None:
@@ -101,7 +128,25 @@ def _current_signature(parent: Path, name: str) -> dict | None:
         return None
     flux = dict(layer.customLayerData).get("flux", {})
     slots = flux.get("slots") if isinstance(flux, dict) else None
-    return {k: dict(v) for k, v in slots.items()} if slots else None
+    return {k: {kk: (dict(vv) if hasattr(vv, "keys") else vv) for kk, vv in dict(v).items()}
+            for k, v in slots.items()} if slots else None
+
+
+def _current_pins(parent: Path, name: str) -> dict[str, dict]:
+    """Pins of the latest component version, excluded slots included."""
+    current = _current_signature(parent, name) or {}
+    pins = {slot: dict(s["pin"]) for slot, s in current.items() if s.get("pin")}
+    from pxr import Sdf
+    from features.publisher.publish_layout import highest_sequence_version, sequence_folder
+
+    ver = highest_sequence_version(parent, name, COMPONENT_EXT)
+    entry = sequence_folder(parent, name, ver) / f"{name}{COMPONENT_EXT}" if ver > 0 else None
+    if entry is not None and entry.is_file():
+        layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+        flux = dict(layer.customLayerData).get("flux", {}) if layer is not None else {}
+        for slot in filter(None, str(flux.get("excluded") or "").split(",")):
+            pins[str(slot)] = {"exclude": True}
+    return pins
 
 
 def _stage_metadata(model_path: Path) -> dict:
@@ -118,7 +163,8 @@ def _stage_metadata(model_path: Path) -> dict:
 
 
 def _author(folder: Path, name: str, token: str, version: str,
-            slots: dict[str, dict], signature: dict[str, dict]) -> Path:
+            slots: dict[str, dict], signature: dict[str, dict],
+            excluded: list[str] | None = None) -> Path:
     """Write entry + payload layers into the (reserved, empty) version *folder*."""
     from pxr import Sdf
 
@@ -147,16 +193,22 @@ def _author(folder: Path, name: str, token: str, version: str,
     entry.defaultPrim = token
     for key, value in meta.items():
         entry.pseudoRoot.SetInfo(key, value)
-    entry.customLayerData = {"flux": {"component": name, "version": version,
-                                      "slots": signature}}
+    flux = {"component": name, "version": version, "slots": signature}
+    if excluded:
+        flux["excluded"] = ",".join(excluded)   # a string: USD dicts reject untyped lists
+    entry.customLayerData = {"flux": flux}
     entry.Save()
     return entry_path
 
 
 def refresh_component(project_path: str | Path, name: str, *, user: str = "",
-                      instance: str = _DEFAULT_INSTANCE) -> dict | None:
+                      instance: str = _DEFAULT_INSTANCE,
+                      pins: dict[str, dict | None] | None = None) -> dict | None:
     """(Re)generate the component of asset *name* from its latest published slots.
 
+    Pins of the previous version are kept (a publish never undoes a manual choice).
+    *pins* edits them: ``{slot: {"task", "instance", "version"}}`` pins a slot,
+    ``{slot: {"exclude": True}}`` removes it, ``{slot: None}`` goes back to automatic.
     Returns {"version", "folder", "entry", "last", "slots"} for a new version, or
     None when nothing is published or the slots did not change (no new version).
     """
@@ -170,14 +222,26 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
     if parent is None:
         log.warning("Component %s skipped: no NAME token", name)
         return None
-    slots = collect_slots(project_path, name, instance)
+    merged = _current_pins(parent, name)
+    for slot, pin in (pins or {}).items():
+        if slot not in SLOT_SOURCES:
+            raise ValueError(f"unknown component slot '{slot}'")
+        if pin is None:
+            merged.pop(slot, None)
+        elif pin.get("exclude") and slot == "model":
+            raise ValueError("the model slot cannot be removed")
+        else:
+            merged[slot] = _clean_pin(pin)
+    slots = collect_slots(project_path, name, instance, merged)
     if "model" not in slots:
         log.info("Component %s skipped: no GEO/RIG model published", name)
         return None
+    excluded = sorted(s for s, p in merged.items() if p.get("exclude"))
 
     # The version folder is always one level under parent: same relative strings.
     signature = _slot_signature(slots, parent / f"{name}_v000")
-    if _current_signature(parent, name) == signature:
+    if _current_signature(parent, name) == signature and sorted(
+            s for s, p in _current_pins(parent, name).items() if p.get("exclude")) == excluded:
         return None
 
     ver = reserve_version(parent, name, COMPONENT_EXT)
@@ -185,7 +249,7 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
     version = format_version(ver)
     token = sanitize_token(name)
     try:
-        entry = _author(folder, name, token, version, slots, signature)
+        entry = _author(folder, name, token, version, slots, signature, excluded)
     except Exception:
         discard_rendered_version(parent, name, COMPONENT_EXT, ver, is_sequence=True)
         raise

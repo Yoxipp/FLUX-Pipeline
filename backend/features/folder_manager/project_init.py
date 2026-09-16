@@ -28,7 +28,7 @@ _PROJECT_DIRS = (
     "shot",
     "lighting",
     "comp",
-    "assembly",
+    "usd/assembly",
     "render",
     # template/ holds the interchangeable Houdini lighting base scenes the
     # seq/shot generators read. Seeded below; the team can swap the files freely.

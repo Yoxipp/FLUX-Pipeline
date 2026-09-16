@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -38,7 +39,11 @@ def _entry_slots(entry: Path) -> dict:
         return {}
     flux = dict(layer.customLayerData).get("flux", {})
     slots = flux.get("slots") if isinstance(flux, dict) else None
-    return {k: dict(v) for k, v in (slots or {}).items()}
+    out = {k: dict(v) for k, v in (slots or {}).items()}
+    excluded = str(flux.get("excluded") or "") if isinstance(flux, dict) else ""
+    for slot in filter(None, excluded.split(",")):
+        out[str(slot)] = {"pin": {"exclude": True}}
+    return out
 
 
 def list_components(project_path: str | Path) -> list[dict]:
@@ -68,14 +73,16 @@ def list_components(project_path: str | Path) -> list[dict]:
 
         if not current:
             state = "missing" if "model" in published else "incomplete"
-        elif any((slots.get(s) or {}).get("version") != v["version"]
-                 or (slots.get(s) or {}).get("task") != v["task"] for s, v in published.items()):
+        elif any(not (slots.get(s) or {}).get("pin") and (
+                 (slots.get(s) or {}).get("version") != v["version"]
+                 or (slots.get(s) or {}).get("task") != v["task"]) for s, v in published.items()):
             state = "stale"
         else:
             state = "ok"
         out.append({
             "name": name, "state": state, "version": current, "versions": versions,
-            "slots": {s: {"task": v.get("task"), "version": v.get("version")} for s, v in slots.items()},
+            "slots": {s: {"task": v.get("task"), "version": v.get("version"),
+                          "pin": dict(v["pin"]) if v.get("pin") else None} for s, v in slots.items()},
             "published": published,
             "dir": str(parent), "last": str(last_file) if last_file.is_file() else None,
             "used_by": [],
@@ -145,3 +152,47 @@ def build_library(project_path: str | Path, assembly_subdir: str = DEFAULT_ASSEM
             if comp is not None and asm["name"] not in comp["used_by"]:
                 comp["used_by"].append(asm["name"])
     return {"components": components, "assemblies": assemblies}
+
+
+def relink_instance(project_path: str | Path, file: str | Path, prim: str, component: str,
+                    version: str = "LAST", assembly_subdir: str = DEFAULT_ASSEMBLY_SUBDIR) -> dict:
+    """Point one assembly instance at *component* (its LAST or a frozen vNNN entry).
+
+    Keeps the instance prim (so a DCC placement layer still applies) and rewrites only
+    its references, relative to the assembly file (ADR 0010). Atomic write.
+    """
+    from pxr import Sdf
+
+    from .io.writer import _export_atomic
+
+    project = Path(project_path)
+    file = Path(file)
+    base = Path(str((project / assembly_subdir).resolve()))
+    if Path(str(file.resolve())).parent != base or file.suffix.lower() not in _USD_EXTS:
+        raise ValueError(f"not an assembly of this project: {file}")
+    parent = component_dir(project, component)
+    if parent is None:
+        raise ValueError(f"unknown asset '{component}'")
+    if version in ("", "LAST", "latest"):
+        target = parent / f"{component}_LAST{COMPONENT_EXT}"
+    else:
+        if not re.fullmatch(r"v\d+", version):
+            raise ValueError(f"bad version '{version}'")
+        target = parent / f"{component}_{version}" / f"{component}{COMPONENT_EXT}"
+    if not target.is_file():
+        raise ValueError(f"component {component} {version or 'LAST'} not found")
+
+    layer = Sdf.Layer.OpenAsAnonymous(str(file))
+    spec = layer.GetPrimAtPath(Sdf.Path(prim)) if layer is not None else None
+    if spec is None:
+        raise ValueError(f"instance {prim} not found in {file.name}")
+    try:
+        rel = os.path.relpath(str(target), str(file.parent)).replace(os.sep, "/")
+    except ValueError:
+        rel = target.as_posix()
+    spec.referenceList.ClearEdits()
+    spec.payloadList.ClearEdits()
+    spec.referenceList.prependedItems = [Sdf.Reference(rel)]
+    _export_atomic(layer, file)
+    log.info("Relinked %s %s -> %s", file.name, prim, rel)
+    return {"prim": prim, "asset_path": rel}

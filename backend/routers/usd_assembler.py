@@ -198,6 +198,16 @@ async def list_usd_variantes(
 class ComponentRefreshRequest(BaseModel):
     name: str
     project: str | None = None
+    # {slot: {"task", "instance", "version"} | {"exclude": true} | null (automatic)}
+    pins: dict[str, dict | None] | None = None
+
+
+class RelinkRequest(BaseModel):
+    file: str
+    prim: str
+    component: str
+    version: str = "LAST"
+    project: str | None = None
 
 
 def _library(project_path: Path) -> dict:
@@ -228,7 +238,7 @@ async def refresh_usd_component(req: ComponentRefreshRequest) -> dict:
 
     loop = asyncio.get_event_loop()
     try:
-        res = await loop.run_in_executor(None, lambda: refresh_component(project_path, req.name))
+        res = await loop.run_in_executor(None, lambda: refresh_component(project_path, req.name, pins=req.pins))
     except Exception as exc:
         log.exception("component refresh failed")
         raise HTTPException(status_code=400, detail=str(exc))
@@ -236,3 +246,23 @@ async def refresh_usd_component(req: ComponentRefreshRequest) -> dict:
         return {"ok": True, "changed": False, "version": None}
     log.info("USD component %s -> %s", req.name, res["version"])
     return {"ok": True, "changed": True, "version": res["version"], "last": str(res["last"] or "")}
+
+
+@router.post("/assembly/relink")
+async def relink_usd_assembly_instance(req: RelinkRequest) -> dict:
+    """Point one instance of an assembly at another component or version."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.library import relink_instance
+
+    ns = config.get("usd_assembler", {}) or {}
+    subdir = ns.get("output_subdir", _DEFAULT_OUTPUT_SUBDIR)
+    loop = asyncio.get_event_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: relink_instance(
+            project_path, req.file, req.prim, req.component, req.version, subdir))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("assembly relink failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, **res}
