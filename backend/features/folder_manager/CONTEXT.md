@@ -5,4 +5,6 @@
 
 Creation projet / assets / seq / shots : `project_init.py`, `asset_creator.py`, `seq_shot_creator.py`, `tokens.py` + `naming_validator.py` (nommage par tokens), `preset_manager.py`, `locks.py`, `sequence_template.py` (USD seq/shot), `houdini_scene_template.py` (scene lighting).
 
+`project_config.py` (V8 U1, ADR 0006/0011) : `<projet>/project.json` = `project_id` stable, `schema_version`, fps, resolution, `usd` (1.0 / Y), `ocio_config`, `env`, `storage`. Cree par `create_project` et automatiquement a la premiere ouverture (`PUT /project/current`, `GET /folder/projects/{p}/tokens`, `GET /folder/projects/{p}/config`). Creation exclusive `O_EXCL` puis relecture ; auto-heal des cles manquantes sans toucher aux valeurs ; fichier illisible deplace en `project.corrupt-<stamp>.json` ; copies de conflit OneDrive `project-*.json` : le `project_id` au `created_at` le plus ancien gagne (warning, copies jamais supprimees). Schema JSON en ligne, erreurs = warnings (jamais bloquant).
+
 Les cles de `locks.py` sont des chemins absolus (ADR 0004 proposee).

@@ -14,6 +14,7 @@ from core.logger import get_logger
 from core.paths import force_remove, force_rmtree, get_project_path, get_projects_dir, is_subpath
 from features.folder_manager.asset_creator import create_asset, heal_tokens_from_disk, list_assets
 from features.folder_manager.locks import is_locked, load_locks, set_lock
+from features.folder_manager.project_config import ensure_project_config, is_direct_project_dir
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
@@ -54,8 +55,25 @@ async def get_project_tokens(project_name: str) -> dict:
         await loop.run_in_executor(None, lambda: heal_tokens_from_disk(project_path))
     except Exception as exc:  # noqa: BLE001 — heal is best-effort, never fatal
         log.warning("Token auto-heal skipped for %s: %s", project_name, exc)
+    # project.json auto-creation at first open (ADR 0006); best-effort, never blocks.
+    try:
+        if is_direct_project_dir(project_path, get_projects_dir()):
+            await loop.run_in_executor(None, lambda: ensure_project_config(project_path))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("project.json auto-create skipped for %s: %s", project_name, exc)
     tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
     return {"tokens": tokens}
+
+
+@router.get("/projects/{project_name}/config")
+async def get_project_config(project_name: str) -> dict:
+    """Return <project>/project.json, creating or healing it first (ADR 0006)."""
+    project_path = get_project_path(project_name)
+    if not is_direct_project_dir(project_path, get_projects_dir()):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_running_loop()
+    config, warnings = await loop.run_in_executor(None, lambda: ensure_project_config(project_path))
+    return {"config": config, "warnings": warnings}
 
 
 @router.get("/projects")

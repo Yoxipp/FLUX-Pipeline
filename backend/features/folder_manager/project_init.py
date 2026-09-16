@@ -4,6 +4,7 @@
 #   - validate project name
 #   - create the standard folder tree under DOSSIER_PROJETS/<name>/
 #   - write tokens.json with default CLASS entries
+#   - write project.json (project_id, units; ADR 0006)
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from pathlib import Path
 from core.logger import get_logger
 from core.paths import ensure_dir, get_projects_dir
 from features.folder_manager.naming_validator import format_token, validate_token
+from features.folder_manager.project_config import ensure_project_config
 from features.folder_manager.tokens import build_default_tokens, save_tokens
 
 log = get_logger(__name__)
@@ -62,6 +64,7 @@ def create_project(project_name: str, projects_root: Path | None = None) -> Path
     _scaffold_directories(project_path)
     _seed_template_dir(project_path)
     _write_initial_tokens(project_path)
+    ensure_project_config(project_path)
 
     log.info("Project created: %s", project_path)
     return project_path
