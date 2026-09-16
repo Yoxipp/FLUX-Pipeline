@@ -260,6 +260,51 @@ def _write_flux_package(prefs_dir: Path, root: Path | None) -> bool:
         return False
 
 
+# File chooser favourites (Locations). jump.pref = plain text, one path per line, env
+# vars kept as-is by Houdini, each entry ends with '/', no empty line.
+_JUMP_PREF_FILENAME = "jump.pref"
+_JUMP_ENTRIES = ("$FLUX/", "$FLUX/DOSSIER_PROJETS/")
+
+
+def _write_flux_jump_pref(prefs_dir: Path) -> bool:
+    """Add the $FLUX favourites to <prefs_dir>/jump.pref, keeping the user's own entries.
+
+    Idempotent and best-effort: returns True when both entries are present after the call.
+    """
+    jump = prefs_dir / _JUMP_PREF_FILENAME
+    try:
+        lines = jump.read_text(encoding="utf-8").splitlines() if jump.exists() else []
+    except OSError:
+        return False
+    lines = [ln for ln in lines if ln.strip()]
+    missing = [e for e in _JUMP_ENTRIES if e not in lines]
+    if not missing:
+        return True
+    try:
+        prefs_dir.mkdir(parents=True, exist_ok=True)
+        jump.write_text("\n".join(lines + missing) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _remove_flux_jump_pref(prefs_dir: Path) -> None:
+    """Remove only the FLUX entries from jump.pref (file deleted if left empty)."""
+    jump = prefs_dir / _JUMP_PREF_FILENAME
+    try:
+        lines = jump.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError):
+        return
+    kept = [ln for ln in lines if ln.strip() and ln not in _JUMP_ENTRIES]
+    try:
+        if kept:
+            jump.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        else:
+            jump.unlink()
+    except OSError:
+        pass
+
+
 def _remove_flux_package(prefs_dir: Path) -> None:
     """Remove <prefs_dir>/packages/flux.json, if present. Best-effort."""
     pkg_file = prefs_dir / "packages" / _PACKAGE_FILENAME
@@ -367,6 +412,7 @@ def _install_to(prefs_dir: Path) -> dict:
     # Inject $FLUX via a Houdini package (separate file, never houdini.env). Best-effort:
     # a package write failure must not block the autostart install itself.
     _write_flux_package(prefs_dir, get_flux_root())
+    _write_flux_jump_pref(prefs_dir)
 
     startup = scripts / "123.py"
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
@@ -437,6 +483,7 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
     for prefs_dir in _all_prefs_dirs(houdini_exe_path):
         _remove_env_block(prefs_dir)
         _remove_flux_package(prefs_dir)
+        _remove_flux_jump_pref(prefs_dir)
         startup = prefs_dir / "scripts" / "123.py"
         if not startup.exists():
             continue
