@@ -1,11 +1,11 @@
 // main.ts — Electron main process: fenêtre native + sidecar Python.
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import http from 'http'
 import {
-  startPythonSidecar, stopPythonSidecar, restartBackend,
+  startPythonSidecar, stopPythonSidecar, restartBackend, getApiToken, invalidateApiToken,
   getBackendStatus, onBackendStatus, type BackendStatus,
 } from './python_bridge'
 
@@ -245,6 +245,25 @@ app.whenReady().then(async () => {
 
   // Splash first — visible immediately, covers the Vite/backend startup gap.
   createSplash()
+
+  // Security S1: stamp the backend's per-launch token on every renderer request to
+  // it (fetch, img/video src, WebSocket). Added here, below the renderer, so it
+  // never triggers a CORS preflight. A 403 drops the cached token so the next
+  // request refetches it (backend restarted with a new token).
+  const backendFilter = { urls: [
+    'http://127.0.0.1:8765/*', 'ws://127.0.0.1:8765/*',
+    'http://localhost:8765/*', 'ws://localhost:8765/*',
+  ] }
+  session.defaultSession.webRequest.onBeforeSendHeaders(backendFilter, (details, callback) => {
+    getApiToken().then((token) => {
+      if (token) details.requestHeaders['X-Flux-Token'] = token
+      callback({ requestHeaders: details.requestHeaders })
+    })
+  })
+  session.defaultSession.webRequest.onHeadersReceived(backendFilter, (details, callback) => {
+    if (details.statusCode === 403) invalidateApiToken()
+    callback({})
+  })
 
   // Forward backend status to the renderer's reconnect banner. Registered before
   // the sidecar starts so no transition is missed; the callback also fires once

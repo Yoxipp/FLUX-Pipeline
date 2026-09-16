@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # Ensure backend/ is on sys.path when run directly
 sys.path.insert(0, os.path.dirname(__file__))
 
-from core import config
+from core import api_auth, config
+from core.api_auth import ApiAuthMiddleware
 from core.logger import get_logger
 from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, usd_assembler
 
@@ -84,6 +85,16 @@ app.add_middleware(
     # is explicitly exposed. Required by the Phase 2 304 short-circuit.
     expose_headers=["ETag"],
 )
+# Added after CORS so it runs first: browser requests without the per-launch token
+# are refused before reaching any route (security S1, see core/api_auth.py).
+app.add_middleware(ApiAuthMiddleware)
+
+
+@app.get(api_auth.TOKEN_PATH, tags=["Health"])
+async def api_token() -> dict:
+    """Hand the per-launch API token to the Electron main process (non-browser only,
+    enforced by ApiAuthMiddleware)."""
+    return {"token": api_auth.API_TOKEN}
 
 @app.get("/health", tags=["Health"])
 async def health() -> dict:

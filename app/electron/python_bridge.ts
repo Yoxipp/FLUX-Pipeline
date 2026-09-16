@@ -51,6 +51,8 @@ export function getBackendStatus(): BackendStatus {
 
 function setStatus(s: BackendStatus, detail?: string): void {
   currentStatus = s
+  // Any transition may mean a new backend process with a new API token.
+  invalidateApiToken()
   console.log(`[Python] status → ${s}${detail ? ` (${detail})` : ''}`)
   try { statusListener?.(s, detail) } catch { /* never let a listener throw here */ }
 }
@@ -79,6 +81,44 @@ function pingHealth(port: number, timeoutMs = 1500): Promise<boolean> {
     req.on('timeout', () => { req.destroy(); resolve(false) })
     req.on('error', () => resolve(false))
   })
+}
+
+// ── API token (security S1) ────────────────────────────────────────────────────
+// The backend refuses browser requests that lack its per-launch token (see
+// backend/core/api_auth.py). The main process fetches it with Node http (not a
+// browser, so the backend hands it over) and main.ts injects it into every renderer
+// request to the backend. Cached until the backend changes or answers 403.
+
+let apiToken = ''
+let apiTokenPending: Promise<string> | null = null
+
+function fetchApiToken(port: number, timeoutMs = 1500): Promise<string> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/auth/token', timeout: timeoutMs }, (res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk) => { body += chunk })
+      res.on('end', () => {
+        try { resolve(res.statusCode === 200 ? String(JSON.parse(body).token || '') : '') }
+        catch { resolve('') }
+      })
+    })
+    req.on('timeout', () => { req.destroy(); resolve('') })
+    req.on('error', () => resolve(''))
+  })
+}
+
+export function invalidateApiToken(): void {
+  apiToken = ''
+}
+
+export async function getApiToken(): Promise<string> {
+  if (apiToken) return apiToken
+  if (!apiTokenPending) {
+    apiTokenPending = fetchApiToken(PYTHON_PORT).finally(() => { apiTokenPending = null })
+  }
+  apiToken = await apiTokenPending
+  return apiToken
 }
 
 /** Kill every process listening on *port* (cross-process — clears zombies). */
