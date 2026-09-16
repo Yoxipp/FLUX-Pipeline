@@ -10,6 +10,11 @@ import core.json_manager as jm
 from core.json_manager import read_jsonl
 from features.activity import history
 
+# These assert the on-disk JSONL rotation/archive behaviour, so pin the JSON
+# backend: a dev config.json flipped to sqlite would otherwise route the store
+# through SQLite and fail the file-format assertions for an unrelated reason.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
 
 def _ev(i: int, month: str = "09") -> dict:
     """A synthetic event with a deterministic, monotonically increasing sort key."""

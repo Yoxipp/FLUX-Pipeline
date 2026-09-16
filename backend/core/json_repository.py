@@ -21,6 +21,7 @@ from core.json_manager import (
     append_lock,
     cached_read_json,
     cached_read_jsonl,
+    file_validator,
     invalidate_cache,
     read_jsonl,
     write_json,
@@ -95,3 +96,12 @@ class JsonFileRepository:
         # replace_log inside the block is atomic w.r.t. concurrent appends.
         with append_lock(self._locate(collection, doc_id)):
             yield
+
+    # ── cache validation ─────────────────────────────────────────────────────
+
+    def version_token(self, collection: str, doc_id: str) -> str:
+        # The file's own stat validator (mtime_ns + size): a rewrite of the doc
+        # or an append to the log both move it. Identical to the token routers
+        # built directly from file stats before this method existed, so JSON-backed
+        # ETags are byte-for-byte unchanged. "0" when the file does not exist yet.
+        return file_validator(self._locate(collection, doc_id)) or "0"

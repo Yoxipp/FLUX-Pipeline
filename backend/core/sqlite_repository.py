@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -263,6 +264,40 @@ class SqliteRepository:
         finally:
             self._txn.conn = None
             conn.close()
+
+    # ── cache validation (HTTP ETags) ───────────────────────────────────────────
+
+    def version_token(self, collection: str, doc_id: str) -> str:
+        """Weak token that moves whenever this (collection, doc_id) changes.
+
+        There is no file stat to lean on here — the data is a row, not a file —
+        so the token is derived from the row state itself:
+          • a document → a short hash of its stored JSON text (changes iff the
+            value changes: a mark-read rewrites the read_state row, so the hash
+            moves and the ETag invalidates);
+          • a log → COUNT(*) + MAX(seq)+1 (an append raises both; a rotation
+            rewrites the rows and moves the count). Weak like the JSON validator:
+            a rotation that happened to keep the same count and top seq could
+            repeat a token — harmless for a 30s poll, and re-marked on the next.
+        A key that holds neither yet → the stable sentinel "0".
+        """
+        did = str(doc_id)
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT data FROM documents WHERE collection=? AND doc_id=?",
+                (collection, did),
+            ).fetchone()
+            if row is not None:
+                digest = hashlib.sha1(str(row[0]).encode("utf-8")).hexdigest()
+                return f"d{digest[:16]}"
+            count, max_seq = conn.execute(
+                "SELECT COUNT(*), COALESCE(MAX(seq), -1) FROM logs "
+                "WHERE collection=? AND doc_id=?",
+                (collection, did),
+            ).fetchone()
+        if count == 0:
+            return "0"
+        return f"l{count:x}-{(int(max_seq) + 1):x}"
 
     # ── internals ──────────────────────────────────────────────────────────────
 

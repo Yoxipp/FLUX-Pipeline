@@ -87,3 +87,22 @@ class MetadataRepository(Protocol):
         backend holds an OS advisory file lock; SQLite would open a transaction.
         """
         ...
+
+    # ── cache validation (HTTP ETags) ────────────────────────────────────────
+    def version_token(self, collection: str, doc_id: str) -> str:
+        """Return a cheap token that changes whenever the document OR log at
+        (collection, doc_id) changes — for building conditional-GET ETags
+        WITHOUT reading the content.
+
+        Backend-defined and *weak*, exactly like a stat validator: equal tokens
+        mean "very probably unchanged", never a strong guarantee. Returns the
+        stable sentinel ``"0"`` when nothing is stored there yet.
+
+        Why the surface needs this: a router cannot build a correct ETag from a
+        file's ``stat()`` any more, because a path-free backend (SQLite / remote)
+        keeps the data in a base, not a file — the file's mtime is then frozen
+        while the data changes, so a stat-based ETag would 304 forever. Each
+        backend derives the token from its own store (file stat for JSON, row
+        state for SQLite), so the ETag tracks the data on every backend.
+        """
+        ...

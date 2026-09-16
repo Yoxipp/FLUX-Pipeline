@@ -59,3 +59,8 @@ class RemoteRepository:
     def log_transaction(self, collection: str, doc_id: str) -> Iterator[None]:
         raise NotImplementedError(_NOT_YET)
         yield  # pragma: no cover - unreachable; keeps this a generator/CM
+
+    # ── cache validation ──────────────────────────────────────────────────────────
+
+    def version_token(self, collection: str, doc_id: str) -> str:
+        raise NotImplementedError(_NOT_YET)

@@ -10,12 +10,13 @@ from pydantic import BaseModel
 
 from core import config
 from core.constants import ARCHIVE_STEM_ACTIVITY, ARCHIVE_STEM_MENTIONS
-from core.json_manager import file_validator, sig_token, stat_sig
+from core.json_manager import file_validator, stat_sig
 from core.logger import get_logger
 from core.paths import (
     get_activity_path, get_activity_read_path, get_chat_path,
     get_mentions_path, get_mentions_read_path, get_users_dir,
 )
+from core.repository_factory import get_repository
 from features.activity.activity_reader import (
     get_events_and_unread, mark_all_as_read, mark_as_read,
 )
@@ -96,13 +97,21 @@ async def get_activity(
         return {"events": [], "unread_count": 0}
 
     sig = stat_sig(path)
-    # Read-status lives in a companion file (Phase 5); fold its stat into the
-    # ETag so marking-read invalidates the cached 304 even though the log is
-    # unchanged.
-    read_sig = stat_sig(get_activity_read_path())
+    # ETag validators come from the repository, not a raw file stat: under the
+    # SQLite backend the log and the read-status live in the base, not on disk, so
+    # activite.json's mtime is frozen while the data changes — a stat-based ETag
+    # would then 304 forever (mark-read looked dead, new events never surfaced).
+    # version_token tracks the data on every backend (== the old stat token for
+    # JSON). Read-status is folded in so marking-read invalidates the cached 304
+    # even though the event log itself is unchanged.
+    repo = get_repository()
+    log_tok = repo.version_token("activity_log", str(path))
+    read_tok = repo.version_token("read_state", str(get_activity_read_path()))
+    # "0" == nothing stored yet → no ETag, always fetch (matches the pre-frontier
+    # "missing file → no validator" behaviour, now backend-agnostic).
     etag = (
-        _etag(sig_token(sig), f"a:{limit}:{user}:{action}:{project}:{sig_token(read_sig)}")
-        if sig else None
+        _etag(log_tok, f"a:{limit}:{user}:{action}:{project}:{read_tok}")
+        if log_tok != "0" else None
     )
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
@@ -170,8 +179,12 @@ async def get_chat(request: Request, response: Response, limit: int = 100) -> di
     except RuntimeError:
         return {"messages": [], "users": []}
 
-    validator = file_validator(chat_path)
-    etag = _etag(validator, f"c:{limit}:{users_validator}") if validator else None
+    # Chat log validator via the repository (SQLite-safe: teamChat.json's mtime is
+    # frozen under the DB backend, so a raw file stat would 304 forever and new
+    # messages would never appear). The USER dir stat stays a real filesystem
+    # validator — the @-autocomplete list is folders on disk, not a repo doc.
+    validator = get_repository().version_token("chat_log", str(chat_path))
+    etag = _etag(validator, f"c:{limit}:{users_validator}") if validator != "0" else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
@@ -215,8 +228,12 @@ async def get_chat_mentions(
         return {"mentions": [], "unread_count": 0}
 
     sig = stat_sig(path)
-    read_sig = stat_sig(get_mentions_read_path())   # read-status companion (Phase 5)
-    etag = _etag(sig_token(sig), f"m:{who}:{unread_only}:{sig_token(read_sig)}") if sig else None
+    # Repository-derived validators (SQLite-safe, like /activity above): the log
+    # token + the read-status token, so a mark-read invalidates the cached 304.
+    repo = get_repository()
+    log_tok = repo.version_token("mentions_log", str(path))
+    read_tok = repo.version_token("read_state", str(get_mentions_read_path()))
+    etag = _etag(log_tok, f"m:{who}:{unread_only}:{read_tok}") if log_tok != "0" else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 

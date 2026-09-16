@@ -116,3 +116,42 @@ class RepositoryContractMixin:
             repo.replace_log("events", "feed", entries[-2:])
         ids = [e["id"] for e in repo.read_log("events", "feed", fresh=True)]
         self.assertEqual(ids, ["e2", "e3"])
+
+    # ── cache validation (version_token / ETags) ─────────────────────────────────
+    # These properties must hold on every backend so the conditional-GET routers
+    # (activity / chat / mentions) invalidate correctly whatever backend is active.
+
+    def test_version_token_empty_is_stable_sentinel(self):
+        repo = self.make_repo()
+        self.assertEqual(repo.version_token("things", "nope"), "0")
+        self.assertEqual(repo.version_token("things", "nope"), "0")  # stable
+
+    def test_version_token_moves_when_document_written(self):
+        # A read_state-shaped doc: writing it (and growing it) must move the token,
+        # so a "mark read" invalidates the cached 304. (This was the SQLite bug.)
+        repo = self.make_repo()
+        before = repo.version_token("read_state", "companion")
+        repo.set("read_state", "companion", {"read_ids": ["e1"]})
+        after_one = repo.version_token("read_state", "companion")
+        self.assertNotEqual(after_one, before)
+        repo.set("read_state", "companion", {"read_ids": ["e1", "e2"]})
+        after_two = repo.version_token("read_state", "companion")
+        self.assertNotEqual(after_two, after_one)
+
+    def test_version_token_moves_when_log_appended(self):
+        # Each append grows the log; the token must move so new events surface.
+        repo = self.make_repo()
+        before = repo.version_token("events", "feed")
+        self.assertEqual(before, "0")
+        repo.append_log("events", "feed", [{"id": "e1"}])
+        after_one = repo.version_token("events", "feed")
+        self.assertNotEqual(after_one, before)
+        repo.append_log("events", "feed", [{"id": "e2"}])
+        self.assertNotEqual(repo.version_token("events", "feed"), after_one)
+
+    def test_version_token_isolated_per_key(self):
+        repo = self.make_repo()
+        repo.append_log("events", "a", [{"id": "a1"}])
+        self.assertNotEqual(
+            repo.version_token("events", "a"), repo.version_token("events", "b"),
+        )
