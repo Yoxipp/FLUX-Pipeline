@@ -108,11 +108,11 @@ class ProxyUsdSwitchTests(unittest.TestCase):
 
 
 class PortablePathsSwitchTests(unittest.TestCase):
-    """$FLUX token paths at the Houdini boundary are opt-in (F2)."""
+    """$FLUX token paths at the Houdini boundary are opt-out (F2, D10)."""
 
-    def test_off_by_default(self):
+    def test_on_by_default(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(portable_paths_enabled())
+            self.assertTrue(portable_paths_enabled())
 
     def test_on_with_truthy_values(self):
         for value in ("1", "true", "on", "YES"):
@@ -120,7 +120,7 @@ class PortablePathsSwitchTests(unittest.TestCase):
                 self.assertTrue(portable_paths_enabled(), value)
 
     def test_off_with_falsey_values(self):
-        for value in ("0", "false", "off", ""):
+        for value in ("0", "false", "off"):
             with mock.patch.dict("os.environ", {"FLUX_PORTABLE_PATHS": value}, clear=False):
                 self.assertFalse(portable_paths_enabled(), value)
 

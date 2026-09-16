@@ -80,8 +80,9 @@ def proxy_usd_reduction() -> float:
     return value if 0.0 < value < 1.0 else _DEFAULT_PROXY_REDUCTION
 
 
-# Portable $FLUX paths at the backend<->Houdini boundary (priority n3, F2). OPT-IN,
-# same posture as texture conform / proxy: off by default. When on, paths handed to
+# Portable $FLUX paths at the backend<->Houdini boundary (priority n3, F2). OPT-OUT:
+# on by default (2026-09-16, D10: nothing persisted as an absolute path). Set
+# FLUX_PORTABLE_PATHS to a falsey value to disable per run. When on, paths handed to
 # Houdini (import resolved_path, publish sopoutput) are stored as "$FLUX/..." so a
 # .hip stays portable across machines with different roots; the disk still uses
 # resolved absolutes. Requires F1 (the Houdini package that sets $FLUX) to be in
@@ -92,10 +93,10 @@ _PORTABLE_PATHS_ENV = "FLUX_PORTABLE_PATHS"
 def portable_paths_enabled() -> bool:
     """Return True when Houdini-facing paths should be stored as $FLUX tokens.
 
-    Opt-in and read fresh each call, so the switch flips without a restart. Depends
-    on F1 (the $FLUX Houdini package); enable only once that is installed.
+    Opt-out and read fresh each call, so the switch flips without a restart. Depends
+    on F1 (the $FLUX Houdini package, installed by the Houdini autostart).
     """
-    return os.environ.get(_PORTABLE_PATHS_ENV, "").strip().lower() in _TRUE
+    return os.environ.get(_PORTABLE_PATHS_ENV, "1").strip().lower() not in _FALSE
 
 
 def engine_publish_enabled(dcc: str) -> bool:
