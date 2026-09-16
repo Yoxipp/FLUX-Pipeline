@@ -99,6 +99,36 @@ register_collection("feed_archive", lambda doc_id: Path(str(doc_id)))
 _repository: MetadataRepository | None = None
 
 
+def _sqlite_db_path() -> Path:
+    """The configured SQLite base, or CONFIG/metadata.db (needs FLUX_ROOT)."""
+    from core import paths
+
+    db_path = paths.get_sqlite_path()
+    return db_path if db_path is not None else paths.get_config_dir() / "metadata.db"
+
+
+def sqlite_refusal_reason() -> str | None:
+    """Why SQLite must not be used here, or None when it is safe (V8 U0).
+
+    SQLite is one local disk, one writer. Refused when the base sits in a synced or
+    network folder (corruption), and when the workspace itself is shared that way:
+    a local base would hide this machine's writes from the rest of the team.
+    """
+    from core import paths
+
+    reason = paths.shared_location_reason(paths.get_flux_root())
+    if reason:
+        return f"workspace is a {reason}"
+    try:
+        db_path = _sqlite_db_path()
+    except RuntimeError:
+        return None  # no FLUX_ROOT: let SqliteRepository fail exactly as before
+    reason = paths.shared_location_reason(db_path)
+    if reason:
+        return f"base is in a {reason}"
+    return None
+
+
 def _build_repository() -> MetadataRepository:
     """Build the backend the config selects. Default "json" keeps today's
     behaviour; "sqlite" / "remote" are explicit opt-ins.
@@ -112,12 +142,17 @@ def _build_repository() -> MetadataRepository:
     backend = paths.get_metadata_backend()
 
     if backend == "sqlite":
-        from core.sqlite_repository import SqliteRepository
-        db_path = paths.get_sqlite_path()
-        if db_path is None:
-            # No explicit path: default to CONFIG/metadata.db (needs FLUX_ROOT).
-            db_path = paths.get_config_dir() / "metadata.db"
-        return SqliteRepository(db_path)
+        reason = sqlite_refusal_reason()
+        if reason is None:
+            from core.sqlite_repository import SqliteRepository
+            return SqliteRepository(_sqlite_db_path())
+        # Never crash the startup: fall back to the file backend and say why.
+        # Export the base first (core.export_sqlite_to_json) or its writes stay hidden.
+        from core.logger import get_logger
+        get_logger(__name__).warning(
+            "metadata_backend=sqlite refused (%s); using json. "
+            "Run: python -m core.export_sqlite_to_json", reason,
+        )
 
     if backend == "remote":
         from core.remote_repository import RemoteRepository

@@ -35,7 +35,8 @@ class FactorySelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / "metadata.db"
             with mock.patch("core.paths.get_metadata_backend", return_value="sqlite"), \
-                 mock.patch("core.paths.get_sqlite_path", return_value=db):
+                 mock.patch("core.paths.get_sqlite_path", return_value=db), \
+                 mock.patch("core.paths.get_flux_root", return_value=None):
                 rf.reset_repository()
                 self.assertIsInstance(rf.get_repository(), SqliteRepository)
 
@@ -51,7 +52,8 @@ class FactorySelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / "metadata.db"
             with mock.patch("core.paths.get_metadata_backend", return_value="sqlite"), \
-                 mock.patch("core.paths.get_sqlite_path", return_value=db):
+                 mock.patch("core.paths.get_sqlite_path", return_value=db), \
+                 mock.patch("core.paths.get_flux_root", return_value=None):
                 rf.reset_repository()
                 second = rf.get_repository()
         self.assertIsInstance(first, JsonFileRepository)
@@ -88,7 +90,8 @@ class TokensStoreOnBothBackendsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / "metadata.db"
             with mock.patch("core.paths.get_metadata_backend", return_value="sqlite"), \
-                 mock.patch("core.paths.get_sqlite_path", return_value=db):
+                 mock.patch("core.paths.get_sqlite_path", return_value=db), \
+                 mock.patch("core.paths.get_flux_root", return_value=None):
                 rf.reset_repository()
                 self._tokens_roundtrip()
 

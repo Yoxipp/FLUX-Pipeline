@@ -107,6 +107,58 @@ def get_sqlite_path() -> Path | None:
     return Path(value) if value else None
 
 
+# Folder names of sync clients that replicate a folder between machines. A SQLite
+# base in (or serving) such a folder is unsafe: the client copies a half-written
+# base, and other machines never see the local writes.
+_SYNCED_DIR_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive")
+
+
+def _is_remote_drive(path: Path) -> bool:
+    """True when *path* sits on a mapped network drive (Windows only)."""
+    if sys.platform != "win32":
+        return False
+    drive = path.drive
+    if not drive or drive.startswith("\\\\"):
+        return False
+    try:
+        import ctypes
+        drive_remote = 4
+        return ctypes.windll.kernel32.GetDriveTypeW(f"{drive}\\") == drive_remote
+    except (AttributeError, OSError):
+        return False
+
+
+def shared_location_reason(path: Path | str | None) -> str | None:
+    """Return why *path* is a synced or network location, or None when local.
+
+    Used by the repository factory to refuse SQLite where several machines share
+    the files (V8 U0). Name based, no read of the target: works for a base that
+    does not exist yet.
+    """
+    if not path:
+        return None
+    raw = str(path)
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        return "network share (UNC path)"
+    p = Path(raw)
+    for env in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+        root = os.environ.get(env)
+        if not root:
+            continue
+        try:
+            p.resolve().relative_to(Path(root).resolve())
+            return f"synced folder ({env})"
+        except (ValueError, OSError):
+            pass
+    for part in p.parts:
+        low = part.casefold()
+        if any(marker in low for marker in _SYNCED_DIR_MARKERS):
+            return f"synced folder ({part})"
+    if _is_remote_drive(p):
+        return "network drive"
+    return None
+
+
 # ── Storage backend selection (config.json, big-files frontier) ──────────────
 # Which StorageLocator the storage factory builds, and where the big files live.
 # Read from config.json directly, like the metadata backend. Defaults keep today's
