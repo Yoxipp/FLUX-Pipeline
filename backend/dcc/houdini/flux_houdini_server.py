@@ -70,7 +70,19 @@ class _Handler(BaseHTTPRequestHandler):
             _response_store.pop(req_id, None)
         return {"ok": False, "error": "timeout: main thread may be busy"}
 
+    def _from_browser(self) -> bool:
+        """True when the request comes from a web browser (security, S2).
+
+        Browsers always attach Origin and/or Sec-Fetch-Site; the FLUX backend client
+        (urllib) sends neither. Refusing browser requests stops any web page, even
+        through DNS rebinding, from reaching /run and executing code in Houdini.
+        """
+        return bool(self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"))
+
     def do_GET(self) -> None:
+        if self._from_browser():
+            self._send_json({"error": "forbidden"}, 403)
+            return
         if self.path == "/ping":
             self._send_json({"ok": True, "version": hou.applicationVersionString(), "flux": True})
         elif self.path == "/state":
@@ -81,9 +93,19 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
+        # Always consume the body first: answering before reading it makes Windows
+        # reset the connection and the client never sees the status.
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        if self._from_browser():
+            self._send_json({"error": "forbidden"}, 403)
+            return
         if self.path == "/run":
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length)
+            # A JSON content type cannot be sent cross-site without a CORS preflight,
+            # which this server never approves.
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                self._send_json({"error": "Content-Type must be application/json"}, 415)
+                return
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
