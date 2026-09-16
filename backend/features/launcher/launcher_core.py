@@ -82,6 +82,18 @@ def get_installed_dccs() -> dict[str, str]:
     return found
 
 
+# Characters cmd.exe still interprets inside double quotes: a quote ends the quoting
+# (then & | > run extra commands) and %VAR% is expanded. Refused in launch arguments.
+_CMD_UNSAFE_CHARS = ('"', "%", "\n", "\r")
+
+
+def _cmd_quoted(value: str) -> str:
+    """Return *value* double-quoted for cmd.exe, refusing anything that could escape it."""
+    if any(ch in value for ch in _CMD_UNSAFE_CHARS):
+        raise ValueError(f"unsafe character in launch argument: {value!r}")
+    return f'"{value}"'
+
+
 def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
     """Launch *dcc_name* fully independent of the hub. Returns True on start.
 
@@ -106,7 +118,9 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
         if os.name == "nt":
             # `start "" "<exe>" [scene]` — the empty "" is start's window-title arg.
             # The DCC is reparented away from the backend, so taskkill /T won't reach it.
-            cmd = f'start "" "{exe}"' + (f' "{scene}"' if scene else "")
+            # Every argument is quoted and checked (security S4): a scene path holding
+            # a quote or %VAR% could otherwise inject commands through the shell.
+            cmd = 'start "" ' + " ".join(_cmd_quoted(str(a)) for a in ([exe, scene] if scene else [exe]))
             subprocess.Popen(
                 cmd, shell=True, close_fds=True, env=env,
                 creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
@@ -117,7 +131,7 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
             subprocess.Popen(args, start_new_session=True, close_fds=True, env=env)
         log.info("Launched %s — %s%s", dcc_name, exe, f" (scene: {scene})" if scene else "")
         return True
-    except OSError as e:
+    except (OSError, ValueError) as e:
         log.error("Failed to launch %s: %s", dcc_name, e)
         return False
 
