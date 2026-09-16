@@ -1,21 +1,28 @@
-# publish.py — place a light layered asset into the Flux publish layout.
+# publish.py — place a light layered asset into the Flux publish layout (ADR 0017).
 #
-# The whole light asset (root + model/skel/anim) lives in ONE per-version folder:
-#   <dest>/<base>_LAST/         active version  (root <base>.usd + <base>_{model,skel,anim}.usd)
-#   <dest>/<base>_vNNN/         archived versions
-# Archiving is a folder rename, so the root keeps pointing at its sibling sublayers
-# (relative names) with no rewriting. <dest> is the token-resolved publish folder, so
-# the light asset sits next to the DCC's normal publishes.
+# The whole light asset (root + model/skel/anim) lives in ONE immutable version folder,
+# and LAST is a pointer layer beside it:
+#   <dest>/<base>_vNNN/          root <base>.usd + <base>_{model,skel,anim}.usd (never rewritten)
+#   <dest>/<base>_LAST.<fmt>     ~1 KB layer, subLayers = [@./<base>_vNNN/<base>.<fmt>@]
+# The root keeps pointing at its sibling sublayers by relative name, so a version folder
+# composes on its own. <dest> is the token-resolved publish folder, so the light asset
+# sits next to the DCC's normal publishes. A legacy <base>_LAST/ folder (pre 0017) is
+# copied to the next vNNN, then removed.
 
 from __future__ import annotations
 
-import re
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
 from core.constants import ACTIVE_VERSION_LABEL
 from core.logger import get_logger
+from features.folder_manager.naming_validator import format_version
+from features.publisher import last_pointer as lp
 from features.publisher.publish_core import ensure_dir
+from features.publisher.publish_layout import (
+    discard_rendered_version, reserve_version, sequence_folder,
+)
 
 from .contract import LightAsset
 from .skel_export import author_light_asset
@@ -26,20 +33,21 @@ log = get_logger("usd_export.publish")
 _USD_SUBDIR = "{asset}/model/usd"
 
 
-def _next_version(parent: Path, base: str) -> int:
-    """Highest existing {base}_vNNN archive number + 1 (1 when none).
+def _archive_legacy_last_folder(parent: Path, base: str, ext: str) -> str | None:
+    """Copy a pre-0017 <base>_LAST/ folder to the next free vNNN/, then remove it.
 
-    Counts BOTH archived folders ({base}_vNNN/) and archived flat files
-    ({base}_vNNN.ext) so layered and non-layered publishes share one version line.
+    Copy then delete (never rename: Windows locks). Returns the version label it took.
     """
-    n = 0
-    if parent.exists():
-        rx = re.compile(re.escape(base) + r"_v(\d+)(?:\.[^.]+)?$")
-        for d in parent.iterdir():
-            m = rx.match(d.name)
-            if m:
-                n = max(n, int(m.group(1)))
-    return n + 1
+    legacy = parent / f"{base}_{ACTIVE_VERSION_LABEL}"
+    if not legacy.is_dir():
+        return None
+    ver = reserve_version(parent, base, ext)
+    target = sequence_folder(parent, base, ver)
+    shutil.copytree(legacy, target)
+    shutil.rmtree(legacy, ignore_errors=True)
+    if legacy.exists():
+        log.warning("Old light asset folder kept (locked): %s", legacy)
+    return format_version(ver)
 
 
 def publish_light_asset(
@@ -50,14 +58,16 @@ def publish_light_asset(
     config: dict | None = None,
     dest_dir: str | Path | None = None,
     base_name: str | None = None,
+    user: str = "",
 ) -> dict:
-    """Author *asset* and publish it as the active LAST folder.
+    """Author *asset* into a new immutable version folder and point LAST at it.
 
     *dest_dir* is the output folder (pass the token-resolved publish path); *base_name*
     is the file/folder stem (e.g. "CHAR_BLOCK_DAVID_null"). Falls back to
     ``{project}/{asset}/model/usd`` and the asset name when omitted.
 
-    Returns {"root": Path, "version": "vNNN", "folder": Path, "layers": {name: Path}}.
+    Returns {"root": Path (LAST pointer, or the version root if LAST is locked),
+    "version": "vNNN", "folder": version folder, "version_root": Path, "layers": {...}}.
     """
     base = base_name or asset.asset
     if dest_dir is not None:
@@ -66,29 +76,25 @@ def publish_light_asset(
         subdir = (config or {}).get("usd_export", {}).get("usd_subdir", _USD_SUBDIR)
         parent = Path(project_path) / subdir.format(asset=asset.asset)
     ensure_dir(parent)
+    ext = f".{fmt.lstrip('.')}"
 
-    active = parent / f"{base}_{ACTIVE_VERSION_LABEL}"   # e.g. CHAR_..._LAST/
-    # Archive any previous active version before taking the LAST slot: a folder (a prior
-    # layered export) AND any flat {base}_LAST.ext file left by the non-layered USD
-    # publisher — otherwise a _LAST/ folder and a _LAST.usda file would coexist.
-    stale_files = [
-        p for p in parent.glob(f"{base}_{ACTIVE_VERSION_LABEL}.*")
-        if p.is_file()
-    ] if parent.exists() else []
-    if active.exists() or stale_files:
-        ver = _next_version(parent, base)
-        if active.exists():
-            active.rename(parent / f"{base}_v{ver:03d}")     # archive the whole folder
-        for f in stale_files:
-            f.rename(parent / f"{base}_v{ver:03d}{f.suffix}")  # archive the flat LAST file
-        version_str = f"v{ver + 1:03d}"
-    else:
-        version_str = "v001"
-    active.mkdir(parents=True, exist_ok=True)
+    _archive_legacy_last_folder(parent, base, ext)
+    ver = reserve_version(parent, base, ext)          # also archives a legacy flat LAST
+    folder = sequence_folder(parent, base, ver)
+    version_str = format_version(ver)
 
-    # Name the files off the base (plain names; the folder carries the version).
+    # Author straight into the reserved version folder (no rename, ADR 0017 U3b rule).
     light = replace(asset, asset=base)
-    authored = author_light_asset(light, active, fmt=fmt, version_label=None)
+    try:
+        authored = author_light_asset(light, folder, fmt=fmt.lstrip("."), version_label=None)
+    except Exception:
+        discard_rendered_version(parent, base, ext, ver, is_sequence=True)
+        raise
 
-    log.info("Published light asset %s (%s) -> %s", base, version_str, active)
-    return {"root": authored["root"], "version": version_str, "folder": active, "layers": authored}
+    root = authored["root"]
+    last = lp.write_last(parent, base, ext, folder, ver, lp.MODE_LAYER, user=user,
+                         layer_target=f"{folder.name}/{root.name}")
+
+    log.info("Published light asset %s (%s) -> %s", base, version_str, folder)
+    return {"root": last or root, "version": version_str, "folder": folder,
+            "version_root": root, "layers": authored}

@@ -373,7 +373,7 @@ def write_last(dest: Path, base: str, ext: str, version_path: Path, ver: int, mo
     written (locked by a DCC): the version stays valid, LAST is just behind (warning).
     *layer_target* overrides the sublayer path (layered USD folder root).
     """
-    target_rel = version_path.name + ("/" if version_path.is_dir() else "")
+    target_rel = layer_target or (version_path.name + ("/" if version_path.is_dir() else ""))
     meta = {
         "version": format_version(ver, padding),
         "target": target_rel,
@@ -386,8 +386,10 @@ def write_last(dest: Path, base: str, ext: str, version_path: Path, ver: int, mo
 
     try:
         if mode == MODE_LAYER:
+            # A layered version folder: the sublayer (and its metadata) is its root file.
+            root_file = dest / layer_target if layer_target else version_path
             text = pointer_layer_text(layer_target or version_path.name, meta,
-                                      read_usd_root_info(version_path))
+                                      read_usd_root_info(root_file))
             if _write_pointer_layer(last, dest, ext, text):
                 _remove(sidecar)
                 _remove(link)

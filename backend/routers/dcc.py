@@ -1042,8 +1042,8 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
             raise HTTPException(status_code=500, detail=f"Export USD léger échoué{reason}")
 
         # Author + publish with pxr, backend-side (Maya stays pxr-free). Resolve the
-        # destination from tokens so the light asset lands next to normal publishes,
-        # grouped in a {base}_LAST folder.
+        # destination from tokens so the light asset lands next to normal publishes:
+        # an immutable {base}_vNNN/ folder + a {base}_LAST.<fmt> pointer layer (ADR 0017).
         from features.usd_export import publish_light_asset
         from features.usd_export.contract import light_asset_from_dict
 

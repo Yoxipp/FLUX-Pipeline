@@ -118,7 +118,31 @@ class FluxResolver:
                     if next(iter(folder.glob(f"{base}_{kind}.*")), None) is not None
                 ]
                 found[ver] = {"base": base, "folder": folder, "layers": layers}
+        if _ACTIVE not in found:
+            self._add_derived_last(found)
         return found
+
+    @staticmethod
+    def _add_derived_last(found: dict[str, dict]) -> None:
+        """ADR 0017: LAST is no longer a folder but a <base>_LAST.<usd ext> pointer layer
+        beside the vNNN/ folders. Map "LAST" to the version it points at (highest vNNN
+        when the pointer is missing or unreadable), with that concrete "version"."""
+        from features.publisher import last_pointer as lp
+
+        versions = {v: info for v, info in found.items() if v.startswith("v") and v[1:].isdigit()}
+        if not versions:
+            return
+        target = None
+        for info in versions.values():
+            for ext in lp.LAYER_EXTS:
+                last = lp.read_last(info["folder"].parent, info["base"], ext)
+                if last and last.get("version") in versions:
+                    target = last["version"]
+                    break
+            if target:
+                break
+        target = target or max(versions, key=lambda v: int(v[1:]))
+        found[_ACTIVE] = {**versions[target], "version": target}
 
     @staticmethod
     def _variante_of_layer_file(name: str) -> str:
@@ -276,6 +300,8 @@ class FluxResolver:
         """Turn the active LAST into a concrete version label for determinism."""
         if label != _ACTIVE:
             return label
+        if scanned.get(_ACTIVE, {}).get("version"):
+            return scanned[_ACTIVE]["version"]
         nums = [int(v[1:]) for v in scanned if v.startswith("v") and v[1:].isdigit()]
         return _VERSION_LABEL.format(num=(max(nums) + 1) if nums else 1)
 

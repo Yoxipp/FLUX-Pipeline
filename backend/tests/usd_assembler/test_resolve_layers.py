@@ -145,5 +145,34 @@ class SuggestAndNarrow(unittest.TestCase):
             self.resolver.resolve_layer(_ASSET, "mod", "model", "latest", instance="head", variante="ghost")
 
 
+
+class ResolveLayersDerivedLast(unittest.TestCase):
+    """ADR 0017 layout: vNNN/ folders + a <base>_LAST.usd pointer layer, no LAST folder."""
+
+    def test_latest_follows_pointer_and_freezes_its_version(self) -> None:
+        from features.publisher import last_pointer as lp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "PROJ"
+            project.mkdir()
+            tokens = tok.build_default_tokens()
+            tokens["NAME"][_ASSET] = _NAME_REL
+            tok.save_tokens(project, tokens)
+            inst = project / _NAME_REL / _TASK / "null"
+            for ver in ("v001", "v002", "v003"):
+                _touch(inst / f"{_BASE}_{ver}" / f"{_BASE}_model.usd")
+                _touch(inst / f"{_BASE}_{ver}" / f"{_BASE}.usd")
+            # LAST points at v002 (v003 written after, e.g. LAST locked at that time)
+            v2 = inst / f"{_BASE}_v002"
+            lp.write_last(inst, _BASE, ".usd", v2, 2, lp.MODE_LAYER,
+                          layer_target=f"{v2.name}/{_BASE}.usd")
+
+            resolver = FluxResolver(project)
+            self.assertIn("LAST", resolver.list_layer_versions(_ASSET, _TASK))
+            resolved = resolver.resolve_layer(_ASSET, _TASK, "model", "latest")
+            self.assertEqual(resolved.path, v2 / f"{_BASE}_model.usd")
+            self.assertEqual(resolved.version, "v002")
+
+
 if __name__ == "__main__":
     unittest.main()
