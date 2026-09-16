@@ -550,6 +550,20 @@ def reconcile_installed_dccs() -> dict:
             log.info("Auto-update Maya %s shelf: %s", version, msg)
             report["maya"].append({"version": version, "ok": ok, "msg": msg})
 
+    # ── Maya: refresh a stale autostart block in userSetup.py ─────────────────
+    # install() only rewrites blocks that differ from the current one. This carries
+    # the loopback-only commandPort (security S3) onto machines that installed the
+    # autostart before, without touching machines where it was never installed.
+    try:
+        from dcc.maya import autostart as maya_autostart
+        if maya_autostart.is_installed():
+            result = maya_autostart.install()
+            if result.get("message") not in (None, "already_installed"):
+                log.info("Auto-update Maya autostart: %s", result.get("message"))
+                report["maya"].append({"autostart": result})
+    except Exception as exc:  # never block startup
+        log.warning("Auto-update Maya autostart failed (non-fatal): %s", exc)
+
     # ── Houdini: replace stale HDAs already present in otls/ ───────────────────
     staged = list(_HDA_STAGING_DIR.glob("*.hda"))
     if staged:

@@ -42,7 +42,8 @@ def start_server(port: int = MAYA_PORT) -> bool:
         log.error("start_server: not running inside Maya")
         return False
     try:
-        port_str = f":{port}"
+        # Loopback only (security S3): a bare ":port" can listen on the whole network.
+        port_str = f"127.0.0.1:{port}"
         if not _cmds.commandPort(port_str, query=True):
             _cmds.commandPort(name=port_str, sourceType="python", noreturn=False)
         log.info("Maya commandPort open on port %d", port)
@@ -58,7 +59,7 @@ def stop_server(port: int = MAYA_PORT) -> bool:
         log.error("stop_server: not running inside Maya")
         return False
     try:
-        _cmds.commandPort(name=f":{port}", close=True)
+        _cmds.commandPort(name=f"127.0.0.1:{port}", close=True)
         log.info("Maya commandPort closed on port %d", port)
         return True
     except Exception as exc:

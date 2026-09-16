@@ -22,7 +22,7 @@ global proc shelf_Flux() {
         -annotation   "Flux — Open commandPort (port 7001)"
         -image1       "commandButton.png"
         -sourceType   "python"
-        -command      "import maya.cmds as mc\nmc.commandPort(name=':7001', sourceType='python')"
+        -command      "import maya.cmds as mc\nmc.commandPort(name='127.0.0.1:7001', sourceType='python')"
     ;
     shelfButton
         -label        "Hub"

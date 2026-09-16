@@ -23,7 +23,7 @@ _MAYA_PORT  = DCC_PORTS["Maya"]
 # Build Connect command without nested quotes
 _CONNECT_CMD = (
     "import maya.cmds as mc; "
-    f"mc.commandPort(name=':{_MAYA_PORT}', sourceType='python')"
+    f"mc.commandPort(name='127.0.0.1:{_MAYA_PORT}', sourceType='python')"
 )
 
 _BUTTONS: list[dict[str, str]] = [

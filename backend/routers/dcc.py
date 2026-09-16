@@ -681,7 +681,7 @@ async def maya_connect_cmd() -> dict:
     cmd = (
         f"import sys; sys.path.insert(0, r'{backend}'); "
         f"import maya.cmds as cmds; "
-        f"cmds.commandPort(name=':7001', sourceType='python', noreturn=False); "
+        f"cmds.commandPort(name='127.0.0.1:7001', sourceType='python', noreturn=False); "
         f"print('[FLUX] commandPort 7001 opened')"
     )
     return {"cmd": cmd, "backend": backend}
@@ -1169,7 +1169,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
                 detail=(
                     "Maya ne répond pas sur le port 7001. "
                     "Assure-toi que le commandPort est ouvert : dans Maya > Script Editor, "
-                    "exécute cmds.commandPort(name=':7001', sourceType='python', noreturn=False)"
+                    "exécute cmds.commandPort(name='127.0.0.1:7001', sourceType='python', noreturn=False)"
                 ),
             )
 

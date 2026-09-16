@@ -177,6 +177,9 @@ def install(maya_exe_path: str | None = None) -> dict:
     except ImportError:
         _maya_port = 7001
 
+    # The commandPort is bound to 127.0.0.1 explicitly (security S3): a bare ':port'
+    # name can listen on every network interface, letting another machine on the
+    # school network run Python in this Maya session.
     _NEW_BLOCK = (
         f"{_BLOCK_BEGIN}\n"
         f"try:\n"
@@ -193,7 +196,7 @@ def install(maya_exe_path: str | None = None) -> dict:
         f"        # for the whole session (~20s window, non-blocking).\n"
         f"        try:\n"
         f"            import maya.cmds as _c\n"
-        f"            _p = ':{_maya_port}'\n"
+        f"            _p = '127.0.0.1:{_maya_port}'\n"
         f"            if _c.commandPort(_p, query=True):\n"
         f"                return\n"
         f"            _c.commandPort(name=_p, sourceType='python', noreturn=False)\n"
