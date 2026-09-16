@@ -128,9 +128,9 @@ def _scan_instances(project_path: Path, class_tok: str, type_tok: str, name_tok:
 # ── iter scan ─────────────────────────────────────────────────────────────────
 
 def _extract_ext(p: Path) -> str:
-    if p.name.endswith(".bgeo.sc"):
-        return ".bgeo.sc"
-    return p.suffix.lower()
+    """Data extension, compound ones included; a LAST .link reports its target's."""
+    from features.publisher.last_pointer import parse_published_name
+    return parse_published_name(p.name)[1].lower()
 
 
 # Preference order when several formats exist for the same asset — pick the one a
@@ -153,10 +153,8 @@ def _import_ext_rank(ext: str) -> int:
 
 def _extract_iter_stem(filename: str) -> tuple[str, str]:
     """Return (base_without_iter, iter_label) for a filename stem."""
-    if filename.endswith(".bgeo.sc"):
-        stem = filename[: -len(".bgeo.sc")]
-    else:
-        stem = filename.rsplit(".", 1)[0]
+    from features.publisher.last_pointer import parse_published_name
+    stem = parse_published_name(filename)[0]
     parts = stem.split("_")
     if not parts:
         return stem, ""
@@ -259,20 +257,24 @@ def resolve_import_path(
 
     # published_files descends into the nested <base>_<FMT>_{LAST,Vnnn}/ folders
     # as well as the legacy flat files, so import resolves under either layout.
+    from features.publisher.last_pointer import link_target, parse_published_name
     from features.publisher.publish_layout import published_files
     candidates: list[Path] = []
     for p in published_files(folder):
-        ext = _extract_ext(p)
-        if ext == ".json":
+        stem, ext, role = parse_published_name(p.name)
+        if ext.lower() == ".json":
             continue
-        if p.name.endswith(".bgeo.sc"):
-            stem = p.name[: -len(".bgeo.sc")]
-        else:
-            stem = p.stem
         su = stem.upper()
         # Exact stem, or the same stem with a VARIANTE token in the middle
         # (e.g. CHAR_RIG_DOMINICK_ALLBODY_NORMAL_LAST).
         if su == exact_stem or (su.startswith(prefix) and su.endswith(suffix)):
+            if role == "link":
+                # LAST .link (ADR 0017): load the real vNNN file; a sequence target
+                # folder is handled by the sequence fallback below.
+                target = link_target(p)
+                if target is not None and target.is_file():
+                    candidates.append(target)
+                continue
             candidates.append(p)
 
     if candidates:

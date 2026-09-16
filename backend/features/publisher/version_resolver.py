@@ -16,24 +16,18 @@ _VERSION_RE = re.compile(r'^v(\d+)$', re.IGNORECASE)
 def get_last_file(folder_path: Path, base_name: str) -> Path | None:
     """Return the active LAST file for *base_name* in *folder_path*, or None.
 
-    Finds both the legacy flat file (``<base>_LAST.ext`` directly in the folder)
-    and the new nested layout (``<base>_<FMT>_LAST/<base>_LAST.ext``). Flat wins
-    when both are present, so older publishes keep resolving unchanged.
+    Flat ``<base>_LAST.ext`` (pointer layer, copy or legacy copy) and the target of
+    ``<base>_LAST.ext.link`` (ADR 0017) win over the older nested layouts.
     """
     if not folder_path.exists():
         return None
-    prefix = f"{base_name}_{ACTIVE_VERSION_LABEL}"
-    # with extension
-    matches = list(folder_path.glob(f"{prefix}.*"))
-    # without extension (edge case)
-    no_ext = folder_path / prefix
-    if not matches and no_ext.is_file():
-        return no_ext
-    if matches:
-        return matches[0]
-    # nested layout fallback
+    # flat derived LAST / .link target / legacy copy, then the nested layouts
     from features.publisher.publish_layout import find_last_file
-    return find_last_file(folder_path, base_name)
+    hit = find_last_file(folder_path, base_name)
+    if hit is not None:
+        return hit
+    no_ext = folder_path / f"{base_name}_{ACTIVE_VERSION_LABEL}"   # edge case
+    return no_ext if no_ext.is_file() else None
 
 
 def get_next_version(
@@ -49,12 +43,16 @@ def get_next_version(
     if not folder_path.exists():
         return 1
 
+    from features.publisher.last_pointer import parse_published_name
+
     max_ver = 0
     prefix = f"{base_name}_"
     for f in folder_path.iterdir():
         if not f.is_file():
             continue
-        stem = f.stem
+        stem, _ext, role = parse_published_name(f.name)
+        if role != "data":
+            continue
         if not stem.startswith(prefix):
             continue
         suffix = stem[len(prefix):]

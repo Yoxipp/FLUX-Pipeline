@@ -301,7 +301,10 @@ class FluxResolver:
             last = get_last_file(folder, base)
             if last is None:
                 raise ResolveError(f"no published USD for asset '{asset}' in {folder}")
-            frozen = _VERSION_LABEL.format(num=max(get_next_version(folder, base) - 1, 1))
+            from features.publisher.last_pointer import full_ext
+            from features.publisher.publish_layout import last_version_label
+            frozen = (last_version_label(folder, base, full_ext(last.name))
+                      or _VERSION_LABEL.format(num=max(get_next_version(folder, base) - 1, 1)))
             return ResolvedAsset(path=last, default_prim=default_prim, version=frozen)
 
         matches = sorted(folder.glob(f"{base}_{version}.*")) if folder.exists() else []

@@ -95,9 +95,9 @@ def publish_zbrush(
         pass
 
     # ── 4. Versioning (after export — temp path is safe to consume) ────────────
-    # Flat layout: <dest>/<base>_LAST.ext (active), previous LAST archived to versions/.
+    # ADR 0017: immutable <base>_vNNN.ext, then LAST derived from it.
     try:
-        dest_path, new_ver = publish_into_layout(temp_path, dest_folder, base_name)
+        dest_path, new_ver = publish_into_layout(temp_path, dest_folder, base_name, user=user)
     except OSError as exc:
         temp_path.unlink(missing_ok=True)
         log.error("Failed to place export in publish layout: %s", exc)

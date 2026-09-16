@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.activity.activity_writer import log_publish
@@ -13,8 +12,8 @@ from features.folder_manager.naming_validator import (
 )
 from features.folder_manager.tokens import get_path_for_token, load_tokens
 from features.publisher.modif_log import append_log
+from features.publisher.last_pointer import full_ext
 from features.publisher.publish_layout import publish_into_layout
-from features.publisher.version_resolver import get_last_file
 
 log = get_logger(__name__)
 
@@ -65,35 +64,6 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     return project_path / name_rel / type_sub / instance
 
 
-# ── versioning ─────────────────────────────────────────────────────────────────
-
-def rename_last_to_versioned(
-    dest_folder: Path,
-    base_name: str,
-    next_version: int,
-    padding: int = DEFAULT_PADDING,
-) -> Path | None:
-    """Rename the existing LAST file to a versioned name.
-
-    Returns the new versioned path, or None if no LAST existed.
-    """
-    last_file = get_last_file(dest_folder, base_name)
-    if last_file is None:
-        return None
-
-    version_str = format_version(next_version, padding)
-    ext = last_file.suffix
-    versioned_path = dest_folder / f"{base_name}_{version_str}{ext}"
-
-    try:
-        last_file.rename(versioned_path)
-        log.debug("Renamed %s → %s", last_file.name, versioned_path.name)
-        return versioned_path
-    except OSError as e:
-        log.error("Failed to rename LAST → versioned: %s", e)
-        return None
-
-
 # ── logical filename ─────────────────────────────────────────────────────────
 
 def resolve_publish_filename(source_path: Path, target_name: str | None = None) -> str:
@@ -127,27 +97,22 @@ def copy_publish(
     / ``build_output_path``) instead of recomputing the path itself.
 
     Steps:
-      1. Compute next version number
-      2. Rename existing LAST → vXXX
-      3. Copy source → dest as *_LAST.ext
-      4. Append entry to modif_logs.json
-      5. Append event to activite.json
+      1. Write the immutable <base>_vNNN.ext, then derive LAST (ADR 0017)
+      2. Append entry to modif_logs.json
+      3. Append event to activite.json
 
     *filename* is the logical FLUX name; it only supplies the base name for the
     archived/active files. *dest_folder* is where they land.
 
-    Returns the destination LAST path on success, None on failure.
+    Returns the LAST path (or the version file when LAST is a .link) on success,
+    None on failure.
     """
     ensure_dir(dest_folder)
 
     base_name = get_base_name(filename)
 
-    # Flat single-file layout: the active version keeps a stable path and past
-    # versions are archived under versions/.
-    #   <dest>/<base>_LAST.ext            (active, one per format)
-    #   <dest>/versions/<base>_vNNN.ext   (archived on the next publish)
     try:
-        dest_path, new_ver = publish_into_layout(source_path, dest_folder, base_name)
+        dest_path, new_ver = publish_into_layout(source_path, dest_folder, base_name, user=user)
     except OSError as e:
         log.error("File copy failed: %s", e)
         return None
@@ -156,7 +121,7 @@ def copy_publish(
     append_log(dest_folder, base_name, format_version(new_ver), description, user)
     # Log the VERSIONED name (not the _LAST alias) so the publish history shows each
     # distinct version; dest_path.parent is the publish folder for the "open folder" UX.
-    versioned_name = f"{base_name}_{format_version(new_ver)}{dest_path.suffix}"
+    versioned_name = f"{base_name}_{format_version(new_ver)}{full_ext(source_path.name)}"
     log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)

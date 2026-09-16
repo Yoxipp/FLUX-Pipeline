@@ -53,12 +53,13 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         proj = _project()
         dest = _publish(proj, 1)
         ir._BCACHE.clear()
-        self.assertEqual(ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST), ["LAST"])
+        self.assertEqual(ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST), ["LAST", "v001"])
         res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["ext"], ".usd")
         self.assertEqual(Path(res["path"]), dest / f"{_BASE}_LAST.usd")
-        self.assertEqual(Path(res["path"]).read_text(), "v1")
+        # ADR 0017: USD LAST is a pointer layer on the version
+        self.assertIn(f"@./{_BASE}_v001.usd@", Path(res["path"]).read_text())
 
     def test_second_publish_exposes_last_and_v001(self):
         proj = _project()
@@ -66,14 +67,14 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         ir._BCACHE.clear()
         self.assertEqual(
             ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST),
-            ["LAST", "v001"],
+            ["LAST", "v002", "v001"],
         )
-        # LAST -> newest bytes at the stable flat path
+        # LAST -> stable flat path, pointing at the newest version
         last = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(last["ok"], last)
         self.assertEqual(Path(last["path"]), dest / f"{_BASE}_LAST.usd")
-        self.assertEqual(Path(last["path"]).read_text(), "v2")
-        # v001 -> archived flat file in the shared folder, beside LAST
+        self.assertIn(f"@./{_BASE}_v002.usd@", Path(last["path"]).read_text())
+        # v001 -> immutable version file in the shared folder, beside LAST
         v1 = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
         self.assertTrue(v1["ok"], v1)
         self.assertEqual(Path(v1["path"]), dest / f"{_BASE}_v001.usd")

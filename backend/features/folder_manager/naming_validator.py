@@ -88,10 +88,8 @@ def parse_filename(filename: str) -> dict | None:
     Returns a dict with keys matching TOKEN_TYPES / TOKEN_TYPES_SHOT,
     plus 'extension' and 'is_shot'. Returns None if unparseable.
     """
-    stem, _, ext = filename.rpartition(".")
-    if not stem:
-        stem = filename
-        ext = ""
+    stem = _strip_ext(filename)
+    ext = filename[len(stem) + 1:]
 
     parts = stem.split("_")
     if not parts or not parts[0]:
@@ -132,11 +130,23 @@ def parse_filename(filename: str) -> dict | None:
     }
 
 
+# Multi-dot extensions that Path.suffix / rpartition would cut in two.
+_COMPOUND_EXTS = (".bgeo.sc", ".bgeo.gz", ".geo.sc", ".geo.gz")
+
+
+def _strip_ext(filename: str) -> str:
+    """*filename* without its extension, compound ones included ('a.bgeo.sc' -> 'a')."""
+    low = filename.lower()
+    for comp in _COMPOUND_EXTS:
+        if low.endswith(comp) and len(filename) > len(comp):
+            return filename[: -len(comp)]
+    stem, _, _ = filename.rpartition(".")
+    return stem or filename
+
+
 def get_base_name(filename: str) -> str:
     """Return CLASS_TYPE_NAME_instance without version or extension."""
-    stem, _, _ = filename.rpartition(".")
-    if not stem:
-        stem = filename
+    stem = _strip_ext(filename)
     parts = stem.split("_")
     # strip last part if it looks like a version or LAST
     if parts and (parts[-1].upper() == ACTIVE_VERSION_LABEL or _VERSION_RE.match(parts[-1])):
@@ -146,12 +156,9 @@ def get_base_name(filename: str) -> str:
 
 def strip_version(filename: str) -> str:
     """Return filename without the _vXXX or _LAST suffix (keeps extension)."""
-    stem, sep, ext = filename.rpartition(".")
-    if not stem:
-        stem = filename
-        sep = ext = ""
-    base = get_base_name(stem)
-    return f"{base}{sep}{ext}" if sep else base
+    stem = _strip_ext(filename)
+    ext = filename[len(stem):]
+    return f"{get_base_name(stem)}{ext}"
 
 
 # ── validation ────────────────────────────────────────────────────────────────

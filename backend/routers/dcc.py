@@ -1053,7 +1053,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     from dcc.maya.maya_connection import send_command_direct
     from features.folder_manager.naming_validator import format_version, get_base_name
     from features.publisher.publish_core import publish_file, resolve_publish_path
-    from features.publisher.version_resolver import get_last_file, get_next_version
+    from features.publisher.publish_layout import next_publish_version
 
     user = req.user or config.get_current_user() or "unknown"
     project_path = get_project_path(req.project_name)
@@ -1070,9 +1070,8 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     )
     if dest_folder is not None:
         base_name = get_base_name(filename_with_ext)
-        next_ver  = await loop.run_in_executor(None, lambda: get_next_version(dest_folder, base_name))
-        had_last  = await loop.run_in_executor(None, lambda: get_last_file(dest_folder, base_name)) is not None
-        new_ver   = next_ver + 1 if had_last else next_ver
+        new_ver   = await loop.run_in_executor(
+            None, lambda: next_publish_version(dest_folder, base_name, ext))
         version_str = format_version(new_ver)
     else:
         version_str = "001"
