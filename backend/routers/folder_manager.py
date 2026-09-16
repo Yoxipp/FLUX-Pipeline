@@ -412,6 +412,9 @@ async def patch_item(req: ItemPatch) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
 
     src_path = (project_path / req.subpath / req.name) if req.subpath else (project_path / req.name)
+    # Security S5: the source must stay inside the project, like the destination.
+    if not is_subpath(src_path.resolve().parent, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
     if not src_path.exists():
         raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")
 
@@ -500,6 +503,9 @@ async def copy_item(req: ItemCopy) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
 
     src_path = (project_path / req.subpath / req.name) if req.subpath else (project_path / req.name)
+    # Security S5: the source must stay inside the project, like the destination.
+    if not is_subpath(src_path.resolve().parent, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
     if not src_path.exists():
         raise HTTPException(status_code=404, detail=f"Introuvable : {req.name}")
 
