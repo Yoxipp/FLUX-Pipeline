@@ -96,5 +96,14 @@ def publish_light_asset(
                          layer_target=f"{folder.name}/{root.name}")
 
     log.info("Published light asset %s (%s) -> %s", base, version_str, folder)
+
+    # USD_ASSEMBLER_V2 A1: a GEO / RIG / SHADING publish regenerates the asset component.
+    # Only for token-resolved publishes (dest_dir); never fails the publish.
+    component = None
+    if dest_dir is not None:
+        from features.usd_assembler.component_auto import refresh_from_publish
+        component = refresh_from_publish(project_path, base, user=user)
+
     return {"root": last or root, "version": version_str, "folder": folder,
-            "version_root": root, "layers": authored}
+            "version_root": root, "layers": authored,
+            "component": component["version"] if component else None}

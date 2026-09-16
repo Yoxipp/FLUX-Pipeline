@@ -33,7 +33,7 @@ _VERSION_LABEL = "v{num:03d}"
 _ACTIVE = "LAST"
 
 # Layer kinds a layered publish may hold (the file suffix after <base>_).
-LAYER_KINDS: tuple[str, ...] = ("model", "skel", "anim", "cam", "light")
+LAYER_KINDS: tuple[str, ...] = ("model", "skel", "anim", "cam", "light", "look")
 
 # A version folder is "<base>_LAST" or "<base>_vNNN".
 _VER_FOLDER_RE = re.compile(r"^(?P<base>.+)_(?P<ver>LAST|v\d+)$")
