@@ -79,7 +79,8 @@ class AssemblyV2(unittest.TestCase):
 
         contents = Sdf.Layer.FindOrOpen(str(av.current_entry(self.project, "TOWN").parent / "TOWN_contents.usda"))
         ref = contents.GetPrimAtPath("/TOWN/CHAR/UTAH_01").referenceList.prependedItems[0]
-        self.assertTrue(ref.assetPath.startswith("../../../../assets/chara/UTAH/usd/UTAH_LAST"))
+        # from assets/sets/TOWN/usd/TOWN_vNNN/ up to assets/, then down to the component
+        self.assertTrue(ref.assetPath.startswith("../../../../chara/UTAH/usd/UTAH_LAST"), ref.assetPath)
 
         lib = build_library(self.project)
         town = next(a for a in lib["assemblies"] if a["name"] == "TOWN")
@@ -162,6 +163,32 @@ class AssemblyV2(unittest.TestCase):
         forest = [a for a in build_library(self.project)["assemblies"] if a["name"] == "ENV_forest"]
         self.assertEqual(len(forest), 1)
         self.assertFalse(forest[0]["legacy"])
+
+    def test_a_decor_is_an_asset(self) -> None:
+        # ADR 0019: a decor gets a CLASS SET + NAME token and lives in <NAME>/usd,
+        # like a component, so Production and the Folder Manager see it.
+        from features.folder_manager import tokens as tok2
+
+        av.create_assembly(self.project, "TOWN")
+        tokens = tok2.load_tokens(self.project)
+        self.assertEqual(tokens["CLASS"]["SET"], "assets/sets")
+        self.assertEqual(tokens["NAME"]["TOWN"], "assets/sets/TOWN")
+        self.assertEqual(av.assembly_dir(self.project, "TOWN"),
+                         self.project / "assets" / "sets" / "TOWN" / "usd")
+        self.assertTrue((self.project / "assets/sets/TOWN/usd/TOWN_LAST.usda").is_file())
+
+        av.edit_assembly(self.project, "TOWN", [{"op": "add", "component": "UTAH"}])
+        lib = build_library(self.project)
+        self.assertIn("TOWN", [a["name"] for a in lib["assemblies"]])
+        self.assertNotIn("TOWN", [c["name"] for c in lib["components"]])   # not a component
+        town = next(a for a in lib["assemblies"] if a["name"] == "TOWN")
+        self.assertEqual(town["broken"], 0)
+        stage = Usd.Stage.Open(town["file"])          # keep the stage alive while reading it
+        self.assertTrue(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_01").IsValid())
+
+    def test_a_component_name_cannot_become_a_decor(self) -> None:
+        with self.assertRaises(ValueError):
+            av.create_assembly(self.project, "UTAH")      # UTAH already has a component
 
     def test_layout_is_sublayered_and_orphans_warned(self) -> None:
         av.create_assembly(self.project, "TOWN")

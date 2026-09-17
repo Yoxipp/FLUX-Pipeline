@@ -103,6 +103,9 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "CHAR":   "assets/chara",
     "PROPS":  "assets/props",
     "ENV":    "assets/enviros",
+    # A set (assembly of components) is an asset like any other (ADR 0019): it has a
+    # NAME token, a folder, and its USD lives in <NAME>/usd like a component's.
+    "SET":    "assets/sets",
     "FXRIG":  "assets/fx_rig",
     # CFX_Rig is no longer a flat CLASS — it lives per-character under
     # assets/chara/<CHARACTER_NAME>/CFX_Rig (scaffolded by asset_creator).

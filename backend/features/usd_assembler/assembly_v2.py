@@ -26,7 +26,10 @@ from .structure.naming import sanitize_token
 
 log = get_logger("usd_assembler.assembly_v2")
 
+# Legacy home of the assemblies, still read (and converted on the first edit).
 ASSEMBLY_SUBDIR = "usd/assembly"
+# A set is an asset: CLASS token of a decor created from the USD page.
+ASSEMBLY_CLASS = "SET"
 ASSEMBLY_EXT = ".usda"
 DEFAULT_CLASS = "MISC"
 _VERSION_RE = re.compile(r"v\d+")
@@ -41,7 +44,56 @@ def assembly_root(project_path: str | Path) -> Path:
 
 
 def assembly_dir(project_path: str | Path, name: str) -> Path:
-    return assembly_root(project_path) / name
+    """Where the assembly's USD lives: ``<NAME_path>/usd`` once it is an asset
+    (ADR 0019), else its legacy folder ``usd/assembly/<NAME>``."""
+    from .component_auto import component_dir
+
+    own = component_dir(project_path, name)
+    return own if own is not None else assembly_root(project_path) / name
+
+
+def _kind_of(entry: Path | None) -> str:
+    """kind of a <NAME>/usd entry ("component", "assembly" or "")."""
+    if entry is None or not entry.is_file():
+        return ""
+    from pxr import Sdf
+
+    layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    if layer is None or not layer.defaultPrim:
+        return ""
+    spec = layer.GetPrimAtPath(Sdf.Path(f"/{layer.defaultPrim}"))
+    return str(spec.kind) if spec is not None and spec.kind else ""
+
+
+def ensure_asset(project_path: str | Path, name: str) -> Path:
+    """Register the decor as an asset (CLASS SET + NAME token + folder) if needed.
+
+    An asset that already has a component USD cannot also be a decor: same folder,
+    same version numbering. Refused with a clear message instead of mixing both.
+    """
+    from .component_auto import component_dir
+
+    own = component_dir(project_path, name)
+    if own is not None and _kind_of(_entry_in(own, name)) == "component":
+        raise ValueError(
+            f"{name} est deja un asset USD (component) : choisis un autre nom pour le decor")
+    from features.folder_manager.asset_creator import create_asset
+    from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
+
+    project = Path(project_path)
+    tokens = load_tokens(project)
+    if get_path_for_token(tokens, "CLASS", ASSEMBLY_CLASS) is None:
+        from core.constants import DEFAULT_CLASS_TOKENS
+
+        add_token(project, "CLASS", ASSEMBLY_CLASS, DEFAULT_CLASS_TOKENS[ASSEMBLY_CLASS])
+    if get_path_for_token(load_tokens(project), "NAME", name) is None:
+        try:
+            create_asset(project, ASSEMBLY_CLASS, name)
+        except FileExistsError:     # folder there, token missing: register it only
+            from core.constants import DEFAULT_CLASS_TOKENS
+
+            add_token(project, "NAME", name, f"{DEFAULT_CLASS_TOKENS[ASSEMBLY_CLASS]}/{name}")
+    return assembly_dir(project, name)
 
 
 def _check_name(name: str) -> str:
@@ -67,10 +119,28 @@ def assembly_versions(parent: Path, name: str) -> list[str]:
 
 
 def current_entry(project_path: str | Path, name: str) -> Path | None:
-    """Entry layer of the version LAST points at (else the highest vNNN)."""
+    """Entry layer of the version LAST points at (else the highest vNNN).
+
+    Looks in the asset folder first, then in the legacy ``usd/assembly/<NAME>``.
+    """
+    for parent in _candidate_dirs(project_path, name):
+        entry = _entry_in(parent, name)
+        if entry is not None:
+            return entry
+    return None
+
+
+def _candidate_dirs(project_path: str | Path, name: str) -> list[Path]:
+    from .component_auto import component_dir
+
+    own = component_dir(project_path, name)
+    legacy = assembly_root(project_path) / name
+    return [d for d in (own, legacy) if d is not None]
+
+
+def _entry_in(parent: Path, name: str) -> Path | None:
     from features.publisher.publish_layout import last_version_label
 
-    parent = assembly_dir(project_path, name)
     label = last_version_label(parent, name, ASSEMBLY_EXT) if _last_file(parent, name).is_file() else None
     versions = assembly_versions(parent, name)
     version = label if label in versions else (versions[-1] if versions else None)
@@ -78,11 +148,11 @@ def current_entry(project_path: str | Path, name: str) -> Path | None:
 
 
 def layout_file(project_path: str | Path, name: str) -> Path | None:
-    parent = assembly_dir(project_path, name)
-    for ext in _LAYOUT_EXTS:
-        cand = parent / f"{name}_layout_LAST{ext}"
-        if cand.is_file():
-            return cand
+    for parent in _candidate_dirs(project_path, name):
+        for ext in _LAYOUT_EXTS:
+            cand = parent / f"{name}_layout_LAST{ext}"
+            if cand.is_file():
+                return cand
     return None
 
 
@@ -394,9 +464,9 @@ def write_version(project_path: str | Path, name: str, instances: list[dict], *,
 
     project = Path(project_path)
     _check_name(name)
-    parent = assembly_dir(project, name)
     if not force and current_entry(project, name) is not None and read_instances(project, name) == instances:
         return None
+    parent = ensure_asset(project, name)     # a decor is an asset (ADR 0019)
     parent.mkdir(parents=True, exist_ok=True)
     ver = reserve_version(parent, name, ASSEMBLY_EXT)
     folder = sequence_folder(parent, name, ver)
@@ -419,8 +489,11 @@ def create_assembly(project_path: str | Path, name: str, *, source: str | None =
     """New assembly, empty or duplicated from *source* (its current instances)."""
     project = Path(project_path)
     _check_name(name)
-    if current_entry(project, name) is not None or (assembly_root(project) / f"{name}{ASSEMBLY_EXT}").is_file():
-        raise ValueError(f"l'assembly {name} existe deja")
+    existing = current_entry(project, name)
+    if _kind_of(existing) == "component":
+        raise ValueError(f"{name} est deja un asset USD (component) : choisis un autre nom pour le decor")
+    if existing is not None or (assembly_root(project) / f"{name}{ASSEMBLY_EXT}").is_file():
+        raise ValueError(f"le decor {name} existe deja")
     instances = read_instances(project, source) if source else []
     return write_version(project, name, instances, user=user, force=True)
 

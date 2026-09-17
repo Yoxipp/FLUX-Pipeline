@@ -64,8 +64,24 @@ def _class_of(tokens: dict, name: str) -> str | None:
     return best
 
 
+def _is_assembly_entry(entry: Path | None) -> bool:
+    """True when this <NAME>/usd entry is a decor (kind=assembly), not a component."""
+    if entry is None or not entry.is_file():
+        return False
+    from pxr import Sdf
+
+    layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    if layer is None or not layer.defaultPrim:
+        return False
+    spec = layer.GetPrimAtPath(Sdf.Path(f"/{layer.defaultPrim}"))
+    return bool(spec is not None and spec.kind == "assembly")
+
+
 def list_components(project_path: str | Path) -> list[dict]:
-    """Every asset with a component or with publishes that could feed one."""
+    """Every asset with a component or with publishes that could feed one.
+
+    A decor (ADR 0019: an asset whose USD is an assembly) is listed by
+    list_assemblies, not here."""
     from features.folder_manager.tokens import load_tokens
     from features.publisher.publish_layout import last_version_label
 
@@ -85,6 +101,10 @@ def list_components(project_path: str | Path) -> list[dict]:
             published = {}
         versions = _component_versions(parent, name)
         if not versions and not published:
+            continue
+        from .assembly_v2 import current_entry as _assembly_entry
+
+        if _is_assembly_entry(_assembly_entry(project, name)):
             continue
         last_file = parent / f"{name}_LAST{COMPONENT_EXT}"
         last = last_version_label(parent, name, COMPONENT_EXT) if last_file.is_file() else None
@@ -162,28 +182,38 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
 
     from .assembly_v2 import ASSEMBLY_EXT, assembly_versions, current_entry, layout_file
 
-    folder = Path(project_path) / subdir
-    if not folder.is_dir():
-        return []
+    from features.folder_manager.tokens import load_tokens
+
+    from .assembly_v2 import assembly_dir
+
+    project = Path(project_path)
+    folder = project / subdir
     comp_dirs = {Path(str(Path(c["dir"]).resolve())): c["name"] for c in (components or [])}
     out: list[dict] = []
     seen: set[str] = set()
-    for d in sorted(p for p in folder.iterdir() if p.is_dir()):
-        entry = current_entry(project_path, d.name)
-        if entry is None:
+    # Decors that are assets (ADR 0019) plus the legacy usd/assembly/<ASM>/ folders.
+    names = sorted(load_tokens(project).get("NAME", {}))
+    names += sorted(p.name for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+    for name in dict.fromkeys(names):
+        entry = current_entry(project, name)
+        if entry is None or name in seen or not _is_assembly_entry(entry):
             continue
-        contents = entry.parent / f"{d.name}_contents{ASSEMBLY_EXT}"
+        parent = entry.parent.parent
+        contents = entry.parent / f"{name}_contents{ASSEMBLY_EXT}"
         layer = Sdf.Layer.OpenAsAnonymous(str(contents))
         instances = _instances(layer, contents, comp_dirs) if layer is not None else []
-        last = d / f"{d.name}_LAST{ASSEMBLY_EXT}"
-        layout = layout_file(project_path, d.name)
-        seen.add(d.name)
-        out.append({"name": d.name, "file": str(last if last.is_file() else entry),
+        last = parent / f"{name}_LAST{ASSEMBLY_EXT}"
+        layout = layout_file(project, name)
+        seen.add(name)
+        out.append({"name": name, "file": str(last if last.is_file() else entry),
                     "version": entry.parent.name.rsplit("_", 1)[-1],
-                    "versions": assembly_versions(d, d.name), "legacy": False,
+                    "versions": assembly_versions(parent, name), "legacy": False,
+                    "dir": str(assembly_dir(project, name)),
                     "layout": str(layout) if layout else None, "layout_version": _pinned_layout_version(entry),
                     "instances": instances,
                     "broken": sum(1 for i in instances if i["broken"])})
+    if not folder.is_dir():
+        return out
     for file in sorted(p for p in folder.iterdir() if p.suffix.lower() in _USD_EXTS and p.is_file()):
         layer = Sdf.Layer.OpenAsAnonymous(str(file))
         if layer is None or not layer.defaultPrim:
@@ -195,7 +225,8 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
             continue
         instances = _instances(layer, file, comp_dirs)
         out.append({"name": layer.defaultPrim, "file": str(file), "version": None, "versions": [],
-                    "legacy": True, "layout": None, "layout_version": None, "instances": instances,
+                    "legacy": True, "dir": str(file.parent),
+                    "layout": None, "layout_version": None, "instances": instances,
                     "broken": sum(1 for i in instances if i["broken"])})
     return out
 

@@ -109,7 +109,9 @@ def publish_layout(project_path: str | Path, name: str, placements: dict[str, li
     if not rows:
         raise ValueError(f"aucune instance de l'assembly {name} trouvee dans la scene")
 
-    parent = assembly_dir(project, name)
+    from .assembly_v2 import ensure_asset
+
+    parent = ensure_asset(project, name)     # a decor is an asset (ADR 0019)
     folder = parent / LAYOUT_SUBDIR
     base = layout_base(name)
     ver = reserve_version(folder, base, ASSEMBLY_EXT)

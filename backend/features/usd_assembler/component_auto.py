@@ -300,6 +300,12 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
     if parent is None:
         log.warning("Component %s skipped: no NAME token", name)
         return None
+    from .assembly_v2 import _entry_in, _kind_of
+
+    if _kind_of(_entry_in(parent, name)) == "assembly":
+        # Same folder, same numbering: a decor and a component cannot share a NAME.
+        log.warning("Component %s skipped: this asset is a decor (assembly)", name)
+        return None
     merged = _current_pins(parent, name)
     for dept, pin in (pins or {}).items():
         if dept not in DEPARTMENTS:
