@@ -267,6 +267,13 @@ def sequence_folder(dest_folder: Path, base: str, ver: int,
     return dest_folder / f"{base}_{format_version(ver, padding)}"
 
 
+def _refresh_component(dest_folder: Path, base: str, ext: str, user: str) -> None:
+    """ADR 0019: a USD publish in an asset task feeds that asset's USD (component)."""
+    from features.usd_assembler.component_auto import refresh_from_publish_folder
+
+    refresh_from_publish_folder(dest_folder, base, ext, user=user)
+
+
 def finalize_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, *,
                               is_sequence: bool = False, pattern: str | None = None,
                               user: str = "", padding: int = DEFAULT_PADDING) -> Path | None:
@@ -286,6 +293,8 @@ def finalize_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, 
                        settings=settings)
     last = lp.write_last(dest_folder, base, ext, version_path, ver, mode,
                          user=user, padding=padding, pattern=pattern)
+    if not is_sequence:
+        _refresh_component(dest_folder, base, ext, user)
     if last is None or mode == lp.MODE_LINK:
         return version_path
     return last

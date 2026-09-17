@@ -125,6 +125,9 @@ def copy_publish(
     log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
+    # ADR 0019: a USD publish in an asset task feeds that asset's USD (component).
+    from features.usd_assembler.component_auto import refresh_from_publish_folder
+    refresh_from_publish_folder(dest_folder, base_name, full_ext(source_path.name), user=user)
     return dest_path
 
 

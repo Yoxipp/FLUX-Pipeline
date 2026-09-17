@@ -240,7 +240,7 @@ interface ComposerSel {
   [key: string]: string
   category: string   // asset: CHAR / PROPS / ENV / FX
   name:     string
-  task:     string   // asset: GEO / SHADING / GROOM / RIG / CFX / MULT
+  task:     string   // asset: GEO / SHADING / GROOM / RIG / CFX (one department each)
   instance: string
   variante: string
   seq:      string   // shot
@@ -308,11 +308,19 @@ function mapSuffix(path: string): string {
 const CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
 const ASSET_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX'] as const
 // Coarse task = TYPE token (fixed order); label shown title-cased, value uppercase.
+// One task = one USD department (ADR 0019): MULT is gone, a publish carries one thing.
 const ASSET_TASKS: { value: string; label: string }[] = [
   { value: 'GEO', label: 'Geo' }, { value: 'ANIM', label: 'Anim' }, { value: 'SHADING', label: 'Shading' },
   { value: 'GROOM', label: 'Groom' }, { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' },
-  { value: 'MULT', label: 'Mult' }, { value: 'REF', label: 'Ref' },
+  { value: 'REF', label: 'Ref' },
 ]
+// What a USD publish of this task contributes to the asset (ADR 0019), and which
+// light-export layers make sense for it. Other tasks: no USD department.
+const USD_DEPARTMENTS: Record<string, { dept: string; layers: ('geo' | 'skel' | 'anim' | 'weights' | 'uv')[] }> = {
+  GEO:  { dept: 'model', layers: ['geo', 'weights', 'uv'] },
+  RIG:  { dept: 'rig',   layers: ['skel'] },
+  ANIM: { dept: 'clip',  layers: ['anim'] },
+}
 
 // Info popover copy for each token (explanation · expected · concrete example).
 interface TokenInfo { title: string; desc: string; expected: string; example: string }
@@ -1932,7 +1940,8 @@ export function Publisher() {
           {/* USD LAYERS — Maya & Houdini, asset + USD formats only (hidden otherwise).
               Layered UsdSkel export; the checkboxes choose which layers to author. */}
           {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
-            const usdOk = true
+            const contribution = USD_DEPARTMENTS[sel.task]
+            const usdOk = !!contribution
             const on = usdOk && lightUsd
             return (
               <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
@@ -1958,13 +1967,15 @@ export function Publisher() {
                   </div>
                   <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
                     {usdOk
-                      ? 'Export en layers USD (model / skel / anim…) — choisis ci-dessous'
-                      : 'Disponible seulement en usd / usda / usdc'}
+                      ? `Export en layers USD · département ${contribution.dept} de l'asset`
+                      : `TASK ${sel.task || '—'} : pas de département USD (GEO, RIG ou ANIM)`}
                   </span>
                 </div>
                 {on && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: 10 }}>
-                    {([['geo', 'Geo'], ['skel', 'Squelette'], ['anim', 'Animation'], ['weights', 'Skin weights (boneCapture)'], ['uv', 'UV']] as const).map(([k, label]) => (
+                    {([['geo', 'Geo'], ['skel', 'Squelette'], ['anim', 'Animation'], ['weights', 'Skin weights (boneCapture)'], ['uv', 'UV']] as const)
+                      .filter(([k]) => contribution.layers.includes(k))
+                      .map(([k, label]) => (
                       <div key={k} onClick={() => setLightInclude(p => ({ ...p, [k]: !p[k] }))}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
                         <Check on={lightInclude[k]} />

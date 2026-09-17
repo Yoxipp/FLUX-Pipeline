@@ -311,28 +311,75 @@ class FluxResolver:
             version=self._freeze_label(want, scanned),
         )
 
+    def _scan_flat_usd(self, parent: Path, instance: str = "") -> dict[str, dict]:
+        """Plain USD publishes ``<inst>/<base>_vNNN.<usd ext>`` (one file, no layers).
+
+        Returns {version_label: {"base", "path"}}; LAST maps to the version its pointer
+        layer targets (ADR 0017), else to the highest vNNN.
+        """
+        from features.publisher import last_pointer as lp
+
+        found: dict[str, dict] = {}
+        if not parent.exists():
+            return found
+        if instance:
+            leaf = parent / instance.lower()
+            candidates = [leaf] if leaf.exists() else []
+        else:
+            candidates = [parent] + sorted(p for p in parent.iterdir() if p.is_dir())
+        for inst in candidates:
+            if not inst.exists():
+                continue
+            for file in sorted(p for p in inst.iterdir() if p.is_file()):
+                stem, ext, role = lp.parse_published_name(file.name)
+                if role != "data" or ext.lower() not in (".usd", ".usda", ".usdc"):
+                    continue
+                m = re.fullmatch(r"(?P<base>.+)_(?P<ver>v\d+)", stem)
+                if m:
+                    found[m.group("ver")] = {"base": m.group("base"), "path": file}
+            if not found:
+                continue
+            target = None
+            for ext in lp.LAYER_EXTS:
+                last = lp.read_last(inst, next(iter(found.values()))["base"], ext)
+                if last and last.get("version") in found:
+                    target = last["version"]
+                    break
+            target = target or max(found, key=lambda v: int(v[1:]))
+            found[_ACTIVE] = {**found[target], "version": target}
+        return found
+
     def resolve_root(
         self, asset: str, task: str, version: str = "latest", instance: str = "",
     ) -> ResolvedAsset:
-        """Freeze the ROOT file ``<base>.<usd ext>`` of one layered publish (all its
-        layers composed), for a department contribution (ADR 0019)."""
+        """Freeze the ROOT file of one publish, for a department contribution (ADR 0019).
+
+        Layered publish: the version folder's ``<base>.<usd ext>`` (all its layers
+        composed). Plain publish: the ``<base>_vNNN.<usd ext>`` file itself.
+        """
         parent = self._publish_parent(asset, task)
         scanned = self._scan_version_folders(parent, instance)
+        flat = self._scan_flat_usd(parent, instance)
         want = _ACTIVE if version in ("latest", "LAST") else version
         info = scanned.get(want)
-        if info is None:
-            avail = ", ".join(sorted(scanned)) or "<none>"
-            raise ResolveError(
-                f"version '{version}' not found for '{asset}' (task '{task}', instance "
-                f"'{instance or '*'}'); available: {avail}"
-            )
-        base, folder = info["base"], info["folder"]
-        for ext in (".usd", ".usda", ".usdc"):
-            root = folder / f"{base}{ext}"
-            if root.is_file():
-                return ResolvedAsset(path=root, default_prim=_default_prim(root) or sanitize_token(base),
-                                     version=self._freeze_label(want, scanned))
-        raise ResolveError(f"root layer missing in {folder.name} for '{asset}'")
+        if info is not None:
+            base, folder = info["base"], info["folder"]
+            for ext in (".usd", ".usda", ".usdc"):
+                root = folder / f"{base}{ext}"
+                if root.is_file():
+                    return ResolvedAsset(path=root, default_prim=_default_prim(root) or sanitize_token(base),
+                                         version=self._freeze_label(want, scanned))
+        flat_info = flat.get(want)
+        if flat_info is not None:
+            root = flat_info["path"]
+            label = flat_info.get("version", want) if want == _ACTIVE else want
+            return ResolvedAsset(path=root, default_prim=_default_prim(root) or sanitize_token(flat_info["base"]),
+                                 version=label)
+        avail = ", ".join(sorted(set(scanned) | set(flat))) or "<none>"
+        raise ResolveError(
+            f"version '{version}' not found for '{asset}' (task '{task}', instance "
+            f"'{instance or '*'}'); available: {avail}"
+        )
 
     @staticmethod
     def _freeze_label(label: str, scanned: dict[str, dict]) -> str:

@@ -125,6 +125,8 @@ DEFAULT_TYPE_TOKENS: dict[str, str] = {
     "GROOM":   "groom",
     "RIG":     "rig",
     "CFX":     "CFX_Rig",
+    # Kept so old "mult" publishes still resolve; the Publisher no longer offers it
+    # (ADR 0019: one publish = one department).
     "MULT":    "mult",
     "REF":     "reference",
 }

@@ -311,6 +311,27 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
             "slots": signature}
 
 
+USD_EXTS = (".usd", ".usda", ".usdc")
+
+
+def refresh_from_publish_folder(dest_folder: str | Path, base: str, ext: str, *,
+                                user: str = "") -> dict | None:
+    """Hook for any publish writer: a USD publish of *base* in an asset task folder
+    refreshes that asset (ADR 0019). The project is the first parent holding
+    tokens.json. Never raises."""
+    if str(ext).lower() not in USD_EXTS:
+        return None
+    try:
+        folder = Path(dest_folder).resolve()
+        project = next((p for p in [folder, *folder.parents] if (p / "tokens.json").is_file()), None)
+        if project is None:
+            return None
+        return refresh_from_publish(project, base, user=user)
+    except Exception as exc:
+        log.warning("Component refresh failed for %s: %s", base, exc)
+        return None
+
+
 def refresh_from_publish(project_path: str | Path, base: str, *, user: str = "") -> dict | None:
     """Hook for a layered publish of *base* (CLASS_TYPE_NAME_INSTANCE).
 

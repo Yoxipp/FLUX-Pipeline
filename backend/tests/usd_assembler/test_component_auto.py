@@ -101,6 +101,30 @@ class ComponentAuto(unittest.TestCase):
         self.assertIsNone(refresh_component(self.project, _NAME))
         self.assertFalse((self.usd_dir / "UTAH_v002").exists())
 
+    def test_plain_usd_publish_feeds_its_department(self) -> None:
+        # A normal USD publish (mayaUSDExport, Houdini ROP...) is a department
+        # contribution too, not only the layered light export (ADR 0019).
+        from pxr import UsdGeom
+
+        from features.publisher.publish_core import publish_file
+
+        src = self.project / "_src" / "CHAR_GEO_UTAH_null.usda"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        stage = Usd.Stage.CreateNew(str(src))
+        stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, f"/{_NAME}").GetPrim())
+        UsdGeom.Mesh.Define(stage, f"/{_NAME}/geo/render/body")
+        stage.GetRootLayer().Save()
+        self.assertIsNotNone(publish_file(src, self.project, "flat", "adam", "PROJ"))
+
+        entry = self.usd_dir / "UTAH_v001" / "UTAH.usda"
+        self.assertTrue(entry.is_file())
+        model = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v001" / "UTAH_model.usda"))
+        ref = model.GetPrimAtPath("/UTAH").variantSets["model"].variants["null"] \
+            .primSpec.referenceList.prependedItems[0]
+        self.assertTrue(ref.assetPath.endswith("CHAR_GEO_UTAH_null_v001.usda"), ref.assetPath)
+        composed = Usd.Stage.Open(str(self.usd_dir / "UTAH_LAST.usda"))
+        self.assertTrue(composed.GetPrimAtPath("/UTAH/geo/render/body").IsValid())
+
     def test_non_component_task_is_ignored(self) -> None:
         res = self._publish("ANIM", "anim", ["Root"])
         self.assertIsNone(res["component"])

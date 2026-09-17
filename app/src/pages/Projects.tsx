@@ -96,7 +96,8 @@ const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custo
 // FX is the display label for the FXRIG class). Name/Instance/Variante come from disk.
 const FINDER_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX']
 const FINDER_CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
-const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'MULT']
+// One task = one USD department (ADR 0019); MULT is kept on disk for old publishes only.
+const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'ANIM']
 
 const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: typeof Star }[] = [
   { id: 'favoris',  label: 'Favoris',  icon: Star },
