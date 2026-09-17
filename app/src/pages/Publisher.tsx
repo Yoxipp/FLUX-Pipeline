@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Trash2, FolderOpen, X } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon, Check, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
@@ -314,12 +314,21 @@ const ASSET_TASKS: { value: string; label: string }[] = [
   { value: 'GROOM', label: 'Groom' }, { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' },
   { value: 'REF', label: 'Ref' },
 ]
-// What a USD publish of this task contributes to the asset (ADR 0019), and which
-// light-export layers make sense for it. Other tasks: no USD department.
-const USD_DEPARTMENTS: Record<string, { dept: string; layers: ('geo' | 'skel' | 'anim' | 'weights' | 'uv')[] }> = {
-  GEO:  { dept: 'model', layers: ['geo', 'weights', 'uv'] },
-  RIG:  { dept: 'rig',   layers: ['skel'] },
-  ANIM: { dept: 'clip',  layers: ['anim'] },
+// What a USD publish of this task contributes to the asset (ADR 0019) and, when FLUX
+// writes the USD itself, what it extracts from the scene. The task decides: no layer
+// checkboxes. Other tasks have no USD department (the DCC writes a plain file).
+interface UsdContribution {
+  dept: string
+  what: string
+  include: { geo: boolean; skel: boolean; anim: boolean; weights: boolean; uv: boolean }
+}
+const USD_DEPARTMENTS: Record<string, UsdContribution> = {
+  GEO:  { dept: 'model', what: 'géométrie, UV et poids de skin',
+          include: { geo: true,  skel: true,  anim: false, weights: true,  uv: true } },
+  RIG:  { dept: 'rig',   what: 'squelette',
+          include: { geo: false, skel: true,  anim: false, weights: false, uv: false } },
+  ANIM: { dept: 'clip',  what: 'animation du squelette',
+          include: { geo: false, skel: true,  anim: true,  weights: false, uv: false } },
 }
 
 // Info popover copy for each token (explanation · expected · concrete example).
@@ -707,8 +716,14 @@ export function Publisher() {
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
   const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
-  const [lightUsd, setLightUsd]                     = useState(false)   // Maya UsdSkel light export
-  const [lightInclude, setLightInclude]             = useState({ geo: true, skel: true, anim: true, weights: true, uv: true })
+  // Who writes the USD of an asset task: null = the default for this task (FLUX when
+  // the task has a department), true/false = the artist's explicit choice.
+  const [fluxWriter, setFluxWriter]                 = useState<boolean | null>(null)
+  const usdContribution = USD_DEPARTMENTS[sel.task]
+  // FLUX writes the layered USD by default for a task that has a department.
+  const usdLayers = (fluxWriter ?? !!usdContribution) && !!usdContribution
+  const usdInclude = usdContribution?.include
+    ?? { geo: true, skel: true, anim: true, weights: true, uv: true }
   const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
   const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
   const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
@@ -1052,7 +1067,7 @@ export function Publisher() {
           toast.error('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
           return
         }
-        if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+        if (usdLayers && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = formatToken(sel.name) || parts[2]
           const res = await api.exportMayaLightUsd({
             project_name: project,
@@ -1062,11 +1077,11 @@ export function Publisher() {
             scope:        mayaScope,
             frame_start:  animOn ? frameStart : undefined,
             frame_end:    animOn ? frameEnd : undefined,
-            include_geo:     lightInclude.geo,
-            include_skel:    lightInclude.skel,
-            include_anim:    lightInclude.anim,
-            include_weights: lightInclude.weights,
-            include_uv:      lightInclude.uv,
+            include_geo:     usdInclude.geo,
+            include_skel:    usdInclude.skel,
+            include_anim:    usdInclude.anim,
+            include_weights: usdInclude.weights,
+            include_uv:      usdInclude.uv,
             port:            readActiveInstancePort('Maya') ?? undefined,
           })
           toast.success(`USD léger ${res.version} → ${res.asset}`)
@@ -1091,7 +1106,7 @@ export function Publisher() {
           toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
           return
         }
-        if (lightUsd && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+        if (usdLayers && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = formatToken(sel.name) || parts[2]
           const res = await api.exportHoudiniLightUsd({
             project_name: project,
@@ -1100,11 +1115,11 @@ export function Publisher() {
             fmt:          exportExt.replace('.', ''),
             frame_start:  animOn ? frameStart : undefined,
             frame_end:    animOn ? frameEnd : undefined,
-            include_geo:     lightInclude.geo,
-            include_skel:    lightInclude.skel,
-            include_anim:    lightInclude.anim,
-            include_weights: lightInclude.weights,
-            include_uv:      lightInclude.uv,
+            include_geo:     usdInclude.geo,
+            include_skel:    usdInclude.skel,
+            include_anim:    usdInclude.anim,
+            include_weights: usdInclude.weights,
+            include_uv:      usdInclude.uv,
           })
           toast.success(`USD Layers ${res.version} → ${res.asset}`)
           res.warnings?.forEach(w => toast.warning(w))
@@ -1278,7 +1293,7 @@ export function Publisher() {
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts,
-    mayaConnected, mayaScope, mayaExportOpts, lightUsd, lightInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
+    mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
   // Ctrl/Cmd+P → publish (also prevents the browser print dialog)
@@ -1689,18 +1704,21 @@ export function Publisher() {
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
         <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
 
-          {/* PRESETS — quick USD Layers setups (Maya & Houdini). Set format + layers. */}
+          {/* PRESETS — one click = the USD department to publish (task + format). */}
           {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && (
             <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-              <SecTitle>PRESETS</SecTitle>
+              <SecTitle>PRESETS USD</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {([
-                  { label: 'Base light USD', ext: '.usd', layers: { geo: true, skel: true, anim: true, weights: true, uv: true } },
-                  { label: 'Géo USD',        ext: '.usd', layers: { geo: true, skel: false, anim: false, weights: false, uv: true } },
-                  { label: 'Skin USD',       ext: '.usd', layers: { geo: true, skel: true, anim: false, weights: true, uv: true } },
+                  { label: 'Modèle',    task: 'GEO' },
+                  { label: 'Rig',       task: 'RIG' },
+                  { label: 'Anim',      task: 'ANIM' },
                 ] as const).map(p => (
-                  <Pill key={p.label} style={{ cursor: 'pointer' }}>
-                    <span onClick={() => { setExportExt(p.ext); setLightUsd(true); setLightInclude({ ...p.layers }) }}>{p.label}</span>
+                  <Pill key={p.label} active={sel.task === p.task && ['.usd', '.usda', '.usdc'].includes(exportExt)}
+                    style={{ cursor: 'pointer' }}>
+                    <span onClick={() => { handleSelect('task', p.task); setExportExt('.usd'); setFluxWriter(null) }}>
+                      {p.label}
+                    </span>
                   </Pill>
                 ))}
               </div>
@@ -1735,7 +1753,7 @@ export function Publisher() {
               ['Start', frameStart, setFrameStart], ['End', frameEnd, setFrameEnd],
             ]
             // Light USD export samples every frame (no step on that path).
-            if (!(animCapable && lightUsd)) fields.push(['Step', frameStep, setFrameStep])
+            if (!(animCapable && usdLayers)) fields.push(['Step', frameStep, setFrameStep])
             return (
               <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
                 <SecTitle>{animCapable ? 'ANIMATION' : 'SÉQUENCE'}</SecTitle>
@@ -1753,7 +1771,7 @@ export function Publisher() {
                   </div>
                   <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                     {animCapable
-                      ? (on ? 'Plage animée · un seul fichier' : (lightUsd ? 'Plage de lecture du DCC' : 'Image courante'))
+                      ? (on ? 'Plage animée · un seul fichier' : (usdLayers ? 'Plage de lecture du DCC' : 'Image courante'))
                       : (on ? 'Activé · dossier versionné + $F4' : 'Désactivé · fichier unique LAST')}
                   </div>
                 </div>
@@ -1937,17 +1955,17 @@ export function Publisher() {
             </div>
           )}
 
-          {/* USD LAYERS — Maya & Houdini, asset + USD formats only (hidden otherwise).
-              Layered UsdSkel export; the checkboxes choose which layers to author. */}
+          {/* USD — Maya & Houdini, asset + USD formats only (hidden otherwise). The TASK
+              decides what is exported (ADR 0019); the switch only says who writes it. */}
           {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
             const contribution = USD_DEPARTMENTS[sel.task]
             const usdOk = !!contribution
-            const on = usdOk && lightUsd
+            const on = usdLayers
             return (
               <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-                <SecTitle>USD LAYERS</SecTitle>
+                <SecTitle>USD</SecTitle>
                 <div
-                  onClick={() => { if (usdOk) setLightUsd(v => !v) }}
+                  onClick={() => { if (usdOk) setFluxWriter(!on) }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     cursor: usdOk ? 'pointer' : 'default', userSelect: 'none',
@@ -1966,24 +1984,20 @@ export function Publisher() {
                     }} />
                   </div>
                   <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
-                    {usdOk
-                      ? `Export en layers USD · département ${contribution.dept} de l'asset`
-                      : `TASK ${sel.task || '—'} : pas de département USD (GEO, RIG ou ANIM)`}
+                    {on ? 'Écrit par FLUX (layers USD)' : `Écrit par ${dcc}`}
                   </span>
                 </div>
-                {on && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: 10 }}>
-                    {([['geo', 'Geo'], ['skel', 'Squelette'], ['anim', 'Animation'], ['weights', 'Skin weights (boneCapture)'], ['uv', 'UV']] as const)
-                      .filter(([k]) => contribution.layers.includes(k))
-                      .map(([k, label]) => (
-                      <div key={k} onClick={() => setLightInclude(p => ({ ...p, [k]: !p[k] }))}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
-                        <Check on={lightInclude[k]} />
-                        <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+                  {usdOk ? (<>
+                    TASK {sel.task} : départment <span style={{ fontFamily: 'var(--mono)' }}>{contribution.dept}</span> de
+                    l'asset, {contribution.what}. La task décide de ce qui est exporté.
+                    {on
+                      ? " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe)."
+                      : ` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`}
+                  </>) : (
+                    `TASK ${sel.task || '—'} : pas de département USD (GEO, RIG ou ANIM). ${dcc} écrit le fichier.`
+                  )}
+                </div>
               </div>
             )
           })()}
