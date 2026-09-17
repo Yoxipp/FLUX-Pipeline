@@ -222,8 +222,15 @@ def generate_proxy(
             render_over = UsdGeom.Mesh(dst_stage.OverridePrim(src_path))
             render_over.CreatePurposeAttr(UsdGeom.Tokens.render)
 
-            # Author the decimated proxy sibling.
-            proxy_path = src_path.GetParentPath().AppendChild(src_path.name + "_proxy")
+            # Author the decimated proxy: /<asset>/geo/proxy/<mesh> for the Solaris layout
+            # (ADR 0019, meshes under geo/render), else a "<mesh>_proxy" sibling.
+            parent = src_path.GetParentPath()
+            if parent.name == "render" and parent.GetParentPath().name == "geo":
+                proxy_scope = parent.GetParentPath().AppendChild("proxy")
+                UsdGeom.Scope.Define(dst_stage, proxy_scope)
+                proxy_path = proxy_scope.AppendChild(src_path.name)
+            else:
+                proxy_path = parent.AppendChild(src_path.name + "_proxy")
             proxy = UsdGeom.Mesh.Define(dst_stage, proxy_path)
             proxy.CreatePurposeAttr(UsdGeom.Tokens.proxy)
             proxy.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(proxy_points))

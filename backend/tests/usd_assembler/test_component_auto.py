@@ -65,7 +65,7 @@ class ComponentAuto(unittest.TestCase):
             .GetPrimAtPath("/UTAH").referenceList.prependedItems
         paths = [r.assetPath for r in refs]
         self.assertTrue(all(p.startswith("../../model/null/") for p in paths), paths)
-        self.assertEqual({r.primPath.pathString for r in refs}, {"/CHAR_GEO_UTAH_null"})
+        self.assertEqual({r.primPath.pathString for r in refs}, {"/UTAH"})
 
     def test_rig_publish_takes_skel_slot_and_bumps_version(self) -> None:
         self._publish("GEO", "model", ["Root"])

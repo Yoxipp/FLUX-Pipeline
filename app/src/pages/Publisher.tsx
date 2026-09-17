@@ -1062,6 +1062,7 @@ export function Publisher() {
             port:            readActiveInstancePort('Maya') ?? undefined,
           })
           toast.success(`USD léger ${res.version} → ${res.asset}`)
+          res.warnings?.forEach(w => toast.warning(w))
           return
         }
         const res = await api.publishMaya({
@@ -1098,6 +1099,7 @@ export function Publisher() {
             include_uv:      lightInclude.uv,
           })
           toast.success(`USD Layers ${res.version} → ${res.asset}`)
+          res.warnings?.forEach(w => toast.warning(w))
           return
         }
         const res = await api.publishHoudiniRop({

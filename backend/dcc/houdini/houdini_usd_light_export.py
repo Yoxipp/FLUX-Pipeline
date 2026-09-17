@@ -322,7 +322,8 @@ def run_light_export(
             light, Path(project_path), fmt=fmt, dest_dir=dest_dir, base_name=base_name
         )
         log.info("Houdini light USD export published: %s (%s)", asset, pub["version"])
-        return {"ok": True, "asset": asset, "version": pub["version"], "root": str(pub["root"])}
+        return {"ok": True, "asset": asset, "version": pub["version"], "root": str(pub["root"]),
+                "warnings": pub.get("warnings", [])}
     except Exception as exc:
         log.error("Houdini light export publish failed: %s", exc)
         return {"ok": False, "error": str(exc)}

@@ -271,7 +271,7 @@ export const api = {
     include_uv?:      boolean
     port?:            number
   }) =>
-    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+    apiCall<{ ok: boolean; asset: string; version: string; root: string; warnings?: string[] }>(
       'POST', '/dcc/maya/export-usd', payload),
 
   exportHoudiniLightUsd: (payload: {
@@ -289,7 +289,7 @@ export const api = {
     include_weights?: boolean
     include_uv?:      boolean
   }) =>
-    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+    apiCall<{ ok: boolean; asset: string; version: string; root: string; warnings?: string[] }>(
       'POST', '/dcc/houdini/export-usd', payload),
 
   // ZBrush

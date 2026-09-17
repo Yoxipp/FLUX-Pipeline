@@ -14,11 +14,20 @@ from core.logger import get_logger
 from ..usd_assembler.structure.naming import sanitize_token
 from .contract import AnimData, LightAsset, Mat4, MeshData, SkeletonData, filter_animated_joints
 
-__all__ = ["author_light_asset", "filter_animated_joints"]
+__all__ = ["ANIM_SUBPATH", "GEO_RENDER_SCOPE", "SKELETON_SUBPATH", "author_light_asset",
+           "filter_animated_joints"]
 
 log = get_logger("usd_export.skel")
 
 _IDENTITY: Mat4 = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+
+# Prim layout inside the root (ADR 0019, SideFX Component Builder + UsdSkel):
+#   /<NAME>                 SkelRoot
+#   /<NAME>/geo/render/<m>  meshes          /<NAME>/geo/proxy  (usd_proxy)
+#   /<NAME>/skel/Skeleton   /<NAME>/skel/Anim
+GEO_RENDER_SCOPE = "geo/render"
+SKELETON_SUBPATH = "skel/Skeleton"
+ANIM_SUBPATH = "skel/Anim"
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -36,17 +45,28 @@ def _new_stage(path: Path, fmt: str) -> Usd.Stage:
 
 # ── layer authoring ──────────────────────────────────────────────────────────────
 
+def _define_scopes(stage: Usd.Stage, path: str) -> None:
+    """Scope prims for every missing ancestor between the root and *path* (Solaris layout)."""
+    parts = [p for p in path.split("/") if p]
+    for i in range(2, len(parts)):
+        sub = "/" + "/".join(parts[:i])
+        if not stage.GetPrimAtPath(sub):
+            UsdGeom.Scope.Define(stage, sub)
+
+
 def _author_model_layer(
     path: Path, root_path: str, skel_path: str, asset: str,
     meshes: list[MeshData], fmt: str,
 ) -> None:
-    """Model layer: the SkelRoot + skinned meshes (the heavy geometry)."""
+    """Model layer: the SkelRoot + skinned meshes under geo/render (the heavy geometry)."""
     stage = _new_stage(path, fmt)
     root = UsdSkel.Root.Define(stage, root_path)
     stage.SetDefaultPrim(root.GetPrim())
+    render_path = f"{root_path}/{GEO_RENDER_SCOPE}"
+    _define_scopes(stage, f"{render_path}/x")
 
     for mesh in meshes:
-        mpath = f"{root_path}/{sanitize_token(mesh.name)}"
+        mpath = f"{render_path}/{sanitize_token(mesh.name)}"
         gmesh = UsdGeom.Mesh.Define(stage, mpath)
         gmesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in mesh.points]))
         gmesh.CreateFaceVertexCountsAttr(Vt.IntArray(mesh.face_vertex_counts))
@@ -79,6 +99,7 @@ def _author_skel_layer(
     """Skel layer: the Skeleton prim (topology + bind/rest pose)."""
     stage = _new_stage(path, fmt)
     stage.OverridePrim(root_path)   # SkelRoot type comes from the model layer
+    _define_scopes(stage, skel_path)
     skel = UsdSkel.Skeleton.Define(stage, skel_path)
     skel.CreateJointsAttr(Vt.TokenArray(skeleton.joints))
     skel.CreateBindTransformsAttr(Vt.Matrix4dArray([_mat(m) for m in skeleton.bind_transforms]))
@@ -94,6 +115,7 @@ def _author_anim_layer(
     """Anim layer: a UsdSkelAnimation carrying ONLY the animated joints."""
     stage = _new_stage(path, fmt)
     stage.OverridePrim(root_path)
+    _define_scopes(stage, anim_path)
     uanim = UsdSkel.Animation.Define(stage, anim_path)
     uanim.CreateJointsAttr(Vt.TokenArray(anim.joints))
 
@@ -194,12 +216,14 @@ def author_light_asset(
     *,
     fmt: str = "usda",
     version_label: str | None = None,
+    root_name: str | None = None,
 ) -> dict[str, Path]:
     """Author the light layered asset into *dest_dir*.
 
     Writes ``{asset}_model``, ``{asset}_skel``, optional ``{asset}_anim`` and a root
-    ``{asset}`` that sublayers them strong->weak (anim, skel, model). The root's
-    defaultPrim is the asset token. When *version_label* is given it is appended to
+    ``{asset}`` that sublayers them strong->weak (anim, skel, model). The prim root
+    (and defaultPrim) is *root_name* (the NAME token, ADR 0019), else the asset token;
+    file names always use ``asset.asset``. When *version_label* is given it is appended to
     every file name (e.g. ``{asset}_model_v001``); the default (None) uses plain names,
     which suits a per-version output folder.
     Returns a dict of {"model","skel","anim"(optional),"root"} -> Path.
@@ -207,10 +231,10 @@ def author_light_asset(
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
 
-    token = sanitize_token(asset.asset)
+    token = sanitize_token(root_name or asset.asset)
     root_path = f"/{token}"
-    skel_path = f"{root_path}/Skeleton"
-    anim_path = f"{root_path}/Anim"
+    skel_path = f"{root_path}/{SKELETON_SUBPATH}"
+    anim_path = f"{root_path}/{ANIM_SUBPATH}"
 
     _suffix_ver = f"_{version_label}" if version_label else ""
 

@@ -1073,15 +1073,18 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
             base_name = get_base_name(full)
 
         light = light_asset_from_dict(envelope["asset"])
-        pub = await loop.run_in_executor(
-            None,
-            lambda: publish_light_asset(
-                light, project_path, fmt=req.fmt, dest_dir=dest_dir, base_name=base_name
-            ),
-        )
+        try:
+            pub = await loop.run_in_executor(
+                None,
+                lambda: publish_light_asset(
+                    light, project_path, fmt=req.fmt, dest_dir=dest_dir, base_name=base_name
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         log.info("Light USD export published: %s (%s) -> %s", base_name or req.asset, pub["version"], pub["folder"])
         return {"ok": True, "asset": base_name or req.asset, "version": pub["version"],
-                "root": str(pub["root"]), "folder": str(pub["folder"])}
+                "root": str(pub["root"]), "folder": str(pub["folder"]), "warnings": pub.get("warnings", [])}
     finally:
         await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
 

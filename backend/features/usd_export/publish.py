@@ -66,10 +66,22 @@ def publish_light_asset(
     is the file/folder stem (e.g. "CHAR_BLOCK_DAVID_null"). Falls back to
     ``{project}/{asset}/model/usd`` and the asset name when omitted.
 
+    A token-named asset publish (ADR 0019) keeps only its department's data
+    (departments.restrict_light_asset, MULT refused) and its prim root is the NAME token.
+
     Returns {"root": Path (LAST pointer, or the version root if LAST is locked),
-    "version": "vNNN", "folder": version folder, "version_root": Path, "layers": {...}}.
+    "version": "vNNN", "folder": version folder, "version_root": Path, "layers": {...},
+    "warnings": [...]}.
     """
+    from .departments import contribution, restrict_light_asset
+
     base = base_name or asset.asset
+    contrib = contribution(base) if base_name else None
+    warnings: list[str] = []
+    root_name = None
+    if contrib is not None:
+        asset, warnings = restrict_light_asset(asset, contrib)
+        root_name = contrib["name"] or None
     if dest_dir is not None:
         parent = Path(dest_dir)
     else:
@@ -86,7 +98,8 @@ def publish_light_asset(
     # Author straight into the reserved version folder (no rename, ADR 0017 U3b rule).
     light = replace(asset, asset=base)
     try:
-        authored = author_light_asset(light, folder, fmt=fmt.lstrip("."), version_label=None)
+        authored = author_light_asset(light, folder, fmt=fmt.lstrip("."), version_label=None,
+                                      root_name=root_name)
     except Exception:
         discard_rendered_version(parent, base, ext, ver, is_sequence=True)
         raise
@@ -104,6 +117,8 @@ def publish_light_asset(
         from features.usd_assembler.component_auto import refresh_from_publish
         component = refresh_from_publish(project_path, base, user=user)
 
+    for w in warnings:
+        log.warning("Light asset %s: %s", base, w)
     return {"root": last or root, "version": version_str, "folder": folder,
             "version_root": root, "layers": authored,
-            "component": component["version"] if component else None}
+            "component": component["version"] if component else None, "warnings": warnings}

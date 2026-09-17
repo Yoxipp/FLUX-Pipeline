@@ -39,6 +39,17 @@ LAYER_KINDS: tuple[str, ...] = ("model", "skel", "anim", "cam", "light", "look")
 _VER_FOLDER_RE = re.compile(r"^(?P<base>.+)_(?P<ver>LAST|v\d+)$")
 
 
+def _default_prim(path: Path) -> str:
+    """defaultPrim of a published layer: the NAME token since ADR 0019, the publish base before."""
+    try:
+        from pxr import Sdf
+
+        layer = Sdf.Layer.OpenAsAnonymous(str(path))
+        return layer.defaultPrim if layer is not None else ""
+    except Exception:
+        return ""
+
+
 class FluxResolver:
     """Resolve pipeline identities to published USD files inside *project_path*.
 
@@ -296,7 +307,7 @@ class FluxResolver:
             )
         return ResolvedAsset(
             path=matches[0],
-            default_prim=sanitize_token(base),
+            default_prim=_default_prim(matches[0]) or sanitize_token(base),
             version=self._freeze_label(want, scanned),
         )
 

@@ -23,12 +23,12 @@ from flux_actions.runner import GENERATE_PROXY_ACTION, run_generate_proxy_action
 from features.publisher import usd_proxy as UP
 
 
-def _make_grid_usd(path: Path, n: int) -> None:
+def _make_grid_usd(path: Path, n: int, mesh_path: str = "/Asset/Geo") -> None:
     """A single quad-grid mesh asset, n x n quads (2*n*n triangles)."""
     stage = Usd.Stage.CreateNew(str(path))
     root = UsdGeom.Xform.Define(stage, "/Asset")
     stage.SetDefaultPrim(root.GetPrim())
-    mesh = UsdGeom.Mesh.Define(stage, "/Asset/Geo")
+    mesh = UsdGeom.Mesh.Define(stage, mesh_path)
     pts = [(float(c), float(r), 0.0) for r in range(n + 1) for c in range(n + 1)]
     counts, idx = [], []
     for r in range(n):
@@ -106,6 +106,15 @@ class GenerateProxyTests(unittest.TestCase):
             self.assertEqual(purposes["/Asset/Geo_proxy"][0], UsdGeom.Tokens.proxy)
             # The proxy has fewer faces than the source render mesh.
             self.assertLess(purposes["/Asset/Geo_proxy"][1], purposes["/Asset/Geo"][1])
+
+    def test_solaris_layout_proxy_goes_to_geo_proxy(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "asset.usda"
+            _make_grid_usd(src, 30, "/Asset/geo/render/body")
+            r = UP.generate_proxy(src, target_reduction=0.9)
+            purposes = _mesh_purposes(Usd.Stage.Open(str(r.dst)))
+            self.assertEqual(purposes["/Asset/geo/proxy/body"][0], UsdGeom.Tokens.proxy)
+            self.assertNotIn("/Asset/geo/render/body_proxy", purposes)
 
     def test_skip_and_force(self):
         with tempfile.TemporaryDirectory() as d:

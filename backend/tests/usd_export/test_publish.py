@@ -9,7 +9,7 @@ from pathlib import Path
 from pxr import Usd
 
 from features.publisher import last_pointer as lp
-from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
+from features.usd_export import AnimData, LightAsset, MeshData, SkeletonData, publish_light_asset
 
 _ID = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 _LEGACY_USDA = "#usda 1.0\n"
@@ -32,7 +32,7 @@ class PublishLightAsset(unittest.TestCase):
     def test_first_publish_creates_version_folder_and_last_layer(self):
         with tempfile.TemporaryDirectory() as proj:
             dest = Path(proj) / "pub"
-            base = "CHAR_BLOCK_DAVID_null"
+            base = "CHAR_GEO_DAVID_null"
             res = publish_light_asset(_asset(), proj, fmt="usd", dest_dir=dest, base_name=base, user="adam")
             folder = dest / f"{base}_v001"
             self.assertEqual(res["version"], "v001")
@@ -47,9 +47,10 @@ class PublishLightAsset(unittest.TestCase):
             self.assertEqual((flux["version"], flux["target"]), ("v001", f"{base}_v001/{base}.usd"))
 
             stage = Usd.Stage.Open(str(last))
-            # LAST repeats the root defaultPrim and composes the whole version
-            self.assertEqual(stage.GetDefaultPrim().GetName(), base)
-            self.assertTrue(stage.GetPrimAtPath(f"/{base}/body").IsValid())
+            # LAST repeats the root defaultPrim (NAME token, ADR 0019) and composes the version
+            self.assertEqual(stage.GetDefaultPrim().GetName(), "DAVID")
+            self.assertTrue(stage.GetPrimAtPath("/DAVID/geo/render/body").IsValid())
+            self.assertTrue(stage.GetPrimAtPath("/DAVID/skel/Skeleton").IsValid())
 
     def test_second_publish_keeps_versions_and_moves_last(self):
         with tempfile.TemporaryDirectory() as proj:
@@ -60,7 +61,27 @@ class PublishLightAsset(unittest.TestCase):
             self.assertTrue((dest / "DAVID_v001" / "DAVID.usd").exists())
             self.assertEqual(lp.read_layer_flux(dest / "DAVID_LAST.usd")["version"], "v002")
             stage = Usd.Stage.Open(str(dest / "DAVID_v001" / "DAVID.usd"))
-            self.assertTrue(stage.GetPrimAtPath("/DAVID/body").IsValid())
+            self.assertTrue(stage.GetPrimAtPath("/DAVID/geo/render/body").IsValid())
+
+    def test_department_keeps_only_its_data(self):
+        anim = AnimData(joints=["Root"], times=[1.0, 2.0], translations=[[(0, 0, 0)], [(1, 0, 0)]],
+                        rotations=[[(0, 0, 0, 1)], [(0, 0, 0, 1)]], scales=[[(1, 1, 1)], [(1, 1, 1)]])
+        full = LightAsset(**{**_asset().__dict__, "anim": anim})
+        with tempfile.TemporaryDirectory() as proj:
+            dest = Path(proj) / "pub"
+            geo = publish_light_asset(full, proj, fmt="usda", dest_dir=dest, base_name="CHAR_GEO_DAVID_null")
+            self.assertNotIn("anim", geo["layers"])
+            self.assertIn("anim", geo["warnings"][0])
+            rig = publish_light_asset(full, proj, fmt="usda", dest_dir=dest, base_name="CHAR_RIG_DAVID_null")
+            stage = Usd.Stage.Open(str(rig["version_root"]))
+            self.assertTrue(stage.GetPrimAtPath("/DAVID/skel/Skeleton").IsValid())
+            self.assertFalse(stage.GetPrimAtPath("/DAVID/geo/render/body").IsValid())
+            self.assertEqual(len(rig["warnings"]), 2)
+            clip = publish_light_asset(full, proj, fmt="usda", dest_dir=dest, base_name="CHAR_ANIM_DAVID_null")
+            self.assertIn("anim", clip["layers"])
+            with self.assertRaises(ValueError):
+                publish_light_asset(full, proj, fmt="usda", dest_dir=dest, base_name="CHAR_MULT_DAVID_null")
+            self.assertFalse(any(p.name.startswith("CHAR_MULT") for p in dest.iterdir()))
 
     def test_legacy_last_folder_is_archived(self):
         with tempfile.TemporaryDirectory() as proj:
