@@ -46,14 +46,27 @@ def _entry_slots(entry: Path) -> dict:
     return out
 
 
+def _class_of(tokens: dict, name: str) -> str | None:
+    """CLASS token whose folder contains the NAME folder (longest match), for deep links."""
+    name_path = str(tokens.get("NAME", {}).get(name, "")).replace("\\", "/").strip("/")
+    best = None
+    for cls, cls_path in tokens.get("CLASS", {}).items():
+        cp = str(cls_path).replace("\\", "/").strip("/")
+        if cp and "{" not in cp and (name_path == cp or name_path.startswith(cp + "/")):
+            if best is None or len(cp) > len(str(tokens["CLASS"][best])):
+                best = cls
+    return best
+
+
 def list_components(project_path: str | Path) -> list[dict]:
     """Every asset with a component or with publishes that could feed one."""
     from features.folder_manager.tokens import load_tokens
     from features.publisher.publish_layout import last_version_label
 
     project = Path(project_path)
+    tokens = load_tokens(project)
     out: list[dict] = []
-    for name in sorted(load_tokens(project).get("NAME", {})):
+    for name in sorted(tokens.get("NAME", {})):
         parent = component_dir(project, name)
         if parent is None:
             continue
@@ -80,7 +93,8 @@ def list_components(project_path: str | Path) -> list[dict]:
         else:
             state = "ok"
         out.append({
-            "name": name, "state": state, "version": current, "versions": versions,
+            "name": name, "class": _class_of(tokens, name),
+            "state": state, "version": current, "versions": versions,
             "slots": {s: {"task": v.get("task"), "version": v.get("version"),
                           "pin": dict(v["pin"]) if v.get("pin") else None} for s, v in slots.items()},
             "published": published,

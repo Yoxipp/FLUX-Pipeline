@@ -259,6 +259,8 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'usd.lib.unchanged':       { fr: 'Component déjà à jour',     en: 'Component already up to date' },
   'usd.lib.copyPath':        { fr: 'Copier le chemin LAST',     en: 'Copy LAST path' },
   'usd.lib.copied':          { fr: 'Chemin copié',              en: 'Path copied' },
+  'usd.lib.openFolder':      { fr: 'Dossier',                   en: 'Folder' },
+  'usd.lib.openProduction':  { fr: 'Production',                en: 'Production' },
   'usd.lib.instances':       { fr: 'Instances',                 en: 'Instances' },
   'usd.lib.followLast':      { fr: 'LAST',                      en: 'LAST' },
   'usd.lib.frozen':          { fr: 'figé',                      en: 'frozen' },

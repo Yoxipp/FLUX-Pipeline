@@ -4,7 +4,8 @@
 // Backend contracts: GET /usd/library, POST /usd/component/refresh.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon } from 'lucide-react'
+import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
@@ -265,8 +266,12 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
   onOpenAssembly: (name: string) => void
 }) {
   const { t: tr } = useI18n()
+  const navigate = useNavigate()
   const [editing, setEditing] = useState<string | null>(null)
   useEffect(() => { setEditing(null) }, [comp.name])
+  // Asset folder = parent of <NAME_path>/usd. Production opens on the model task.
+  const assetDir = comp.dir.replace(/[\\/]usd[\\/]?$/i, '')
+  const task = comp.published.model?.task ?? comp.published.skel?.task ?? 'GEO'
   const slots = SLOT_ORDER
   const canGenerate = comp.state === 'missing' || comp.state === 'stale'
   return (
@@ -277,6 +282,16 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
         {comp.version && <span style={{ ...mono, color: 'var(--ink-3)' }}>{comp.version}</span>}
         <span className="lbl" style={{ fontSize: 10, color: stateColor[comp.state] }}>{tr(`usd.lib.state.${comp.state}`)}</span>
         <div style={{ flex: 1 }} />
+        <Btn sm ghost onClick={() => navigate('/projects', { state: { openPath: assetDir } })} title={assetDir}>
+          <FolderOpen size={11} strokeWidth={2} /> {tr('usd.lib.openFolder')}
+        </Btn>
+        {comp.class && (
+          <Btn sm ghost onClick={() => navigate('/production', {
+            state: { openFavorite: { project, class: comp.class, name: comp.name, task } },
+          })}>
+            <ClipboardList size={11} strokeWidth={2} /> {tr('usd.lib.openProduction')}
+          </Btn>
+        )}
         {comp.last && (
           <Btn sm ghost onClick={() => copy(comp.last as string, tr('usd.lib.copied'))} title={comp.last}>
             <Copy size={11} strokeWidth={2} /> {tr('usd.lib.copyPath')}
@@ -359,6 +374,7 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
   onOpenComponent: (name: string) => void; onChanged: () => void
 }) {
   const { t: tr } = useI18n()
+  const navigate = useNavigate()
   const [editing, setEditing] = useState<string | null>(null)
   const [target, setTarget] = useState('')
   const [version, setVersion] = useState('LAST')
@@ -398,6 +414,9 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
           <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{tr('usd.lib.brokenCount', { n: asm.broken })}</span>
         )}
         <div style={{ flex: 1 }} />
+        <Btn sm ghost onClick={() => navigate('/projects', { state: { openPath: asm.file.replace(/[\\/][^\\/]+$/, '') } })}>
+          <FolderOpen size={11} strokeWidth={2} /> {tr('usd.lib.openFolder')}
+        </Btn>
         <Btn sm ghost onClick={() => copy(asm.file, tr('usd.lib.copied'))} title={asm.file}>
           <Copy size={11} strokeWidth={2} />
         </Btn>

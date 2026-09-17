@@ -58,6 +58,7 @@ class Library(unittest.TestCase):
         self.assertEqual(comp["state"], "ok")
         self.assertEqual(comp["version"], "v001")
         self.assertEqual(comp["slots"]["model"]["task"], "GEO")
+        self.assertEqual(comp["class"], "CHAR")   # deep link to Production
 
     def test_assembly_instances_and_used_by(self) -> None:
         self._assemble()

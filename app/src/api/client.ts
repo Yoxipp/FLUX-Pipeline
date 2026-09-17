@@ -747,6 +747,7 @@ export interface UsdSlotPin { task?: string; instance?: string; version?: string
 export interface UsdSlotRef { task: string | null; version: string | null; pin?: UsdSlotPin | null }
 export interface UsdComponentInfo {
   name: string
+  class: string | null   // CLASS token (deep link to Production)
   state: 'ok' | 'stale' | 'missing' | 'incomplete'
   version: string | null
   versions: string[]
