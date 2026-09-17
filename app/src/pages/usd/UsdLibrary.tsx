@@ -157,7 +157,10 @@ export function UsdLibrary({ project, projects, onProject }: {
             />
           ))}
           {lib && (tab === 'components' ? components : assemblies).length === 0 && (
-            <div className="lbl" style={{ padding: '8px 6px', fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.lib.empty')}</div>
+            <div className="lbl" style={{ padding: '8px 6px', fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+              {tr('usd.lib.empty')}
+              {tab === 'components' && <><br />{tr('usd.lib.emptyAssets')}</>}
+            </div>
           )}
         </div>
       </div>
@@ -317,6 +320,16 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
       <DetailTabs tab={tab} onTab={setTab} />
 
       {tab === 'content' && (<>
+      {(comp.state === 'missing' || comp.state === 'incomplete') && (
+        <div className="card" style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-3)', flex: 1, lineHeight: 1.5 }}>
+            {tr('usd.lib.howToCreate')}
+          </span>
+          <Btn sm ghost onClick={() => navigate('/publisher')}>
+            <Upload size={11} strokeWidth={2} /> {tr('usd.lib.openPublisher')}
+          </Btn>
+        </div>
+      )}
       <SecTitle>{tr('usd.lib.departments')}</SecTitle>
       <div className="card" style={{ padding: '6px 10px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 110px', gap: '6px 10px', alignItems: 'center' }}>
