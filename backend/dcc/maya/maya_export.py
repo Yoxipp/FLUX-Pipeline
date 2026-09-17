@@ -205,6 +205,7 @@ def _export_abc(
     frame_start: int | None = None,
     frame_end: int | None = None,
     options: dict | None = None,
+    frame_step: float | None = None,
 ) -> bool:
     """Export to Alembic matching 'Cache > Alembic Cache > Export {All|Selection} to Alembic'.
 
@@ -257,6 +258,8 @@ def _export_abc(
     job_parts: list[str] = []
     if frame_start is not None and frame_end is not None:
         job_parts.append(f"-frameRange {frame_start} {frame_end}")
+        if frame_step and float(frame_step) != 1.0:
+            job_parts.append(f"-step {float(frame_step)}")
     if _b(o, "uv_write", True):
         job_parts.append("-uvWrite")
     if _b(o, "world_space", True):
@@ -322,7 +325,14 @@ _USD_STR_FLAGS: frozenset[str] = frozenset({
 })
 
 
-def _export_usd(file_path: Path, selection_only: bool, options: dict | None = None) -> bool:
+def _export_usd(
+    file_path: Path,
+    selection_only: bool,
+    options: dict | None = None,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+    frame_step: float | None = None,
+) -> bool:
     if not _load_usd_plugin():
         log.error("USD export: Maya USD plugin unavailable (tried mayaUsdPlugin)")
         return False
@@ -333,6 +343,11 @@ def _export_usd(file_path: Path, selection_only: bool, options: dict | None = No
     kwargs: dict = {"file": path_fwd, "defaultUSDFormat": usd_format}
     if selection_only:
         kwargs["selection"] = True
+    # Animated export: time samples over the range into this single file.
+    if frame_start is not None and frame_end is not None:
+        kwargs["frameRange"] = (float(frame_start), float(frame_end))
+        if frame_step and float(frame_step) != 1.0:
+            kwargs["frameStride"] = float(frame_step)
 
     # Pass known flags straight through (keys are the real mayaUSDExport flag names).
     for key, val in o.items():
@@ -365,6 +380,7 @@ def _do_export(
     frame_start: int | None,
     frame_end: int | None,
     options: dict | None,
+    frame_step: float | None = None,
 ) -> Path | None:
     ext = _normalise_ext(extension).lower()
     out = Path(file_path).with_suffix(ext)
@@ -372,10 +388,10 @@ def _do_export(
 
     try:
         if ext == ".abc":
-            return out if _export_abc(out, selection_only, frame_start, frame_end, options) else None
+            return out if _export_abc(out, selection_only, frame_start, frame_end, options, frame_step) else None
 
         if ext in _USD_EXTS:
-            return out if _export_usd(out, selection_only, options) else None
+            return out if _export_usd(out, selection_only, options, frame_start, frame_end, frame_step) else None
 
         if ext == ".fbx":
             return out if _export_fbx(out, selection_only, options) else None
@@ -411,23 +427,29 @@ def _do_export(
 
 # ── public API ────────────────────────────────────────────────────────────────
 
+# Formats that carry an animation range inside ONE file (time samples).
+_ANIM_EXTS: frozenset[str] = frozenset({".abc", ".usd", ".usda", ".usdc"})
+
+
 def export_selection(
     file_path: str | Path,
     extension: str,
     frame_start: int | None = None,
     frame_end: int | None = None,
     options: dict | None = None,
+    frame_step: float | None = None,
 ) -> Path | None:
     """Export the current Maya selection to *file_path*.
 
     Supported extensions: .mb .ma .abc .fbx .obj .usd .usda .usdc
-    frame_start/frame_end apply to .abc (animated geo); *options* is the per-format
-    option dict (see module docstring). Returns the exported path, None on failure.
+    frame_start/frame_end/frame_step apply to .abc and USD (one animated file);
+    *options* is the per-format option dict (see module docstring). Returns the
+    exported path, None on failure.
     """
     if not _IN_MAYA:
         log.error("export_selection: not running inside Maya")
         return None
-    return _do_export(file_path, extension, True, frame_start, frame_end, options)
+    return _do_export(file_path, extension, True, frame_start, frame_end, options, frame_step)
 
 
 def export_scene(
@@ -436,17 +458,19 @@ def export_scene(
     frame_start: int | None = None,
     frame_end: int | None = None,
     options: dict | None = None,
+    frame_step: float | None = None,
 ) -> Path | None:
     """Export the entire Maya scene to *file_path*.
 
     Supported extensions: .mb .ma .abc .fbx .obj .usd .usda .usdc
-    frame_start/frame_end apply to .abc (animated geo); *options* is the per-format
-    option dict (see module docstring). Returns the exported path, None on failure.
+    frame_start/frame_end/frame_step apply to .abc and USD (one animated file);
+    *options* is the per-format option dict (see module docstring). Returns the
+    exported path, None on failure.
     """
     if not _IN_MAYA:
         log.error("export_scene: not running inside Maya")
         return None
-    return _do_export(file_path, extension, False, frame_start, frame_end, options)
+    return _do_export(file_path, extension, False, frame_start, frame_end, options, frame_step)
 
 
 def run_publish_export(
@@ -457,6 +481,7 @@ def run_publish_export(
     frame_start: int | None = None,
     frame_end: int | None = None,
     options_b64: str = "",
+    frame_step: float | None = None,
 ) -> None:
     """Export for the Flux publisher and persist a JSON result envelope.
 
@@ -499,8 +524,9 @@ def run_publish_export(
     result: Path | None = None
     try:
         export_fn = export_scene if scope == "scene" else export_selection
-        if extension == ".abc" and frame_start is not None and frame_end is not None:
-            result = export_fn(file_path, extension, frame_start=frame_start, frame_end=frame_end, options=options)
+        if extension in _ANIM_EXTS and frame_start is not None and frame_end is not None:
+            result = export_fn(file_path, extension, frame_start=frame_start, frame_end=frame_end,
+                               options=options, frame_step=frame_step)
         else:
             result = export_fn(file_path, extension, options=options)
     except Exception as exc:  # pragma: no cover - defensive; export_fn already guards

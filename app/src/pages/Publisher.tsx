@@ -587,6 +587,9 @@ export function Publisher() {
   // Export config (shared for all DCCs)
   const [exportExt, setExportExt]   = useState('.abc')
   const [isSequence, setIsSequence] = useState(false)
+  // ANIMATION = one file with time samples over a frame range (abc / USD).
+  // SÉQUENCE = one file per frame ($F4 folder). Frame fields are shared.
+  const [animRange, setAnimRange] = useState(false)
   const [frameStart, setFrameStart] = useState(1)
   const [frameEnd, setFrameEnd]     = useState(100)
   const [frameStep, setFrameStep]   = useState(1)
@@ -1014,8 +1017,15 @@ export function Publisher() {
     setDescription('')
   }, [])
 
+  const ANIM_EXTS = ['.abc', '.usd', '.usda', '.usdc']
+  const animCapable = (dcc === 'Maya' || dcc === 'Houdini') && ANIM_EXTS.includes(exportExt)
+  const seqCapable = (dcc === 'Houdini' && !animCapable && !['.hip', '.hiplc', '.hipnc'].includes(exportExt))
+    || (dcc === 'Nuke' && exportExt !== '.nk')
+
   const handlePublish = useCallback(async () => {
     if (!project) { toast.error('Sélectionne un projet'); return }
+    const animOn = animCapable && animRange
+    const seqOn = seqCapable && isSequence
 
     const filename = buildFilename()
     const parts = filename.split('_').filter(Boolean)
@@ -1042,8 +1052,8 @@ export function Publisher() {
             filename,
             fmt:          exportExt.replace('.', ''),
             scope:        mayaScope,
-            frame_start:  isSequence ? frameStart : undefined,
-            frame_end:    isSequence ? frameEnd : undefined,
+            frame_start:  animOn ? frameStart : undefined,
+            frame_end:    animOn ? frameEnd : undefined,
             include_geo:     lightInclude.geo,
             include_skel:    lightInclude.skel,
             include_anim:    lightInclude.anim,
@@ -1054,14 +1064,13 @@ export function Publisher() {
           toast.success(`USD léger ${res.version} → ${res.asset}`)
           return
         }
-        const isAnimAbc = isSequence && exportExt === '.abc'
         const res = await api.publishMaya({
           project_name: project,
           filename,
           extension:    exportExt,
           scope:        mayaScope,
-          is_sequence:  isAnimAbc,
-          frame_range:  isAnimAbc ? [frameStart, frameEnd] : undefined,
+          is_sequence:  false,
+          frame_range:  animOn ? [frameStart, frameEnd, frameStep] : undefined,
           export_options: mayaExportOpts,
           description:  description || undefined,
           user:         settings?.username ?? undefined,
@@ -1080,8 +1089,8 @@ export function Publisher() {
             asset:        assetName,
             filename,
             fmt:          exportExt.replace('.', ''),
-            frame_start:  isSequence ? frameStart : undefined,
-            frame_end:    isSequence ? frameEnd : undefined,
+            frame_start:  animOn ? frameStart : undefined,
+            frame_end:    animOn ? frameEnd : undefined,
             include_geo:     lightInclude.geo,
             include_skel:    lightInclude.skel,
             include_anim:    lightInclude.anim,
@@ -1096,8 +1105,8 @@ export function Publisher() {
           filename,
           extension:     exportExt,
           rop_node_path: ropNodePath || undefined,
-          is_sequence:   isSequence,
-          frame_range:   isSequence ? [frameStart, frameEnd, frameStep] : undefined,
+          is_sequence:   seqOn,
+          frame_range:   (animOn || seqOn) ? [frameStart, frameEnd, frameStep] : undefined,
           export_options: houExportOpts,
           attr_filter:   (houAttrMode !== 'none' && houAttrNames.some(n => n.trim()))
             ? { mode: houAttrMode, names: houAttrNames.map(n => n.trim()).filter(Boolean) }
@@ -1131,7 +1140,7 @@ export function Publisher() {
         // colorspace is a top-level arg of the backend (not a Write knob): pull it
         // out of the options map and send the rest as Write knobs.
         const { colorspace, ...writeKnobs } = nukeExportOpts as { colorspace?: string } & Record<string, unknown>
-        const isSeq = isSequence && exportExt !== '.nk'
+        const isSeq = seqOn
         const res = await api.publishNuke({
           project_name:   project,
           filename,
@@ -1255,7 +1264,7 @@ export function Publisher() {
     }
   }, [
     project, mode, buildFilename, createNewTokens, dcc,
-    exportExt, ropNodePath, isSequence, frameStart, frameEnd, frameStep,
+    exportExt, ropNodePath, isSequence, animRange, animCapable, seqCapable, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts,
@@ -1708,40 +1717,53 @@ export function Publisher() {
           </div>
           )}
 
-          {/* SÉQUENCE ANIMÉE — ZBrush: never; Maya: .abc only; Houdini: always */}
-          <div style={{ padding: '0 20px 12px', flexShrink: 0, opacity: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 0.35 : 1, pointerEvents: (dcc === 'ZBrush' || (dcc === 'Maya' && exportExt !== '.abc')) ? 'none' : undefined }}>
-            <SecTitle>SÉQUENCE ANIMÉE</SecTitle>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSequence ? 10 : 0 }}>
-              <div onClick={() => setIsSequence(v => !v)} style={{
-                width: 32, height: 18, borderRadius: 9, cursor: 'pointer', flexShrink: 0,
-                background: isSequence ? 'var(--accent)' : 'var(--rule-2)',
-                position: 'relative', transition: 'background 0.15s',
-              }}>
-                <div style={{
-                  position: 'absolute', top: 2, left: isSequence ? 16 : 2,
-                  width: 14, height: 14, borderRadius: '50%', background: 'white',
-                  transition: 'left 0.15s', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
-                }} />
-              </div>
-              <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {isSequence ? 'Activé · dossier versionné + $F4' : 'Désactivé · fichier unique LAST'}
-              </div>
-            </div>
-            {isSequence && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {([['Start', frameStart, setFrameStart], ['End', frameEnd, setFrameEnd], ['Step', frameStep, setFrameStep]] as const).map(([lbl, val, set]) => (
-                  <div key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
-                    <input type="number" value={val} onChange={e => set(Number(e.target.value))} style={{
-                      width: 56, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                      borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
-                      color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+          {/* ANIMATION (one animated file: abc / USD) or SÉQUENCE (one file per frame, $F4) */}
+          {(animCapable || seqCapable) && (() => {
+            const on = animCapable ? animRange : isSequence
+            const toggle = () => (animCapable ? setAnimRange(v => !v) : setIsSequence(v => !v))
+            const fields: [string, number, (n: number) => void][] = [
+              ['Start', frameStart, setFrameStart], ['End', frameEnd, setFrameEnd],
+            ]
+            // Light USD export samples every frame (no step on that path).
+            if (!(animCapable && lightUsd)) fields.push(['Step', frameStep, setFrameStep])
+            return (
+              <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+                <SecTitle>{animCapable ? 'ANIMATION' : 'SÉQUENCE'}</SecTitle>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 10 : 0 }}>
+                  <div onClick={toggle} style={{
+                    width: 32, height: 18, borderRadius: 9, cursor: 'pointer', flexShrink: 0,
+                    background: on ? 'var(--accent)' : 'var(--rule-2)',
+                    position: 'relative', transition: 'background 0.15s',
+                  }}>
+                    <div style={{
+                      position: 'absolute', top: 2, left: on ? 16 : 2,
+                      width: 14, height: 14, borderRadius: '50%', background: 'white',
+                      transition: 'left 0.15s', boxShadow: '0 1px 3px rgba(0,0,0,.3)',
                     }} />
                   </div>
-                ))}
+                  <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                    {animCapable
+                      ? (on ? 'Plage animée · un seul fichier' : (lightUsd ? 'Plage de lecture du DCC' : 'Image courante'))
+                      : (on ? 'Activé · dossier versionné + $F4' : 'Désactivé · fichier unique LAST')}
+                  </div>
+                </div>
+                {on && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {fields.map(([lbl, val, set]) => (
+                      <div key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
+                        <input type="number" value={val} onChange={e => set(Number(e.target.value))} style={{
+                          width: 56, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                          borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
+                          color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+                        }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            )
+          })()}
 
           {/* SCOPE — Maya only */}
           {dcc === 'Maya' && (
@@ -1957,7 +1979,7 @@ export function Publisher() {
           <div style={{ padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <SecTitle>APERÇU OUTPUT</SecTitle>
             <div className="subcard" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 90, maxHeight: 200, overflowY: 'auto' }}>
-              {isSequence ? (<>
+              {(seqCapable && isSequence) ? (<>
                 <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{filename}_v001/</div>
                 <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)', paddingLeft: 12 }}>
                   {filename}_v001.$F4{exportExt}

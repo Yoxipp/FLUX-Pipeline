@@ -20,6 +20,7 @@ from dcc.zbrush  import autostart as _zbrush_autostart
 from dcc.substance_painter import autostart as _substance_autostart
 from dcc.mari    import autostart as _mari_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
+from dcc.maya.maya_export_client import ANIM_EXTS as MAYA_ANIM_EXTS
 
 # Maps dcc_key (lowercase) → autostart module. Extend here when adding new DCCs.
 # Keys are the ONE canonical frontend key per soft (matches Sidebar SOFTWARE,
@@ -704,7 +705,7 @@ class MayaPublishRequest(BaseModel):
     extension:    str               # e.g. ".abc"
     scope:        str = "scene"    # "scene" | "selection"
     is_sequence:  bool = False
-    frame_range:  list[int] | None = None   # [start, end]
+    frame_range:  list[float] | None = None  # [start, end(, step)] one animated .abc / USD file
     export_options: dict | None = None      # per-format export options (see maya_export)
     description:  str = ""
     user:         str | None = None
@@ -1066,7 +1067,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
 
     Resolves the pipeline path from tokens, sends an export command to Maya
     (which writes the file to a temp location), then archives the previous version.
-    For .abc with is_sequence, passes frame_range to AbcExport.
+    frame_range exports ONE animated .abc / USD file over [start, end(, step)].
     """
     import shutil
     import tempfile
@@ -1113,9 +1114,8 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
 
         scope = "scene" if req.scope == "scene" else "selection"
         target_port = _resolve_target_port("Maya", req.port)
-        is_anim_abc = (
-            ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2
-        )
+        # One animated file over the range (abc / USD): independent of is_sequence.
+        is_anim = bool(ext in MAYA_ANIM_EXTS and req.frame_range and len(req.frame_range) >= 2)
         dest = await loop.run_in_executor(
             None,
             lambda: run_maya_publish_action(
@@ -1127,7 +1127,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
                 user=user,
                 project_name=req.project_name,
                 port=target_port,
-                frame_range=list(req.frame_range) if is_anim_abc else None,
+                frame_range=list(req.frame_range) if is_anim else None,
                 options=req.export_options,
             ),
         )
@@ -1166,13 +1166,15 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     if req.export_options:
         opts_b64 = _b64.b64encode(_json2.dumps(req.export_options).encode("utf-8")).decode("ascii")
 
-    if ext == ".abc" and req.is_sequence and req.frame_range and len(req.frame_range) == 2:
-        fs, fe = req.frame_range
+    is_anim = bool(ext in MAYA_ANIM_EXTS and req.frame_range and len(req.frame_range) >= 2)
+    if is_anim:
+        fs, fe = int(req.frame_range[0]), int(req.frame_range[1])
+        step = float(req.frame_range[2]) if len(req.frame_range) > 2 else 1.0
         cmd = (
             f"{path_prefix}; "
             f"from dcc.maya.maya_export import run_publish_export; "
             f"run_publish_export(r'{tmp_path}', '{ext}', '{scope}', r'{result_path}', "
-            f"frame_start={fs}, frame_end={fe}, options_b64='{opts_b64}')"
+            f"frame_start={fs}, frame_end={fe}, frame_step={step}, options_b64='{opts_b64}')"
         )
     else:
         cmd = (
@@ -1182,7 +1184,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         )
 
     # Timeout: 30s for static exports, 600s for animated ABC (100 frames can be slow)
-    export_timeout = 600.0 if (ext == ".abc" and req.is_sequence) else 120.0
+    export_timeout = 600.0 if is_anim else 120.0
 
     target_port = _resolve_target_port("Maya", req.port)
     try:

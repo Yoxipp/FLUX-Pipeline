@@ -274,8 +274,9 @@ def export_via_node(
     attr_filter: dict | None = None,
 ) -> dict:
     """Export from ANY selected node: reuse it if it is a ROP, otherwise create the
-    right output ROP (rop_geometry for geo/obj/usd, rop_alembic for .abc) as a child of
-    the node's SOP network, wire it to the node, set the output path and cook.
+    right output ROP (rop_geometry for geo/obj, usdexport for USD, rop_alembic for .abc)
+    as a child of the node's SOP network, wire it to the node, set the output path and
+    cook. With *frame_range* abc and USD write ONE animated file (time samples).
 
     *options* is a {parm_name: value} dict of ROP parameters to apply before the
     cook (see houdiniExportOptions.ts). Each is set only if the parm exists on the
@@ -358,6 +359,13 @@ def export_via_node(
                 for _sp in ('startnode', 'exportnode', 'root'):
                     if _rop.parm(_sp) is not None:
                         _rop.parm(_sp).set(_objroot.path()); break
+            elif _ext in ('.usd', '.usda', '.usdc'):
+                # rop_geometry would write classic geo under a .usd name: use the SOP
+                # "ROP USD Output". Root prim = the geo object name (defaultPrim).
+                _rop = _parent.createNode('usdexport', node_name='flux_export'); _op = 'lopoutput'
+                _rop.setFirstInput(_tail)
+                if _rop.parm('pathprefix') is not None:
+                    _rop.parm('pathprefix').set('/' + _objroot.name())
             else:
                 _rop = _parent.createNode('rop_geometry', node_name='flux_export'); _op = 'sopoutput'
                 for _sp in ('soppath', 'sopname'):
@@ -380,10 +388,23 @@ def export_via_node(
                 except Exception:
                     pass
 
-        if _fr:
-            _rop.render(frame_range=_fr)
+        if hasattr(_rop, 'render'):
+            if _fr:
+                _rop.render(frame_range=_fr)
+            else:
+                _rop.render()
         else:
-            _rop.render()
+            # SOP-level ROPs such as usdexport have no render(): drive trange + Execute.
+            if _rop.parm('trange') is not None:
+                if _fr:
+                    _rop.parm('trange').set(1)
+                    _ft = _rop.parmTuple('f')
+                    if _ft is not None:
+                        _ft.deleteAllKeyframes()
+                        _ft.set(tuple(_fr) + (1,) * (3 - len(_fr)))
+                else:
+                    _rop.parm('trange').set(0)
+            _rop.parm('execute').pressButton()
         result = {{"ok": True, "rop": _rop.path()}}
     """)
 

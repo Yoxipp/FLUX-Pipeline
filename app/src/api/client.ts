@@ -246,7 +246,7 @@ export const api = {
     extension:    string
     scope?:       string
     is_sequence?: boolean
-    frame_range?: [number, number]
+    frame_range?: [number, number] | [number, number, number]
     export_options?: Record<string, unknown>
     description?: string
     user?:        string

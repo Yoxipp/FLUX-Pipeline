@@ -23,7 +23,10 @@ log = get_logger(__name__)
 # Maya session started before the autostart was installed.
 _BACKEND_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 
-# Animated ABC over many frames can be slow; everything else is quick.
+# Formats exported as ONE animated file over a frame range (time samples).
+ANIM_EXTS: frozenset[str] = frozenset({".abc", ".usd", ".usda", ".usdc"})
+
+# Animated exports over many frames can be slow; everything else is quick.
 _DEFAULT_TIMEOUT = 120.0
 _ABC_SEQUENCE_TIMEOUT = 600.0
 
@@ -33,7 +36,7 @@ def _build_command(
     result_path: Path,
     extension: str,
     scope: str,
-    frame_range: tuple[int, int] | None,
+    frame_range: tuple[float, ...] | None,
     options: dict | None,
 ) -> str:
     """Compose the single-line Python command Maya's commandPort will exec()."""
@@ -56,9 +59,10 @@ def _build_command(
         f"from dcc.maya.maya_export import run_publish_export; "
         f"run_publish_export(r'{out_fwd}', '{extension}', '{scope}', r'{res_fwd}', "
     )
-    if extension == ".abc" and frame_range is not None:
-        fs, fe = frame_range
-        call += f"frame_start={fs}, frame_end={fe}, options_b64='{opts_b64}')"
+    if extension in ANIM_EXTS and frame_range is not None:
+        fs, fe = int(frame_range[0]), int(frame_range[1])
+        step = float(frame_range[2]) if len(frame_range) > 2 else 1.0
+        call += f"frame_start={fs}, frame_end={fe}, frame_step={step}, options_b64='{opts_b64}')"
     else:
         call += f"options_b64='{opts_b64}')"
 
@@ -98,7 +102,7 @@ def run_maya_export(
     scope: str,
     *,
     port: int | None = None,
-    frame_range: tuple[int, int] | None = None,
+    frame_range: tuple[float, ...] | None = None,
     options: dict | None = None,
     timeout: float | None = None,
 ) -> tuple[Path | None, list[dict]]:
@@ -114,7 +118,7 @@ def run_maya_export(
     scope_norm = "scene" if scope == "scene" else "selection"
 
     if timeout is None:
-        timeout = _ABC_SEQUENCE_TIMEOUT if (extension == ".abc" and frame_range) else _DEFAULT_TIMEOUT
+        timeout = _ABC_SEQUENCE_TIMEOUT if (extension in ANIM_EXTS and frame_range) else _DEFAULT_TIMEOUT
 
     cmd = _build_command(out_path, result_path, extension, scope_norm, frame_range, options)
     response = send_command_direct(cmd, timeout=timeout, port=port or _maya_port())

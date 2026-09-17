@@ -53,7 +53,7 @@ class MayaExport(CommandBase):
             "value": None,
             "hide": True,
         },
-        # Optional [start, end] for animated .abc.
+        # Optional [start, end] or [start, end, step] for animated .abc / USD.
         "frame_range": {
             "type": "list",
             "label": "Plage d'images",
@@ -79,9 +79,9 @@ class MayaExport(CommandBase):
         options = parameters.get("options")
 
         frame_range = parameters.get("frame_range")
-        fr: tuple[int, int] | None = None
-        if frame_range and len(frame_range) == 2:
-            fr = (int(frame_range[0]), int(frame_range[1]))
+        fr: tuple[float, ...] | None = None
+        if frame_range and len(frame_range) >= 2:
+            fr = tuple(float(v) for v in frame_range[:3])
 
         export_dir = Path(tempfile.mkdtemp(prefix="flux_maya_export_"))
         out_path = export_dir / filename
