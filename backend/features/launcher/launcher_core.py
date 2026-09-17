@@ -24,11 +24,14 @@ _CREATE_NEW_PROCESS_GROUP = 0x00000200
 # read $HOME/houdiniX.Y instead of %USERPROFILE%/Documents/houdiniX.Y, so the user's
 # prefs, desktops, shelves and HDAs never load. FLUX_PORT is deliberately KEPT so the
 # Houdini importer HDA bootstrap can still find the backend.
+# PYTHONUSERBASE is set by the Microsoft Store Python that runs the dev backend: Houdini
+# (also py3.13) then adds that user site to sys.path and imports the pip usd-core pxr
+# instead of its own, which breaks every LopNode.stage() and Python LOP.
 _ENV_LEAK_VARS: tuple[str, ...] = (
     "_MEIPASS", "_MEIPASS2", "_PYI_ARCHIVE_FILE", "_PYI_APPLICATION_HOME_DIR",
     "PYINSTALLER_RESET_ENVIRONMENT",
     "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
-    "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE", "PYTHONHASHSEED",
+    "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE", "PYTHONHASHSEED", "PYTHONUSERBASE",
     "SSL_CERT_FILE", "SSL_CERT_DIR",
     "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
 )
