@@ -782,6 +782,7 @@ export interface UsdComponentInfo {
 }
 export interface UsdAssemblyInstance {
   prim: string; asset_path: string; component: string | null; broken: boolean; follows_last: boolean
+  variants: Record<string, string>   // department -> variant picked by this instance
 }
 export interface UsdAssemblyInfo {
   name: string; file: string; instances: UsdAssemblyInstance[]; broken: number
@@ -799,6 +800,7 @@ export type UsdAssemblyOp =
   | { op: 'rename'; name: string; new_name: string }
   | { op: 'relink'; name: string; component: string; version?: string }
   | { op: 'set_version'; name?: string; all?: boolean; version: string }
+  | { op: 'set_variant'; name: string; department: string; variant: string }   // '' = component default
 export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
 export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }
 export interface UsdPrimNode {

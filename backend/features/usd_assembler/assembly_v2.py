@@ -189,7 +189,8 @@ def apply_ops(project_path: str | Path, instances: list[dict], ops: list[dict]) 
          {"op": "remove", "name"} | {"op": "duplicate", "name"} |
          {"op": "rename", "name", "new_name"} |
          {"op": "relink", "name", "component", "version"="LAST"} |
-         {"op": "set_version", "name" | "all": true, "version"}
+         {"op": "set_version", "name" | "all": true, "version"} |
+         {"op": "set_variant", "name", "department", "variant"} ("" = component default)
     """
     project = Path(project_path)
     out = [dict(i) for i in instances]
@@ -224,15 +225,73 @@ def apply_ops(project_path: str | Path, instances: list[dict], ops: list[dict]) 
             version = str(op.get("version") or "LAST")
             _require_component(project, comp, version)
             inst.update(component=comp, version=version)
+            inst["variants"] = _keep_known_variants(project, inst)
+            warnings.extend(_variant_warnings(inst, project))
+        elif kind == "set_variant":
+            inst = _find(out, str(op.get("name")))
+            dept = str(op.get("department") or "")
+            variant = str(op.get("variant") or "")
+            if not _PRIM_RE.match(dept):
+                raise ValueError(f"departement invalide : {dept!r}")
+            if variant and not _PRIM_RE.match(variant):
+                raise ValueError(f"variante invalide : {variant!r}")
+            variants = dict(inst.get("variants") or {})
+            available = _component_variants(project, inst["component"], inst["version"])
+            if variant and variant not in available.get(dept, []):
+                raise ValueError(
+                    f"{inst['component']} : variante {variant!r} inconnue pour {dept} "
+                    f"({', '.join(available.get(dept, [])) or 'aucune'})")
+            if variant:
+                variants[dept] = variant
+            else:
+                variants.pop(dept, None)
+            inst["variants"] = variants
         elif kind == "set_version":
             version = str(op.get("version") or "LAST")
             targets = out if op.get("all") else [_find(out, str(op.get("name")))]
             for inst in targets:
                 _require_component(project, inst["component"], version)
                 inst["version"] = version
+                inst["variants"] = _keep_known_variants(project, inst)
         else:
             raise ValueError(f"operation inconnue : {kind!r}")
+    for inst in out:
+        if not inst.get("variants"):        # no selection = the component's own default
+            inst.pop("variants", None)
     return out, warnings
+
+
+def _component_variants(project_path: Path, component: str, version: str) -> dict[str, list[str]]:
+    """{department: [variant...]} offered by a component entry (ADR 0019)."""
+    from pxr import Sdf
+
+    from features.publisher.last_pointer import read_layer_flux
+
+    entry = _component_target(project_path, component, version)
+    if entry.is_file() and entry.name.endswith(f"_LAST{COMPONENT_EXT}"):
+        # LAST is a pointer layer (ADR 0017): the slots live in the version it targets.
+        target = (read_layer_flux(entry) or {}).get("target")
+        if target and (entry.parent / target).is_file():
+            entry = entry.parent / target
+    layer = Sdf.Layer.OpenAsAnonymous(str(entry)) if entry.is_file() else None
+    if layer is None:
+        return {}
+    from .component_auto import _plain
+
+    flux = _plain(dict(layer.customLayerData).get("flux", {}))
+    slots = flux.get("slots") or {}
+    return {dept: sorted((s.get("variants") or {}).keys()) for dept, s in slots.items()}
+
+
+def _keep_known_variants(project_path: Path, inst: dict) -> dict[str, str]:
+    """Drop the variant selections the instance's component no longer offers."""
+    available = _component_variants(project_path, inst["component"], inst["version"])
+    return {d: v for d, v in (inst.get("variants") or {}).items() if v in available.get(d, [])}
+
+
+def _variant_warnings(inst: dict, project_path: Path) -> list[str]:
+    dropped = set(inst.get("variants") or {}) - set(_keep_known_variants(project_path, inst))
+    return [f"{inst['name']} : variante {d} perdue (le nouveau component ne l'a pas)" for d in sorted(dropped)]
 
 
 def _layout_warnings(project_path: Path, name: str, instances: list[dict]) -> list[str]:
@@ -287,6 +346,10 @@ def _author(folder: Path, project: Path, name: str, version: str, instances: lis
         prim.kind = "component"
         prim.instanceable = True
         prim.referenceList.prependedItems = [Sdf.Reference(_rel(target, folder))]
+        # ADR 0019: an instance may pick a department variant of its component
+        # (model = B...). No selection = the component's own default.
+        for dept, variant in sorted((inst.get("variants") or {}).items()):
+            prim.variantSelections[dept] = variant
     contents.defaultPrim = name
     contents.Save()
 
@@ -308,7 +371,9 @@ def _author(folder: Path, project: Path, name: str, version: str, instances: lis
     entry.customLayerData = {"flux": {
         "assembly": name, "version": version,
         # A JSON string: USD dictionaries cannot hold a list of dictionaries.
-        "instances_json": json.dumps([{k: str(inst[k]) for k in ("name", "class", "component", "version")}
+        "instances_json": json.dumps([{**{k: str(inst[k]) for k in ("name", "class", "component", "version")},
+                                       **({"variants": {str(d): str(v) for d, v in inst["variants"].items()}}
+                                          if inst.get("variants") else {})}
                                       for inst in instances]),
     }}
     entry.Save()

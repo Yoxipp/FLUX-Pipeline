@@ -98,6 +98,31 @@ class AssemblyV2(unittest.TestCase):
         av.edit_assembly(self.project, "TOWN", [{"op": "remove", "name": "hero"}])
         self.assertEqual([i["name"] for i in av.read_instances(self.project, "TOWN")], ["UTAH_01"])
 
+    def test_instance_picks_a_component_variant(self) -> None:
+        # A second INSTANCE of UTAH is a variant of its model department (ADR 0019);
+        # each assembly instance can pick which one it shows.
+        publish_light_asset(_asset(), self.project, fmt="usd",
+                            dest_dir=self.project / "assets/chara/UTAH" / "model" / "B",
+                            base_name="CHAR_GEO_UTAH_B")
+        refresh_component(self.project, "UTAH")
+        av.create_assembly(self.project, "TOWN")
+        av.edit_assembly(self.project, "TOWN", [{"op": "add", "component": "UTAH", "count": 2}])
+        res = av.edit_assembly(self.project, "TOWN", [
+            {"op": "set_variant", "name": "UTAH_02", "department": "model", "variant": "B"}])
+        self.assertEqual(res["warnings"], [])
+        stage = self._stage("TOWN")
+        self.assertEqual(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_01").GetVariantSet("model").GetVariantSelection(), "null")
+        self.assertEqual(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_02").GetVariantSet("model").GetVariantSelection(), "B")
+        inst = next(i for i in av.read_instances(self.project, "TOWN") if i["name"] == "UTAH_02")
+        self.assertEqual(inst["variants"], {"model": "B"})
+        # back to the component default, and an unknown variant is refused
+        av.edit_assembly(self.project, "TOWN", [
+            {"op": "set_variant", "name": "UTAH_02", "department": "model", "variant": ""}])
+        self.assertEqual(av.read_instances(self.project, "TOWN")[1].get("variants", {}), {})
+        with self.assertRaises(ValueError):
+            av.edit_assembly(self.project, "TOWN", [
+                {"op": "set_variant", "name": "UTAH_01", "department": "model", "variant": "NOPE"}])
+
     def test_noop_edit_and_errors(self) -> None:
         av.create_assembly(self.project, "TOWN")
         av.edit_assembly(self.project, "TOWN", [{"op": "add", "component": "UTAH"}])

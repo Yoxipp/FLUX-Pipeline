@@ -483,6 +483,8 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
   useEffect(() => { setEditing(null) }, [asm.file])
 
   const linkable = components.filter(c => c.versions.length > 0)
+  const componentOf = (i: UsdAssemblyInfo['instances'][number]) =>
+    components.find(c => c.name === i.component)
   const versionsOf = (name: string) => linkable.find(c => c.name === name)?.versions ?? []
   const instName = (prim: string) => prim.split('/').pop() ?? prim
   const instVersion = (i: UsdAssemblyInfo['instances'][number]) =>
@@ -622,6 +624,20 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
               <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)', width: 40, textAlign: 'right' }}>
                 {i.follows_last ? tr('usd.lib.followLast') : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? tr('usd.lib.frozen'))}
               </span>
+              {/* ADR 0019: pick a department variant of the referenced component. */}
+              {SLOT_ORDER.map(dept => {
+                const choices = Object.keys(componentOf(i)?.slots[dept]?.variants ?? {})
+                if (choices.length < 2) return null
+                return (
+                  <select key={dept} value={i.variants?.[dept] ?? ''} disabled={busy}
+                    title={`${tr('usd.lib.variant')} ${dept}`}
+                    onChange={e => void edit([{ op: 'set_variant', name, department: dept, variant: e.target.value }])}
+                    style={{ ...selectStyle, width: 86, fontFamily: 'var(--mono)' }}>
+                    <option value="">{dept} ·</option>
+                    {choices.map(v => <option key={v} value={v}>{dept} {v}</option>)}
+                  </select>
+                )
+              })}
               {i.broken && (
                 <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 4 }}>
                   <AlertTriangle size={10} strokeWidth={2} /> {tr('usd.lib.broken')}

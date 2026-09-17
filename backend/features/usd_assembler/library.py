@@ -130,6 +130,8 @@ def _instances(layer, file: Path, components: dict[Path, str]) -> list[dict]:
                     "prim": child.path.pathString, "asset_path": raw,
                     "component": comp, "broken": not target.exists(),
                     "follows_last": "_LAST." in target.name,
+                    # ADR 0019: department variants this instance picked (empty = component default)
+                    "variants": {str(k): str(v) for k, v in dict(child.variantSelections).items()},
                 })
             if not items and depth < _MAX_DEPTH:
                 _walk(child, depth + 1)

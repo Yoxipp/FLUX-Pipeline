@@ -64,6 +64,16 @@ def _variant_name(instance: str) -> str:
     return sanitize_token(instance) or _DEFAULT_INSTANCE
 
 
+def _published_instance(path: Path, fallback: str) -> str:
+    """INSTANCE token as PUBLISHED (the folder on disk is lowercased, the file is not)."""
+    from features.folder_manager.naming_validator import parse_filename
+
+    parsed = parse_filename(path.name)
+    if parsed and not parsed.get("is_shot"):
+        return str(parsed.get("INSTANCE") or fallback)
+    return fallback
+
+
 def collect_slots(project_path: str | Path, name: str,
                   instance: str = _DEFAULT_INSTANCE,
                   pins: dict[str, dict] | None = None) -> dict[str, dict]:
@@ -91,13 +101,17 @@ def collect_slots(project_path: str | Path, name: str,
                 if frozen and frozen != "latest":
                     raise
                 continue
-            variants[_variant_name(inst)] = {"instance": inst, "path": Path(hit.path),
-                                             "prim": hit.default_prim, "version": hit.version}
+            variant = _variant_name(_published_instance(Path(hit.path), inst))
+            variants[variant] = {"instance": inst, "path": Path(hit.path),
+                                 "prim": hit.default_prim, "version": hit.version}
         if pin.get("instance") and _variant_name(pin["instance"]) not in variants:
             raise ResolveError(f"{dept}: instance epinglee introuvable : {pin['instance']}")
         if not variants:
             continue
         wanted = [_variant_name(v) for v in (pin.get("instance"), instance, _DEFAULT_INSTANCE) if v]
+        by_instance = {d["instance"]: v for v, d in variants.items()}
+        wanted += [by_instance[i] for i in (pin.get("instance"), instance, _DEFAULT_INSTANCE)
+                   if i and i in by_instance]
         default = next((v for v in wanted if v in variants), sorted(variants)[0])
         slots[dept] = {"task": task, "default": default, "variants": variants,
                        "version": variants[default]["version"]}
