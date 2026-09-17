@@ -34,7 +34,7 @@ def library_items(project_path: str | Path) -> list[dict]:
         })
     for asm in lib.get("assemblies", []):
         items.append({"key": f"assembly:{asm['name']}", "label": f"Assembly  {asm['name']}",
-                      "versions": ["LAST"]})
+                      "versions": ["LAST"] + sorted(asm.get("versions") or [], reverse=True)})
     return items
 
 
@@ -60,11 +60,74 @@ def resolve_library_item(project_path: str | Path, key: str, version: str = "LAS
             return {"ok": False, "error": f"Version invalide : {version!r}"}
     else:
         asm = next((a for a in lib.get("assemblies", []) if a["name"] == name), None)
-        path = Path(asm["file"]) if asm else None
+        if asm is None:
+            path = None
+        elif version in ("", "LAST", "latest") or asm.get("legacy"):
+            path = Path(asm["file"])
+        elif _VERSION_RE.fullmatch(version):
+            path = Path(asm["file"]).parent / f"{name}_{version}" / f"{name}.usda"
+        else:
+            return {"ok": False, "error": f"Version invalide : {version!r}"}
 
     if path is None or not path.is_file():
         return {"ok": False, "error": f"Fichier introuvable pour {key} {version or 'LAST'}"}
     return {"ok": True, "path": str(path), "kind": kind, **_skel(path)}
+
+
+def importer_source_for_file(project_path: str | Path, file: str | Path) -> dict:
+    """flux_importer HDA parms that point at *file* (2026-09-17: "Ouvrir dans
+    Houdini" must give an importer whose asset can be changed).
+
+    * component / assembly entry (LAST or vNNN)  -> {"source_mode": "library", ...}
+    * task publish the tokens resolve back to    -> {"source_mode": "tokens", ...}
+    * anything else (a sublayer, a free file)     -> {"source_mode": "file", "free_path"}
+    """
+    from features.importer.importer_resolve import path_to_tokens, resolve_import_path
+    from features.usd_assembler.library import build_library
+
+    project = Path(str(Path(project_path).resolve()))
+    target = Path(str(Path(file).resolve()))
+    lib = build_library(project)
+
+    def _entry_version(folder: Path, name: str) -> str | None:
+        if target.parent == folder and target.name.startswith(f"{name}_LAST."):
+            return "LAST"
+        m = re.fullmatch(rf"{re.escape(name)}_(v\d+)", target.parent.name)
+        if m and target.parent.parent == folder and target.stem == name:
+            return m.group(1)
+        return None
+
+    for comp in lib.get("components", []):
+        version = _entry_version(Path(str(Path(comp["dir"]).resolve())), comp["name"])
+        if version:
+            return {"source_mode": "library", "lib_item": f"component:{comp['name']}", "lib_version": version}
+    for asm in lib.get("assemblies", []):
+        asm_file = Path(str(Path(asm["file"]).resolve()))
+        if asm.get("legacy"):
+            version = "LAST" if target == asm_file else None
+        else:
+            version = _entry_version(asm_file.parent, asm["name"])
+        if version:
+            return {"source_mode": "library", "lib_item": f"assembly:{asm['name']}", "lib_version": version}
+
+    try:
+        rel_parts = list(target.relative_to(project).parts)
+    except ValueError:
+        rel_parts = []
+    tok = path_to_tokens(project, rel_parts) if rel_parts else {}
+    if tok.get("CLASS") and tok.get("TYPE") and tok.get("NAME"):
+        m = _ITER_RE.search(target.stem) or _ITER_RE.search(target.parent.name)
+        iter_val = m.group(1) if m else "LAST"
+        instance = tok.get("INSTANCE") or "null"
+        instance = "null" if instance.upper() == "NULL" else instance
+        r = resolve_import_path(project, tok["CLASS"], tok["TYPE"], tok["NAME"], instance, iter_val)
+        if r.get("ok") and r.get("path") and Path(str(Path(r["path"]).resolve())) == target:
+            return {"source_mode": "tokens", "flux_class": tok["CLASS"], "flux_type": tok["TYPE"],
+                    "flux_name": tok["NAME"], "flux_instance": instance, "flux_iter": iter_val}
+    return {"source_mode": "file", "free_path": str(file)}
+
+
+_ITER_RE = re.compile(r"_(LAST|v\d+)$")
 
 
 def probe_file(path: str | Path) -> dict:

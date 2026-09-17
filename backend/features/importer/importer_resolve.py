@@ -20,6 +20,7 @@ from features.publisher.publish_core import resolve_publish_path
 log = get_logger(__name__)
 
 _VERSION_RE = re.compile(r"^v(\d+)$", re.IGNORECASE)
+_LAYERED_DIR_RE = re.compile(r"^(.+)_v(\d+)$", re.IGNORECASE)
 
 # ── backend-side TTL cache ────────────────────────────────────────────────────
 _BCACHE: dict = {}
@@ -208,6 +209,11 @@ def _scan_iters(
             has_last = True
         elif _VERSION_RE.match(ver):
             versions.add(int(ver[1:]))
+    # Layered USD version folders (ADR 0017 U3c): <base>_vNNN/<base>.<usd ext>.
+    for d in folder.iterdir():
+        m = _LAYERED_DIR_RE.match(d.name)
+        if m and d.is_dir() and any((d / f"{m.group(1)}{e}").is_file() for e in (".usd", ".usda", ".usdc")):
+            versions.add(int(m.group(2)))
 
     result: list[str] = []
     if has_last:
@@ -281,6 +287,11 @@ def resolve_import_path(
         best = min(candidates, key=lambda p: _import_ext_rank(_extract_ext(p)))
         return {"ok": True, "path": str(best), "ext": _extract_ext(best), "exists": True}
 
+    # Layered USD version folder (ADR 0017 U3c): <base>_vNNN/<base>.<usd ext>.
+    layered = _resolve_layered_usd(folder, prefix, suffix, exact_stem)
+    if layered is not None:
+        return {"ok": True, "path": str(layered), "ext": layered.suffix.lower(), "exists": True}
+
     # No flat file matched — try the sequence layout. Nuke/Houdini publish a frame
     # sequence as a versioned SUBFOLDER <base>_<ITER>/ holding <base>_<ITER>.<frame>.<ext>
     # files (there is no _LAST sequence, so iter=LAST maps to the newest version).
@@ -293,6 +304,24 @@ def resolve_import_path(
 
 
 _FRAME_RE = re.compile(r"^\d+$")
+
+
+def _resolve_layered_usd(folder: Path, prefix: str, suffix: str, exact_stem: str) -> Path | None:
+    """Root layer of a layered USD version folder ``<base>_vNNN/<base>.<usd ext>``."""
+    try:
+        subdirs = sorted(d for d in folder.iterdir() if d.is_dir())
+    except OSError:
+        return None
+    for d in subdirs:
+        du = d.name.upper()
+        if not (du == exact_stem or (du.startswith(prefix) and du.endswith(suffix))):
+            continue
+        base = d.name[: -len(suffix)]
+        for ext in (".usd", ".usda", ".usdc"):
+            root = d / f"{base}{ext}"
+            if root.is_file():
+                return root
+    return None
 
 
 def _resolve_sequence(

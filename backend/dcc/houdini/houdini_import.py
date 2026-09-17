@@ -504,14 +504,16 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
     return {"ok": True, "local_path": local_path, "abs_path": str(dest)}
 
 
-def create_usd_context_import(file_path: str, probe: dict) -> dict:
+def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None) -> dict:
     """Import a USD file according to the active network pane (2026-09-17).
 
     * LOP network (/stage, lopnet): Reference LOP at ``probe_prim_path`` wired after
       the selected (else displayed) LOP, display flag moved to it.
-    * /obj or SOP network: ``kinefx::usdcharacterimport`` (source = file) when the
-      stage has a skeleton, so mesh + joints + anim come in; else ``usdimport``.
-      /obj gets a new Geometry node to hold the SOP.
+    * /obj or SOP network: the ``flux_importer`` HDA set from *importer* (parm values
+      from features.importer.library_import.importer_source_for_file: tokens, USD
+      library or free path) so the asset stays changeable (2026-09-17). Without
+      the HDA: ``kinefx::usdcharacterimport`` when the stage has a skeleton, else
+      ``usdimport``. /obj gets a new Geometry node to hold the SOP.
     *probe* comes from features.importer.usd_probe (backend pxr). *file_path* may be
     a portable ``$FLUX/...`` token: both node types expand variables.
     Returns {"ok", "result": {"node_path", "mode", "resolved_path"}} or {"ok": False, "error"}.
@@ -521,6 +523,7 @@ def create_usd_context_import(file_path: str, probe: dict) -> dict:
     file_str = str(file_path).replace("\\", "/")
     prim_path = reference_prim_path(probe)
     has_skel = bool(probe.get("has_skel"))
+    importer_parms = dict(importer or {})
     name = re.sub(r"[^A-Za-z0-9_]", "_", probe.get("default_prim") or _node_name_from(file_path)) or "usd"
 
     code = textwrap.dedent(f"""\
@@ -547,7 +550,18 @@ def create_usd_context_import(file_path: str, probe: dict) -> dict:
             _mode = "lop_reference"
         elif _cat in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory()):
             _net = _pwd.createNode("geo", node_name="flux_" + _name) if _cat == hou.objNodeTypeCategory() else _pwd
-            if {has_skel!r}:
+            _importer = {importer_parms!r}
+            if _importer and hou.sopNodeTypeCategory().nodeType("flux_importer") is not None:
+                _node = _net.createNode("flux_importer", node_name="flux_import_" + _name)
+                # Order matters: project and source first, the menus below read them.
+                for _pn in ("project", "source_mode", "flux_class", "flux_type", "flux_name",
+                            "flux_instance", "flux_iter", "lib_item", "lib_version", "free_path"):
+                    if _pn in _importer and _node.parm(_pn) is not None:
+                        _node.parm(_pn).set(_importer[_pn])
+                # .set() does not fire callbacks: resolve explicitly with the node's module.
+                _node.hdaModule().resolve_path(_node)
+                _mode = "sop_flux_importer_" + str(_importer.get("source_mode", ""))
+            elif {has_skel!r}:
                 _node = _net.createNode("kinefx::usdcharacterimport", node_name="flux_character_" + _name)
                 _node.parm("usdsource").set("file")
                 _node.parm("usdfile").set({file_str!r})

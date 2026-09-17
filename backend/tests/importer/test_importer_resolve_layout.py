@@ -88,6 +88,26 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         self.assertFalse(res["ok"])
 
 
+class ImporterResolveLayeredUsd(unittest.TestCase):
+    """ADR 0017 U3c: layered USD versions live in <base>_vNNN/<base>.usd."""
+
+    def setUp(self):
+        ir._BCACHE.clear()
+
+    def test_version_folder_root_layer_is_listed_and_resolved(self):
+        proj = _project()
+        dest = resolve_publish_path(proj, f"{_BASE}_LAST.usd")
+        for n in (1, 2):
+            vdir = dest / f"{_BASE}_v00{n}"
+            vdir.mkdir(parents=True)
+            (vdir / f"{_BASE}.usd").write_text("#usda 1.0\n")
+            (vdir / f"{_BASE}_skel.usd").write_text("#usda 1.0\n")
+        self.assertEqual(ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST), ["v002", "v001"])
+        res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(Path(res["path"]), dest / f"{_BASE}_v001" / f"{_BASE}.usd")
+
+
 class ImporterResolveSequenceLayout(unittest.TestCase):
     """Frame-sequence import: <base>_vNNN/<base>_vNNN.<frame>.<ext> (Nuke/Houdini)."""
 

@@ -466,17 +466,24 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
 
     loop = asyncio.get_event_loop()
 
-    # USD: import by context (Reference LOP in /stage, KineFX character or usdimport in
-    # SOP). Component / assembly files are not task publishes, so the token HDA would
-    # show a wrong TYPE (e.g. RIG); every USD goes this way.
+    # USD: import by context (Reference LOP in /stage, flux_importer HDA in SOP whose
+    # source matches the file: tokens for a task publish, USD library for a component /
+    # assembly, free path otherwise).
     if selected_file and _PLib(req.rel_path).suffix.lower() in USD_EXTS:
         from dcc.houdini.houdini_import import create_usd_context_import
+        from features.importer.library_import import importer_source_for_file
         from features.importer.usd_probe import probe_usd
 
         abs_file = str(get_project_path(req.project) / req.rel_path.replace("/", "\\"))
         probe = await loop.run_in_executor(None, lambda: probe_usd(abs_file))
+        # SOP context: flux_importer HDA pointing at the same file (tokens / library / path).
+        importer = await loop.run_in_executor(
+            None, lambda: importer_source_for_file(get_project_path(req.project), abs_file))
+        if importer.get("source_mode") == "file":
+            importer["free_path"] = selected_file
+        importer["project"] = req.project
         resp = await loop.run_in_executor(
-            None, lambda: create_usd_context_import(selected_file, probe))
+            None, lambda: create_usd_context_import(selected_file, probe, importer))
         if not resp.get("ok"):
             raise HTTPException(status_code=503, detail=resp.get("error", "Import USD echoue"))
         return resp
