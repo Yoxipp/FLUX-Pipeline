@@ -46,7 +46,13 @@ def probe_usd(path: str | Path) -> dict:
 
     for p in stage.Traverse():
         if p.IsA(UsdSkel.Skeleton):
-            info["has_skel"] = True
+            # KineFX character import needs the Skeleton inside a SkelRoot; a stray one
+            # (skel layer alone, old hand-built component sublayering department roots)
+            # would make it fail, so it imports as plain geometry instead.
+            if UsdSkel.Root.Find(p):
+                info["has_skel"] = True
+            else:
+                info["skel_outside_root"] = True
         elif p.IsA(UsdSkel.Animation):
             info["has_anim"] = True
         elif p.IsA(UsdGeom.Mesh):

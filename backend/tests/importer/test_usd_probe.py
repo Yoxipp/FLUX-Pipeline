@@ -63,6 +63,18 @@ class ProbeUsd(unittest.TestCase):
         self.assertEqual(reference_prim_path({"default_prim": "SET", "kind": "assembly"}), "/sets/SET")
         self.assertEqual(reference_prim_path({"default_prim": "cam", "kind": ""}), "/cam")
 
+    def test_skeleton_outside_skelroot_is_not_a_character(self):
+        # Old hand-built component: department layers sublayered, so the Skeleton sits
+        # under its own root beside the SkelRoot (KineFX import fails on it).
+        def old_component(st):
+            root = UsdSkel.Root.Define(st, "/CHAR_GEO_X_null").GetPrim()
+            UsdGeom.Mesh.Define(st, "/CHAR_GEO_X_null/body")
+            UsdSkel.Skeleton.Define(st, "/CHAR_RIG_X_null/Skeleton")
+            st.SetDefaultPrim(root)
+        info = probe_usd(self._stage("old.usda", old_component))
+        self.assertTrue(info["ok"] and info["has_mesh"] and info["skel_outside_root"])
+        self.assertFalse(info["has_skel"])
+
     def test_unreadable_file_is_not_ok(self):
         bad = self.dir / "bad.usda"
         bad.write_text("nope", encoding="utf-8")

@@ -113,6 +113,7 @@ class ProbeFile(unittest.TestCase):
         f = self.tmp / "DOSSIER_PROJETS" / "anim.usda"
         f.parent.mkdir(parents=True)
         st = Usd.Stage.CreateNew(str(f))
+        UsdSkel.Root.Define(st, "/A")
         UsdSkel.Skeleton.Define(st, "/A/Skeleton")
         st.GetRootLayer().Save()
         with mock.patch("core.paths.get_flux_root", return_value=self.tmp):
