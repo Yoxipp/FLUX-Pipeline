@@ -186,6 +186,17 @@ class AssemblyV2(unittest.TestCase):
         stage = Usd.Stage.Open(town["file"])          # keep the stage alive while reading it
         self.assertTrue(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_01").IsValid())
 
+    def test_a_lowercase_decor_name_keeps_its_case(self) -> None:
+        # The NAME token must match the decor name exactly (it is the USD prim name):
+        # an upper-cased token would leave the decor in its legacy folder for ever.
+        from features.folder_manager import tokens as tok2
+
+        av.create_assembly(self.project, "town_b")
+        self.assertEqual(tok2.load_tokens(self.project)["NAME"]["town_b"], "assets/sets/town_b")
+        self.assertEqual(av.assembly_dir(self.project, "town_b"),
+                         self.project / "assets" / "sets" / "town_b" / "usd")
+        self.assertIsNotNone(av.current_entry(self.project, "town_b"))
+
     def test_a_component_name_cannot_become_a_decor(self) -> None:
         with self.assertRaises(ValueError):
             av.create_assembly(self.project, "UTAH")      # UTAH already has a component

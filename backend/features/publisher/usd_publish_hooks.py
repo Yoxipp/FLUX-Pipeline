@@ -41,8 +41,13 @@ def generate_proxy_layer(version_path: Path | None) -> str | None:
 
         result = run_generate_proxy_action(Path(version_path),
                                            target_reduction=proxy_usd_reduction())
-    except Exception:       # noqa: BLE001 - a proxy failure never breaks a publish
-        log.exception("USD proxy failed for %s", version_path)
+    except Exception as exc:    # noqa: BLE001 - a proxy failure never breaks a publish
+        # A rig, an anim or a shot layer has no render mesh: nothing to proxy, not a
+        # failure worth a traceback.
+        if "no render mesh" in str(exc).lower():
+            log.debug("USD proxy skipped (no render mesh): %s", Path(version_path).name)
+        else:
+            log.exception("USD proxy failed for %s", version_path)
         return None
     if not result or result.get("status") != "converted":
         return None

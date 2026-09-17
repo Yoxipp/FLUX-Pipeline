@@ -77,22 +77,21 @@ def ensure_asset(project_path: str | Path, name: str) -> Path:
     if own is not None and _kind_of(_entry_in(own, name)) == "component":
         raise ValueError(
             f"{name} est deja un asset USD (component) : choisis un autre nom pour le decor")
-    from features.folder_manager.asset_creator import create_asset
+    from core.constants import DEFAULT_CLASS_TOKENS
     from features.folder_manager.tokens import add_token, get_path_for_token, load_tokens
+    from features.publisher.publish_core import ensure_dir
 
     project = Path(project_path)
-    tokens = load_tokens(project)
-    if get_path_for_token(tokens, "CLASS", ASSEMBLY_CLASS) is None:
-        from core.constants import DEFAULT_CLASS_TOKENS
-
-        add_token(project, "CLASS", ASSEMBLY_CLASS, DEFAULT_CLASS_TOKENS[ASSEMBLY_CLASS])
+    class_rel = get_path_for_token(load_tokens(project), "CLASS", ASSEMBLY_CLASS)
+    if class_rel is None:
+        class_rel = DEFAULT_CLASS_TOKENS[ASSEMBLY_CLASS]
+        add_token(project, "CLASS", ASSEMBLY_CLASS, class_rel)
     if get_path_for_token(load_tokens(project), "NAME", name) is None:
-        try:
-            create_asset(project, ASSEMBLY_CLASS, name)
-        except FileExistsError:     # folder there, token missing: register it only
-            from core.constants import DEFAULT_CLASS_TOKENS
-
-            add_token(project, "NAME", name, f"{DEFAULT_CLASS_TOKENS[ASSEMBLY_CLASS]}/{name}")
+        # The NAME token must be the decor name EXACTLY (it is the USD prim name);
+        # create_asset would upper-case it and the token would no longer match.
+        rel = f"{class_rel}/{name}"
+        ensure_dir(project / rel)
+        add_token(project, "NAME", name, rel)
     return assembly_dir(project, name)
 
 
