@@ -337,8 +337,8 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
   variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
   seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ###', example: 'SEQ001' },
   shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT###', example: 'SHOT010' },
-  shotName: { title: 'Name', desc: 'La classe du plan (task shot). Suggestions basées sur Sequence + Shot.', expected: 'Champ libre', example: 'ANIM, LAYOUT, FX, CFX…' },
-  shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Name.', expected: 'Champ libre', example: 'ANIM_SEQ001_SHOT010_block_LAST' },
+  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). Suggestions basées sur Sequence + Shot.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_null' },
+  shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_block_LAST' },
 }
 
 // ── PublishComposer ───────────────────────────────────────────────────────────
@@ -574,7 +574,7 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
             placeholder="SHOT010" onChange={v => onSelect('shot', v)}
             onArchiveOption={sel.seq ? (v => onArchiveToken('shot', v)) : undefined}
           />
-          <ModuleBox label="Name" info={TOKEN_INFO.shotName} value={sel.name} options={shotNameSug} placeholder="task…" onChange={v => onSelect('name', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} options={shotNameSug} placeholder="LAYOUT, ANIM, FX…" onChange={v => onSelect('name', v)} />
           <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
         </>
       )}
@@ -993,7 +993,8 @@ export function Publisher() {
       return base
     }
     const varr = formatToken(sel.variante) || 'null'
-    return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${varr}`
+    // ADR 0019: SEQ_SHOT_TASK[_VARIANTE] — the department sits where an asset has its TYPE.
+    return `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${varr}`
   }, [mode, sel])
 
   // ── Token / folder pre-creation before publish ─────────────────────────────

@@ -39,9 +39,13 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     instance = parsed["INSTANCE"].lower() if parsed["INSTANCE"] else "null"
 
     if parsed["is_shot"]:
-        class_rel = get_path_for_token(tokens, "CLASS", parsed["CLASS"])
+        # ADR 0019: the department of a shot is its TYPE (TYPE_SHOT tokens); projects
+        # written before that carry it in their CLASS tokens.
+        dept = parsed.get("TYPE") or parsed["CLASS"]
+        class_rel = (get_path_for_token(tokens, "TYPE_SHOT", dept)
+                     or get_path_for_token(tokens, "CLASS", dept))
         if class_rel is None:
-            log.warning("CLASS token not found: %s", parsed["CLASS"])
+            log.warning("Shot department token not found: %s", dept)
             return None
         try:
             rel = class_rel.format(seq=parsed["SEQ"], shot=parsed["SHOT"])

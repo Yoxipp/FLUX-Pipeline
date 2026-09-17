@@ -101,11 +101,29 @@ def parse_filename(filename: str) -> dict | None:
     iter_val = parts[-1] if has_iter else ""
     core = parts[:-1] if has_iter else list(parts)
 
-    # shot: CLASS_SEQ###_SHOT###_VARIANTE  (VARIANTE replaces the old instance slot)
+    # shot, current form (ADR 0019): SEQ###_SHOT###_TYPE[_VARIANTE] — the department
+    # sits where an asset has its TYPE. "CLASS" repeats it so old readers still work.
+    if core and _SEQ_RE.match(core[0]):
+        dept = core[2] if len(core) > 2 else ""
+        variante = core[3] if len(core) > 3 else DEFAULT_INSTANCE
+        return {
+            "CLASS":     dept,
+            "TYPE":      dept,
+            "SEQ":       core[0],
+            "SHOT":      core[1] if len(core) > 1 else "",
+            "INSTANCE":  variante,   # kept for back-compat with path resolution
+            "VARIANTE":  variante,
+            "ITER":      iter_val,
+            "extension": ext,
+            "is_shot":   True,
+        }
+
+    # shot, legacy form: CLASS_SEQ###_SHOT###[_VARIANTE]
     if len(core) >= 2 and _SEQ_RE.match(core[1]):
         variante = core[3] if len(core) > 3 else DEFAULT_INSTANCE
         return {
             "CLASS":     core[0],
+            "TYPE":      core[0],
             "SEQ":       core[1],
             "SHOT":      core[2] if len(core) > 2 else "",
             "INSTANCE":  variante,   # kept for back-compat with path resolution
@@ -128,6 +146,25 @@ def parse_filename(filename: str) -> dict | None:
         "extension": ext,
         "is_shot":   False,
     }
+
+
+def build_shot_filename(
+    seq: str,
+    shot: str,
+    type_token: str,
+    variante: str = DEFAULT_INSTANCE,
+    version: str = ACTIVE_VERSION_LABEL,
+    extension: str = "",
+) -> str:
+    """Return a shot filename: SEQ###_SHOT###_TYPE[_VARIANTE]_ITER (ADR 0019).
+
+    Unlike build_asset_filename (whose output only feeds path resolution), this keeps
+    the case of *variante* and *version* so it can name a real published file.
+    """
+    parts = [format_token(seq), format_token(shot), format_token(type_token),
+             variante or DEFAULT_INSTANCE, version]
+    name = "_".join(p for p in parts if p)
+    return f"{name}.{extension.lstrip('.')}" if extension else name
 
 
 # Multi-dot extensions that Path.suffix / rpartition would cut in two.

@@ -8,14 +8,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS
+from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_SHOT_TYPE_TOKENS, DEFAULT_TYPE_TOKENS
 from core.logger import get_logger
 from core.repository_factory import get_repository
 
 log = get_logger(__name__)
 
 # All recognised token-type section keys in tokens.json
-_TOKEN_SECTIONS = ("CLASS", "TYPE", "NAME", "INSTANCE", "SEQ", "SHOT", "custom")
+# TYPE_SHOT: department of a shot publish (ADR 0019). Absent from old projects, which
+# fall back to their CLASS tokens for the legacy CLASS_SEQ_SHOT names.
+_TOKEN_SECTIONS = ("CLASS", "TYPE", "TYPE_SHOT", "NAME", "INSTANCE", "SEQ", "SHOT", "custom")
 
 # Metadata frontier (V5): tokens.json goes through the repository. The document is
 # a dict, addressed by its project folder (the resolver appends the file name).
@@ -28,7 +30,8 @@ def build_default_tokens() -> dict:
     """Return a fresh tokens dict seeded with the default CLASS, TYPE and INSTANCE entries."""
     return {
         "CLASS":    dict(DEFAULT_CLASS_TOKENS),
-        "TYPE":     dict(DEFAULT_TYPE_TOKENS),
+        "TYPE":      dict(DEFAULT_TYPE_TOKENS),
+        "TYPE_SHOT": dict(DEFAULT_SHOT_TYPE_TOKENS),
         "NAME":     {},
         "INSTANCE": {"null": ""},
         "SEQ":      {},
@@ -53,7 +56,7 @@ def load_tokens(project_path: Path) -> dict:
     defaults = build_default_tokens()
     for section in _TOKEN_SECTIONS:
         default_section = defaults.get(section, {})
-        if section in ("CLASS", "TYPE", "INSTANCE") and default_section:
+        if section in ("CLASS", "TYPE", "TYPE_SHOT", "INSTANCE") and default_section:
             # Always ensure built-in tokens exist; custom entries take priority on key collision
             raw[section] = {**default_section, **raw.get(section, {})}
         else:

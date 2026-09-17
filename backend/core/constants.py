@@ -117,6 +117,18 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "COMP":   "comp/{seq}/{shot}",
 }
 
+# Default TYPE token map for a SHOT (ADR 0019: the department of a shot is its TYPE,
+# exactly like an asset's). Same folders as the legacy shot CLASS tokens above, which
+# stay for the old CLASS_SEQ_SHOT names.
+DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
+    "LAYOUT": "shot/{seq}/{shot}/layout",
+    "ANIM":   "shot/{seq}/{shot}/anim",
+    "FX":     "shot/{seq}/{shot}/fx",
+    "CFX":    "shot/{seq}/{shot}/cfx",
+    "LIGHT":  "lighting/{seq}",
+    "COMP":   "comp/{seq}/{shot}",
+}
+
 # Default TYPE token map (Task → asset-relative top-level sub-folder).
 # The Publisher exposes exactly these coarse tasks (fixed order), matching the
 # CHAR asset scaffold (model / shading / groom / rig / CFX_Rig). "mult" is a
