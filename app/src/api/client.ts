@@ -613,7 +613,14 @@ export const api = {
     apiCall<{ ok: boolean; changed: boolean; version: string | null; last?: string }>(
       'POST', '/usd/component/refresh', { project, name, pins }),
 
+  // A3: new versioned assembly (empty or copy of *source*) and edits (each = new version).
+  createUsdAssembly: (project: string, name: string, source?: string) =>
+    apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/create', { project, name, source }),
+  editUsdAssembly: (project: string, name: string, ops: UsdAssemblyOp[]) =>
+    apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
+
   // Point one assembly instance at a component LAST or a frozen vNNN.
+
   relinkUsdInstance: (project: string, file: string, prim: string, component: string, version: string) =>
     apiCall<{ ok: boolean; prim: string; asset_path: string }>(
       'POST', '/usd/assembly/relink', { project, file, prim, component, version }),
@@ -760,5 +767,20 @@ export interface UsdComponentInfo {
 export interface UsdAssemblyInstance {
   prim: string; asset_path: string; component: string | null; broken: boolean; follows_last: boolean
 }
-export interface UsdAssemblyInfo { name: string; file: string; instances: UsdAssemblyInstance[]; broken: number }
+export interface UsdAssemblyInfo {
+  name: string; file: string; instances: UsdAssemblyInstance[]; broken: number
+  version: string | null      // current vNNN (null = legacy flat file)
+  versions: string[]
+  legacy: boolean             // old builder file, converted on first edit
+  layout: string | null       // placement layer published from a DCC (read only)
+}
+// A3 edit operations (backend assembly_v2.apply_ops).
+export type UsdAssemblyOp =
+  | { op: 'add'; component: string; count?: number; version?: string }
+  | { op: 'remove'; name: string }
+  | { op: 'duplicate'; name: string }
+  | { op: 'rename'; name: string; new_name: string }
+  | { op: 'relink'; name: string; component: string; version?: string }
+  | { op: 'set_version'; name?: string; all?: boolean; version: string }
+export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
 export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }

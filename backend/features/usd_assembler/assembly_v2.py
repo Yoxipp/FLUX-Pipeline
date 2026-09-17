@@ -263,7 +263,9 @@ def _author(folder: Path, project: Path, name: str, version: str, instances: lis
             group = groups[cls] = Sdf.PrimSpec(root, cls, Sdf.SpecifierDef, "Xform")
             group.kind = "group"
         target = _component_target(project, inst["component"], inst["version"])
-        prim = Sdf.PrimSpec(group, inst["name"], Sdf.SpecifierDef, "Xform")
+        # Typeless: the component's own root type (SkelRoot for a character) must come
+        # through the reference, a typed "Xform" here would override it and break skinning.
+        prim = Sdf.PrimSpec(group, inst["name"], Sdf.SpecifierDef)
         prim.kind = "component"
         prim.instanceable = True
         prim.referenceList.prependedItems = [Sdf.Reference(_rel(target, folder))]

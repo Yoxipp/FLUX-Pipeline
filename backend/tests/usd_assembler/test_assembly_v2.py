@@ -66,6 +66,8 @@ class AssemblyV2(unittest.TestCase):
         inst = stage.GetPrimAtPath("/TOWN/CHAR/UTAH_01")
         self.assertTrue(inst.IsInstance())
         self.assertEqual(Usd.ModelAPI(inst).GetKind(), "component")
+        comp_stage = Usd.Stage.Open(str(self.project / "assets/chara/UTAH/usd/UTAH_LAST.usda"))
+        self.assertEqual(inst.GetTypeName(), comp_stage.GetDefaultPrim().GetTypeName())   # SkelRoot kept
         meshes = [p for p in Usd.PrimRange(inst, Usd.TraverseInstanceProxies()) if p.IsA(UsdGeom.Mesh)]
         self.assertEqual(len(meshes), 1)
 

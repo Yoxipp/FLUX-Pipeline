@@ -4,12 +4,12 @@
 // Backend contracts: GET /usd/library, POST /usd/component/refresh.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList } from 'lucide-react'
+import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
-import type { UsdAssemblyInfo, UsdComponentInfo, UsdLibrary as Library, UsdSlotPin, UsdSlotRef } from '../../api/client'
+import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdLibrary as Library, UsdSlotPin, UsdSlotRef } from '../../api/client'
 import { useI18n } from '../../i18n'
 
 type Tab = 'components' | 'assemblies'
@@ -121,6 +121,10 @@ export function UsdLibrary({ project, projects, onProject }: {
           </div>
         </div>
 
+        {tab === 'assemblies' && lib && (
+          <NewAssembly project={project} assemblies={lib.assemblies}
+            onCreated={name => { load(); goTo('assemblies', name) }} />
+        )}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {tab === 'components' && components.map(c => (
             <ListRow key={c.name} active={sel?.tab === 'components' && sel.name === c.name}
@@ -139,7 +143,10 @@ export function UsdLibrary({ project, projects, onProject }: {
               onClick={() => setSel({ tab: 'assemblies', name: a.name })}
               icon={<Boxes size={12} strokeWidth={1.75} />}
               title={a.name}
-              meta={a.broken > 0 ? <AlertTriangle size={11} strokeWidth={2} color="var(--err)" /> : null}
+              meta={<>
+                <span style={{ ...mono, color: 'var(--ink-3)' }}>{a.version ?? '-'}</span>
+                {a.broken > 0 && <AlertTriangle size={11} strokeWidth={2} color="var(--err)" />}
+              </>}
               sub={`${a.instances.length} ${tr('usd.lib.instances').toLowerCase()}`}
             />
           ))}
@@ -369,33 +376,86 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
   )
 }
 
+function NewAssembly({ project, assemblies, onCreated }: {
+  project: string; assemblies: UsdAssemblyInfo[]; onCreated: (name: string) => void
+}) {
+  const { t: tr } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [source, setSource] = useState('')
+  const [busy, setBusy] = useState(false)
+  const valid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+
+  async function create() {
+    setBusy(true)
+    try {
+      const res = await api.createUsdAssembly(project, name, source || undefined)
+      toast.success(tr('usd.lib.saved', { name, version: res.version ?? '' }))
+      setOpen(false); setName(''); setSource('')
+      onCreated(name)
+    } catch (e) {
+      toast.error(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div style={{ padding: '0 14px 8px' }}>
+        <Btn sm ghost onClick={() => setOpen(true)}><Plus size={11} strokeWidth={2} /> {tr('usd.lib.newAssembly')}</Btn>
+      </div>
+    )
+  }
+  return (
+    <div className="card" style={{ margin: '0 14px 8px', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={tr('usd.lib.assemblyName')}
+        onKeyDown={e => { if (e.key === 'Enter' && valid && !busy) void create() }}
+        style={{ ...selectStyle, width: '100%', height: 26, boxSizing: 'border-box', fontFamily: 'var(--mono)' }} />
+      <select value={source} onChange={e => setSource(e.target.value)} style={{ ...selectStyle, width: '100%', height: 26 }}>
+        <option value="">{tr('usd.lib.blank')}</option>
+        {assemblies.map(a => <option key={a.name} value={a.name}>{tr('usd.lib.copyOf', { name: a.name })}</option>)}
+      </select>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <Btn sm ghost disabled={busy} onClick={() => setOpen(false)}><X size={11} strokeWidth={2} /></Btn>
+        <Btn sm primary disabled={busy || !valid} onClick={() => void create()}>
+          <Check size={11} strokeWidth={2} /> {tr('usd.lib.create')}
+        </Btn>
+      </div>
+    </div>
+  )
+}
+
 function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }: {
   project: string; asm: UsdAssemblyInfo; components: UsdComponentInfo[]
   onOpenComponent: (name: string) => void; onChanged: () => void
 }) {
   const { t: tr } = useI18n()
   const navigate = useNavigate()
-  const [editing, setEditing] = useState<string | null>(null)
+  // prim of the row being relinked / renamed
+  const [editing, setEditing] = useState<{ prim: string; mode: 'link' | 'rename' } | null>(null)
   const [target, setTarget] = useState('')
   const [version, setVersion] = useState('LAST')
+  const [newName, setNewName] = useState('')
+  const [addComp, setAddComp] = useState('')
+  const [addCount, setAddCount] = useState(1)
+  const [addVersion, setAddVersion] = useState('LAST')
   const [busy, setBusy] = useState(false)
   useEffect(() => { setEditing(null) }, [asm.file])
 
   const linkable = components.filter(c => c.versions.length > 0)
-  const targetVersions = linkable.find(c => c.name === target)?.versions ?? []
+  const versionsOf = (name: string) => linkable.find(c => c.name === name)?.versions ?? []
+  const instName = (prim: string) => prim.split('/').pop() ?? prim
+  const instVersion = (i: UsdAssemblyInfo['instances'][number]) =>
+    i.follows_last ? 'LAST' : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? 'LAST')
 
-  function startEdit(prim: string, component: string | null, followsLast: boolean, assetPath: string) {
-    setEditing(prim)
-    setTarget(component ?? linkable[0]?.name ?? '')
-    const m = followsLast ? null : assetPath.match(/_(v\d+)\//)
-    setVersion(m ? m[1] : 'LAST')
-  }
-
-  async function apply(prim: string) {
+  async function edit(ops: UsdAssemblyOp[]) {
     setBusy(true)
     try {
-      await api.relinkUsdInstance(project, asm.file, prim, target, version)
-      toast.success(tr('usd.lib.relinked', { name: prim.split('/').pop() ?? prim, target: `${target} ${version}` }))
+      const res = await api.editUsdAssembly(project, asm.name, ops)
+      if (res.changed) toast.success(tr('usd.lib.saved', { name: asm.name, version: res.version ?? '' }))
+      else toast.info(tr('usd.lib.noChange'))
+      res.warnings.forEach(w => toast.warning(w))
       setEditing(null)
       onChanged()
     } catch (e) {
@@ -405,11 +465,23 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
     }
   }
 
+  function startLink(i: UsdAssemblyInfo['instances'][number]) {
+    setEditing({ prim: i.prim, mode: 'link' })
+    setTarget(i.component ?? linkable[0]?.name ?? '')
+    setVersion(instVersion(i))
+  }
+
+  const freezeOps: UsdAssemblyOp[] = asm.instances
+    .filter(i => i.follows_last && i.component)
+    .map(i => ({ op: 'set_version', name: instName(i.prim),
+                 version: components.find(c => c.name === i.component)?.version ?? 'LAST' }))
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 820 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <Boxes size={15} strokeWidth={1.75} color="var(--ink-3)" />
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{asm.name}</span>
+        {asm.version && <span style={{ ...mono, color: 'var(--ink-3)' }}>{asm.version}</span>}
         {asm.broken > 0 && (
           <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{tr('usd.lib.brokenCount', { n: asm.broken })}</span>
         )}
@@ -421,16 +493,53 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
           <Copy size={11} strokeWidth={2} />
         </Btn>
       </div>
+      {asm.legacy && (
+        <span className="lbl" style={{ fontSize: 10, color: 'var(--warn)' }}>{tr('usd.lib.legacy')}</span>
+      )}
+      <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }} title={asm.layout ?? undefined}>
+        {tr('usd.lib.layout')} : {asm.layout ? asm.layout.split(/[\\/]/).pop() : tr('usd.lib.noLayout')}
+      </span>
 
-      <SecTitle>{tr('usd.lib.instances')}</SecTitle>
+      <SecTitle>{tr('usd.lib.add')}</SecTitle>
+      <div className="card" style={{ padding: '6px 10px', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={addComp} onChange={e => { setAddComp(e.target.value); setAddVersion('LAST') }} style={{ ...selectStyle, width: 170 }}>
+          <option value="">{tr('usd.lib.components')}</option>
+          {linkable.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+        <span className="cap">{tr('usd.lib.count')}</span>
+        <input type="number" min={1} max={500} value={addCount} onChange={e => setAddCount(Math.max(1, Number(e.target.value) || 1))}
+          style={{ ...selectStyle, width: 56, fontFamily: 'var(--mono)' }} />
+        <select value={addVersion} onChange={e => setAddVersion(e.target.value)} style={{ ...selectStyle, width: 100, fontFamily: 'var(--mono)' }}>
+          <option value="LAST">{tr('usd.lib.followLast')}</option>
+          {[...versionsOf(addComp)].reverse().map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <div style={{ flex: 1 }} />
+        <Btn sm primary disabled={busy || !addComp}
+          onClick={() => void edit([{ op: 'add', component: addComp, count: addCount, version: addVersion }])}>
+          <Plus size={11} strokeWidth={2} /> {tr('usd.lib.add')}
+        </Btn>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <SecTitle>{tr('usd.lib.instances')}</SecTitle>
+        <div style={{ flex: 1 }} />
+        <Btn sm ghost disabled={busy || asm.instances.length === 0}
+          onClick={() => void edit([{ op: 'set_version', all: true, version: 'LAST' }])}>{tr('usd.lib.allLast')}</Btn>
+        <Btn sm ghost disabled={busy || freezeOps.length === 0} onClick={() => void edit(freezeOps)}>
+          <PinIcon size={10} strokeWidth={2} /> {tr('usd.lib.freezeAll')}
+        </Btn>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {asm.instances.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.lib.noInstance')}</span>}
-        {asm.instances.map(i => (
+        {asm.instances.map(i => {
+          const name = instName(i.prim)
+          const rowEdit = editing?.prim === i.prim ? editing.mode : null
+          return (
           <div key={`${i.prim}|${i.asset_path}`} className="card" style={{
             padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 6,
             borderColor: i.broken ? 'var(--err)' : undefined,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ ...mono, color: 'var(--ink-2)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={i.asset_path}>
                 {i.prim.split('/').slice(2).join('/')}
               </span>
@@ -449,13 +558,22 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
                   <AlertTriangle size={10} strokeWidth={2} /> {tr('usd.lib.broken')}
                 </span>
               )}
-              {editing !== i.prim && (
-                <Btn sm ghost disabled={linkable.length === 0} onClick={() => startEdit(i.prim, i.component, i.follows_last, i.asset_path)}>
-                  <Pencil size={10} strokeWidth={2} /> {tr('usd.lib.changeLink')}
+              {!rowEdit && (<>
+                <Btn sm ghost disabled={busy || linkable.length === 0} onClick={() => startLink(i)} title={tr('usd.lib.changeLink')}>
+                  <Pencil size={10} strokeWidth={2} />
                 </Btn>
-              )}
+                <Btn sm ghost disabled={busy} title={tr('usd.lib.rename')}
+                  onClick={() => { setEditing({ prim: i.prim, mode: 'rename' }); setNewName(name) }}>Aa</Btn>
+                <Btn sm ghost disabled={busy || !i.component} title={tr('usd.lib.duplicate')}
+                  onClick={() => void edit([{ op: 'duplicate', name }])}>
+                  <CopyPlus size={10} strokeWidth={2} />
+                </Btn>
+                <Btn sm ghost disabled={busy} title={tr('usd.lib.remove')} onClick={() => void edit([{ op: 'remove', name }])}>
+                  <Trash2 size={10} strokeWidth={2} />
+                </Btn>
+              </>)}
             </div>
-            {editing === i.prim && (
+            {rowEdit === 'link' && (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
                 <span className="cap">{tr('usd.lib.components')}</span>
                 <select value={target} onChange={e => { setTarget(e.target.value); setVersion('LAST') }} style={{ ...selectStyle, width: 160 }}>
@@ -464,17 +582,31 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
                 <span className="cap">{tr('usd.col.version')}</span>
                 <select value={version} onChange={e => setVersion(e.target.value)} style={{ ...selectStyle, width: 110, fontFamily: 'var(--mono)' }}>
                   <option value="LAST">{tr('usd.lib.followLast')}</option>
-                  {[...targetVersions].reverse().map(v => <option key={v} value={v}>{v}</option>)}
+                  {[...versionsOf(target)].reverse().map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
                 <div style={{ flex: 1 }} />
-                <Btn sm primary disabled={busy || !target} onClick={() => void apply(i.prim)}>
+                <Btn sm primary disabled={busy || !target}
+                  onClick={() => void edit([{ op: 'relink', name, component: target, version }])}>
+                  <Check size={11} strokeWidth={2} /> {tr('usd.lib.apply')}
+                </Btn>
+                <Btn sm ghost disabled={busy} onClick={() => setEditing(null)}><X size={11} strokeWidth={2} /></Btn>
+              </div>
+            )}
+            {rowEdit === 'rename' && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
+                <input autoFocus value={newName} onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && newName && newName !== name) void edit([{ op: 'rename', name, new_name: newName }]) }}
+                  style={{ ...selectStyle, flex: 1, fontFamily: 'var(--mono)' }} />
+                <Btn sm primary disabled={busy || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(newName) || newName === name}
+                  onClick={() => void edit([{ op: 'rename', name, new_name: newName }])}>
                   <Check size={11} strokeWidth={2} /> {tr('usd.lib.apply')}
                 </Btn>
                 <Btn sm ghost disabled={busy} onClick={() => setEditing(null)}><X size={11} strokeWidth={2} /></Btn>
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
