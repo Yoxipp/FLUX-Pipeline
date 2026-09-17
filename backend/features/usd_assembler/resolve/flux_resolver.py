@@ -311,6 +311,29 @@ class FluxResolver:
             version=self._freeze_label(want, scanned),
         )
 
+    def resolve_root(
+        self, asset: str, task: str, version: str = "latest", instance: str = "",
+    ) -> ResolvedAsset:
+        """Freeze the ROOT file ``<base>.<usd ext>`` of one layered publish (all its
+        layers composed), for a department contribution (ADR 0019)."""
+        parent = self._publish_parent(asset, task)
+        scanned = self._scan_version_folders(parent, instance)
+        want = _ACTIVE if version in ("latest", "LAST") else version
+        info = scanned.get(want)
+        if info is None:
+            avail = ", ".join(sorted(scanned)) or "<none>"
+            raise ResolveError(
+                f"version '{version}' not found for '{asset}' (task '{task}', instance "
+                f"'{instance or '*'}'); available: {avail}"
+            )
+        base, folder = info["base"], info["folder"]
+        for ext in (".usd", ".usda", ".usdc"):
+            root = folder / f"{base}{ext}"
+            if root.is_file():
+                return ResolvedAsset(path=root, default_prim=_default_prim(root) or sanitize_token(base),
+                                     version=self._freeze_label(want, scanned))
+        raise ResolveError(f"root layer missing in {folder.name} for '{asset}'")
+
     @staticmethod
     def _freeze_label(label: str, scanned: dict[str, dict]) -> str:
         """Turn the active LAST into a concrete version label for determinism."""

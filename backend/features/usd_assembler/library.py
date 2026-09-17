@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core.logger import get_logger
 
-from .component_auto import COMPONENT_EXT, collect_slots, component_dir
+from .component_auto import COMPONENT_EXT, DEPARTMENTS, _plain, collect_slots, component_dir
 
 log = get_logger("usd_assembler.library")
 
@@ -32,18 +32,24 @@ def _component_versions(parent: Path, name: str) -> list[str]:
 
 
 def _entry_slots(entry: Path) -> dict:
+    """Departments recorded in a component entry (ADR 0019). A pre-0019 entry (slots
+    model / skel / look without variants) reads as out of date."""
     from pxr import Sdf
 
     layer = Sdf.Layer.OpenAsAnonymous(str(entry))
     if layer is None:
         return {}
-    flux = dict(layer.customLayerData).get("flux", {})
+    flux = _plain(dict(layer.customLayerData).get("flux", {}))
     slots = flux.get("slots") if isinstance(flux, dict) else None
-    out = {k: dict(v) for k, v in (slots or {}).items()}
+    out = {k: dict(v) for k, v in (slots or {}).items() if k in DEPARTMENTS and "variants" in v}
     excluded = str(flux.get("excluded") or "") if isinstance(flux, dict) else ""
-    for slot in filter(None, excluded.split(",")):
-        out[str(slot)] = {"pin": {"exclude": True}}
+    for dept in filter(None, excluded.split(",")):
+        out[str(dept)] = {"pin": {"exclude": True}}
     return out
+
+
+def _variant_versions(slot: dict) -> dict[str, str]:
+    return {v: str(d.get("version")) for v, d in (slot.get("variants") or {}).items()}
 
 
 def _class_of(tokens: dict, name: str) -> str | None:
@@ -71,8 +77,9 @@ def list_components(project_path: str | Path) -> list[dict]:
         if parent is None:
             continue
         try:
-            published = {s: {"task": v["task"], "version": v["version"]}
-                         for s, v in collect_slots(project, name).items()}
+            published = {d: {"task": v["task"], "version": v["version"], "default": v["default"],
+                             "variants": _variant_versions(v)}
+                         for d, v in collect_slots(project, name).items()}
         except Exception as exc:          # unreadable publish tree: list the asset anyway
             log.info("Library: slots of %s unreadable: %s", name, exc)
             published = {}
@@ -86,17 +93,18 @@ def list_components(project_path: str | Path) -> list[dict]:
 
         if not current:
             state = "missing" if "model" in published else "incomplete"
-        elif any(not (slots.get(s) or {}).get("pin") and (
-                 (slots.get(s) or {}).get("version") != v["version"]
-                 or (slots.get(s) or {}).get("task") != v["task"]) for s, v in published.items()):
+        elif any(not (slots.get(d) or {}).get("pin")
+                 and _variant_versions(slots.get(d) or {}) != v["variants"]
+                 for d, v in published.items()):
             state = "stale"
         else:
             state = "ok"
         out.append({
             "name": name, "class": _class_of(tokens, name),
             "state": state, "version": current, "versions": versions,
-            "slots": {s: {"task": v.get("task"), "version": v.get("version"),
-                          "pin": dict(v["pin"]) if v.get("pin") else None} for s, v in slots.items()},
+            "slots": {d: {"task": v.get("task"), "version": v.get("version"), "default": v.get("default"),
+                          "variants": _variant_versions(v),
+                          "pin": dict(v["pin"]) if v.get("pin") else None} for d, v in slots.items()},
             "published": published,
             "dir": str(parent), "last": str(last_file) if last_file.is_file() else None,
             "used_by": [],

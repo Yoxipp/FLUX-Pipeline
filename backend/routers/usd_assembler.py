@@ -113,7 +113,7 @@ async def get_recipe_schema() -> dict:
 
 @router.get("/layers")
 async def list_usd_layers(
-    asset: str, task: str, project: str | None = None
+    asset: str, task: str, instance: str = "", project: str | None = None
 ) -> dict:
     """List published layered-USD versions for *asset*'s *task* (component slots).
 
@@ -129,7 +129,7 @@ async def list_usd_layers(
     ns = config.get("usd_assembler", {}) or {}
     resolver = FluxResolver(project_path, ns)
     try:
-        versions = resolver.list_layer_versions(asset, task)
+        versions = resolver.list_layer_versions(asset, task, instance)
     except ResolveError as exc:
         log.info("USD layers: %s (asset '%s', task '%s')", exc, asset, task)
         versions = {}

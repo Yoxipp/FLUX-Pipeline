@@ -1,17 +1,20 @@
-# component_auto.py — automatic USD component, regenerated after a layer publish
-# (USD_ASSEMBLER_V2 step A1). Each department publish (GEO, RIG, SHADING) is its own
-# layered publish with its own base token (CLASS_TYPE_NAME_INSTANCE), so the slots
-# cannot simply be sublayered: each one is referenced with an explicit prim path and
-# remapped onto /<NAME>. Output, beside the asset's department folders:
+# component_auto.py — automatic USD asset (component), regenerated after a department
+# publish (USD_ASSEMBLER_V2 A1, ADR 0018 location, ADR 0019 structure: AYON contribution
+# workflow + SideFX Component Builder). Output, beside the asset's department folders:
 #   <NAME_path>/usd/<NAME>_vNNN/<NAME>.usda          entry: defaultPrim, kind=component,
 #                                                    assetInfo, payload -> ./<NAME>_payload.usda
-#   <NAME_path>/usd/<NAME>_vNNN/<NAME>_payload.usda  /<NAME> references look > skel > model
+#   <NAME_path>/usd/<NAME>_vNNN/<NAME>_payload.usda  def /<NAME>, sublayers the department
+#                                                    layers strong -> weak (rig > look > model)
+#   <NAME_path>/usd/<NAME>_vNNN/<NAME>_<dept>.usda   over /<NAME> + variantSet "<dept>":
+#                                                    one variant per INSTANCE, referencing that
+#                                                    instance's published root (concrete vNNN)
 #   <NAME_path>/usd/<NAME>_LAST.usda                 pointer layer (ADR 0017)
 # Paths are relative (ADR 0010). anim / cam / light are shot layers, never in a component.
 
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from core.logger import get_logger
@@ -24,16 +27,20 @@ log = get_logger("usd_assembler.component_auto")
 
 COMPONENT_EXT = ".usda"
 COMPONENT_SUBDIR = "usd"
-
-# slot -> ordered (TYPE task, layer kind) sources; first published source wins.
-# Strong -> weak order of the payload references is the dict order.
-SLOT_SOURCES: dict[str, tuple[tuple[str, str], ...]] = {
-    "look": (("SHADING", "look"),),
-    "skel": (("RIG", "skel"), ("GEO", "skel")),
-    "model": (("GEO", "model"), ("RIG", "model")),
-}
-COMPONENT_TASKS = frozenset(task for sources in SLOT_SOURCES.values() for task, _ in sources)
 _DEFAULT_INSTANCE = "null"
+_VERSION_RE = re.compile(r"v\d+")
+
+
+def _departments() -> dict[str, str]:
+    """{department: TYPE task}, strong -> weak (ADR 0019 order)."""
+    from features.usd_export.departments import ASSET_DEPARTMENTS, DEPARTMENT_ORDER
+
+    by_dept = {dept: task for task, dept in ASSET_DEPARTMENTS.items()}
+    return {d: by_dept[d] for d in sorted(by_dept, key=lambda d: -DEPARTMENT_ORDER[d])}
+
+
+DEPARTMENTS: dict[str, str] = _departments()
+COMPONENT_TASKS = frozenset(DEPARTMENTS.values())
 
 
 def _rel(path: Path, start: Path) -> str:
@@ -42,16 +49,6 @@ def _rel(path: Path, start: Path) -> str:
         return os.path.relpath(str(path), str(start)).replace(os.sep, "/")
     except ValueError:
         return Path(path).as_posix()
-
-
-def _resolve_slot(resolver: FluxResolver, name: str, sources, instance: str):
-    for task, layer in sources:
-        for inst in dict.fromkeys((instance, "")):
-            try:
-                return task, resolver.resolve_layer(name, task, layer, "latest", instance=inst)
-            except ResolveError:
-                continue
-    return None
 
 
 def component_dir(project_path: str | Path, name: str) -> Path | None:
@@ -63,121 +60,175 @@ def component_dir(project_path: str | Path, name: str) -> Path | None:
     return project / name_rel / COMPONENT_SUBDIR if name_rel is not None else None
 
 
+def _variant_name(instance: str) -> str:
+    return sanitize_token(instance) or _DEFAULT_INSTANCE
+
+
 def collect_slots(project_path: str | Path, name: str,
                   instance: str = _DEFAULT_INSTANCE,
                   pins: dict[str, dict] | None = None) -> dict[str, dict]:
-    """Return {slot: {"task", "path": Path, "prim", "version"[, "pin"]}} for published slots.
+    """Published departments of asset *name*.
 
-    *pins* fixes a slot by hand: ``{"task", "instance", "version"}`` (version ``latest``
-    keeps following that task's LAST) or ``{"exclude": True}`` to leave the slot out.
-    A pin that no longer resolves raises ResolveError (never silently replaced).
+    Returns {dept: {"task", "default", "variants": {variant: {"instance", "path": Path,
+    "prim", "version"}}, "version" (default variant's)[, "pin"]}}.
+    *pins* per department: ``{"instance", "version"}`` picks the default variant and
+    freezes it on a vNNN (``latest`` follows its LAST), ``{"exclude": True}`` drops the
+    department. A frozen version that no longer resolves raises ResolveError.
+    *instance* is the preferred default variant when no pin says otherwise.
     """
     resolver = FluxResolver(project_path)
     slots: dict[str, dict] = {}
-    for slot, sources in SLOT_SOURCES.items():
-        pin = (pins or {}).get(slot)
-        if pin and pin.get("exclude"):
+    for dept, task in DEPARTMENTS.items():
+        pin = (pins or {}).get(dept) or {}
+        if pin.get("exclude"):
             continue
-        if pin:
-            resolved = resolver.resolve_layer(name, pin["task"], slot, pin.get("version") or "latest",
-                                              instance=pin.get("instance") or "")
-            task = pin["task"]
-        else:
-            hit = _resolve_slot(resolver, name, sources, instance)
-            if hit is None:
+        variants: dict[str, dict] = {}
+        for inst in resolver.list_instances(name, task):
+            frozen = pin.get("version") if pin.get("instance") == inst else None
+            try:
+                hit = resolver.resolve_root(name, task, frozen or "latest", instance=inst)
+            except ResolveError:
+                if frozen and frozen != "latest":
+                    raise
                 continue
-            task, resolved = hit
-        slots[slot] = {"task": task, "path": Path(resolved.path),
-                       "prim": resolved.default_prim, "version": resolved.version}
+            variants[_variant_name(inst)] = {"instance": inst, "path": Path(hit.path),
+                                             "prim": hit.default_prim, "version": hit.version}
+        if pin.get("instance") and _variant_name(pin["instance"]) not in variants:
+            raise ResolveError(f"{dept}: instance epinglee introuvable : {pin['instance']}")
+        if not variants:
+            continue
+        wanted = [_variant_name(v) for v in (pin.get("instance"), instance, _DEFAULT_INSTANCE) if v]
+        default = next((v for v in wanted if v in variants), sorted(variants)[0])
+        slots[dept] = {"task": task, "default": default, "variants": variants,
+                       "version": variants[default]["version"]}
         if pin:
-            slots[slot]["pin"] = _clean_pin(pin)
+            slots[dept]["pin"] = _clean_pin(pin)
     return slots
 
 
 def _clean_pin(pin: dict) -> dict:
     if pin.get("exclude"):
         return {"exclude": True}
-    return {"task": str(pin["task"]), "instance": str(pin.get("instance") or ""),
-            "version": str(pin.get("version") or "latest")}
+    version = str(pin.get("version") or "latest")
+    if version != "latest" and not _VERSION_RE.fullmatch(version):
+        raise ValueError(f"version invalide : {version!r}")
+    return {"instance": str(pin.get("instance") or ""), "version": version}
 
 
 def _slot_signature(slots: dict[str, dict], folder_depth_ref: Path) -> dict[str, dict]:
     """Relative, comparable description of *slots* (stored in customLayerData)."""
     out = {}
-    for slot, s in slots.items():
-        out[slot] = {"task": s["task"], "path": _rel(s["path"], folder_depth_ref),
-                     "prim": s["prim"], "version": s["version"]}
+    for dept, s in slots.items():
+        out[dept] = {
+            "task": s["task"], "default": s["default"], "version": s["version"],
+            "variants": {v: {"instance": d["instance"], "path": _rel(d["path"], folder_depth_ref),
+                             "prim": d["prim"], "version": d["version"]}
+                         for v, d in sorted(s["variants"].items())},
+        }
         if s.get("pin"):
-            out[slot]["pin"] = dict(s["pin"])
+            out[dept]["pin"] = dict(s["pin"])
     return out
 
 
-def _current_signature(parent: Path, name: str) -> dict | None:
+def _plain(value):
+    """USD dictionaries (VtDictionary) -> plain nested dicts, for comparisons."""
+    if hasattr(value, "keys"):
+        return {str(k): _plain(value[k]) for k in value.keys()}
+    return value
+
+
+def _latest_entry(parent: Path, name: str) -> Path | None:
     from features.publisher.publish_layout import highest_sequence_version, sequence_folder
 
     ver = highest_sequence_version(parent, name, COMPONENT_EXT)
     if ver <= 0:
         return None
     entry = sequence_folder(parent, name, ver) / f"{name}{COMPONENT_EXT}"
-    if not entry.is_file():
-        return None
+    return entry if entry.is_file() else None
+
+
+def _entry_flux(entry: Path | None) -> dict:
+    if entry is None:
+        return {}
     from pxr import Sdf
 
     layer = Sdf.Layer.OpenAsAnonymous(str(entry))
-    if layer is None:
-        return None
-    flux = dict(layer.customLayerData).get("flux", {})
-    slots = flux.get("slots") if isinstance(flux, dict) else None
-    return {k: {kk: (dict(vv) if hasattr(vv, "keys") else vv) for kk, vv in dict(v).items()}
-            for k, v in slots.items()} if slots else None
+    flux = dict(layer.customLayerData).get("flux", {}) if layer is not None else {}
+    return _plain(flux) if flux else {}
+
+
+def _current_signature(parent: Path, name: str) -> dict | None:
+    return _entry_flux(_latest_entry(parent, name)).get("slots") or None
 
 
 def _current_pins(parent: Path, name: str) -> dict[str, dict]:
-    """Pins of the latest component version, excluded slots included."""
-    current = _current_signature(parent, name) or {}
-    pins = {slot: dict(s["pin"]) for slot, s in current.items() if s.get("pin")}
-    from pxr import Sdf
-    from features.publisher.publish_layout import highest_sequence_version, sequence_folder
-
-    ver = highest_sequence_version(parent, name, COMPONENT_EXT)
-    entry = sequence_folder(parent, name, ver) / f"{name}{COMPONENT_EXT}" if ver > 0 else None
-    if entry is not None and entry.is_file():
-        layer = Sdf.Layer.OpenAsAnonymous(str(entry))
-        flux = dict(layer.customLayerData).get("flux", {}) if layer is not None else {}
-        for slot in filter(None, str(flux.get("excluded") or "").split(",")):
-            pins[str(slot)] = {"exclude": True}
+    """Pins of the latest component version, excluded departments included.
+    Pins of the pre-0019 layout (slot "skel", pin "task") are dropped."""
+    flux = _entry_flux(_latest_entry(parent, name))
+    pins = {dept: dict(s["pin"]) for dept, s in (flux.get("slots") or {}).items()
+            if dept in DEPARTMENTS and s.get("pin") and "task" not in s["pin"]}
+    for dept in filter(None, str(flux.get("excluded") or "").split(",")):
+        if dept in DEPARTMENTS:
+            pins[dept] = {"exclude": True}
     return pins
 
 
-def _stage_metadata(model_path: Path) -> dict:
+def _stage_metadata(root_path: Path) -> dict:
     from pxr import Sdf
 
-    layer = Sdf.Layer.FindOrOpen(str(model_path))
+    layer = Sdf.Layer.FindOrOpen(str(root_path))
     if layer is None:
         return {}
     meta = {}
     for key in ("metersPerUnit", "upAxis"):
         if layer.pseudoRoot.HasInfo(key):
             meta[key] = layer.pseudoRoot.GetInfo(key)
+        else:
+            for sub in layer.subLayerPaths:          # a publish root sublayers its layers
+                sub_layer = Sdf.Layer.FindOrOpenRelativeToLayer(layer, sub)
+                if sub_layer is not None and sub_layer.pseudoRoot.HasInfo(key):
+                    meta[key] = sub_layer.pseudoRoot.GetInfo(key)
+                    break
     return meta
+
+
+def _author_department(folder: Path, name: str, token: str, dept: str, slot: dict) -> Path:
+    from pxr import Sdf
+
+    path = folder / f"{name}_{dept}{COMPONENT_EXT}"
+    layer = Sdf.Layer.CreateNew(str(path))
+    prim = Sdf.PrimSpec(layer, token, Sdf.SpecifierOver)
+    vset = Sdf.VariantSetSpec(prim, dept)
+    for variant, data in sorted(slot["variants"].items()):
+        spec = Sdf.VariantSpec(vset, variant)
+        # Explicit prim: the published root (/<NAME> since ADR 0019, /<base> before)
+        # is remapped onto /<NAME>.
+        spec.primSpec.referenceList.prependedItems = [
+            Sdf.Reference(_rel(data["path"], folder), Sdf.Path(f"/{data['prim']}"))]
+    prim.variantSetNameList.prependedItems = [dept]
+    prim.variantSelections[dept] = slot["default"]
+    layer.defaultPrim = token
+    layer.Save()
+    return path
 
 
 def _author(folder: Path, name: str, token: str, version: str,
             slots: dict[str, dict], signature: dict[str, dict],
             excluded: list[str] | None = None) -> Path:
-    """Write entry + payload layers into the (reserved, empty) version *folder*."""
+    """Write entry + payload + department layers into the (reserved, empty) version *folder*."""
     from pxr import Sdf
 
     folder.mkdir(parents=True, exist_ok=True)
-    meta = _stage_metadata(slots["model"]["path"]) if "model" in slots else {}
+    model = slots.get("model")
+    meta = _stage_metadata(model["variants"][model["default"]]["path"]) if model else {}
+
+    dept_layers = [_author_department(folder, name, token, dept, slots[dept])
+                   for dept in DEPARTMENTS if dept in slots]
 
     payload_path = folder / f"{name}_payload{COMPONENT_EXT}"
     payload = Sdf.Layer.CreateNew(str(payload_path))
-    prim = Sdf.PrimSpec(payload, token, Sdf.SpecifierDef)
-    prim.referenceList.prependedItems = [
-        Sdf.Reference(_rel(slots[s]["path"], folder), Sdf.Path(f"/{slots[s]['prim']}"))
-        for s in SLOT_SOURCES if s in slots
-    ]
+    Sdf.PrimSpec(payload, token, Sdf.SpecifierDef)       # typeless: department types come through
+    payload.subLayerPaths[:] = [f"./{p.name}" for p in dept_layers]
     payload.defaultPrim = token
     for key, value in meta.items():
         payload.pseudoRoot.SetInfo(key, value)
@@ -185,7 +236,7 @@ def _author(folder: Path, name: str, token: str, version: str,
 
     entry_path = folder / f"{name}{COMPONENT_EXT}"
     entry = Sdf.Layer.CreateNew(str(entry_path))
-    root = Sdf.PrimSpec(entry, token, Sdf.SpecifierDef)   # typeless: slot types come through
+    root = Sdf.PrimSpec(entry, token, Sdf.SpecifierDef)
     root.kind = "component"
     root.assetInfo = {"name": name, "version": version,
                       "identifier": Sdf.AssetPath(f"./{entry_path.name}")}
@@ -204,13 +255,13 @@ def _author(folder: Path, name: str, token: str, version: str,
 def refresh_component(project_path: str | Path, name: str, *, user: str = "",
                       instance: str = _DEFAULT_INSTANCE,
                       pins: dict[str, dict | None] | None = None) -> dict | None:
-    """(Re)generate the component of asset *name* from its latest published slots.
+    """(Re)generate the component of asset *name* from its published departments.
 
     Pins of the previous version are kept (a publish never undoes a manual choice).
-    *pins* edits them: ``{slot: {"task", "instance", "version"}}`` pins a slot,
-    ``{slot: {"exclude": True}}`` removes it, ``{slot: None}`` goes back to automatic.
+    *pins* edits them: ``{dept: {"instance", "version"}}`` pins a department,
+    ``{dept: {"exclude": True}}`` removes it, ``{dept: None}`` goes back to automatic.
     Returns {"version", "folder", "entry", "last", "slots"} for a new version, or
-    None when nothing is published or the slots did not change (no new version).
+    None when no model is published or nothing changed (no new version).
     """
     from features.folder_manager.naming_validator import format_version
     from features.publisher import last_pointer as lp
@@ -223,25 +274,25 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
         log.warning("Component %s skipped: no NAME token", name)
         return None
     merged = _current_pins(parent, name)
-    for slot, pin in (pins or {}).items():
-        if slot not in SLOT_SOURCES:
-            raise ValueError(f"unknown component slot '{slot}'")
+    for dept, pin in (pins or {}).items():
+        if dept not in DEPARTMENTS:
+            raise ValueError(f"departement inconnu : '{dept}'")
         if pin is None:
-            merged.pop(slot, None)
-        elif pin.get("exclude") and slot == "model":
-            raise ValueError("the model slot cannot be removed")
+            merged.pop(dept, None)
+        elif pin.get("exclude") and dept == "model":
+            raise ValueError("le departement model ne peut pas etre retire")
         else:
-            merged[slot] = _clean_pin(pin)
+            merged[dept] = _clean_pin(pin)
     slots = collect_slots(project_path, name, instance, merged)
     if "model" not in slots:
-        log.info("Component %s skipped: no GEO/RIG model published", name)
+        log.info("Component %s skipped: no GEO (model) published", name)
         return None
-    excluded = sorted(s for s, p in merged.items() if p.get("exclude"))
+    excluded = sorted(d for d, p in merged.items() if p.get("exclude"))
 
     # The version folder is always one level under parent: same relative strings.
     signature = _slot_signature(slots, parent / f"{name}_v000")
-    if _current_signature(parent, name) == signature and sorted(
-            s for s, p in _current_pins(parent, name).items() if p.get("exclude")) == excluded:
+    current_excluded = sorted(d for d, p in _current_pins(parent, name).items() if p.get("exclude"))
+    if _current_signature(parent, name) == signature and current_excluded == excluded:
         return None
 
     ver = reserve_version(parent, name, COMPONENT_EXT)
@@ -263,8 +314,8 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
 def refresh_from_publish(project_path: str | Path, base: str, *, user: str = "") -> dict | None:
     """Hook for a layered publish of *base* (CLASS_TYPE_NAME_INSTANCE).
 
-    Only GEO / RIG / SHADING feed a component. Never raises: a component failure must
-    not fail the publish that triggered it.
+    Only asset department TYPEs (GEO, SHADING, GROOM, RIG) feed a component. Never
+    raises: a component failure must not fail the publish that triggered it.
     """
     from features.folder_manager.naming_validator import parse_filename
 
@@ -274,8 +325,7 @@ def refresh_from_publish(project_path: str | Path, base: str, *, user: str = "")
             return None
         if str(parsed.get("TYPE", "")).upper() not in COMPONENT_TASKS:
             return None
-        return refresh_component(project_path, parsed["NAME"], user=user,
-                                 instance=parsed.get("INSTANCE") or _DEFAULT_INSTANCE)
+        return refresh_component(project_path, parsed["NAME"], user=user)
     except Exception as exc:
         log.warning("Component refresh failed for %s: %s", base, exc)
         return None

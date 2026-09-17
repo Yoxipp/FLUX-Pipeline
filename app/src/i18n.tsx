@@ -278,6 +278,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'usd.lib.removeSlot':      { fr: 'Retirer',                   en: 'Remove' },
   'usd.lib.removed':         { fr: 'retiré',                    en: 'removed' },
   'usd.lib.anyInstance':     { fr: 'auto',                      en: 'auto' },
+  'usd.lib.variant':         { fr: 'Variante',                  en: 'Variant' },
   'usd.lib.followLatest':    { fr: 'Dernier (LAST)',            en: 'Latest (LAST)' },
   'usd.lib.pinnedTask':      { fr: 'manuel',                    en: 'manual' },
   'usd.lib.pinnedHint':      { fr: 'Choisi à la main : un nouveau publish ne le remplace pas', en: 'Set by hand: a new publish does not replace it' },

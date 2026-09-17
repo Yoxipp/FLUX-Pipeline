@@ -574,8 +574,9 @@ export const api = {
 
   // Published layered-USD versions for a component slot (feeds the slot editor's
   // version dropdown). Empty `versions` when nothing is published for asset+task.
-  getUsdLayers: (project: string, asset: string, task: string) => {
+  getUsdLayers: (project: string, asset: string, task: string, instance = '') => {
     const qs = new URLSearchParams({ project, asset, task })
+    if (instance) qs.set('instance', instance)
     return apiCall<{
       project: string
       asset: string
@@ -754,8 +755,13 @@ export const api = {
 }
 
 // USD assembler library (GET /usd/library)
-export interface UsdSlotPin { task?: string; instance?: string; version?: string; exclude?: boolean }
-export interface UsdSlotRef { task: string | null; version: string | null; pin?: UsdSlotPin | null }
+// ADR 0019: one slot per department (model / look / rig), one variant per INSTANCE.
+export interface UsdSlotPin { instance?: string; version?: string; exclude?: boolean }
+export interface UsdSlotRef {
+  task: string | null; version: string | null; pin?: UsdSlotPin | null
+  default?: string | null                 // selected variant (instance)
+  variants?: Record<string, string>       // variant -> version
+}
 export interface UsdComponentInfo {
   name: string
   class: string | null   // CLASS token (deep link to Production)

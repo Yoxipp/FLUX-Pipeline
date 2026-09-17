@@ -84,25 +84,26 @@ class Library(unittest.TestCase):
                             base_name="CHAR_RIG_UTAH_null")
 
     def test_pin_survives_publish_and_can_be_cleared(self) -> None:
-        self._publish_rig()                               # v002: skel from RIG
+        self._publish_rig()                               # v002: rig department
         res = refresh_component(self.project, "UTAH",
-                                pins={"skel": {"task": "GEO", "instance": "null", "version": "v001"}})
+                                pins={"rig": {"instance": "null", "version": "v001"}})
         self.assertEqual(res["version"], "v003")
-        self.assertEqual(res["slots"]["skel"]["task"], "GEO")
         self._publish_rig()                               # new RIG publish keeps the pin
         comp = build_library(self.project)["components"][0]
-        self.assertEqual(comp["slots"]["skel"]["task"], "GEO")
-        self.assertEqual(comp["slots"]["skel"]["pin"]["version"], "v001")
+        self.assertEqual(comp["slots"]["rig"]["version"], "v001")
+        self.assertEqual(comp["slots"]["rig"]["pin"]["version"], "v001")
+        self.assertEqual(comp["published"]["rig"]["version"], "v002")
         self.assertEqual(comp["state"], "ok")
-        res = refresh_component(self.project, "UTAH", pins={"skel": None})
-        self.assertEqual(res["slots"]["skel"]["task"], "RIG")
-        self.assertNotIn("pin", res["slots"]["skel"])
+        res = refresh_component(self.project, "UTAH", pins={"rig": None})
+        self.assertEqual(res["slots"]["rig"]["version"], "v002")
+        self.assertNotIn("pin", res["slots"]["rig"])
 
     def test_exclude_slot(self) -> None:
-        res = refresh_component(self.project, "UTAH", pins={"skel": {"exclude": True}})
-        self.assertNotIn("skel", res["slots"])
+        self._publish_rig()
+        res = refresh_component(self.project, "UTAH", pins={"rig": {"exclude": True}})
+        self.assertNotIn("rig", res["slots"])
         comp = build_library(self.project)["components"][0]
-        self.assertEqual(comp["slots"]["skel"]["pin"], {"exclude": True})
+        self.assertEqual(comp["slots"]["rig"]["pin"], {"exclude": True})
         with self.assertRaises(ValueError):
             refresh_component(self.project, "UTAH", pins={"model": {"exclude": True}})
 

@@ -15,7 +15,9 @@ import { useI18n } from '../../i18n'
 type Tab = 'components' | 'assemblies'
 type Selection = { tab: Tab; name: string } | null
 
-const SLOT_ORDER = ['model', 'skel', 'look']
+// Asset departments, weak -> strong (ADR 0019) and the TYPE task that publishes each.
+const SLOT_ORDER = ['model', 'look', 'rig']
+const DEPT_TASK: Record<string, string> = { model: 'GEO', look: 'SHADING', rig: 'RIG' }
 
 const stateColor: Record<UsdComponentInfo['state'], string> = {
   ok: 'var(--ok)', stale: 'var(--warn)', missing: 'var(--ink-3)', incomplete: 'var(--ink-4)',
@@ -204,45 +206,40 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-// Inline editor of one component slot: pick the publish (task, instance, version).
-// Version "latest" keeps following that task's LAST; a vNNN freezes the slot.
+// Inline editor of one department: pick the default variant (instance) and its version.
+// Version "latest" keeps following that instance's LAST; a vNNN freezes it.
 function SlotEditor({ project, name, slot, current, busy, onApply, onCancel }: {
   project: string; name: string; slot: string; current: UsdSlotRef | undefined; busy: boolean
   onApply: (pin: UsdSlotPin | null) => void; onCancel: () => void
 }) {
   const { t: tr } = useI18n()
-  const [tasks, setTasks] = useState<string[]>([])
-  const [task, setTask] = useState(current?.pin?.task ?? current?.task ?? '')
+  const task = DEPT_TASK[slot] ?? ''
   const [instances, setInstances] = useState<string[]>([])
-  const [instance, setInstance] = useState(current?.pin?.instance ?? '')
+  const [instance, setInstance] = useState(current?.pin?.instance || current?.default || '')
   const [versions, setVersions] = useState<string[]>([])
   const [version, setVersion] = useState(current?.pin?.version ?? 'latest')
 
   useEffect(() => {
-    api.getUsdTasks(project, name).then(d => setTasks(d.tasks)).catch(() => setTasks([]))
-  }, [project, name])
+    if (!task) { setInstances([]); return }
+    api.getUsdInstances(project, name, task)
+      .then(d => { setInstances(d.instances); setInstance(i => i || d.instances[0] || '') })
+      .catch(() => setInstances([]))
+  }, [project, name, task])
   useEffect(() => {
-    if (!task) { setInstances([]); setVersions([]); return }
-    api.getUsdInstances(project, name, task).then(d => setInstances(d.instances)).catch(() => setInstances([]))
-    api.getUsdLayers(project, name, task)
-      .then(d => setVersions(Object.entries(d.versions)
-        .filter(([label, info]) => label !== 'LAST' && info.layers.includes(slot))
-        .map(([label]) => label)
+    if (!task || !instance) { setVersions([]); return }
+    api.getUsdLayers(project, name, task, instance)
+      .then(d => setVersions(Object.keys(d.versions)
+        .filter(label => label !== 'LAST')
         .sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)))))
       .catch(() => setVersions([]))
-  }, [project, name, task, slot])
+  }, [project, name, task, instance])
 
-  const taskOpts = task && !tasks.includes(task) ? [task, ...tasks] : tasks
   return (
     <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)' }}>
       <span className="cap">{tr('usd.col.task')}</span>
-      <select value={task} onChange={e => { setTask(e.target.value); setVersion('latest') }} style={{ ...selectStyle, width: 90 }}>
-        <option value="">-</option>
-        {taskOpts.map(t => <option key={t} value={t}>{t}</option>)}
-      </select>
-      <span className="cap">{tr('usd.col.instance')}</span>
-      <select value={instance} onChange={e => setInstance(e.target.value)} style={{ ...selectStyle, width: 90 }}>
-        <option value="">{tr('usd.lib.anyInstance')}</option>
+      <span style={{ ...mono, color: 'var(--ink-2)' }}>{task}</span>
+      <span className="cap">{tr('usd.lib.variant')}</span>
+      <select value={instance} onChange={e => { setInstance(e.target.value); setVersion('latest') }} style={{ ...selectStyle, width: 90 }}>
         {instances.map(i => <option key={i} value={i}>{i}</option>)}
       </select>
       <span className="cap">{tr('usd.col.version')}</span>
@@ -251,7 +248,7 @@ function SlotEditor({ project, name, slot, current, busy, onApply, onCancel }: {
         {versions.map(v => <option key={v} value={v}>{v}</option>)}
       </select>
       <div style={{ flex: 1 }} />
-      <Btn sm primary disabled={busy || !task} onClick={() => onApply({ task, instance, version })}>
+      <Btn sm primary disabled={busy || !instance} onClick={() => onApply({ instance, version })}>
         <Check size={11} strokeWidth={2} /> {tr('usd.lib.apply')}
       </Btn>
       {current?.pin && !current.pin.exclude && (
@@ -278,7 +275,7 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
   useEffect(() => { setEditing(null) }, [comp.name])
   // Asset folder = parent of <NAME_path>/usd. Production opens on the model task.
   const assetDir = comp.dir.replace(/[\\/]usd[\\/]?$/i, '')
-  const task = comp.published.model?.task ?? comp.published.skel?.task ?? 'GEO'
+  const task = comp.published.model?.task ?? comp.published.rig?.task ?? 'GEO'
   const slots = SLOT_ORDER
   const canGenerate = comp.state === 'missing' || comp.state === 'stale'
   return (
@@ -323,18 +320,21 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
             const inC = comp.slots[s], pub = comp.published[s]
             const excluded = !!inC?.pin?.exclude
             const pinned = !!inC?.pin && !excluded
-            const differs = !pinned && !excluded && !!pub && (!inC || inC.version !== pub.version || inC.task !== pub.task)
+            const variantsText = (ref?: UsdSlotRef) => ref?.variants
+              ? Object.entries(ref.variants).map(([v, ver]) => `${v === ref.default ? '*' : ''}${v} ${ver}`).join(', ')
+              : ''
+            const differs = !pinned && !excluded && !!pub && (!inC || variantsText(inC) !== variantsText(pub))
             const cells = [
               <span key={`${s}-n`} style={{ fontSize: 11, color: 'var(--ink-2)' }}>{s}</span>,
               <span key={`${s}-c`} style={{ ...mono, color: excluded ? 'var(--ink-4)' : 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                {excluded ? tr('usd.lib.removed') : inC ? `${inC.task} ${inC.version}` : '-'}
+                {excluded ? tr('usd.lib.removed') : inC ? `${inC.task} ${variantsText(inC)}` : '-'}
                 {pinned && (
                   <span className="lbl" title={tr('usd.lib.pinnedHint')} style={{ fontSize: 9, color: 'var(--accent-hi)', display: 'flex', alignItems: 'center', gap: 3 }}>
                     <PinIcon size={9} strokeWidth={2} /> {inC?.pin?.version === 'latest' ? tr('usd.lib.pinnedTask') : tr('usd.lib.frozen')}
                   </span>
                 )}
               </span>,
-              <span key={`${s}-p`} style={{ ...mono, color: differs ? stateColor.stale : 'var(--ink-3)' }}>{pub ? `${pub.task} ${pub.version}` : '-'}</span>,
+              <span key={`${s}-p`} style={{ ...mono, color: differs ? stateColor.stale : 'var(--ink-3)' }}>{pub ? `${pub.task} ${variantsText(pub)}` : '-'}</span>,
               <div key={`${s}-a`} style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 {comp.version && editing !== s && (
                   <Btn sm ghost onClick={() => setEditing(s)}>

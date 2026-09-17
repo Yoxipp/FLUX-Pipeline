@@ -1,5 +1,5 @@
-# USD_ASSEMBLER_V2 A1: a GEO / RIG publish regenerates <NAME_path>/usd/<NAME>_vNNN/
-# (entry + payload) and <NAME>_LAST.usda, with relative, prim-remapped slot references.
+# USD_ASSEMBLER_V2 A1 + ADR 0019: a GEO / RIG publish regenerates <NAME_path>/usd/<NAME>_vNNN/
+# (entry, payload sublayering department layers, one variant per INSTANCE) and <NAME>_LAST.usda.
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pxr import Sdf, Usd, UsdGeom
+from pxr import Sdf, Usd, UsdGeom, UsdSkel
 
 from features.folder_manager import tokens as tok
 from features.usd_assembler.component_auto import refresh_component, refresh_from_publish
@@ -41,10 +41,10 @@ class ComponentAuto(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _publish(self, task: str, sub: str, joints: list[str]) -> dict:
-        dest = self.project / _NAME_REL / sub / "null"
+    def _publish(self, task: str, sub: str, joints: list[str], instance: str = "null") -> dict:
+        dest = self.project / _NAME_REL / sub / instance
         return publish_light_asset(_asset(joints), self.project, fmt="usd", dest_dir=dest,
-                                   base_name=f"CHAR_{task}_{_NAME}_null", user="adam")
+                                   base_name=f"CHAR_{task}_{_NAME}_{instance}", user="adam")
 
     def test_geo_publish_creates_component(self) -> None:
         res = self._publish("GEO", "model", ["Root"])
@@ -61,22 +61,40 @@ class ComponentAuto(unittest.TestCase):
         self.assertTrue(any(p.IsA(UsdGeom.Mesh) for p in Usd.PrimRange(prim)))
         self.assertEqual(prim.GetAssetInfo()["version"], "v001")
 
-        refs = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v001" / "UTAH_payload.usda")) \
-            .GetPrimAtPath("/UTAH").referenceList.prependedItems
-        paths = [r.assetPath for r in refs]
-        self.assertTrue(all(p.startswith("../../model/null/") for p in paths), paths)
-        self.assertEqual({r.primPath.pathString for r in refs}, {"/UTAH"})
+        payload = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v001" / "UTAH_payload.usda"))
+        self.assertEqual(list(payload.subLayerPaths), ["./UTAH_model.usda"])
+        model = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v001" / "UTAH_model.usda"))
+        vset = model.GetPrimAtPath("/UTAH").variantSets["model"]
+        refs = vset.variants["null"].primSpec.referenceList.prependedItems
+        self.assertTrue(refs[0].assetPath.startswith("../../model/null/CHAR_GEO_UTAH_null_v001/"), refs[0].assetPath)
+        self.assertEqual(refs[0].primPath.pathString, "/UTAH")
+        self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/render/body").IsValid())
 
-    def test_rig_publish_takes_skel_slot_and_bumps_version(self) -> None:
+    def test_rig_department_is_stronger_than_model(self) -> None:
         self._publish("GEO", "model", ["Root"])
         res = self._publish("RIG", "rig", ["Root", "Root/Hip"])
         self.assertEqual(res["component"], "v002")
         data = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v002" / "UTAH.usda")).customLayerData
         slots = data["flux"]["slots"]
-        self.assertEqual(slots["model"]["task"], "GEO")
-        self.assertEqual(slots["skel"]["task"], "RIG")
+        self.assertEqual((slots["model"]["task"], slots["rig"]["task"]), ("GEO", "RIG"))
+        payload = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v002" / "UTAH_payload.usda"))
+        self.assertEqual(list(payload.subLayerPaths), ["./UTAH_rig.usda", "./UTAH_model.usda"])
         stage = Usd.Stage.Open(str(self.usd_dir / "UTAH_LAST.usda"))
-        self.assertTrue(stage.GetPrimAtPath("/UTAH").IsValid())
+        skel = UsdSkel.Skeleton(stage.GetPrimAtPath("/UTAH/skel/Skeleton"))
+        self.assertEqual(list(skel.GetJointsAttr().Get()), ["Root", "Root/Hip"])
+
+    def test_instances_become_variants(self) -> None:
+        self._publish("GEO", "model", ["Root"])
+        res = self._publish("GEO", "model", ["Root"], instance="B")
+        self.assertEqual(res["component"], "v002")
+        stage = Usd.Stage.Open(str(self.usd_dir / "UTAH_LAST.usda"))
+        vset = stage.GetPrimAtPath("/UTAH").GetVariantSet("model")
+        self.assertEqual(sorted(vset.GetVariantNames()), ["B", "null"])
+        self.assertEqual(vset.GetVariantSelection(), "null")
+        vset.SetVariantSelection("B")
+        self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/render/body").IsValid())
+        res = refresh_component(self.project, _NAME, pins={"model": {"instance": "B", "version": "latest"}})
+        self.assertEqual(res["slots"]["model"]["default"], "B")
 
     def test_unchanged_slots_do_not_create_version(self) -> None:
         self._publish("GEO", "model", ["Root"])
