@@ -431,13 +431,19 @@ class FluxResolver:
 
     @staticmethod
     def _freeze_label(label: str, scanned: dict[str, dict]) -> str:
-        """Turn the active LAST into a concrete version label for determinism."""
+        """Turn the active LAST into a concrete version label for determinism.
+
+        Only labels that EXIST on disk are returned: the highest published vNNN, or
+        LAST itself for a legacy ``<base>_LAST/`` folder that never had a version
+        number. Never the next version (it is not published yet, so a shot frozen on
+        it would point at nothing).
+        """
         if label != _ACTIVE:
             return label
         if scanned.get(_ACTIVE, {}).get("version"):
             return scanned[_ACTIVE]["version"]
         nums = [int(v[1:]) for v in scanned if v.startswith("v") and v[1:].isdigit()]
-        return _VERSION_LABEL.format(num=(max(nums) + 1) if nums else 1)
+        return _VERSION_LABEL.format(num=max(nums)) if nums else _ACTIVE
 
     # ── legacy single-root resolution (assembly / old component) ────────────────
     def _root_dir(self, asset: str) -> Path:

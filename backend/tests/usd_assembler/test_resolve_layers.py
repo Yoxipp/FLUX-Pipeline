@@ -176,5 +176,18 @@ class ResolveLayersDerivedLast(unittest.TestCase):
             self.assertEqual(resolved.version, "v002")
 
 
+
+class FreezeLabel(unittest.TestCase):
+    """A frozen "latest" must name a version that exists (never the next one)."""
+
+    def test_legacy_last_folder_stays_last(self) -> None:
+        from features.usd_assembler.resolve.flux_resolver import FluxResolver
+
+        freeze = FluxResolver._freeze_label
+        self.assertEqual(freeze("LAST", {"LAST": {"version": "v002"}, "v002": {}}), "v002")
+        self.assertEqual(freeze("LAST", {"v001": {}, "v003": {}}), "v003")
+        self.assertEqual(freeze("LAST", {"LAST": {}}), "LAST")
+        self.assertEqual(freeze("v002", {"v002": {}}), "v002")
+
 if __name__ == "__main__":
     unittest.main()
