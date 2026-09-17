@@ -118,7 +118,9 @@ class SuggestAndNarrow(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_list_tasks(self) -> None:
-        self.assertEqual(self.resolver.list_tasks(_ASSET), ["mod", "rig"])
+        # "rig" is the RIG token folder -> key; "mod" is no token -> folder name.
+        (self.project / _NAME_REL / "usd").mkdir()
+        self.assertEqual(self.resolver.list_tasks(_ASSET), ["RIG", "mod"])
 
     def test_list_tasks_unknown_asset(self) -> None:
         self.assertEqual(self.resolver.list_tasks("NOPE"), [])

@@ -194,7 +194,12 @@ class FluxResolver:
         base = self._project / name_rel
         if not base.exists():
             return []
-        return sorted(p.name for p in base.iterdir() if p.is_dir())
+        # Folder -> TYPE key ("model" -> "GEO"); unknown folders keep their name. The
+        # component folder "usd" is not a task.
+        by_folder = {str(v).replace("\\", "/").strip("/").split("/")[0]: k
+                     for k, v in tokens.get("TYPE", {}).items() if v}
+        return sorted({by_folder.get(p.name, p.name) for p in base.iterdir()
+                       if p.is_dir() and p.name != "usd"})
 
     def list_instances(self, asset: str, task: str = "") -> list[str]:
         """Instance leaves published for *asset* (optionally scoped to *task*).

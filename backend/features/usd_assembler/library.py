@@ -134,14 +134,33 @@ def _instances(layer, file: Path, components: dict[Path, str]) -> list[dict]:
 
 def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUBDIR,
                     components: list[dict] | None = None) -> list[dict]:
-    """Assembled roots (kind=assembly) written by the assembler under *subdir*."""
+    """Assemblies under *subdir*: versioned ones (A3, ``<ASM>/<ASM>_vNNN``) first, then
+    legacy flat roots (kind=assembly) written by the old builder."""
     from pxr import Sdf
+
+    from .assembly_v2 import ASSEMBLY_EXT, assembly_versions, current_entry, layout_file
 
     folder = Path(project_path) / subdir
     if not folder.is_dir():
         return []
     comp_dirs = {Path(str(Path(c["dir"]).resolve())): c["name"] for c in (components or [])}
     out: list[dict] = []
+    seen: set[str] = set()
+    for d in sorted(p for p in folder.iterdir() if p.is_dir()):
+        entry = current_entry(project_path, d.name)
+        if entry is None:
+            continue
+        contents = entry.parent / f"{d.name}_contents{ASSEMBLY_EXT}"
+        layer = Sdf.Layer.OpenAsAnonymous(str(contents))
+        instances = _instances(layer, contents, comp_dirs) if layer is not None else []
+        last = d / f"{d.name}_LAST{ASSEMBLY_EXT}"
+        layout = layout_file(project_path, d.name)
+        seen.add(d.name)
+        out.append({"name": d.name, "file": str(last if last.is_file() else entry),
+                    "version": entry.parent.name.rsplit("_", 1)[-1],
+                    "versions": assembly_versions(d, d.name), "legacy": False,
+                    "layout": str(layout) if layout else None, "instances": instances,
+                    "broken": sum(1 for i in instances if i["broken"])})
     for file in sorted(p for p in folder.iterdir() if p.suffix.lower() in _USD_EXTS and p.is_file()):
         layer = Sdf.Layer.OpenAsAnonymous(str(file))
         if layer is None or not layer.defaultPrim:
@@ -149,8 +168,11 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
         spec = layer.GetPrimAtPath(Sdf.Path(f"/{layer.defaultPrim}"))
         if spec is None or spec.kind != "assembly":
             continue
+        if layer.defaultPrim in seen:
+            continue
         instances = _instances(layer, file, comp_dirs)
-        out.append({"name": layer.defaultPrim, "file": str(file), "instances": instances,
+        out.append({"name": layer.defaultPrim, "file": str(file), "version": None, "versions": [],
+                    "legacy": True, "layout": None, "instances": instances,
                     "broken": sum(1 for i in instances if i["broken"])})
     return out
 

@@ -248,6 +248,63 @@ async def refresh_usd_component(req: ComponentRefreshRequest) -> dict:
     return {"ok": True, "changed": True, "version": res["version"], "last": str(res["last"] or "")}
 
 
+class AssemblyCreateRequest(BaseModel):
+    name: str
+    source: str | None = None       # duplicate this assembly's current instances
+    project: str | None = None
+    user: str = ""
+
+
+class AssemblyEditRequest(BaseModel):
+    name: str
+    ops: list[dict]                 # see assembly_v2.apply_ops
+    project: str | None = None
+    user: str = ""
+
+
+def _assembly_result(res: dict | None) -> dict:
+    if not res or not res.get("version"):
+        return {"ok": True, "changed": False, "version": None, "warnings": (res or {}).get("warnings", [])}
+    return {"ok": True, "changed": True, "version": res["version"],
+            "last": str(res.get("last") or ""), "warnings": res.get("warnings", [])}
+
+
+@router.post("/assembly/create")
+async def create_usd_assembly(req: AssemblyCreateRequest) -> dict:
+    """New versioned assembly (A3), empty or duplicated from an existing one."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.assembly_v2 import create_assembly
+
+    loop = asyncio.get_event_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: create_assembly(
+            project_path, req.name, source=req.source, user=req.user))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("assembly create failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _assembly_result(res)
+
+
+@router.post("/assembly/edit")
+async def edit_usd_assembly(req: AssemblyEditRequest) -> dict:
+    """Add / remove / duplicate / rename / relink / version instances: new assembly version."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.assembly_v2 import edit_assembly
+
+    loop = asyncio.get_event_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: edit_assembly(
+            project_path, req.name, req.ops, user=req.user))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("assembly edit failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _assembly_result(res)
+
+
 @router.post("/assembly/relink")
 async def relink_usd_assembly_instance(req: RelinkRequest) -> dict:
     """Point one instance of an assembly at another component or version."""
