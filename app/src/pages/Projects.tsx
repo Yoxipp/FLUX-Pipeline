@@ -2036,6 +2036,8 @@ export function Projects() {
   const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
+    // DCC imports can take a while (big USD stages): keep a spinner toast until done.
+    const id = toast.loading(`Import de ${item.name} dans Houdini…`)
     try {
       const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
       const res = await api.createFluxImporterNode({
@@ -2050,18 +2052,18 @@ export function Projects() {
       // Node is created but resolve can still find nothing (asset missing for these
       // tokens, or FLUX unreachable from Houdini) — warn instead of a false success.
       if (res.result?.mode === 'replaced') {
-        toast.success(`${item.name} : path mis à jour sur le node sélectionné`)
+        toast.success(`${item.name} : path mis à jour sur le node sélectionné`, { id })
       } else if (res.result?.resolved_path) {
-        toast.success(`${item.name} importé dans Houdini`)
+        toast.success(`${item.name} importé dans Houdini`, { id })
       } else {
-        toast.warning(`Node créé mais fichier non résolu pour ${item.name} — clique ↺ Resolve dans le node`)
+        toast.warning(`Node créé mais fichier non résolu pour ${item.name} : clique ↺ Resolve dans le node`, { id })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
       const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)
       toast.error(offline
         ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
-        : `Import Houdini échoué : ${msg}`)
+        : `Import Houdini échoué : ${msg}`, { id })
     }
   }, [nav])
 
@@ -2070,14 +2072,15 @@ export function Projects() {
   const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
+    const id = toast.loading(`Import de ${item.name} dans Maya…`)
     try {
       await api.importFileInMaya(nav.project, rel_path, readActiveInstancePort('Maya') ?? undefined)
-      toast.success(`${item.name} importé dans Maya`)
+      toast.success(`${item.name} importé dans Maya`, { id })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
       toast.error(msg.includes('répond pas')
         ? 'Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
-        : `Import Maya échoué : ${msg}`)
+        : `Import Maya échoué : ${msg}`, { id })
     }
   }, [nav])
 
@@ -2088,24 +2091,26 @@ export function Projects() {
   const handleOpenInNuke = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
+    const id = toast.loading(`Import de ${item.name} dans Nuke…`)
     try {
       await api.nukeImportPath(nav.project, rel_path)
-      toast.success(`${item.name} → Nuke (Read)`)
+      toast.success(`${item.name} → Nuke (Read)`, { id })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
-      toast.error(`Import Nuke échoué : ${msg}`)
+      toast.error(`Import Nuke échoué : ${msg}`, { id })
     }
   }, [nav])
 
   const handleOpenInPhotoshop = useCallback(async (item: ExplorerItem) => {
     if (nav.kind !== 'inside') return
     const rel_path = [...nav.subpath, item.name].join('/')
+    const id = toast.loading(`Ouverture de ${item.name} dans Photoshop…`)
     try {
       await api.photoshopOpen(nav.project, rel_path)
-      toast.success(`${item.name} ouvert dans Photoshop`)
+      toast.success(`${item.name} ouvert dans Photoshop`, { id })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
-      toast.error(`Ouverture Photoshop échouée : ${msg}`)
+      toast.error(`Ouverture Photoshop échouée : ${msg}`, { id })
     }
   }, [nav])
 

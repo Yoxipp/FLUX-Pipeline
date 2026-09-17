@@ -797,28 +797,18 @@ _USD_IMPORT_EXTS = {".usd", ".usda", ".usdc", ".usdz"}
 def _maya_usd_source(file_path, work_dir: str):
     """Return a USD path Maya's mayaUsd can actually read.
 
-    The FLUX backend authors crate (usdc) files with a very recent USD (26.x). Maya
-    2024 ships an OLDER mayaUsd/USD that cannot read those binary crates → Maya's
-    "USD Import" fails with "Error reading file" (reproduced even on a manual File>Import).
-    ASCII .usda is version-independent, so when the source is a binary crate we flatten
-    the composed stage to a temporary .usda (self-contained: no external-reference path
-    resolution to worry about) and hand THAT to Maya. Non-crate inputs (.usda ASCII,
-    .usdz) are returned unchanged.
-
-    Returns the path Maya should import (str). *work_dir* is an existing temp dir the
-    caller already owns (cleaned up by the caller).
+    Maya 2024 ships an older mayaUsd that fails with "Error reading file" on two
+    things FLUX produces: binary crates authored by the backend's recent USD, and
+    files under an accented path (OneDrive "Projets d'ete"), even for
+    a plain ASCII .usda whose sublayers are fine. Flattening the composed stage into a
+    self-contained ASCII .usda inside *work_dir* (an ASCII temp dir the caller owns and
+    cleans up) avoids both: one file, no sublayer/reference resolution, no accents.
+    .usdz packages and unreadable stages are returned unchanged.
     """
     from pathlib import Path as _PLib
 
     src = _PLib(file_path)
-    try:
-        with open(src, "rb") as _fh:
-            magic = _fh.read(8)
-    except OSError:
-        return str(src).replace("\\", "/")
-
-    # Only binary crate needs transcoding. "PXR-USDC" is the crate magic.
-    if magic != b"PXR-USDC":
+    if src.suffix.lower() == ".usdz":
         return str(src).replace("\\", "/")
 
     try:
@@ -827,14 +817,12 @@ def _maya_usd_source(file_path, work_dir: str):
         if stage is None:
             return str(src).replace("\\", "/")
         out = _PLib(work_dir) / (src.stem + ".usda")
-        # Flatten so the temp layer is fully self-contained (references/sublayers baked
-        # in) — Maya then reads one ASCII file with no dependency on the original layout.
         stage.Flatten().Export(str(out))
-        log.info("[Maya] transcoded crate USD → ASCII for import: %s", src.name)
+        log.info("[Maya] flattened USD to ASCII for import: %s", src.name)
         return str(out).replace("\\", "/")
     except Exception as exc:
-        # Best-effort: if transcoding fails, fall back to the original file.
-        log.warning("[Maya] USD crate→usda transcode failed for %s: %s", src.name, exc)
+        # Best-effort: if flattening fails, fall back to the original file.
+        log.warning("[Maya] USD flatten for import failed for %s: %s", src.name, exc)
         return str(src).replace("\\", "/")
 
 
@@ -873,9 +861,8 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     result_dir = _tempfile.mkdtemp(prefix="flux_maya_import_")
     result_path = result_dir.replace("\\", "/") + "/_flux_import_result.json"
 
-    # USD binary crates authored by the backend's recent USD are unreadable by Maya 2024's
-    # mayaUsd → transcode to a temp ASCII .usda (in result_dir, cleaned up with it). Other
-    # formats pass through unchanged.
+    # Maya 2024's mayaUsd cannot read recent crates nor accented paths: flatten USD to a
+    # temp ASCII .usda (in result_dir, cleaned up with it). Other formats pass through.
     if ext in _USD_IMPORT_EXTS:
         fp_fwd = _maya_usd_source(file_path, result_dir)
     else:
