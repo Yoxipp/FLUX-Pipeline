@@ -140,6 +140,15 @@ async def list_usd_layers(
     return {"project": name, "asset": asset, "task": task, "versions": versions}
 
 
+@router.get("/departments")
+async def list_usd_departments() -> dict:
+    """The one department table (ADR 0019): TYPE -> department + what FLUX exports.
+    The Publisher reads it so backend and UI can never disagree."""
+    from features.usd_export.departments import DEPARTMENT_ORDER, publisher_table
+
+    return {"tasks": publisher_table(), "order": DEPARTMENT_ORDER}
+
+
 @router.get("/composition")
 async def get_usd_composition(file: str, project: str | None = None) -> dict:
     """Read-only composition of a published USD entry: prims (type, kind, variants,

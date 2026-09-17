@@ -12,6 +12,7 @@ import { photoshopSchemaForExt, defaultPhotoshopOptions } from '../lib/photoshop
 import { PAINTER_OPTIONS, defaultPainterOptions } from '../lib/painterExportOptions'
 import { MARI_OPTIONS, defaultMariOptions } from '../lib/mariExportOptions'
 import { api } from '../api/client'
+import type { UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstancePort } from '../hooks/useActiveInstances'
@@ -314,20 +315,15 @@ const ASSET_TASKS: { value: string; label: string }[] = [
   { value: 'GROOM', label: 'Groom' }, { value: 'RIG', label: 'Rig' }, { value: 'CFX', label: 'Cfx' },
   { value: 'REF', label: 'Ref' },
 ]
-// What a USD publish of this task contributes to the asset (ADR 0019) and, when FLUX
-// writes the USD itself, what it extracts from the scene. The task decides: no layer
-// checkboxes. Other tasks have no USD department (the DCC writes a plain file).
-interface UsdContribution {
-  dept: string
-  what: string
-  include: { geo: boolean; skel: boolean; anim: boolean; weights: boolean; uv: boolean }
-}
-const USD_DEPARTMENTS: Record<string, UsdContribution> = {
-  GEO:  { dept: 'model', what: 'géométrie, UV et poids de skin',
+// Which task writes which USD department comes from the backend (GET /usd/departments,
+// ADR 0019): one table, no copy to drift. This is only the fallback used while the
+// request is in flight or when the backend is unreachable.
+const USD_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
+  GEO:  { department: 'model', what: 'géométrie, UV et poids de skin',
           include: { geo: true,  skel: true,  anim: false, weights: true,  uv: true } },
-  RIG:  { dept: 'rig',   what: 'squelette',
+  RIG:  { department: 'rig',   what: 'squelette',
           include: { geo: false, skel: true,  anim: false, weights: false, uv: false } },
-  ANIM: { dept: 'clip',  what: 'animation du squelette',
+  ANIM: { department: 'clip',  what: 'animation du squelette',
           include: { geo: false, skel: true,  anim: true,  weights: false, uv: false } },
 }
 
@@ -719,7 +715,11 @@ export function Publisher() {
   // Who writes the USD of an asset task: null = the default for this task (FLUX when
   // the task has a department), true/false = the artist's explicit choice.
   const [fluxWriter, setFluxWriter]                 = useState<boolean | null>(null)
-  const usdContribution = USD_DEPARTMENTS[sel.task]
+  const [usdDepartments, setUsdDepartments] = useState(USD_DEPARTMENTS_FALLBACK)
+  useEffect(() => {
+    api.getUsdDepartments().then(d => setUsdDepartments(d.tasks)).catch(() => {})
+  }, [])
+  const usdContribution = usdDepartments[sel.task]
   // FLUX writes the layered USD by default for a task that has a department.
   const usdLayers = (fluxWriter ?? !!usdContribution) && !!usdContribution
   const usdInclude = usdContribution?.include
@@ -1709,15 +1709,12 @@ export function Publisher() {
             <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
               <SecTitle>PRESETS USD</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {([
-                  { label: 'Modèle',    task: 'GEO' },
-                  { label: 'Rig',       task: 'RIG' },
-                  { label: 'Anim',      task: 'ANIM' },
-                ] as const).map(p => (
-                  <Pill key={p.label} active={sel.task === p.task && ['.usd', '.usda', '.usdc'].includes(exportExt)}
+                {Object.entries(usdDepartments).map(([task, info]) => (
+                  <Pill key={task} active={sel.task === task && ['.usd', '.usda', '.usdc'].includes(exportExt)}
                     style={{ cursor: 'pointer' }}>
-                    <span onClick={() => { handleSelect('task', p.task); setExportExt('.usd'); setFluxWriter(null) }}>
-                      {p.label}
+                    <span title={info.what}
+                      onClick={() => { handleSelect('task', task); setExportExt('.usd'); setFluxWriter(null) }}>
+                      {info.department}
                     </span>
                   </Pill>
                 ))}
@@ -1958,7 +1955,7 @@ export function Publisher() {
           {/* USD — Maya & Houdini, asset + USD formats only (hidden otherwise). The TASK
               decides what is exported (ADR 0019); the switch only says who writes it. */}
           {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
-            const contribution = USD_DEPARTMENTS[sel.task]
+            const contribution = usdContribution
             const usdOk = !!contribution
             const on = usdLayers
             return (
@@ -1989,7 +1986,7 @@ export function Publisher() {
                 </div>
                 <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
                   {usdOk ? (<>
-                    TASK {sel.task} : départment <span style={{ fontFamily: 'var(--mono)' }}>{contribution.dept}</span> de
+                    TASK {sel.task} : département <span style={{ fontFamily: 'var(--mono)' }}>{contribution.department}</span> de
                     l'asset, {contribution.what}. La task décide de ce qui est exporté.
                     {on
                       ? " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe)."

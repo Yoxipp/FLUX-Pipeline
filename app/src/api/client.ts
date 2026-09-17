@@ -619,6 +619,11 @@ export const api = {
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/create', { project, name, source }),
   editUsdAssembly: (project: string, name: string, ops: UsdAssemblyOp[]) =>
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
+  // The department table (ADR 0019): which task writes which USD department.
+  getUsdDepartments: () =>
+    apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number> }>(
+      'GET', '/usd/departments'),
+
   // Read-only composition of a published USD file (prims, variants, layers used).
   getUsdComposition: (project: string, file: string) => {
     const qs = new URLSearchParams({ project, file })
@@ -803,6 +808,11 @@ export type UsdAssemblyOp =
   | { op: 'set_variant'; name: string; department: string; variant: string }   // '' = component default
 export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
 export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }
+export interface UsdTaskContribution {
+  department: string
+  what: string
+  include: { geo: boolean; skel: boolean; anim: boolean; weights: boolean; uv: boolean }
+}
 export interface UsdPrimNode {
   path: string; name: string; type: string; kind: string; purpose: string
   instanceable: boolean

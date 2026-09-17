@@ -20,6 +20,28 @@ CLIP_TYPES = frozenset({"ANIM"})
 # Asset TYPE the light (skinned mesh / skeleton) export can write.
 LIGHT_EXPORT_TYPES = frozenset({"GEO", "RIG"}) | CLIP_TYPES
 
+# What FLUX extracts from the scene when it writes the USD of that TYPE itself, and
+# how to say it in the Publisher. ONE table for backend and UI (GET /usd/departments).
+LIGHT_EXPORT_CONTENT: dict[str, dict] = {
+    "GEO":  {"what": "geometrie, UV et poids de skin",
+             "include": {"geo": True, "skel": True, "anim": False, "weights": True, "uv": True}},
+    "RIG":  {"what": "squelette",
+             "include": {"geo": False, "skel": True, "anim": False, "weights": False, "uv": False}},
+    "ANIM": {"what": "animation du squelette",
+             "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
+}
+
+
+def publisher_table() -> dict[str, dict]:
+    """{TYPE: {"department", "what", "include"}} for the tasks a DCC can export in USD."""
+    out: dict[str, dict] = {}
+    for task in sorted(LIGHT_EXPORT_TYPES):
+        content = LIGHT_EXPORT_CONTENT.get(task)
+        if content is None:
+            continue
+        out[task] = {"department": ASSET_DEPARTMENTS.get(task, "clip"), **content}
+    return out
+
 
 def contribution(base: str) -> dict | None:
     """{"kind": "asset" | "clip" | "shot", "department", "name", "instance", "type"} for a
