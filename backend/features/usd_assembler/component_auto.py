@@ -93,17 +93,24 @@ def collect_slots(project_path: str | Path, name: str,
         if pin.get("exclude"):
             continue
         variants: dict[str, dict] = {}
-        for inst in resolver.list_instances(name, task):
+        for published in resolver.list_publish_bases(name, task):
+            inst, base = published["instance"], published["base"]
             frozen = pin.get("version") if pin.get("instance") == inst else None
             try:
-                hit = resolver.resolve_root(name, task, frozen or "latest", instance=inst)
+                hit = resolver.resolve_root(name, task, frozen or "latest", instance=inst,
+                                            base_name=base)
             except ResolveError:
                 if frozen and frozen != "latest":
                     raise
                 continue
-            variant = _variant_name(_published_instance(Path(hit.path), inst))
-            variants[variant] = {"instance": inst, "path": Path(hit.path),
-                                 "prim": hit.default_prim, "version": hit.version}
+            # One variant per published base: INSTANCE, or INSTANCE_VARIANTE when the
+            # publish carries a VARIANTE token (ADR 0019).
+            label = _published_instance(Path(hit.path), inst)
+            if published["variante"]:
+                label = f"{label}_{published['variante']}"
+            variants[_variant_name(label)] = {
+                "instance": inst, "variante": published["variante"], "base": base,
+                "path": Path(hit.path), "prim": hit.default_prim, "version": hit.version}
         if pin.get("instance") and _variant_name(pin["instance"]) not in variants:
             raise ResolveError(f"{dept}: instance epinglee introuvable : {pin['instance']}")
         if not variants:
@@ -135,7 +142,8 @@ def _slot_signature(slots: dict[str, dict], folder_depth_ref: Path) -> dict[str,
     for dept, s in slots.items():
         out[dept] = {
             "task": s["task"], "default": s["default"], "version": s["version"],
-            "variants": {v: {"instance": d["instance"], "path": _rel(d["path"], folder_depth_ref),
+            "variants": {v: {"instance": d["instance"], "variante": d.get("variante", ""),
+                             "path": _rel(d["path"], folder_depth_ref),
                              "prim": d["prim"], "version": d["version"]}
                          for v, d in sorted(s["variants"].items())},
         }

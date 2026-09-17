@@ -92,7 +92,7 @@ class FluxResolver:
 
     # ── layered-publish discovery (component v2) ────────────────────────────────
     def _scan_version_folders(
-        self, parent: Path, instance: str = "", variante: str = ""
+        self, parent: Path, instance: str = "", variante: str = "", base_name: str = "",
     ) -> dict[str, dict]:
         """Return {version_label: {"base", "folder", "layers": [kind...]}}.
 
@@ -121,6 +121,8 @@ class FluxResolver:
                 if not m:
                     continue
                 base, ver = m.group("base"), m.group("ver")
+                if base_name and base != base_name:
+                    continue
                 if want_var and not self._folder_has_variante(folder, want_var):
                     continue
                 layers = [
@@ -239,6 +241,51 @@ class FluxResolver:
                     insts.add(p.name)
         return sorted(insts)
 
+    def list_publish_bases(self, asset: str, task: str, instance: str = "") -> list[dict]:
+        """Every published base of *asset*/*task*: ``[{"base", "instance", "variante"}]``.
+
+        A base is ``CLASS_TYPE_NAME_INSTANCE[_VARIANTE]``: two publishes of the same
+        instance that differ by their VARIANTE are two different things (ADR 0019), so
+        each one is listed separately (layered version folders and plain files alike).
+        """
+        from features.folder_manager.naming_validator import parse_filename
+        from features.publisher import last_pointer as lp
+
+        try:
+            parent = self._publish_parent(asset, task)
+        except ResolveError:
+            return []
+        if not parent.exists():
+            return []
+        if instance:
+            leaf = parent / instance.lower()
+            leaves = [leaf] if leaf.exists() else []
+        else:
+            leaves = [parent] + sorted(p for p in parent.iterdir() if p.is_dir())
+        out: dict[tuple[str, str], dict] = {}
+        for inst in leaves:
+            if not inst.exists():
+                continue
+            leaf_name = inst.name if inst != parent else ""
+            for entry in sorted(inst.iterdir()):
+                base = ""
+                if entry.is_dir():
+                    m = _VER_FOLDER_RE.match(entry.name)
+                    base = m.group("base") if m else ""
+                elif entry.is_file():
+                    stem, ext, role = lp.parse_published_name(entry.name)
+                    if role == "data" and ext.lower() in (".usd", ".usda", ".usdc"):
+                        m = re.fullmatch(r"(?P<base>.+)_v\d+", stem)
+                        base = m.group("base") if m else ""
+                if not base:
+                    continue
+                parsed = parse_filename(f"{base}.usd") or {}
+                out[(leaf_name, base)] = {
+                    "base": base, "instance": leaf_name or str(parsed.get("INSTANCE") or ""),
+                    "variante": str(parsed.get("VARIANTE") or ""),
+                }
+        return [out[k] for k in sorted(out)]
+
     def list_variantes(self, asset: str, task: str, instance: str = "") -> list[str]:
         """VARIANTE tokens published for *asset*/*task* (optionally one *instance*).
 
@@ -311,7 +358,7 @@ class FluxResolver:
             version=self._freeze_label(want, scanned),
         )
 
-    def _scan_flat_usd(self, parent: Path, instance: str = "") -> dict[str, dict]:
+    def _scan_flat_usd(self, parent: Path, instance: str = "", base_name: str = "") -> dict[str, dict]:
         """Plain USD publishes ``<inst>/<base>_vNNN.<usd ext>`` (one file, no layers).
 
         Returns {version_label: {"base", "path"}}; LAST maps to the version its pointer
@@ -335,7 +382,7 @@ class FluxResolver:
                 if role != "data" or ext.lower() not in (".usd", ".usda", ".usdc"):
                     continue
                 m = re.fullmatch(r"(?P<base>.+)_(?P<ver>v\d+)", stem)
-                if m:
+                if m and (not base_name or m.group("base") == base_name):
                     found[m.group("ver")] = {"base": m.group("base"), "path": file}
             if not found:
                 continue
@@ -351,6 +398,7 @@ class FluxResolver:
 
     def resolve_root(
         self, asset: str, task: str, version: str = "latest", instance: str = "",
+        base_name: str = "",
     ) -> ResolvedAsset:
         """Freeze the ROOT file of one publish, for a department contribution (ADR 0019).
 
@@ -358,8 +406,8 @@ class FluxResolver:
         composed). Plain publish: the ``<base>_vNNN.<usd ext>`` file itself.
         """
         parent = self._publish_parent(asset, task)
-        scanned = self._scan_version_folders(parent, instance)
-        flat = self._scan_flat_usd(parent, instance)
+        scanned = self._scan_version_folders(parent, instance, base_name=base_name)
+        flat = self._scan_flat_usd(parent, instance, base_name=base_name)
         want = _ACTIVE if version in ("latest", "LAST") else version
         info = scanned.get(want)
         if info is not None:

@@ -125,6 +125,23 @@ class ComponentAuto(unittest.TestCase):
         composed = Usd.Stage.Open(str(self.usd_dir / "UTAH_LAST.usda"))
         self.assertTrue(composed.GetPrimAtPath("/UTAH/geo/render/body").IsValid())
 
+    def test_variante_is_its_own_variant(self) -> None:
+        # Two publishes of the same instance that differ only by their VARIANTE token
+        # are two different things: one variant each, no silent overwrite (ADR 0019).
+        self._publish("GEO", "model", ["Root"])
+        dest = self.project / _NAME_REL / "model" / "null"
+        publish_light_asset(_asset(["Root"]), self.project, fmt="usd", dest_dir=dest,
+                            base_name=f"CHAR_GEO_{_NAME}_null_DAMAGED", user="adam")
+        from features.usd_assembler.component_auto import collect_slots
+
+        slots = collect_slots(self.project, _NAME)
+        self.assertEqual(sorted(slots["model"]["variants"]), ["null", "null_DAMAGED"])
+        self.assertEqual(slots["model"]["default"], "null")
+        self.assertEqual(slots["model"]["variants"]["null_DAMAGED"]["variante"], "DAMAGED")
+        stage = Usd.Stage.Open(str(self.usd_dir / "UTAH_LAST.usda"))
+        self.assertEqual(sorted(stage.GetPrimAtPath("/UTAH").GetVariantSet("model").GetVariantNames()),
+                         ["null", "null_DAMAGED"])
+
     def test_non_component_task_is_ignored(self) -> None:
         res = self._publish("ANIM", "anim", ["Root"])
         self.assertIsNone(res["component"])
