@@ -333,6 +333,13 @@ def refresh_component(project_path: str | Path, name: str, *, user: str = "",
         raise
     last = lp.write_last(parent, name, COMPONENT_EXT, folder, ver, lp.MODE_LAYER, user=user,
                          layer_target=f"{folder.name}/{entry.name}")
+    # Same history as a publish: who regenerated the asset, when, from which departments
+    # (read by the Folder Manager note panel).
+    from features.publisher.modif_log import append_log
+
+    append_log(parent, name, version,
+               "asset USD regenere : " + ", ".join(f"{d} {s['version']}" for d, s in slots.items()),
+               user or "flux")
     log.info("Component %s %s -> %s (%s)", name, version, folder, ", ".join(slots))
     return {"version": version, "folder": folder, "entry": entry, "last": last,
             "slots": signature}

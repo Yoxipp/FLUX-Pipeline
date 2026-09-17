@@ -148,6 +148,16 @@ class ComponentAuto(unittest.TestCase):
         self.assertEqual(sorted(stage.GetPrimAtPath("/UTAH").GetVariantSet("model").GetVariantNames()),
                          ["null", "null_DAMAGED"])
 
+    def test_regeneration_is_logged_like_a_publish(self) -> None:
+        import json
+
+        self._publish("GEO", "model", ["Root"])
+        entries = json.loads((self.usd_dir / "modif_logs.json").read_text(encoding="utf-8"))
+        self.assertEqual(entries[-1]["name"], _NAME)
+        self.assertEqual(entries[-1]["version"], "v001")
+        self.assertIn("model v001", entries[-1]["modification"])
+        self.assertEqual(entries[-1]["user"], "adam")
+
     def test_non_component_task_is_ignored(self) -> None:
         res = self._publish("ANIM", "anim", ["Root"])
         self.assertIsNone(res["component"])
