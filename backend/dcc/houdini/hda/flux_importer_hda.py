@@ -58,7 +58,8 @@ except Exception as _offline_err:
             return False
     def _dead_menu(*a, **kw): return ["", "FLUX offline"]
     def _noop(*a, **kw): pass
-    for _n in ("menu_project","menu_class","menu_type","menu_name","menu_instance","menu_iter"):
+    for _n in ("menu_project","menu_class","menu_type","menu_name","menu_instance","menu_iter",
+               "menu_lib_item","menu_lib_version"):
         globals()[_n] = _dead_menu
     def resolve_path(node):
         if _try_reconnect():
@@ -74,7 +75,7 @@ except Exception as _offline_err:
 # exec()'d by the bootstrap above — functions land directly in hou.phm() globals.
 
 _MODULE_FUNCTIONS: str = '''
-import json, os, threading, time, urllib.request
+import json, os, threading, time, urllib.parse, urllib.request
 
 
 # ── port & HTTP ───────────────────────────────────────────────────────────────
@@ -103,7 +104,8 @@ def _api():
 def _get(path, **params):
     url = _api() + path
     if params:
-        url += "?" + "&".join(f"{k}={v}" for k, v in params.items() if v)
+        # Encode: library keys carry ":" and free paths spaces / accents.
+        url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v})
     try:
         with urllib.request.urlopen(url, timeout=1.5) as r:
             return json.loads(r.read())
@@ -224,12 +226,60 @@ def menu_iter(node):
     return _flat(r.get("iters", ["LAST"]))
 
 
+def _library(node):
+    project = _pval(node, "project")
+    if not project:
+        return []
+    return _cached(f"library:{project}",
+                   lambda: _get("/dcc/houdini/importer/library", project=project).get("items", []))
+
+def menu_lib_item(node):
+    items = _library(node)
+    if not items:
+        return ["", "bibliotheque vide"]
+    out = []
+    for it in items:
+        out += [it["key"], it["label"]]
+    return out
+
+def menu_lib_version(node):
+    key = _pval(node, "lib_item")
+    it = next((i for i in _library(node) if i["key"] == key), None)
+    return _flat(it["versions"] if it else ["LAST"])
+
+
 # ── resolve ───────────────────────────────────────────────────────────────────
+
+def _set_character(node, flag):
+    p = node.parm("usd_character")
+    if p is not None:
+        p.set(1 if flag else 0)
+
+def _apply(node, r):
+    p = node.parm("resolved_path")
+    if r.get("ok") and r.get("path"):
+        if p: p.set(r["path"])
+        _set_character(node, r.get("has_skel"))
+        ext = os.path.splitext(r["path"])[1]
+        _set_status(node, f"OK  [{ext}]" + ("  character (skeleton)" if r.get("has_skel") else ""))
+    else:
+        if p: p.set("")
+        _set_character(node, False)
+        _set_status(node, r.get("error", "File not found"))
 
 def resolve_path(node):
     project = _pval(node, "project")
+    _sm = node.parm("source_mode")
+    mode = _sm.evalAsString() if _sm is not None else "tokens"
+    if mode == "file":
+        _apply(node, _get("/dcc/houdini/importer/probe", file=_pval(node, "free_path")))
+        return
     if not project:
         _set_status(node, "No project selected"); return
+    if mode == "library":
+        _apply(node, _get("/dcc/houdini/importer/library_resolve", project=project,
+                          key=_pval(node, "lib_item"), version=_pval(node, "lib_version") or "LAST"))
+        return
     r = _get(
         "/dcc/houdini/importer/resolve",
         project=project,
@@ -239,14 +289,7 @@ def resolve_path(node):
         instance=_pval(node, "flux_instance"),
         iter=_pval(node, "flux_iter"),
     )
-    if r.get("ok") and r.get("path"):
-        p = node.parm("resolved_path")
-        if p: p.set(r["path"])
-        _set_status(node, f"OK  [{r.get(\'ext\',\'\')}]")
-    else:
-        p = node.parm("resolved_path")
-        if p: p.set("")
-        _set_status(node, r.get("error", "File not found"))
+    _apply(node, r)
 
 
 # ── move to local ─────────────────────────────────────────────────────────────
@@ -281,6 +324,7 @@ def _prefetch(node):
         if project:
             _cached(f"tokens:{project}",
                     lambda: _get("/dcc/houdini/importer/tokens", project=project).get("tokens", {}))
+            _library(node)
     threading.Thread(target=_work, daemon=True).start()
 
 def on_created(node):
@@ -339,17 +383,51 @@ def _menu_str(name, label, default, menu_fn, help_txt):
     # evaluate to the flat menu list) — a leading `return` is a SyntaxError there.
     t.setItemGeneratorScript(f"hou.phm().{{menu_fn}}(kwargs[\\'node\\'])")
     t.setItemGeneratorScriptLanguage(_PY)
+    t.setScriptCallback("hou.phm().resolve_path(kwargs[\\'node\\'])")
+    t.setScriptCallbackLanguage(_PY)
+    return t
+
+def _only(t, mode):
+    t.setConditional(hou.parmCondType.HideWhen, "{{ source_mode != " + mode + " }}")
     return t
 
 _ptg.append(hou.SeparatorParmTemplate("sep_pipeline"))
 
 # Project — changing it also re-resolves
 _ptg.append(_menu_str("project",      "Project",   "",     "menu_project",  "FLUX project name"))
-_ptg.append(_menu_str("flux_class",   "Class",     "CHAR", "menu_class",    "CLASS token (CHAR, PROPS, ENV…)"))
-_ptg.append(_menu_str("flux_type",    "Type",      "RIG",  "menu_type",     "TYPE token (RIG, GEO, SCULPT…)"))
-_ptg.append(_menu_str("flux_name",    "Name",      "",     "menu_name",     "Asset NAME token (e.g. HERO_A)"))
-_ptg.append(_menu_str("flux_instance","Instance",  "null", "menu_instance", "Instance variant (null, A, B…)"))
-_ptg.append(_menu_str("flux_iter",    "Iteration", "LAST", "menu_iter",     "Version: LAST, v001, v002…"))
+
+# Source (2026-09-17): task publish by tokens, USD library, or any file.
+_src = hou.MenuParmTemplate(
+    "source_mode", "Source", ("tokens", "library", "file"),
+    menu_labels=("Publish (tokens)", "Bibliotheque USD", "Chemin libre"),
+    default_value=0,
+    script_callback="hou.phm().resolve_path(kwargs[\\'node\\'])",
+    script_callback_language=_PY,
+    help="Where the file comes from",
+)
+_ptg.append(_src)
+
+_ptg.append(_only(_menu_str("flux_class",   "Class",     "CHAR", "menu_class",    "CLASS token (CHAR, PROPS, ENV…)"), "tokens"))
+_ptg.append(_only(_menu_str("flux_type",    "Type",      "GEO",  "menu_type",     "TYPE token of the project"), "tokens"))
+_ptg.append(_only(_menu_str("flux_name",    "Name",      "",     "menu_name",     "Asset NAME token (e.g. HERO_A)"), "tokens"))
+_ptg.append(_only(_menu_str("flux_instance","Instance",  "null", "menu_instance", "Instance variant (null, A, B…)"), "tokens"))
+_ptg.append(_only(_menu_str("flux_iter",    "Iteration", "LAST", "menu_iter",     "Version: LAST, v001, v002…"), "tokens"))
+
+_ptg.append(_only(_menu_str("lib_item",    "Element",   "",     "menu_lib_item",    "Component or assembly of the USD library"), "library"))
+_ptg.append(_only(_menu_str("lib_version", "Version",   "LAST", "menu_lib_version", "LAST follows new publishes, vNNN is frozen"), "library"))
+
+_fp = hou.StringParmTemplate(
+    "free_path", "Fichier", 1, default_value=("",),
+    string_type=hou.stringParmType.FileReference,
+    script_callback="hou.phm().resolve_path(kwargs[\\'node\\'])",
+    script_callback_language=_PY,
+    help="Any file ($FLUX/... recommended)",
+)
+_ptg.append(_only(_fp, "file"))
+
+# Set by resolve: 1 = USD with a skeleton -> KineFX character import (mesh, skeleton, anim).
+_ptg.append(hou.ToggleParmTemplate("usd_character", "Character USD", default_value=False,
+                                   is_hidden=True))
 
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
 
@@ -405,12 +483,16 @@ _sub.setParmTemplateGroup(_ptg)
 _usd  = _sub.createNode("usdimport", "usd_import")
 _abc  = _sub.createNode("alembic",   "abc_import")
 _file = _sub.createNode("file",      "file_import")
+_char = _sub.createNode("kinefx::usdcharacterimport", "char_import")
+_char.parm("usdsource").set("file")
+_char.parm("usdfile").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
 _sw   = _sub.createNode("switch",    "format_switch")
 
-# Wire: 0=USD, 1=ABC, 2=File
+# Wire: 0=USD, 1=ABC, 2=File, 3=USD character (mesh with boneCapture)
 _sw.setInput(0, _usd)
 _sw.setInput(1, _abc)
 _sw.setInput(2, _file)
+_sw.setInput(3, _char, 0)
 
 # Path expressions reference the HDA parameter via ch().
 # Parm names drift across Houdini versions (usdimport: filepath vs filepath1),
@@ -449,14 +531,31 @@ if _ext.endswith(".bgeo.sc"):
 else:
     import os
     _ext = os.path.splitext(_ext)[1]
-return {{"usd":0,"usda":0,"usdc":0,"usdz":0,".usd":0,".usda":0,".usdc":0,".usdz":0,
+_idx = {{"usd":0,"usda":0,"usdc":0,"usdz":0,".usd":0,".usda":0,".usdc":0,".usdz":0,
          "abc":1,".abc":1,
          "bgeo":2,".bgeo":2,".bgeo.sc":2,"geo":2,".geo":2,"obj":2,".obj":2,"fbx":2,".fbx":2}}.get(_ext, 0)
+_ch = _n.parm("usd_character") if _n else None
+if _idx == 0 and _ch is not None and _ch.eval():
+    return 3
+return _idx
 """.strip(), hou.exprLanguage.Python)
 
 # Output connector — expose the switch output
 _out = _sub.createNode("output", "OUT")
 _out.setInput(0, _sw)
+
+# Outputs 2 and 3: rest skeleton and animated skeleton of a USD character
+# (empty for any other source, so wiring them never errors).
+_empty = _sub.createNode("null", "no_skeleton")
+_char_expr = 'ch("../usd_character")'
+for _i, _nm in ((1, "skeleton"), (2, "animated_skeleton")):
+    _swk = _sub.createNode("switch", "switch_" + _nm)
+    _swk.setInput(0, _empty)
+    _swk.setInput(1, _char, _i)
+    _swk.parm("input").setExpression(_char_expr, hou.exprLanguage.Hscript)
+    _o = _sub.createNode("output", "OUT_" + _nm)
+    _o.parm("outputidx").set(_i)
+    _o.setInput(0, _swk)
 _sub.layoutChildren()
 
 # ── 5. Convert subnet → HDA ───────────────────────────────────────────────────

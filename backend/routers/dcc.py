@@ -1668,6 +1668,12 @@ async def houdini_importer_resolve(
         None,
         lambda: resolve_import_path(project_path, class_tok, type, name, instance, iter),
     )
+    # A USD publish with a skeleton (GEO with skin, RIG, ANIM) imports as a KineFX
+    # character in the HDA (mesh + boneCapture, skeleton, animated skeleton).
+    if result.get("ok") and result.get("path"):
+        from features.importer.library_import import probe_file
+        result["has_skel"] = bool(
+            (await loop.run_in_executor(None, lambda: probe_file(result["path"]))).get("has_skel"))
     # F2: hand Houdini a portable "$FLUX/..." path so the HDA stores a token the
     # scene can carry across machines. Houdini expands $FLUX (F1 package) at cook.
     # Opt-in; the resolver itself stays absolute for backend-internal use.
@@ -1676,6 +1682,51 @@ async def houdini_importer_resolve(
         from core.paths import to_flux_token
         result["path"] = to_flux_token(result["path"])
     return result
+
+
+@router.get("/houdini/importer/library")
+async def houdini_importer_library(project: str) -> dict:
+    """USD library items (components / assemblies) for the importer HDA "Bibliotheque" mode."""
+    from core.paths import get_project_path
+    from features.importer.library_import import library_items
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    loop = asyncio.get_event_loop()
+    try:
+        items = await loop.run_in_executor(None, lambda: library_items(project_path))
+    except Exception as exc:
+        log.exception("importer library failed")
+        return {"ok": False, "error": str(exc), "items": []}
+    return {"ok": True, "items": items}
+
+
+@router.get("/houdini/importer/library_resolve")
+async def houdini_importer_library_resolve(project: str, key: str, version: str = "LAST") -> dict:
+    """Library item + version -> file ($FLUX token when portable) + has_skel."""
+    from core.paths import get_project_path
+    from features.importer.library_import import resolve_library_item
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: resolve_library_item(project_path, key, version))
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled() and result.get("ok"):
+        from core.paths import to_flux_token
+        result["path"] = to_flux_token(result["path"])
+    return result
+
+
+@router.get("/houdini/importer/probe")
+async def houdini_importer_probe(file: str) -> dict:
+    """Free path mode of the importer HDA: file exists? skeleton inside (USD)?"""
+    from features.importer.library_import import probe_file
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: probe_file(file))
 
 
 @router.get("/houdini/importer/instances")
