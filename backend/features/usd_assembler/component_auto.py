@@ -108,9 +108,14 @@ def collect_slots(project_path: str | Path, name: str,
             label = _published_instance(Path(hit.path), inst)
             if published["variante"]:
                 label = f"{label}_{published['variante']}"
+            # A proxy layer (purpose=proxy, ADR 0019) sublayers its source: referencing
+            # it brings the render meshes AND their proxies, so it wins when present.
+            from features.publisher.usd_publish_hooks import proxy_sibling
+
+            source = proxy_sibling(hit.path) if proxy_sibling(hit.path).is_file() else Path(hit.path)
             variants[_variant_name(label)] = {
                 "instance": inst, "variante": published["variante"], "base": base,
-                "path": Path(hit.path), "prim": hit.default_prim, "version": hit.version}
+                "path": source, "prim": hit.default_prim, "version": hit.version}
         if pin.get("instance") and _variant_name(pin["instance"]) not in variants:
             raise ResolveError(f"{dept}: instance epinglee introuvable : {pin['instance']}")
         if not variants:

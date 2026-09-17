@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from features.folder_manager import tokens as tok
@@ -26,6 +28,10 @@ def _asset() -> LightAsset:
 
 class Composition(unittest.TestCase):
     def setUp(self) -> None:
+        # deterministic: the proxy hook is an opt-in of the project, not of these tests
+        env = mock.patch.dict(os.environ, {"FLUX_PROXY_USD": "0"})
+        env.start()
+        self.addCleanup(env.stop)
         self._tmp = tempfile.TemporaryDirectory()
         self.project = Path(self._tmp.name) / "PROJ"
         self.project.mkdir()

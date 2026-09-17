@@ -110,12 +110,14 @@ def publish_light_asset(
 
     log.info("Published light asset %s (%s) -> %s", base, version_str, folder)
 
-    # USD_ASSEMBLER_V2 A1: a GEO / RIG / SHADING publish regenerates the asset component.
-    # Only for token-resolved publishes (dest_dir); never fails the publish.
+    # USD_ASSEMBLER_V2 A1 / ADR 0019: proxy layer beside the version root, then the
+    # asset (component). Only for token-resolved publishes (dest_dir); never fails.
     component = None
     if dest_dir is not None:
-        from features.usd_assembler.component_auto import refresh_from_publish
-        component = refresh_from_publish(project_path, base, user=user)
+        from features.publisher.usd_publish_hooks import after_usd_publish
+
+        hooked = after_usd_publish(parent, base, ext, root, user=user)
+        component = hooked["component"]
 
     for w in warnings:
         log.warning("Light asset %s: %s", base, w)

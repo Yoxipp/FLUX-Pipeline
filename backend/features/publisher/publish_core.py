@@ -125,9 +125,13 @@ def copy_publish(
     log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
-    # ADR 0019: a USD publish in an asset task feeds that asset's USD (component).
-    from features.usd_assembler.component_auto import refresh_from_publish_folder
-    refresh_from_publish_folder(dest_folder, base_name, full_ext(source_path.name), user=user)
+    # ADR 0019: proxy layer + asset (component) refresh, both on the immutable version.
+    from features.publisher.publish_layout import flat_version_path
+    from features.publisher.usd_publish_hooks import after_usd_publish
+
+    ext = full_ext(source_path.name)
+    after_usd_publish(dest_folder, base_name, ext,
+                      flat_version_path(dest_folder, base_name, new_ver, ext), user=user)
     return dest_path
 
 

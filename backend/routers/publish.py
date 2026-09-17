@@ -118,33 +118,31 @@ async def _maybe_conform_texture(dest: Path, loop) -> list[str] | None:
 
 
 async def _maybe_generate_proxy(dest: Path, loop) -> str | None:
-    """Author a USD purpose=proxy layer when the opt-in flag is on.
+    """Proxy layer of this publish (purpose=proxy), or None when the flag is off.
 
-    Returns the proxy layer path, or None when proxy is off / the file is not a
-    USD asset / it has no render mesh / generation failed (the publish already
-    succeeded either way).
+    Authored beside the IMMUTABLE version, never beside LAST (ADR 0019): the asset
+    references the proxy layer, and a LAST pointer must stay a pointer. The publish
+    hook (features/publisher/usd_publish_hooks) usually wrote it already, in which
+    case this only reports its path back to the UI.
     """
-    from flux_actions.switch import proxy_usd_enabled, proxy_usd_reduction
+    from features.publisher import last_pointer as lp
     from features.publisher.usd_proxy import is_usd_asset
+    from features.publisher.usd_publish_hooks import generate_proxy_layer, proxy_sibling
+    from flux_actions.switch import proxy_usd_enabled
 
+    dest = Path(dest)
     if not proxy_usd_enabled() or not is_usd_asset(dest):
         return None
-    try:
-        from flux_actions.runner import run_generate_proxy_action
-
-        result = await loop.run_in_executor(
-            None,
-            lambda: run_generate_proxy_action(
-                dest, target_reduction=proxy_usd_reduction()
-            ),
-        )
-    except Exception:  # noqa: BLE001 - proxy must never break a publish
-        log.exception("USD proxy a échoué pour %s", dest)
-        return None
-    if not result or result.get("status") != "converted":
-        # No render mesh, or nothing to do: not an error worth surfacing.
-        return None
-    proxy_path = result.get("proxy_path")
-    log.info("USD proxy: %s -> %s (%s tris -> %s)",
-             dest.name, proxy_path, result.get("tris_in"), result.get("tris_out"))
-    return proxy_path
+    # A LAST pointer layer is not a source: follow it to the version it targets.
+    source = dest
+    stem, ext, _role = lp.parse_published_name(dest.name)
+    info = await loop.run_in_executor(
+        None, lambda: lp.read_last(dest.parent, stem.rsplit("_", 1)[0], ext))
+    if info and info.get("target"):
+        target = dest.parent / str(info["target"])
+        if target.is_file():
+            source = target
+    existing = proxy_sibling(source)
+    if existing.is_file():
+        return str(existing)
+    return await loop.run_in_executor(None, lambda: generate_proxy_layer(source))
