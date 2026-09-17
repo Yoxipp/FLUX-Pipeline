@@ -21,6 +21,8 @@ log = get_logger(__name__)
 
 _VERSION_RE = re.compile(r"^v(\d+)$", re.IGNORECASE)
 _LAYERED_DIR_RE = re.compile(r"^(.+)_v(\d+)$", re.IGNORECASE)
+# The asset's generated USD folder (component_auto.COMPONENT_SUBDIR); never a task.
+COMPONENT_SUBDIR = "usd"
 
 # ── backend-side TTL cache ────────────────────────────────────────────────────
 _BCACHE: dict = {}
@@ -492,8 +494,12 @@ def _extract_type_instance(segs: list[str], type_by_subpath: dict[str, str]) -> 
     Tries 2-segment match first (e.g. 'model'+'sculpt' → SCULPT),
     then 1-segment match (e.g. 'cloth' → CLOTH), then plain uppercase fallback.
     File-like segments (containing a dot) are never treated as instance or type.
+    The asset's USD folder (<NAME>/usd, ADR 0018) is NOT a task: it holds the generated
+    asset entry, so it resolves to no TYPE rather than to a made-up "USD" task.
     """
     if not segs:
+        return "", ""
+    if segs[0].lower() == COMPONENT_SUBDIR:
         return "", ""
 
     if len(segs) >= 2:

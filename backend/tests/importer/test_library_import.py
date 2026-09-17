@@ -79,6 +79,19 @@ class LibraryImport(unittest.TestCase):
                          {"source_mode": "library", "lib_item": "assembly:PARK", "lib_version": "v003"})
         self.assertEqual(src(self.tmp, self.tmp / "usd" / "assembly" / "TOWN.usda")["lib_item"], "assembly:TOWN")
 
+    def test_component_folder_is_not_a_task(self):
+        # <NAME>/usd holds the generated asset (ADR 0018): it must not look like a TYPE.
+        from features.folder_manager import tokens as tok
+        from features.importer.importer_resolve import path_to_tokens
+
+        tokens = tok.build_default_tokens()
+        tokens["NAME"]["HERO"] = "assets/chara/HERO"
+        tok.save_tokens(self.tmp, tokens)
+        rel = ["assets", "chara", "HERO", "usd", "HERO_v002", "HERO.usda"]
+        self.assertEqual(path_to_tokens(self.tmp, rel),
+                         {"CLASS": "CHAR", "TYPE": "", "NAME": "HERO", "INSTANCE": ""})
+        self.assertEqual(path_to_tokens(self.tmp, ["assets", "chara", "HERO", "rig", "null"])["TYPE"], "RIG")
+
     def test_importer_source_tokens_only_when_they_resolve_to_the_file(self):
         folder = self.tmp / "assets" / "chara" / "HERO" / "rig" / "null"
         root = folder / "CHAR_RIG_HERO_null_v004" / "CHAR_RIG_HERO_null.usd"
