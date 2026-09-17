@@ -510,7 +510,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             from the menu on purpose. It is NOT a replacement for the Publisher; it
             only proves the generic form + destination preview. Re-add when the rich
             Publisher's logic is wired through the engine. */}
-        <NavItem icon={Layers}     label={t('nav.usdAssembler')}  active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
+        <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
       </NavGroup>
 
       <NavGroup title="PIPELINE">

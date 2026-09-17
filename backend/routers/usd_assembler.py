@@ -140,6 +140,31 @@ async def list_usd_layers(
     return {"project": name, "asset": asset, "task": task, "versions": versions}
 
 
+@router.get("/composition")
+async def get_usd_composition(file: str, project: str | None = None) -> dict:
+    """Read-only composition of a published USD entry: prims (type, kind, variants,
+    references) and the layers it uses. Feeds the USD page "Composition" view."""
+    _, project_path = _resolve_project(project)
+    from core.paths import is_subpath
+
+    # Security S5: only files of the project can be inspected (the UI passes absolute
+    # paths coming from /usd/library, a relative one is taken under the project).
+    raw = Path(file)
+    target = raw if raw.is_absolute() else (project_path / file)
+    if not is_subpath(target.resolve(), project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorise")
+    from features.usd_assembler.inspect import composition
+
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: composition(target))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        log.exception("composition failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 def _resolver_for(project: str | None):
     """Build a FluxResolver for *project* (or the active one). Pure python, no pxr."""
     name, project_path = _resolve_project(project)

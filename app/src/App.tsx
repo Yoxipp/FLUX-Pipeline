@@ -20,7 +20,7 @@ import { ActionGraph }   from './pages/ActionGraph'
 import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
-import { UsdAssembler }  from './pages/UsdAssembler'
+import { UsdPage }       from './pages/usd/UsdPage'
 import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
 import { FirstLaunch }   from './pages/FirstLaunch'
@@ -134,7 +134,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/activity"  element={<Activity />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
-              <Route path="/usd"       element={<UsdAssembler />} />
+              <Route path="/usd"       element={<UsdPage />} />
               <Route path="/templates" element={<TemplateEditor />} />
               <Route path="/production" element={<Production />} />
             </Routes>

@@ -619,6 +619,12 @@ export const api = {
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/create', { project, name, source }),
   editUsdAssembly: (project: string, name: string, ops: UsdAssemblyOp[]) =>
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
+  // Read-only composition of a published USD file (prims, variants, layers used).
+  getUsdComposition: (project: string, file: string) => {
+    const qs = new URLSearchParams({ project, file })
+    return apiCall<UsdComposition>('GET', `/usd/composition?${qs}`)
+  },
+
   // Read instance placements from the open DCC: layout vNNN + LAST, then a new assembly version.
   publishUsdLayout: (project: string, name: string, dcc: 'houdini' | 'maya') =>
     apiCall<UsdAssemblyEditResult & { layout_version: string; layout: string; placements: number }>(
@@ -795,3 +801,16 @@ export type UsdAssemblyOp =
   | { op: 'set_version'; name?: string; all?: boolean; version: string }
 export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
 export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }
+export interface UsdPrimNode {
+  path: string; name: string; type: string; kind: string; purpose: string
+  instanceable: boolean
+  variant_sets: Record<string, { selection: string; variants: string[] }>
+  arcs: { arc: string; asset: string; prim: string }[]
+  children: UsdPrimNode[]
+  truncated: boolean
+}
+export interface UsdComposition {
+  file: string; default_prim: string
+  layers: { path: string; root: boolean }[]
+  tree: UsdPrimNode | null
+}

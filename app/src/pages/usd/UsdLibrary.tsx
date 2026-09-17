@@ -1,7 +1,10 @@
-// UsdLibrary.tsx — default view of the USD assembler (USD_ASSEMBLER_V2 A2): everything
-// already published in the project. Left: components (ADR 0018) and assemblies, with
-// search. Right: detail (layers, versions, used by, instances, broken links).
-// Backend contracts: GET /usd/library, POST /usd/component/refresh.
+// UsdLibrary.tsx — the USD page content: everything already published in the project.
+// Left: assets (components, ADR 0018/0019) and decors (assemblies), with search.
+// Right: one entity in four views, like a documented USD pipeline tool (AYON scene
+// inventory / Solaris stage manager): Content (departments or instances, editable),
+// Versions, Composition (what the file really gives) and Dependencies.
+// Backend: GET /usd/library, /usd/composition, POST /usd/component/refresh,
+// /usd/assembly/{create,edit,layout/publish}.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus, Upload } from 'lucide-react'
@@ -9,10 +12,11 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
-import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdLibrary as Library, UsdSlotPin, UsdSlotRef } from '../../api/client'
+import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdComposition, UsdLibrary as Library, UsdPrimNode, UsdSlotPin, UsdSlotRef } from '../../api/client'
 import { useI18n } from '../../i18n'
 
 type Tab = 'components' | 'assemblies'
+type DetailTab = 'content' | 'versions' | 'composition' | 'deps'
 type Selection = { tab: Tab; name: string } | null
 
 // Asset departments, weak -> strong (ADR 0019) and the TYPE task that publishes each.
@@ -272,6 +276,7 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
   const { t: tr } = useI18n()
   const navigate = useNavigate()
   const [editing, setEditing] = useState<string | null>(null)
+  const [tab, setTab] = useState<DetailTab>('content')
   useEffect(() => { setEditing(null) }, [comp.name])
   // Asset folder = parent of <NAME_path>/usd. Production opens on the model task.
   const assetDir = comp.dir.replace(/[\\/]usd[\\/]?$/i, '')
@@ -309,7 +314,10 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
         )}
       </div>
 
-      <SecTitle>{tr('usd.lib.slots')}</SecTitle>
+      <DetailTabs tab={tab} onTab={setTab} />
+
+      {tab === 'content' && (<>
+      <SecTitle>{tr('usd.lib.departments')}</SecTitle>
       <div className="card" style={{ padding: '6px 10px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 110px', gap: '6px 10px', alignItems: 'center' }}>
           <span className="cap">{tr('usd.lib.col.slot')}</span>
@@ -354,13 +362,29 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
           })}
         </div>
       </div>
+      </>)}
 
-      <SecTitle>{tr('usd.lib.versions')}</SecTitle>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        {comp.versions.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>}
-        {[...comp.versions].reverse().map(v => (
-          <Pill key={v} active={v === comp.version}><span style={mono}>{v}</span></Pill>
-        ))}
+      {tab === 'versions' && <VersionsView versions={comp.versions} current={comp.version} />}
+      {tab === 'composition' && <CompositionView project={project} file={comp.last} />}
+
+      {tab === 'deps' && (<>
+      <SecTitle>{tr('usd.deps.sources')}</SecTitle>
+      <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {SLOT_ORDER.filter(s => comp.published[s]).map(s => {
+          const pub = comp.published[s]
+          return (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--ink-2)', width: 60 }}>{s}</span>
+              <span style={{ ...mono, color: 'var(--ink-3)' }}>{pub.task}</span>
+              <span style={{ ...mono, color: 'var(--ink-3)' }}>
+                {Object.entries(pub.variants ?? {}).map(([v, ver]) => `${v} ${ver}`).join(' · ')}
+              </span>
+            </div>
+          )
+        })}
+        {SLOT_ORDER.every(s => !comp.published[s]) && (
+          <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>
+        )}
       </div>
 
       <SecTitle>{tr('usd.lib.usedBy')}</SecTitle>
@@ -372,6 +396,7 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
           </Pill>
         ))}
       </div>
+      </>)}
     </div>
   )
 }
@@ -441,6 +466,7 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
   const [addCount, setAddCount] = useState(1)
   const [addVersion, setAddVersion] = useState('LAST')
   const [busy, setBusy] = useState(false)
+  const [tab, setTab] = useState<DetailTab>('content')
   useEffect(() => { setEditing(null) }, [asm.file])
 
   const linkable = components.filter(c => c.versions.length > 0)
@@ -527,6 +553,9 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
         </Btn>
       </div>
 
+      <DetailTabs tab={tab} onTab={setTab} />
+
+      {tab === 'content' && (<>
       <SecTitle>{tr('usd.lib.add')}</SecTitle>
       <div className="card" style={{ padding: '6px 10px', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={addComp} onChange={e => { setAddComp(e.target.value); setAddVersion('LAST') }} style={{ ...selectStyle, width: 170 }}>
@@ -635,6 +664,127 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
           )
         })}
       </div>
+      </>)}
+
+      {tab === 'versions' && <VersionsView versions={asm.versions} current={asm.version} />}
+      {tab === 'composition' && <CompositionView project={project} file={asm.file} />}
+
+      {tab === 'deps' && (<>
+        <SecTitle>{tr('usd.deps.components')}</SecTitle>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {[...new Set(asm.instances.map(i => i.component).filter(Boolean))].map(c => (
+            <Pill key={c as string} onClick={() => onOpenComponent(c as string)} style={{ cursor: 'pointer' }}>
+              <Box size={10} strokeWidth={2} /> {c}
+            </Pill>
+          ))}
+          {asm.instances.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>}
+        </div>
+
+        <SecTitle>{tr('usd.lib.layout')}</SecTitle>
+        <span style={{ ...mono, color: 'var(--ink-3)' }} title={asm.layout ?? undefined}>
+          {asm.layout ? asm.layout.split(/[\\/]/).pop() : tr('usd.lib.noLayout')}
+        </span>
+      </>)}
     </div>
+  )
+}
+
+// ── detail views shared by assets and decors ─────────────────────────────────
+
+function DetailTabs({ tab, onTab }: { tab: DetailTab; onTab: (t: DetailTab) => void }) {
+  const { t: tr } = useI18n()
+  const tabs: DetailTab[] = ['content', 'versions', 'composition', 'deps']
+  return (
+    <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--rule)', paddingBottom: 6 }}>
+      {tabs.map(t => (
+        <Pill key={t} active={tab === t} onClick={() => onTab(t)} style={{ cursor: 'pointer' }}>{tr(`usd.tab.${t}`)}</Pill>
+      ))}
+    </div>
+  )
+}
+
+// Version history: newest first, the one LAST points at is marked.
+function VersionsView({ versions, current }: { versions: string[]; current: string | null }) {
+  const { t: tr } = useI18n()
+  if (versions.length === 0) return <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {[...versions].reverse().map(v => (
+        <div key={v} className="card" style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ ...mono, color: v === current ? 'var(--accent-hi)' : 'var(--ink-2)' }}>{v}</span>
+          {v === current && <span className="lbl" style={{ fontSize: 9.5, color: 'var(--accent-hi)' }}>{tr('usd.versions.current')}</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Composition of the published file, read by the backend with pxr (read only).
+function CompositionView({ project, file }: { project: string; file: string | null }) {
+  const { t: tr } = useI18n()
+  const [comp, setComp] = useState<UsdComposition | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setComp(null); setError('')
+    if (!file) return
+    api.getUsdComposition(project, file)
+      .then(setComp)
+      .catch(e => setError(errMsg(e)))
+  }, [project, file])
+
+  if (!file) return <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.comp.empty')}</span>
+  if (error) return <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{error}</span>
+  if (!comp) return <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>...</span>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {comp.tree ? <PrimRow node={comp.tree} depth={0} /> : <span className="lbl" style={{ fontSize: 10 }}>-</span>}
+      </div>
+      <SecTitle>{tr('usd.comp.layers')}</SecTitle>
+      <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {comp.layers.map(l => (
+          <span key={l.path} style={{ ...mono, color: l.root ? 'var(--ink-2)' : 'var(--ink-3)' }}>
+            {l.root ? '* ' : '  '}{l.path}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PrimRow({ node, depth }: { node: UsdPrimNode; depth: number }) {
+  const { t: tr } = useI18n()
+  const vsets = Object.entries(node.variant_sets)
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: depth * 14 }}>
+        <span style={{ ...mono, color: 'var(--ink)' }}>{node.name || '/'}</span>
+        {node.type && <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>{node.type}</span>}
+        {node.kind && <Pill>{node.kind}</Pill>}
+        {node.purpose && node.purpose !== 'default' && (
+          <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>{node.purpose}</span>
+        )}
+        {vsets.map(([name, v]) => (
+          <span key={name} className="lbl" style={{ fontSize: 9.5, color: 'var(--accent-hi)' }}>
+            {name} = {v.selection || '-'} ({v.variants.length})
+          </span>
+        ))}
+        {node.arcs.map((a, i) => (
+          <span key={i} className="lbl" title={a.asset} style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>
+            {a.arc} {a.asset.split('/').pop()}
+          </span>
+        ))}
+        {node.instanceable && (
+          <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>{tr('usd.comp.instanced')}</span>
+        )}
+      </div>
+      {node.children.map(c => <PrimRow key={c.path} node={c} depth={depth + 1} />)}
+      {node.truncated && !node.instanceable && (
+        <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', paddingLeft: (depth + 1) * 14 }}>
+          {tr('usd.comp.more')}
+        </span>
+      )}
+    </>
   )
 }
