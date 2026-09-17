@@ -618,6 +618,10 @@ export const api = {
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/create', { project, name, source }),
   editUsdAssembly: (project: string, name: string, ops: UsdAssemblyOp[]) =>
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
+  // Read instance placements from the open DCC: layout vNNN + LAST, then a new assembly version.
+  publishUsdLayout: (project: string, name: string, dcc: 'houdini' | 'maya') =>
+    apiCall<UsdAssemblyEditResult & { layout_version: string; layout: string; placements: number }>(
+      'POST', '/usd/assembly/layout/publish', { project, name, dcc }),
 
   // Point one assembly instance at a component LAST or a frozen vNNN.
 
@@ -772,7 +776,8 @@ export interface UsdAssemblyInfo {
   version: string | null      // current vNNN (null = legacy flat file)
   versions: string[]
   legacy: boolean             // old builder file, converted on first edit
-  layout: string | null       // placement layer published from a DCC (read only)
+  layout: string | null       // layout LAST published from a DCC
+  layout_version: string | null   // layout vNNN pinned by the current assembly version
 }
 // A3 edit operations (backend assembly_v2.apply_ops).
 export type UsdAssemblyOp =

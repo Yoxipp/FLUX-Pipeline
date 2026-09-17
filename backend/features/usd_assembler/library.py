@@ -132,6 +132,18 @@ def _instances(layer, file: Path, components: dict[Path, str]) -> list[dict]:
     return out
 
 
+def _pinned_layout_version(entry: Path) -> str | None:
+    """vNNN of the layout sublayered by an assembly version payload (None if none)."""
+    from pxr import Sdf
+
+    payload = Sdf.Layer.OpenAsAnonymous(str(entry.with_name(entry.stem + "_payload" + entry.suffix)))
+    for sub in (payload.subLayerPaths if payload is not None else []):
+        m = re.search(r"_layout_(v\d+)\.usd[ac]?$", sub)
+        if m:
+            return m.group(1)
+    return None
+
+
 def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUBDIR,
                     components: list[dict] | None = None) -> list[dict]:
     """Assemblies under *subdir*: versioned ones (A3, ``<ASM>/<ASM>_vNNN``) first, then
@@ -159,7 +171,8 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
         out.append({"name": d.name, "file": str(last if last.is_file() else entry),
                     "version": entry.parent.name.rsplit("_", 1)[-1],
                     "versions": assembly_versions(d, d.name), "legacy": False,
-                    "layout": str(layout) if layout else None, "instances": instances,
+                    "layout": str(layout) if layout else None, "layout_version": _pinned_layout_version(entry),
+                    "instances": instances,
                     "broken": sum(1 for i in instances if i["broken"])})
     for file in sorted(p for p in folder.iterdir() if p.suffix.lower() in _USD_EXTS and p.is_file()):
         layer = Sdf.Layer.OpenAsAnonymous(str(file))
@@ -172,7 +185,7 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
             continue
         instances = _instances(layer, file, comp_dirs)
         out.append({"name": layer.defaultPrim, "file": str(file), "version": None, "versions": [],
-                    "legacy": True, "layout": None, "instances": instances,
+                    "legacy": True, "layout": None, "layout_version": None, "instances": instances,
                     "broken": sum(1 for i in instances if i["broken"])})
     return out
 

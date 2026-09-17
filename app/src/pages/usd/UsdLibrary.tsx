@@ -4,7 +4,7 @@
 // Backend contracts: GET /usd/library, POST /usd/component/refresh.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus } from 'lucide-react'
+import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
@@ -449,6 +449,21 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
   const instVersion = (i: UsdAssemblyInfo['instances'][number]) =>
     i.follows_last ? 'LAST' : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? 'LAST')
 
+  async function publishLayout(dcc: 'houdini' | 'maya') {
+    setBusy(true)
+    try {
+      const res = await api.publishUsdLayout(project, asm.name, dcc)
+      toast.success(tr('usd.lib.layoutPublished', {
+        layout: res.layout_version, n: res.placements, name: asm.name, version: res.version ?? '' }))
+      res.warnings.forEach(w => toast.warning(w))
+      onChanged()
+    } catch (e) {
+      toast.error(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function edit(ops: UsdAssemblyOp[]) {
     setBusy(true)
     try {
@@ -496,9 +511,21 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
       {asm.legacy && (
         <span className="lbl" style={{ fontSize: 10, color: 'var(--warn)' }}>{tr('usd.lib.legacy')}</span>
       )}
-      <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }} title={asm.layout ?? undefined}>
-        {tr('usd.lib.layout')} : {asm.layout ? asm.layout.split(/[\\/]/).pop() : tr('usd.lib.noLayout')}
-      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }} title={asm.layout ?? undefined}>
+          {tr('usd.lib.layout')} : {asm.layout_version ?? (asm.layout ? asm.layout.split(/[\\/]/).pop() : tr('usd.lib.noLayout'))}
+        </span>
+        <div style={{ flex: 1 }} />
+        <span className="cap" title={tr('usd.lib.layoutHelp')}>{tr('usd.lib.publishLayout')}</span>
+        <Btn sm ghost disabled={busy || asm.instances.length === 0} title={tr('usd.lib.layoutHelp')}
+          onClick={() => void publishLayout('houdini')}>
+          <Upload size={11} strokeWidth={2} /> Houdini
+        </Btn>
+        <Btn sm ghost disabled={busy || asm.instances.length === 0} title={tr('usd.lib.layoutHelp')}
+          onClick={() => void publishLayout('maya')}>
+          <Upload size={11} strokeWidth={2} /> Maya
+        </Btn>
+      </div>
 
       <SecTitle>{tr('usd.lib.add')}</SecTitle>
       <div className="card" style={{ padding: '6px 10px', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>

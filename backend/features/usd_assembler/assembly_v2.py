@@ -4,11 +4,12 @@
 #   usd/assembly/<ASM>/<ASM>_vNNN/<ASM>.usda           entry: kind=assembly, assetInfo,
 #                                                      payload -> ./<ASM>_payload.usda,
 #                                                      customLayerData.flux.instances_json
-#   usd/assembly/<ASM>/<ASM>_vNNN/<ASM>_payload.usda   sublayers: layout (if any) > contents
+#   usd/assembly/<ASM>/<ASM>_vNNN/<ASM>_payload.usda   sublayers: layout vNNN (if any) > contents
 #   usd/assembly/<ASM>/<ASM>_vNNN/<ASM>_contents.usda  /<ASM>/<CLASS>/<INSTANCE> kind=component,
 #                                                      instanceable, reference -> component
 #   usd/assembly/<ASM>/<ASM>_LAST.usda                 pointer layer (ADR 0017)
-#   usd/assembly/<ASM>/<ASM>_layout_LAST.usd*          placement from the DCC (later unit)
+#   usd/assembly/<ASM>/<ASM>_layout_LAST.usd*          placement from the DCC (layout_publish.py),
+#                                                      each version pins the layout vNNN LAST points at
 # Every edit writes a new version so a shot can freeze one. Paths are relative (ADR 0010).
 # Legacy flat assemblies (usd/assembly/<ASM>.usda) are read and converted on first edit.
 
@@ -83,6 +84,22 @@ def layout_file(project_path: str | Path, name: str) -> Path | None:
         if cand.is_file():
             return cand
     return None
+
+
+def pinned_layout(project_path: str | Path, name: str) -> Path | None:
+    """Layout file a new assembly version sublayers: the vNNN the layout LAST points at
+    (frozen, ADR 0017), else the LAST file itself (hand-made layer without pointer data)."""
+    from features.publisher.last_pointer import read_layer_flux
+
+    last = layout_file(project_path, name)
+    if last is None:
+        return None
+    target = (read_layer_flux(last) or {}).get("target")
+    if target:
+        cand = last.parent / target
+        if cand.is_file():
+            return cand
+    return last
 
 
 # ── reading instances ────────────────────────────────────────────────────────
@@ -222,7 +239,7 @@ def _layout_warnings(project_path: Path, name: str, instances: list[dict]) -> li
     """Layout overs on prims that no longer exist (renamed / removed instance)."""
     from pxr import Sdf
 
-    layout = layout_file(project_path, name)
+    layout = pinned_layout(project_path, name)
     if layout is None:
         return []
     layer = Sdf.Layer.FindOrOpen(str(layout))
@@ -246,7 +263,8 @@ def _layout_warnings(project_path: Path, name: str, instances: list[dict]) -> li
 
 # ── authoring ────────────────────────────────────────────────────────────────
 
-def _author(folder: Path, project: Path, name: str, version: str, instances: list[dict]) -> Path:
+def _author(folder: Path, project: Path, name: str, version: str, instances: list[dict],
+            layout: Path | None) -> Path:
     from pxr import Sdf
 
     folder.mkdir(parents=True, exist_ok=True)
@@ -274,7 +292,6 @@ def _author(folder: Path, project: Path, name: str, version: str, instances: lis
 
     payload_path = folder / f"{name}_payload{ASSEMBLY_EXT}"
     payload = Sdf.Layer.CreateNew(str(payload_path))
-    layout = layout_file(project, name)
     subs = ([_rel(layout, folder)] if layout is not None else []) + [f"./{contents_path.name}"]
     payload.subLayerPaths[:] = subs
     payload.defaultPrim = name
@@ -299,8 +316,11 @@ def _author(folder: Path, project: Path, name: str, version: str, instances: lis
 
 
 def write_version(project_path: str | Path, name: str, instances: list[dict], *,
-                  user: str = "", force: bool = False) -> dict | None:
-    """Author a new assembly version for *instances*; None if nothing changed."""
+                  user: str = "", force: bool = False, layout: Path | None = None) -> dict | None:
+    """Author a new assembly version for *instances*; None if nothing changed.
+
+    *layout*: layout file to sublayer (default: the pinned layout, see pinned_layout).
+    """
     from features.folder_manager.naming_validator import format_version
     from features.publisher import last_pointer as lp
     from features.publisher.publish_layout import (
@@ -317,7 +337,8 @@ def write_version(project_path: str | Path, name: str, instances: list[dict], *,
     folder = sequence_folder(parent, name, ver)
     version = format_version(ver)
     try:
-        entry = _author(folder, project, name, version, instances)
+        entry = _author(folder, project, name, version, instances,
+                        layout if layout is not None else pinned_layout(project, name))
     except Exception:
         discard_rendered_version(parent, name, ASSEMBLY_EXT, ver, is_sequence=True)
         raise

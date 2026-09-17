@@ -305,6 +305,44 @@ async def edit_usd_assembly(req: AssemblyEditRequest) -> dict:
     return _assembly_result(res)
 
 
+class LayoutPublishRequest(BaseModel):
+    name: str
+    dcc: str                        # "houdini" | "maya"
+    project: str | None = None
+    user: str = ""
+
+
+@router.post("/assembly/layout/publish")
+async def publish_usd_assembly_layout(req: LayoutPublishRequest) -> dict:
+    """Read instance placements from the open DCC, publish the layout vNNN + LAST,
+    then a new assembly version pinned on it."""
+    _, project_path = _resolve_project(req.project)
+    dcc = req.dcc.lower()
+    if dcc == "houdini":
+        from dcc.houdini.houdini_layout import collect_layout
+    elif dcc == "maya":
+        from dcc.maya.maya_layout import collect_layout
+    else:
+        raise HTTPException(status_code=400, detail=f"DCC non gere pour le layout : {req.dcc}")
+    from features.usd_assembler.layout_publish import publish_layout
+
+    loop = asyncio.get_event_loop()
+    collected = await loop.run_in_executor(None, lambda: collect_layout(req.name))
+    if not collected.get("ok"):
+        raise HTTPException(status_code=503, detail=collected.get("error") or f"{req.dcc} injoignable")
+    placements = (collected.get("result") or {}).get("placements") or {}
+    try:
+        res = await loop.run_in_executor(None, lambda: publish_layout(
+            project_path, req.name, placements, user=req.user, source=dcc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("layout publish failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {**_assembly_result(res), "layout_version": res["layout_version"],
+            "layout": str(res["layout"]), "placements": len(placements)}
+
+
 @router.post("/assembly/relink")
 async def relink_usd_assembly_instance(req: RelinkRequest) -> dict:
     """Point one instance of an assembly at another component or version."""
