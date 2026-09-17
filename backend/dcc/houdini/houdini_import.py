@@ -502,3 +502,78 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
     local_path = f"{rel_prefix}/{dest.name}" if rel_prefix else str(dest)
     log.info("Copied %s → %s", src.name, local_path)
     return {"ok": True, "local_path": local_path, "abs_path": str(dest)}
+
+
+def create_usd_context_import(file_path: str, probe: dict) -> dict:
+    """Import a USD file according to the active network pane (2026-09-17).
+
+    * LOP network (/stage, lopnet): Reference LOP at ``probe_prim_path`` wired after
+      the selected (else displayed) LOP, display flag moved to it.
+    * /obj or SOP network: ``kinefx::usdcharacterimport`` (source = file) when the
+      stage has a skeleton, so mesh + joints + anim come in; else ``usdimport``.
+      /obj gets a new Geometry node to hold the SOP.
+    *probe* comes from features.importer.usd_probe (backend pxr). *file_path* may be
+    a portable ``$FLUX/...`` token: both node types expand variables.
+    Returns {"ok", "result": {"node_path", "mode", "resolved_path"}} or {"ok": False, "error"}.
+    """
+    from features.importer.usd_probe import reference_prim_path
+
+    file_str = str(file_path).replace("\\", "/")
+    prim_path = reference_prim_path(probe)
+    has_skel = bool(probe.get("has_skel"))
+    name = re.sub(r"[^A-Za-z0-9_]", "_", probe.get("default_prim") or _node_name_from(file_path)) or "usd"
+
+    code = textwrap.dedent(f"""\
+        import hou
+        try:
+            _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            _pwd = _pane.pwd() if _pane else hou.node("/obj")
+        except Exception:
+            _pwd = hou.node("/obj")
+        if _pwd is None:
+            _pwd = hou.node("/obj")
+        _cat = _pwd.childTypeCategory()
+        _name = {name!r}
+        if _cat == hou.lopNodeTypeCategory():
+            _sel = [n for n in hou.selectedNodes() if n.parent() == _pwd]
+            _prev = _sel[0] if _sel else _pwd.displayNode()
+            _node = _pwd.createNode("reference", node_name="flux_ref_" + _name)
+            _node.parm("filepath1").set({file_str!r})
+            _node.parm("primpath1").set({prim_path!r})
+            if _prev is not None:
+                _node.setInput(0, _prev)
+                _node.setPosition(_prev.position() + hou.Vector2(0, -1.2))
+            _node.setDisplayFlag(True)
+            _mode = "lop_reference"
+        elif _cat in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory()):
+            _net = _pwd.createNode("geo", node_name="flux_" + _name) if _cat == hou.objNodeTypeCategory() else _pwd
+            if {has_skel!r}:
+                _node = _net.createNode("kinefx::usdcharacterimport", node_name="flux_character_" + _name)
+                _node.parm("usdsource").set("file")
+                _node.parm("usdfile").set({file_str!r})
+                _mode = "sop_character"
+            else:
+                _node = _net.createNode("usdimport", node_name="flux_usd_" + _name)
+                for _pn in ("filepath1", "filepath", "file"):
+                    if _node.parm(_pn) is not None:
+                        _node.parm(_pn).set({file_str!r}); break
+                _mode = "sop_usdimport"
+            _node.setDisplayFlag(True)
+            if hasattr(_node, "setRenderFlag"):
+                _node.setRenderFlag(True)
+        else:
+            raise RuntimeError(
+                "Contexte '" + _pwd.path() + "' incompatible avec un import USD : "
+                "place-toi dans /stage (LOP), /obj ou un reseau SOP."
+            )
+        _node.setSelected(True, clear_all_selected=True)
+        result = {{"node_path": _node.path(), "mode": _mode, "resolved_path": {file_str!r}}}
+    """)
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        r = resp.get("result") or {}
+        log.info("USD context import %s -> %s (%s)", Path(file_str).name, r.get("node_path"), r.get("mode"))
+    else:
+        log.error("create_usd_context_import failed: %s", resp.get("error"))
+    return resp
+

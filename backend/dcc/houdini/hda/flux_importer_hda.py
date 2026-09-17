@@ -173,12 +173,11 @@ def menu_class(node):
     keys = list(_tokens(node).get("CLASS", {}).keys())
     return _flat(keys) if keys else ["", "no project"]
 
-_DEFAULT_TYPES = ["SCULPT","BLOCK","TOPO","TEX","LDEV","FUR","HAIR","FEATHERS","SK","WGHT","RIG","CLOTH","MUSCLE","GBL"]
-
 def menu_type(node):
-    project_keys = list(_tokens(node).get("TYPE", {}).keys())
-    all_types = sorted(set(project_keys + _DEFAULT_TYPES))
-    return _flat(all_types)
+    # Only the project's TYPE tokens (the legacy hardcoded list offered types the
+    # pipeline no longer has, e.g. SCULPT, FUR, WGHT).
+    keys = list(_tokens(node).get("TYPE", {}).keys())
+    return _flat(keys) if keys else ["", "no project"]
 
 def menu_name(node):
     toks  = _tokens(node)

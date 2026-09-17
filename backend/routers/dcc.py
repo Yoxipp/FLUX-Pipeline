@@ -423,11 +423,14 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
     Resolves the concrete file backend-side so the node can fall back to a native
     importer when the flux_importer HDA is not registered in the running Houdini.
     """
+    from pathlib import Path as _PLib
+
     from dcc.houdini.houdini_import import (
         create_flux_importer_node, set_path_on_selected_if_match,
     )
     from core.paths import get_project_path
     from features.importer.importer_resolve import resolve_import_path
+    from features.importer.usd_probe import USD_EXTS
 
     # Backend-side token → absolute path (fallback for when the HDA is absent).
     resolved_path = ""
@@ -462,6 +465,21 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
             selected_file = to_flux_token(selected_file)
 
     loop = asyncio.get_event_loop()
+
+    # USD: import by context (Reference LOP in /stage, KineFX character or usdimport in
+    # SOP). Component / assembly files are not task publishes, so the token HDA would
+    # show a wrong TYPE (e.g. RIG); every USD goes this way.
+    if selected_file and _PLib(req.rel_path).suffix.lower() in USD_EXTS:
+        from dcc.houdini.houdini_import import create_usd_context_import
+        from features.importer.usd_probe import probe_usd
+
+        abs_file = str(get_project_path(req.project) / req.rel_path.replace("/", "\\"))
+        probe = await loop.run_in_executor(None, lambda: probe_usd(abs_file))
+        resp = await loop.run_in_executor(
+            None, lambda: create_usd_context_import(selected_file, probe))
+        if not resp.get("ok"):
+            raise HTTPException(status_code=503, detail=resp.get("error", "Import USD echoue"))
+        return resp
 
     # Prefer re-pathing a matching selected import node over creating a new one.
     # Only possible when we know the concrete selected file; otherwise (and on any

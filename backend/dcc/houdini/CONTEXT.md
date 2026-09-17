@@ -6,3 +6,6 @@
 `flux_houdini_server.py` (HTTP in-app 48884..48891, refuse les navigateurs S2), `client.py`, `houdini_export.py` / `houdini_import.py` / `houdini_usd_light_export.py`, `autostart.py` (package `packages/flux.json` + favoris `jump.pref` `$FLUX/` et `$FLUX/DOSSIER_PROJETS/` ajoutes a l'installation, retires a la desinstallation), `hda/` (HDA importer/exporter/lighting), `startup/`.
 
 Ne jamais ecrire dans `houdini.env` (crash Houdini 22). Ne jamais exposer le `usd-core` pip au Python de Houdini.
+
+Import USD "Ouvrir dans Houdini" (2026-09-17) : toujours par contexte, jamais via l'HDA tokens (`create_usd_context_import`, sonde pxr `features/importer/usd_probe.py`) : `/stage` = Reference LOP (`/assets/<X>` component ou skeleton, `/sets/<X>` assembly), `/obj` ou SOP = `kinefx::usdcharacterimport` (source fichier) si skeleton, sinon `usdimport`. Export SOP `.usd*` = `usdexport` (plage = un fichier anime), jamais `rop_geometry`.
+Launcher : `PYTHONUSERBASE` retire de l'env (sinon Houdini charge le pxr pip du Python Store).
