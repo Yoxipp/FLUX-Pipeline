@@ -4,7 +4,8 @@
 # publish always gets the same treatment (ADR 0019):
 #   1. purpose=proxy geometry beside the IMMUTABLE version (opt-in), so the asset can
 #      reference it instead of the raw render mesh;
-#   2. the asset's USD (component) is refreshed from its departments.
+#   2. the asset's USD (component) is refreshed from its departments;
+#   3. a shot department publish regenerates the shot stage (ADR 0020).
 # Never raises: a publish that reached disk must not fail afterwards.
 
 from __future__ import annotations
@@ -89,8 +90,9 @@ def _has_render_geometry(base: str) -> bool:
 
 def after_usd_publish(dest_folder: Path, base: str, ext: str,
                       version_path: Path | None, *, user: str = "") -> dict:
-    """Proxy + component refresh for a freshly published USD. {"proxy", "component"}."""
-    out: dict = {"proxy": None, "component": None}
+    """Proxy + component / shot stage refresh for a freshly published USD.
+    {"proxy", "component", "shot"}."""
+    out: dict = {"proxy": None, "component": None, "shot": None}
     if str(ext).lower() not in USD_EXTS:
         return out
     try:
@@ -99,6 +101,10 @@ def after_usd_publish(dest_folder: Path, base: str, ext: str,
         from features.usd_assembler.component_auto import refresh_from_publish_folder
 
         out["component"] = refresh_from_publish_folder(dest_folder, base, ext, user=user)
+        # A shot department (LAYOUT, ANIM, CFX, FX, LIGHT) regenerates the shot stage (ADR 0020).
+        from features.usd_assembler.shot_stage import refresh_from_publish_folder as refresh_shot
+
+        out["shot"] = refresh_shot(dest_folder, base, ext, user=user)
     except Exception as exc:    # noqa: BLE001 - defensive: both halves already guard
         log.warning("USD publish hook failed for %s: %s", base, exc)
     return out

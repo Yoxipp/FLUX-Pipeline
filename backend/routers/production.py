@@ -208,6 +208,37 @@ async def get_production(project: str) -> dict:
         }
 
 
+
+def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
+    """(SEQ, SHOT) -> what the shot stage reads from Production (casting + frame range)."""
+    from features.usd_assembler.shot_stage import read_casting, read_frame_range
+
+    seqs = {s.get("id"): s.get("name") for s in production.get("sequences", [])}
+    out = {}
+    for sh in production.get("shots", []):
+        seq = seqs.get(sh.get("seq_id"))
+        if seq and sh.get("name"):
+            cast = sorted((c["name"], c["count"]) for c in read_casting(production, seq, sh["name"]))
+            out[(seq, sh["name"])] = (tuple(cast), read_frame_range(production, seq, sh["name"]))
+    return out
+
+
+def _refresh_changed_shot_stages(project: str, before: dict, after: dict) -> list[str]:
+    """Regenerate the stage of every shot whose casting or range changed. Returns the
+    ``SEQ_SHOT vNNN`` written."""
+    from features.usd_assembler.shot_stage import write_stage
+
+    old, new = _shot_keys(before or {}), _shot_keys(after or {})
+    written = []
+    for key, value in new.items():
+        if old.get(key) == value:
+            continue
+        res = write_stage(get_project_path(project), key[0], key[1], production=after,
+                          save_casting=False)
+        if res.get("version"):
+            written.append(f"{key[0]}_{key[1]} {res['version']}")
+    return written
+
 @router.put("/{project}")
 async def put_production(project: str, payload: ProductionPayload) -> dict:
     """Replace production.json with *payload.production* (atomic), then mirror the
@@ -221,9 +252,18 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     """
     _ensure_project(project)
     loop = asyncio.get_event_loop()
+    previous = await loop.run_in_executor(None, lambda: store.load_production(project))
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
+
+    # A4 (ADR 0020): a casting or frame range edit regenerates that shot's stage.
+    stages: list[str] = []
+    try:
+        stages = await loop.run_in_executor(
+            None, lambda: _refresh_changed_shot_stages(project, previous, payload.production))
+    except Exception as e:  # noqa: BLE001 — the save already succeeded
+        log.warning("Shot stage refresh after Production save failed for %r: %s", project, e)
 
     synced = {}
     try:
@@ -233,7 +273,7 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     except Exception as e:  # noqa: BLE001 — sync is best-effort, save already succeeded
         log.warning("Production→disk sync failed for %r: %s", project, e)
 
-    return {"success": True, "synced": synced}
+    return {"success": True, "synced": synced, "shot_stages": stages}
 
 
 @router.post("/{project}/comment")

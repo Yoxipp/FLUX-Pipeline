@@ -398,3 +398,46 @@ async def relink_usd_assembly_instance(req: RelinkRequest) -> dict:
         log.exception("assembly relink failed")
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, **res}
+
+
+# ── shot stage (A4, ADR 0020) ────────────────────────────────────────────────
+
+class ShotStageRequest(BaseModel):
+    seq: str
+    shot: str
+    project: str | None = None
+    user: str = ""
+    frozen: bool = False            # "figer": every layer points at its vNNN (farm)
+
+
+@router.get("/shots")
+async def list_usd_shots(project: str | None = None) -> dict:
+    """Every shot of Production with its stage state, casting, animations and layers."""
+    name, project_path = _resolve_project(project)
+    from features.usd_assembler.shot_stage import list_shots
+
+    loop = asyncio.get_running_loop()
+    try:
+        shots = await loop.run_in_executor(None, lambda: list_shots(project_path))
+    except Exception as exc:
+        log.exception("USD shots failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"project": name, "shots": shots}
+
+
+@router.post("/shot/generate")
+async def generate_usd_shot(req: ShotStageRequest) -> dict:
+    """(Re)generate the shot stage: new version only when something changed."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.shot_stage import write_stage
+
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: write_stage(
+            project_path, req.seq, req.shot, user=req.user, frozen=req.frozen))
+    except Exception as exc:
+        log.exception("shot stage failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "changed": bool(res["version"]), "version": res["version"],
+            "last": str(res["last"]) if res["last"] and Path(res["last"]).is_file() else "",
+            "warnings": res["warnings"], "auto_cast": res["auto_cast"]}
