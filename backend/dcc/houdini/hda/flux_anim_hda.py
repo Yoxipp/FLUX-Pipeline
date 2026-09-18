@@ -56,6 +56,12 @@ except Exception:
             globals()["resolve_path"](node)
         except Exception:
             node.parm("status_msg").set("FLUX offline : demarre FLUX puis clique Resolve")
+    def apply_frame_range(node):
+        try:
+            _load()
+            globals()["apply_frame_range"](node)
+        except Exception:
+            node.parm("status_msg").set("FLUX offline : demarre FLUX puis clique Resolve")
     def on_created(node): pass
     def on_loaded(node): pass
 '''
@@ -237,6 +243,33 @@ def _frame_range(node):
     except Exception:
         return ""
 
+def _layer_range(node):
+    """(start, end, fps) of the published animation, or None."""
+    from pxr import Sdf
+    layer = Sdf.Layer.FindOrOpen(_pval(node, "resolved_path"))
+    if layer is None or not layer.HasStartTimeCode():
+        return None
+    fps = layer.framesPerSecond if layer.HasFramesPerSecond() else layer.timeCodesPerSecond
+    return int(layer.startTimeCode), int(layer.endTimeCode), float(fps)
+
+def apply_frame_range(node):
+    """Button "Appliquer la plage": playbar range + fps of the scene = the animation's
+    (V9-01, 2026-09-18). Never automatic: several FLUX Anim can live in one scene."""
+    try:
+        rng = _layer_range(node)
+    except Exception as exc:
+        _status(node, "plage illisible : %s" % exc); return
+    if rng is None:
+        _status(node, "Pas de plage dans l'anim publiee (Resolve d'abord)"); return
+    start, end, fps = rng
+    import hou
+    if abs(hou.fps() - fps) > 1e-6:
+        hou.setFps(fps)
+    hou.playbar.setFrameRange(start, end)
+    hou.playbar.setPlaybackRange(start, end)
+    hou.setFrame(start)
+    _status(node, "Plage appliquee : images %d-%d a %g fps" % (start, end, fps))
+
 def resolve_path(node):
     if not _pval(node, "project"):
         _status(node, "Choisis un projet"); return
@@ -312,6 +345,10 @@ _ptg.append(hou.StringParmTemplate("resolved_path", "Resolved Path", 1, default_
 _ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Reload", script_callback=_CB,
                                    script_callback_language=_PY,
                                    help="Re-read the published animation from disk"))
+_ptg.append(hou.ButtonParmTemplate("btn_frame_range", "Appliquer la plage",
+                                   script_callback="hou.phm().apply_frame_range(kwargs['node'])",
+                                   script_callback_language=_PY,
+                                   help="Timeline and fps of the scene = those of the animation"))
 _ptg.append(hou.StringParmTemplate("status_msg", "Status", 1, default_value=("",)))
 
 _stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
