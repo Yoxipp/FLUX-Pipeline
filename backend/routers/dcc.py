@@ -2022,6 +2022,27 @@ async def houdini_importer_module() -> dict:
     return {"code": _MODULE_FUNCTIONS}
 
 
+@router.get("/houdini/anim/module")
+async def houdini_anim_module() -> dict:
+    """PythonModule of the FLUX Anim HDA, exec()'d by its bootstrap (no rebuild on fix)."""
+    from dcc.houdini.hda.flux_anim_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/anim/publishes")
+async def houdini_anim_publishes(project: str) -> dict:
+    """Shot animations (SEQ_SHOT_ANIM_<NAME>) the FLUX Anim HDA can apply."""
+    from core.paths import get_project_path
+    from features.importer.shot_anim import list_shot_anims
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, lambda: list_shot_anims(project_path))
+    return {"ok": True, "items": items}
+
+
 @router.get("/houdini/importer/open_hub")
 async def houdini_importer_open_hub() -> dict:
     """Best-effort stub — signal to open/focus the FLUX Hub.
