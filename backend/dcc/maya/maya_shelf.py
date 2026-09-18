@@ -1,5 +1,5 @@
 ﻿# maya_shelf.py — programmatic Flux shelf creation inside Maya.
-# Called by flux_bridge.py at startup when the MEL shelf file is absent.
+# Not called at startup any more (the old flux_bridge.py was archived to old/, 2026-09-18).
 
 from __future__ import annotations
 
