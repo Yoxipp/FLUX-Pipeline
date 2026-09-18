@@ -265,21 +265,28 @@ def _is_lop(node):
 def _reload_lop(node):
     """Houdini keeps a USD file it already read: after a republish the stage would
     still show the old version. Reload the inner Reference LOP on every resolve."""
-    ref = node.node("reference")
-    btn = ref.parm("reload") if ref is not None else None
-    if btn is not None:
-        try:
-            btn.pressButton()
-        except Exception:
-            pass
+    for inner in ("reference", "sublayer"):
+        ref = node.node(inner)
+        btn = ref.parm("reload") if ref is not None else None
+        if btn is not None:
+            try:
+                btn.pressButton()
+            except Exception:
+                pass
 
 def _apply_lop(node, r):
+    sub = node.parm("as_sublayer")
+    if sub is not None:
+        sub.set(1 if r.get("kind") == "shot" else 0)
     auto = node.parm("prim_auto")
     if r.get("prim_path") and (auto is None or auto.eval()):
         pp = node.parm("prim_path")
         if pp is not None:
             pp.set(r["prim_path"])
     _reload_lop(node)
+    if r.get("kind") == "shot":
+        _set_status(node, "OK  shot (sublayer)")
+        return
     _set_status(node, "OK  " + _pval(node, "prim_path"))
 
 def _apply(node, r):

@@ -246,6 +246,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'usd.versions.current':    { fr: 'courante',                  en: 'current' },
   'usd.lib.components':      { fr: 'Components',                en: 'Components' },
   'usd.lib.assemblies':      { fr: 'Assemblies',                en: 'Assemblies' },
+  'usd.lib.shots':           { fr: 'Shots',                     en: 'Shots' },
   'usd.lib.search':          { fr: 'Rechercher',                en: 'Search' },
   'usd.lib.refresh':         { fr: 'Actualiser',                en: 'Refresh' },
   'usd.lib.empty':           { fr: 'Rien de publié pour ce filtre', en: 'Nothing published for this filter' },

@@ -73,15 +73,19 @@ _disp = hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                              menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                              help="Proxy: purpose=proxy mesh in the viewport. Geo complete: the "
                                   "render mesh is shown (purpose default) and the proxy hidden.")
+# Set by resolve: 1 = a shot stage (sublayered, ADR 0020), 0 = an asset / decor (referenced).
+_as_sub = hou.ToggleParmTemplate("as_sublayer", "Shot (sublayer)", default_value=False, is_hidden=True)
 _anchor = _ptg.find("sep_resolved")
 if _anchor is not None:
     _ptg.insertBefore(_anchor, _auto)
     _ptg.insertBefore(_anchor, _prim)
     _ptg.insertBefore(_anchor, _disp)
+    _ptg.insertBefore(_anchor, _as_sub)
 else:
     _ptg.append(_auto)
     _ptg.append(_prim)
     _ptg.append(_disp)
+    _ptg.append(_as_sub)
 _btn = _ptg.find("btn_resolve")
 if _btn is not None:
     _ptg.insertAfter(_btn, _reload)
@@ -102,19 +106,28 @@ _ref = _sub.createNode("reference", "reference")
 _ref.setInput(0, _sub.indirectInputs()[0])
 _ref.parm("filepath1").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
 _ref.parm("primpath1").setExpression('chs("../prim_path")', hou.exprLanguage.Hscript)
+# A shot stage (ADR 0020) is a whole scene: sublayered instead of referenced.
+_subl = _sub.createNode("sublayer", "sublayer")
+_subl.setInput(0, _sub.indirectInputs()[0])
+_subl.parm("filepath1").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
+_load = _sub.createNode("switch", "load_mode")
+_load.setInput(0, _ref)
+_load.setInput(1, _subl)
+_load.parm("input").setExpression('ch("../as_sublayer")', hou.exprLanguage.Hscript)
 # "Geo complete": render meshes shown in the viewport (purpose default), proxy hidden.
+# Two patterns: the asset itself (prim_path/geo) and every asset below it (a shot: /assets/**).
 _full = _sub.createNode("configureprimitive", "show_render_geo")
-_full.setInput(0, _ref)
-_full.parm("primpattern").set('`chs("../prim_path")`/geo/render/**')
+_full.setInput(0, _load)
+_full.parm("primpattern").set('`chs("../prim_path")`/geo/render/** `chs("../prim_path")`/**/geo/render/**')
 _full.parm("setpurpose").set(1)
 _full.parm("purpose").set("default")
 _hide = _sub.createNode("configureprimitive", "hide_proxy")
 _hide.setInput(0, _full)
-_hide.parm("primpattern").set('`chs("../prim_path")`/geo/proxy')
+_hide.parm("primpattern").set('`chs("../prim_path")`/geo/proxy `chs("../prim_path")`/**/geo/proxy')
 _hide.parm("setvisibility").set(1)
 _hide.parm("visibility").set("invisible")
 _sw = _sub.createNode("switch", "geo_display")
-_sw.setInput(0, _ref)
+_sw.setInput(0, _load)
 _sw.setInput(1, _hide)
 _sw.parm("input").setExpression('ch("../geo_display")', hou.exprLanguage.Hscript)
 _out.setInput(0, _sw)

@@ -630,6 +630,15 @@ export const api = {
     return apiCall<UsdLibrary>('GET', `/usd/library?${qs}`)
   },
 
+  // A4 (ADR 0020): shot stages generated from the Production casting.
+  getUsdShots: (project: string) => {
+    const qs = new URLSearchParams({ project })
+    return apiCall<{ project: string; shots: UsdShotInfo[] }>('GET', `/usd/shots?${qs}`)
+  },
+  generateUsdShot: (project: string, seq: string, shot: string, frozen = false, user?: string) =>
+    apiCall<{ ok: boolean; changed: boolean; version: string | null; last: string; warnings: string[]; auto_cast: string[] }>(
+      'POST', '/usd/shot/generate', { project, seq, shot, frozen, user: user ?? '' }),
+
   // pins: {slot: {task, instance, version} | {exclude: true} | null (automatic again)}
   refreshUsdComponent: (project: string, name: string, pins?: Record<string, UsdSlotPin | null>) =>
     apiCall<{ ok: boolean; changed: boolean; version: string | null; last?: string }>(
@@ -830,6 +839,23 @@ export type UsdAssemblyOp =
   | { op: 'set_variant'; name: string; department: string; variant: string }   // '' = component default
 export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
 export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }
+export interface UsdShotInfo {
+  seq: string
+  shot: string
+  entity: string
+  state: 'none' | 'up_to_date' | 'outdated' | 'frozen'
+  versions: string[]
+  last_version: string | null
+  last: string | null
+  rel_last: string | null
+  legacy: string | null
+  casting: { prim: string; name: string; kind: string }[]
+  anims: { instance: string; character: string; prim: string; range: [number, number] | null }[]
+  departments: { department: string; task: string; files: string[] }[]
+  range: [number, number] | null
+  fps: number
+  warnings: string[]
+}
 export interface UsdTaskContribution {
   department: string
   what: string

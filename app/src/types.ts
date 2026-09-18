@@ -276,9 +276,18 @@ export interface ProductionSequence {
   order: number
   origin?: 'user' | 'auto'
   tasks: ProductionTask[]
-  assets: { id: string; ref: string }[]
+  assets: CastingLink[]
   task_details?: Record<string, ProductionTaskDetail>
   notes?: string
+}
+
+// Casting link (ADR 0020): count = number of instances in the shot stage (NAME_01, NAME_02...),
+// origin "auto" = added because an animation was published for that character.
+export interface CastingLink {
+  id: string
+  ref: string
+  count?: number
+  origin?: 'user' | 'auto'
 }
 
 export interface ProductionShot {
@@ -291,8 +300,10 @@ export interface ProductionShot {
   inherit_tasks: boolean
   inherit_assets: boolean
   tasks: ProductionTask[]
-  assets: { id: string; ref: string }[]
+  assets: CastingLink[]
   task_details?: Record<string, ProductionTaskDetail>
+  frame_start?: number            // shot frame range (ADR 0020), written on the shot stage
+  frame_end?: number
 }
 
 export interface ProductionState {

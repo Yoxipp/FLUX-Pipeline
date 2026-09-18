@@ -5,4 +5,6 @@
 
 Metier par domaine : `folder_manager`, `production`, `publisher`, `importer`, `activity`, `launcher`, `shelf_manager`, `usd_assembler`, `usd_export`.
 
+`usd_assembler/shot_stage.py` (A4, ADR 0020) : stage de shot genere depuis le casting Production et les departements du shot.
+
 Metadonnees via `core.repository_factory.get_repository()`, octets via filesystem / `get_storage()`.

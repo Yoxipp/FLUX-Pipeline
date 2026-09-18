@@ -19,7 +19,8 @@ _VERSION_RE = re.compile(r"v\d+")
 
 
 def library_items(project_path: str | Path) -> list[dict]:
-    """[{"key": "component:NAME" | "assembly:NAME", "label", "versions": ["LAST", ...]}]."""
+    """[{"key": "component:NAME" | "assembly:NAME" | "shot:SEQ/SHOT", "label",
+    "versions": ["LAST", ...]}]. Shots are listed once their stage exists (ADR 0020)."""
     from features.usd_assembler.library import build_library
 
     lib = build_library(project_path)
@@ -35,7 +36,53 @@ def library_items(project_path: str | Path) -> list[dict]:
     for asm in lib.get("assemblies", []):
         items.append({"key": f"assembly:{asm['name']}", "label": f"Assembly  {asm['name']}",
                       "versions": ["LAST"] + sorted(asm.get("versions") or [], reverse=True)})
+    items += _shot_items(project_path)
     return items
+
+
+def _shot_items(project_path: str | Path) -> list[dict]:
+    from features.usd_assembler import shot_stage as ss
+
+    items = []
+    for seq, shot in _stage_shots(Path(project_path)):
+        versions = ss.stage_versions(project_path, seq, shot)
+        if not versions and not ss.last_file(project_path, seq, shot).is_file():
+            continue
+        items.append({"key": f"shot:{seq}/{shot}", "label": f"Shot  {seq} {shot}",
+                      "versions": ["LAST"] + sorted(versions, reverse=True)})
+    return items
+
+
+def _stage_shots(project: Path) -> list[tuple[str, str]]:
+    """(SEQ, SHOT) of the SHOT tokens of the project."""
+    from features.folder_manager.tokens import load_tokens
+
+    out = []
+    for key in sorted(((load_tokens(project) or {}).get("SHOT") or {})):
+        seq, _, shot = str(key).partition("/")
+        if seq and shot:
+            out.append((seq.upper(), shot.upper()))
+    return out
+
+
+def _resolve_shot(project_path: str | Path, name: str, version: str) -> dict:
+    from features.usd_assembler import shot_stage as ss
+
+    seq, _, shot = name.partition("/")
+    if not seq or not shot:
+        return {"ok": False, "error": f"Shot invalide : {name!r}"}
+    if version in ("", "LAST", "latest"):
+        path = ss.last_file(project_path, seq, shot)
+    elif _VERSION_RE.fullmatch(version):
+        ent = ss.entity(seq, shot)
+        path = ss.stage_dir(project_path, seq, shot) / f"{ent}_{version}" / f"{ent}.usda"
+    else:
+        return {"ok": False, "error": f"Version invalide : {version!r}"}
+    if not path.is_file():
+        return {"ok": False, "error": f"Stage du shot {seq} {shot} {version or 'LAST'} introuvable "
+                                      "(le generer depuis la page USD)"}
+    # A shot stage is a whole scene: it is sublayered, never referenced under a prim.
+    return {"ok": True, "path": str(path), "kind": "shot", "has_skel": False, "prim_path": "/assets"}
 
 
 def resolve_library_item(project_path: str | Path, key: str, version: str = "LAST") -> dict:
@@ -43,6 +90,8 @@ def resolve_library_item(project_path: str | Path, key: str, version: str = "LAS
     from features.usd_assembler.library import build_library
 
     kind, _, name = (key or "").partition(":")
+    if kind == "shot":
+        return _resolve_shot(project_path, name, version)
     if kind not in ("component", "assembly") or not name:
         return {"ok": False, "error": f"Element de bibliotheque invalide : {key!r}"}
     lib = build_library(project_path)
@@ -101,6 +150,9 @@ def importer_source_for_file(project_path: str | Path, file: str | Path) -> dict
         version = _entry_version(Path(str(Path(comp["dir"]).resolve())), comp["name"])
         if version:
             return {"source_mode": "library", "lib_item": f"component:{comp['name']}", "lib_version": version}
+    shot = _shot_of_file(project, target)
+    if shot:
+        return {"source_mode": "library", "lib_item": f"shot:{shot[0]}/{shot[1]}", "lib_version": shot[2]}
     for asm in lib.get("assemblies", []):
         asm_file = Path(str(Path(asm["file"]).resolve()))
         if asm.get("legacy"):
@@ -152,3 +204,18 @@ def _skel(path: Path) -> dict:
 
     info = probe_usd(path)
     return {"has_skel": bool(info.get("has_skel")), "prim_path": reference_prim_path(info)}
+
+
+def _shot_of_file(project: Path, target: Path) -> tuple[str, str, str] | None:
+    """(SEQ, SHOT, "LAST" | vNNN) when *target* is a shot stage entry (ADR 0020)."""
+    from features.usd_assembler import shot_stage as ss
+
+    for seq, shot in _stage_shots(project):
+        folder = Path(str(ss.stage_dir(project, seq, shot).resolve()))
+        ent = ss.entity(seq, shot)
+        if target.parent == folder and target.name == f"{ent}_LAST.usda":
+            return seq, shot, "LAST"
+        m = re.fullmatch(rf"{re.escape(ent)}_(v\d+)", target.parent.name)
+        if m and target.parent.parent == folder and target.name == f"{ent}.usda":
+            return seq, shot, m.group(1)
+    return None

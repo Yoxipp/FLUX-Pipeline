@@ -7,15 +7,16 @@
 // /usd/assembly/{create,edit,layout/publish}.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus, Upload } from 'lucide-react'
+import { Box, Boxes, Clapperboard, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
-import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdComposition, UsdLibrary as Library, UsdPrimNode, UsdSlotPin, UsdSlotRef } from '../../api/client'
+import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdComposition, UsdLibrary as Library, UsdPrimNode, UsdShotInfo, UsdSlotPin, UsdSlotRef } from '../../api/client'
+import { ShotDetail, shotStateColor } from './UsdShots'
 import { useI18n } from '../../i18n'
 
-type Tab = 'components' | 'assemblies'
+type Tab = 'components' | 'assemblies' | 'shots'
 type DetailTab = 'content' | 'versions' | 'composition' | 'deps'
 type Selection = { tab: Tab; name: string } | null
 
@@ -39,14 +40,19 @@ export function UsdLibrary({ project, projects, onProject }: {
   const [query, setQuery] = useState('')
   const [sel, setSel] = useState<Selection>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [shots, setShots] = useState<UsdShotInfo[] | null>(null)
 
   const load = useCallback(() => {
-    if (!project) { setLib(null); return }
+    if (!project) { setLib(null); setShots(null); return }
     setLoading(true)
     api.getUsdLibrary(project)
       .then(setLib)
       .catch(e => { setLib(null); toast.error(e instanceof Error ? e.message : String(e)) })
       .finally(() => setLoading(false))
+    // Shot stages (A4): a separate call, a slow disk scan never blocks the library.
+    api.getUsdShots(project)
+      .then(r => setShots(r.shots))
+      .catch(() => setShots([]))
   }, [project])
 
   useEffect(() => { load() }, [load])
@@ -59,6 +65,9 @@ export function UsdLibrary({ project, projects, onProject }: {
 
   const selComponent = sel?.tab === 'components' ? lib?.components.find(c => c.name === sel.name) : undefined
   const selAssembly = sel?.tab === 'assemblies' ? lib?.assemblies.find(a => a.name === sel.name) : undefined
+  const shotList = useMemo(
+    () => (shots ?? []).filter(s => !q || s.entity.toLowerCase().includes(q)), [shots, q])
+  const selShot = sel?.tab === 'shots' ? shots?.find(s => s.entity === sel.name) : undefined
 
   useEffect(() => { setSel(null) }, [project])
 
@@ -108,6 +117,9 @@ export function UsdLibrary({ project, projects, onProject }: {
             <Pill active={tab === 'assemblies'} onClick={() => setTab('assemblies')} style={{ cursor: 'pointer' }}>
               {tr('usd.lib.assemblies')} {lib ? lib.assemblies.length : ''}
             </Pill>
+            <Pill active={tab === 'shots'} onClick={() => setTab('shots')} style={{ cursor: 'pointer' }}>
+              {tr('usd.lib.shots')} {shots ? shots.length : ''}
+            </Pill>
             <div style={{ flex: 1 }} />
             <Btn sm ghost title={tr('usd.lib.refresh')} onClick={load}>
               <RefreshCw size={11} strokeWidth={2} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
@@ -156,7 +168,24 @@ export function UsdLibrary({ project, projects, onProject }: {
               sub={`${a.instances.length} ${tr('usd.lib.instances').toLowerCase()}`}
             />
           ))}
-          {lib && (tab === 'components' ? components : assemblies).length === 0 && (
+          {tab === 'shots' && shotList.map(s => (
+            <ListRow key={s.entity} active={sel?.tab === 'shots' && sel.name === s.entity}
+              onClick={() => setSel({ tab: 'shots', name: s.entity })}
+              icon={<Clapperboard size={12} strokeWidth={1.75} />}
+              title={`${s.seq} ${s.shot}`}
+              meta={<>
+                <span style={{ ...mono, color: 'var(--ink-3)' }}>{s.last_version ?? '-'}</span>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: shotStateColor[s.state], flexShrink: 0 }} />
+              </>}
+              sub={`${s.casting.length} perso(s) / decor(s)  ·  ${s.anims.length} anim(s)`}
+            />
+          ))}
+          {tab === 'shots' && shots && shotList.length === 0 && (
+            <div className="lbl" style={{ padding: '8px 6px', fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+              Aucun shot dans Production.
+            </div>
+          )}
+          {tab !== 'shots' && lib && (tab === 'components' ? components : assemblies).length === 0 && (
             <div className="lbl" style={{ padding: '8px 6px', fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
               {tr('usd.lib.empty')}
               {tab === 'components' && <><br />{tr('usd.lib.emptyAssets')}</>}
@@ -173,6 +202,8 @@ export function UsdLibrary({ project, projects, onProject }: {
         ) : selAssembly ? (
           <AssemblyDetail project={project} asm={selAssembly} components={lib?.components ?? []}
             onOpenComponent={n => goTo('components', n)} onChanged={load} />
+        ) : selShot ? (
+          <ShotDetail project={project} shot={selShot} onChanged={load} />
         ) : (
           <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.lib.pick')}</div>
         )}

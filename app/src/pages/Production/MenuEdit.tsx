@@ -8,7 +8,7 @@ import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import type {
   ProductionAsset as Asset,
-  ProductionAssetGroup, ProductionPublish,
+  CastingLink, ProductionAssetGroup, ProductionPublish,
   ProductionSequence, ProductionShot,
   ProductionState, ProductionTask,
 } from '../../types'
@@ -898,6 +898,19 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
             style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
           />
         </div>
+        <div style={{ ..._lbl, marginTop: 8 }}>Plage d'images (stage USD)</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            value={shot.frame_start ?? ''}
+            onChange={e => patchShot({ frame_start: parseFrame(e.target.value) })}
+            placeholder="Debut" style={{ ..._input, flex: 1 }}
+          />
+          <input
+            value={shot.frame_end ?? ''}
+            onChange={e => patchShot({ frame_end: parseFrame(e.target.value) })}
+            placeholder="Fin" style={{ ..._input, flex: 1 }}
+          />
+        </div>
         <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
           <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
         </ProdBtn>
@@ -918,9 +931,8 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
         </label>
       </div>
 
-      {!shot.inherit_assets && (
-        <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot} />
-      )}
+      <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot}
+                    title={shot.inherit_assets ? 'Casting du shot (en plus de la sequence)' : undefined} />
 
       {!shot.inherit_tasks && (
         <div style={_pad}>
@@ -952,30 +964,34 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
 }
 
 // ── assets picker (button + modal box) ──────────────────────────────────────
-function AssetsPicker({ state, setState, entityKind, entity }: {
+function AssetsPicker({ state, setState, entityKind, entity, title }: {
   state:      ProductionState
   setState:   (patch: (prev: ProductionState) => ProductionState) => void
   entityKind: 'seq' | 'shot'
   entity:     ProductionSequence | ProductionShot
+  title?:     string
 }) {
   const { t } = useI18n()
   const [modalOpen, setModalOpen] = useState(false)
   const linked = entity.assets ?? []
 
-  const removeChip = (id: string) => {
+  const editLinks = (fn: (arr: CastingLink[]) => CastingLink[]) => {
     setState(prev => {
-      const filt = (arr: { id: string; ref: string }[]) => arr.filter(x => x.id !== id)
       if (entityKind === 'seq') {
-        return { ...prev, sequences: prev.sequences.map(s => s.id === entity.id ? { ...s, assets: filt(s.assets ?? []) } : s) }
+        return { ...prev, sequences: prev.sequences.map(s => s.id === entity.id ? { ...s, assets: fn(s.assets ?? []) } : s) }
       }
-      return { ...prev, shots: prev.shots.map(s => s.id === entity.id ? { ...s, assets: filt(s.assets ?? []) } : s) }
+      return { ...prev, shots: prev.shots.map(s => s.id === entity.id ? { ...s, assets: fn(s.assets ?? []) } : s) }
     })
   }
+  const removeChip = (id: string) => editLinks(arr => arr.filter(x => x.id !== id))
+  // Number of instances in the shot stage (ADR 0020): DINGO_01, DINGO_02...
+  const setCount = (id: string, delta: number) => editLinks(arr => arr.map(x => x.id === id
+    ? { ...x, count: Math.max(1, (x.count ?? 1) + delta) } : x))
 
   return (
     <div style={_pad}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <div style={_lbl}>{t('prod.tabAssets')}</div>
+        <div style={_lbl}>{title ?? t('prod.tabAssets')}</div>
         <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>· {linked.length}</span>
         <span style={{ flex: 1 }} />
         <ProdBtn size="sm" variant="ghost" onClick={() => setModalOpen(true)}>
@@ -992,16 +1008,22 @@ function AssetsPicker({ state, setState, entityKind, entity }: {
             const a = state.assets.find(x => x.id === l.id)
             const color = a ? categoryColor(a.class) : 'var(--ink-4)'
             return (
-              <span key={l.id} title={l.ref}
-                    onClick={() => removeChip(l.id)}
+              <span key={l.id}
+                    title={l.origin === 'auto' ? `${l.ref} (ajoute par une anim publiee)` : l.ref}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 4,
                       padding: '3px 9px', borderRadius: 999,
                       background: color, color: 'var(--paper)',
                       fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
-                      cursor: 'pointer',
                     }}>
-                {a?.name ?? l.ref} <span style={{ opacity: 0.75 }}>×</span>
+                {a?.name ?? l.ref}
+                {(l.count ?? 1) > 1 && <span style={{ opacity: 0.85 }}>x{l.count}</span>}
+                <span title="Une instance de moins" onClick={() => setCount(l.id, -1)}
+                      style={{ cursor: 'pointer', opacity: 0.75, padding: '0 2px' }}>-</span>
+                <span title="Une instance de plus" onClick={() => setCount(l.id, 1)}
+                      style={{ cursor: 'pointer', opacity: 0.75, padding: '0 2px' }}>+</span>
+                <span title="Retirer" onClick={() => removeChip(l.id)}
+                      style={{ cursor: 'pointer', opacity: 0.75 }}>×</span>
               </span>
             )
           })}
@@ -1041,7 +1063,7 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
   const toggle = (a: Asset) => {
     const ref = `${a.class}/${a.name}`
     setState(prev => {
-      const patchAssets = (existing: { id: string; ref: string }[]) => {
+      const patchAssets = (existing: CastingLink[]) => {
         if (existing.some(x => x.id === a.id)) return existing.filter(x => x.id !== a.id)
         return [...existing, { id: a.id, ref }]
       }
@@ -1204,6 +1226,14 @@ function SeqColorPicker({ seq, onPick, onReset }: {
 
 // ── inline styles ────────────────────────────────────────────────────────────
 const _pad: React.CSSProperties = { padding: '12px 12px 10px', borderBottom: '1px solid var(--rule)' }
+// Frame number typed in a shot range field; empty or invalid = not set.
+function parseFrame(raw: string): number | undefined {
+  const v = raw.replace(/[^0-9-]/g, '')
+  if (!v || v === '-') return undefined
+  const n = parseInt(v, 10)
+  return Number.isNaN(n) ? undefined : n
+}
+
 const _lbl: React.CSSProperties = {
   fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
   letterSpacing: '0.05em', color: 'var(--ink-3)',

@@ -168,6 +168,23 @@ class ShotStage(unittest.TestCase):
         prod["sequences"][0]["assets"][0]["count"] = 3
         self.assertEqual(ss.shot_summary(self.project, "SEQ001", "SHOT010", prod)["state"], "outdated")
 
+    def test_the_importer_library_offers_the_shot_as_a_sublayer(self) -> None:
+        from features.importer.library_import import (
+            importer_source_for_file, library_items, resolve_library_item,
+        )
+
+        self.assertNotIn("shot:SEQ001/SHOT010", [i["key"] for i in library_items(self.project)])
+        res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        item = next(i for i in library_items(self.project) if i["key"] == "shot:SEQ001/SHOT010")
+        self.assertEqual(item["versions"], ["LAST", "v001"])
+        r = resolve_library_item(self.project, "shot:SEQ001/SHOT010", "LAST")
+        self.assertEqual((r["ok"], r["kind"]), (True, "shot"))
+        self.assertEqual(Path(r["path"]), res["last"])
+        src = importer_source_for_file(self.project, res["last"])
+        self.assertEqual((src["lib_item"], src["lib_version"]), ("shot:SEQ001/SHOT010", "LAST"))
+        src = importer_source_for_file(self.project, res["entry"])
+        self.assertEqual(src["lib_version"], "v001")
+
 
 if __name__ == "__main__":
     unittest.main()

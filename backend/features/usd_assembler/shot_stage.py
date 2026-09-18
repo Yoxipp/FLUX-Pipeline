@@ -661,6 +661,8 @@ def shot_summary(project_path: str | Path, seq: str, shot: str, production: dict
         "versions": versions,
         "last_version": last_version_label(parent, name, STAGE_EXT) if last.is_file() else None,
         "last": str(last) if last.is_file() else None,
+        # Project-relative (forward slashes): what "Ouvrir dans Houdini" sends to the importer.
+        "rel_last": last.relative_to(project).as_posix() if last.is_file() else None,
         "legacy": str(legacy) if legacy.is_file() else None,
         "casting": [{"prim": c["prim"], "name": c["name"], "kind": c["kind"]} for c in plan["casting"]],
         "anims": [{"instance": a["instance"], "character": a["character"], "prim": a["prim"],
