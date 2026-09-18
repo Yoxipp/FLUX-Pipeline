@@ -185,6 +185,52 @@ class ShotStage(unittest.TestCase):
         src = importer_source_for_file(self.project, res["entry"])
         self.assertEqual(src["lib_version"], "v001")
 
+    def test_the_shot_light_rig_is_published_and_joins_the_stage(self) -> None:
+        from features.usd_assembler.shot_light import list_stage_shots, publish_shot_light
+
+        prod = _production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}], frame_range=(1001, 1010))
+        (self.project / "production.json").write_text(json.dumps(prod), encoding="utf-8")
+        self._write(prod)
+        shots = list_stage_shots(self.project)
+        self.assertEqual([(s["seq"], s["shot"], s["range"]) for s in shots],
+                         [("SEQ001", "SHOT010", [1001, 1010])])
+        # What the FLUX Shot node exports: the layers after its Layer Break (lights only).
+        src = Path(self._tmp.name) / "light.usda"
+        layer = Sdf.Layer.CreateNew(str(src))
+        Sdf.CreatePrimInLayer(layer, "/lights/key").specifier = Sdf.SpecifierDef
+        layer.GetPrimAtPath("/lights/key").typeName = "DistantLight"
+        layer.Save()
+        res = publish_shot_light(src, self.project, "SEQ001", "SHOT010", user="adam")
+        self.assertEqual((res["base"], res["version"]), ("SEQ001_SHOT010_LIGHT", "v001"))
+        self.assertTrue(str(res["last"]).replace("\\", "/").endswith("lighting/SEQ001/null/SEQ001_SHOT010_LIGHT_LAST.usda"))
+        self.assertEqual(res["stage"], "v002")              # the stage now sublayers the light rig
+        stage = Usd.Stage.Open(str(ss.last_file(self.project, "SEQ001", "SHOT010")))
+        self.assertTrue(stage.GetPrimAtPath("/lights/key"))
+        entry = Sdf.Layer.FindOrOpen(str(ss.stage_dir(self.project, "SEQ001", "SHOT010")
+                                         / "SEQ001_SHOT010_v002" / "SEQ001_SHOT010.usda"))
+        self.assertIn("SEQ001_SHOT010_LIGHT_LAST.usda", entry.subLayerPaths[0])   # lighting = strongest
+
+    def test_an_empty_light_export_is_refused(self) -> None:
+        from features.usd_assembler.shot_light import publish_shot_light
+
+        src = Path(self._tmp.name) / "empty.usda"
+        Sdf.Layer.CreateNew(str(src)).Save()
+        with self.assertRaises(ValueError):
+            publish_shot_light(src, self.project, "SEQ001", "SHOT010")
+
+
+class SequenceScene(unittest.TestCase):
+    def test_the_scene_script_has_the_selector_the_lights_and_one_rop(self) -> None:
+        from features.folder_manager.houdini_sequence_scene import scene_script
+
+        code = scene_script("PROJ", "SEQ001", "SHOT010", "C:/p/shot/SEQ001/usd/lighting/SEQ001_sequence")
+        compile(code, "scene", "exec")
+        for needle in ("createNode(\"flux_shot\", 'SHOT')", "'SHOT_LIGHTS'", "usdrender",
+                       'ch("/stage/SHOT/frame_rangex")', 'chs("/stage/SHOT/camera")', "BRAY_HdKarma",
+                       "set -g %s = ''", "hou.hipFile.clear"):
+            self.assertIn(needle, code)
+        self.assertNotIn("hipFile.load", code)       # built from an empty scene, never a template
+
 
 if __name__ == "__main__":
     unittest.main()

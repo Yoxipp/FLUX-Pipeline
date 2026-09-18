@@ -643,6 +643,10 @@ export const api = {
     const qs = new URLSearchParams({ project })
     return apiCall<{ project: string; shots: UsdShotInfo[] }>('GET', `/usd/shots?${qs}`)
   },
+  // A5: one Houdini scene per sequence (FLUX Shot selector, shot lights, render ROP), via hython.
+  generateSequenceScene: (project: string, seq: string, overwrite = false) =>
+    apiCall<{ ok: boolean; path: string; created: boolean; warnings?: string[] }>(
+      'POST', '/usd/sequence/scene', { project, seq, overwrite }),
   generateUsdShot: (project: string, seq: string, shot: string, frozen = false, user?: string) =>
     apiCall<{ ok: boolean; changed: boolean; version: string | null; last: string; warnings: string[]; auto_cast: string[] }>(
       'POST', '/usd/shot/generate', { project, seq, shot, frozen, user: user ?? '' }),

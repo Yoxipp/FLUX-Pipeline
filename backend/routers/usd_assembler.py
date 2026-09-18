@@ -478,3 +478,26 @@ async def delete_usd_legacy(req: LegacyDeleteRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "backup": str(backup) if backup else ""}
+
+
+# ── Houdini sequence scene (A5) ──────────────────────────────────────────────
+
+class SequenceSceneRequest(BaseModel):
+    seq: str
+    project: str | None = None
+    overwrite: bool = False
+
+
+@router.post("/sequence/scene")
+async def generate_sequence_scene(req: SequenceSceneRequest) -> dict:
+    """One Houdini scene per sequence (FLUX Shot selector, shot lights, render ROP),
+    built by an isolated hython. Never overwrites an existing scene unless asked."""
+    _, project_path = _resolve_project(req.project)
+    from features.folder_manager.houdini_sequence_scene import create_sequence_scene
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: create_sequence_scene(
+        project_path, req.seq, overwrite=req.overwrite))
+    if not res.get("ok"):
+        raise HTTPException(status_code=503, detail=f"Scene non generee : {res.get('error')}")
+    return res

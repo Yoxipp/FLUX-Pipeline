@@ -2128,3 +2128,61 @@ async def dcc_status_websocket(websocket: WebSocket):
             await asyncio.sleep(2)
     except (WebSocketDisconnect, RuntimeError):
         pass
+
+
+# ── FLUX Shot node of the sequence scene (A5) ────────────────────────────────
+
+@router.get("/houdini/shot_switch/module")
+async def houdini_shot_switch_module() -> dict:
+    """PythonModule of the FLUX Shot HDA, exec()'d by its bootstrap (no rebuild on fix)."""
+    from dcc.houdini.hda.flux_shot_switch_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/shot_switch/shots")
+async def houdini_shot_switch_shots(project: str) -> dict:
+    """Shots with a generated stage (ADR 0020): menus of the FLUX Shot node."""
+    from core.paths import get_project_path
+    from features.usd_assembler.shot_light import list_stage_shots
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    loop = asyncio.get_running_loop()
+    shots = await loop.run_in_executor(None, lambda: list_stage_shots(project_path))
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled():
+        from core.paths import to_flux_token
+        for s in shots:
+            s["last"] = to_flux_token(s["last"])
+            s["files"] = {v: to_flux_token(p) for v, p in s["files"].items()}
+    return {"shots": shots}
+
+
+class ShotLightPublishRequest(BaseModel):
+    project: str
+    seq: str
+    shot: str
+    file: str               # light layer written by the FLUX Shot node (temp file)
+    user: str | None = None
+
+
+@router.post("/houdini/shot-light/publish")
+async def houdini_shot_light_publish(req: ShotLightPublishRequest) -> dict:
+    """Publish the shot light rig exported by the FLUX Shot node (SEQ_SHOT_LIGHT)."""
+    from core import config
+    from core.paths import get_project_path
+    from features.usd_assembler.shot_light import publish_shot_light
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    user = req.user or config.get("username") or ""
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: publish_shot_light(
+            req.file, project_path, req.seq, req.shot, user=user))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "base": res["base"], "version": res["version"], "last": str(res["last"] or ""),
+            "stage": res["stage"]}
