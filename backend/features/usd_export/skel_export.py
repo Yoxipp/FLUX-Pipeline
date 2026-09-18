@@ -15,7 +15,7 @@ from ..usd_assembler.structure.naming import sanitize_token
 from .contract import AnimData, LightAsset, Mat4, MeshData, SkeletonData, filter_animated_joints
 
 __all__ = ["ANIM_SUBPATH", "GEO_RENDER_SCOPE", "SKELETON_SUBPATH", "author_light_asset",
-           "filter_animated_joints"]
+           "author_motion_only", "filter_animated_joints"]
 
 log = get_logger("usd_export.skel")
 
@@ -206,6 +206,66 @@ def _author_light_layer(path: Path, root_path: str, lights, fmt: str) -> None:
         UsdGeom.Xformable(ulight).AddTransformOp().Set(_mat(lt.transform))
     stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
     stage.GetRootLayer().Save()
+
+
+def _set_time_range(layer: Sdf.Layer, anim: AnimData) -> None:
+    """Frame range + frame rate, so a DCC timeline knows how long the motion lasts."""
+    if anim.times:
+        layer.startTimeCode = float(min(anim.times))
+        layer.endTimeCode = float(max(anim.times))
+    if anim.fps:
+        layer.timeCodesPerSecond = float(anim.fps)
+        layer.framesPerSecond = float(anim.fps)
+
+
+def author_motion_only(asset: LightAsset, dest_dir: str | Path, *, fmt: str = "usda",
+                       root_name: str | None = None) -> dict[str, Path]:
+    """Motion only (2026-09-18): ``{asset}_anim`` holds the moving joints of the
+    skeleton animation under ``/<root>/skel/Anim`` and binds it as the animation source
+    of ``/<root>``; no skeleton, no geometry (they come from the asset's rig and model).
+    Referenced onto an asset prim, it animates that asset. The root ``{asset}`` file
+    sublayers it and carries the same frame range. Returns {"anim", "root"} -> Path.
+    """
+    if asset.anim is None or not asset.anim.joints:
+        raise ValueError("aucune anim : rien ne bouge sur la plage demandee")
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    token = sanitize_token(root_name or asset.asset)
+    root_path = f"/{token}"
+    anim_path = f"{root_path}/{ANIM_SUBPATH}"
+
+    anim_p = dest / f"{asset.asset}_anim.{fmt}"
+    stage = _new_stage(anim_p, fmt)
+    stage.OverridePrim(root_path)
+    _define_scopes(stage, anim_path)
+    uanim = UsdSkel.Animation.Define(stage, anim_path)
+    uanim.CreateJointsAttr(Vt.TokenArray(asset.anim.joints))
+    t_attr = uanim.CreateTranslationsAttr()
+    r_attr = uanim.CreateRotationsAttr()
+    s_attr = uanim.CreateScalesAttr()
+    for i, t in enumerate(asset.anim.times):
+        t_attr.Set(Vt.Vec3fArray([Gf.Vec3f(*v) for v in asset.anim.translations[i]]), t)
+        r_attr.Set(Vt.QuatfArray([Gf.Quatf(q[3], q[0], q[1], q[2])
+                                  for q in asset.anim.rotations[i]]), t)
+        s_attr.Set(Vt.Vec3hArray([Gf.Vec3h(*v) for v in asset.anim.scales[i]]), t)
+    binding = UsdSkel.BindingAPI.Apply(stage.GetPrimAtPath(root_path))
+    binding.CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+    # Defining skel/Anim also defined its ancestors: the root stays an "over", the
+    # asset it is referenced onto owns it.
+    stage.GetRootLayer().GetPrimAtPath(root_path).specifier = Sdf.SpecifierOver
+    stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
+    _set_time_range(stage.GetRootLayer(), asset.anim)
+    stage.GetRootLayer().Save()
+
+    root_p = dest / f"{asset.asset}.{fmt}"
+    root_layer = _new_stage(root_p, fmt).GetRootLayer()
+    root_layer.subLayerPaths = [anim_p.name]
+    root_layer.defaultPrim = token
+    _set_time_range(root_layer, asset.anim)
+    root_layer.Save()
+    log.info("Authored motion-only anim %s (%d joints, %d frames) -> %s",
+             asset.asset, len(asset.anim.joints), len(asset.anim.times), root_p.name)
+    return {"anim": anim_p, "root": root_p}
 
 
 # ── public API ────────────────────────────────────────────────────────────────

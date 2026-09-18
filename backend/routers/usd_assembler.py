@@ -144,9 +144,12 @@ async def list_usd_layers(
 async def list_usd_departments() -> dict:
     """The one department table (ADR 0019): TYPE -> department + what FLUX exports.
     The Publisher reads it so backend and UI can never disagree."""
-    from features.usd_export.departments import DEPARTMENT_ORDER, publisher_table
+    from features.usd_export.departments import (
+        DEPARTMENT_ORDER, SHOT_EXPORT_CONTENT, publisher_table,
+    )
 
-    return {"tasks": publisher_table(), "order": DEPARTMENT_ORDER}
+    return {"tasks": publisher_table(), "order": DEPARTMENT_ORDER,
+            "shot_tasks": SHOT_EXPORT_CONTENT}
 
 
 @router.get("/composition")

@@ -17,6 +17,9 @@ ASSET_DEPARTMENTS: dict[str, str] = {"GEO": "model", "GROOM": "groom", "SHADING"
 DEPARTMENT_ORDER: dict[str, int] = {"model": 100, "groom": 175, "look": 200, "rig": 300}
 # Asset TYPE published as a standalone skeleton animation (crowd clip, A6), not in the asset.
 CLIP_TYPES = frozenset({"ANIM"})
+# Shot TYPE whose light export is the motion of ONE character (2026-09-18):
+# SEQ_SHOT_ANIM_<NAME>, motion only, prim root = the character.
+SHOT_MOTION_TYPES = frozenset({"ANIM"})
 # Asset TYPE the light (skinned mesh / skeleton) export can write.
 LIGHT_EXPORT_TYPES = frozenset({"GEO", "RIG"}) | CLIP_TYPES
 # Asset TYPE the look export writes (A1b): the DCC exports its materials, the backend
@@ -35,6 +38,14 @@ LIGHT_EXPORT_CONTENT: dict[str, dict] = {
              "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
     "SHADING": {"what": "materiaux et assignations (sans geometrie)", "writer": "look",
                 "include": {"geo": False, "skel": False, "anim": False, "weights": False, "uv": False}},
+}
+
+
+# Shot tasks FLUX writes itself (2026-09-18): the motion of ONE character.
+SHOT_EXPORT_CONTENT: dict[str, dict] = {
+    "ANIM": {"department": "animation", "writer": "light",
+             "what": "mouvement du squelette d'un perso (seulement les joints qui bougent)",
+             "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
 }
 
 
@@ -58,19 +69,61 @@ def contribution(base: str) -> dict | None:
     if not parsed:
         return None
     if parsed.get("is_shot"):
-        return {"kind": "shot", "department": None, "name": None,
-                "instance": parsed.get("VARIANTE") or "", "type": None}
+        task = str(parsed.get("TYPE") or "").upper()
+        # SEQ_SHOT_ANIM_<NAME>[_NN]: the character is everything after the TYPE
+        # (2026-09-18), e.g. DINGO or DINGO_02 for a second DINGO in the shot.
+        rest = base.split("_")[3:]
+        character = "_".join(rest) if task in SHOT_MOTION_TYPES and rest else ""
+        if character.lower() == "null":       # legacy SEQ_SHOT_ANIM_null: no character
+            character = ""
+        return {"kind": "shot", "department": None, "name": character or None,
+                "instance": parsed.get("VARIANTE") or "", "type": task}
     task = str(parsed.get("TYPE") or "").upper()
     kind = "clip" if task in CLIP_TYPES else "asset"
     return {"kind": kind, "department": ASSET_DEPARTMENTS.get(task), "name": parsed.get("NAME") or "",
             "instance": parsed.get("INSTANCE") or "", "type": task}
 
 
+def is_motion_only(contrib: dict | None) -> bool:
+    """A publish that carries nothing but skeleton motion: an asset clip (ANIM) or the
+    animation of one character in a shot (SEQ_SHOT_ANIM_<NAME>)."""
+    if not contrib:
+        return False
+    if contrib["kind"] == "clip":
+        return True
+    return contrib["kind"] == "shot" and contrib.get("type") in SHOT_MOTION_TYPES
+
+
+def character_name(contrib: dict, project_path) -> str:
+    """NAME token of the character a shot animation belongs to: the longest leading
+    part of ``DINGO_02`` that is a project NAME (names may hold underscores)."""
+    raw = contrib.get("name") or ""
+    try:
+        from features.folder_manager.tokens import load_tokens
+
+        names = set((load_tokens(project_path) or {}).get("NAME", {}))
+    except Exception:
+        names = set()
+    parts = raw.split("_")
+    for i in range(len(parts), 0, -1):
+        if "_".join(parts[:i]) in names:
+            return "_".join(parts[:i])
+    return raw
+
+
 def restrict_light_asset(asset: LightAsset, contrib: dict) -> tuple[LightAsset, list[str]]:
     """Keep only what the publish department owns; ValueError for a TYPE the light
     export cannot write (MULT, SHADING, ...). Returns (asset, warnings)."""
     if contrib["kind"] == "shot":
-        return asset, []
+        if contrib.get("type") not in SHOT_MOTION_TYPES:
+            return asset, []
+        # A shot animation is the motion of one character, nothing else.
+        warnings: list[str] = []
+        if asset.meshes:
+            warnings.append("geometrie ignoree : l'anim d'un plan ne contient que le mouvement")
+        if asset.cameras or asset.lights:
+            warnings.append("cameras et lumieres ignorees : elles se publient a part dans le plan")
+        return replace(asset, meshes=[], cameras=[], lights=[]), warnings
     task = contrib["type"]
     if task not in LIGHT_EXPORT_TYPES:
         raise ValueError(

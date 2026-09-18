@@ -25,7 +25,7 @@ from features.publisher.publish_layout import (
 )
 
 from .contract import LightAsset
-from .skel_export import author_light_asset
+from .skel_export import author_light_asset, author_motion_only
 
 log = get_logger("usd_export.publish")
 
@@ -48,6 +48,48 @@ def _archive_legacy_last_folder(parent: Path, base: str, ext: str) -> str | None
     if legacy.exists():
         log.warning("Old light asset folder kept (locked): %s", legacy)
     return format_version(ver)
+
+
+def _match_rig(project_path, name: str | None, joints: list[str]) -> tuple[list[str], list[str]]:
+    """(joints, warnings): the animated joints checked against the rig of asset *name*
+    (motion only: the skeleton comes from the asset). A rig imported in Maya from the
+    asset USD gets an extra root joint named after the Skeleton prim ("Skeleton/joint1"):
+    that prefix is dropped when it makes every joint match. Never raises."""
+    rig, warnings = _rig_joints(project_path, name)
+    if rig is None:
+        return joints, warnings
+    if any(j not in rig for j in joints):
+        stripped = [j.split("/", 1)[1] if "/" in j else j for j in joints]
+        heads = {j.split("/", 1)[0] for j in joints}
+        if len(heads) == 1 and all(j in rig for j in stripped):
+            return stripped, [f"racine {heads.pop()} retiree : les joints suivent le rig de {name}"]
+    missing = [j for j in joints if j not in rig]
+    if not missing:
+        return joints, []
+    shown = ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else "")
+    return joints, [f"{len(missing)} joint(s) anime(s) absent(s) du rig de {name} : {shown}"]
+
+
+def _rig_joints(project_path, name: str | None) -> tuple[set[str] | None, list[str]]:
+    """Joints of the skeleton published for asset *name*, or (None, [warning])."""
+    if not name:
+        return None, ["anim sans perso reconnu : impossible de verifier le squelette"]
+    try:
+        from pxr import Usd, UsdSkel
+
+        from features.usd_assembler.component_auto import component_dir
+
+        folder = component_dir(project_path, name)
+        entry = folder / f"{name}_LAST.usda" if folder is not None else None
+        if entry is None or not entry.is_file():
+            return None, [f"asset {name} sans USD publie : squelette non verifie"]
+        stage = Usd.Stage.Open(str(entry))
+        skel = next((UsdSkel.Skeleton(p) for p in stage.Traverse() if p.IsA(UsdSkel.Skeleton)), None)
+        if skel is None:
+            return None, [f"l'asset {name} n'a pas de squelette publie (GEO avec skin ou RIG)"]
+        return set(skel.GetJointsAttr().Get() or []), []
+    except Exception as exc:        # noqa: BLE001 - a check never blocks a publish
+        return None, [f"squelette de {name} non verifie : {exc}"]
 
 
 def publish_light_asset(
@@ -73,15 +115,29 @@ def publish_light_asset(
     "version": "vNNN", "folder": version folder, "version_root": Path, "layers": {...},
     "warnings": [...]}.
     """
-    from .departments import contribution, restrict_light_asset
+    from .departments import character_name, contribution, is_motion_only, restrict_light_asset
 
     base = base_name or asset.asset
     contrib = contribution(base) if base_name else None
     warnings: list[str] = []
     root_name = None
+    motion_only = is_motion_only(contrib)
     if contrib is not None:
         asset, warnings = restrict_light_asset(asset, contrib)
         root_name = contrib["name"] or None
+        if motion_only and contrib["kind"] == "shot":
+            root_name = character_name(contrib, project_path) or None
+            if root_name is None:
+                raise ValueError("anim de plan sans perso : nomme-la SEQ_SHOT_ANIM_<NAME> "
+                                 "(4e case du Publisher = le perso anime)")
+    if motion_only:
+        if asset.anim is None or not asset.anim.joints:
+            raise ValueError("aucune anim a publier : rien ne bouge sur la plage demandee "
+                             "(active la plage d'animation et selectionne le rig)")
+        joints, rig_warnings = _match_rig(project_path, root_name, asset.anim.joints)
+        warnings += rig_warnings
+        if joints != asset.anim.joints:
+            asset = replace(asset, anim=replace(asset.anim, joints=joints))
     if dest_dir is not None:
         parent = Path(dest_dir)
     else:
@@ -98,8 +154,11 @@ def publish_light_asset(
     # Author straight into the reserved version folder (no rename, ADR 0017 U3b rule).
     light = replace(asset, asset=base)
     try:
-        authored = author_light_asset(light, folder, fmt=fmt.lstrip("."), version_label=None,
-                                      root_name=root_name)
+        if motion_only:
+            authored = author_motion_only(light, folder, fmt=fmt.lstrip("."), root_name=root_name)
+        else:
+            authored = author_light_asset(light, folder, fmt=fmt.lstrip("."), version_label=None,
+                                          root_name=root_name)
     except Exception:
         discard_rendered_version(parent, base, ext, ver, is_sequence=True)
         raise

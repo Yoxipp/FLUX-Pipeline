@@ -77,12 +77,12 @@ def generate_proxy_layer(version_path: Path | None) -> str | None:
 def _has_render_geometry(base: str) -> bool:
     """False for a publish whose department never carries render meshes (look, rig,
     anim clip): the proxy run would only fail. Unknown names keep the proxy run."""
-    from features.usd_export.departments import contribution
+    from features.usd_export.departments import contribution, is_motion_only
 
     contrib = contribution(base)
     if contrib is None:
         return True
-    if contrib["kind"] == "clip":
+    if is_motion_only(contrib):
         return False
     return not (contrib["kind"] == "asset" and contrib["department"] in ("look", "rig"))
 

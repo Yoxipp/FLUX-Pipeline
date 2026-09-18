@@ -249,6 +249,7 @@ _EXTRACT_CODE = textwrap.dedent(r'''
                             "translations": translations,
                             "rotations": rotations,
                             "scales": scales,
+                            "fps": hou.fps(),
                         }}
 
             if not meshes and not joints:

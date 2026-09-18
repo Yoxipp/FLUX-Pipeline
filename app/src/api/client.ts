@@ -642,7 +642,8 @@ export const api = {
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
   // The department table (ADR 0019): which task writes which USD department.
   getUsdDepartments: () =>
-    apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number> }>(
+    apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number>
+              shot_tasks?: Record<string, UsdTaskContribution> }>(
       'GET', '/usd/departments'),
 
   // Read-only composition of a published USD file (prims, variants, layers used).

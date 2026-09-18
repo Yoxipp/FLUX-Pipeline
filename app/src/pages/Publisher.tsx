@@ -328,6 +328,12 @@ const USD_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
   SHADING: { department: 'look', what: 'matériaux et assignations (sans géométrie)', writer: 'look',
              include: { geo: false, skel: false, anim: false, weights: false, uv: false } },
 }
+// Shot tasks FLUX writes itself (2026-09-18): SEQ_SHOT_ANIM_<NAME> = the motion of
+// one character, the 4th token is the character.
+const USD_SHOT_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
+  ANIM: { department: 'animation', what: "mouvement du squelette d'un perso (seulement les joints qui bougent)",
+          writer: 'light', include: { geo: false, skel: true, anim: true, weights: false, uv: false } },
+}
 
 // Info popover copy for each token (explanation · expected · concrete example).
 interface TokenInfo { title: string; desc: string; expected: string; example: string }
@@ -340,6 +346,7 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
   seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ###', example: 'SEQ001' },
   shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT###', example: 'SHOT010' },
   shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). Suggestions basées sur Sequence + Shot.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_null' },
+  shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ001_SHOT010_ANIM_DINGO' },
   shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_block_LAST' },
 }
 
@@ -577,7 +584,13 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
             onArchiveOption={sel.seq ? (v => onArchiveToken('shot', v)) : undefined}
           />
           <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} options={shotNameSug} placeholder="LAYOUT, ANIM, FX…" onChange={v => onSelect('name', v)} />
-          <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
+          {formatToken(sel.name) === 'ANIM' ? (
+            <ModuleBox label="Perso" info={TOKEN_INFO.shotCharacter} value={sel.variante}
+              options={Object.keys(tokens.NAME ?? {}).sort()} placeholder="DINGO"
+              onChange={v => onSelect('variante', v)} />
+          ) : (
+            <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
+          )}
         </>
       )}
     </div>
@@ -718,10 +731,16 @@ export function Publisher() {
   // the task has a department), true/false = the artist's explicit choice.
   const [fluxWriter, setFluxWriter]                 = useState<boolean | null>(null)
   const [usdDepartments, setUsdDepartments] = useState(USD_DEPARTMENTS_FALLBACK)
+  const [usdShotDepartments, setUsdShotDepartments] = useState(USD_SHOT_DEPARTMENTS_FALLBACK)
   useEffect(() => {
-    api.getUsdDepartments().then(d => setUsdDepartments(d.tasks)).catch(() => {})
+    api.getUsdDepartments().then(d => {
+      setUsdDepartments(d.tasks)
+      if (d.shot_tasks) setUsdShotDepartments(d.shot_tasks)
+    }).catch(() => {})
   }, [])
-  const usdContribution = usdDepartments[sel.task]
+  const usdContribution = mode === 'asset'
+    ? usdDepartments[sel.task]
+    : usdShotDepartments[formatToken(sel.name)]
   // FLUX writes the layered USD by default for a task that has a department.
   const usdLayers = (fluxWriter ?? !!usdContribution) && !!usdContribution
   // The look department is written by its own exporter (materials, no geometry).
@@ -1054,6 +1073,10 @@ export function Publisher() {
     if (!project) { toast.error('Sélectionne un projet'); return }
     const animOn = animCapable && animRange
     const seqOn = seqCapable && isSequence
+    // Shot animation (SEQ_SHOT_ANIM_<NAME>): the 4th token is the animated character.
+    const shotCharacter = mode === 'shot'
+      ? (formatToken(sel.variante) && formatToken(sel.variante) !== 'null' ? formatToken(sel.variante) : '')
+      : null
 
     const filename = buildFilename()
     const parts = filename.split('_').filter(Boolean)
@@ -1085,8 +1108,9 @@ export function Publisher() {
           res.warnings?.forEach(w => toast.warning(w))
           return
         }
-        if (usdLayers && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
-          const assetName = formatToken(sel.name) || parts[2]
+        if (usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const assetName = shotCharacter ?? (formatToken(sel.name) || parts[2])
+          if (!assetName) { toast.error('Choisis le perso animé (4e case)'); return }
           const res = await api.exportMayaLightUsd({
             project_name: project,
             asset:        assetName,
@@ -1136,8 +1160,9 @@ export function Publisher() {
           res.warnings?.forEach(w => toast.warning(w))
           return
         }
-        if (usdLayers && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
-          const assetName = formatToken(sel.name) || parts[2]
+        if (usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const assetName = shotCharacter ?? (formatToken(sel.name) || parts[2])
+          if (!assetName) { toast.error('Choisis le perso animé (4e case)'); return }
           const res = await api.exportHoudiniLightUsd({
             project_name: project,
             asset:        assetName,
@@ -1984,7 +2009,7 @@ export function Publisher() {
 
           {/* USD — Maya & Houdini, asset + USD formats only (hidden otherwise). The TASK
               decides what is exported (ADR 0019); the switch only says who writes it. */}
-          {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
+          {(dcc === 'Maya' || dcc === 'Houdini') && ['.usd', '.usda', '.usdc'].includes(exportExt) && (() => {
             const contribution = usdContribution
             const usdOk = !!contribution
             const on = usdLayers
@@ -2015,7 +2040,14 @@ export function Publisher() {
                   </span>
                 </div>
                 <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
-                  {usdOk ? (<>
+                  {usdOk && mode === 'shot' ? (<>
+                    TASK {formatToken(sel.name)} du plan : {contribution.what}, avec la plage d'images et les fps.
+                    Le 4e token est le perso animé (<span style={{ fontFamily: 'var(--mono)' }}>SEQ_SHOT_ANIM_NAME</span>) ;
+                    sélectionne son rig dans {dcc}.
+                    {on
+                      ? " FLUX écrit /NAME/skel/Anim seul : le squelette et la géo viennent de l'asset."
+                      : ` ${dcc} écrit le fichier tel quel (structure non garantie).`}
+                  </>) : usdOk ? (<>
                     TASK {sel.task} : département <span style={{ fontFamily: 'var(--mono)' }}>{contribution.department}</span> de
                     l'asset, {contribution.what}. La task décide de ce qui est exporté.
                     {on
@@ -2024,7 +2056,9 @@ export function Publisher() {
                         : " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe).")
                       : ` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`}
                   </>) : (
-                    `TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`
+                    mode === 'shot'
+                      ? `TASK ${formatToken(sel.name) || '—'} : FLUX n'écrit que l'ANIM d'un plan. ${dcc} écrit le fichier.`
+                      : `TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`
                   )}
                 </div>
               </div>

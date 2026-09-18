@@ -215,12 +215,18 @@ def _extract_anim(joints_dag: list[str], tokens: list[str], frame_start: int, fr
     translations = [[trs_per_time[ti][j][0] for j in keep] for ti in range(len(times))]
     rotations    = [[trs_per_time[ti][j][1] for j in keep] for ti in range(len(times))]
     scales       = [[trs_per_time[ti][j][2] for j in keep] for ti in range(len(times))]
+    try:
+        import maya.mel as mel
+        fps = float(mel.eval("currentTimeUnitToFPS()"))
+    except Exception:
+        fps = None
     return AnimData(
         joints=animated,
         times=[float(t) for t in times],
         translations=translations,
         rotations=rotations,
         scales=scales,
+        fps=fps,
     )
 
 

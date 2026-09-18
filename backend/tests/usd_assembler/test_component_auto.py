@@ -159,7 +159,16 @@ class ComponentAuto(unittest.TestCase):
         self.assertEqual(entries[-1]["user"], "adam")
 
     def test_non_component_task_is_ignored(self) -> None:
-        res = self._publish("ANIM", "anim", ["Root"])
+        # An ANIM clip is motion only (2026-09-18): it needs a moving joint.
+        from dataclasses import replace
+
+        from features.usd_export import AnimData
+
+        anim = AnimData(joints=["Root"], times=[1.0, 2.0], translations=[[(0, 0, 0)], [(1, 0, 0)]],
+                        rotations=[[(0, 0, 0, 1)]] * 2, scales=[[(1, 1, 1)]] * 2)
+        res = publish_light_asset(replace(_asset(["Root"]), anim=anim), self.project, fmt="usd",
+                                  dest_dir=self.project / _NAME_REL / "anim" / "null",
+                                  base_name=f"CHAR_ANIM_{_NAME}_null", user="adam")
         self.assertIsNone(res["component"])
         self.assertFalse(self.usd_dir.exists())
         self.assertIsNone(refresh_from_publish(self.project, "SH_SEQ010_SH020_null"))

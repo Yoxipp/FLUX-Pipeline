@@ -52,6 +52,7 @@ class AnimData:
     translations: list[list[Vec3]]    # [time][joint]
     rotations: list[list[Quat]]       # [time][joint]
     scales: list[list[Vec3]]          # [time][joint]
+    fps: float | None = None          # scene frame rate (layer timeCodesPerSecond)
 
 
 @dataclass
@@ -139,6 +140,7 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             translations=[[tuple(v) for v in row] for row in a["translations"]],
             rotations=[[tuple(q) for q in row] for row in a["rotations"]],
             scales=[[tuple(v) for v in row] for row in a["scales"]],
+            fps=(float(a["fps"]) if a.get("fps") else None),
         )
     cameras = [
         CameraData(
