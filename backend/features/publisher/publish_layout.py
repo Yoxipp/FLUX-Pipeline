@@ -314,6 +314,13 @@ def discard_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, *
             target.unlink()
     except OSError as exc:
         log.warning("Could not remove failed output %s: %s", target, exc)
+    # A first publish that fails must not leave an empty instance folder behind
+    # (e.g. DINGO/shading/null): rmdir only succeeds on an empty folder.
+    try:
+        if dest_folder.is_dir() and not any(dest_folder.iterdir()):
+            dest_folder.rmdir()
+    except OSError:
+        pass
 
 
 def next_publish_version(dest_folder: Path, base: str, ext: str) -> int:

@@ -59,8 +59,10 @@ class ReserveAndFinalize(unittest.TestCase):
 
     def test_discard(self):
         with tempfile.TemporaryDirectory() as tmp:
-            dest = Path(tmp)
+            dest = Path(tmp) / "null"
+            dest.mkdir()
             (dest / f"{_BASE}_v001.abc").write_text("partial")
+            (dest / "keep.txt").write_text("other publish")
             seq = dest / f"{_BASE}_v002"
             seq.mkdir()
             (seq / f"{_BASE}_v002.0001.exr").write_text("x")
@@ -68,6 +70,16 @@ class ReserveAndFinalize(unittest.TestCase):
             discard_rendered_version(dest, _BASE, ".exr", 2, is_sequence=True)
             self.assertFalse((dest / f"{_BASE}_v001.abc").exists())
             self.assertFalse(seq.exists())
+            self.assertTrue(dest.is_dir())  # not empty: kept
+
+    def test_discard_of_a_first_publish_removes_the_empty_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "shading" / "null"
+            ver = reserve_version(dest, _BASE, ".usda")
+            (dest / f"{_BASE}_v{ver:03d}").mkdir()
+            discard_rendered_version(dest, _BASE, ".usda", ver, is_sequence=True)
+            self.assertFalse(dest.exists())
+            self.assertTrue(dest.parent.is_dir())  # the task folder stays
 
 
 class HoudiniRop(unittest.TestCase):
@@ -118,7 +130,8 @@ class HoudiniRop(unittest.TestCase):
             with mock.patch.object(hx, "export_via_node", side_effect=failing):
                 res = hx.publish_houdini_rop(proj, _BASE, ".abc", rop_node_path="/out/rop1")
             self.assertFalse(res["ok"])
-            self.assertEqual([p.name for p in dest.iterdir() if p.suffix == ".abc"], [])
+            # First publish failed: no version, and no empty instance folder left.
+            self.assertFalse(dest.exists() and any(p.suffix == ".abc" for p in dest.iterdir()))
 
     def test_scene_publish_saves_version(self):
         with tempfile.TemporaryDirectory() as tmp:
