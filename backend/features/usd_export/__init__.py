@@ -12,8 +12,19 @@
 # ({asset}/model/usd/{asset}_vNNN.usd*, defaultPrim == asset).
 
 from .contract import AnimData, LightAsset, MeshData, SkeletonData
-from .publish import publish_light_asset
-from .skel_export import author_light_asset, filter_animated_joints
+
+
+def __getattr__(name: str):
+    # Lazy: the DCC extractors import .contract inside Maya / Houdini, whose Python has
+    # neither pxr for sure nor the publish chain's deps (yaml via flux_core). Only the
+    # backend touches the authoring / publish side.
+    if name == "publish_light_asset":
+        from .publish import publish_light_asset
+        return publish_light_asset
+    if name in ("author_light_asset", "filter_animated_joints"):
+        from . import skel_export
+        return getattr(skel_export, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "AnimData",
