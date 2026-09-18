@@ -310,6 +310,9 @@ def export_via_node(
         _pl.Path(_out).parent.mkdir(parents=True, exist_ok=True)
 
         _tname = _n.type().name()
+        # Nodes created for this export only: destroyed after the cook, so repeated
+        # publishes no longer pile up flux_export1, flux_export2... in the network.
+        _tmp = []
         if _tname in _ropmap:
             _rop = _n
             _op = _ropmap[_tname]
@@ -330,6 +333,7 @@ def export_via_node(
             _af_names = [_x for _x in _af.get('names', []) if _x]
             if _af_names and _ext != '.fbx':
                 _adl = _parent.createNode('attribdelete', node_name='flux_attr_filter')
+                _tmp.append(_adl)
                 _adl.setFirstInput(_tail)
                 if _af.get('mode') == 'keep':
                     _keep = list(_af_names)
@@ -346,6 +350,7 @@ def export_via_node(
 
             if _ext == '.abc':
                 _rop = _parent.createNode('rop_alembic', node_name='flux_export'); _op = 'filename'
+                _tmp.append(_rop)
                 for _sp in ('soppath', 'sopname'):
                     if _rop.parm(_sp) is not None:
                         _rop.parm(_sp).set(_tail.path()); break
@@ -363,49 +368,59 @@ def export_via_node(
                 # rop_geometry would write classic geo under a .usd name: use the SOP
                 # "ROP USD Output". Root prim = the geo object name (defaultPrim).
                 _rop = _parent.createNode('usdexport', node_name='flux_export'); _op = 'lopoutput'
+                _tmp.append(_rop)
                 _rop.setFirstInput(_tail)
                 if _rop.parm('pathprefix') is not None:
                     _rop.parm('pathprefix').set('/' + _objroot.name())
             else:
                 _rop = _parent.createNode('rop_geometry', node_name='flux_export'); _op = 'sopoutput'
+                _tmp.append(_rop)
                 for _sp in ('soppath', 'sopname'):
                     if _rop.parm(_sp) is not None:
                         _rop.parm(_sp).set(_tail.path()); break
 
-        _set = False
-        for _pn in (_op, 'sopoutput', 'filename', 'lopoutput', 'file', 'picture'):
-            if _pn and _rop.parm(_pn) is not None:
-                _rop.parm(_pn).set(_out); _set = True; break
-        if not _set:
-            raise RuntimeError("Cannot set output parm on ROP type: %s" % _rop.type().name())
+        try:
+            _set = False
+            for _pn in (_op, 'sopoutput', 'filename', 'lopoutput', 'file', 'picture'):
+                if _pn and _rop.parm(_pn) is not None:
+                    _rop.parm(_pn).set(_out); _set = True; break
+            if not _set:
+                raise RuntimeError("Cannot set output parm on ROP type: %s" % _rop.type().name())
 
-        # Apply per-format ROP options defensively (skip absent parms / bad values).
-        for _k, _v in _opts.items():
-            _p = _rop.parm(_k)
-            if _p is not None:
+            # Apply per-format ROP options defensively (skip absent parms / bad values).
+            for _k, _v in _opts.items():
+                _p = _rop.parm(_k)
+                if _p is not None:
+                    try:
+                        _p.set(_v)
+                    except Exception:
+                        pass
+
+            if hasattr(_rop, 'render'):
+                if _fr:
+                    _rop.render(frame_range=_fr)
+                else:
+                    _rop.render()
+            else:
+                # SOP-level ROPs such as usdexport have no render(): drive trange + Execute.
+                if _rop.parm('trange') is not None:
+                    if _fr:
+                        _rop.parm('trange').set(1)
+                        _ft = _rop.parmTuple('f')
+                        if _ft is not None:
+                            _ft.deleteAllKeyframes()
+                            _ft.set(tuple(_fr) + (1,) * (3 - len(_fr)))
+                    else:
+                        _rop.parm('trange').set(0)
+                _rop.parm('execute').pressButton()
+            # A temporary ROP is gone after the export: no path to rewrite later.
+            result = {{"ok": True, "rop": None if _rop in _tmp else _rop.path()}}
+        finally:
+            for _t in reversed(_tmp):
                 try:
-                    _p.set(_v)
+                    _t.destroy()
                 except Exception:
                     pass
-
-        if hasattr(_rop, 'render'):
-            if _fr:
-                _rop.render(frame_range=_fr)
-            else:
-                _rop.render()
-        else:
-            # SOP-level ROPs such as usdexport have no render(): drive trange + Execute.
-            if _rop.parm('trange') is not None:
-                if _fr:
-                    _rop.parm('trange').set(1)
-                    _ft = _rop.parmTuple('f')
-                    if _ft is not None:
-                        _ft.deleteAllKeyframes()
-                        _ft.set(tuple(_fr) + (1,) * (3 - len(_fr)))
-                else:
-                    _rop.parm('trange').set(0)
-            _rop.parm('execute').pressButton()
-        result = {{"ok": True, "rop": _rop.path()}}
     """)
 
     resp = houdini_client.run(code)
