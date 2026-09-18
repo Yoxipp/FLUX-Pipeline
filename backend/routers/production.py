@@ -226,12 +226,14 @@ def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
 def _refresh_changed_shot_stages(project: str, before: dict, after: dict) -> list[str]:
     """Regenerate the stage of every shot whose casting or range changed. Returns the
     ``SEQ_SHOT vNNN`` written."""
-    from features.usd_assembler.shot_stage import write_stage
+    from features.usd_assembler.shot_stage import stage_versions, write_stage
 
     old, new = _shot_keys(before or {}), _shot_keys(after or {})
     written = []
+    project_path = get_project_path(project)
     for key, value in new.items():
-        if old.get(key) == value:
+        # Every shot has its stage (2026-09-19): a shot without one gets it now.
+        if old.get(key) == value and stage_versions(project_path, key[0], key[1]):
             continue
         res = write_stage(get_project_path(project), key[0], key[1], production=after,
                           save_casting=False)

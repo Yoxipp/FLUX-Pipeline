@@ -130,7 +130,23 @@ class ShotStage(unittest.TestCase):
         res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
         self.assertTrue(any("layout" in w for w in res["warnings"]))
         entry = Sdf.Layer.FindOrOpen(str(res["entry"]))
-        self.assertEqual(list(entry.subLayerPaths), ["./SEQ001_SHOT010_casting.usda"])
+        # No department published: the shot light rig template (created with the stage) + the casting.
+        self.assertEqual(list(entry.subLayerPaths),
+                         ["../lighting/SEQ001_SHOT010_light.usda", "./SEQ001_SHOT010_casting.usda"])
+
+    def test_the_old_template_root_is_retired_by_the_first_stage(self) -> None:
+        from features.folder_manager.sequence_template import create_sequence_usd_template
+
+        legacy = ss.stage_dir(self.project, "SEQ001", "SHOT010") / "SEQ001_SHOT010.usda"
+        legacy.parent.mkdir(parents=True)
+        layer = Sdf.Layer.CreateNew(str(legacy))
+        layer.customLayerData = {"flux": {"role": "shot_root", "sequence": "SEQ001", "shot": "SHOT010"}}
+        layer.Save()
+        del layer
+        create_sequence_usd_template(ss.seq_dir(self.project, "SEQ001"), "SEQ001")
+        self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        self.assertFalse(legacy.exists())
+        self.assertTrue(list((self.project / "_backup_flux").rglob("SEQ001_SHOT010.usda")))
 
     def test_nothing_changed_means_no_new_version(self) -> None:
         prod = _production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}])

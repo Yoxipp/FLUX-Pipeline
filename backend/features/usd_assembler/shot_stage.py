@@ -6,7 +6,7 @@
 #       <SEQ>_<SHOT>_casting.usda    /assets/<CLASS>/<NAME>_NN (components), /sets/<NAME> (decors)
 #   <SHOT_path>/usd/<SEQ>_<SHOT>_LAST.usda   pointer (ADR 0017)
 #
-# Entry sublayers: lighting > fx > simulation > animation > layout > casting > <SEQ>.usda.
+# Entry sublayers: lighting > fx > simulation > crowd > animation > layout > casting > <SEQ>.usda.
 # FLUX decides WHAT is in the shot (Production casting, published departments, versions);
 # the DCC decides WHERE (layout, animation, lights). Relative paths only (ADR 0010).
 
@@ -34,6 +34,7 @@ SETS_ROOT = "sets"
 SHOT_DEPARTMENTS: dict[str, tuple[str, int]] = {
     "LAYOUT": ("layout", 200),
     "ANIM": ("animation", 300),
+    "CROWD": ("crowd", 350),          # A7 crowd layers (features/usd_assembler/crowd.py)
     "CFX": ("simulation", 400),
     "FX": ("fx", 500),
     "LIGHT": ("lighting", 600),
@@ -433,7 +434,8 @@ def _layer_list(project: Path, seq: str, shot: str, plan: dict, folder: Path,
     if root is not None:
         out.append(("sequence", _rel(root, folder)))
     # The strongest sublayer comes first: keep the lighting > fx > simulation order.
-    order = {"lighting": 0, "fx": 1, "simulation": 2, "animation": 3, "layout": 4, "casting": 5, "sequence": 6}
+    order = {"lighting": 0, "fx": 1, "simulation": 2, "crowd": 3, "animation": 4, "layout": 5,
+             "casting": 6, "sequence": 7}
     return sorted(out, key=lambda kv: order.get(kv[0], 9))
 
 
@@ -555,6 +557,14 @@ def write_stage(project_path: str | Path, seq: str, shot: str, *, production: di
     can_save = False
     if own_production:
         production, can_save = load_project_production(project)
+    # Same folders for every shot, however it was created (Production sync or Folder
+    # Manager): the shot light rig template (idempotent, never overwritten).
+    try:
+        from features.folder_manager.sequence_template import create_shot_usd_template
+
+        create_shot_usd_template(shot_dir(project, seq, shot), seq, shot)
+    except Exception as exc:     # noqa: BLE001
+        log.warning("Shot light rig template skipped for %s_%s: %s", seq, shot, exc)
     plan = collect(project, seq, shot, production)
 
     saved_cast = []
@@ -588,6 +598,7 @@ def write_stage(project_path: str | Path, seq: str, shot: str, *, production: di
         raise
     last = lp.write_last(parent, name, STAGE_EXT, folder, ver, lp.MODE_LAYER, user=user,
                          layer_target=f"{folder.name}/{entry.name}")
+    _retire_template_root(project, parent / f"{name}{STAGE_EXT}")
     from features.publisher.modif_log import append_log
 
     what = ", ".join(sorted({c["name"] for c in plan["casting"]})) or "casting vide"
@@ -596,6 +607,26 @@ def write_stage(project_path: str | Path, seq: str, shot: str, *, production: di
     log.info("Shot stage %s %s -> %s", name, version, folder)
     out.update(version=version, entry=entry, last=last)
     return out
+
+
+def _retire_template_root(project: Path, legacy: Path) -> None:
+    """The old template root <SEQ>_<SHOT>.usda (written by FLUX, role shot_root) is replaced
+    by the stage: move it to <project>/_backup_flux/<date>/ (2026-09-19: one layout per shot)."""
+    if not legacy.is_file():
+        return
+    try:
+        from datetime import datetime
+
+        from features.publisher.last_pointer import read_layer_flux
+
+        if (read_layer_flux(legacy) or {}).get("role") != "shot_root":
+            return
+        dest = project / "_backup_flux" / datetime.now().strftime("%Y%m%d-%H%M%S") / legacy.relative_to(project)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        legacy.replace(dest)
+        log.info("Old shot root %s moved to %s", legacy.name, dest.parent)
+    except Exception as exc:     # noqa: BLE001 - cosmetic cleanup, never fails a stage
+        log.warning("Old shot root %s kept: %s", legacy.name, exc)
 
 
 def refresh_from_publish_folder(dest_folder: str | Path, base: str, ext: str, *,

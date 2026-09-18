@@ -85,6 +85,8 @@ def _has_render_geometry(base: str) -> bool:
         return True
     if is_motion_only(contrib):
         return False
+    if contrib["kind"] == "shot" and contrib.get("type") in ("CROWD", "LIGHT", "LAYOUT"):
+        return False    # references, lights, cameras: the proxy would duplicate the assets
     return not (contrib["kind"] == "asset" and contrib["department"] in ("look", "rig"))
 
 
