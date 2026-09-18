@@ -177,7 +177,8 @@ def maya_window_visible(port: int, timeout: float = 1.5) -> bool | None:
     resp = send_command_direct(_WINDOW_EXPR, timeout=timeout, port=port)
     if resp is None:
         return None
-    return resp.strip().strip("\x00").lower() in ("true", "1")
+    # The commandPort answers "True\n\x00": drop the NUL terminator, then whitespace.
+    return resp.replace("\x00", "").strip().lower() in ("true", "1")
 
 
 class GhostMayaError(RuntimeError):
