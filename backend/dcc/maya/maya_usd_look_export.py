@@ -55,8 +55,11 @@ def export_look(out_path: str, *, scope: str = "scene") -> str | None:
         "defaultUSDFormat": "usda",
         "materialsScopeName": "mtl",
     }
+    # Creating the shader copy selects it: keep the artist's selection for the export.
+    picked = cmds.ls(selection=True, long=True) or []
     stand_in = _stand_in_for_default_material()
     try:
+        cmds.select(picked, replace=True) if picked else cmds.select(clear=True)
         try:
             cmds.mayaUSDExport(**opts)
         except TypeError:
@@ -66,6 +69,7 @@ def export_look(out_path: str, *, scope: str = "scene") -> str | None:
             cmds.mayaUSDExport(**opts)
     finally:
         _restore_default_material(stand_in)
+        cmds.select(picked, replace=True) if picked else cmds.select(clear=True)
     log.info("look export: %s (%s)", out_path, "selection" if selection else "scene")
     return out_path
 
