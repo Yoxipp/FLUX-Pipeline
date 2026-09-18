@@ -54,8 +54,9 @@ _EXPORT_CODE = textwrap.dedent(r'''
         else:
             parent = node.parent()
             rop = parent.node("flux_look_export")
-            if rop is None:
-                rop = parent.createNode("usd_rop", "flux_look_export")
+            if rop is not None:
+                rop.destroy()                     # leftover of a crashed run
+            rop = parent.createNode("usd_rop", "flux_look_export")
             def _set(name, value):
                 parm = rop.parm(name)
                 if parm is not None:
@@ -66,9 +67,13 @@ _EXPORT_CODE = textwrap.dedent(r'''
             _set("lopoutput", _OUT)
             # Absolute paths in a throwaway file: the backend rewrites them anyway.
             _set("enableoutputprocessor_simplerelativepaths", 0)
-            _set("savestyle", 0)                  # flatten implicit layers
+            # One self-contained file: the backend reads it once and throws it away.
+            _set("savestyle", "flattenstage")
             rop.setInput(0, node)
-            rop.render()
+            try:
+                rop.render()
+            finally:
+                rop.destroy()                     # the artist's scene stays as it was
             _log("INFO", "look ecrit depuis %s" % node.path())
             result = {{"usd": _OUT, "__logs__": _logs}}
     except Exception as exc:

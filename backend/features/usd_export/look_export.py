@@ -171,8 +171,10 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     look_p = dest / f"{base}_look.{fmt}"
     look_layer = _new_layer(look_p, fmt)
     look_stage = Usd.Stage.Open(look_layer)
-    look_stage.OverridePrim(root_path)             # the model layer owns the type
     _define_scopes(look_stage, mtl_root)
+    # Defining /<NAME>/mtl also defines its ancestors: keep the root an "over", the
+    # model layer owns its type (SkelRoot / Xform).
+    look_layer.GetPrimAtPath(root_path).specifier = Sdf.SpecifierOver
 
     # 1. materials, copied whole (shaders, node graphs, connections) under /<NAME>/mtl.
     moved: dict[Sdf.Path, Sdf.Path] = {}

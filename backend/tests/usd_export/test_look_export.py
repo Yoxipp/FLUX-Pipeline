@@ -84,6 +84,8 @@ class LookLayer(unittest.TestCase):
             defined = [str(s.path) for s in _specs(layer)
                        if s.specifier == Sdf.SpecifierDef and s.typeName == "Mesh"]
             self.assertEqual(defined, [])
+            # The asset root belongs to the model layer: the look only overrides it.
+            self.assertEqual(layer.GetPrimAtPath("/DAVID").specifier, Sdf.SpecifierOver)
 
     def test_texture_points_at_the_conformed_tx_relative_to_the_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -123,7 +125,7 @@ class LookPublish(unittest.TestCase):
     _REL = "assets/chara/DAVID"
 
     def setUp(self) -> None:
-        env = mock.patch.dict(os.environ, {"FLUX_PROXY_USD": "0"})
+        env = mock.patch.dict(os.environ, {"FLUX_PROXY_USD": "1"})
         env.start()
         self.addCleanup(env.stop)
         self._tmp = tempfile.TemporaryDirectory()
@@ -158,6 +160,8 @@ class LookPublish(unittest.TestCase):
                          / "CHAR_SHADING_DAVID_null_look.usda").is_file())
         self.assertTrue((dest / "CHAR_SHADING_DAVID_null_LAST.usda").is_file())
         self.assertIsNotNone(res["component"])
+        # A look carries no render mesh: no proxy file may be written beside it.
+        self.assertEqual(list((dest / "CHAR_SHADING_DAVID_null_v001").glob("*.proxy.usda")), [])
 
         usd_dir = self.project / self._REL / "usd"
         payload = Sdf.Layer.FindOrOpen(str(usd_dir / f"DAVID_{res['component']}"
