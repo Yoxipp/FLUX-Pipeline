@@ -41,6 +41,7 @@ export function UsdLibrary({ project, projects, onProject }: {
   const [sel, setSel] = useState<Selection>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [shots, setShots] = useState<UsdShotInfo[] | null>(null)
+  const [legacy, setLegacy] = useState<{ name: string; rel_path: string }[]>([])
 
   const load = useCallback(() => {
     if (!project) { setLib(null); setShots(null); return }
@@ -53,6 +54,10 @@ export function UsdLibrary({ project, projects, onProject }: {
     api.getUsdShots(project)
       .then(r => setShots(r.shots))
       .catch(() => setShots([]))
+    // V4: old flat Constructor files, never imported, deletable (moved to a backup).
+    api.getUsdLegacy(project)
+      .then(r => setLegacy(r.files))
+      .catch(() => setLegacy([]))
   }, [project])
 
   useEffect(() => { load() }, [load])
@@ -180,6 +185,27 @@ export function UsdLibrary({ project, projects, onProject }: {
               sub={`${s.casting.length} perso(s) / decor(s)  ·  ${s.anims.length} anim(s)`}
             />
           ))}
+          {tab === 'assemblies' && legacy.length > 0 && (
+            <div style={{ marginTop: 10, padding: '8px 6px', borderTop: '1px solid var(--rule)' }}>
+              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 4 }}>
+                Anciens fichiers ({legacy.length}) : plus proposes a l'import
+              </div>
+              {legacy.map(f => (
+                <div key={f.rel_path} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5 }}>
+                  <span style={{ ...mono, flex: 1, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.rel_path}>{f.name}</span>
+                  <Btn sm ghost title="Deplace le fichier dans <projet>/_backup_flux (rien n'est efface)"
+                    onClick={() => {
+                      if (!project) return
+                      api.deleteUsdLegacy(project, f.rel_path)
+                        .then(() => { toast.success(`${f.name} deplace dans le backup`); load() })
+                        .catch(e => toast.error(e instanceof Error ? e.message : String(e)))
+                    }}>
+                    <Trash2 size={10} strokeWidth={2} /> Supprimer
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          )}
           {tab === 'shots' && shots && shotList.length === 0 && (
             <div className="lbl" style={{ padding: '8px 6px', fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
               Aucun shot dans Production.

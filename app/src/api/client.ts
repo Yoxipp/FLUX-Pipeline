@@ -237,8 +237,16 @@ export const api = {
     apiCall<{ cmd: string; backend: string }>('GET', '/dcc/maya/connect_cmd'),
 
   // port targets a specific Maya instance (multi-instance); omit → base commandPort.
-  importFileInMaya: (project_name: string, rel_path: string, port?: number) =>
-    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path, port }),
+  importFileInMaya: (project_name: string, rel_path: string, port?: number, mode: 'import' | 'proxy' = 'import') =>
+    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path, port, mode }),
+  // V4: what "Ouvrir dans..." loads for a file (asset / decor / shot first, layer second).
+  getLoadTargets: (project: string, rel_path: string) =>
+    apiCall<LoadTargets>('GET', `/dcc/load-targets?${new URLSearchParams({ project, rel_path })}`),
+  // Old Constructor files (usd/assembly): list, and move to <project>/_backup_flux (never a hard delete).
+  getUsdLegacy: (project: string) =>
+    apiCall<{ files: { name: string; rel_path: string }[] }>('GET', `/usd/legacy?${new URLSearchParams({ project })}`),
+  deleteUsdLegacy: (project: string, rel_path: string) =>
+    apiCall<{ ok: boolean; backup: string }>('POST', '/usd/legacy/delete', { project, rel_path }),
 
   publishMaya: (payload: {
     project_name: string
@@ -839,6 +847,12 @@ export type UsdAssemblyOp =
   | { op: 'set_variant'; name: string; department: string; variant: string }   // '' = component default
 export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
 export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }
+export interface LoadTargets {
+  what: 'asset' | 'decor' | 'shot' | 'layer' | 'file'
+  legacy: boolean
+  message: string
+  targets: { label: string; rel_path: string; primary: boolean; what: string }[]
+}
 export interface UsdShotInfo {
   seq: string
   shot: string

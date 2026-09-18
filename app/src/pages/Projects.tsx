@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
+import type { LoadTargets } from '../api/client'
 import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
@@ -46,7 +47,9 @@ function loadTileSize(): TileSize {
   return 'md'
 }
 
-interface ExplorerItem { name: string; isDir: boolean }
+interface ExplorerItem { name: string; isDir: boolean; legacy?: boolean }
+
+const USD_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz'])
 
 interface SavedItem {
   label:   string
@@ -1506,6 +1509,8 @@ export function Projects() {
 
   // Context menu & delete confirm
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null)
+  // V4: what "Ouvrir dans..." loads for the right-clicked USD file (asset first, layer second).
+  const [loadTargets,    setLoadTargets]    = useState<{ name: string; lt: LoadTargets } | null>(null)
   const [deleteConfirm,  setDeleteConfirm]  = useState<ExplorerItem[] | null>(null)
   const [deleteProjectTarget, setDeleteProjectTarget] = useState<SavedItem | null>(null)
   const [deleteError,    setDeleteError]    = useState('')
@@ -1783,7 +1788,7 @@ export function Projects() {
         const d = await api.browseProject(nav.project, subpath || undefined)
         setItems([
           ...d.folders.map(f => ({ name: f.name, isDir: true })),
-          ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
+          ...(d.files ?? []).map(f => ({ name: f.name, isDir: false, legacy: !!f.legacy })),
         ])
       }
     } catch { setItems([]) }
@@ -1995,7 +2000,15 @@ export function Projects() {
     setSelectedNames(newSel)
     const ctxItems = items.filter(it => newSel.has(it.name))
     setCtxMenu({ x: e.clientX, y: e.clientY, items: ctxItems })
-  }, [selectedNames, items])
+    setLoadTargets(null)
+    const one = ctxItems.length === 1 ? ctxItems[0] : null
+    if (one && !one.isDir && nav.kind === 'inside' && USD_EXTS.has('.' + (one.name.split('.').pop() ?? '').toLowerCase())) {
+      const rel = [...nav.subpath, one.name].join('/')
+      api.getLoadTargets(nav.project, rel)
+        .then(lt => setLoadTargets({ name: one.name, lt }))
+        .catch(() => setLoadTargets(null))
+    }
+  }, [selectedNames, items, nav])
 
   const handleSetProject = useCallback((name: string) => {
     setActiveProject(name)
@@ -2034,9 +2047,9 @@ export function Projects() {
     await loadItems()
   }, [nav, loadItems, pushUndo])
 
-  const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
+  const handleOpenInHoudini = useCallback(async (item: ExplorerItem, relOverride?: string) => {
     if (nav.kind !== 'inside') return
-    const rel_path = [...nav.subpath, item.name].join('/')
+    const rel_path = relOverride ?? [...nav.subpath, item.name].join('/')
     // DCC imports can take a while (big USD stages): keep a spinner toast until done.
     const id = toast.loading(`Import de ${item.name} dans Houdini…`)
     try {
@@ -2070,12 +2083,12 @@ export function Projects() {
 
   const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc', '.usd', '.usda', '.usdc', '.usdz'])
 
-  const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
+  const handleOpenInMaya = useCallback(async (item: ExplorerItem, relOverride?: string, mode: 'import' | 'proxy' = 'import') => {
     if (nav.kind !== 'inside') return
-    const rel_path = [...nav.subpath, item.name].join('/')
+    const rel_path = relOverride ?? [...nav.subpath, item.name].join('/')
     const id = toast.loading(`Import de ${item.name} dans Maya…`)
     try {
-      await api.importFileInMaya(nav.project, rel_path, readActiveInstancePort('Maya') ?? undefined)
+      await api.importFileInMaya(nav.project, rel_path, readActiveInstancePort('Maya') ?? undefined, mode)
       toast.success(`${item.name} importé dans Maya`, { id })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
@@ -2117,12 +2130,45 @@ export function Projects() {
 
   // "Open in" targets = every currently-CONNECTED DCC that can import this file.
   // Only Maya & Houdini have an import bridge today; add a branch here to onboard more.
+  const handleDeleteLegacy = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    try {
+      const res = await api.deleteUsdLegacy(nav.project, rel_path)
+      toast.success(`${item.name} deplace dans le backup du projet`, { description: res.backup })
+      await loadItems()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+  }, [nav, loadItems])
+
   const buildOpenInTargets = useCallback((items: ExplorerItem[]): { dcc: string; onClick: () => void }[] => {
     if (nav.kind !== 'inside' || items.length !== 1) return []
     const item = items[0]
     if (item.isDir) return []
     const ext = '.' + (item.name.split('.').pop() ?? '').toLowerCase()
     const targets: { dcc: string; onClick: () => void }[] = []
+    // V4 (ADR 0019 points 5 and 7): a USD file opens what the pipeline loads (the asset,
+    // the decor or the shot), the department layer alone comes second, an old file never.
+    const lt = loadTargets?.name === item.name ? loadTargets.lt : null
+    if (USD_EXTS.has(ext) && lt) {
+      for (const t of lt.targets) {
+        const label = t.primary ? t.label : 'couche seule'
+        if (dccStatus['Houdini']?.connected) {
+          targets.push({ dcc: `Houdini : ${label}`, onClick: () => void handleOpenInHoudini(item, t.rel_path) })
+        }
+        if (dccStatus['Maya']?.connected) {
+          targets.push({ dcc: `Maya : ${label} (aplati)`, onClick: () => void handleOpenInMaya(item, t.rel_path) })
+          if (t.primary) {
+            targets.push({ dcc: `Maya : ${label} (proxy USD, variantes)`, onClick: () => void handleOpenInMaya(item, t.rel_path, 'proxy') })
+          }
+        }
+      }
+      if (lt.legacy) {
+        targets.push({ dcc: 'Ancien fichier : supprimer (backup)', onClick: () => void handleDeleteLegacy(item) })
+      }
+      return targets
+    }
     if (dccStatus['Houdini']?.connected) {
       targets.push({ dcc: 'Houdini', onClick: () => void handleOpenInHoudini(item) })
     }
@@ -2137,7 +2183,7 @@ export function Projects() {
       targets.push({ dcc: 'Photoshop', onClick: () => void handleOpenInPhotoshop(item) })
     }
     return targets
-  }, [nav, dccStatus, handleOpenInHoudini, handleOpenInMaya, handleOpenInNuke, handleOpenInPhotoshop, MAYA_IMPORT_EXTS, NUKE_IMPORT_EXTS, PS_OPEN_EXTS])
+  }, [nav, dccStatus, loadTargets, handleOpenInHoudini, handleOpenInMaya, handleOpenInNuke, handleOpenInPhotoshop, handleDeleteLegacy, MAYA_IMPORT_EXTS, NUKE_IMPORT_EXTS, PS_OPEN_EXTS])
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
@@ -2793,6 +2839,12 @@ export function Projects() {
                           <div title={item.name} style={{ fontSize: TILE_SIZES[tileSize].font, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%' }}>
                             {item.name}
                           </div>
+                          {item.legacy && (
+                            <span title="Ancien fichier du Constructeur : plus propose a l'import (clic droit pour le supprimer)"
+                              style={{ fontSize: 9, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--rule-2)', color: 'var(--ink-3)', background: 'var(--paper-2)' }}>
+                              ancien
+                            </span>
+                          )}
                         </div>
                       )
                     })}

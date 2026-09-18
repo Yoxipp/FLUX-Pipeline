@@ -441,3 +441,40 @@ async def generate_usd_shot(req: ShotStageRequest) -> dict:
     return {"ok": True, "changed": bool(res["version"]), "version": res["version"],
             "last": str(res["last"]) if res["last"] and Path(res["last"]).is_file() else "",
             "warnings": res["warnings"], "auto_cast": res["auto_cast"]}
+
+
+# ── old Constructor files (V4, ADR 0019 point 7) ─────────────────────────────
+
+class LegacyDeleteRequest(BaseModel):
+    rel_path: str
+    project: str | None = None
+    user: str = ""
+
+
+@router.get("/legacy")
+async def list_usd_legacy(project: str | None = None) -> dict:
+    """Old flat files of the removed Constructor (never proposed to DCC imports)."""
+    _, project_path = _resolve_project(project)
+    from features.importer.load_target import legacy_files
+
+    loop = asyncio.get_running_loop()
+    files = await loop.run_in_executor(None, lambda: legacy_files(project_path))
+    return {"files": [{"name": f.name, "rel_path": f.relative_to(project_path).as_posix()} for f in files]}
+
+
+@router.post("/legacy/delete")
+async def delete_usd_legacy(req: LegacyDeleteRequest) -> dict:
+    """Move an old Constructor file to <project>/_backup_flux/<date>/ (never a hard delete)."""
+    _, project_path = _resolve_project(req.project)
+    from core.paths import is_subpath
+    from features.importer.load_target import delete_legacy_file
+
+    target = (project_path / req.rel_path).resolve()
+    if not is_subpath(target, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorise")
+    loop = asyncio.get_running_loop()
+    try:
+        backup = await loop.run_in_executor(None, lambda: delete_legacy_file(project_path, target, user=req.user))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "backup": str(backup) if backup else ""}

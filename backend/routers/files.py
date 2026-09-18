@@ -35,6 +35,13 @@ async def browse_project(project_name: str, subpath: str = "") -> dict:
     )
     all_files = await loop.run_in_executor(None, lambda: list_files_immediate(target))
     files_info = [get_file_info(f, target) for f in all_files]
+    # V4: old Constructor files of usd/assembly are flagged "ancien" (never imported).
+    from features.usd_assembler.assembly_v2 import assembly_root
+    if target == assembly_root(project_path).resolve():
+        from features.importer.load_target import is_legacy_file
+
+        for info, f in zip(files_info, all_files):
+            info["legacy"] = await loop.run_in_executor(None, lambda f=f: is_legacy_file(project_path, f))
 
     return {
         "path":    str(target),

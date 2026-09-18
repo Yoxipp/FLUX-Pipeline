@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from core.logger import get_logger
@@ -128,7 +129,29 @@ def import_file(file_path: str | Path) -> list[str] | None:
         return None
 
 
-def run_import(file_path: str | Path, result_path: str) -> None:
+def open_proxy(file_path: str | Path) -> list[str] | None:
+    """Open a USD stage as a mayaUsdProxyShape (V4, 2026-09-18): nothing is flattened,
+    variant sets stay switchable. *file_path* must be ASCII (the hub sends the Windows
+    short path of an accented folder). Returns [transform, shape] or None."""
+    src = Path(str(file_path))
+    if not _load_usd_plugin():
+        log.error("proxy USD: plugin mayaUsdPlugin indisponible")
+        return None
+    try:
+        name = re.sub(r"[^A-Za-z0-9_]", "_", src.stem.replace("_LAST", "")) or "usd"
+        tr = cmds.createNode("transform", name=f"{name}_usd")
+        shape = cmds.createNode("mayaUsdProxyShape", parent=tr, name=f"{name}_usdShape")
+        cmds.setAttr(f"{shape}.filePath", str(src).replace("\\", "/"), type="string")
+        if cmds.objExists("time1"):
+            cmds.connectAttr("time1.outTime", f"{shape}.time", force=True)
+        log.info("proxy USD: %s -> %s", src.name, shape)
+        return [tr, shape]
+    except Exception as exc:
+        log.error("proxy USD failed for %s: %s", src.name, exc)
+        return None
+
+
+def run_import(file_path: str | Path, result_path: str, mode: str = "import") -> None:
     """Import for the Flux hub and persist a JSON result envelope.
 
     Runs inside Maya. Maya is a separate process from the hub, so its log messages
@@ -156,7 +179,7 @@ def run_import(file_path: str | Path, result_path: str) -> None:
 
     nodes: list[str] | None = None
     try:
-        nodes = import_file(file_path)
+        nodes = open_proxy(file_path) if mode == "proxy" else import_file(file_path)
     except Exception as exc:  # pragma: no cover - defensive; import_file already guards
         records.append({"level": "ERROR", "msg": f"import raised: {exc!r}"})
     finally:

@@ -66,6 +66,7 @@ export interface FileEntry {
   size: number
   modified: string
   is_dir: boolean
+  legacy?: boolean               // old flat Constructor file of usd/assembly (V4): never imported
 }
 
 // Template library preset (RETAKES-3): a reusable model file the team links once

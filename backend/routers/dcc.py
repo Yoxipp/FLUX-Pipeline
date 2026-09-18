@@ -435,6 +435,21 @@ class HoudiniFluxImporterCreateRequest(BaseModel):
     rel_path:      str = ""
 
 
+@router.get("/load-targets")
+async def dcc_load_targets(project: str, rel_path: str) -> dict:
+    """V4: what "Ouvrir dans..." loads for a file (asset / decor / shot first, the
+    department layer second, old files refused). See features/importer/load_target.py."""
+    from core.paths import get_project_path, is_subpath
+    from features.importer.load_target import load_targets
+
+    project_path = get_project_path(project)
+    target = (project_path / rel_path).resolve()
+    if not project_path.exists() or not is_subpath(target, project_path.resolve()):
+        raise HTTPException(status_code=404, detail=f"Fichier introuvable : {rel_path}")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: load_targets(project_path, target))
+
+
 @router.post("/houdini/importer/create_node")
 async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) -> dict:
     """Create a flux_importer node in the active Houdini network.
@@ -471,6 +486,7 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
         pp = get_project_path(req.project)
         cand = pp / req.rel_path.replace("/", "\\")
         if cand.exists():
+            _refuse_legacy(pp, cand)
             selected_file = str(cand)
 
     # F2: store portable "$FLUX/..." tokens on the created / re-pathed node so the
@@ -874,6 +890,41 @@ class MayaImportRequest(BaseModel):
     project_name: str
     rel_path: str  # project-relative path, e.g. "CHAR/RIG/HorseBody/adam/HorseBody_adam.fbx"
     port: int | None = None  # target Maya instance (None → base commandPort)
+    # USD only (V4): "import" = flattened copy (default), "proxy" = mayaUsdProxyShape
+    # on the file itself (variants kept, editable).
+    mode: str = "import"
+
+
+def _ascii_path(path) -> str | None:
+    """*path* with an ASCII folder (Windows short name of an accented folder), file name
+    kept, forward slashes. None when no ASCII form exists (8.3 names disabled)."""
+    from pathlib import Path as _PLib
+
+    p = _PLib(path)
+    text = str(p).replace("\\", "/")
+    if text.isascii():
+        return text
+    if not p.name.isascii():
+        return None
+    try:
+        import ctypes
+
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(str(p.parent), buf, 1024)
+    except Exception:           # noqa: BLE001 - not Windows
+        return None
+    short = buf.value if 0 < n < 1024 else ""
+    if not short or not short.isascii():
+        return None
+    return (short.rstrip("\\/") + "/" + p.name).replace("\\", "/")
+
+
+def _refuse_legacy(project_path, file_path) -> None:
+    """V4 (ADR 0019 point 7): an old flat Constructor file is never opened in a DCC."""
+    from features.importer.load_target import is_legacy_file, load_targets
+
+    if is_legacy_file(project_path, file_path):
+        raise HTTPException(status_code=400, detail=load_targets(project_path, file_path)["message"])
 
 
 _MAYA_IMPORT_EXTS = {".obj", ".fbx", ".ma", ".mb", ".abc", ".usd", ".usda", ".usdc", ".usdz"}
@@ -953,6 +1004,10 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     file_path = project_path / req.rel_path.replace("/", "\\")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {file_path}")
+    _refuse_legacy(project_path, file_path)
+    proxy_mode = req.mode == "proxy"
+    if proxy_mode and ext not in _USD_IMPORT_EXTS:
+        raise HTTPException(status_code=400, detail="Le mode proxy USD ne s'applique qu'a un fichier USD")
 
     import json as _json
     import os as _os
@@ -967,7 +1022,15 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
 
     # Maya 2024's mayaUsd cannot read recent crates nor accented paths: flatten USD to a
     # temp ASCII .usda (in result_dir, cleaned up with it). Other formats pass through.
-    if ext in _USD_IMPORT_EXTS:
+    if proxy_mode:
+        # The stage itself (no flattening): mayaUsd reads the sublayers and variants. An
+        # accented folder goes through its Windows short name (mayaUsd fails on accents).
+        fp_fwd = _ascii_path(file_path)
+        if fp_fwd is None:
+            _shutil.rmtree(result_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=(
+                "Chemin avec accents sans nom court Windows : ouvre plutot l'import aplati"))
+    elif ext in _USD_IMPORT_EXTS:
         fp_fwd = _maya_usd_source(file_path, result_dir)
     else:
         fp_fwd = str(file_path).replace("\\", "/")
@@ -989,7 +1052,8 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
         f"sys.modules.pop('dcc.maya.maya_import', None); "
         f"from dcc.maya.maya_import import run_import; "
         f"run_import(_b64.b64decode('{_enc(fp_fwd)}').decode('utf-8'), "
-        f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'))"
+        f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'), "
+        f"mode={'proxy' if proxy_mode else 'import'!r})"
     )
 
     target_port = await _maya_target(req.port)
