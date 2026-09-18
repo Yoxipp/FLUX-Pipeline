@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-from pxr import Sdf, Usd, UsdGeom, Vt
+from pxr import Sdf, Usd, UsdGeom, UsdSkel, Vt
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,9 @@ DEFAULT_REDUCTION = 0.9
 # customLayerData key that carries the source hash for skip-if-unchanged.
 _HASH_KEY = "flux_proxy_src_sha1"
 _TOOL_KEY = "flux_proxy_tool"
-_TOOL_TAG = "flux-usd-proxy"
+# Bumped when the proxy content changes, so older proxies are rebuilt even if their
+# source did not change (2: the skin binding follows the proxy, 2026-09-18).
+_TOOL_TAG = "flux-usd-proxy/2"
 
 
 # USD containers pxr can open for proxy generation.
@@ -108,17 +110,70 @@ def decimate(
     target_reduction is the fraction of triangles removed (clamped to a sane
     open interval). Falls back to the input when there is nothing to reduce.
     """
+    new_points, new_faces, _ = decimate_with_mapping(points, tri_faces, target_reduction)
+    return new_points, new_faces
+
+
+def decimate_with_mapping(
+    points: np.ndarray, tri_faces: np.ndarray, target_reduction: float
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``decimate`` plus, for every source point, the index of the proxy point it
+    collapsed into (lets per-point data such as skin weights follow the proxy)."""
     import fast_simplification as fs
 
+    identity = np.arange(points.shape[0], dtype=np.int64)
     if tri_faces.shape[0] == 0:
-        return points, tri_faces
+        return points, tri_faces, identity
     reduction = min(max(target_reduction, 0.0), 0.99)
     if reduction <= 0.0:
-        return points, tri_faces
-    new_points, new_faces = fs.simplify(
-        points.astype(np.float32), tri_faces.astype(np.int64), target_reduction=reduction
-    )
-    return np.asarray(new_points, dtype=np.float32), np.asarray(new_faces, dtype=np.int64)
+        return points, tri_faces, identity
+    pts = points.astype(np.float32)
+    faces = tri_faces.astype(np.int64)
+    _, _, collapses = fs.simplify(pts, faces, target_reduction=reduction, return_collapses=True)
+    new_points, new_faces, mapping = fs.replay_simplification(pts, faces, collapses)
+    return (np.asarray(new_points, dtype=np.float32), np.asarray(new_faces, dtype=np.int64),
+            np.asarray(mapping, dtype=np.int64))
+
+
+def _copy_skin_binding(src: UsdGeom.Mesh, proxy: UsdGeom.Mesh, mapping: np.ndarray,
+                       n_proxy_points: int) -> bool:
+    """Give the proxy the skin of its source mesh: same skeleton, same bind transform,
+    and per proxy point the joint indices / weights of one source point that collapsed
+    into it. Without it a viewport showing proxies (Houdini) keeps the mesh rigid while
+    the skeleton animates. Returns True when a binding was copied."""
+    prim = src.GetPrim()
+    if not prim.HasAPI(UsdSkel.BindingAPI):
+        return False
+    s = UsdSkel.BindingAPI(prim)
+    ji, jw = s.GetJointIndicesPrimvar(), s.GetJointWeightsPrimvar()
+    if not ji or not jw or ji.Get() is None or jw.Get() is None:
+        return False
+    d = UsdSkel.BindingAPI.Apply(proxy.GetPrim())
+    size = ji.GetElementSize()
+    indices = np.asarray(ji.Get(), dtype=np.int32)
+    weights = np.asarray(jw.Get(), dtype=np.float32)
+    if ji.GetInterpolation() == UsdGeom.Tokens.constant:        # rigid binding
+        d.CreateJointIndicesPrimvar(True, size).Set(Vt.IntArray.FromNumpy(indices))
+        d.CreateJointWeightsPrimvar(True, size).Set(Vt.FloatArray.FromNumpy(weights))
+    else:
+        # First source point of each proxy point (mapping is source -> proxy).
+        rep = np.zeros(n_proxy_points, dtype=np.int64)
+        order = np.arange(mapping.shape[0] - 1, -1, -1)
+        rep[mapping[order]] = order
+        per_point_i = indices.reshape(-1, size)[rep].reshape(-1)
+        per_point_w = weights.reshape(-1, size)[rep].reshape(-1)
+        d.CreateJointIndicesPrimvar(False, size).Set(Vt.IntArray.FromNumpy(per_point_i))
+        d.CreateJointWeightsPrimvar(False, size).Set(Vt.FloatArray.FromNumpy(per_point_w))
+    targets = s.GetSkeletonRel().GetTargets() if s.GetSkeletonRel() else []
+    if targets:
+        d.CreateSkeletonRel().SetTargets(targets)
+    bind = s.GetGeomBindTransformAttr()
+    if bind and bind.HasAuthoredValue():
+        d.CreateGeomBindTransformAttr(bind.Get())
+    joints = s.GetJointsAttr()
+    if joints and joints.HasAuthoredValue():
+        d.CreateJointsAttr(joints.Get())
+    return True
 
 
 def _iter_render_meshes(stage: Usd.Stage):
@@ -147,6 +202,8 @@ def _read_stored_hash(dst: Path) -> Optional[str]:
     if layer is None:
         return None
     data = layer.customLayerData or {}
+    if data.get(_TOOL_KEY) != _TOOL_TAG:
+        return None                      # built by an older proxy tool: rebuild
     value = data.get(_HASH_KEY)
     return value if isinstance(value, str) and value else None
 
@@ -220,8 +277,10 @@ def generate_proxy(
             # Keep tiny meshes as-is; decimate the rest.
             if tri_faces.shape[0] <= min_tris:
                 proxy_points, proxy_faces = points, tri_faces
+                mapping = np.arange(points.shape[0], dtype=np.int64)
             else:
-                proxy_points, proxy_faces = decimate(points, tri_faces, target_reduction)
+                proxy_points, proxy_faces, mapping = decimate_with_mapping(
+                    points, tri_faces, target_reduction)
             tris_out += proxy_faces.shape[0]
 
             # The source mesh is render geometry.
@@ -248,6 +307,7 @@ def generate_proxy(
                 Vt.IntArray.FromNumpy(proxy_faces.astype(np.int32).reshape(-1))
             )
             proxy.CreateExtentAttr(_extent_of(proxy_points))
+            _copy_skin_binding(mesh, proxy, mapping, proxy_points.shape[0])
     except Exception as exc:  # noqa: BLE001 - report, do not crash the caller
         _drop_created(dst, created)
         return ProxyResult(src=src_usd, dst=dst, status="failed", error=str(exc))

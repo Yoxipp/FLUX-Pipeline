@@ -157,6 +157,68 @@ class GenerateProxyTests(unittest.TestCase):
             self.assertEqual(usable_proxy(src), stub)
 
 
+class SkinnedProxyTests(unittest.TestCase):
+    """Live 2026-09-18: Houdini shows proxies in the viewport; an unskinned proxy kept
+    the character rigid while its skeleton animated."""
+
+    def _skinned_grid(self, path: Path, n: int = 12) -> None:
+        from pxr import Gf, Sdf, UsdSkel
+
+        _make_grid_usd(path, n, mesh_path="/Asset/geo/render/body")
+        stage = Usd.Stage.Open(str(path))
+        UsdSkel.Root.Define(stage, "/Asset")
+        skel = UsdSkel.Skeleton.Define(stage, "/Asset/skel/Skeleton")
+        skel.CreateJointsAttr(["Root", "Root/Top"])
+        ident = Gf.Matrix4d(1)
+        skel.CreateBindTransformsAttr([ident, ident])
+        skel.CreateRestTransformsAttr([ident, ident])
+        mesh = stage.GetPrimAtPath("/Asset/geo/render/body")
+        pts = UsdGeom.Mesh(mesh).GetPointsAttr().Get()
+        b = UsdSkel.BindingAPI.Apply(mesh)
+        # bottom half on Root, top half on Top (one influence per point)
+        b.CreateJointIndicesPrimvar(False, 1).Set([0 if p[1] < n / 2 else 1 for p in pts])
+        b.CreateJointWeightsPrimvar(False, 1).Set([1.0] * len(pts))
+        b.CreateSkeletonRel().SetTargets([Sdf.Path("/Asset/skel/Skeleton")])
+        stage.GetRootLayer().Save()
+
+    def test_the_proxy_keeps_the_skin_of_its_source(self):
+        from pxr import UsdSkel
+
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "asset.usda"
+            self._skinned_grid(src)
+            r = UP.generate_proxy(src, target_reduction=0.8, min_tris=10)
+            self.assertEqual(r.status, "converted")
+            stage = Usd.Stage.Open(str(r.dst))
+            proxy = stage.GetPrimAtPath("/Asset/geo/proxy/body")
+            self.assertTrue(proxy.HasAPI(UsdSkel.BindingAPI))
+            b = UsdSkel.BindingAPI(proxy)
+            n_pts = len(UsdGeom.Mesh(proxy).GetPointsAttr().Get())
+            idx = list(b.GetJointIndicesPrimvar().Get())
+            self.assertEqual(len(idx), n_pts)
+            self.assertEqual(set(idx), {0, 1})
+            self.assertEqual([str(t) for t in b.GetSkeletonRel().GetTargets()], ["/Asset/skel/Skeleton"])
+            pts = UsdGeom.Mesh(proxy).GetPointsAttr().Get()
+            for p, j in zip(pts, idx):        # weights follow position, not index order
+                if p[1] <= 4.5:               # collapsed points near y=6 may go either way
+                    self.assertEqual(j, 0, p)
+                elif p[1] >= 7.0:
+                    self.assertEqual(j, 1, p)
+
+    def test_an_older_proxy_is_rebuilt(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "asset.usda"
+            self._skinned_grid(src)
+            r = UP.generate_proxy(src, target_reduction=0.8, min_tris=10)
+            from pxr import Sdf
+            layer = Sdf.Layer.FindOrOpen(str(r.dst))
+            data = dict(layer.customLayerData)
+            data["flux_proxy_tool"] = "flux-usd-proxy"          # pre-skin tool
+            layer.customLayerData = data
+            layer.Save()
+            self.assertEqual(UP.generate_proxy(src).status, "converted")
+
+
 class ProxyCommandTests(unittest.TestCase):
     def test_action_loads_one_step(self):
         query = ActionQuery.from_file(GENERATE_PROXY_ACTION, context={})
