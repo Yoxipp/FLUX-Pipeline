@@ -19,23 +19,29 @@ DEPARTMENT_ORDER: dict[str, int] = {"model": 100, "groom": 175, "look": 200, "ri
 CLIP_TYPES = frozenset({"ANIM"})
 # Asset TYPE the light (skinned mesh / skeleton) export can write.
 LIGHT_EXPORT_TYPES = frozenset({"GEO", "RIG"}) | CLIP_TYPES
+# Asset TYPE the look export writes (A1b): the DCC exports its materials, the backend
+# rewrites them into /<NAME>/mtl + bindings (features/usd_export/look_export.py).
+LOOK_EXPORT_TYPES = frozenset({"SHADING"})
 
 # What FLUX extracts from the scene when it writes the USD of that TYPE itself, and
 # how to say it in the Publisher. ONE table for backend and UI (GET /usd/departments).
+# "writer" says which exporter runs: "light" (skinned mesh / skeleton) or "look".
 LIGHT_EXPORT_CONTENT: dict[str, dict] = {
-    "GEO":  {"what": "geometrie, UV et poids de skin",
+    "GEO":  {"what": "geometrie, UV et poids de skin", "writer": "light",
              "include": {"geo": True, "skel": True, "anim": False, "weights": True, "uv": True}},
-    "RIG":  {"what": "squelette",
+    "RIG":  {"what": "squelette", "writer": "light",
              "include": {"geo": False, "skel": True, "anim": False, "weights": False, "uv": False}},
-    "ANIM": {"what": "animation du squelette",
+    "ANIM": {"what": "animation du squelette", "writer": "light",
              "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
+    "SHADING": {"what": "materiaux et assignations (sans geometrie)", "writer": "look",
+                "include": {"geo": False, "skel": False, "anim": False, "weights": False, "uv": False}},
 }
 
 
 def publisher_table() -> dict[str, dict]:
-    """{TYPE: {"department", "what", "include"}} for the tasks a DCC can export in USD."""
+    """{TYPE: {"department", "what", "writer", "include"}} for the tasks FLUX exports in USD."""
     out: dict[str, dict] = {}
-    for task in sorted(LIGHT_EXPORT_TYPES):
+    for task in sorted(LIGHT_EXPORT_TYPES | LOOK_EXPORT_TYPES):
         content = LIGHT_EXPORT_CONTENT.get(task)
         if content is None:
             continue

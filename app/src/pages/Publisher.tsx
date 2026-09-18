@@ -319,12 +319,14 @@ const ASSET_TASKS: { value: string; label: string }[] = [
 // ADR 0019): one table, no copy to drift. This is only the fallback used while the
 // request is in flight or when the backend is unreachable.
 const USD_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
-  GEO:  { department: 'model', what: 'géométrie, UV et poids de skin',
+  GEO:  { department: 'model', what: 'géométrie, UV et poids de skin', writer: 'light',
           include: { geo: true,  skel: true,  anim: false, weights: true,  uv: true } },
-  RIG:  { department: 'rig',   what: 'squelette',
+  RIG:  { department: 'rig',   what: 'squelette', writer: 'light',
           include: { geo: false, skel: true,  anim: false, weights: false, uv: false } },
-  ANIM: { department: 'clip',  what: 'animation du squelette',
+  ANIM: { department: 'clip',  what: 'animation du squelette', writer: 'light',
           include: { geo: false, skel: true,  anim: true,  weights: false, uv: false } },
+  SHADING: { department: 'look', what: 'matériaux et assignations (sans géométrie)', writer: 'look',
+             include: { geo: false, skel: false, anim: false, weights: false, uv: false } },
 }
 
 // Info popover copy for each token (explanation · expected · concrete example).
@@ -722,6 +724,8 @@ export function Publisher() {
   const usdContribution = usdDepartments[sel.task]
   // FLUX writes the layered USD by default for a task that has a department.
   const usdLayers = (fluxWriter ?? !!usdContribution) && !!usdContribution
+  // The look department is written by its own exporter (materials, no geometry).
+  const usdLook = usdLayers && usdContribution?.writer === 'look'
   const usdInclude = usdContribution?.include
     ?? { geo: true, skel: true, anim: true, weights: true, uv: true }
   const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
@@ -1068,6 +1072,19 @@ export function Publisher() {
           toast.error('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
           return
         }
+        if (usdLook && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const res = await api.exportMayaLookUsd({
+            project_name: project,
+            filename,
+            fmt:          exportExt.replace('.', ''),
+            scope:        mayaScope,
+            user:         settings?.username ?? undefined,
+            port:         readActiveInstancePort('Maya') ?? undefined,
+          })
+          toast.success(`Look ${res.version} → ${res.materials} matériau(x), ${res.bindings} liaison(s)`)
+          res.warnings?.forEach(w => toast.warning(w))
+          return
+        }
         if (usdLayers && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = formatToken(sel.name) || parts[2]
           const res = await api.exportMayaLightUsd({
@@ -1105,6 +1122,18 @@ export function Publisher() {
       } else if (dcc === 'Houdini') {
         if (!houdiniConnected) {
           toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
+          return
+        }
+        if (usdLook && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
+          const res = await api.exportHoudiniLookUsd({
+            project_name: project,
+            filename,
+            lop_node:     ropNodePath || undefined,
+            fmt:          exportExt.replace('.', ''),
+            user:         settings?.username ?? undefined,
+          })
+          toast.success(`Look ${res.version} → ${res.materials} matériau(x), ${res.bindings} liaison(s)`)
+          res.warnings?.forEach(w => toast.warning(w))
           return
         }
         if (usdLayers && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
@@ -1990,10 +2019,12 @@ export function Publisher() {
                     TASK {sel.task} : département <span style={{ fontFamily: 'var(--mono)' }}>{contribution.department}</span> de
                     l'asset, {contribution.what}. La task décide de ce qui est exporté.
                     {on
-                      ? " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe)."
+                      ? (contribution.writer === 'look'
+                        ? ` FLUX lit les matériaux de ${dcc === 'Houdini' ? 'Solaris (LOP affiché ou chemin du node)' : 'la scène'} et écrit /NAME/mtl + les assignations sur /NAME/geo/render (textures .tx si converties).`
+                        : " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe).")
                       : ` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`}
                   </>) : (
-                    `TASK ${sel.task || '—'} : pas de département USD (GEO, RIG ou ANIM). ${dcc} écrit le fichier.`
+                    `TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`
                   )}
                 </div>
               </div>

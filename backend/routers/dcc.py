@@ -696,6 +696,48 @@ async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
     return result
 
 
+def _resolve_look_target(project_path, filename: str, fmt: str) -> tuple[str, str]:
+    """(publish folder, base name) for a look publish, or 400 when tokens cannot place it."""
+    from features.folder_manager.naming_validator import get_base_name
+    from features.publisher.publish_core import resolve_publish_path
+
+    full = f"{filename}.{fmt.lstrip('.')}"
+    dest = resolve_publish_path(project_path, full)
+    if dest is None:
+        raise HTTPException(status_code=400, detail=f"Chemin de publish introuvable pour {filename}")
+    return str(dest), get_base_name(full)
+
+
+class HoudiniLookExportRequest(BaseModel):
+    project_name: str
+    filename:     str            # full base (CLASS_SHADING_NAME_INSTANCE)
+    lop_node:     str | None = None   # LOP to export; None = display node of /stage
+    fmt:          str = "usda"
+    user:         str | None = None
+
+
+@router.post("/houdini/export-usd-look")
+async def houdini_export_usd_look(req: HoudiniLookExportRequest) -> dict:
+    """Look department of an asset from Solaris: Houdini writes, the backend authors."""
+    from core.paths import get_project_path
+    from dcc.houdini.houdini_usd_look_export import run_look_export
+
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    dest_dir, base_name = _resolve_look_target(project_path, req.filename, req.fmt)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: run_look_export(str(project_path), lop_node=req.lop_node, fmt=req.fmt,
+                                dest_dir=dest_dir, base_name=base_name, user=req.user or ""),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Export look echoue"))
+    return result
+
+
 class HoudiniCharacterImportRequest(BaseModel):
     file_path:    str            # absolute path to a skinned .usd*/.fbx
     network_path: str = "/obj"   # where to create the import (wraps in a geo if OBJ ctx)
@@ -1087,6 +1129,97 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
                 "root": str(pub["root"]), "folder": str(pub["folder"]), "warnings": pub.get("warnings", [])}
     finally:
         await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
+
+
+class MayaLookExportRequest(BaseModel):
+    project_name: str
+    filename:     str            # full base (CLASS_SHADING_NAME_INSTANCE)
+    fmt:          str = "usda"
+    scope:        str = "scene"  # "scene" | "selection"
+    user:         str | None = None
+    port:         int | None = None
+
+
+@router.post("/maya/export-usd-look")
+async def maya_export_usd_look(req: MayaLookExportRequest) -> dict:
+    """Look department of an asset from Maya: mayaUSDExport writes a throwaway USD,
+    the backend rewrites it into /<NAME>/mtl + bindings and publishes it (ADR 0019)."""
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+    import tempfile as _tempfile
+    from pathlib import Path as _PLib
+
+    from core.paths import get_project_path
+    from dcc.maya.maya_connection import send_command_direct
+
+    project_path = get_project_path(req.project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
+
+    dest_dir, base_name = _resolve_look_target(project_path, req.filename, req.fmt)
+
+    _backend_root = str(_PLib(__file__).resolve().parent.parent)
+    work_dir = _tempfile.mkdtemp(prefix="flux_maya_look_")
+    out_path = work_dir.replace("\\", "/") + "/look_export.usda"
+    result_path = work_dir.replace("\\", "/") + "/_flux_look_export.json"
+
+    cmd = (
+        f"import sys; sys.path.insert(0, r'{_backend_root}'); "
+        f"sys.modules.pop('dcc.maya.maya_usd_look_export', None); "
+        f"from dcc.maya.maya_usd_look_export import run_look_export; "
+        f"run_look_export(r'{out_path}', r'{result_path}', scope='{req.scope}')"
+    )
+
+    target_port = _resolve_target_port("Maya", req.port)
+    loop = asyncio.get_event_loop()
+    try:
+        sent = await loop.run_in_executor(
+            None, lambda: send_command_direct(cmd, timeout=300.0, port=target_port))
+        if sent is None:
+            raise HTTPException(status_code=503,
+                                detail="Maya ne repond pas. Ouvre Maya avec le bridge FLUX actif.")
+
+        envelope = None
+        if _os.path.exists(result_path):
+            try:
+                with open(result_path, encoding="utf-8") as _fh:
+                    envelope = _json.load(_fh)
+            except (OSError, ValueError):
+                envelope = None
+        maya_errors: list[str] = []
+        if envelope:
+            for rec in envelope.get("logs", []):
+                lvl = str(rec.get("level", "INFO")).upper()
+                text = f"[Maya] {rec.get('msg', '')}"
+                if lvl in ("ERROR", "CRITICAL"):
+                    log.error(text)
+                    maya_errors.append(str(rec.get("msg", "")))
+                elif lvl == "WARNING":
+                    log.warning(text)
+                else:
+                    log.info(text)
+        if not envelope or not envelope.get("ok") or not envelope.get("usd"):
+            reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
+            raise HTTPException(status_code=500, detail=f"Export look echoue{reason}")
+
+        from features.usd_export.look_export import publish_look_asset
+
+        try:
+            pub = await loop.run_in_executor(
+                None,
+                lambda: publish_look_asset(envelope["usd"], project_path, fmt=req.fmt,
+                                           dest_dir=dest_dir, base_name=base_name,
+                                           user=req.user or ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        log.info("Look published: %s (%s) -> %s", base_name, pub["version"], pub["folder"])
+        return {"ok": True, "asset": base_name, "version": pub["version"],
+                "root": str(pub["root"]), "materials": pub["materials"],
+                "bindings": pub["bindings"], "warnings": pub["warnings"]}
+    finally:
+        await loop.run_in_executor(None, lambda: _shutil.rmtree(work_dir, ignore_errors=True))
 
 
 @router.post("/maya/publish")

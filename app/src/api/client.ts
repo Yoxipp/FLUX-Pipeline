@@ -292,6 +292,27 @@ export const api = {
     apiCall<{ ok: boolean; asset: string; version: string; root: string; warnings?: string[] }>(
       'POST', '/dcc/houdini/export-usd', payload),
 
+  // Look department (ADR 0019 A1b): the DCC exports its materials, the backend
+  // rewrites them into /<NAME>/mtl + bindings and publishes the look layer.
+  exportMayaLookUsd: (payload: {
+    project_name: string
+    filename:     string
+    fmt?:         string
+    scope?:       string
+    user?:        string
+    port?:        number
+  }) =>
+    apiCall<LookExportResult>('POST', '/dcc/maya/export-usd-look', payload),
+
+  exportHoudiniLookUsd: (payload: {
+    project_name: string
+    filename:     string
+    lop_node?:    string
+    fmt?:         string
+    user?:        string
+  }) =>
+    apiCall<LookExportResult>('POST', '/dcc/houdini/export-usd-look', payload),
+
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>
     apiCall<ZBrushPublishResult>('POST', '/dcc/zbrush/publish', payload),
@@ -811,7 +832,13 @@ export interface UsdLibrary { project: string; components: UsdComponentInfo[]; a
 export interface UsdTaskContribution {
   department: string
   what: string
+  // Which exporter writes this department: the skinned-mesh/skeleton one, or the look one.
+  writer: 'light' | 'look'
   include: { geo: boolean; skel: boolean; anim: boolean; weights: boolean; uv: boolean }
+}
+export interface LookExportResult {
+  ok: boolean; asset: string; version: string; root: string
+  materials: number; bindings: number; warnings?: string[]
 }
 export interface UsdPrimNode {
   path: string; name: string; type: string; kind: string; purpose: string
