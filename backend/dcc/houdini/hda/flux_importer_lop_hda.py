@@ -29,7 +29,8 @@ log = get_logger(__name__)
 NODE_NAME = "flux_importer"
 LABEL = "FLUX Import"
 # SOP-only parms of the /obj importer (KineFX character switch, copy to $HIP).
-_SOP_ONLY = ("usd_character", "btn_move_local")
+# geo_display is re-added below with the LOP wiring (configureprimitive, not a purpose filter).
+_SOP_ONLY = ("usd_character", "btn_move_local", "geo_display")
 
 
 def _build_code(hda_path: str, python_module: str) -> str:

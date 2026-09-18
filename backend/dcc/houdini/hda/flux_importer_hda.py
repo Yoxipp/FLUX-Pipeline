@@ -463,6 +463,13 @@ _ptg.append(_only(_fp, "file"))
 _ptg.append(hou.ToggleParmTemplate("usd_character", "Character USD", default_value=False,
                                    is_hidden=True))
 
+# Viewport geometry (2026-09-18, same menu as the /stage importer): light proxy or render mesh.
+_ptg.append(hou.MenuParmTemplate(
+    "geo_display", "Geometrie", ("proxy", "render"),
+    menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
+    help="USD only. Proxy: the purpose=proxy mesh. Geo complete: the purpose=render mesh.",
+))
+
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
 
 # Resolved path — display only (no callback, no menu)
@@ -521,6 +528,10 @@ _char = _sub.createNode("kinefx::usdcharacterimport", "char_import")
 _char.parm("usdsource").set("file")
 _char.parm("usdfile").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
 _sw   = _sub.createNode("switch",    "format_switch")
+# Purpose filter follows the Geometrie menu (chs on a menu parm returns its token).
+for _pn in (_usd, _char):
+    if _pn.parm("purpose") is not None:
+        _pn.parm("purpose").setExpression('chs("../geo_display")', hou.exprLanguage.Hscript)
 
 # Wire: 0=USD, 1=ABC, 2=File, 3=USD character (mesh with boneCapture)
 _sw.setInput(0, _usd)
