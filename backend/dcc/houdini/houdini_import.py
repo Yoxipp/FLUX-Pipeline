@@ -507,8 +507,9 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
 def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None) -> dict:
     """Import a USD file according to the active network pane (2026-09-17).
 
-    * LOP network (/stage, lopnet): Reference LOP at ``probe_prim_path`` wired after
-      the selected (else displayed) LOP, display flag moved to it.
+    * LOP network (/stage, lopnet): the LOP ``flux_importer`` HDA (same parms as in
+      /obj, 2026-09-18) at ``probe_prim_path``, wired after the selected (else
+      displayed) LOP, display flag moved to it; a plain Reference LOP without the HDA.
     * /obj or SOP network: the ``flux_importer`` HDA set from *importer* (parm values
       from features.importer.library_import.importer_source_for_file: tokens, USD
       library or free path) so the asset stays changeable (2026-09-17). Without
@@ -540,14 +541,30 @@ def create_usd_context_import(file_path: str, probe: dict, importer: dict | None
         if _cat == hou.lopNodeTypeCategory():
             _sel = [n for n in hou.selectedNodes() if n.parent() == _pwd]
             _prev = _sel[0] if _sel else _pwd.displayNode()
-            _node = _pwd.createNode("reference", node_name="flux_ref_" + _name)
-            _node.parm("filepath1").set({file_str!r})
-            _node.parm("primpath1").set({prim_path!r})
+            _importer = {importer_parms!r}
+            if _importer and hou.lopNodeTypeCategory().nodeType("flux_importer") is not None:
+                # Same FLUX Import node as in /obj (2026-09-18): changeable asset,
+                # reload on resolve (Houdini keeps stale USD files otherwise).
+                _node = _pwd.createNode("flux_importer", node_name="flux_import_" + _name)
+                if _prev is not None:
+                    _node.setInput(0, _prev)
+                for _pn in ("project", "source_mode", "flux_class", "flux_type", "flux_name",
+                            "flux_instance", "flux_iter", "lib_item", "lib_version", "free_path"):
+                    if _pn in _importer and _node.parm(_pn) is not None:
+                        _node.parm(_pn).set(_importer[_pn])
+                _node.parm("prim_path").set({prim_path!r})
+                _node.hdaModule().resolve_path(_node)
+                _mode = "lop_flux_importer_" + str(_importer.get("source_mode", ""))
+            else:
+                _node = _pwd.createNode("reference", node_name="flux_ref_" + _name)
+                _node.parm("filepath1").set({file_str!r})
+                _node.parm("primpath1").set({prim_path!r})
+                if _prev is not None:
+                    _node.setInput(0, _prev)
+                _mode = "lop_reference"
             if _prev is not None:
-                _node.setInput(0, _prev)
                 _node.setPosition(_prev.position() + hou.Vector2(0, -1.2))
             _node.setDisplayFlag(True)
-            _mode = "lop_reference"
         elif _cat in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory()):
             _net = _pwd.createNode("geo", node_name="flux_" + _name) if _cat == hou.objNodeTypeCategory() else _pwd
             _importer = {importer_parms!r}

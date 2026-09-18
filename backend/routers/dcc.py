@@ -485,7 +485,7 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
 
     loop = asyncio.get_event_loop()
 
-    # USD: import by context (Reference LOP in /stage, flux_importer HDA in SOP whose
+    # USD: import by context (flux_importer HDA in /stage and in SOP, whose
     # source matches the file: tokens for a task publish, USD library for a component /
     # assembly, free path otherwise).
     if selected_file and _PLib(req.rel_path).suffix.lower() in USD_EXTS:
@@ -1851,8 +1851,9 @@ async def houdini_importer_resolve(
     # character in the HDA (mesh + boneCapture, skeleton, animated skeleton).
     if result.get("ok") and result.get("path"):
         from features.importer.library_import import probe_file
-        result["has_skel"] = bool(
-            (await loop.run_in_executor(None, lambda: probe_file(result["path"]))).get("has_skel"))
+        probed = await loop.run_in_executor(None, lambda: probe_file(result["path"]))
+        result["has_skel"] = bool(probed.get("has_skel"))
+        result["prim_path"] = probed.get("prim_path", "")
     # F2: hand Houdini a portable "$FLUX/..." path so the HDA stores a token the
     # scene can carry across machines. Houdini expands $FLUX (F1 package) at cook.
     # Opt-in; the resolver itself stays absolute for backend-internal use.

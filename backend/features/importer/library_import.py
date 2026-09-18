@@ -144,6 +144,11 @@ def probe_file(path: str | Path) -> dict:
 
 
 def _skel(path: Path) -> dict:
+    """{"has_skel", "prim_path"}: prim_path is where a LOP importer puts the file
+    (/assets/<X> for an asset, /sets/<X> for a decor), "" for a non-USD file."""
     if path.suffix.lower() not in (".usd", ".usda", ".usdc", ".usdz"):
-        return {"has_skel": False}
-    return {"has_skel": bool(probe_usd(path).get("has_skel"))}
+        return {"has_skel": False, "prim_path": ""}
+    from features.importer.usd_probe import reference_prim_path
+
+    info = probe_usd(path)
+    return {"has_skel": bool(info.get("has_skel")), "prim_path": reference_prim_path(info)}

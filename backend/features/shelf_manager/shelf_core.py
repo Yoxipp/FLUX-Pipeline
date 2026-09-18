@@ -401,6 +401,7 @@ def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
     """
     try:
         from dcc.houdini.hda.flux_importer_hda import build_hda as build_importer
+        from dcc.houdini.hda.flux_importer_lop_hda import build_hda as build_importer_lop
         from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
         from dcc.houdini.hda.flux_lighting_hda import build_hda as build_lighting
     except ImportError as exc:
@@ -412,6 +413,10 @@ def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
         r = build_importer(str(otls / "flux_importer.hda"))
         if not r.get("ok"):
             return False, f"Live build (importer) failed: {r.get('error')}"
+        # /stage twin of the importer: reads the SOP definition built just above.
+        r = build_importer_lop(str(otls / "flux_importer_lop.hda"))
+        if not r.get("ok"):
+            return False, f"Live build (importer LOP) failed: {r.get('error')}"
         r = build_exporter(str(otls / "flux_exporter.hda"))
         if not r.get("ok"):
             return False, f"Live build (exporter) failed: {r.get('error')}"
@@ -419,7 +424,8 @@ def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
         if not r.get("ok"):
             return False, f"Live build (lighting) failed: {r.get('error')}"
 
-        built_names = ("flux_importer.hda", "flux_exporter.hda", "flux_lighting.hda")
+        built_names = ("flux_importer.hda", "flux_importer_lop.hda", "flux_exporter.hda",
+                       "flux_lighting.hda")
         # Mirror into the other otls roots so Houdini finds it wherever it reads.
         for other in otls_dirs[1:]:
             try:

@@ -255,10 +255,40 @@ def _set_character(node, flag):
     if p is not None:
         p.set(1 if flag else 0)
 
+def _is_lop(node):
+    import hou
+    try:
+        return node.type().category() == hou.lopNodeTypeCategory()
+    except Exception:
+        return False
+
+def _reload_lop(node):
+    """Houdini keeps a USD file it already read: after a republish the stage would
+    still show the old version. Reload the inner Reference LOP on every resolve."""
+    ref = node.node("reference")
+    btn = ref.parm("reload") if ref is not None else None
+    if btn is not None:
+        try:
+            btn.pressButton()
+        except Exception:
+            pass
+
+def _apply_lop(node, r):
+    auto = node.parm("prim_auto")
+    if r.get("prim_path") and (auto is None or auto.eval()):
+        pp = node.parm("prim_path")
+        if pp is not None:
+            pp.set(r["prim_path"])
+    _reload_lop(node)
+    _set_status(node, "OK  " + _pval(node, "prim_path"))
+
 def _apply(node, r):
     p = node.parm("resolved_path")
     if r.get("ok") and r.get("path"):
         if p: p.set(r["path"])
+        if _is_lop(node):
+            _apply_lop(node, r)
+            return
         _set_character(node, r.get("has_skel"))
         ext = os.path.splitext(r["path"])[1]
         _set_status(node, f"OK  [{ext}]" + ("  character (skeleton)" if r.get("has_skel") else ""))
