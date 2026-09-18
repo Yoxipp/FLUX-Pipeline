@@ -34,8 +34,12 @@ def export_look(out_path: str, *, scope: str = "scene") -> str | None:
     """
     _ensure_plugin()
     selection = scope == "selection"
+    scene = cmds.file(query=True, sceneName=True) or "untitled"
     if selection and not cmds.ls(selection=True):
-        log.error("look export: rien de selectionne")
+        log.error("look export: rien de selectionne dans Maya (scene : %s)", scene)
+        return None
+    if not cmds.ls(type="mesh"):
+        log.error("look export: aucun mesh dans la scene Maya %s", scene)
         return None
 
     opts: dict = {

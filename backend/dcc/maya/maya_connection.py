@@ -157,3 +157,45 @@ def send_command_direct(command: str, timeout: float = 60.0, port: int = MAYA_PO
             except OSError:
                 pass
 
+
+
+# ── ghost sessions ───────────────────────────────────────────────────────────────
+# Live 2026-09-18: a Maya whose main window was gone (a session that never finished
+# quitting) still held the commandPort, so FLUX exported its empty scene instead of
+# the artist's. A Maya that answers but shows no main window is never a target.
+
+_WINDOW_EXPR = (
+    "(lambda c: bool(c.window('MayaWindow', exists=True)"
+    " and c.window('MayaWindow', q=True, visible=True)))"
+    "(__import__('maya.cmds', fromlist=['cmds']))"
+)
+
+
+def maya_window_visible(port: int, timeout: float = 1.5) -> bool | None:
+    """True / False when the Maya on *port* shows its main window, None when it does
+    not answer (closed port, busy Maya)."""
+    resp = send_command_direct(_WINDOW_EXPR, timeout=timeout, port=port)
+    if resp is None:
+        return None
+    return resp.strip().strip("\x00").lower() in ("true", "1")
+
+
+class GhostMayaError(RuntimeError):
+    """The only Maya reachable by FLUX has no main window."""
+
+
+def pick_live_port(requested: int, candidates: list[int], *, probe=None) -> int:
+    """*requested* unless its Maya is a ghost (answers, no window): then another
+    instance in *candidates* that shows its window, else GhostMayaError. Busy / silent
+    Mayas are kept: only a proven ghost is skipped."""
+    probe_fn = probe or maya_window_visible
+    if probe_fn(requested) is not False:
+        return requested
+    for port in candidates:
+        if port != requested and probe_fn(port) is True:
+            log.warning("Maya :%d n'a pas de fenetre (session fantome) : cible :%d", requested, port)
+            return port
+    raise GhostMayaError(
+        f"Le Maya connecte a FLUX (port {requested}) n'a pas de fenetre : c'est une session "
+        "qui ne s'est pas fermee. Ferme maya.exe en trop dans le Gestionnaire des taches, "
+        "puis relance Maya (ou le bouton de connexion du shelf FLUX).")

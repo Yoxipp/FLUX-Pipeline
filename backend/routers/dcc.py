@@ -145,6 +145,25 @@ def _resolve_target_port(dcc: str, port: int | None) -> int:
     return port
 
 
+async def _maya_target(port: int | None) -> int:
+    """Maya port for an export / publish: never a Maya with no window (a session that
+    never finished quitting keeps its port and an empty scene, live 2026-09-18)."""
+    from core.dcc_instances import scan_instances
+    from dcc.maya.maya_connection import GhostMayaError, pick_live_port
+
+    requested = _resolve_target_port("Maya", port)
+    loop = asyncio.get_event_loop()
+
+    def _pick() -> int:
+        open_ports = [i["port"] for i in scan_instances("Maya")]
+        return pick_live_port(requested, open_ports) if open_ports else requested
+
+    try:
+        return await loop.run_in_executor(None, _pick)
+    except GhostMayaError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
 @router.post("/execute", response_model=CommandResult)
 async def execute_command(req: CommandRequest) -> CommandResult:
     """Send a Python command to a connected DCC instance via TCP socket."""
@@ -956,7 +975,7 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
         f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'))"
     )
 
-    target_port = _resolve_target_port("Maya", req.port)
+    target_port = await _maya_target(req.port)
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0, port=target_port))
@@ -1061,7 +1080,7 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)})"
     )
 
-    target_port = _resolve_target_port("Maya", req.port)
+    target_port = await _maya_target(req.port)
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=300.0, port=target_port))
@@ -1171,7 +1190,7 @@ async def maya_export_usd_look(req: MayaLookExportRequest) -> dict:
         f"run_look_export(r'{out_path}', r'{result_path}', scope='{req.scope}')"
     )
 
-    target_port = _resolve_target_port("Maya", req.port)
+    target_port = await _maya_target(req.port)
     loop = asyncio.get_event_loop()
     try:
         sent = await loop.run_in_executor(
@@ -1274,7 +1293,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         from flux_actions.runner import run_maya_publish_action
 
         scope = "scene" if req.scope == "scene" else "selection"
-        target_port = _resolve_target_port("Maya", req.port)
+        target_port = await _maya_target(req.port)
         # One animated file over the range (abc / USD): independent of is_sequence.
         is_anim = bool(ext in MAYA_ANIM_EXTS and req.frame_range and len(req.frame_range) >= 2)
         dest = await loop.run_in_executor(
@@ -1347,7 +1366,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     # Timeout: 30s for static exports, 600s for animated ABC (100 frames can be slow)
     export_timeout = 600.0 if is_anim else 120.0
 
-    target_port = _resolve_target_port("Maya", req.port)
+    target_port = await _maya_target(req.port)
     try:
         result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=export_timeout, port=target_port))
         if result is None:

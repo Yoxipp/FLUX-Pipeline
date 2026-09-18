@@ -35,18 +35,26 @@ class MayaCommandPortLoopbackTests(unittest.TestCase):
     def test_new_block_binds_loopback_and_is_valid_python(self):
         autostart.install()
         block = _block(self.startup.read_text(encoding="utf-8"))
-        self.assertIn("_p = '127.0.0.1:7001'", block)
-        self.assertNotIn("_p = ':7001'", block)
+        self.assertIn("'127.0.0.1:%d' % _n for _n in range(7001, 7009)", block)
+        self.assertNotIn("':%d'", block)
         compile(block, "userSetup.py", "exec")
 
     def test_stale_block_with_bare_port_is_upgraded(self):
         autostart.install()
         text = self.startup.read_text(encoding="utf-8")
-        self.startup.write_text(text.replace("'127.0.0.1:7001'", "':7001'"), encoding="utf-8")
+        self.startup.write_text(text.replace("'127.0.0.1:%d'", "':%d'"), encoding="utf-8")
         self.assertTrue(autostart.is_installed())
         result = autostart.install()
         self.assertNotEqual(result["message"], "already_installed")
-        self.assertIn("_p = '127.0.0.1:7001'", self.startup.read_text(encoding="utf-8"))
+        self.assertIn("'127.0.0.1:%d'", self.startup.read_text(encoding="utf-8"))
+
+    def test_new_block_takes_the_first_free_port_and_frees_it_on_quit(self):
+        # Live 2026-09-18: a Maya with no window held 7001, the artist's Maya gave up.
+        autostart.install()
+        block = _block(self.startup.read_text(encoding="utf-8"))
+        self.assertIn("for _p in _flux_ports:", block)
+        self.assertIn("quitApplication", block)
+        self.assertIn("close=True", block)
 
     def test_shelf_and_router_commands_use_loopback(self):
         backend = Path(autostart.__file__).resolve().parents[2]

@@ -170,12 +170,12 @@ def install(maya_exe_path: str | None = None) -> dict:
     # Flux backend directory resolved at runtime (no hardcoding).
     _flux_backend = str(Path(__file__).resolve().parent.parent.parent)
 
-    # Port resolved from constants — reinstalling picks up any change automatically.
+    # Port range resolved from constants — reinstalling picks up any change automatically.
     try:
-        from core.constants import DCC_PORTS
-        _maya_port = DCC_PORTS.get("Maya", 7001)
+        from core.constants import DCC_PORT_RANGES
+        _maya_port, _maya_count = DCC_PORT_RANGES.get("Maya", (7001, 8))
     except ImportError:
-        _maya_port = 7001
+        _maya_port, _maya_count = 7001, 8
 
     # The commandPort is bound to 127.0.0.1 explicitly (security S3): a bare ':port'
     # name can listen on every network interface, letting another machine on the
@@ -186,29 +186,43 @@ def install(maya_exe_path: str | None = None) -> dict:
         f"    import sys as _s, maya.utils as _mu\n"
         f"    if r'{_flux_backend}' not in _s.path:\n"
         f"        _s.path.insert(0, r'{_flux_backend}')\n"
-        f"    def _flux_open_port(_tries_left=20):\n"
-        f"        # Opens the FLUX commandPort. commandPort(query=True) only reports\n"
-        f"        # whether THIS Maya session opened the port, not whether another\n"
-        f"        # process holds the socket. When a previous Maya instance is still\n"
-        f"        # shutting down it keeps :{_maya_port} bound, so a freshly launched\n"
-        f"        # instance fails to bind (Windows socket 10048 / address in use).\n"
-        f"        # Retry until the old instance frees the port instead of giving up\n"
-        f"        # for the whole session (~20s window, non-blocking).\n"
+        f"    _flux_ports = ['127.0.0.1:%d' % _n for _n in range({_maya_port}, {_maya_port + _maya_count})]\n"
+        f"    def _flux_close_port(_p):\n"
+        f"        # Free the port as soon as Maya starts quitting: a session that hangs\n"
+        f"        # while closing must not keep FLUX talking to a Maya with no window.\n"
         f"        try:\n"
         f"            import maya.cmds as _c\n"
-        f"            _p = '127.0.0.1:{_maya_port}'\n"
         f"            if _c.commandPort(_p, query=True):\n"
+        f"                _c.commandPort(name=_p, close=True)\n"
+        f"        except Exception:\n"
+        f"            pass\n"
+        f"    def _flux_open_port(_tries_left=20):\n"
+        f"        # Opens the FIRST FREE FLUX commandPort of the range ({_maya_port}..{_maya_port + _maya_count - 1}),\n"
+        f"        # so a second Maya (or one launched while another still holds {_maya_port})\n"
+        f"        # gets its own port and FLUX sees every instance. commandPort(query=True)\n"
+        f"        # only reports ports THIS session opened. Retry only when every port is\n"
+        f"        # busy (~20s window, non-blocking).\n"
+        f"        try:\n"
+        f"            import maya.cmds as _c\n"
+        f"            if any(_c.commandPort(_p, query=True) for _p in _flux_ports):\n"
         f"                return\n"
-        f"            _c.commandPort(name=_p, sourceType='python', noreturn=False)\n"
-        f"            print('[FLUX] commandPort {_maya_port} opened')\n"
+        f"            for _p in _flux_ports:\n"
+        f"                try:\n"
+        f"                    _c.commandPort(name=_p, sourceType='python', noreturn=False)\n"
+        f"                except Exception:\n"
+        f"                    continue\n"
+        f"                print('[FLUX] commandPort %s opened' % _p)\n"
+        f"                _c.scriptJob(event=['quitApplication', lambda _p=_p: _flux_close_port(_p)], protected=True)\n"
+        f"                return\n"
+        f"            raise RuntimeError('every FLUX port is busy')\n"
         f"        except Exception as _e:\n"
         f"            if _tries_left > 0:\n"
         f"                if _tries_left == 20:\n"
-        f"                    print('[FLUX] commandPort {_maya_port} busy (another Maya closing?), retrying...')\n"
+        f"                    print('[FLUX] commandPort: every port busy, retrying...')\n"
         f"                import threading as _th\n"
         f"                _th.Timer(1.0, lambda: _mu.executeDeferred(lambda: _flux_open_port(_tries_left - 1))).start()\n"
         f"            else:\n"
-        f"                print(f'[FLUX] commandPort error (port {_maya_port} still busy after retries): {{_e}}')\n"
+        f"                print(f'[FLUX] commandPort error (every port still busy after retries): {{_e}}')\n"
         f"    _mu.executeDeferred(_flux_open_port)\n"
         f"except Exception as _e:\n"
         f"    print(f'[FLUX] autostart error: {{_e}}')\n"
