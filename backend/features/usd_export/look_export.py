@@ -168,6 +168,9 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
         raise ValueError("aucun materiau dans l'export : rien a publier dans le departement look")
 
     warnings: list[str] = []
+    for mat in materials:
+        if not mat.GetChildren():   # e.g. Maya's default lambert1, exported empty
+            warnings.append(f"materiau vide (aucun shader) : {mat.GetName()}")
     look_p = dest / f"{base}_look.{fmt}"
     look_layer = _new_layer(look_p, fmt)
     look_stage = Usd.Stage.Open(look_layer)

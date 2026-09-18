@@ -55,15 +55,93 @@ def export_look(out_path: str, *, scope: str = "scene") -> str | None:
         "defaultUSDFormat": "usda",
         "materialsScopeName": "mtl",
     }
+    stand_in = _stand_in_for_default_material()
     try:
-        cmds.mayaUSDExport(**opts)
-    except TypeError:
-        # Older mayaUsd: drop the flags it does not know rather than failing the export.
-        for flag in ("materialsScopeName", "exportBlendShapes", "defaultUSDFormat"):
-            opts.pop(flag, None)
-        cmds.mayaUSDExport(**opts)
+        try:
+            cmds.mayaUSDExport(**opts)
+        except TypeError:
+            # Older mayaUsd: drop the flags it does not know rather than failing the export.
+            for flag in ("materialsScopeName", "exportBlendShapes", "defaultUSDFormat"):
+                opts.pop(flag, None)
+            cmds.mayaUSDExport(**opts)
+    finally:
+        _restore_default_material(stand_in)
     log.info("look export: %s (%s)", out_path, "selection" if selection else "scene")
     return out_path
+
+
+def _is_default_node(node: str) -> bool:
+    return bool(cmds.ls(node, defaultNodes=True))
+
+
+def _copy_shader(src: str) -> str:
+    """A new node of *src*'s type carrying its values and inputs (Maya's default
+    shaders are internal nodes it refuses to duplicate). Textures stay connected."""
+    dst = cmds.shadingNode(cmds.nodeType(src), asShader=True, name=f"{src}_flux")
+    for attr in cmds.listAttr(src, settable=True, scalar=True) or []:
+        try:
+            if cmds.getAttr(f"{dst}.{attr}", settable=True):
+                cmds.setAttr(f"{dst}.{attr}", cmds.getAttr(f"{src}.{attr}"))
+        except (RuntimeError, ValueError, TypeError):
+            continue
+    for attr in cmds.listAttr(src, settable=True) or []:
+        try:
+            if "." in attr or not cmds.attributeQuery(attr, node=src, usedAsColor=True):
+                continue
+            cmds.setAttr(f"{dst}.{attr}", *cmds.getAttr(f"{src}.{attr}")[0], type="double3")
+        except (RuntimeError, ValueError, TypeError):
+            continue
+    pairs = cmds.listConnections(src, source=True, destination=False,
+                                 connections=True, plugs=True) or []
+    for dst_plug, src_plug in zip(pairs[0::2], pairs[1::2]):
+        attr = dst_plug.split(".", 1)[1]
+        if attr == "message":
+            continue
+        try:
+            cmds.connectAttr(src_plug, f"{dst}.{attr}", force=True)
+        except RuntimeError:
+            continue
+    return dst
+
+
+def _stand_in_for_default_material() -> list[dict]:
+    """Plug a real copy of Maya's default shaders into their shading groups for the export.
+
+    mayaUSDExport skips default shader nodes (lambert1, standardSurface1): a mesh on
+    them, even recoloured, publishes an EMPTY Material. The shading group (and so the
+    published material name) stays; only its surface shader is swapped, and
+    ``_restore_default_material`` plugs the original back.
+    """
+    swaps: list[dict] = []
+    try:
+        for sg in cmds.ls(type="shadingEngine") or []:
+            if not cmds.sets(sg, query=True):
+                continue
+            plugs = cmds.listConnections(f"{sg}.surfaceShader", source=True, plugs=True) or []
+            if not plugs:
+                continue
+            shader = plugs[0].split(".", 1)[0]
+            if not _is_default_node(shader):
+                continue
+            swap = {"sg": sg, "plug": plugs[0], "copy": None}
+            swaps.append(swap)
+            swap["copy"] = _copy_shader(shader)
+            cmds.connectAttr(f"{swap['copy']}.outColor", f"{sg}.surfaceShader", force=True)
+            log.info("look export: shader par defaut %s de %s exporte via une copie", shader, sg)
+    except Exception:
+        _restore_default_material(swaps)      # never leave the scene half swapped
+        raise
+    return swaps
+
+
+def _restore_default_material(swaps: list[dict]) -> None:
+    """Undo ``_stand_in_for_default_material``: the artist's scene is left as it was."""
+    for swap in swaps or []:
+        try:
+            cmds.connectAttr(swap["plug"], f"{swap['sg']}.surfaceShader", force=True)
+        finally:
+            if swap["copy"] and cmds.objExists(swap["copy"]):
+                cmds.delete(swap["copy"])
 
 
 def run_look_export(out_path: str, result_path: str, scope: str = "scene") -> None:
