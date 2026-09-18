@@ -85,13 +85,24 @@ def import_file(file_path: str | Path) -> list[str] | None:
             if not _load_usd_plugin():
                 log.error("USD import: Maya USD plugin unavailable (tried mayaUsdPlugin)")
                 return None
-            nodes = cmds.file(  # type: ignore[union-attr]
-                str(src),
-                i=True,
-                type="USD Import",
-                ignoreVersion=True,
-                returnNewNodes=True,
-            ) or []
+            try:
+                # Read the published look (UsdPreviewSurface -> standardSurface): the
+                # plain translator imports every mesh on the default grey material.
+                nodes = cmds.mayaUSDImport(  # type: ignore[union-attr]
+                    file=str(src),
+                    shadingMode=[["useRegistry", "UsdPreviewSurface"]],
+                    preferredMaterial="standardSurface",
+                    readAnimData=True,
+                ) or []
+            except (TypeError, RuntimeError) as exc:
+                log.warning("USD import with materials failed (%s), plain import", exc)
+                nodes = cmds.file(  # type: ignore[union-attr]
+                    str(src),
+                    i=True,
+                    type="USD Import",
+                    ignoreVersion=True,
+                    returnNewNodes=True,
+                ) or []
             log.info("Imported (USD) %s → %d nodes", src.name, len(nodes))
             return nodes
 

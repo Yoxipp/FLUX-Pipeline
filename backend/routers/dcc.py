@@ -904,13 +904,30 @@ def _maya_usd_source(file_path, work_dir: str):
         if stage is None:
             return str(src).replace("\\", "/")
         out = _PLib(work_dir) / (src.stem + ".usda")
-        stage.Flatten().Export(str(out))
+        flat = stage.Flatten()
+        _drop_proxy_prims(flat)
+        flat.Export(str(out))
         log.info("[Maya] flattened USD to ASCII for import: %s", src.name)
         return str(out).replace("\\", "/")
     except Exception as exc:
         # Best-effort: if flattening fails, fall back to the original file.
         log.warning("[Maya] USD flatten for import failed for %s: %s", src.name, exc)
         return str(src).replace("\\", "/")
+
+
+def _drop_proxy_prims(layer) -> None:
+    """Remove purpose=proxy prims from a flattened layer: Maya has no purpose, so the
+    decimated proxy (geo/proxy, ADR 0019) would land as a second visible copy."""
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.Open(layer)
+    doomed = [p.GetPath() for p in stage.Traverse()
+              if p.IsA(UsdGeom.Imageable)
+              and UsdGeom.Imageable(p).GetPurposeAttr().Get() == UsdGeom.Tokens.proxy]
+    for path in doomed:
+        parent = layer.GetPrimAtPath(path.GetParentPath())
+        if parent is not None and path.name in parent.nameChildren:
+            del parent.nameChildren[path.name]
 
 
 @router.post("/maya/import")
