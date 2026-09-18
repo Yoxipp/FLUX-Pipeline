@@ -24,6 +24,7 @@ from pxr import Sdf, Usd, UsdGeom, UsdShade
 from core.logger import get_logger
 
 from ..usd_assembler.structure.naming import sanitize_token
+from .contract import mesh_prim_names
 from .skel_export import GEO_RENDER_SCOPE
 
 __all__ = ["MTL_SCOPE", "author_look_layer", "publish_look_asset"]
@@ -200,18 +201,17 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     # 2. bindings: one "over" per bound mesh, at the FLUX prim path of the model layer.
     look_stage = Usd.Stage.Open(look_layer)
     bindings = 0
-    seen: set[str] = set()
-    for prim in flat_stage.Traverse():
-        if not prim.IsA(UsdGeom.Gprim):
-            continue
+    # Mesh names follow the model layer rule (contract.mesh_prim_names): a leaf name
+    # shared by two meshes becomes a path tail, so each keeps its own binding.
+    gprims = [p for p in flat_stage.Traverse() if p.IsA(UsdGeom.Gprim)]
+    prim_names = dict(zip(
+        (p.GetPath() for p in gprims),
+        mesh_prim_names([(p.GetName(), str(p.GetPath())) for p in gprims], sanitize_token)))
+    for prim in gprims:
         mat_prim = _bound_material(prim)
         if mat_prim is None or mat_prim.GetPath() not in moved:
             continue
-        leaf = sanitize_token(prim.GetName())
-        if leaf in seen:
-            warnings.append(f"deux geometries nommees {leaf} : la derniere liaison gagne")
-        seen.add(leaf)
-        mesh_path = f"{root_path}/{GEO_RENDER_SCOPE}/{leaf}"
+        mesh_path = f"{root_path}/{GEO_RENDER_SCOPE}/{prim_names[prim.GetPath()]}"
         over = look_stage.OverridePrim(mesh_path)
         UsdShade.MaterialBindingAPI.Apply(over)
         UsdShade.MaterialBindingAPI(over).Bind(

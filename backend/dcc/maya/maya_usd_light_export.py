@@ -126,6 +126,7 @@ def _extract_mesh(mesh: str, skin: str | None, joints_dag: list[str],
 
     data = MeshData(
         name=mesh_short,
+        path=mesh,
         points=points,
         face_vertex_counts=vtx_counts,
         face_vertex_indices=vtx_indices,

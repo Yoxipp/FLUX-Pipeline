@@ -12,7 +12,9 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
 from core.logger import get_logger
 
 from ..usd_assembler.structure.naming import sanitize_token
-from .contract import AnimData, LightAsset, Mat4, MeshData, SkeletonData, filter_animated_joints
+from .contract import (
+    AnimData, LightAsset, Mat4, MeshData, SkeletonData, filter_animated_joints, mesh_prim_names,
+)
 
 __all__ = ["ANIM_SUBPATH", "GEO_RENDER_SCOPE", "SKELETON_SUBPATH", "author_light_asset",
            "author_motion_only", "filter_animated_joints"]
@@ -65,8 +67,9 @@ def _author_model_layer(
     render_path = f"{root_path}/{GEO_RENDER_SCOPE}"
     _define_scopes(stage, f"{render_path}/x")
 
-    for mesh in meshes:
-        mpath = f"{render_path}/{sanitize_token(mesh.name)}"
+    prim_names = mesh_prim_names([(m.name, m.path) for m in meshes], sanitize_token)
+    for mesh, prim_name in zip(meshes, prim_names):
+        mpath = f"{render_path}/{prim_name}"
         gmesh = UsdGeom.Mesh.Define(stage, mpath)
         gmesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in mesh.points]))
         gmesh.CreateFaceVertexCountsAttr(Vt.IntArray(mesh.face_vertex_counts))
