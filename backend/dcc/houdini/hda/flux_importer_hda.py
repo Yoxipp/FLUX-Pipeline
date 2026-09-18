@@ -380,9 +380,13 @@ def _build_code(hda_path: str, python_module: str) -> str:
     from pathlib import Path as _P
     icon_path = str(_P(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.png")
 
+    # Keep the artists' settings when the HDA is rebuilt (live 2026-09-18).
+    from dcc.houdini.hda.preserve_instances import RESTORE, snapshot
+    _snapshot = snapshot("hou.sopNodeTypeCategory()", "flux_importer")
+
     return f'''
 import hou
-
+{_snapshot}
 _HDA_PATH = {hda_path!r}
 _ICON_PATH = {icon_path!r}
 _NODE_NAME = "flux_importer"
@@ -656,7 +660,7 @@ _hda_def.save(_HDA_PATH)
 # ── 7. Install and clean up ───────────────────────────────────────────────────
 hou.hda.installFile(_HDA_PATH, oplibraries_file=None, change_oplibraries_file=False)
 _geo.destroy()
-
+{RESTORE}
 result = {{"ok": True, "path": _HDA_PATH, "node_type": _NODE_NAME}}
 '''.replace("{python_module}", pm_escaped)
 

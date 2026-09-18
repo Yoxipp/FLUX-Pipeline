@@ -20,6 +20,24 @@ class ImporterLop(unittest.TestCase):
         self.assertIn('max_num_inputs=1', code)
         self.assertIn('chs("../prim_path")', code)
 
+    def test_a_rebuild_keeps_the_settings_of_existing_nodes(self) -> None:
+        # Live 2026-09-18: rebuilding reset every flux_importer to its defaults. The
+        # snapshot must run before the new definition exists (createDigitalAsset).
+        from dcc.houdini.hda import flux_anim_hda
+
+        for code in (flux_importer_lop_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE),
+                     flux_anim_hda._build_code("x.hda"),
+                     flux_importer_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)):
+            compile(code, "build", "exec")
+            self.assertLess(code.index("_flux_keep = {}"), code.index("createDigitalAsset"))
+            self.assertGreater(code.index("for _flux_path, _vals in _flux_keep.items()"),
+                               code.index("installFile"))
+
+    def test_the_lop_importer_can_show_the_full_geometry(self) -> None:
+        code = flux_importer_lop_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)
+        self.assertIn('"geo_display"', code)
+        self.assertIn("/geo/proxy", code)
+
     def test_the_served_module_reloads_a_lop_importer(self) -> None:
         compile(flux_importer_hda._MODULE_FUNCTIONS, "module", "exec")
         self.assertIn("def _apply_lop", flux_importer_hda._MODULE_FUNCTIONS)
