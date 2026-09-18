@@ -23,6 +23,24 @@ def proxy_sibling(version_path: Path) -> Path:
     return Path(version_path).with_suffix(".proxy.usda")
 
 
+def usable_proxy(version_path: Path) -> Path | None:
+    """The proxy layer of *version_path* when it is a real one (a default prim), else None.
+
+    A failed run used to leave an empty ``.proxy.usda``: referencing it composed nothing,
+    so a stub must never win over the publish itself.
+    """
+    proxy = proxy_sibling(version_path)
+    if not proxy.is_file():
+        return None
+    try:
+        from pxr import Sdf
+
+        layer = Sdf.Layer.FindOrOpen(str(proxy))
+    except Exception:           # noqa: BLE001 - unreadable = unusable
+        return None
+    return proxy if layer is not None and layer.defaultPrim else None
+
+
 def generate_proxy_layer(version_path: Path | None) -> str | None:
     """Author the purpose=proxy layer of a published version when the flag is on.
 
@@ -56,6 +74,19 @@ def generate_proxy_layer(version_path: Path | None) -> str | None:
     return result.get("proxy_path")
 
 
+def _has_render_geometry(base: str) -> bool:
+    """False for a publish whose department never carries render meshes (look, rig,
+    anim clip): the proxy run would only fail. Unknown names keep the proxy run."""
+    from features.usd_export.departments import contribution
+
+    contrib = contribution(base)
+    if contrib is None:
+        return True
+    if contrib["kind"] == "clip":
+        return False
+    return not (contrib["kind"] == "asset" and contrib["department"] in ("look", "rig"))
+
+
 def after_usd_publish(dest_folder: Path, base: str, ext: str,
                       version_path: Path | None, *, user: str = "") -> dict:
     """Proxy + component refresh for a freshly published USD. {"proxy", "component"}."""
@@ -63,7 +94,8 @@ def after_usd_publish(dest_folder: Path, base: str, ext: str,
     if str(ext).lower() not in USD_EXTS:
         return out
     try:
-        out["proxy"] = generate_proxy_layer(version_path)
+        if _has_render_geometry(base):
+            out["proxy"] = generate_proxy_layer(version_path)
         from features.usd_assembler.component_auto import refresh_from_publish_folder
 
         out["component"] = refresh_from_publish_folder(dest_folder, base, ext, user=user)

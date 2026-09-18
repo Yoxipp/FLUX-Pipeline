@@ -110,9 +110,9 @@ def collect_slots(project_path: str | Path, name: str,
                 label = f"{label}_{published['variante']}"
             # A proxy layer (purpose=proxy, ADR 0019) sublayers its source: referencing
             # it brings the render meshes AND their proxies, so it wins when present.
-            from features.publisher.usd_publish_hooks import proxy_sibling
+            from features.publisher.usd_publish_hooks import usable_proxy
 
-            source = proxy_sibling(hit.path) if proxy_sibling(hit.path).is_file() else Path(hit.path)
+            source = usable_proxy(Path(hit.path)) or Path(hit.path)
             variants[_variant_name(label)] = {
                 "instance": inst, "variante": published["variante"], "base": base,
                 "path": source, "prim": hit.default_prim, "version": hit.version}

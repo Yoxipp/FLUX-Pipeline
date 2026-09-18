@@ -177,8 +177,15 @@ def generate_proxy(
         return ProxyResult(src=src_usd, dst=dst, status="failed",
                            error=f"cannot open USD: {src_usd}")
 
+    # Nothing to decimate (rig, look, anim layer): fail before touching the disk, an
+    # empty proxy file would be picked by the asset instead of the publish.
+    if next(_iter_render_meshes(src_stage), None) is None:
+        return ProxyResult(src=src_usd, dst=dst, status="failed",
+                           error="no render mesh found")
+
     # Fresh destination layer that composes the source as a sublayer.
-    dst_stage = Usd.Stage.CreateNew(str(dst)) if not dst.exists() else Usd.Stage.Open(str(dst))
+    created = not dst.exists()
+    dst_stage = Usd.Stage.CreateNew(str(dst)) if created else Usd.Stage.Open(str(dst))
     if dst_stage is None:
         dst_stage = Usd.Stage.CreateNew(str(dst))
     dst_layer = dst_stage.GetRootLayer()
@@ -242,9 +249,11 @@ def generate_proxy(
             )
             proxy.CreateExtentAttr(_extent_of(proxy_points))
     except Exception as exc:  # noqa: BLE001 - report, do not crash the caller
+        _drop_created(dst, created)
         return ProxyResult(src=src_usd, dst=dst, status="failed", error=str(exc))
 
     if meshes == 0:
+        _drop_created(dst, created)
         return ProxyResult(src=src_usd, dst=dst, status="failed",
                            error="no render mesh found")
 
@@ -254,6 +263,19 @@ def generate_proxy(
         src=src_usd, dst=dst, status="converted",
         meshes=meshes, tris_in=tris_in, tris_out=tris_out,
     )
+
+
+def _drop_created(dst: Path, created: bool) -> None:
+    """Remove a proxy file this run created but could not fill."""
+    if not created:
+        return
+    layer = Sdf.Layer.Find(str(dst))
+    if layer is not None:
+        layer.Clear()
+    try:
+        dst.unlink()
+    except OSError:
+        pass
 
 
 def _fmt_kb(n: int) -> str:

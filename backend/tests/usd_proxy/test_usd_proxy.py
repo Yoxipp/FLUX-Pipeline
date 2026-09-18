@@ -140,6 +140,21 @@ class GenerateProxyTests(unittest.TestCase):
             stage.GetRootLayer().Save()
             r = UP.generate_proxy(src)
             self.assertEqual(r.status, "failed")
+            # Live bug 2026-09-18: the empty proxy file stayed and the asset used it.
+            self.assertFalse(src.with_suffix(".proxy.usda").exists())
+
+    def test_a_stub_proxy_never_replaces_its_publish(self):
+        from features.publisher.usd_publish_hooks import usable_proxy
+
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "asset.usda"
+            _make_grid_usd(src, 4)
+            stub = src.with_suffix(".proxy.usda")
+            stub.write_text("#usda 1.0\n", encoding="utf-8")
+            self.assertIsNone(usable_proxy(src))
+            stub.unlink()
+            UP.generate_proxy(src)
+            self.assertEqual(usable_proxy(src), stub)
 
 
 class ProxyCommandTests(unittest.TestCase):
