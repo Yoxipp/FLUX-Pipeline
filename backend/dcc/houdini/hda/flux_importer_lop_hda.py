@@ -38,7 +38,8 @@ def _build_code(hda_path: str, python_module: str) -> str:
 
     _snapshot = snapshot('hou.lopNodeTypeCategory()', NODE_NAME).replace("{{", "{").replace("}}", "}")
     _restore = RESTORE
-    icon_path = str(Path(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.svg")
+    from dcc.houdini.hda.hda_common import FINALIZE as _finalize, ICON_PATH as icon_path
+
     return f'''
 import hou
 {_snapshot}
@@ -135,38 +136,7 @@ _sub.layoutChildren()
 
 _asset = _sub.createDigitalAsset(name=_NAME, hda_file_name=_HDA_PATH, description={LABEL!r},
                                  min_num_inputs=0, max_num_inputs=1, version="1.0")
-_def = _asset.type().definition()
-for _sec, _code in (("PythonModule", _PM_CODE),
-                    ("OnCreated", "hou.phm().on_created(kwargs['node'])"),
-                    ("OnLoaded", "hou.phm().on_loaded(kwargs['node'])")):
-    if _sec in _def.sections():
-        _def.sections()[_sec].setContents(_code)
-    else:
-        _def.addSection(_sec, _code)
-try:
-    _extra = dict(_def.extraFileOptions())
-    for _sec in ("PythonModule", "OnCreated", "OnLoaded"):
-        _extra[_sec + ".IsPython"] = True
-    _def.setExtraFileOptions(_extra)
-except AttributeError:
-    pass
-# createDigitalAsset does not always keep spare parms: persist the interface.
-_def.setParmTemplateGroup(_ptg)
-try:
-    import os as _os
-    if _os.path.isfile(_ICON_PATH):
-        with open(_ICON_PATH, "rb") as _f:
-            _bytes = _f.read()
-        if "IconSVG" in _def.sections():
-            _def.sections()["IconSVG"].setContents(_bytes)
-        else:
-            _def.addSection("IconSVG", _bytes)
-        _def.setIcon("opdef:.?IconSVG")
-except Exception:
-    pass
-_def.save(_HDA_PATH)
-hou.hda.installFile(_HDA_PATH, oplibraries_file=None, change_oplibraries_file=False)
-_asset.destroy()
+{_finalize}
 {_restore}
 result = {{"ok": True, "path": _HDA_PATH, "node_type": "Lop/" + _NAME}}
 '''
