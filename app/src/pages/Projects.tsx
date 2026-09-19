@@ -15,6 +15,7 @@ import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
 import { readActiveInstancePort } from '../hooks/useActiveInstances'
+import { PublishNote } from '../components/shared/PublishNote'
 
 // DCCs the backend can import into (from the Folder Manager). Others have no
 // import bridge yet, so they never appear in "Ouvrir dans…".
@@ -2889,6 +2890,11 @@ export function Projects() {
               />
             )}
           </div>
+
+          {/* N7: note of the selected published file (hidden when it has none) */}
+          {nav.kind === 'inside' && selectedNames.size === 1 && (
+            <PublishNote project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
+          )}
 
           {/* Projet actif + Set Project */}
           <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>

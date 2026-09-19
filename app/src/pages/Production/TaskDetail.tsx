@@ -457,6 +457,11 @@ function PublishRow({ p, onOpen, onCopy, onExplorer }: {
         <div style={{ fontSize: 8, color: 'var(--ink-4)', marginTop: 1 }}>
           {p.user} · {p.date} {p.time}
         </div>
+        {comment && (
+          <div style={{ fontSize: 8.5, color: 'var(--ink-2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {comment}
+          </div>
+        )}
       </div>
       <button style={_miniIconBtn} title="Copier" onClick={e => { e.stopPropagation(); onCopy() }}>
         <Copy size={9} strokeWidth={1.75} />

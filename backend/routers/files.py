@@ -48,3 +48,18 @@ async def browse_project(project_name: str, subpath: str = "") -> dict:
         "folders": [{"name": n, "path": str(project_path / subpath / n if subpath else project_path / n)} for n in folder_names],
         "files":   files_info,
     }
+
+
+@router.get("/projects/{project_name}/publish-note")
+async def publish_note(project_name: str, rel_path: str) -> dict:
+    """Note of a published file (N7): latest entry of its version + history, from modif_logs.json."""
+    from features.publisher.publish_note import publish_notes
+
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    target = (project_path / rel_path).resolve()
+    if not is_subpath(target, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: publish_notes(project_path, rel_path))
