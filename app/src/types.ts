@@ -109,6 +109,8 @@ export interface PublishResult {
   success: boolean
   dest_path: string | null
   message: string
+  tx_paths?: string[] | null      // .tx written by the texture conform (switch on)
+  proxy_path?: string | null      // purpose=proxy USD written at publish (switch on)
 }
 
 // ── Action engine (declarative YAML actions) ───────────────────────────────

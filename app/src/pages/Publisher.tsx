@@ -1305,31 +1305,35 @@ export function Publisher() {
           }
           return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
         }
-        // Route to the soft's endpoint; all return truthy on success.
-        const publishOne = async (f: string, target: string): Promise<boolean> => {
+        // Route to the soft's endpoint; ok + what the publish also wrote (.tx, USD proxy).
+        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean }> => {
           const base = { project_name: project, source_path: f, target_name: target,
                          description: description || undefined, user: settings?.username ?? undefined }
-          if (dcc === 'Designer')  return (await api.publishDesigner(base)).ok
-          if (dcc === 'Marvelous') return (await api.publishMarvelous(base)).ok
-          return (await api.publish({ source_path: f, project_name: project,
+          if (dcc === 'Designer')  return { ok: (await api.publishDesigner(base)).ok, tx: 0, proxy: false }
+          if (dcc === 'Marvelous') return { ok: (await api.publishMarvelous(base)).ok, tx: 0, proxy: false }
+          const r = await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
-                   target_name: target })).success
+                   target_name: target })
+          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path }
         }
-        let okCount = 0
+        let okCount = 0, txCount = 0, proxyCount = 0
         const failed: string[] = []
         for (const f of files) {
           try {
-            if (await publishOne(f, targetFor(f))) okCount++
+            const r = await publishOne(f, targetFor(f))
+            if (r.ok) { okCount++; txCount += r.tx; if (r.proxy) proxyCount++ }
             else failed.push(fileStem(f))
           } catch {
             failed.push(fileStem(f))
           }
         }
         if (okCount) {
+          // N4: the .tx / proxy written with the publish are reported, not silent.
+          const extras = `${txCount ? ` · ${txCount} .tx` : ''}${proxyCount ? ` · proxy USD` : ''}`
           toast.success(
             multi
-              ? `${okCount} fichier${okCount > 1 ? 's' : ''} publié${okCount > 1 ? 's' : ''}${failed.length ? ` · ${failed.length} échec(s)` : ''}`
-              : `Publié → ${dcc}`,
+              ? `${okCount} fichier${okCount > 1 ? 's' : ''} publié${okCount > 1 ? 's' : ''}${extras}${failed.length ? ` · ${failed.length} échec(s)` : ''}`
+              : `Publié → ${dcc}${extras}`,
           )
         }
         if (failed.length && !okCount) toast.error(`Échec : ${failed.join(', ')}`)
