@@ -193,6 +193,26 @@ async def get_dcc_instances(dcc_key: str) -> dict:
     return {"dcc": dcc_key, "instances": instances}
 
 
+class CloseInstanceRequest(BaseModel):
+    port: int
+    force: bool = False     # kill (unsaved work lost); default = like the window's X
+
+
+@router.post("/instances/{dcc_key}/close")
+async def close_dcc_instance(dcc_key: str, req: CloseInstanceRequest) -> dict:
+    """Close one running instance of a DCC (instance menu of the sidebar)."""
+    from core.dcc_process import close_instance
+
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: close_instance(dcc_key, req.port, req.force))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if dcc_key == "Maya":
+        _invalidate_maya_stuck_cache()
+    return res
+
+
 @router.post("/connect/{dcc_name}")
 async def connect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
     """Explicitly open a socket connection to a DCC instance (base port if omitted)."""

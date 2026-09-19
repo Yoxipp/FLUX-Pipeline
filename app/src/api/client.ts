@@ -180,6 +180,11 @@ export const api = {
     apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),
 
   // Terminate a stuck Maya holding the commandPort (re-verified server-side before killing).
+  // Close one running instance of a DCC (sidebar instance menu). force = kill (unsaved work lost).
+  closeDccInstance: (dcc: string, port: number, force = false) =>
+    apiCall<{ closed: boolean; pid: number | null; needs_force: boolean; message: string }>(
+      'POST', `/dcc/instances/${encodeURIComponent(dcc)}/close`, { port, force }),
+
   reapMayaPort: () =>
     apiCall<{ killed: boolean; pid: number | null; message: string }>('POST', '/dcc/maya/reap'),
 

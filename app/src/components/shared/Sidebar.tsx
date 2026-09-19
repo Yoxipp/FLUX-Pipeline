@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check,
+  ClipboardList, AlertTriangle, Check, X,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -130,6 +130,28 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   // Multi-instance (cluster C): which instance each DCC targets. The selector row
   // control only appears when a DCC exposes more than one running instance.
   const { activePort, setActivePort } = useActiveInstances(dccStatus)
+
+  // Close an instance: normal close first (the DCC may ask to save); if it stays,
+  // the toast offers "Forcer" (kill, unsaved work lost).
+  const closeInstance = useCallback(async (statusKey: string, name: string, port: number, force = false) => {
+    const label = `${name} :${port}`
+    try {
+      const r = await api.closeDccInstance(statusKey, port, force)
+      if (r.closed) { toast.success(`${label} ferme`); return }
+      if (r.needs_force) {
+        toast.warning(`${label} ne s'est pas ferme`, {
+          description: "Une fenetre d'enregistrement est peut-etre ouverte dans le logiciel, ou la session n'a pas de fenetre. "
+            + 'Forcer ferme sans enregistrer.',
+          duration: 12000,
+          action: { label: 'Forcer', onClick: () => { void closeInstance(statusKey, name, port, true) } },
+        })
+        return
+      }
+      toast.error(r.message, { duration: 8000 })
+    } catch (e) {
+      toast.error(`Fermeture de ${label} : ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
+    }
+  }, [])
   const [instMenu, setInstMenu] = useState<{ statusKey: string; name: string; y: number } | null>(null)
 
   // Load the active project's presets (for button colour + menu), refresh on edits.
@@ -942,7 +964,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         )
       })()}
 
-      {/* Instance picker — choose which running instance of a DCC the pipeline targets. */}
+      {/* Instance picker — choose which running instance of a DCC the pipeline targets,
+          or close one (X: like the window's close button; "Forcer" only if it stays). */}
       {instMenu && (() => {
         const insts = dccStatus[instMenu.statusKey]?.instances ?? []
         const current = activePort(instMenu.statusKey)
@@ -981,6 +1004,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                       {inst.scene ? inst.scene : inst.pid ? `pid ${inst.pid}` : inst.label}
                     </span>
                     {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
+                    <span
+                      role="button"
+                      title={`Fermer ${instMenu.name} :${inst.port}`}
+                      onClick={e => { e.stopPropagation(); setInstMenu(null); void closeInstance(instMenu.statusKey, instMenu.name, inst.port) }}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16,
+                               borderRadius: 4, color: 'var(--ink-4)', flexShrink: 0 }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--err)'; e.currentTarget.style.background = 'var(--paper)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--ink-4)'; e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <X size={10} strokeWidth={2.25} />
+                    </span>
                   </button>
                 )
               })}
