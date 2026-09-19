@@ -352,7 +352,14 @@ async def archive_entity(project: str, payload: ArchiveRequest) -> dict:
     except Exception as e:
         log.exception("archive failed")
         raise HTTPException(status_code=500, detail=str(e))
-    return {"archived": True, "archived_to": archived}
+    try:
+        dropped = await loop.run_in_executor(
+            None, lambda: prod_archive.drop_tokens_under(project_path, payload.rel_path)
+        )
+    except Exception as e:  # noqa: BLE001 - the folder is archived, tokens are secondary
+        log.warning("drop_tokens_under %s failed: %s", payload.rel_path, e)
+        dropped = []
+    return {"archived": True, "archived_to": archived, "tokens_dropped": dropped}
 
 
 # ── Composer token archive (Publisher ghost-token cross) ──────────────────────
