@@ -115,3 +115,28 @@ class LegacyDccNameApi(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _BigServer(_EchoServer):
+    """Answers every command with a 10 000 byte payload sent in pieces."""
+
+    def _handle(self, conn: socket.socket) -> None:
+        import time
+
+        with conn:
+            if conn.recv(4096):
+                payload = b"x" * 9999 + b"\n"
+                for i in range(0, len(payload), 3000):
+                    conn.sendall(payload[i:i + 3000])
+                    time.sleep(0.02)
+                time.sleep(1.0)     # keep the connection open: the reader must stop on silence
+
+
+class LongResponses(unittest.TestCase):
+    def test_a_response_longer_than_the_buffer_is_read_whole(self):
+        server = _BigServer()
+        self.addCleanup(server.close)
+        mgr = SocketManager()
+        self.assertTrue(mgr.connect_port(server.port))
+        self.addCleanup(mgr.disconnect_port, server.port)
+        self.assertEqual(len(mgr.send_command_port(server.port, "big")), 9999)
