@@ -278,6 +278,11 @@ def on_lib_filter(node):
         p.set(items[0]["key"] if items else "")
     resolve_path(node)
 
+def menu_lib_version(node):
+    key = _pval(node, "lib_item")
+    it = next((i for i in _library(node) if i["key"] == key), None)
+    return _flat(it["versions"] if it else ["LAST"])
+
 def _sync_lib_filters(node):
     """Type / Classe / Sequence follow the element (set by "Open in" or an old node).
     An empty Classe / Sequence ("Toutes") already shows the element: left as is."""

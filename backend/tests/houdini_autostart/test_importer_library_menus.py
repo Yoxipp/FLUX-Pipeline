@@ -97,6 +97,17 @@ class LibraryMenus(unittest.TestCase):
         ns["resolve_path"](node)
         self.assertEqual(node.value("lib_class"), "CHAR")
 
+    def test_every_menu_and_callback_of_the_build_exists_in_the_module(self) -> None:
+        # Live 2026-09-19: menu_lib_version had been dropped, the Version menu failed.
+        import re
+
+        ns = _module()
+        code = flux_importer_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)
+        called = set(re.findall(r'"(menu_[a-z_]+)"', code)) | set(re.findall(r"hou\.phm\(\)\.([a-z_]+)\(", code))
+        self.assertIn("menu_lib_version", called)
+        self.assertEqual(sorted(n for n in called if n not in ns), [])
+        self.assertEqual(ns["menu_lib_version"](_node(lib_item="component:DINGO")), ["LAST", "LAST"])
+
     def test_the_build_adds_the_filter_menus(self) -> None:
         code = flux_importer_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)
         compile(code, "build", "exec")
