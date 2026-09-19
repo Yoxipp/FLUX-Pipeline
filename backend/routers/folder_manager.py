@@ -47,7 +47,7 @@ async def get_project_tokens(project_name: str) -> dict:
     project_path = get_project_path(project_name)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # Auto-heal first: adopt on-disk assets/shots that have no token yet so the
     # composer's NAME/SEQ/SHOT pickers list everything that exists on disk. Idempotent
     # and non-destructive; a scan hiccup must never block returning the tokens.
@@ -78,7 +78,7 @@ async def get_project_config(project_name: str) -> dict:
 
 @router.get("/projects")
 async def get_projects() -> dict:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     projects = await loop.run_in_executor(None, list_projects)
     return {"projects": projects}
 
@@ -87,7 +87,7 @@ async def get_projects() -> dict:
 async def post_project(req: ProjectCreate) -> dict:
     if project_exists(req.name):
         raise HTTPException(status_code=409, detail=f"Projet '{req.name}' existe déjà")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         path = await loop.run_in_executor(None, lambda: create_project(req.name))
     except ValueError as e:
@@ -114,7 +114,7 @@ async def delete_project(project_name: str) -> dict:
     if project_path.parent != projects_dir or not is_subpath(project_path, projects_dir):
         raise HTTPException(status_code=403, detail="Chemin non autorisé")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(None, lambda: force_rmtree(project_path))
     except Exception as e:
@@ -148,7 +148,7 @@ async def get_types_for_class(project_name: str, class_token: str | None = None)
     project_path = get_project_path(project_name)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
     type_tokens: dict[str, str] = tokens.get("TYPE", {})
     all_type_keys = list(type_tokens.keys())
@@ -263,7 +263,7 @@ async def suggest_tokens(
                                 vals.add(parsed["VARIANTE"])
         return sorted(vals)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     suggestions = await loop.run_in_executor(None, _work)
     return {"suggestions": suggestions}
 
@@ -273,7 +273,7 @@ async def get_assets(project_name: str, class_token: str | None = None) -> dict:
     project_path = get_project_path(project_name)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     assets = await loop.run_in_executor(
         None, lambda: list_assets(project_path, class_token)
     )
@@ -285,7 +285,7 @@ async def post_asset(req: AssetCreate) -> dict:
     project_path = get_project_path(req.project)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         path = await loop.run_in_executor(
             None, lambda: create_asset(project_path, req.class_token, req.name)
@@ -313,7 +313,7 @@ async def get_sequences(project_name: str) -> dict:
     project_path = get_project_path(project_name)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     seqs = await loop.run_in_executor(None, lambda: list_sequences(project_path))
     return {"sequences": seqs}   # ["SEQ001", "SEQ002", ...]
 
@@ -321,7 +321,7 @@ async def get_sequences(project_name: str) -> dict:
 @router.post("/sequences")
 async def post_sequence(req: SequenceCreate) -> dict:
     project_path = get_project_path(req.project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         path = await loop.run_in_executor(
             None, lambda: create_sequence(project_path, req.seq_number)
@@ -339,7 +339,7 @@ async def get_shots(project_name: str, seq_label: str) -> dict:
         seq_number = _parse_int(seq_label)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     shots = await loop.run_in_executor(
         None, lambda: list_shots(project_path, seq_number)
     )
@@ -349,7 +349,7 @@ async def get_shots(project_name: str, seq_label: str) -> dict:
 @router.post("/shots")
 async def post_shot(req: ShotCreate) -> dict:
     project_path = get_project_path(req.project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         path = await loop.run_in_executor(
             None, lambda: create_shot(project_path, req.seq_number, req.shot_number)
@@ -378,7 +378,7 @@ async def post_directory(req: DirectoryCreate) -> dict:
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Le nom du dossier est requis")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     if req.token and req.token_type:
         tokens = await loop.run_in_executor(None, lambda: load_tokens(project_path))
@@ -463,7 +463,7 @@ async def patch_item(req: ItemPatch) -> dict:
         raise HTTPException(status_code=409, detail=f"'{new_name}' existe déjà à destination")
 
     dst_path.parent.mkdir(parents=True, exist_ok=True)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(None, lambda: shutil.move(str(src_path), str(dst_path)))
     except Exception as e:
@@ -487,7 +487,7 @@ async def get_locks(project_name: str) -> dict:
     project_path = get_project_path(project_name)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     locked = await loop.run_in_executor(None, lambda: load_locks(project_path))
     return {"locked": locked}
 
@@ -498,7 +498,7 @@ async def post_lock(req: LockSet) -> dict:
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
     rel = f"{req.subpath}/{req.name}" if req.subpath else req.name
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     locked = await loop.run_in_executor(None, lambda: set_lock(project_path, rel, req.locked))
     return {"locked": locked}
 
@@ -545,7 +545,7 @@ async def copy_item(req: ItemCopy) -> dict:
         raise HTTPException(status_code=409, detail=f"'{dst_name}' existe déjà à destination")
 
     dst_path.parent.mkdir(parents=True, exist_ok=True)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         if src_path.is_dir():
             await loop.run_in_executor(None, lambda: shutil.copytree(src_path, dst_path))
@@ -603,7 +603,7 @@ def _preset_or_400(result: dict) -> dict:
 @router.get("/projects/{project_name}/presets")
 async def get_presets(project_name: str) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     presets = await loop.run_in_executor(None, lambda: preset_manager.list_presets(project_path))
     return {"presets": presets}
 
@@ -611,7 +611,7 @@ async def get_presets(project_name: str) -> dict:
 @router.post("/projects/{project_name}/presets")
 async def post_preset(project_name: str, req: PresetAdd) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, lambda: preset_manager.add_preset_slot(project_path, req.name))
     return _preset_or_400(res)
 
@@ -619,7 +619,7 @@ async def post_preset(project_name: str, req: PresetAdd) -> dict:
 @router.put("/projects/{project_name}/presets/{preset_id}/link")
 async def put_preset_link(project_name: str, preset_id: str, req: PresetLink) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(
         None, lambda: preset_manager.link_preset(project_path, preset_id, Path(req.src_path))
     )
@@ -629,7 +629,7 @@ async def put_preset_link(project_name: str, preset_id: str, req: PresetLink) ->
 @router.put("/projects/{project_name}/presets/{preset_id}/unlink")
 async def put_preset_unlink(project_name: str, preset_id: str) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, lambda: preset_manager.unlink_preset(project_path, preset_id))
     return _preset_or_400(res)
 
@@ -637,7 +637,7 @@ async def put_preset_unlink(project_name: str, preset_id: str) -> dict:
 @router.put("/projects/{project_name}/presets/{preset_id}/rename")
 async def put_preset_rename(project_name: str, preset_id: str, req: PresetRename) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(
         None, lambda: preset_manager.rename_preset(project_path, preset_id, req.name)
     )
@@ -647,7 +647,7 @@ async def put_preset_rename(project_name: str, preset_id: str, req: PresetRename
 @router.delete("/projects/{project_name}/presets/{preset_id}")
 async def delete_preset(project_name: str, preset_id: str) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, lambda: preset_manager.remove_preset_slot(project_path, preset_id))
     return _preset_or_400(res)
 
@@ -655,7 +655,7 @@ async def delete_preset(project_name: str, preset_id: str) -> dict:
 @router.post("/projects/{project_name}/presets/{preset_id}/drop")
 async def post_preset_drop(project_name: str, preset_id: str, req: PresetDrop) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(
         None, lambda: preset_manager.drop_preset(project_path, preset_id, req.dest_subpath)
     )
@@ -665,7 +665,7 @@ async def post_preset_drop(project_name: str, preset_id: str, req: PresetDrop) -
 @router.put("/projects/{project_name}/presets/{preset_id}/meta")
 async def put_preset_meta(project_name: str, preset_id: str, req: PresetMeta) -> dict:
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(
         None, lambda: preset_manager.set_preset_meta(project_path, preset_id, req.task, req.soft)
     )
@@ -681,7 +681,7 @@ async def post_preset_launch(project_name: str, preset_id: str, req: PresetLaunc
     """
     from features.launcher.launcher_core import launch_dcc
     project_path = _require_project(project_name)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     prep = await loop.run_in_executor(
         None, lambda: preset_manager.prepare_new_scene(project_path, preset_id)
     )
@@ -718,7 +718,7 @@ async def delete_item(req: ItemDelete) -> dict:
     if is_locked(project_path, rel):
         raise HTTPException(status_code=423, detail=f"Élément verrouillé : {req.name}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         # force_remove clears read-only bits first: archived publishes are often
         # read-only, so a plain rmtree/unlink fails with WinError 5 on Windows.

@@ -129,7 +129,7 @@ async def get_production(project: str) -> dict:
     later edits (renaming a task's label, etc.) survive.
     """
     _ensure_project(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _do() -> dict:
         production = store.load_production(project)
@@ -253,7 +253,7 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     files. A sync failure never fails the save — the planning is persisted first.
     """
     _ensure_project(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     previous = await loop.run_in_executor(None, lambda: store.load_production(project))
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
@@ -294,7 +294,7 @@ async def notify_comment(project: str, payload: CommentNotify) -> dict:
     if payload.subtask:
         parts.append(payload.subtask.upper())
     filename = "_".join(parts)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         lambda: log_event(user, "comment", project, filename=filename, dest_folder=None),
@@ -321,7 +321,7 @@ async def entity_folder(
     count, so the UI can warn before archiving (prevention message)."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _do() -> dict:
         rel = prod_archive.resolve_entity_rel(project_path, kind, class_token, name, seq, shot)
@@ -338,7 +338,7 @@ async def archive_entity(project: str, payload: ArchiveRequest) -> dict:
     removes the logical entity from production.json AFTER this succeeds."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         archived = await loop.run_in_executor(
             None, lambda: prod_archive.archive_folder(project_path, payload.rel_path)
@@ -417,7 +417,7 @@ async def token_folder(
     archiving the token from the Publisher."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     class _R:
         pass
@@ -440,7 +440,7 @@ async def archive_token(project: str, payload: ArchiveTokenRequest) -> dict:
     tokens.json. Never hard-deletes — mirrors the entity archive flow."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _do() -> dict:
         rel, tok = _resolve_token_rel(project_path, payload)
@@ -498,7 +498,7 @@ async def resolve_ref(
     """Resolve the project-relative root of a task/subtask (where /ref lives)."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     rel = await loop.run_in_executor(
         None,
         lambda: ref_media.resolve_ref_root(
@@ -518,7 +518,7 @@ async def deposit_ref(project: str, request: Request, rel_path: str = "", filena
     _ensure_project(project)
     data = await request.body()
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             None, lambda: ref_media.deposit(project_path, rel_path, filename, data)
@@ -536,7 +536,7 @@ async def latest_ref(project: str, rel_path: str = "") -> dict:
     """Return info about the current LAST file, or {found: false} when empty."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         info = await loop.run_in_executor(
             None, lambda: ref_media.latest(project_path, rel_path)
@@ -553,7 +553,7 @@ async def stream_ref(project: str, rel_path: str = "", name: str = "") -> FileRe
     """Stream a ref file (Range-enabled by FileResponse) for the <img>/<video> src."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         path = await loop.run_in_executor(
             None, lambda: ref_media.resolve_file(project_path, rel_path, name)
@@ -571,7 +571,7 @@ async def export_ref(project: str, payload: RefExport) -> dict:
     """Copy a ref file to a user-chosen destination (download button)."""
     _ensure_project(project)
     project_path = get_project_path(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         dest = await loop.run_in_executor(
             None, lambda: ref_media.export_to(project_path, payload.rel_path, payload.name, payload.dest_path)

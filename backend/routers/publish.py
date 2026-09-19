@@ -48,7 +48,7 @@ async def publish(req: PublishRequest) -> PublishResult:
     if not project_path.exists():
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape. The runner runs publish.yml, which

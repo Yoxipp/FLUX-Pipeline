@@ -29,7 +29,7 @@ async def browse_project(project_name: str, subpath: str = "") -> dict:
     target = (project_path / subpath).resolve() if subpath else project_path.resolve()
     if not is_subpath(target, project_path.resolve()):
         raise HTTPException(status_code=403, detail="Chemin non autorisé")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     folder_names = await loop.run_in_executor(
         None, lambda: list_folders(project_path, subpath)
     )

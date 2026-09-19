@@ -79,7 +79,7 @@ def _run_assemble(recipe: dict, project_path: Path, strict: bool) -> dict:
 async def assemble_recipe(req: AssembleRequest) -> dict:
     """Assemble a recipe into published USD and return the written layer paths."""
     _, project_path = _resolve_project(req.project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             None, lambda: _run_assemble(req.recipe, project_path, req.strict)
@@ -167,7 +167,7 @@ async def get_usd_composition(file: str, project: str | None = None) -> dict:
         raise HTTPException(status_code=403, detail="Chemin non autorise")
     from features.usd_assembler.inspect import composition
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(None, lambda: composition(target))
     except ValueError as exc:
@@ -258,7 +258,7 @@ def _library(project_path: Path) -> dict:
 async def get_usd_library(project: str | None = None) -> dict:
     """Existing components (ADR 0018) and assemblies of the project (A2 default view)."""
     name, project_path = _resolve_project(project)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         lib = await loop.run_in_executor(None, lambda: _library(project_path))
     except Exception as exc:
@@ -273,7 +273,7 @@ async def refresh_usd_component(req: ComponentRefreshRequest) -> dict:
     _, project_path = _resolve_project(req.project)
     from features.usd_assembler.component_auto import refresh_component
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         res = await loop.run_in_executor(None, lambda: refresh_component(project_path, req.name, pins=req.pins))
     except Exception as exc:
@@ -312,7 +312,7 @@ async def create_usd_assembly(req: AssemblyCreateRequest) -> dict:
     _, project_path = _resolve_project(req.project)
     from features.usd_assembler.assembly_v2 import create_assembly
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         res = await loop.run_in_executor(None, lambda: create_assembly(
             project_path, req.name, source=req.source, user=req.user))
@@ -330,7 +330,7 @@ async def edit_usd_assembly(req: AssemblyEditRequest) -> dict:
     _, project_path = _resolve_project(req.project)
     from features.usd_assembler.assembly_v2 import edit_assembly
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         res = await loop.run_in_executor(None, lambda: edit_assembly(
             project_path, req.name, req.ops, user=req.user))
@@ -363,7 +363,7 @@ async def publish_usd_assembly_layout(req: LayoutPublishRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"DCC non gere pour le layout : {req.dcc}")
     from features.usd_assembler.layout_publish import publish_layout
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     collected = await loop.run_in_executor(None, lambda: collect_layout(req.name))
     if not collected.get("ok"):
         raise HTTPException(status_code=503, detail=collected.get("error") or f"{req.dcc} injoignable")
@@ -388,7 +388,7 @@ async def relink_usd_assembly_instance(req: RelinkRequest) -> dict:
 
     ns = config.get("usd_assembler", {}) or {}
     subdir = ns.get("output_subdir", _DEFAULT_OUTPUT_SUBDIR)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         res = await loop.run_in_executor(None, lambda: relink_instance(
             project_path, req.file, req.prim, req.component, req.version, subdir))

@@ -66,7 +66,7 @@ async def publish_preview(req: PreviewRequest) -> PreviewResponse:
 
     # preview_publish_action drives the engine with asyncio.run internally, so it
     # must run off the request's event loop, in a worker thread.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     dest = await loop.run_in_executor(
         None,
         lambda: preview_publish_action(

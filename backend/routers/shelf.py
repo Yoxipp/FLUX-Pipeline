@@ -43,7 +43,7 @@ class ToolsApplyRequest(BaseModel):
 @router.get("")
 async def get_shelves() -> dict:
     """Return shelf + HDA status for all supported DCCs and their installed versions."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = {}
     for dcc in _SUPPORTED_DCCS:
         versions = await loop.run_in_executor(None, lambda d=dcc: get_installed_versions(d))
@@ -66,7 +66,7 @@ async def get_shelf_status(dcc: str, version: str) -> dict:
     """Return shelf + HDA install status for a specific DCC version."""
     if dcc not in _SUPPORTED_DCCS:
         raise HTTPException(status_code=400, detail=f"DCC non supporté : {dcc}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     shelf = await loop.run_in_executor(None, lambda: is_shelf_installed(dcc, version))
     hdas = False
     if dcc == "Houdini":
@@ -79,7 +79,7 @@ async def install(req: ShelfInstallRequest) -> dict:
     """Install the Flux shelf for a given DCC + version."""
     if req.dcc not in _SUPPORTED_DCCS:
         raise HTTPException(status_code=400, detail=f"DCC non supporté : {req.dcc}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(None, lambda: install_shelf(req.dcc, req.version))
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
@@ -91,7 +91,7 @@ async def remove(req: ShelfRemoveRequest) -> dict:
     """Remove the Flux shelf for a given DCC + version."""
     if req.dcc not in _SUPPORTED_DCCS:
         raise HTTPException(status_code=400, detail=f"DCC non supporté : {req.dcc}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(None, lambda: remove_shelf(req.dcc, req.version))
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
@@ -102,7 +102,7 @@ async def remove(req: ShelfRemoveRequest) -> dict:
 @router.get("/tools")
 async def get_tools() -> dict:
     """Return the Maya tools, their persisted selection, and shelf install status."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     versions = await loop.run_in_executor(None, lambda: get_installed_versions("Maya"))
     selection = await loop.run_in_executor(None, get_shelf_tool_selection)
     tools = list_tools()
@@ -118,7 +118,7 @@ async def get_tools() -> dict:
 @router.post("/tools/apply")
 async def apply_tools(req: ToolsApplyRequest) -> dict:
     """Install the single Flux shelf with the selected tools (persists the choice)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(
         None, lambda: install_flux_shelf(req.version, req.tool_ids))
     if not ok:

@@ -93,7 +93,7 @@ async def _probe_all_dccs() -> dict:
     for back-compat — `connected` is true when at least one instance is up, and
     `port` is the lowest open instance port (or the base port when none is up).
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     names = list(DCC_PORT_RANGES.keys())
     # One executor task per DCC scans its whole port range; DCCs run in parallel.
     scans = await asyncio.gather(
@@ -152,7 +152,7 @@ async def _maya_target(port: int | None) -> int:
     from dcc.maya.maya_connection import GhostMayaError, pick_live_port
 
     requested = _resolve_target_port("Maya", port)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _pick() -> int:
         open_ports = [i["port"] for i in scan_instances("Maya")]
@@ -169,7 +169,7 @@ async def execute_command(req: CommandRequest) -> CommandResult:
     """Send a Python command to a connected DCC instance via TCP socket."""
     target = _resolve_target_port(req.dcc, req.port)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, lambda: socket_manager.is_port_connected(target)):
         connected = await loop.run_in_executor(None, lambda: socket_manager.connect_port(target))
         if not connected:
@@ -188,7 +188,7 @@ async def get_dcc_instances(dcc_key: str) -> dict:
     """List the running instances of a single DCC (one record per open port)."""
     if dcc_key not in DCC_PORT_RANGES:
         raise HTTPException(status_code=400, detail=f"DCC inconnu : {dcc_key}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     instances = await loop.run_in_executor(None, lambda: scan_instances(dcc_key))
     return {"dcc": dcc_key, "instances": instances}
 
@@ -197,7 +197,7 @@ async def get_dcc_instances(dcc_key: str) -> dict:
 async def connect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
     """Explicitly open a socket connection to a DCC instance (base port if omitted)."""
     target = _resolve_target_port(dcc_name, port)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok = await loop.run_in_executor(None, lambda: socket_manager.connect_port(target))
     return {"dcc": dcc_name, "port": target, "connected": ok}
 
@@ -205,7 +205,7 @@ async def connect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
 @router.post("/disconnect/{dcc_name}")
 async def disconnect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
     target = _resolve_target_port(dcc_name, port)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, lambda: socket_manager.disconnect_port(target))
     return {"dcc": dcc_name, "port": target, "connected": False}
 
@@ -213,7 +213,7 @@ async def disconnect_dcc(dcc_name: str, port: int | None = Query(None)) -> dict:
 @router.get("/find/{dcc_key}")
 async def auto_find_dcc(dcc_key: str) -> dict:
     """Glob-scan default install paths for dcc_key, save if found."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     path = await loop.run_in_executor(None, lambda: find_dcc_exe(dcc_key))
     return {"dcc": dcc_key, "path": path, "found": path is not None}
 
@@ -221,7 +221,7 @@ async def auto_find_dcc(dcc_key: str) -> dict:
 @router.get("/installed")
 async def get_installed() -> dict:
     """Return all DCCs detected on this machine."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     found = await loop.run_in_executor(None, get_installed_dccs)
     return {"dccs": found}
 
@@ -230,7 +230,7 @@ async def get_installed() -> dict:
 async def launch(req: LaunchRequest) -> dict:
     """Launch a DCC application (optionally saving a custom exe path first)."""
     from features.launcher.launcher_core import set_custom_exe_path
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     if req.exe_path:
         await loop.run_in_executor(None, lambda: set_custom_exe_path(req.dcc, req.exe_path))
     ok = await loop.run_in_executor(None, lambda: launch_dcc(req.dcc))
@@ -241,7 +241,7 @@ async def launch(req: LaunchRequest) -> dict:
 async def houdini_state() -> dict:
     """Return current Houdini state: selected nodes, frame, path, hip file."""
     from dcc.houdini.client import houdini_client
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, houdini_client.state)
     if "error" in result:
         raise HTTPException(status_code=503, detail=result["error"])
@@ -332,7 +332,7 @@ async def get_autostart(dcc_key: str) -> dict:
     mod = _AUTOSTART_MODULES.get(dcc_key)
     if mod is None:
         raise HTTPException(status_code=400, detail=f"Autostart not supported for: {dcc_key}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     exe = await loop.run_in_executor(None, lambda: _config.get("dcc_paths", {}).get(dcc_key))
     installed = await loop.run_in_executor(None, lambda: mod.is_installed(exe))
     startup = await loop.run_in_executor(None, lambda: mod.get_startup_file(exe))
@@ -345,7 +345,7 @@ async def install_autostart(dcc_key: str) -> dict:
     mod = _AUTOSTART_MODULES.get(dcc_key)
     if mod is None:
         raise HTTPException(status_code=400, detail=f"Autostart not supported for: {dcc_key}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     exe = await loop.run_in_executor(None, lambda: _config.get("dcc_paths", {}).get(dcc_key))
     result = await loop.run_in_executor(None, lambda: mod.install(exe))
     if not result["success"]:
@@ -359,7 +359,7 @@ async def remove_autostart(dcc_key: str) -> dict:
     mod = _AUTOSTART_MODULES.get(dcc_key)
     if mod is None:
         raise HTTPException(status_code=400, detail=f"Autostart not supported for: {dcc_key}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     exe = await loop.run_in_executor(None, lambda: _config.get("dcc_paths", {}).get(dcc_key))
     result = await loop.run_in_executor(None, lambda: mod.uninstall(exe))
     if not result["success"]:
@@ -386,7 +386,7 @@ class HoudiniMoveToLocalRequest(BaseModel):
 async def houdini_import_create(req: HoudiniImportCreateRequest) -> dict:
     """Create a Houdini import node (type auto-detected from extension)."""
     from dcc.houdini.houdini_import import create_import_node
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, lambda: create_import_node(req.network_path, req.file_path)
     )
@@ -399,7 +399,7 @@ async def houdini_import_create(req: HoudiniImportCreateRequest) -> dict:
 async def houdini_import_set_path(req: HoudiniImportSetPathRequest) -> dict:
     """Update the file path parameter on an existing Houdini import node."""
     from dcc.houdini.houdini_import import set_import_path
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, lambda: set_import_path(req.node_path, req.file_path)
     )
@@ -412,7 +412,7 @@ async def houdini_import_set_path(req: HoudiniImportSetPathRequest) -> dict:
 async def houdini_import_move_to_local(req: HoudiniMoveToLocalRequest) -> dict:
     """Copy a pipeline file into $HIP/sourceimages/ of the current Houdini project."""
     from dcc.houdini.houdini_import import move_to_local
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, lambda: move_to_local(req.file_path, req.dest_folder or None)
     )
@@ -499,7 +499,7 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
         if selected_file:
             selected_file = to_flux_token(selected_file)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # USD: import by context (flux_importer HDA in /stage and in SOP, whose
     # source matches the file: tokens for a task publish, USD library for a component /
@@ -581,7 +581,7 @@ class HoudiniPublishRequest(BaseModel):
 async def houdini_export_geo(req: HoudiniGeoExportRequest) -> dict:
     """Export geometry from a Houdini SOP node. Requires Houdini to be running with FLUX server."""
     from dcc.houdini.houdini_export import export_geo
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, lambda: export_geo(req.node_path, req.file_path, req.extension)
     )
@@ -594,7 +594,7 @@ async def houdini_export_geo(req: HoudiniGeoExportRequest) -> dict:
 async def houdini_export_scene(req: HoudiniSceneExportRequest) -> dict:
     """Save the current Houdini scene to disk. Requires Houdini to be running with FLUX server."""
     from dcc.houdini.houdini_export import export_scene
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, lambda: export_scene(req.file_path, req.extension)
     )
@@ -623,7 +623,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
 
     frame_range = tuple(req.frame_range) if req.frame_range and len(req.frame_range) == 3 else None  # type: ignore[arg-type]
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape — only the logic underneath changes.
@@ -713,7 +713,7 @@ async def houdini_export_usd(req: HoudiniLightExportRequest) -> dict:
             raise HTTPException(status_code=400, detail=f"Chemin de publish introuvable pour {req.filename}")
         dest_dir, base_name = str(rp), get_base_name(full)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: run_light_export(
@@ -762,7 +762,7 @@ async def houdini_export_usd_look(req: HoudiniLookExportRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
     dest_dir, base_name = _resolve_look_target(project_path, req.filename, req.fmt)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: run_look_export(str(project_path), lop_node=req.lop_node, fmt=req.fmt,
@@ -789,7 +789,7 @@ async def houdini_import_character(req: HoudiniCharacterImportRequest) -> dict:
 
     if not houdini_client.is_connected():
         raise HTTPException(status_code=503, detail="Houdini non connecté (lance le serveur FLUX dans Houdini)")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     resp = await loop.run_in_executor(
         None, lambda: create_character_import_node(req.network_path, req.file_path)
     )
@@ -836,7 +836,7 @@ async def maya_port_status() -> dict:
     Returns {"stuck": bool, "pid": int|None, "name": str|None}.
     """
     from dcc.maya.port_guard import find_stuck_maya
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     stuck = await loop.run_in_executor(None, find_stuck_maya)
     if stuck is None:
         return {"stuck": False, "pid": None, "name": None}
@@ -850,7 +850,7 @@ async def maya_reap() -> dict:
     Returns {"killed": bool, "pid": int|None, "message": str}.
     """
     from dcc.maya.port_guard import reap_stuck_maya
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, reap_stuck_maya)
     # Drop the cached verdict so the next status push reflects the reap immediately
     # instead of showing a stale "stuck" banner for up to one TTL.
@@ -862,7 +862,7 @@ async def maya_reap() -> dict:
 async def maya_diag() -> dict:
     """Diagnostic — reports autostart install state and what's actually in userSetup.py."""
     from dcc.maya import autostart as _ma
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     startup = await loop.run_in_executor(None, lambda: _ma.get_startup_file())
     installed = await loop.run_in_executor(None, lambda: _ma.is_installed())
     snippet: str | None = None
@@ -1063,7 +1063,7 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     )
 
     target_port = await _maya_target(req.port)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0, port=target_port))
         if result is None:
@@ -1257,7 +1257,7 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
     )
 
     target_port = await _maya_target(req.port)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=300.0, port=target_port))
         if result is None:
@@ -1367,7 +1367,7 @@ async def maya_export_usd_look(req: MayaLookExportRequest) -> dict:
     )
 
     target_port = await _maya_target(req.port)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         sent = await loop.run_in_executor(
             None, lambda: send_command_direct(cmd, timeout=300.0, port=target_port))
@@ -1446,7 +1446,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     filename_with_ext = f"{req.filename}{ext}"
 
     # Pre-flight: compute the version number that will be assigned after publish
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     dest_folder = await loop.run_in_executor(
         None, lambda: resolve_publish_path(project_path, filename_with_ext)
     )
@@ -1631,7 +1631,7 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
     if not project_path.exists():
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: publish_zbrush(
@@ -1659,7 +1659,7 @@ async def cancel_zbrush() -> dict:
     Sends 'stop' so the freeze loop breaks immediately; the bridge acks it even
     when idle, so this never hangs and is safe to call at app shutdown."""
     from dcc.zbrush.client import zbrush_client
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, zbrush_client.release)
     return {"cancelled": result.get("ok", False)}
 
@@ -1686,7 +1686,7 @@ async def nuke_import_read(req: NukeImportRequest) -> dict:
     """Create a Read node in Nuke for a FLUX-published file resolved from tokens."""
     from dcc.nuke.nuke_import import DEFAULT_READ_COLORSPACE, import_into_nuke
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: import_into_nuke(
@@ -1713,7 +1713,7 @@ async def nuke_import_path(req: NukeImportPathRequest) -> dict:
     """Create a Read node in Nuke from a project-relative file (Folder Manager)."""
     from dcc.nuke.nuke_import import DEFAULT_READ_COLORSPACE, import_path_into_nuke
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: import_path_into_nuke(
@@ -1747,7 +1747,7 @@ async def nuke_publish_write(req: NukePublishRequest) -> dict:
     from dcc.nuke.nuke_publish import publish_from_nuke
 
     user = req.user or config.get_current_user() or "unknown"
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: publish_from_nuke(
@@ -1787,7 +1787,7 @@ async def photoshop_open(req: PhotoshopOpenRequest) -> dict:
     from dcc.photoshop.client import open_document
 
     file_path = get_project_path(req.project_name) / req.rel_path.replace("/", "\\")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: open_document(str(file_path)))
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Photoshop open failed"))
@@ -1798,7 +1798,7 @@ async def photoshop_open(req: PhotoshopOpenRequest) -> dict:
 async def photoshop_status() -> dict:
     """Actionable Photoshop state: lib_missing / not_running / ok (+ version)."""
     from dcc.photoshop.client import status as ps_status
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, ps_status)
 
 
@@ -1806,7 +1806,7 @@ async def photoshop_status() -> dict:
 async def photoshop_install() -> dict:
     """Install photoshop-python-api into the backend env when missing (dev)."""
     from dcc.photoshop.client import ensure_library
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, ensure_library)
 
 
@@ -1817,7 +1817,7 @@ async def photoshop_publish(req: PhotoshopPublishRequest) -> dict:
     from dcc.photoshop.photoshop_export import publish_photoshop
 
     user = req.user or config.get_current_user() or "unknown"
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: publish_photoshop(
@@ -1854,7 +1854,7 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
     from dcc.substance_painter.substance_export import publish_painter
 
     user = req.user or config.get_current_user() or "unknown"
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: publish_painter(
@@ -1890,7 +1890,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
     from dcc.mari.mari_export import publish_mari
 
     user = req.user or config.get_current_user() or "unknown"
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: publish_mari(
@@ -1940,7 +1940,7 @@ def _ingest_file(req: "FilePublishRequest", soft: str) -> dict:
 @router.post("/designer/publish")
 async def designer_publish(req: FilePublishRequest) -> dict:
     """Ingest a Substance Designer file (.sbsar / maps) into FLUX."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: _ingest_file(req, "Designer"))
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Designer publish failed"))
@@ -1950,7 +1950,7 @@ async def designer_publish(req: FilePublishRequest) -> dict:
 @router.post("/marvelous/publish")
 async def marvelous_publish(req: FilePublishRequest) -> dict:
     """Ingest a Marvelous Designer file (.zprj / .abc / .obj / .fbx) into FLUX."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: _ingest_file(req, "Marvelous"))
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Marvelous publish failed"))
@@ -1974,7 +1974,7 @@ async def houdini_importer_tokens(project: str = "") -> dict:
     from core.paths import get_project_path
     from features.importer.importer_resolve import get_import_tokens, get_project_list
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     projects = await loop.run_in_executor(None, get_project_list)
     tokens: dict = {}
     if project:
@@ -2001,7 +2001,7 @@ async def houdini_importer_resolve(
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         lambda: resolve_import_path(project_path, class_tok, type, name, instance, iter),
@@ -2032,7 +2032,7 @@ async def houdini_importer_library(project: str) -> dict:
     project_path = get_project_path(project)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         items = await loop.run_in_executor(None, lambda: library_items(project_path))
     except Exception as exc:
@@ -2050,7 +2050,7 @@ async def houdini_importer_library_resolve(project: str, key: str, version: str 
     project_path = get_project_path(project)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: resolve_library_item(project_path, key, version))
     from flux_actions.switch import portable_paths_enabled
     if portable_paths_enabled() and result.get("ok"):
@@ -2064,7 +2064,7 @@ async def houdini_importer_probe(file: str) -> dict:
     """Free path mode of the importer HDA: file exists? skeleton inside (USD)?"""
     from features.importer.library_import import probe_file
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: probe_file(file))
 
 
@@ -2087,7 +2087,7 @@ async def houdini_importer_instances(
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     instances = await loop.run_in_executor(
         None,
         lambda: get_available_instances(project_path, class_tok, type, name),
@@ -2111,7 +2111,7 @@ async def houdini_importer_iters(
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     iters = await loop.run_in_executor(
         None,
         lambda: get_available_iters(project_path, class_tok, type, name, instance),
@@ -2133,7 +2133,7 @@ async def houdini_importer_inject_module(req: HoudiniInjectModuleRequest) -> dic
     """
     from dcc.houdini.hda.flux_importer_hda import inject_module
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: inject_module(req.hda_name))
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Inject failed"))
@@ -2149,7 +2149,7 @@ async def houdini_importer_build_hda(req: HoudiniBuildHdaRequest) -> dict:
     """
     from dcc.houdini.hda.flux_importer_hda import build_hda
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: build_hda(req.hda_path))
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "HDA build failed"))
@@ -2197,7 +2197,7 @@ async def houdini_anim_publishes(project: str) -> dict:
     project_path = get_project_path(project)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     items = await loop.run_in_executor(None, lambda: list_shot_anims(project_path))
     return {"ok": True, "items": items}
 

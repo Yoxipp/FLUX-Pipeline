@@ -40,7 +40,7 @@ class SettingsUpdate(BaseModel):
 @router.get("")
 async def get_settings() -> dict:
     """Return current settings + first-launch state."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     is_first = await loop.run_in_executor(None, config.is_first_launch)
     root = get_flux_root()
     user = config.get_current_user()
@@ -80,7 +80,7 @@ async def init_first_launch(req: InitRequest) -> dict:
         set_flux_root(root)
         config.create_user(username, req.workspace)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(None, _scaffold)
     except Exception as exc:
@@ -92,7 +92,7 @@ async def init_first_launch(req: InitRequest) -> dict:
 @router.put("")
 async def update_settings(req: SettingsUpdate) -> dict:
     """Update one or more settings fields."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     if req.theme_bg or req.theme_surface or req.theme_fg or req.theme_accent:
         current = await loop.run_in_executor(None, config.get_theme)
@@ -146,7 +146,7 @@ async def update_settings(req: SettingsUpdate) -> dict:
 async def list_users() -> dict:
     """Return existing usernames (for first-launch suggestions)."""
     from utils.user_utils import list_users as _list
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     users = await loop.run_in_executor(None, _list)
     return {"users": users}
 
@@ -159,7 +159,7 @@ class UserRenameRequest(BaseModel):
 @router.put("/users/rename")
 async def rename_user_endpoint(req: UserRenameRequest) -> dict:
     """Rename an artist (renames their USER folder; active user follows)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.rename_user(req.old, req.new))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -169,7 +169,7 @@ async def rename_user_endpoint(req: UserRenameRequest) -> dict:
 @router.delete("/users/{name}")
 async def delete_user_endpoint(name: str) -> dict:
     """Delete an artist and their data (refuses the active user)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.delete_user(name))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -184,7 +184,7 @@ async def get_user_data() -> dict:
     user = config.get_current_user()
     if not user:
         return {}
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: user_utils.read_user_data(user))
 
 
@@ -201,7 +201,7 @@ async def put_user_data(patch: dict) -> dict:
         user_utils.write_user_data(user, data)
         return data
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _merge)
 
 

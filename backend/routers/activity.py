@@ -116,7 +116,7 @@ async def get_activity(
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     events, unread = await loop.run_in_executor(
         None,
         lambda: get_events_and_unread(
@@ -137,7 +137,7 @@ async def get_activity_history(limit: int = 200, offset: int = 0, kind: str = "a
     feed ("activity" or "mentions").
     """
     stem = ARCHIVE_STEM_MENTIONS if kind == "mentions" else ARCHIVE_STEM_ACTIVITY
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         events, has_more = await loop.run_in_executor(
             None, lambda: read_archive_events(stem, limit, offset),
@@ -149,7 +149,7 @@ async def get_activity_history(limit: int = 200, offset: int = 0, kind: str = "a
 
 @router.post("/read")
 async def mark_read(req: MarkReadRequest) -> dict:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok = await loop.run_in_executor(None, lambda: mark_as_read(req.event_id))
     if not ok:
         raise HTTPException(status_code=404, detail="Événement introuvable")
@@ -158,7 +158,7 @@ async def mark_read(req: MarkReadRequest) -> dict:
 
 @router.post("/read-all")
 async def mark_all_read() -> dict:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, mark_all_as_read)
     return {"success": True}
 
@@ -188,7 +188,7 @@ async def get_chat(request: Request, response: Response, limit: int = 100) -> di
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # get_messages caches internally (burst window); the stat above is the ETag's.
     messages = await loop.run_in_executor(None, lambda: get_messages(limit=limit, path=chat_path))
     users = await loop.run_in_executor(None, get_user_list)
@@ -201,7 +201,7 @@ async def get_chat(request: Request, response: Response, limit: int = 100) -> di
 async def post_chat(req: ChatMessage) -> dict:
     """Send a chat message (records @mentions for notified users)."""
     user = req.user or config.get_current_user() or "unknown"
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok = await loop.run_in_executor(None, lambda: send_message(user, req.message))
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")
@@ -237,7 +237,7 @@ async def get_chat_mentions(
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     mentions, unread = await loop.run_in_executor(
         None, lambda: get_mentions_and_unread(who, unread_only, path=path, sig=sig),
     )
@@ -250,6 +250,6 @@ async def get_chat_mentions(
 async def read_chat_mentions(req: MentionsReadRequest) -> dict:
     """Mark every mention addressed to the current user as read."""
     who = req.user or config.get_current_user() or "unknown"
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, lambda: mark_mentions_read(who))
     return {"success": True}
