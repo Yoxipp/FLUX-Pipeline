@@ -432,6 +432,20 @@ export const api = {
     apiCall<{ success: boolean }>('POST', '/activity/chat/mentions/read', { user }),
 
   // Files
+  // N8: deep settings (project.json + publish switches of this machine).
+  getAdvancedSettings: (project?: string) =>
+    apiCall<{ project: AdvancedProject | null; switches: Record<string, AdvancedSwitch> }>(
+      'GET', `/settings/advanced${project ? `?project=${encodeURIComponent(project)}` : ''}`),
+  putAdvancedProject: (project: string, values: Record<string, unknown>) =>
+    apiCall<AdvancedProject>('PUT', '/settings/advanced/project', { project, values }),
+  putAdvancedSwitches: (values: Record<string, boolean | number | null>) =>
+    apiCall<Record<string, AdvancedSwitch>>('PUT', '/settings/advanced/switches', { values }),
+
+  // N7: note of a published file (modif_logs.json): the version clicked + the history.
+  getPublishNote: (project_name: string, relPath: string) =>
+    apiCall<{ base: string; version: string | null; latest: PublishNoteEntry | null; history: PublishNoteEntry[] }>(
+      'GET', `/files/projects/${encodeURIComponent(project_name)}/publish-note?rel_path=${encodeURIComponent(relPath)}`),
+
   browseProject: (project_name: string, subpath?: string) =>
     apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
 
@@ -899,6 +913,23 @@ export interface UsdPrimNode {
   children: UsdPrimNode[]
   truncated: boolean
 }
+// N8 "Parametres avances" (GET /settings/advanced).
+export interface AdvancedProject {
+  name: string; project_id: string; last_modes: string[]; warnings: string[]
+  values: {
+    fps: number; resolution: [number, number]; ocio_config: string; env: Record<string, string>
+    usd: { meters_per_unit: number; up_axis: string }
+    storage: { last_mode: Record<string, string>; last_link_threshold_gb: number }
+  }
+}
+export interface AdvancedSwitch {
+  value: boolean | number; saved: boolean | number | null; env: string; source: 'page' | 'lancement' | 'defaut'
+}
+
+export interface PublishNoteEntry {
+  name: string; date: string; time: string; version: string; modification: string; user: string
+}
+
 // Crowd (A6, ADR 0022): shared skeletons and animation clips (GET /usd/crowd/compat).
 export interface UsdCrowdClip {
   base: string; asset: string; clip: string; last: string

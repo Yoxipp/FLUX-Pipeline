@@ -243,3 +243,59 @@ async def put_enabled_dccs(req: EnabledDccsUpdate) -> dict:
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"known": sorted(known), "enabled": enabled}
+
+
+# ── Parametres avances (N8) ───────────────────────────────────────────────────
+
+class AdvancedProjectUpdate(BaseModel):
+    project: str
+    values: dict
+
+
+class AdvancedSwitchesUpdate(BaseModel):
+    values: dict        # {name: value, or null to go back to the default}
+
+
+@router.get("/advanced")
+async def get_advanced(project: str | None = None) -> dict:
+    """project.json settings of *project* (or the last project) + this machine's publish switches."""
+    from core.paths import get_project_path
+    from features.settings.advanced import read_project_settings, read_switches
+
+    loop = asyncio.get_running_loop()
+    name = project or config.get_last_project()
+    proj = None
+    if name and get_project_path(name).exists():
+        proj = await loop.run_in_executor(None, lambda: read_project_settings(get_project_path(name)))
+        proj["name"] = name
+    return {"project": proj, "switches": await loop.run_in_executor(None, read_switches)}
+
+
+@router.put("/advanced/project")
+async def put_advanced_project(req: AdvancedProjectUpdate) -> dict:
+    """Write the project.json settings (validated; nothing written on error)."""
+    from core.paths import get_project_path
+    from features.settings.advanced import write_project_settings
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: write_project_settings(project_path, req.values))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    res["name"] = req.project
+    return res
+
+
+@router.put("/advanced/switches")
+async def put_advanced_switches(req: AdvancedSwitchesUpdate) -> dict:
+    """Save and apply the publish switches of this machine (decision D1)."""
+    from features.settings.advanced import save_switches
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: save_switches(req.values))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

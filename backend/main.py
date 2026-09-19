@@ -40,6 +40,14 @@ async def lifespan(app: FastAPI):
     if saved_user:
         config.set_current_user(saved_user)
         log.info("[FLUX] Active user: %s", saved_user)
+    # Publish switches saved in "Parametres avances" (N8, decision D1) -> env of this process.
+    try:
+        from features.settings.advanced import apply_saved_switches
+        applied = apply_saved_switches()
+        if applied:
+            log.info("[FLUX] Advanced switches applied: %s", applied)
+    except Exception as exc:  # never block startup on a prefs hiccup
+        log.warning("[FLUX] Advanced switches skipped: %s", exc)
     # Re-stage bundled Houdini HDAs (copy-if-newer). Keeps a dev who pulled updated
     # .hda in sync so the offline shelf install works without a live rebuild.
     try:

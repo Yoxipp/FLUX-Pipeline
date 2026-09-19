@@ -23,6 +23,7 @@ import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
 import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
+import { AdvancedSettings } from './pages/AdvancedSettings'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
@@ -137,6 +138,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/usd"       element={<UsdPage />} />
               <Route path="/templates" element={<TemplateEditor />} />
               <Route path="/production" element={<Production />} />
+              <Route path="/advanced"  element={<AdvancedSettings />} />
             </Routes>
           </main>
         </div>
