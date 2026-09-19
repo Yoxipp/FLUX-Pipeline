@@ -335,6 +335,18 @@ def _apply_lop(node, r):
         return
     _set_status(node, "OK  " + _pval(node, "prim_path"))
 
+def _reload_sop(node):
+    """Same as the LOP: the import SOPs keep a file they already read, so a scene
+    reopened after a republish would show the old LAST (X4, ADR 0017)."""
+    for inner in ("usd_import", "abc_import", "file_import", "char_import"):
+        sop = node.node(inner)
+        btn = sop.parm("reload") if sop is not None else None
+        if btn is not None:
+            try:
+                btn.pressButton()
+            except Exception:
+                pass
+
 def _apply(node, r):
     p = node.parm("resolved_path")
     if r.get("ok") and r.get("path"):
@@ -343,6 +355,7 @@ def _apply(node, r):
             _apply_lop(node, r)
             return
         _set_character(node, r.get("has_skel"))
+        _reload_sop(node)
         ext = os.path.splitext(r["path"])[1]
         _set_status(node, f"OK  [{ext}]" + ("  character (skeleton)" if r.get("has_skel") else ""))
     else:

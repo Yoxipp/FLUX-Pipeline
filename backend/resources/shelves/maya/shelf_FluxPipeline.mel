@@ -1,0 +1,13 @@
+// shelf_FluxPipeline.mel — FLUX pipeline buttons, always added to the Flux shelf.
+// Installed by the Flux Shelf Manager (merged into shelf_Flux.mel).
+
+global proc shelf_FluxPipeline() {
+    shelfButton
+        -label        "MAJ"
+        -annotation   "FLUX : mettre a jour les imports FLUX de la scene (derniere version publiee, transform gardee)"
+        -image1       "commandButton.png"
+        -imageOverlayLabel "MAJ"
+        -sourceType   "python"
+        -command      "from dcc.maya import maya_update; maya_update.update_imports()"
+    ;
+}

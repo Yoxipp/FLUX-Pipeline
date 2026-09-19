@@ -1046,14 +1046,20 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     def _enc(_s: str) -> str:
         return _b64.b64encode(_s.encode("utf-8")).decode("ascii")
 
+    from features.importer.import_tracking import source_stamp
+
+    tag = _json.dumps({"project": req.project_name, "source": req.rel_path.replace("\\", "/"),
+                       "stamp": source_stamp(file_path), "mode": "proxy" if proxy_mode else "import"})
     cmd = (
         f"import sys, base64 as _b64; "
         f"sys.path.insert(0, _b64.b64decode('{_enc(_backend_root)}').decode('utf-8')); "
         f"sys.modules.pop('dcc.maya.maya_import', None); "
+        f"sys.modules.pop('dcc.maya.maya_update', None); "
         f"from dcc.maya.maya_import import run_import; "
         f"run_import(_b64.b64decode('{_enc(fp_fwd)}').decode('utf-8'), "
         f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'), "
-        f"mode={'proxy' if proxy_mode else 'import'!r})"
+        f"mode={'proxy' if proxy_mode else 'import'!r}, "
+        f"tag_json=_b64.b64decode('{_enc(tag)}').decode('utf-8'))"
     )
 
     target_port = await _maya_target(req.port)
@@ -1097,6 +1103,95 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
         return {"ok": True, "file": fp_fwd}
     finally:
         await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
+
+
+class MayaUpdateImportsRequest(BaseModel):
+    port: int | None = None     # the Maya that asks (shelf button "MAJ")
+
+
+def _maya_call_json(port: int, func: str, *args: str, timeout: float = 60.0) -> dict | None:
+    """Run ``dcc.maya.maya_update.<func>(*args, result_path)`` in Maya, return its JSON.
+    Arguments travel as base64 (commandPort decodes with the system locale)."""
+    import base64 as _b64
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+    import tempfile as _tempfile
+    from pathlib import Path as _PLib
+
+    from dcc.maya.maya_connection import send_command_direct
+
+    def _enc(s: str) -> str:
+        return _b64.b64encode(s.encode("utf-8")).decode("ascii")
+
+    backend_root = str(_PLib(__file__).resolve().parent.parent)
+    tmp = _tempfile.mkdtemp(prefix="flux_maya_update_")
+    result_path = tmp.replace("\\", "/") + "/result.json"
+    decoded = ", ".join(f"_b64.b64decode('{_enc(a)}').decode('utf-8')" for a in (*args, result_path))
+    cmd = (f"import sys, base64 as _b64; "
+           f"sys.path.insert(0, _b64.b64decode('{_enc(backend_root)}').decode('utf-8')); "
+           f"sys.modules.pop('dcc.maya.maya_update', None); "
+           f"from dcc.maya import maya_update as _mu; _mu.{func}({decoded})")
+    try:
+        if send_command_direct(cmd, timeout=timeout, port=port) is None:
+            return None
+        if not _os.path.exists(result_path):
+            return {"ok": False, "error": "Maya n'a rien renvoye"}
+        with open(result_path, encoding="utf-8") as fh:
+            return _json.load(fh)
+    finally:
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+
+@router.post("/maya/update-imports")
+async def maya_update_imports(req: MayaUpdateImportsRequest) -> dict:
+    """Bring the FLUX imports of the Maya scene to their LAST (X4): each tagged import whose
+    published file changed is re-imported in place (same parent and transform); vNNN
+    imports stay frozen. Called by the shelf button "MAJ" of the Maya that asks."""
+    import json as _json
+    import shutil as _shutil
+    import tempfile as _tempfile
+
+    from core.paths import get_project_path
+    from features.importer.import_tracking import plan_updates, summary
+
+    port = await _maya_target(req.port)
+    loop = asyncio.get_running_loop()
+    listed = await loop.run_in_executor(None, lambda: _maya_call_json(port, "run_list"))
+    if listed is None:
+        raise HTTPException(status_code=503, detail="Maya ne repond pas (commandPort).")
+    items = listed.get("items", [])
+    projects = {p: get_project_path(p) for p in {str(i.get("project") or "") for i in items} if p}
+    plan = plan_updates(items, {k: v for k, v in projects.items() if v.exists()})
+    done, failed = 0, []
+    for entry in plan:
+        if entry["status"] != "update":
+            continue
+        project_path = projects[entry["project"]]
+        file_path = project_path / entry["source"]
+        tmp = _tempfile.mkdtemp(prefix="flux_maya_update_src_")
+        try:
+            if entry["mode"] == "proxy":
+                fp = str(file_path).replace("\\", "/")
+            elif file_path.suffix.lower() in _USD_IMPORT_EXTS:
+                fp = await loop.run_in_executor(None, lambda: _maya_usd_source(file_path, tmp))
+            else:
+                fp = str(file_path).replace("\\", "/")
+            tag = _json.dumps({"project": entry["project"], "source": entry["source"],
+                               "stamp": entry["stamp"], "mode": entry["mode"] or "import"})
+            res = await loop.run_in_executor(
+                None, lambda: _maya_call_json(port, "run_replace", entry["node"], fp, tag, timeout=120.0))
+        finally:
+            await loop.run_in_executor(None, lambda: _shutil.rmtree(tmp, ignore_errors=True))
+        if res and res.get("ok"):
+            done += 1
+            entry["status"] = "updated"
+        else:
+            failed.append(entry["node"].rsplit("|", 1)[-1])
+            log.warning("[Maya] MAJ import %s echouee : %s", entry["node"], (res or {}).get("error"))
+    message = summary(plan, done, failed)
+    log.info("[Maya] %s", message)
+    return {"ok": not failed, "message": message, "items": plan}
 
 
 class MayaLightExportRequest(BaseModel):

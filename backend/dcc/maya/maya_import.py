@@ -151,7 +151,7 @@ def open_proxy(file_path: str | Path) -> list[str] | None:
         return None
 
 
-def run_import(file_path: str | Path, result_path: str, mode: str = "import") -> None:
+def run_import(file_path: str | Path, result_path: str, mode: str = "import", tag_json: str = "") -> None:
     """Import for the Flux hub and persist a JSON result envelope.
 
     Runs inside Maya. Maya is a separate process from the hub, so its log messages
@@ -180,6 +180,10 @@ def run_import(file_path: str | Path, result_path: str, mode: str = "import") ->
     nodes: list[str] | None = None
     try:
         nodes = open_proxy(file_path) if mode == "proxy" else import_file(file_path)
+        if nodes is not None and tag_json:
+            # Where the import comes from: the shelf button "MAJ" follows LAST (X4).
+            from dcc.maya.maya_update import tag_nodes
+            tag_nodes(nodes, json.loads(tag_json))
     except Exception as exc:  # pragma: no cover - defensive; import_file already guards
         records.append({"level": "ERROR", "msg": f"import raised: {exc!r}"})
     finally:
