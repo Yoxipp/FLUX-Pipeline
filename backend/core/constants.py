@@ -113,6 +113,7 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "ANIM":   "shot/{seq}/{shot}/anim",
     "FX":     "shot/{seq}/{shot}/fx",
     "CFX":    "shot/{seq}/{shot}/cfx",
+    "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
 }
@@ -125,6 +126,7 @@ DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
     "ANIM":   "shot/{seq}/{shot}/anim",
     "FX":     "shot/{seq}/{shot}/fx",
     "CFX":    "shot/{seq}/{shot}/cfx",
+    "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
 }

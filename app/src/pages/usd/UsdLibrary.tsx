@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
-import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdComposition, UsdLibrary as Library, UsdPrimNode, UsdShotInfo, UsdSlotPin, UsdSlotRef } from '../../api/client'
+import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdComposition, UsdCrowdCompat, UsdLibrary as Library, UsdPrimNode, UsdShotInfo, UsdSlotPin, UsdSlotRef } from '../../api/client'
 import { ShotDetail, shotStateColor } from './UsdShots'
 import { useI18n } from '../../i18n'
 
@@ -457,6 +457,8 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
         )}
       </div>
 
+      <SkeletonInfo project={project} name={comp.name} />
+
       <SecTitle>{tr('usd.lib.usedBy')}</SecTitle>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {comp.used_by.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.lib.unused')}</span>}
@@ -803,6 +805,58 @@ function VersionsView({ versions, current }: { versions: string[]; current: stri
       ))}
     </div>
   )
+}
+
+// Crowd (A6, ADR 0022): the asset's skeleton signature, the assets on the same rig and
+// the animation clips that fit it. One request per project, shared by every asset.
+const crowdCache = new Map<string, Promise<UsdCrowdCompat>>()
+
+function SkeletonInfo({ project, name }: { project: string; name: string }) {
+  const { t: tr } = useI18n()
+  const [compat, setCompat] = useState<UsdCrowdCompat | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setCompat(null); setError('')
+    let req = crowdCache.get(project)
+    if (!req) {
+      req = api.getUsdCrowdCompat(project)
+      crowdCache.set(project, req)
+      req.catch(() => crowdCache.delete(project))
+      setTimeout(() => crowdCache.delete(project), 30000)
+    }
+    req.then(setCompat).catch(e => setError(errMsg(e)))
+  }, [project, name])
+
+  const info = compat?.assets[name]
+  const clips = compat && info ? compat.clips.filter(c => info.clips.includes(c.base)) : []
+  return (<>
+    <SecTitle>{tr('usd.crowd.skeleton')}</SecTitle>
+    <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {error && <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{error}</span>}
+      {!error && !compat && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>...</span>}
+      {compat && !info && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.crowd.noSkeleton')}</span>}
+      {info && (<>
+        <span style={{ ...mono, color: 'var(--ink-2)' }}>
+          {tr('usd.crowd.signature')} {info.signature} · {info.joint_count} {tr('usd.crowd.joints')}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <span className="cap" style={{ marginRight: 4 }}>{tr('usd.crowd.sameRig')}</span>
+          {info.compatible.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.crowd.none')}</span>}
+          {info.compatible.map(a => <Pill key={a}>{a}</Pill>)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <span className="cap" style={{ marginRight: 4 }}>{tr('usd.crowd.clips')}</span>
+          {clips.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.crowd.none')}</span>}
+          {clips.map(c => (
+            <Pill key={c.base}>
+              {c.asset} {c.clip}{c.range ? ` ${c.range[0]}-${c.range[1]}` : ''}
+            </Pill>
+          ))}
+        </div>
+      </>)}
+    </div>
+  </>)
 }
 
 // Composition of the published file, read by the backend with pxr (read only).

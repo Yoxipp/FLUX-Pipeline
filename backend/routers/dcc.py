@@ -2159,6 +2159,59 @@ async def houdini_shot_switch_shots(project: str) -> dict:
     return {"shots": shots}
 
 
+# ── FLUX Crowd node (A7, ADR 0022) ───────────────────────────────────────────
+
+@router.get("/houdini/crowd/module")
+async def houdini_crowd_module() -> dict:
+    """PythonModule of the FLUX Crowd HDA, exec()'d by its bootstrap (no rebuild on fix)."""
+    from dcc.houdini.hda.flux_crowd_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+class CrowdBuildRequest(BaseModel):
+    project: str
+    seq: str
+    shot: str
+    group: str = "crowd"
+    points: list[dict]              # [{"p": [x, y, z], "ry": deg, "scale": s}] from the SOP
+    components: list[str]
+    clips: list[str] = []
+    seed: int = 0
+    offset: list[float] = [0.0, 0.0]
+    speed: list[float] = [1.0, 1.0]
+    publish: bool = False
+    user: str | None = None
+
+
+@router.post("/houdini/crowd/build")
+async def houdini_crowd_build(req: CrowdBuildRequest) -> dict:
+    """Preview (work layer in the shot) or publish (SEQ_SHOT_CROWD[_GROUP]) a crowd."""
+    from core import config
+    from core.paths import get_project_path
+    from features.usd_assembler.crowd import build_crowd
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    user = req.user or config.get("username") or ""
+    offset = (tuple(req.offset) + (0.0, 0.0))[:2]
+    speed = (tuple(req.speed) + (1.0, 1.0))[:2]
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: build_crowd(
+            project_path, req.seq, req.shot, req.group, req.points, components=req.components,
+            clips=req.clips, seed=req.seed, offset=offset, speed=speed, publish=req.publish, user=user))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    path = str(res["path"])
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled():
+        from core.paths import to_flux_token
+        path = to_flux_token(path)
+    return {"ok": True, "path": path, "agents": res["agents"], "warnings": res["warnings"],
+            "base": res.get("base", ""), "version": res.get("version", ""), "stage": res.get("stage")}
+
+
 class ShotLightPublishRequest(BaseModel):
     project: str
     seq: str

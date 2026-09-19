@@ -406,6 +406,7 @@ def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
         from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
         from dcc.houdini.hda.flux_lighting_hda import build_hda as build_lighting
         from dcc.houdini.hda.flux_shot_switch_hda import build_hda as build_shot
+        from dcc.houdini.hda.flux_crowd_hda import build_hda as build_crowd
     except ImportError as exc:
         return False, f"Cannot import HDA builders: {exc}"
 
@@ -431,9 +432,12 @@ def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
         r = build_shot(str(otls / "flux_shot.hda"))
         if not r.get("ok"):
             return False, f"Live build (shot) failed: {r.get('error')}"
+        r = build_crowd(str(otls / "flux_crowd.hda"))
+        if not r.get("ok"):
+            return False, f"Live build (crowd) failed: {r.get('error')}"
 
         built_names = ("flux_importer.hda", "flux_importer_lop.hda", "flux_anim.hda",
-                       "flux_exporter.hda", "flux_lighting.hda", "flux_shot.hda")
+                       "flux_exporter.hda", "flux_lighting.hda", "flux_shot.hda", "flux_crowd.hda")
         # Mirror into the other otls roots so Houdini finds it wherever it reads.
         for other in otls_dirs[1:]:
             try:

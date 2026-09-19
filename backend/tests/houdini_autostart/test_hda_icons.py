@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from dcc.houdini.hda import (
-    flux_anim_hda, flux_exporter_hda, flux_importer_hda, flux_importer_lop_hda,
+    flux_anim_hda, flux_crowd_hda, flux_exporter_hda, flux_importer_hda, flux_importer_lop_hda,
     flux_lighting_hda, flux_shot_switch_hda,
 )
 
@@ -29,6 +29,7 @@ class HdaIcons(unittest.TestCase):
             "exporter": flux_exporter_hda._build_code("x.hda", flux_exporter_hda.PYTHON_MODULE),
             "lighting": flux_lighting_hda._build_code("x.hda"),
             "shot": flux_shot_switch_hda._build_code("x.hda"),
+            "crowd": flux_crowd_hda._build_code("x.hda"),
         }
         for name, code in codes.items():
             with self.subTest(name):
@@ -36,6 +37,18 @@ class HdaIcons(unittest.TestCase):
                 self.assertIn("opdef:.?IconSVG", code)
                 self.assertIn("flux_hda.svg", code)
                 self.assertNotIn("IconImage", code)
+
+
+class CrowdHda(unittest.TestCase):
+    def test_the_crowd_node_is_valid_python_and_has_the_geometry_menu(self) -> None:
+        code = flux_crowd_hda._build_code("x.hda")
+        compile(code, "build", "exec")
+        compile(flux_crowd_hda.MODULE_FUNCTIONS, "module", "exec")
+        compile(flux_crowd_hda.BOOTSTRAP, "bootstrap", "exec")
+        for token in ('"geo_display"', '"points_sop"', "StringToggle", "/crowd/**/geo/proxy"):
+            self.assertIn(token, code)
+        for fn in ("def generate", "def publish", "def menu_assets", "def menu_clips"):
+            self.assertIn(fn, flux_crowd_hda.MODULE_FUNCTIONS)
 
 
 if __name__ == "__main__":

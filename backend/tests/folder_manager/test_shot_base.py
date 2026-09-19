@@ -36,7 +36,7 @@ class ShotBase(unittest.TestCase):
 
     def test_departments_inside_the_shot_only(self) -> None:
         dirs = ssc.shot_department_dirs(self.project, "SEQ001", "SHOT010")
-        self.assertEqual({d.name for d in dirs}, {"layout", "anim", "fx", "cfx"})
+        self.assertEqual({d.name for d in dirs}, {"layout", "anim", "fx", "cfx", "crowd"})
         self.assertTrue(all(d.parent == self.project / "shot" / "SEQ001" / "SHOT010" for d in dirs))
 
     def test_folder_manager_and_production_give_the_same_folders(self) -> None:
@@ -47,7 +47,7 @@ class ShotBase(unittest.TestCase):
                       "shots": [{"seq_id": "s1", "name": "SHOT020", "tasks": []}]}
         sync_production_to_disk(self.project, production)
         prod = self.project / "shot" / "SEQ001" / "SHOT020"
-        self.assertEqual(_subdirs(fm) - {"usd"}, {"layout", "anim", "fx", "cfx"})
+        self.assertEqual(_subdirs(fm) - {"usd"}, {"layout", "anim", "fx", "cfx", "crowd"})
         self.assertEqual(_subdirs(fm), _subdirs(prod))
 
     def test_sub_task_folders_only_when_declared(self) -> None:
@@ -64,7 +64,7 @@ class ShotBase(unittest.TestCase):
         (shot / "anim" / "dingo").mkdir(parents=True)
         (shot / "anim" / "dingo" / "keep.txt").write_text("keep", encoding="utf-8")
         created = ssc.ensure_shot_base(self.project, "SEQ001", "SHOT010")
-        self.assertEqual({p.name for p in created}, {"layout", "fx", "cfx"})
+        self.assertEqual({p.name for p in created}, {"layout", "fx", "cfx", "crowd"})
         self.assertEqual((shot / "anim" / "dingo" / "keep.txt").read_text(encoding="utf-8"), "keep")
         self.assertEqual(ssc.ensure_shot_base(self.project, "SEQ001", "SHOT010"), [])
 

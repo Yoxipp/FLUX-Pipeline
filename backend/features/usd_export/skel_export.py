@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
@@ -271,6 +272,14 @@ def author_motion_only(asset: LightAsset, dest_dir: str | Path, *, fmt: str = "u
     return {"anim": anim_p, "root": root_p}
 
 
+def skeleton_signature(joints: list[str]) -> str:
+    """12 hex chars of the ordered joint paths ("" without joints): same signature =
+    same rig, whatever the geometry (crowd A6, ADR 0022)."""
+    if not joints:
+        return ""
+    return hashlib.sha1("\n".join(str(j) for j in joints).encode("utf-8")).hexdigest()[:12]
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def author_light_asset(
@@ -342,6 +351,11 @@ def author_light_asset(
     root_layer = root_stage.GetRootLayer()
     root_layer.subLayerPaths = sublayers
     root_layer.defaultPrim = token
+    if has_skel:
+        # Crowd (A6, ADR 0022): assets with the same signature share a rig.
+        root_layer.customLayerData = {"flux": {
+            "skeleton_signature": skeleton_signature(asset.skeleton.joints),
+            "joint_count": len(asset.skeleton.joints)}}
     root_layer.Save()
     paths["root"] = root_p
 

@@ -443,6 +443,22 @@ async def generate_usd_shot(req: ShotStageRequest) -> dict:
             "warnings": res["warnings"], "auto_cast": res["auto_cast"]}
 
 
+# ── crowd (A6 / A7, ADR 0022) ────────────────────────────────────────────────
+
+@router.get("/crowd/compat")
+async def crowd_compat(project: str | None = None) -> dict:
+    """Assets with a skeleton (signature, same-rig assets, fitting clips) + the clips."""
+    _, project_path = _resolve_project(project)
+    from features.usd_assembler.crowd import compatibility
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: compatibility(project_path))
+    except Exception as exc:
+        log.exception("crowd compat failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ── old Constructor files (V4, ADR 0019 point 7) ─────────────────────────────
 
 class LegacyDeleteRequest(BaseModel):

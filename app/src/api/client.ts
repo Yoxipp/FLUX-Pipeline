@@ -638,6 +638,12 @@ export const api = {
     return apiCall<UsdLibrary>('GET', `/usd/library?${qs}`)
   },
 
+  // Crowd (A6, ADR 0022): which assets share a rig and which clips fit them.
+  getUsdCrowdCompat: (project: string) => {
+    const qs = new URLSearchParams({ project })
+    return apiCall<UsdCrowdCompat>('GET', `/usd/crowd/compat?${qs}`)
+  },
+
   // A4 (ADR 0020): shot stages generated from the Production casting.
   getUsdShots: (project: string) => {
     const qs = new URLSearchParams({ project })
@@ -893,6 +899,16 @@ export interface UsdPrimNode {
   children: UsdPrimNode[]
   truncated: boolean
 }
+// Crowd (A6, ADR 0022): shared skeletons and animation clips (GET /usd/crowd/compat).
+export interface UsdCrowdClip {
+  base: string; asset: string; clip: string; last: string
+  joints: string[]; range: [number, number] | null; fps: number
+}
+export interface UsdCrowdCompat {
+  assets: Record<string, { signature: string; joint_count: number; compatible: string[]; clips: string[] }>
+  clips: UsdCrowdClip[]
+}
+
 export interface UsdComposition {
   file: string; default_prim: string
   layers: { path: string; root: boolean }[]
