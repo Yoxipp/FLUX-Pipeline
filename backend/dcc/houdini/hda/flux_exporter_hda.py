@@ -227,7 +227,7 @@ def _build_code(hda_path: str, python_module: str) -> str:
     pm_escaped = python_module.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
     from pathlib import Path as _P
-    icon_path = str(_P(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.png")
+    icon_path = str(_P(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.svg")
 
     return f'''
 import hou
@@ -353,11 +353,11 @@ try:
             _icon_bytes = _icf.read()
         # Houdini 22's HDASection has no setBinaryContents — setContents accepts the
         # raw PNG bytes and stores them as the section payload.
-        if "IconImage" not in _hda_def.sections():
-            _hda_def.addSection("IconImage", _icon_bytes)
+        if "IconSVG" not in _hda_def.sections():
+            _hda_def.addSection("IconSVG", _icon_bytes)
         else:
-            _hda_def.sections()["IconImage"].setContents(_icon_bytes)
-        _hda_def.setIcon("opdef:.?IconImage")
+            _hda_def.sections()["IconSVG"].setContents(_icon_bytes)
+        _hda_def.setIcon("opdef:.?IconSVG")
 except Exception:
     pass  # icon is cosmetic — never fail the build over it
 

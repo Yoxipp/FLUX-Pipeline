@@ -303,7 +303,7 @@ def _build_code(hda_path: str) -> str:
 
     _snapshot = snapshot('hou.lopNodeTypeCategory()', NODE_NAME).replace("{{", "{").replace("}}", "}")
     _restore = RESTORE
-    icon_path = str(Path(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.png")
+    icon_path = str(Path(__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.svg")
     return f'''
 import hou
 {_snapshot}
@@ -391,11 +391,11 @@ try:
     if _os.path.isfile(_ICON_PATH):
         with open(_ICON_PATH, "rb") as _f:
             _bytes = _f.read()
-        if "IconImage" in _def.sections():
-            _def.sections()["IconImage"].setContents(_bytes)
+        if "IconSVG" in _def.sections():
+            _def.sections()["IconSVG"].setContents(_bytes)
         else:
-            _def.addSection("IconImage", _bytes)
-        _def.setIcon("opdef:.?IconImage")
+            _def.addSection("IconSVG", _bytes)
+        _def.setIcon("opdef:.?IconSVG")
 except Exception:
     pass
 _def.save(_HDA_PATH)
