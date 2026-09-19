@@ -54,11 +54,11 @@ class EnginePublishSwitchTests(unittest.TestCase):
 
 
 class ConformTxSwitchTests(unittest.TestCase):
-    """Texture conform is opt-in; colorconvert defaults on when conform is on."""
+    """Texture conform is opt-out; colorconvert defaults on when conform is on."""
 
-    def test_conform_off_by_default(self):
+    def test_conform_on_by_default(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(conform_tx_enabled())
+            self.assertTrue(conform_tx_enabled())
 
     def test_conform_on_with_truthy_values(self):
         for value in ("1", "true", "on", "YES"):
@@ -66,7 +66,7 @@ class ConformTxSwitchTests(unittest.TestCase):
                 self.assertTrue(conform_tx_enabled(), value)
 
     def test_conform_off_with_falsey_values(self):
-        for value in ("0", "false", "off", ""):
+        for value in ("0", "false", "off"):
             with mock.patch.dict("os.environ", {"FLUX_CONFORM_TX": value}, clear=False):
                 self.assertFalse(conform_tx_enabled(), value)
 
@@ -83,15 +83,16 @@ class ConformTxSwitchTests(unittest.TestCase):
 
 
 class ProxyUsdSwitchTests(unittest.TestCase):
-    """USD proxy is opt-in; reduction defaults to 0.9 and validates its range."""
+    """USD proxy is opt-out; reduction defaults to 0.9 and validates its range."""
 
-    def test_proxy_off_by_default(self):
+    def test_proxy_on_by_default(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(proxy_usd_enabled())
-
-    def test_proxy_on_with_truthy(self):
-        with mock.patch.dict("os.environ", {"FLUX_PROXY_USD": "on"}, clear=False):
             self.assertTrue(proxy_usd_enabled())
+
+    def test_proxy_off_with_falsey(self):
+        for value in ("0", "false", "off"):
+            with mock.patch.dict("os.environ", {"FLUX_PROXY_USD": value}, clear=False):
+                self.assertFalse(proxy_usd_enabled(), value)
 
     def test_reduction_default(self):
         with mock.patch.dict("os.environ", {}, clear=True):

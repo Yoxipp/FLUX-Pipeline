@@ -42,13 +42,13 @@ class IsTextureSourceTests(unittest.TestCase):
 
 
 class MaybeConformTextureTests(unittest.TestCase):
-    def test_off_by_default_returns_none(self):
+    def test_disabled_returns_none(self):
         with tempfile.TemporaryDirectory() as d:
             src = Path(d) / "rock_Normal.exr"
             _make_image(src)
-            with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch.dict("os.environ", {"FLUX_CONFORM_TX": "0"}, clear=True):
                 self.assertIsNone(_run_maybe_conform(src))
-            # No .tx written when conform is off.
+            # No .tx written when conform is explicitly disabled.
             self.assertFalse((Path(d) / "rock_Normal.tx").exists())
 
     def test_on_conforms_a_real_texture(self):

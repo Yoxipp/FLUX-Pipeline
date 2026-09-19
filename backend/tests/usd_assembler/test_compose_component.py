@@ -57,7 +57,16 @@ class ComposeComponent(unittest.TestCase):
         stage = _compose_stage()
         prim = stage.GetPrimAtPath("/CHAR_hero")
         vsets = prim.GetVariantSets()
-        self.assertEqual(sorted(vsets.GetNames()), ["lod", "look", "purpose"])
+        # P-USD-8: no empty purpose / lod sets by default.
+        self.assertEqual(sorted(vsets.GetNames()), ["look"])
+
+    def test_lod_only_when_the_project_declares_it(self) -> None:
+        ctx = build_context(config={"component_variants": {"lod": ["hi", "mid", "lo"], "look": ["default"]}})
+        ctx.resolver = _FakeResolver()
+        registry = Registry()
+        registry.register_builder(PayloadBuilder())
+        registry.register_builder(VariantSetBuilder())
+        prim = StageComposer(ctx, registry).compose(loader.load(_RECIPE)).GetPrimAtPath("/CHAR_hero")
         self.assertEqual(sorted(prim.GetVariantSet("lod").GetVariantNames()), ["hi", "lo", "mid"])
         self.assertEqual(prim.GetVariantSet("lod").GetVariantSelection(), "hi")
 

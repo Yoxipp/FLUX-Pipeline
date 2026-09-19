@@ -50,11 +50,11 @@ class IsUsdAssetTests(unittest.TestCase):
 
 
 class MaybeGenerateProxyTests(unittest.TestCase):
-    def test_off_by_default(self):
+    def test_disabled(self):
         with tempfile.TemporaryDirectory() as d:
             src = Path(d) / "asset.usda"
             _make_grid_usd(src, 40)
-            with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch.dict("os.environ", {"FLUX_PROXY_USD": "0"}, clear=True):
                 self.assertIsNone(_run(src))
             self.assertFalse((Path(d) / "asset.proxy.usda").exists())
 

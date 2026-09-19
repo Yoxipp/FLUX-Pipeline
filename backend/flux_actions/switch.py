@@ -20,9 +20,9 @@ import os
 
 _ENV_VAR = "FLUX_LEGACY_PUBLISH"
 
-# Texture conform (.tx) at publish time. OPT-IN: off by default, exactly like the
-# publish engine was before it became the default. It stays off until the maintainer has
-# validated the gain (and the colorspace choice) with a Karma control render.
+# Texture conform (.tx) at publish time. OPT-OUT: on by default now that the maintainer has
+# validated the gain (and the colorspace choice) with a Karma control render. Set
+# FLUX_CONFORM_TX to a falsey value ("0"/"off"/"no"/"false") to disable per run.
 _CONFORM_ENV = "FLUX_CONFORM_TX"
 # When conform is on, whether to bake the colorspace of color maps (sRGB->linear)
 # into the .tx. This is the point to validate with Karma: some pipelines prefer
@@ -37,9 +37,10 @@ _FALSE = {"0", "false", "no", "off", ""}
 def conform_tx_enabled() -> bool:
     """Return True when a texture publish should also generate a mipped .tx.
 
-    Opt-in and read fresh each call, so the switch flips without a restart.
+    Opt-out and read fresh each call: on by default, set FLUX_CONFORM_TX to a
+    falsey value to disable without a restart.
     """
-    return os.environ.get(_CONFORM_ENV, "").strip().lower() in _TRUE
+    return os.environ.get(_CONFORM_ENV, "1").strip().lower() not in _FALSE
 
 
 def conform_tx_colorconvert() -> bool:
@@ -52,8 +53,8 @@ def conform_tx_colorconvert() -> bool:
     return os.environ.get(_CONFORM_COLORCONVERT_ENV, "1").strip().lower() not in _FALSE
 
 
-# USD proxy generation at publish time. OPT-IN, same posture as texture conform:
-# off until the maintainer has validated the proxy quality on real assets.
+# USD proxy generation at publish time. OPT-OUT, same posture as texture conform:
+# on by default. Set FLUX_PROXY_USD to a falsey value to disable per run.
 _PROXY_ENV = "FLUX_PROXY_USD"
 _PROXY_REDUCTION_ENV = "FLUX_PROXY_REDUCTION"
 _DEFAULT_PROXY_REDUCTION = 0.9
@@ -62,9 +63,10 @@ _DEFAULT_PROXY_REDUCTION = 0.9
 def proxy_usd_enabled() -> bool:
     """Return True when a USD asset publish should also author proxy geometry.
 
-    Opt-in and read fresh each call, so the switch flips without a restart.
+    Opt-out and read fresh each call: on by default, set FLUX_PROXY_USD to a
+    falsey value to disable without a restart.
     """
-    return os.environ.get(_PROXY_ENV, "").strip().lower() in _TRUE
+    return os.environ.get(_PROXY_ENV, "1").strip().lower() not in _FALSE
 
 
 def proxy_usd_reduction() -> float:
