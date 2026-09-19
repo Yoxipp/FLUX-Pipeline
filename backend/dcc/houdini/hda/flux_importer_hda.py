@@ -59,14 +59,14 @@ except Exception as _offline_err:
     def _dead_menu(*a, **kw): return ["", "FLUX offline"]
     def _noop(*a, **kw): pass
     for _n in ("menu_project","menu_class","menu_type","menu_name","menu_instance","menu_iter",
-               "menu_lib_item","menu_lib_version"):
+               "menu_lib_item","menu_lib_version","menu_lib_class","menu_lib_seq"):
         globals()[_n] = _dead_menu
     def resolve_path(node):
         if _try_reconnect():
             globals()["resolve_path"](node)
             return
         node.parm("status_msg").set("FLUX offline : démarre le backend puis clique ↺ Resolve")
-    move_to_local = use_hub = on_created = on_loaded = _noop
+    move_to_local = use_hub = on_created = on_loaded = on_lib_filter = _noop
 '''
 
 
@@ -233,19 +233,65 @@ def _library(node):
     return _cached(f"library:{project}",
                    lambda: _get("/dcc/houdini/importer/library", project=project).get("items", []))
 
-def menu_lib_item(node):
+# Type (asset / decor / shot) -> Classe (assets) or Sequence (shots) -> Element
+# (2026-09-19: one menu mixing everything was unreadable with many assets).
+# lib_item keeps its "component:X" / "assembly:X" / "shot:SEQ/SHOT" key.
+
+def _lib_kind(node):
+    p = node.parm("lib_kind")
+    return p.evalAsString() if p is not None else ""
+
+def _lib_filtered(node):
     items = _library(node)
+    kind = _lib_kind(node)
+    if not kind:
+        return items
+    items = [i for i in items if i.get("kind") == kind]
+    if kind == "asset" and _pval(node, "lib_class"):
+        items = [i for i in items if i.get("class") == _pval(node, "lib_class")]
+    if kind == "shot" and _pval(node, "lib_seq"):
+        items = [i for i in items if i.get("seq") == _pval(node, "lib_seq")]
+    return items
+
+def menu_lib_class(node):
+    classes = sorted({i.get("class") for i in _library(node) if i.get("kind") == "asset" and i.get("class")})
+    return ["", "Toutes"] + _flat(classes)
+
+def menu_lib_seq(node):
+    seqs = sorted({i.get("seq") for i in _library(node) if i.get("kind") == "shot" and i.get("seq")})
+    return ["", "Toutes"] + _flat(seqs)
+
+def menu_lib_item(node):
+    items = _lib_filtered(node)
     if not items:
-        return ["", "bibliotheque vide"]
+        return ["", "rien dans ce filtre" if _library(node) else "bibliotheque vide"]
     out = []
-    for it in items:
-        out += [it["key"], it["label"]]
+    for it in sorted(items, key=lambda i: (i.get("seq", ""), i.get("name") or i["key"])):
+        out += [it["key"], it.get("name") or it["label"]]
     return out
 
-def menu_lib_version(node):
+def on_lib_filter(node):
+    """Type / Classe / Sequence changed: keep the element if it still matches, else the first match."""
+    items = _lib_filtered(node)
+    p = node.parm("lib_item")
+    if p is not None and p.eval() not in [i["key"] for i in items]:
+        p.set(items[0]["key"] if items else "")
+    resolve_path(node)
+
+def _sync_lib_filters(node):
+    """Type / Classe / Sequence follow the element (set by "Open in" or an old node).
+    An empty Classe / Sequence ("Toutes") already shows the element: left as is."""
     key = _pval(node, "lib_item")
     it = next((i for i in _library(node) if i["key"] == key), None)
-    return _flat(it["versions"] if it else ["LAST"])
+    if it is None:
+        return
+    p = node.parm("lib_kind")
+    if p is not None and it.get("kind") and p.evalAsString() != it["kind"]:
+        p.set(it["kind"])
+    for name, field in (("lib_class", "class"), ("lib_seq", "seq")):
+        p = node.parm(name)
+        if p is not None and p.eval() and p.eval() != it.get(field, ""):
+            p.set(it.get(field, ""))
 
 
 # ── resolve ───────────────────────────────────────────────────────────────────
@@ -314,6 +360,7 @@ def resolve_path(node):
     if not project:
         _set_status(node, "No project selected"); return
     if mode == "library":
+        _sync_lib_filters(node)
         _apply(node, _get("/dcc/houdini/importer/library_resolve", project=project,
                           key=_pval(node, "lib_item"), version=_pval(node, "lib_version") or "LAST"))
         return
@@ -454,7 +501,23 @@ _ptg.append(_only(_menu_str("flux_name",    "Name",      "",     "menu_name",   
 _ptg.append(_only(_menu_str("flux_instance","Instance",  "null", "menu_instance", "Instance variant (null, A, B…)"), "tokens"))
 _ptg.append(_only(_menu_str("flux_iter",    "Iteration", "LAST", "menu_iter",     "Version: LAST, v001, v002…"), "tokens"))
 
-_ptg.append(_only(_menu_str("lib_item",    "Element",   "",     "menu_lib_item",    "Component or assembly of the USD library"), "library"))
+_lib_cb = "hou.phm().on_lib_filter(kwargs[\'node\'])"
+_kind = hou.MenuParmTemplate(
+    "lib_kind", "Type", ("asset", "decor", "shot"),
+    menu_labels=("Asset", "Decor", "Shot"), default_value=0,
+    script_callback=_lib_cb, script_callback_language=_PY,
+    help="What to import from the USD library",
+)
+_ptg.append(_only(_kind, "library"))
+_cls = _menu_str("lib_class", "Classe", "", "menu_lib_class", "CLASS token of the asset (empty = all)")
+_cls.setScriptCallback(_lib_cb)
+_cls.setConditional(hou.parmCondType.HideWhen, "{{ source_mode != library }} {{ lib_kind != asset }}")
+_ptg.append(_cls)
+_seq = _menu_str("lib_seq", "Sequence", "", "menu_lib_seq", "Sequence of the shot (empty = all)")
+_seq.setScriptCallback(_lib_cb)
+_seq.setConditional(hou.parmCondType.HideWhen, "{{ source_mode != library }} {{ lib_kind != shot }}")
+_ptg.append(_seq)
+_ptg.append(_only(_menu_str("lib_item",    "Element",   "",     "menu_lib_item",    "Asset, decor or shot of the USD library"), "library"))
 _ptg.append(_only(_menu_str("lib_version", "Version",   "LAST", "menu_lib_version", "LAST follows new publishes, vNNN is frozen"), "library"))
 
 _fp = hou.StringParmTemplate(

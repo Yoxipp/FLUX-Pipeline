@@ -28,7 +28,7 @@ def _lib(tmp: Path) -> dict:
     (asm / "PARK" / "PARK_v003" / "PARK.usda").write_text("#usda 1.0\n", encoding="utf-8")
     (asm / "PARK" / "PARK_LAST.usda").write_text("#usda 1.0\n", encoding="utf-8")
     return {
-        "components": [{"name": "HERO", "dir": str(comp_dir), "last": str(comp_dir / "HERO_LAST.usda"),
+        "components": [{"name": "HERO", "class": "CHAR", "dir": str(comp_dir), "last": str(comp_dir / "HERO_LAST.usda"),
                         "versions": ["v001", "v002"]}],
         "assemblies": [{"name": "TOWN", "file": str(asm / "TOWN.usda"), "instances": [], "legacy": True},
                        {"name": "PARK", "file": str(asm / "PARK" / "PARK_LAST.usda"), "instances": [],
@@ -52,6 +52,10 @@ class LibraryImport(unittest.TestCase):
         self.assertEqual([i["key"] for i in items], ["component:HERO", "assembly:TOWN", "assembly:PARK"])
         self.assertEqual(items[0]["versions"], ["LAST", "v002", "v001"])
         self.assertEqual(items[2]["versions"], ["LAST", "v003", "v001"])
+        # Type / Classe / Sequence menus of the importer (2026-09-19).
+        self.assertEqual([(i["kind"], i["name"]) for i in items],
+                         [("asset", "HERO"), ("decor", "TOWN"), ("decor", "PARK")])
+        self.assertEqual(items[0]["class"], "CHAR")
 
     def test_resolve_last_frozen_and_assembly(self):
         last = library_import.resolve_library_item(self.tmp, "component:HERO", "LAST")

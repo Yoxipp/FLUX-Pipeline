@@ -19,8 +19,12 @@ _VERSION_RE = re.compile(r"v\d+")
 
 
 def library_items(project_path: str | Path) -> list[dict]:
-    """[{"key": "component:NAME" | "assembly:NAME" | "shot:SEQ/SHOT", "label",
-    "versions": ["LAST", ...]}]. Shots are listed once their stage exists (ADR 0020)."""
+    """[{"key": "component:NAME" | "assembly:NAME" | "shot:SEQ/SHOT", "label", "name",
+    "kind": "asset" | "decor" | "shot", "class", "seq", "versions": ["LAST", ...]}].
+
+    kind / class / seq feed the importer's Type, Classe and Sequence menus (the maintainer
+    2026-09-19: one flat menu was unreadable). Shots are listed once their stage
+    exists (ADR 0020)."""
     from features.usd_assembler.library import build_library
 
     lib = build_library(project_path)
@@ -29,12 +33,15 @@ def library_items(project_path: str | Path) -> list[dict]:
         if not comp.get("last") and not comp.get("versions"):
             continue
         items.append({
-            "key": f"component:{comp['name']}",
+            "key": f"component:{comp['name']}", "name": comp["name"],
             "label": f"Component  {comp['name']}",
+            "kind": "asset", "class": comp.get("class") or "", "seq": "",
             "versions": ["LAST"] + sorted(comp.get("versions") or [], reverse=True),
         })
     for asm in lib.get("assemblies", []):
-        items.append({"key": f"assembly:{asm['name']}", "label": f"Assembly  {asm['name']}",
+        items.append({"key": f"assembly:{asm['name']}", "name": asm["name"],
+                      "label": f"Assembly  {asm['name']}",
+                      "kind": "decor", "class": asm.get("class") or "", "seq": "",
                       "versions": ["LAST"] + sorted(asm.get("versions") or [], reverse=True)})
     items += _shot_items(project_path)
     return items
@@ -48,7 +55,8 @@ def _shot_items(project_path: str | Path) -> list[dict]:
         versions = ss.stage_versions(project_path, seq, shot)
         if not versions and not ss.last_file(project_path, seq, shot).is_file():
             continue
-        items.append({"key": f"shot:{seq}/{shot}", "label": f"Shot  {seq} {shot}",
+        items.append({"key": f"shot:{seq}/{shot}", "name": shot, "label": f"Shot  {seq} {shot}",
+                      "kind": "shot", "class": "", "seq": seq,
                       "versions": ["LAST"] + sorted(versions, reverse=True)})
     return items
 

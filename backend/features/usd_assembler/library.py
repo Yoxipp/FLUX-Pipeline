@@ -192,7 +192,8 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
     out: list[dict] = []
     seen: set[str] = set()
     # Decors that are assets (ADR 0019) plus the legacy usd/assembly/<ASM>/ folders.
-    names = sorted(load_tokens(project).get("NAME", {}))
+    tokens = load_tokens(project)
+    names = sorted(tokens.get("NAME", {}))
     names += sorted(p.name for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
     for name in dict.fromkeys(names):
         entry = current_entry(project, name)
@@ -205,7 +206,8 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
         last = parent / f"{name}_LAST{ASSEMBLY_EXT}"
         layout = layout_file(project, name)
         seen.add(name)
-        out.append({"name": name, "file": str(last if last.is_file() else entry),
+        out.append({"name": name, "class": _class_of(tokens, name) or "",
+                    "file": str(last if last.is_file() else entry),
                     "version": entry.parent.name.rsplit("_", 1)[-1],
                     "versions": assembly_versions(parent, name), "legacy": False,
                     "dir": str(assembly_dir(project, name)),
