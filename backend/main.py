@@ -40,6 +40,20 @@ async def lifespan(app: FastAPI):
     if saved_user:
         config.set_current_user(saved_user)
         log.info("[FLUX] Active user: %s", saved_user)
+    # Self-heal frozen installs whose config.json drifted from prefs.json (older
+    # wizard wrote username only to prefs.json, leaving is_first_launch stuck at
+    # True and the front-end looping through the first-launch wizard forever).
+    try:
+        from core import paths
+        if saved_user and not paths.get_config_username():
+            paths.set_config_username(saved_user)
+            log.info("[FLUX] Mirrored username to config.json (self-heal)")
+        saved_workspace = config.get("workspace")
+        if saved_workspace and not paths.get_flux_root():
+            paths.set_flux_root(saved_workspace)
+            log.info("[FLUX] Mirrored workspace to config.json (self-heal)")
+    except Exception as exc:  # never block startup on a bootstrap hiccup
+        log.warning("[FLUX] Bootstrap self-heal skipped: %s", exc)
     # Publish switches saved in "Parametres avances" (N8, decision D1) -> env of this process.
     try:
         from features.settings.advanced import apply_saved_switches

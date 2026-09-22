@@ -74,10 +74,13 @@ async def init_first_launch(req: InitRequest) -> dict:
         for d in FLUX_ROOT_DIRS:
             ensure_dir(root / d)
         (root / FLUX_MARKER_FILENAME).touch()
-        # Écrire workspace dans les deux emplacements :
-        # - config.json (next to exe, lu par get_flux_root())
-        # - prefs.json  (AppData, lu par config._load())
+        # Bootstrap keys go into config.json (next to exe / %APPDATA%/FluxPipeline/
+        # when frozen) because is_first_launch reads that file directly - it must NOT
+        # depend on the metadata repository, whose location depends on the workspace.
+        # When frozen, config.json and prefs.json are two different files, so writing
+        # only to prefs.json (via create_user) would leave the wizard looping forever.
         set_flux_root(root)
+        set_config_username(username)
         config.create_user(username, req.workspace)
 
     loop = asyncio.get_running_loop()

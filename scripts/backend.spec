@@ -16,6 +16,12 @@ ROOT = Path(SPECPATH).parent
 # Validated frozen in isolation: a probe exe composes kind+payload+variant+refs OK.
 pxr_datas, pxr_binaries, pxr_hidden = collect_all("pxr")
 
+# OpenImageIO is imported lazily by features.publisher.texture_conform (make_texture
+# -> mipped/tiled .tx at publish time), so PyInstaller's static analysis never sees
+# it. collect_all pulls the C-extension (.pyd), the native DLLs (OpenImageIO*.dll,
+# its OCIO/PNG/JPEG/TIFF/OpenEXR deps) and the OCIO config data OIIO ships with.
+oiio_datas, oiio_binaries, oiio_hidden = collect_all("OpenImageIO")
+
 hidden = (
     collect_submodules("uvicorn")
     + collect_submodules("fastapi")
@@ -23,15 +29,16 @@ hidden = (
     + ["uvicorn.logging", "uvicorn.loops", "uvicorn.loops.auto",
        "uvicorn.protocols.http.auto", "uvicorn.lifespan.on"]
     + pxr_hidden
+    + oiio_hidden
 )
 
 a = Analysis(
     [str(ROOT / "backend/main.py")],
     pathex=[str(ROOT / "backend")],
-    binaries=pxr_binaries,
+    binaries=pxr_binaries + oiio_binaries,
     datas=[
         (str(ROOT / "backend/resources"), "resources"),
-    ] + pxr_datas,
+    ] + pxr_datas + oiio_datas,
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],

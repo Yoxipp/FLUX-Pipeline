@@ -30,7 +30,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import OpenImageIO as oiio
+# OpenImageIO is imported lazily: it is an optional native dependency, and the
+# backend (routers/actions -> flux_actions -> commands) must load even when it
+# is missing. Calling any conform function without it raises a clear error.
+oiio = None  # type: ignore[assignment]
+
+
+def _oiio():
+    """Return the OpenImageIO module, importing it on first use."""
+    global oiio
+    if oiio is None:
+        import OpenImageIO as _oiio_mod  # noqa: PLC0415
+        oiio = _oiio_mod
+    return oiio
 
 # Image extensions we accept as conform sources.
 _IMAGE_EXTS = {".exr", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".tga", ".hdr", ".bmp"}
@@ -165,6 +177,7 @@ def _stored_hash(tx_path: Path) -> Optional[str]:
     """
     if not tx_path.exists():
         return None
+    oiio = _oiio()
     src = oiio.ImageInput.open(str(tx_path))
     if src is None:
         return None
@@ -185,6 +198,7 @@ def _is_integer_source(src: Path) -> bool:
     color map there must NOT be sRGB-linearised again. Integer containers
     (TIFF/PNG/JPG 8-16 bit) are the sRGB-authored case we convert.
     """
+    oiio = _oiio()
     inp = oiio.ImageInput.open(str(src))
     if inp is None:
         # Unknown: treat as float (the safe choice = no conversion).
@@ -229,6 +243,7 @@ def _resolve_colorspaces(
     """
     if role != "color" or not is_integer_source:
         return None, None
+    oiio = _oiio()
     cfg = oiio.ColorConfig()
     names = set(cfg.getColorSpaceNames())
     incs = _resolve_space(cfg, names, color_in)
@@ -238,8 +253,9 @@ def _resolve_colorspaces(
     return None, None
 
 
-def _make_config(role: str, incs: Optional[str], outcs: Optional[str]) -> oiio.ImageSpec:
+def _make_config(role: str, incs: Optional[str], outcs: Optional[str]) -> "oiio.ImageSpec":
     """Build the make_texture config spec (maketx-equivalent flags)."""
+    oiio = _oiio()
     config = oiio.ImageSpec()
     # Tiled output, standard 64x64 tiles: this is what lets Karma stream tiles.
     config.tile_width = 64
@@ -297,6 +313,7 @@ def conform_one(
     config = _make_config(role, incs, outcs)
     config.attribute("ImageDescription", _build_description(src_hash, role))
 
+    oiio = _oiio()
     ok = oiio.ImageBufAlgo.make_texture(
         oiio.MakeTextureMode.MakeTxTexture, str(src), str(dst), config
     )
