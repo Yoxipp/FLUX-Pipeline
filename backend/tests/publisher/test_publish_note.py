@@ -36,6 +36,18 @@ class PublishNote(unittest.TestCase):
     def _note(self, rel: str) -> dict:
         return pn.publish_notes(self.project, "assets/chara/DINGO/model/null/" + rel)
 
+    def _log(self, rel: str) -> dict:
+        return pn.file_log(self.project, "assets/chara/DINGO/model/null/" + rel)
+
+    def test_file_log_returns_matched_and_folder(self) -> None:
+        r = self._log("CHAR_GEO_DINGO_null_LAST.usda")
+        # matched: entries whose name matches the file's base.
+        self.assertEqual(len(r["matched"]), 2)
+        # folder_log: everything in this folder's modif_logs.json (all 3 entries).
+        self.assertEqual(len(r["folder_log"]), 3)
+        self.assertEqual(r["folder_path"], str(self.folder))
+        self.assertEqual(r["base"], "CHAR_GEO_DINGO_null")
+
     def test_last_shows_the_newest_note(self) -> None:
         note = self._note("CHAR_GEO_DINGO_null_LAST.usda")
         self.assertEqual((note["base"], note["version"]), ("CHAR_GEO_DINGO_null", None))

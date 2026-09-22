@@ -24,6 +24,7 @@ import { UsdPage }       from './pages/usd/UsdPage'
 import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
 import { AdvancedSettings } from './pages/AdvancedSettings'
+import { DiskUsage } from './pages/DiskUsage'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
@@ -139,6 +140,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/templates" element={<TemplateEditor />} />
               <Route path="/production" element={<Production />} />
               <Route path="/advanced"  element={<AdvancedSettings />} />
+              <Route path="/disk"      element={<DiskUsage />} />
             </Routes>
           </main>
         </div>

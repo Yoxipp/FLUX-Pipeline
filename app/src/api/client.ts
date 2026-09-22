@@ -451,6 +451,24 @@ export const api = {
     apiCall<{ base: string; version: string | null; latest: PublishNoteEntry | null; history: PublishNoteEntry[] }>(
       'GET', `/files/projects/${encodeURIComponent(project_name)}/publish-note?rel_path=${encodeURIComponent(relPath)}`),
 
+  // Raw modif_logs.json entries touching a file, plus the folder's full log
+  // (fallback when the file is not a publish output but the folder has a log).
+  getFileLog: (project_name: string, relPath: string) =>
+    apiCall<{
+      base: string; version: string | null;
+      matched: Record<string, unknown>[];
+      folder_log: Record<string, unknown>[];
+      folder_path: string;
+    }>('GET', `/files/projects/${encodeURIComponent(project_name)}/file-log?rel_path=${encodeURIComponent(relPath)}`),
+
+  // Disk manager: heaviest files under DOSSIER_PROJETS, optionally scoped to a project.
+  getDiskUsage: (project?: string, limit = 200) =>
+    apiCall<{
+      root: string; total_bytes: number; file_count: number;
+      top_files: { rel: string; project: string; size: number; mtime: number }[];
+      by_project: { project: string; size: number; file_count: number }[];
+    }>('GET', `/system/disk-usage?limit=${limit}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
+
   browseProject: (project_name: string, subpath?: string) =>
     apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
 

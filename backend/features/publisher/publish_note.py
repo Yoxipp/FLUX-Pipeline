@@ -55,3 +55,43 @@ def publish_notes(project_path: str | Path, rel_path: str) -> dict:
     if history:
         latest = next((e for e in history if e.get("version") == version), None) if version else history[0]
     return {"base": base, "version": version, "latest": latest, "history": history}
+
+
+def file_log(project_path: str | Path, rel_path: str) -> dict:
+    """Raw modif_logs.json entries touching *rel_path*, plus the folder's full log.
+
+    Broader than publish_notes: even a file that is not a matching publish output
+    (a random source file next to a modif_logs.json, a stale name...) still gets
+    the folder's raw entries returned so the artist sees SOMETHING when clicking
+    it in the Folder Manager.
+
+    Returns {
+        "base", "version",
+        "matched":    [entries where name matches the file's base, newest first],
+        "folder_log": [ALL entries in modif_logs.json of the file's own folder],
+        "folder_path": str,
+    }
+    """
+    project = Path(project_path)
+    target = project / str(rel_path).replace("\\", "/")
+    base, version = _base_and_version(target)
+    own_folder = target if target.is_dir() else target.parent
+
+    matched: list[dict] = []
+    for folder in (own_folder, own_folder.parent, own_folder.parent.parent):
+        if project not in (folder, *folder.parents):
+            break
+        found = [e for e in read_logs(folder)
+                 if str(e.get("name", "")) == base or str(e.get("name", "")).startswith(base + "_")]
+        if found:
+            matched = found
+            break
+
+    folder_log = read_logs(own_folder)
+    return {
+        "base":        base,
+        "version":     version,
+        "matched":     matched,
+        "folder_log":  folder_log,
+        "folder_path": str(own_folder),
+    }

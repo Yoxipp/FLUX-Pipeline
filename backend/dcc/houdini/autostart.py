@@ -320,10 +320,26 @@ def _remove_flux_package(prefs_dir: Path) -> None:
 
 # The autostart block. homeHoudiniDirectory() resolves the scripts dir AT RUNTIME
 # inside Houdini, so the same block works regardless of which prefs dir Houdini uses.
+# It also sets $FLUX from the *currently running* FLUX backend (agnostic of the pipe
+# folder that installed the autostart): each Houdini launch asks the live backend for
+# its root and overrides the value the flux.json package set at install time. When no
+# FLUX is up, the package value is kept as a fallback.
 _NEW_BLOCK = (
     f"{_BLOCK_BEGIN}\n"
     f"try:\n"
     f"    import sys as _flux_sys, os as _flux_os, hou as _flux_hou\n"
+    f"    # Dynamic $FLUX: whichever FLUX is currently running wins over the installed value.\n"
+    f"    try:\n"
+    f"        import urllib.request as _flux_ureq, json as _flux_json, pathlib as _flux_pl\n"
+    f"        _flux_port_file = _flux_pl.Path(_flux_os.environ.get('APPDATA', '')) / 'FLUX' / 'backend_port'\n"
+    f"        _flux_port = int(_flux_port_file.read_text().strip()) if _flux_port_file.exists() else 8765\n"
+    f"        with _flux_ureq.urlopen('http://127.0.0.1:' + str(_flux_port) + '/system/flux-root', timeout=1.0) as _r:\n"
+    f"            _flux_root = _flux_json.loads(_r.read().decode()).get('root') or ''\n"
+    f"        if _flux_root:\n"
+    f"            _flux_hou.putenv('FLUX', _flux_root.replace('\\\\', '/'))\n"
+    f"            print('[FLUX] $FLUX -> ' + _flux_root)\n"
+    f"    except Exception as _flux_env_exc:\n"
+    f"        print('[FLUX] $FLUX left to flux.json package (no live backend): ' + str(_flux_env_exc))\n"
     f"    _flux_sys.path.insert(0, _flux_os.path.join(_flux_hou.homeHoudiniDirectory(), 'scripts'))\n"
     f"    import flux_houdini_server\n"
     f"except Exception as _flux_exc:\n"
@@ -426,6 +442,8 @@ def _install_to(prefs_dir: Path) -> dict:
             "try:" not in old_fragment
             or "homeHoudiniDirectory" not in old_fragment
             or "__file__" in old_fragment
+            # New: dynamic $FLUX from the running backend (2026-09-22).
+            or "system/flux-root" not in old_fragment
         )
         if needs_upgrade:
             try:

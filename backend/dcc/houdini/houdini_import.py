@@ -504,6 +504,84 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
     return {"ok": True, "local_path": local_path, "abs_path": str(dest)}
 
 
+def create_native_import_in_context(file_path: str | Path) -> dict:
+    """Import *file_path* natively (no flux_importer HDA) in the active pane.
+
+    The FLUX importer HDA is USD-specific: for a non-USD file (bgeo, abc, fbx, obj,
+    …) "Open in Houdini" must skip it and drop a plain import node fitting the
+    extension. This picks the pane's pwd() as target: /obj wraps in a Geometry
+    node; a SOP network takes the node in-place; a LOP context falls back to
+    /obj (LOP has no native importer for non-USD).
+
+    Returns {"ok": True, "result": {"node_path", "mode", "resolved_path"}}.
+    """
+    ext = _get_ext(file_path)
+    entry = _EXT_MAP.get(ext)
+    if entry is None:
+        return {"ok": False, "error": f"Extension non supportee par l'import natif : {ext}"}
+    node_type, parm_name = entry
+    file_str = str(file_path).replace("\\", "/")
+    node_name = f"flux_import_{_node_name_from(file_path)}"
+    candidates = repr([parm_name] + list(_FALLBACK_FILE_PARMS))
+
+    # FBX = KineFX character import (same treatment as create_character_import_node).
+    if ext == ".fbx":
+        node_type = "kinefx::fbxcharacterimport"
+
+    code = textwrap.dedent(f"""\
+        import hou
+        try:
+            _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            _pwd  = _pane.pwd() if _pane else hou.node("/obj")
+        except Exception:
+            _pwd = hou.node("/obj")
+        if _pwd is None:
+            _pwd = hou.node("/obj")
+        _cat = _pwd.childTypeCategory()
+        # LOP has no native importer for non-USD: fall back to /obj so the file
+        # still lands somewhere useful instead of an "incompatible" error.
+        if _cat not in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory()):
+            _pwd = hou.node("/obj")
+            _cat = _pwd.childTypeCategory()
+        if _cat == hou.objNodeTypeCategory():
+            _net = _pwd.createNode("geo", node_name={node_name!r})
+        else:
+            _net = _pwd
+        _node = _net.createNode({node_type!r}, node_name={node_name!r})
+        _set = False
+        for _pn in {candidates}:
+            if _pn and _node.parm(_pn) is not None:
+                _node.parm(_pn).set({file_str!r}); _set = True; break
+        # Version-agnostic fallback: a FileReference string parm, else any "file" parm.
+        if not _set:
+            for _p in _node.parms():
+                _t = _p.parmTemplate()
+                try:
+                    if (_t.type() == hou.parmTemplateType.String
+                            and _t.stringType() == hou.stringParmType.FileReference):
+                        _p.set({file_str!r}); _set = True; break
+                except Exception:
+                    pass
+        if not _set:
+            for _p in _node.parms():
+                if "file" in _p.name().lower():
+                    _p.set({file_str!r}); _set = True; break
+        _node.setSelected(True, clear_all_selected=True)
+        _node.setDisplayFlag(True)
+        if hasattr(_node, "setRenderFlag"):
+            _node.setRenderFlag(True)
+        result = {{"node_path": _node.path(), "mode": "native_" + {node_type!r},
+                   "resolved_path": {file_str!r}, "file_set": _set}}
+    """)
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        r = resp.get("result") or {}
+        log.info("Native import %s -> %s (%s)", Path(file_str).name, r.get("node_path"), r.get("mode"))
+    else:
+        log.error("create_native_import_in_context failed: %s", resp.get("error"))
+    return resp
+
+
 def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None) -> dict:
     """Import a USD file according to the active network pane (2026-09-17).
 

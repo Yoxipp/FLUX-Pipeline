@@ -521,6 +521,22 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
 
     loop = asyncio.get_running_loop()
 
+    # Non-USD: the flux_importer HDA is USD-only, so a .bgeo/.abc/.fbx/.obj file
+    # goes through a plain native import in the current pane (falls back to /obj
+    # from a LOP context). Fixes "Open in Houdini" that did nothing for non-USD.
+    if selected_file:
+        ext = _PLib(req.rel_path).suffix.lower()
+        # .bgeo.sc is a compound extension that .suffix drops the ".sc" from.
+        if req.rel_path.endswith(".bgeo.sc"):
+            ext = ".bgeo.sc"
+        if ext not in USD_EXTS:
+            from dcc.houdini.houdini_import import create_native_import_in_context
+            resp = await loop.run_in_executor(
+                None, lambda: create_native_import_in_context(selected_file))
+            if not resp.get("ok"):
+                raise HTTPException(status_code=503, detail=resp.get("error", "Import natif echoue"))
+            return resp
+
     # USD: import by context (flux_importer HDA in /stage and in SOP, whose
     # source matches the file: tokens for a task publish, USD library for a component /
     # assembly, free path otherwise).

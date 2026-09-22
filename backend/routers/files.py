@@ -63,3 +63,18 @@ async def publish_note(project_name: str, rel_path: str) -> dict:
         raise HTTPException(status_code=403, detail="Chemin non autorisé")
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: publish_notes(project_path, rel_path))
+
+
+@router.get("/projects/{project_name}/file-log")
+async def get_file_log(project_name: str, rel_path: str) -> dict:
+    """Raw modif_logs.json entries for a file, plus the folder's whole log."""
+    from features.publisher.publish_note import file_log
+
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    target = (project_path / rel_path).resolve()
+    if not is_subpath(target, project_path.resolve()):
+        raise HTTPException(status_code=403, detail="Chemin non autorisé")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: file_log(project_path, rel_path))

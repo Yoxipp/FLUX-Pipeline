@@ -16,6 +16,7 @@ import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
 import { readActiveInstancePort } from '../hooks/useActiveInstances'
 import { PublishNote } from '../components/shared/PublishNote'
+import { FileLog } from '../components/shared/FileLog'
 
 // DCCs the backend can import into (from the Folder Manager). Others have no
 // import bridge yet, so they never appear in "Ouvrir dans…".
@@ -890,7 +891,7 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, openInTargets, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, onCopyHoudiniPath, openInTargets, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -905,6 +906,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
   onMove:           () => void
   onDelete:         () => void
   onCopyPath?:      () => void
+  onCopyHoudiniPath?: () => void
   // Every currently-connected, import-capable DCC for this item (built from live status).
   openInTargets?:   { dcc: string; onClick: () => void }[]
   onClose:          () => void
@@ -969,6 +971,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           {row('Copier le chemin', false, () => { onCopyPath(); onClose() })}
+          {onCopyHoudiniPath && row('Copier le chemin Houdini ($FLUX)', false, () => { onCopyHoudiniPath(); onClose() })}
         </>
       )}
       {canEdit && (
@@ -2388,6 +2391,20 @@ export function Projects() {
     }
   }, [nav, settings?.workspace])
 
+  // Copy the path as $FLUX/DOSSIER_PROJETS/... — pasteable directly in any
+  // Houdini string parm (the flux.json / autostart sets $FLUX to the pipe root).
+  const handleCopyHoudiniPath = useCallback(async (item: ExplorerItem) => {
+    const parts = nav.kind === 'root'
+      ? ['$FLUX', 'DOSSIER_PROJETS', item.name]
+      : ['$FLUX', 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
+    try {
+      await navigator.clipboard.writeText(parts.join('/'))
+      toast.success('Chemin Houdini copié')
+    } catch {
+      toast.error('Impossible de copier le chemin')
+    }
+  }, [nav])
+
   const recentSidebarItems = recents.slice(0, 5)
 
   return (
@@ -2893,7 +2910,10 @@ export function Projects() {
 
           {/* N7: note of the selected published file (hidden when it has none) */}
           {nav.kind === 'inside' && selectedNames.size === 1 && (
-            <PublishNote project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
+            <>
+              <PublishNote project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
+              <FileLog     project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
+            </>
           )}
 
           {/* Projet actif + Set Project */}
@@ -2939,6 +2959,7 @@ export function Projects() {
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
+          onCopyHoudiniPath={ctxMenu.items.length === 1 && !ctxMenu.items[0].isDir ? () => void handleCopyHoudiniPath(ctxMenu.items[0]) : undefined}
           openInTargets={buildOpenInTargets(ctxMenu.items)}
           onClose={() => setCtxMenu(null)}
         />

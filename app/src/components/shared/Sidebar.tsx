@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X,
+  ClipboardList, AlertTriangle, Check, X, HardDrive,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -540,6 +540,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent onClick={() => navigate('/templates')} />
         <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent onClick={() => navigate('/production')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} onClick={() => navigate('/activity')} />
+        <NavItem icon={HardDrive}      label="Disque"                  active={pathname === '/disk'}       indent onClick={() => navigate('/disk')} />
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
