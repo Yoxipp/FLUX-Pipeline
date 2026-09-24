@@ -49,7 +49,7 @@ def _flux_port():
         return 8765
 
 def _load():
-    with urllib.request.urlopen(f"http://localhost:{_flux_port()}/dcc/houdini/shot_switch/module", timeout=3) as _r:
+    with urllib.request.urlopen(f"http://127.0.0.1:{_flux_port()}/dcc/houdini/shot_switch/module", timeout=3) as _r:
         exec(json.loads(_r.read())["code"], globals())
 
 try:
@@ -86,7 +86,7 @@ def _flux_port():
         return 8765
 
 def _get(path, **params):
-    url = f"http://localhost:{_flux_port()}" + path
+    url = f"http://127.0.0.1:{_flux_port()}" + path
     if params:
         url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v})
     try:
@@ -96,7 +96,7 @@ def _get(path, **params):
         return {"ok": False, "error": str(exc)}
 
 def _post(path, payload):
-    req = urllib.request.Request(f"http://localhost:{_flux_port()}" + path,
+    req = urllib.request.Request(f"http://127.0.0.1:{_flux_port()}" + path,
                                  data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST")
     try:

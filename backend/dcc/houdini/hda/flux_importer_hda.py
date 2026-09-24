@@ -41,7 +41,7 @@ def _flux_port():
         return 8765
 
 try:
-    _url = f"http://localhost:{_flux_port()}/dcc/houdini/importer/module"
+    _url = f"http://127.0.0.1:{_flux_port()}/dcc/houdini/importer/module"
     with urllib.request.urlopen(_url, timeout=3) as _r:
         exec(json.loads(_r.read())["code"], globals())
 except Exception as _offline_err:
@@ -50,7 +50,7 @@ except Exception as _offline_err:
     def _try_reconnect():
         try:
             with urllib.request.urlopen(
-                f"http://localhost:{_flux_port()}/dcc/houdini/importer/module", timeout=3
+                f"http://127.0.0.1:{_flux_port()}/dcc/houdini/importer/module", timeout=3
             ) as _r:
                 exec(json.loads(_r.read())["code"], globals())
             return True
@@ -98,7 +98,7 @@ _API_BASE = None  # cached alongside port
 def _api():
     global _API_BASE
     if not _API_BASE:
-        _API_BASE = f"http://localhost:{_flux_port()}"
+        _API_BASE = f"http://127.0.0.1:{_flux_port()}"
     return _API_BASE
 
 def _get(path, **params):

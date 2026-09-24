@@ -262,7 +262,7 @@ def start(port: int = FLUX_PORT) -> None:
     # 1. Critical path: bind the HTTP server. This alone makes FLUX see Houdini as
     #    connected (the backend probes port 48884). If it fails, we are not connected.
     try:
-        _httpd = _ThreadedHTTPServer(("localhost", port), _Handler)
+        _httpd = _ThreadedHTTPServer(("127.0.0.1", port), _Handler)
         threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http").start()
     except Exception as exc:
         _httpd = None

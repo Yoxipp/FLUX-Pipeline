@@ -25,7 +25,7 @@ HOUDINI_HTTP_PORT = 48884
 class HoudiniClient:
     """Sync HTTP client for flux_houdini_server running inside Houdini."""
 
-    def __init__(self, host: str = "localhost", port: int = HOUDINI_HTTP_PORT) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = HOUDINI_HTTP_PORT) -> None:
         self.base = f"http://{host}:{port}"
 
     # ------------------------------------------------------------------

@@ -152,7 +152,7 @@ def update_imports() -> None:
         print("FLUX : " + msg)
 
     def _work() -> None:
-        req = urllib.request.Request(f"http://localhost:{hub}/dcc/maya/update-imports", data=payload,
+        req = urllib.request.Request(f"http://127.0.0.1:{hub}/dcc/maya/update-imports", data=payload,
                                      headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=600) as r:
