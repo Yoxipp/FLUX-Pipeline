@@ -201,21 +201,19 @@ export function ShelfManager() {
           {/* aperçu shelf */}
           <div>
             <SecTitle>Aperçu du shelf</SecTitle>
-            <div className="card" style={{ padding: '14px 20px', display: 'flex', gap: 20, alignItems: 'center', minHeight: 62 }}>
+            <div className="card" style={{ padding: '14px 20px', display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', minHeight: 62 }}>
               {dcc === 'Maya' ? (
                 <>
                   <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="ANIM" />
                   <ShelfBtn icon={<FluxLogo size={20} color={RIG_COLOR} />} label="RIG" />
                 </>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, fontSize: 11, lineHeight: 1.5 }}>
-                  <div style={{ color: 'var(--ink-2)' }}>
-                    HDAs FLUX dans otls/ : Import, Export, Anim, Shot, Crowd, Lighting
-                  </div>
-                  <div style={{ color: 'var(--ink-3)' }}>
-                    Shelf « Flux » : un outil, Import KineFX (perso skinné USD / FBX en KineFX, poids venus de Maya)
-                  </div>
-                </div>
+                <>
+                  {/* One button per FLUX node (HDA): same list as resources/shelves/houdini/Flux.shelf. */}
+                  {['Import', 'Export', 'Anim', 'Shot', 'Crowd', 'Lighting'].map(l => (
+                    <ShelfBtn key={l} icon={<FluxLogo size={20} color={ANIM_COLOR} />} label={l} />
+                  ))}
+                </>
               )}
             </div>
           </div>
