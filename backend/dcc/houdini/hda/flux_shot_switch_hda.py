@@ -12,7 +12,13 @@ drives the scene from it:
     a new layer. "Publier le light rig du shot" writes those layers (USD ROP, strip
     layers above layer breaks) to a temp file inside Houdini, then FLUX publishes it
     as SEQ_SHOT_LIGHT (vNNN + LAST) and regenerates the shot stage.
-The render ROP of the sequence scene follows this node (frame range, camera, output).
+Several FLUX Shot nodes can sit side by side in one sequence scene (ADR 0023, the
+template is made by the team): common lights upstream feed every shot (the node's
+input), each shot has its own branch (its lights after its Layer Break, published with
+"Publier le light rig du shot") and its own render ROP ("Creer le ROP du shot"), which
+follows this node: frame range, camera, output ``render_picture``. "Rendre ce shot"
+renders one shot, "Rendre la sequence" every FLUX Shot of the same sequence, one after
+the other, each with its own range and camera.
 
 Same bootstrap pattern as FLUX Anim: the HDA holds a few lines that fetch the real
 module from GET /dcc/houdini/shot_switch/module, so a fix needs no HDA rebuild.
@@ -29,6 +35,8 @@ log = get_logger(__name__)
 
 NODE_NAME = "flux_shot"
 LABEL = "FLUX Shot"
+# Output of the shot render (one folder per shot, beside the scene).
+RENDER_PICTURE = '$HIP/render/`chs("seq")`_`chs("shot")`/`chs("seq")`_`chs("shot")`.$F4.exr'
 
 BOOTSTRAP: str = '''
 import json, os, urllib.request
@@ -59,6 +67,9 @@ except Exception:
     def resolve_path(node): _offline(node, "resolve_path")
     def apply_frame_range(node): _offline(node, "apply_frame_range")
     def publish_light(node): _offline(node, "publish_light")
+    def create_render_rop(node): _offline(node, "create_render_rop")
+    def render_shot(node): _offline(node, "render_shot")
+    def render_sequence(node): _offline(node, "render_sequence")
     def on_created(node): pass
     def on_loaded(node): pass
 '''
@@ -229,6 +240,18 @@ def resolve_path(node):
     msg += "  camera " + (_pval(node, "camera") or "aucune")
     _status(node, msg)
 
+def _branch_end(node):
+    """Last node of this shot's branch: follows single outputs, stops before a node that
+    mixes several inputs (another shot, a merge) or a ROP. Several shots side by side
+    each keep their own branch (ADR 0023)."""
+    cur = node
+    for _ in range(500):
+        outs = [o for o in cur.outputs() if "rop" not in o.type().name().lower()]
+        if len(outs) != 1 or len(outs[0].inputs()) > 1:
+            return cur
+        cur = outs[0]
+    return cur
+
 def _light_source(node):
     import hou
     path = _pval(node, "light_node")
@@ -236,8 +259,75 @@ def _light_source(node):
         n = hou.node(path)
         if n is not None:
             return n
-    parent = node.parent()
-    return parent.displayNode() if parent is not None else None
+    return _branch_end(node)
+
+def _shot_tag(node):
+    return "%s_%s" % (_pval(node, "seq"), _pval(node, "shot"))
+
+def create_render_rop(node):
+    """One USD Render ROP (Karma) per shot, following this node (range, camera, output)."""
+    import hou
+    if not (_pval(node, "seq") and _pval(node, "shot")):
+        _status(node, "Choisis la sequence et le shot d'abord"); return
+    src = _light_source(node)
+    rop = hou.node(_pval(node, "render_rop")) if _pval(node, "render_rop") else None
+    if rop is None:
+        out = hou.node("/out") or hou.node("/").createNode("ropnet", "out")
+        rop = out.createNode("usdrender", "RENDER_" + _shot_tag(node))
+    me = node.path()
+    rop.parm("loppath").set(src.path())
+    if rop.parm("renderer") is not None:
+        rop.parm("renderer").set("BRAY_HdKarma")
+    rop.parm("trange").set(1)
+    rop.parm("f1").setExpression('ch("%s/frame_rangex")' % me, hou.exprLanguage.Hscript)
+    rop.parm("f2").setExpression('ch("%s/frame_rangey")' % me, hou.exprLanguage.Hscript)
+    if rop.parm("override_camera") is not None:
+        rop.parm("override_camera").setExpression('chs("%s/camera")' % me, hou.exprLanguage.Hscript)
+    rop.parm("outputimage").set('`chs("%s/render_picture")`' % me)
+    _set(node, "render_rop", rop.path())
+    _status(node, "ROP %s : rend %s" % (rop.path(), src.path()))
+
+def _render(node):
+    """Render one shot with its own ROP and range. "" when done, else why not."""
+    import hou
+    rop = hou.node(_pval(node, "render_rop")) if _pval(node, "render_rop") else None
+    if rop is None:
+        return "pas de ROP (bouton Creer le ROP du shot)"
+    try:
+        start, end = int(node.evalParm("frame_rangex")), int(node.evalParm("frame_rangey"))
+    except Exception:
+        return "plage illisible"
+    if end < start:
+        return "pas de plage (Production)"
+    try:
+        rop.render(frame_range=(start, end))
+    except Exception as exc:
+        return str(exc)
+    return ""
+
+def render_shot(node):
+    err = _render(node)
+    _status(node, ("Rendu %s termine" % _shot_tag(node)) if not err else "Rendu impossible : " + err)
+
+def _sequence_shots(node):
+    """Every FLUX Shot of the scene on the same project and sequence, in shot order."""
+    same = [n for n in node.type().instances()
+            if _pval(n, "project") == _pval(node, "project") and _pval(n, "seq") == _pval(node, "seq")]
+    return sorted(same, key=lambda n: _pval(n, "shot"))
+
+def render_sequence(node):
+    """Each shot rendered on its own (its range, camera, lights): one failure never stops the others."""
+    done, failed = [], []
+    for shot in _sequence_shots(node):
+        err = _render(shot)
+        if err:
+            failed.append("%s (%s)" % (_pval(shot, "shot"), err))
+        else:
+            done.append(_pval(shot, "shot"))
+    msg = "Sequence %s : %d shot(s) rendu(s)" % (_pval(node, "seq"), len(done))
+    if failed:
+        msg += ", non rendus : " + ", ".join(failed)
+    _status(node, msg)
 
 def publish_light(node):
     """Write the layers authored after this node (the shot lights) and publish them."""
@@ -332,11 +422,29 @@ _ptg.append(_cam)
 _ptg.append(hou.SeparatorParmTemplate("sep_light"))
 _ptg.append(hou.StringParmTemplate("light_node", "Light Node", 1, default_value=("",),
                                    string_type=hou.stringParmType.NodeReference,
-                                   help="LOP holding the shot lights (empty = display node of the network)"))
+                                   help="LOP holding the shot lights (empty = end of this shot's branch)"))
 _ptg.append(hou.ButtonParmTemplate("btn_publish_light", "Publier le light rig du shot",
                                    script_callback="hou.phm().publish_light(kwargs['node'])",
                                    script_callback_language=_PY,
                                    help="Publishes the layers authored after this node as SEQ_SHOT_LIGHT"))
+_ptg.append(hou.SeparatorParmTemplate("sep_render"))
+_ptg.append(hou.StringParmTemplate("render_picture", "Images du shot", 1, default_value=({RENDER_PICTURE!r},),
+                                   string_type=hou.stringParmType.FileReference,
+                                   help="Output of this shot's render ROP"))
+_ptg.append(hou.StringParmTemplate("render_rop", "ROP du shot", 1, default_value=("",),
+                                   string_type=hou.stringParmType.NodeReference,
+                                   help="USD Render ROP of this shot (created by the button)"))
+_ptg.append(hou.ButtonParmTemplate("btn_render_rop", "Creer le ROP du shot",
+                                   script_callback="hou.phm().create_render_rop(kwargs['node'])",
+                                   script_callback_language=_PY,
+                                   help="Karma ROP that renders this shot's branch (range, camera, output)"))
+_ptg.append(hou.ButtonParmTemplate("btn_render_shot", "Rendre ce shot",
+                                   script_callback="hou.phm().render_shot(kwargs['node'])",
+                                   script_callback_language=_PY))
+_ptg.append(hou.ButtonParmTemplate("btn_render_seq", "Rendre la sequence",
+                                   script_callback="hou.phm().render_sequence(kwargs['node'])",
+                                   script_callback_language=_PY,
+                                   help="Every FLUX Shot of this sequence in the scene, one after the other"))
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
 _ptg.append(hou.StringParmTemplate("resolved_path", "Resolved Path", 1, default_value=("",)))
 _ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Reload", script_callback=_CB,
