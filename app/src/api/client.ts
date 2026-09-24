@@ -687,18 +687,6 @@ export const api = {
     return apiCall<UsdCrowdCompat>('GET', `/usd/crowd/compat?${qs}`)
   },
 
-  // A4 (ADR 0020): shot stages generated from the Production casting.
-  getUsdShots: (project: string) => {
-    const qs = new URLSearchParams({ project })
-    return apiCall<{ project: string; shots: UsdShotInfo[] }>('GET', `/usd/shots?${qs}`)
-  },
-  // A5: one Houdini scene per sequence (FLUX Shot selector, shot lights, render ROP), via hython.
-  generateSequenceScene: (project: string, seq: string, overwrite = false) =>
-    apiCall<{ ok: boolean; path: string; created: boolean; warnings?: string[] }>(
-      'POST', '/usd/sequence/scene', { project, seq, overwrite }),
-  generateUsdShot: (project: string, seq: string, shot: string, frozen = false, user?: string) =>
-    apiCall<{ ok: boolean; changed: boolean; version: string | null; last: string; warnings: string[]; auto_cast: string[] }>(
-      'POST', '/usd/shot/generate', { project, seq, shot, frozen, user: user ?? '' }),
 
   // pins: {slot: {task, instance, version} | {exclude: true} | null (automatic again)}
   refreshUsdComponent: (project: string, name: string, pins?: Record<string, UsdSlotPin | null>) =>
@@ -905,23 +893,6 @@ export interface LoadTargets {
   legacy: boolean
   message: string
   targets: { label: string; rel_path: string; primary: boolean; what: string }[]
-}
-export interface UsdShotInfo {
-  seq: string
-  shot: string
-  entity: string
-  state: 'none' | 'up_to_date' | 'outdated' | 'frozen'
-  versions: string[]
-  last_version: string | null
-  last: string | null
-  rel_last: string | null
-  legacy: string | null
-  casting: { prim: string; name: string; kind: string }[]
-  anims: { instance: string; character: string; prim: string; range: [number, number] | null }[]
-  departments: { department: string; task: string; files: string[] }[]
-  range: [number, number] | null
-  fps: number
-  warnings: string[]
 }
 export interface UsdTaskContribution {
   department: string

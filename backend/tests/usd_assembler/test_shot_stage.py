@@ -235,18 +235,5 @@ class ShotStage(unittest.TestCase):
             publish_shot_light(src, self.project, "SEQ001", "SHOT010")
 
 
-class SequenceScene(unittest.TestCase):
-    def test_the_scene_script_has_the_selector_the_lights_and_one_rop(self) -> None:
-        from features.folder_manager.houdini_sequence_scene import scene_script
-
-        code = scene_script("PROJ", "SEQ001", "SHOT010", "C:/p/shot/SEQ001/usd/lighting/SEQ001_sequence")
-        compile(code, "scene", "exec")
-        for needle in ("createNode(\"flux_shot\", 'SHOT')", "'SHOT_LIGHTS'", "usdrender",
-                       'ch("/stage/SHOT/frame_rangex")', 'chs("/stage/SHOT/camera")', "BRAY_HdKarma",
-                       "set -g %s = ''", "hou.hipFile.clear"):
-            self.assertIn(needle, code)
-        self.assertNotIn("hipFile.load", code)       # built from an empty scene, never a template
-
-
 if __name__ == "__main__":
     unittest.main()
