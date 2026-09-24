@@ -14,6 +14,12 @@ otherwise keep showing its old version.
 
 The parameter interface is taken from the SOP importer definition (built just before
 by the same installer), minus the SOP-only parms, plus the prim parms.
+
+Component content (ADR 0023): for a component of the USD library, one toggle per file,
+grouped GEO / GROOM / LOOKDEV / ANIM (preview) / AUTRES. The toggles only live on the
+node; the inner Python LOP ``apply_component`` sets the matching variant selections
+(one variant set per file, "on" / "off") on ``prim_path``. A file without an active
+target is greyed (its toggle is kept); warnings show as text and as a node warning.
 """
 
 from __future__ import annotations
@@ -27,6 +33,65 @@ from dcc.houdini.hda.flux_importer_hda import PYTHON_MODULE
 log = get_logger(__name__)
 
 NODE_NAME = "flux_importer"
+
+# (multiparm, parm prefix, label) of the component content (ADR 0023).
+COMPONENT_FOLDERS = (("geo_files", "geo", "GEO"), ("groom_files", "groom", "GROOM"),
+                     ("look_files", "look", "LOOKDEV"), ("anim_files", "anim", "ANIM (preview)"),
+                     ("other_files", "other", "AUTRES (rig, autres)"))
+
+# Runs inside the apply_component Python LOP: variant selections from comp_state.
+APPLY_COMPONENT = """
+import json
+node = hou.pwd()
+hda = node.parent()
+stage = node.editableStage()
+try:
+    state = json.loads(hda.evalParm("comp_state") or "{}")
+except Exception:
+    state = {}
+prim = stage.GetPrimAtPath(hda.evalParm("prim_path")) if state else None
+if prim is not None and prim.IsValid():
+    sets = prim.GetVariantSets()
+    for name, selection in sorted(state.items()):
+        if sets.HasVariantSet(name):
+            sets.GetVariantSet(name).SetVariantSelection(selection)
+warnings = hda.evalParm("comp_warnings")
+if warnings:
+    try:
+        node.addWarning(warnings)
+    except Exception:
+        pass
+"""
+
+# Parameter templates of the component content, inserted into the builder script.
+_COMPONENT_PARMS = """
+_comp = hou.FolderParmTemplate("comp_folder", "Contenu du component", folder_type=hou.folderType.Simple)
+_comp.setConditional(hou.parmCondType.HideWhen, "{ source_mode != library } { lib_kind != asset }")
+_warn = hou.StringParmTemplate("comp_warnings", "ATTENTION", 1, default_value=("",),
+                               tags={"editor": "1", "editorlines": "2-6"},
+                               help="Situations to check. Nothing is unselected automatically.")
+_warn.setConditional(hou.parmCondType.HideWhen, "{ comp_has_warn == 0 }")
+_comp.addParmTemplate(_warn)
+for _hidden in (hou.ToggleParmTemplate("comp_has_warn", "has warnings", default_value=False, is_hidden=True),
+                hou.StringParmTemplate("comp_state", "state", 1, default_value=("{}",), is_hidden=True),
+                hou.StringParmTemplate("comp_key", "key", 1, default_value=("",), is_hidden=True),
+                hou.StringParmTemplate("comp_memory", "memory", 1, default_value=("{}",), is_hidden=True)):
+    _comp.addParmTemplate(_hidden)
+for _multi, _prefix, _label in COMPONENT_FOLDERS:
+    _m = hou.FolderParmTemplate(_multi, _label, folder_type=hou.folderType.MultiparmBlock)
+    _on = hou.ToggleParmTemplate(_prefix + "_on#", "Actif", default_value=True,
+                                 script_callback="hou.phm().on_component_toggle(kwargs['node'])",
+                                 script_callback_language=_PY,
+                                 help="Greyed: none of its targets is active (its state is kept)")
+    _on.setConditional(hou.parmCondType.DisableWhen, "{ " + _prefix + "_ok# == 0 }")
+    _on.setJoinWithNext(True)
+    _lbl = hou.StringParmTemplate(_prefix + "_label#", "Fichier", 1, default_value=("",))
+    _m.addParmTemplate(_on)
+    _m.addParmTemplate(_lbl)
+    _m.addParmTemplate(hou.StringParmTemplate(_prefix + "_id#", "id", 1, default_value=("",), is_hidden=True))
+    _m.addParmTemplate(hou.ToggleParmTemplate(_prefix + "_ok#", "ok", default_value=True, is_hidden=True))
+    _comp.addParmTemplate(_m)
+"""
 LABEL = "FLUX Import"
 # SOP-only parms of the /obj importer (KineFX character switch, copy to $HIP).
 # geo_display is re-added below with the LOP wiring (configureprimitive, not a purpose filter).
@@ -76,17 +141,21 @@ _disp = hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                                   "render mesh is shown (purpose default) and the proxy hidden.")
 # Set by resolve: 1 = a shot stage (sublayered, ADR 0020), 0 = an asset / decor (referenced).
 _as_sub = hou.ToggleParmTemplate("as_sublayer", "Shot (sublayer)", default_value=False, is_hidden=True)
+COMPONENT_FOLDERS = {COMPONENT_FOLDERS!r}
+{_COMPONENT_PARMS}
 _anchor = _ptg.find("sep_resolved")
 if _anchor is not None:
     _ptg.insertBefore(_anchor, _auto)
     _ptg.insertBefore(_anchor, _prim)
     _ptg.insertBefore(_anchor, _disp)
     _ptg.insertBefore(_anchor, _as_sub)
+    _ptg.insertBefore(_anchor, _comp)
 else:
     _ptg.append(_auto)
     _ptg.append(_prim)
     _ptg.append(_disp)
     _ptg.append(_as_sub)
+    _ptg.append(_comp)
 _btn = _ptg.find("btn_resolve")
 if _btn is not None:
     _ptg.insertAfter(_btn, _reload)
@@ -115,10 +184,14 @@ _load = _sub.createNode("switch", "load_mode")
 _load.setInput(0, _ref)
 _load.setInput(1, _subl)
 _load.parm("input").setExpression('ch("../as_sublayer")', hou.exprLanguage.Hscript)
+# ADR 0023: the importer's own choices (variant selections), never saved in the component.
+_apply = _sub.createNode("pythonscript", "apply_component")
+_apply.setInput(0, _load)
+_apply.parm("python").set({APPLY_COMPONENT!r})
 # "Geo complete": render meshes shown in the viewport (purpose default), proxy hidden.
 # Two patterns: the asset itself (prim_path/geo) and every asset below it (a shot: /assets/**).
 _full = _sub.createNode("configureprimitive", "show_render_geo")
-_full.setInput(0, _load)
+_full.setInput(0, _apply)
 _full.parm("primpattern").set('`chs("../prim_path")`/geo/render/** `chs("../prim_path")`/**/geo/render/**')
 _full.parm("setpurpose").set(1)
 _full.parm("purpose").set("default")
@@ -128,7 +201,7 @@ _hide.parm("primpattern").set('`chs("../prim_path")`/geo/proxy `chs("../prim_pat
 _hide.parm("setvisibility").set(1)
 _hide.parm("visibility").set("invisible")
 _sw = _sub.createNode("switch", "geo_display")
-_sw.setInput(0, _load)
+_sw.setInput(0, _apply)
 _sw.setInput(1, _hide)
 _sw.parm("input").setExpression('ch("../geo_display")', hou.exprLanguage.Hscript)
 _out.setInput(0, _sw)

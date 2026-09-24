@@ -66,7 +66,7 @@ except Exception as _offline_err:
             globals()["resolve_path"](node)
             return
         node.parm("status_msg").set("FLUX offline : démarre le backend puis clique ↺ Resolve")
-    move_to_local = use_hub = on_created = on_loaded = on_lib_filter = _noop
+    move_to_local = use_hub = on_created = on_loaded = on_lib_filter = on_component_toggle = _noop
 '''
 
 
@@ -325,6 +325,145 @@ def _reload_lop(node):
             except Exception:
                 pass
 
+# ── component content (ADR 0023, /stage importer) ──────────────────────────────
+# One toggle per file of the component, grouped by kind (GEO, GROOM, LOOKDEV, ANIM,
+# other). The toggles live on this node only (comp_memory keeps them per component,
+# so going back to an element restores them): the component itself never changes.
+# comp_state = {variant set: "on" / "off"} applied by the inner apply_component LOP.
+_COMP_FOLDERS = (("geo_files", "geo", ("geometry",)), ("groom_files", "groom", ("groom",)),
+                 ("look_files", "look", ("shader",)), ("anim_files", "anim", ("animation",)),
+                 ("other_files", "other", ("rig", "other")))
+
+def _sval(node, name):
+    p = node.parm(name)
+    return p.evalAsString() if p is not None else ""
+
+def _folder_of(kind):
+    for multi, prefix, kinds in _COMP_FOLDERS:
+        if kind in kinds:
+            return multi, prefix
+    return "other_files", "other"
+
+def _json_parm(node, name, default):
+    try:
+        return json.loads(_sval(node, name) or "null") or default
+    except Exception:
+        return default
+
+def _set_parm(node, name, value):
+    p = node.parm(name)
+    if p is not None:
+        p.set(value)
+
+def _toggles(node):
+    """{file id: toggle} as set on this node."""
+    out = {}
+    for multi, prefix, _kinds in _COMP_FOLDERS:
+        p = node.parm(multi)
+        if p is None:
+            continue
+        for i in range(1, p.eval() + 1):
+            fid = _sval(node, "%s_id%d" % (prefix, i))
+            if fid:
+                out[fid] = bool(node.evalParm("%s_on%d" % (prefix, i)))
+    return out
+
+def _component_key(node):
+    if _sval(node, "source_mode") != "library":
+        return ""
+    key = _sval(node, "lib_item")
+    return key if key.startswith("component:") else ""
+
+def _check(node, key, active):
+    return _post("/usd/component/check", {
+        "project": _pval(node, "project"), "name": key.split(":", 1)[1],
+        "version": _pval(node, "lib_version") or "LAST", "active": active})
+
+def _file_label(f):
+    txt = "%s  .%s" % (f.get("label", f["id"]), f.get("format", ""))
+    if f.get("proxy_of"):
+        txt += "  (proxy)"
+    if not f.get("variant_set"):
+        txt += "  (ancien component : a reenregistrer dans FLUX)"
+    return txt
+
+def _clear_component(node):
+    for multi, _prefix, _kinds in _COMP_FOLDERS:
+        _set_parm(node, multi, 0)
+    _set_parm(node, "comp_key", "")
+    _set_parm(node, "comp_state", "{}")
+    _set_parm(node, "comp_warnings", "")
+    _set_parm(node, "comp_has_warn", 0)
+
+def _fill_component(node):
+    """List the files of the component being imported; restore this node's toggles."""
+    if node.parm("comp_state") is None:
+        return                       # /obj importer: no per-file content
+    key = _component_key(node)
+    if not key:
+        _clear_component(node)
+        return
+    memory = _json_parm(node, "comp_memory", {})
+    current = _sval(node, "comp_key")
+    if current:
+        memory[current] = dict(memory.get(current, {}), **_toggles(node))
+    mem = memory.get(key, {})
+    r = _check(node, key, mem)
+    if "files" not in r:
+        _clear_component(node)
+        _set_status(node, "Component illisible : " + str(r.get("error") or r.get("detail") or "?"))
+        return
+    groups = {}
+    for f in r["files"]:
+        groups.setdefault(_folder_of(f.get("kind")), []).append(f)
+    for multi, prefix, _kinds in _COMP_FOLDERS:
+        rows = groups.get((multi, prefix), [])
+        _set_parm(node, multi, len(rows))
+        for i, f in enumerate(rows, 1):
+            # Proxies are on by default; the rest follows the component (anims: off).
+            default = True if f.get("proxy_of") else bool(f.get("active"))
+            _set_parm(node, "%s_id%d" % (prefix, i), f["id"])
+            _set_parm(node, "%s_label%d" % (prefix, i), _file_label(f))
+            _set_parm(node, "%s_on%d" % (prefix, i), 1 if mem.get(f["id"], default) else 0)
+    _set_parm(node, "comp_key", key)
+    memory[key] = _toggles(node)
+    _set_parm(node, "comp_memory", json.dumps(memory, sort_keys=True))
+    on_component_toggle(node)
+
+def on_component_toggle(node):
+    """A toggle changed: grey the files without an active target, show the warnings
+    (yellow badge + text) and hand the variant selections to apply_component."""
+    key = _sval(node, "comp_key")
+    if not key:
+        return
+    active = _toggles(node)
+    memory = _json_parm(node, "comp_memory", {})
+    memory[key] = active
+    _set_parm(node, "comp_memory", json.dumps(memory, sort_keys=True))
+    r = _check(node, key, active)
+    if "files" not in r:
+        _set_status(node, "Component illisible : " + str(r.get("error") or r.get("detail") or "?"))
+        return
+    grey = set(f["id"] for f in r["files"] if f.get("greyed"))
+    sets = dict((f["id"], f.get("variant_set")) for f in r["files"])
+    state = {}
+    for multi, prefix, _kinds in _COMP_FOLDERS:
+        p = node.parm(multi)
+        if p is None:
+            continue
+        for i in range(1, p.eval() + 1):
+            fid = _sval(node, "%s_id%d" % (prefix, i))
+            if not fid:
+                continue
+            # Greyed: the toggle keeps its value (memorized), the file is simply not applied.
+            _set_parm(node, "%s_ok%d" % (prefix, i), 0 if fid in grey else 1)
+            if sets.get(fid):
+                state[sets[fid]] = "on" if active.get(fid) and fid not in grey else "off"
+    _set_parm(node, "comp_state", json.dumps(state, sort_keys=True))
+    warns = r.get("warnings") or []
+    _set_parm(node, "comp_warnings", "\\n".join(warns))
+    _set_parm(node, "comp_has_warn", 1 if warns else 0)
+
 def _apply_lop(node, r):
     sub = node.parm("as_sublayer")
     if sub is not None:
@@ -336,9 +475,11 @@ def _apply_lop(node, r):
             pp.set(r["prim_path"])
     _reload_lop(node)
     if r.get("kind") == "shot":
+        _clear_component(node)
         _set_status(node, "OK  shot (sublayer)")
         return
     _set_status(node, "OK  " + _pval(node, "prim_path"))
+    _fill_component(node)
 
 def _reload_sop(node):
     """Same as the LOP: the import SOPs keep a file they already read, so a scene
@@ -366,6 +507,8 @@ def _apply(node, r):
     else:
         if p: p.set("")
         _set_character(node, False)
+        if _is_lop(node):
+            _clear_component(node)
         _set_status(node, r.get("error", "File not found"))
 
 def resolve_path(node):
