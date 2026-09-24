@@ -51,5 +51,28 @@ class HoudiniShelfHdas(unittest.TestCase):
         self.assertFalse((self.toolbar / "Flux.shelf").exists())
 
 
+class HdaBackupPurge(unittest.TestCase):
+    def test_only_flux_backups_are_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            otls = Path(d) / "otls"
+            backup = otls / "backup"
+            backup.mkdir(parents=True)
+            for name in ("flux_anim_bak1.hda", "flux_importer_lop_bak12.hda"):
+                (backup / name).write_bytes(b"x")
+            (backup / "studio_tool_bak1.hda").write_bytes(b"x")
+            (otls / "flux_anim.hda").write_bytes(b"x")
+            self.assertEqual(shelf_core.purge_hda_backups([otls, Path(d) / "missing"]), 2)
+            self.assertEqual([f.name for f in backup.iterdir()], ["studio_tool_bak1.hda"])
+            self.assertTrue((otls / "flux_anim.hda").exists())
+
+    def test_empty_backup_folder_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            backup = Path(d) / "backup"
+            backup.mkdir()
+            (backup / "flux_shot_bak3.hda").write_bytes(b"x")
+            shelf_core.purge_hda_backups([Path(d)])
+            self.assertFalse(backup.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

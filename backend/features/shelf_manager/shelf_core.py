@@ -405,6 +405,30 @@ def is_hda_installed(version: str) -> bool:
     )
 
 
+def purge_hda_backups(dirs: list[Path]) -> int:
+    """Delete the ``backup/flux_*_bak*.hda`` copies Houdini writes each time a FLUX HDA
+    is saved over itself (hundreds after a few rebuilds). Other studios' backups are
+    left alone; an emptied backup folder is removed. Returns the number of files."""
+    removed = 0
+    for base in dirs:
+        backup = Path(base) / "backup"
+        if not backup.is_dir():
+            continue
+        for f in backup.glob("flux_*_bak*.hda"):
+            try:
+                f.unlink()
+                removed += 1
+            except OSError as exc:
+                log.debug("HDA backup not removed %s: %s", f, exc)
+        try:
+            backup.rmdir()          # only succeeds when empty
+        except OSError:
+            pass
+    if removed:
+        log.info("Removed %d Houdini HDA backup file(s)", removed)
+    return removed
+
+
 def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
     """Build the FLUX HDAs in the connected Houdini into otls_dirs[0], mirror the
     resulting .hda files into the other otls dirs AND refresh the staging copy.
@@ -467,6 +491,7 @@ def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
                 shutil.copy2(otls / built, _HDA_STAGING_DIR / built)
         except OSError as exc:
             log.warning("Could not refresh HDA staging copy: %s", exc)
+        purge_hda_backups([*otls_dirs, _HDA_STAGING_DIR])
         return True, f"HDAs built live → {otls}"
     except Exception as exc:
         return False, f"Live build error: {exc}"
@@ -483,6 +508,7 @@ def install_hdas(version: str) -> tuple[bool, str]:
     otls_dirs = get_dcc_otls_dirs(version)
     if not otls_dirs:
         return False, f"Cannot resolve otls directory for Houdini {version}."
+    purge_hda_backups(otls_dirs)     # leftovers of earlier rebuilds
 
     # Prefer a fresh live build when Houdini is reachable.
     try:
