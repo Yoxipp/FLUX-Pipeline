@@ -23,6 +23,7 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertEqual(cfg["defaultExportPreset"], "PBR Metallic Roughness")
         self.assertEqual(cfg["exportParameters"][0]["parameters"]["fileFormat"], "png")
         self.assertEqual(cfg["exportParameters"][0]["parameters"]["bitDepth"], "16")
+        self.assertEqual(cfg["exportParameters"][0]["parameters"]["paddingAlgorithm"], "infinite")
 
     def test_map_token_from_filename(self):
         self.assertEqual(se.map_token_from_filename("HeroBody_BaseColor.png"), "BASECOLOR")
@@ -31,11 +32,15 @@ class ExportConfigAndTokens(unittest.TestCase):
 
 class PublishPainter(unittest.TestCase):
     def test_exports_then_ingests_each_map(self):
-        maps = ["/tmp/x_BaseColor.png", "/tmp/x_Roughness.png"]
-        with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
-             mock.patch("pathlib.Path.exists", return_value=True), \
-             mock.patch.object(sp_client.substance_client, "export",
-                               return_value={"ok": True, "files": maps}), \
+        def _export(config):
+            # The bridge writes the maps in the export dir; FLUX reads the dir.
+            out = Path(config["exportPath"])
+            for name in ("x_BaseColor.png", "x_Roughness.png"):
+                (out / name).write_bytes(b"x")
+            return {"ok": True, "files": []}
+
+        with mock.patch("core.paths.get_project_path", return_value=Path(__file__).parent), \
+             mock.patch.object(sp_client.substance_client, "export", side_effect=_export), \
              mock.patch("features.publisher.publish_core.publish_file",
                         side_effect=lambda src, *a, **k: Path("/proj/dest") / Path(src).name) as pf:
             out = se.publish_painter("PROJ", "CHAR", "TEX", "HERO", "null")
@@ -57,16 +62,21 @@ class PublishPainter(unittest.TestCase):
 
 class PublishMari(unittest.TestCase):
     def test_exports_then_ingests(self):
-        chans = ["/tmp/g_Diffuse.tif", "/tmp/g_Bump.tif"]
-        with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
-             mock.patch("pathlib.Path.exists", return_value=True), \
-             mock.patch.object(mari_client_mod.mari_client, "export",
-                               return_value={"ok": True, "files": chans}), \
+        def _export(export_path, file_format):
+            # Mari names each file after its channel only ($UDIM filled by Mari).
+            for name in ("Diffuse.tif", "B_COL.tif"):
+                (Path(export_path) / name).write_bytes(b"x")
+            return {"ok": True, "files": [f"{export_path}/Diffuse.$UDIM.tif"]}
+
+        with mock.patch("core.paths.get_project_path", return_value=Path(__file__).parent), \
+             mock.patch.object(mari_client_mod.mari_client, "export", side_effect=_export), \
              mock.patch("features.publisher.publish_core.publish_file",
-                        side_effect=lambda src, *a, **k: Path("/proj/dest") / Path(src).name):
+                        side_effect=lambda src, *a, **k: Path("/proj/dest") / Path(src).name) as pf:
             out = me.publish_mari("PROJ", "CHAR", "TEX", "HERO", "null")
         self.assertTrue(out["ok"], out)
         self.assertEqual(len(out["published"]), 2)
+        names = [k.args[5] for k in pf.call_args_list]
+        self.assertEqual(sorted(names), ["CHAR_TEX_HERO_BCOL", "CHAR_TEX_HERO_DIFFUSE"])
 
 
 if __name__ == "__main__":

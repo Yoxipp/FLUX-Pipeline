@@ -31,8 +31,11 @@ def build_export_config(
         "exportPath": str(export_path).replace("\\", "/"),
         "exportShaderParams": False,
         "defaultExportPreset": preset,
+        # Painter refuses the export ("impossible de resoudre l'algorithme de
+        # dilatation") when parameters are given without a padding algorithm.
         "exportParameters": [
-            {"parameters": {"fileFormat": file_format, "bitDepth": bit_depth}}
+            {"parameters": {"fileFormat": file_format, "bitDepth": bit_depth,
+                            "paddingAlgorithm": "infinite", "dithering": False}}
         ],
     }
     if texture_sets:
@@ -46,12 +49,9 @@ def map_token_from_filename(filename: str) -> str:
     Painter names maps like ``TextureSet_BaseColor.png`` / ``..._Roughness.1001.png``.
     We take the last alpha segment before any UDIM/frame number as the map token.
     """
-    stem = Path(filename).stem
-    # drop a trailing UDIM/frame block (e.g. ".1001")
-    parts = stem.split(".")
-    core = parts[0]
-    token = core.split("_")[-1] if "_" in core else core
-    return token.upper() or "MAP"
+    from dcc.texture_publish import split_map_name
+
+    return split_map_name(filename)[0]
 
 
 def publish_painter(
@@ -73,8 +73,6 @@ def publish_painter(
     """
     from core.paths import get_project_path
     from dcc.substance_painter.client import substance_client
-    from features.publisher.publish_core import publish_file
-
     project_path = get_project_path(project)
     if not project_path.exists():
         return {"ok": False, "error": f"Projet introuvable : {project}"}
@@ -87,40 +85,49 @@ def publish_painter(
         log.warning("Painter export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Painter export failed")}
 
-    files = [Path(f) for f in result.get("files", [])]
+    files = _exported_files(export_dir, result.get("files", []))
     if not files:
         return {"ok": False, "error": "Painter export produced no maps"}
 
-    published: list[str] = []
-    tx_paths: list[str] = []
-    variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
-    for f in files:
-        map_tok = map_token_from_filename(f.name)
-        parts = [class_tok, task_tok, name_tok, map_tok]
-        if variante:
-            parts.append(variante)
-        target_name = "_".join(parts).upper()
-        dest = publish_file(f, project_path, description, user, project, target_name)
-        if dest is None:
-            log.warning("Painter map not published (unresolved name): %s", f.name)
-            continue
-        published.append(str(dest))
-        if conform_tx:
-            tx = _maybe_conform(Path(dest))
-            if tx:
-                tx_paths.extend(tx)
+    from dcc.texture_publish import publish_maps
 
+    variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
+    published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
+                                       variante, description, user)
+    for w in warnings:
+        log.warning("Painter publish: %s", w)
     if not published:
         return {"ok": False, "error": "No Painter map could be published"}
-    return {"ok": True, "published": published, "tx": tx_paths or None}
+    tx_paths = _conform_published(published, "Painter") if conform_tx else []
+    return {"ok": True, "published": published, "tx": tx_paths or None, "warnings": warnings}
 
 
-def _maybe_conform(published_map: Path) -> list[str] | None:
-    """Conform a published map to .tx via the existing texture_conform brick."""
-    try:
-        from flux_actions.runner import run_conform_texture_action
-        res = run_conform_texture_action(published_map, out_dir=published_map.parent)
-    except Exception as exc:  # noqa: BLE001 - conform must never fail a publish
-        log.warning("Painter .tx conform failed for %s: %s", published_map.name, exc)
-        return None
-    return (res or {}).get("tx_paths") or None
+def _exported_files(export_dir: Path, reported: list[str]) -> list[Path]:
+    """Files really written in *export_dir* (the bridge may report a template such
+    as ``..._BaseColor.$UDIM.tif``, not the tiles); the reported list as fallback."""
+    on_disk = sorted(p for p in Path(export_dir).rglob("*") if p.is_file())
+    return on_disk or [Path(f) for f in reported if Path(f).is_file()]
+
+
+def _conform_published(published: list[str], label: str) -> list[str]:
+    """.tx conform of each published map (a UDIM version folder as a <UDIM> pattern)."""
+    from dcc.texture_publish import UDIM_TOKEN
+    from flux_actions.runner import run_conform_texture_action
+
+    tx_paths: list[str] = []
+    for dest in published:
+        p = Path(dest)
+        source = p
+        if p.is_dir():
+            tiles = sorted(p.iterdir())
+            if not tiles:
+                continue
+            first = tiles[0]
+            stem = first.name.split(".")[0]
+            source = p / f"{stem}.{UDIM_TOKEN}{first.suffix}"
+        try:
+            res = run_conform_texture_action(source, out_dir=p if p.is_dir() else p.parent)
+            tx_paths.extend((res or {}).get("tx_paths") or [])
+        except Exception as exc:  # noqa: BLE001 - conform must never fail a publish
+            log.warning("%s .tx conform failed for %s: %s", label, p.name, exc)
+    return tx_paths

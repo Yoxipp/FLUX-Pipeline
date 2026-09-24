@@ -30,7 +30,6 @@ def publish_mari(
     """Export Mari channels and ingest them into FLUX (one publish per channel)."""
     from core.paths import get_project_path
     from dcc.mari.client import mari_client
-    from features.publisher.publish_core import publish_file
 
     project_path = get_project_path(project)
     if not project_path.exists():
@@ -43,31 +42,19 @@ def publish_mari(
         log.warning("Mari export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Mari export failed")}
 
-    files = [Path(f) for f in result.get("files", [])]
+    from dcc.substance_painter.substance_export import _conform_published, _exported_files
+    from dcc.texture_publish import publish_maps
+
+    files = _exported_files(export_dir, result.get("files", []))
     if not files:
         return {"ok": False, "error": "Mari export produced no channels"}
 
-    published: list[str] = []
-    tx_paths: list[str] = []
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
-    for f in files:
-        parts = [class_tok, task_tok, name_tok, map_token_from_filename(f.name)]
-        if variante:
-            parts.append(variante)
-        target_name = "_".join(parts).upper()
-        dest = publish_file(f, project_path, description, user, project, target_name)
-        if dest is None:
-            log.warning("Mari channel not published (unresolved name): %s", f.name)
-            continue
-        published.append(str(dest))
-        if conform_tx:
-            try:
-                from flux_actions.runner import run_conform_texture_action
-                res = run_conform_texture_action(Path(dest), out_dir=Path(dest).parent)
-                tx = (res or {}).get("tx_paths") or []
-                tx_paths.extend(tx)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Mari .tx conform failed for %s: %s", f.name, exc)
+    published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
+                                       variante, description, user, whole_name=True)
+    for w in warnings:
+        log.warning("Mari publish: %s", w)
+    tx_paths = _conform_published(published, "Mari") if (conform_tx and published) else []
 
     if not published:
         return {"ok": False, "error": "No Mari channel could be published"}

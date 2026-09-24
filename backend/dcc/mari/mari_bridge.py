@@ -109,8 +109,9 @@ def _do_export(export_path: str, file_format: str) -> dict:
         files: list[str] = []
         os.makedirs(export_path, exist_ok=True)
         for channel in geo.channelList():
-            # Template with the channel name; Mari fills UDIM/token itself.
-            out = os.path.join(export_path, f"{geo.name()}_{channel.name()}.$UDIM.{file_format}")
+            # One file per channel named after the channel only (FLUX keeps the whole
+            # name as the MAP token); Mari fills $UDIM with each tile number.
+            out = os.path.join(export_path, f"{channel.name()}.$UDIM.{file_format}")
             try:
                 channel.exportImages(out)
                 files.append(out)
