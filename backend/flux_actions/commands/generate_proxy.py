@@ -76,9 +76,10 @@ class GenerateProxy(CommandBase):
             raise ValueError(f"generation proxy USD echouee: {result.error}")
 
         logger.info(
-            "generate_proxy: %s -> %s (%d meshes, %d -> %d tris)",
+            "generate_proxy: %s -> %s (%d meshes, %d -> %d tris, %d grooms, %d -> %d curves)",
             result.src.name, result.dst.name,
             result.meshes, result.tris_in, result.tris_out,
+            result.grooms, result.curves_in, result.curves_out,
         )
         return {
             "proxy_path": str(result.dst),
@@ -86,4 +87,7 @@ class GenerateProxy(CommandBase):
             "meshes": result.meshes,
             "tris_in": result.tris_in,
             "tris_out": result.tris_out,
+            "grooms": result.grooms,
+            "curves_in": result.curves_in,
+            "curves_out": result.curves_out,
         }

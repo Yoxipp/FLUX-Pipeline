@@ -219,6 +219,78 @@ class SkinnedProxyTests(unittest.TestCase):
             self.assertEqual(UP.generate_proxy(src).status, "converted")
 
 
+def _make_groom_usd(path: Path, n_curves: int, *, skinned: bool = False) -> None:
+    """/Asset/groom/hair: n_curves 4-point curves, per-vertex widths (+ a guide)."""
+    from pxr import UsdSkel
+
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(stage.GetPrimAtPath("/Asset"))
+    curves = UsdGeom.BasisCurves.Define(stage, "/Asset/groom/hair")
+    pts = [(float(c), float(k), 0.0) for c in range(n_curves) for k in range(4)]
+    curves.CreatePointsAttr(Vt.Vec3fArray(pts))
+    curves.CreateCurveVertexCountsAttr(Vt.IntArray([4] * n_curves))
+    curves.CreateTypeAttr(UsdGeom.Tokens.cubic)
+    curves.CreateBasisAttr(UsdGeom.Tokens.catmullRom)
+    curves.CreateWidthsAttr(Vt.FloatArray([0.01 * (i + 1) for i in range(len(pts))]))
+    curves.SetWidthsInterpolation(UsdGeom.Tokens.vertex)
+    guide = UsdGeom.BasisCurves.Define(stage, "/Asset/groom/guides")
+    guide.CreatePurposeAttr(UsdGeom.Tokens.guide)
+    guide.CreatePointsAttr(Vt.Vec3fArray(pts[:4]))
+    guide.CreateCurveVertexCountsAttr(Vt.IntArray([4]))
+    if skinned:
+        UsdSkel.Skeleton.Define(stage, "/Asset/skel")
+        b = UsdSkel.BindingAPI.Apply(curves.GetPrim())
+        b.CreateSkeletonRel().SetTargets(["/Asset/skel"])
+        b.CreateJointIndicesPrimvar(False, 1).Set(Vt.IntArray([i // 4 for i in range(len(pts))]))
+        b.CreateJointWeightsPrimvar(False, 1).Set(Vt.FloatArray([1.0] * len(pts)))
+    stage.GetRootLayer().Save()
+
+
+class GroomProxyTests(unittest.TestCase):
+    """ADR 0026: a render groom gets a thinned purpose=proxy sibling by default."""
+
+    def test_keep_every(self):
+        self.assertEqual(UP.curve_keep_every(0.9), 10)
+        self.assertEqual(UP.curve_keep_every(0.5), 2)
+        self.assertEqual(UP.curve_keep_every(0.0), 1)
+
+    def test_thinned_curves_keep_whole_curves_and_widths(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "DINGO_GROOM_v001.usda"
+            _make_groom_usd(src, 100)
+            r = UP.generate_proxy(src, target_reduction=0.9)
+            self.assertEqual(r.status, "converted")
+            self.assertEqual((r.meshes, r.grooms, r.curves_in, r.curves_out), (0, 1, 100, 10))
+            stage = Usd.Stage.Open(str(r.dst))
+            render = UsdGeom.BasisCurves(stage.GetPrimAtPath("/Asset/groom/hair"))
+            proxy = UsdGeom.BasisCurves(stage.GetPrimAtPath("/Asset/groom/hair_proxy"))
+            self.assertEqual(render.GetPurposeAttr().Get(), UsdGeom.Tokens.render)
+            self.assertEqual(proxy.GetPurposeAttr().Get(), UsdGeom.Tokens.proxy)
+            self.assertEqual(list(proxy.GetCurveVertexCountsAttr().Get()), [4] * 10)
+            self.assertEqual(len(proxy.GetPointsAttr().Get()), 40)
+            self.assertEqual(proxy.GetBasisAttr().Get(), UsdGeom.Tokens.catmullRom)
+            widths = proxy.GetWidthsAttr().Get()
+            self.assertEqual(len(widths), 40)
+            # Curve 10 (points 40..43) is the second kept one: its widths follow it.
+            self.assertAlmostEqual(widths[4], 0.41, places=5)
+            self.assertIsNotNone(proxy.GetExtentAttr().Get())
+            # The guide curves are never proxied.
+            self.assertFalse(stage.GetPrimAtPath("/Asset/groom/guides_proxy"))
+
+    def test_skinned_groom_proxy_keeps_its_skin(self):
+        from pxr import UsdSkel
+
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "groom.usda"
+            _make_groom_usd(src, 30, skinned=True)
+            r = UP.generate_proxy(src, target_reduction=0.9)
+            stage = Usd.Stage.Open(str(r.dst))
+            b = UsdSkel.BindingAPI(stage.GetPrimAtPath("/Asset/groom/hair_proxy"))
+            self.assertEqual(list(b.GetJointIndicesPrimvar().Get()), [0] * 4 + [10] * 4 + [20] * 4)
+            self.assertEqual([str(t) for t in b.GetSkeletonRel().GetTargets()], ["/Asset/skel"])
+
+
 class ProxyCommandTests(unittest.TestCase):
     def test_action_loads_one_step(self):
         query = ActionQuery.from_file(GENERATE_PROXY_ACTION, context={})

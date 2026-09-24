@@ -1,6 +1,7 @@
 # usd_proxy.py - generate lightweight USD proxy geometry (purpose=proxy).
 #
-# Goal: give every render mesh a decimated sibling tagged purpose=proxy, so
+# Goal: give every render mesh a decimated sibling tagged purpose=proxy (and every
+# render groom a thinned one, ADR 0026), so
 # Solaris / usdview draw the light version in the viewport while the renderer
 # still uses the full purpose=render mesh. Lighter viewports, no LOD system.
 #
@@ -19,6 +20,8 @@
 #     .bgeo cannot be read here; the pipeline is USD-centred so the source is the
 #     published USD.
 #   - One proxy level only (YAGNI). No multi-level LOD.
+#   - Groom (BasisCurves): the proxy keeps 1 curve in N (N from the reduction, 0.9 ->
+#     1 in 10), whole curves, widths and skin kept, other primvars dropped (ADR 0026).
 
 from __future__ import annotations
 
@@ -70,6 +73,9 @@ class ProxyResult:
     meshes: int = 0
     tris_in: int = 0
     tris_out: int = 0
+    grooms: int = 0             # BasisCurves prims thinned (ADR 0026)
+    curves_in: int = 0
+    curves_out: int = 0
     error: str = ""
 
 
@@ -135,12 +141,13 @@ def decimate_with_mapping(
             np.asarray(mapping, dtype=np.int64))
 
 
-def _copy_skin_binding(src: UsdGeom.Mesh, proxy: UsdGeom.Mesh, mapping: np.ndarray,
+def _copy_skin_binding(src: UsdGeom.Gprim, proxy: UsdGeom.Gprim, mapping: np.ndarray,
                        n_proxy_points: int) -> bool:
     """Give the proxy the skin of its source mesh: same skeleton, same bind transform,
     and per proxy point the joint indices / weights of one source point that collapsed
     into it. Without it a viewport showing proxies (Houdini) keeps the mesh rigid while
-    the skeleton animates. Returns True when a binding was copied."""
+    the skeleton animates. A source point mapped to -1 was dropped (thinned groom).
+    Returns True when a binding was copied."""
     prim = src.GetPrim()
     if not prim.HasAPI(UsdSkel.BindingAPI):
         return False
@@ -158,7 +165,7 @@ def _copy_skin_binding(src: UsdGeom.Mesh, proxy: UsdGeom.Mesh, mapping: np.ndarr
     else:
         # First source point of each proxy point (mapping is source -> proxy).
         rep = np.zeros(n_proxy_points, dtype=np.int64)
-        order = np.arange(mapping.shape[0] - 1, -1, -1)
+        order = np.nonzero(mapping >= 0)[0][::-1]
         rep[mapping[order]] = order
         per_point_i = indices.reshape(-1, size)[rep].reshape(-1)
         per_point_w = weights.reshape(-1, size)[rep].reshape(-1)
@@ -185,6 +192,83 @@ def _iter_render_meshes(stage: Usd.Stage):
         if purpose in (UsdGeom.Tokens.proxy, UsdGeom.Tokens.guide):
             continue
         yield UsdGeom.Mesh(prim)
+
+
+def _iter_render_curves(stage: Usd.Stage):
+    """Yield UsdGeom.BasisCurves prims that are render groom (not proxy/guide)."""
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.BasisCurves):
+            continue
+        purpose = UsdGeom.Imageable(prim).GetPurposeAttr().Get()
+        if purpose in (UsdGeom.Tokens.proxy, UsdGeom.Tokens.guide):
+            continue
+        yield UsdGeom.BasisCurves(prim)
+
+
+def curve_keep_every(target_reduction: float) -> int:
+    """1 curve kept in N: 0.9 -> 10, 0.5 -> 2, 0 -> 1 (every curve)."""
+    keep = max(1.0 - float(target_reduction), 1e-3)
+    return max(1, int(round(1.0 / keep)))
+
+
+def thin_curves(counts: np.ndarray, keep_every: int) -> tuple[np.ndarray, np.ndarray]:
+    """(kept curve indices, source point -> proxy point mapping, -1 when dropped).
+
+    Whole curves are kept (1 in keep_every, the first one always), so a thinned
+    groom keeps its silhouette and its per-curve shape."""
+    kept = np.arange(0, counts.shape[0], keep_every, dtype=np.int64)
+    keep_curve = np.zeros(counts.shape[0], dtype=bool)
+    keep_curve[kept] = True
+    keep_point = np.repeat(keep_curve, counts)
+    mapping = np.full(keep_point.shape[0], -1, dtype=np.int64)
+    mapping[keep_point] = np.arange(int(keep_point.sum()), dtype=np.int64)
+    return kept, mapping
+
+
+def _author_curves_proxy(dst_stage: Usd.Stage, src: UsdGeom.BasisCurves,
+                         keep_every: int) -> tuple[int, int]:
+    """Author "<curves>_proxy" (purpose=proxy, 1 curve in keep_every) next to *src*,
+    overriding *src* purpose=render. Returns (curves in, curves out), (0, 0) if empty."""
+    points_attr = src.GetPointsAttr().Get()
+    counts_attr = src.GetCurveVertexCountsAttr().Get()
+    if not points_attr or not counts_attr:
+        return 0, 0
+    points = np.asarray(points_attr, dtype=np.float32)
+    counts = np.asarray(counts_attr, dtype=np.int64)
+    if int(counts.sum()) != points.shape[0]:
+        return 0, 0                      # inconsistent curve: leave it alone
+    kept, mapping = thin_curves(counts, keep_every)
+    keep_point = mapping >= 0
+
+    src_path = src.GetPath()
+    UsdGeom.BasisCurves(dst_stage.OverridePrim(src_path)).CreatePurposeAttr(UsdGeom.Tokens.render)
+    proxy = UsdGeom.BasisCurves.Define(dst_stage, src_path.GetParentPath().AppendChild(src_path.name + "_proxy"))
+    proxy.CreatePurposeAttr(UsdGeom.Tokens.proxy)
+    for getter, creator in ((src.GetTypeAttr, proxy.CreateTypeAttr),
+                            (src.GetBasisAttr, proxy.CreateBasisAttr),
+                            (src.GetWrapAttr, proxy.CreateWrapAttr)):
+        attr = getter()
+        if attr and attr.HasAuthoredValue():
+            creator(attr.Get())
+    proxy_points = points[keep_point]
+    proxy.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(proxy_points))
+    proxy.CreateCurveVertexCountsAttr(Vt.IntArray.FromNumpy(counts[kept].astype(np.int32)))
+    widths = src.GetWidthsAttr().Get()
+    if widths is not None and len(widths):
+        w = np.asarray(widths, dtype=np.float32)
+        interp = src.GetWidthsInterpolation()
+        if interp in (UsdGeom.Tokens.vertex, UsdGeom.Tokens.varying) and w.shape[0] == points.shape[0]:
+            w = w[keep_point]
+        elif interp == UsdGeom.Tokens.uniform and w.shape[0] == counts.shape[0]:
+            w = w[kept]
+        elif interp != UsdGeom.Tokens.constant:
+            w = None                     # unknown layout: the default width is fine for a proxy
+        if w is not None:
+            proxy.CreateWidthsAttr(Vt.FloatArray.FromNumpy(w))
+            proxy.SetWidthsInterpolation(interp)
+    proxy.CreateExtentAttr(_extent_of(proxy_points))
+    _copy_skin_binding(src, proxy, mapping, proxy_points.shape[0])
+    return int(counts.shape[0]), int(kept.shape[0])
 
 
 def _extent_of(points: np.ndarray) -> Vt.Vec3fArray:
@@ -215,12 +299,13 @@ def generate_proxy(
     min_tris: int = DEFAULT_MIN_TRIS,
     force: bool = False,
 ) -> ProxyResult:
-    """Author purpose=proxy siblings for every render mesh in a USD asset.
+    """Author purpose=proxy siblings for every render mesh (and groom) in a USD asset.
 
     The destination layer SUBLAYERS the source (so full render geometry is not
     duplicated), overrides each render mesh purpose=render, and adds a decimated
     "<name>_proxy" Mesh with purpose=proxy next to it. Skips if the source is
-    unchanged since the last run.
+    unchanged since the last run. A render groom (BasisCurves) gets a thinned
+    "<name>_proxy" sibling (1 curve kept in N, ADR 0026).
     """
     src_usd = Path(src_usd)
     dst = Path(dst_usd) if dst_usd else src_usd.with_suffix(".proxy.usda")
@@ -236,7 +321,7 @@ def generate_proxy(
 
     # Nothing to decimate (rig, look, anim layer): fail before touching the disk, an
     # empty proxy file would be picked by the asset instead of the publish.
-    if next(_iter_render_meshes(src_stage), None) is None:
+    if next(_iter_render_meshes(src_stage), None) is None and             next(_iter_render_curves(src_stage), None) is None:
         return ProxyResult(src=src_usd, dst=dst, status="failed",
                            error="no render mesh found")
 
@@ -256,6 +341,7 @@ def generate_proxy(
     meshes = 0
     tris_in = 0
     tris_out = 0
+    grooms = curves_in = curves_out = 0
     try:
         for mesh in _iter_render_meshes(src_stage):
             points_attr = mesh.GetPointsAttr().Get()
@@ -308,11 +394,19 @@ def generate_proxy(
             )
             proxy.CreateExtentAttr(_extent_of(proxy_points))
             _copy_skin_binding(mesh, proxy, mapping, proxy_points.shape[0])
+
+        keep_every = curve_keep_every(target_reduction)
+        for curves in _iter_render_curves(src_stage):
+            n_in, n_out = _author_curves_proxy(dst_stage, curves, keep_every)
+            if n_in:
+                grooms += 1
+                curves_in += n_in
+                curves_out += n_out
     except Exception as exc:  # noqa: BLE001 - report, do not crash the caller
         _drop_created(dst, created)
         return ProxyResult(src=src_usd, dst=dst, status="failed", error=str(exc))
 
-    if meshes == 0:
+    if meshes == 0 and grooms == 0:
         _drop_created(dst, created)
         return ProxyResult(src=src_usd, dst=dst, status="failed",
                            error="no render mesh found")
@@ -322,6 +416,7 @@ def generate_proxy(
     return ProxyResult(
         src=src_usd, dst=dst, status="converted",
         meshes=meshes, tris_in=tris_in, tris_out=tris_out,
+        grooms=grooms, curves_in=curves_in, curves_out=curves_out,
     )
 
 
