@@ -60,8 +60,11 @@ backend/resources/shelves/houdini/backup/
 # source (skills are reinstalled from skills-lock.json / `npx gitnexus analyze`).
 .local/settings.local.json
 .local/settings.local.json
-.local/skills/
-.local/skills/
+.local/skills/*
+.local/skills/*
+# FLUX-owned skills (USD knowledge, VFX USD Survival Guide adapted, Apache-2.0) are versioned.
+!.local/skills/flux-usd-pipeline/
+!.local/skills/usd-*/
 .agents/
 
 # Session scratch files
