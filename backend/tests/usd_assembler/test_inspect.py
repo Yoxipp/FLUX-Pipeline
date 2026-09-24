@@ -74,6 +74,8 @@ class Composition(unittest.TestCase):
         self.assertEqual(inst["children"], [])          # an instance is not traversed
         self.assertTrue(inst["truncated"])
         self.assertEqual(inst["arcs"][0]["arc"], "reference")
+        # R4: the instanced component's payload is not loaded, its geometry is never read.
+        self.assertFalse(any(entry["path"].endswith("UTAH_model.usda") for entry in comp["layers"]))
 
     def test_missing_file(self) -> None:
         with self.assertRaises(ValueError):

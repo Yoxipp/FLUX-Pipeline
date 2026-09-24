@@ -505,6 +505,10 @@ def _author(folder: Path, name: str, token: str, version: str, recipe: dict,
     root.assetInfo = {"name": name, "version": version,
                       "identifier": Sdf.AssetPath(f"./{entry_path.name}")}
     root.payloadList.prependedItems = [Sdf.Payload(f"./{payload_path.name}")]
+    # Bound drawable while the payload is unloaded (USD strategy R2).
+    from .extents import author_extents_hint, compute_extents_hint
+
+    author_extents_hint(root, compute_extents_hint(payload_path))
     entry.defaultPrim = token
     for key, value in meta.items():
         entry.pseudoRoot.SetInfo(key, value)

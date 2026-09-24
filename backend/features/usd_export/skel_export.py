@@ -72,7 +72,12 @@ def _author_model_layer(
     for mesh, prim_name in zip(meshes, prim_names):
         mpath = f"{render_path}/{prim_name}"
         gmesh = UsdGeom.Mesh.Define(stage, mpath)
-        gmesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in mesh.points]))
+        points = Vt.Vec3fArray([Gf.Vec3f(*p) for p in mesh.points])
+        gmesh.CreatePointsAttr(points)
+        # Rest bound: bbox caches, viewport culling and the component extentsHint read it.
+        extent = UsdGeom.PointBased.ComputeExtent(points) if len(points) else None
+        if extent is not None:
+            gmesh.CreateExtentAttr(extent)
         gmesh.CreateFaceVertexCountsAttr(Vt.IntArray(mesh.face_vertex_counts))
         gmesh.CreateFaceVertexIndicesAttr(Vt.IntArray(mesh.face_vertex_indices))
 

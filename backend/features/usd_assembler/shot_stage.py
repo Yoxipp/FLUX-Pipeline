@@ -475,14 +475,19 @@ def _author(folder: Path, project: Path, seq: str, shot: str, version: str, plan
     for c in plan["casting"]:
         parts = c["prim"].strip("/").split("/")
         top = roots.get(parts[0])
+        # kind=group on /assets, /assets/<CLASS>, /sets: the model hierarchy must be
+        # contiguous up to the root, else the components below are not models for USD
+        # (Houdini kind selection, model traversals, bbox caches ignore them). R1.
         if top is None:
             top = roots[parts[0]] = Sdf.PrimSpec(casting, parts[0], Sdf.SpecifierDef, "Scope")
+            top.kind = "group"
         parent = top
         if len(parts) == 3:
             key = "/".join(parts[:2])
             parent = groups.get(key)
             if parent is None:
                 parent = groups[key] = Sdf.PrimSpec(top, parts[1], Sdf.SpecifierDef, "Scope")
+                parent.kind = "group"
         # Typeless: the component's root type (SkelRoot for a character) comes through.
         prim = Sdf.PrimSpec(parent, parts[-1], Sdf.SpecifierDef)
         prim.kind = "component" if c["kind"] == "component" else "assembly"

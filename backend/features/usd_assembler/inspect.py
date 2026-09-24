@@ -3,7 +3,8 @@
 # gives, their type, kind, variants, references, and which layers are used.
 #
 # Never edits anything. Bounded (depth + children) so a 300 asset set stays instant:
-# instanced prims are not traversed (their content is the component's own tree).
+# instanced prims are not traversed (their content is the component's own tree) and
+# their payloads are never loaded (USD strategy R4).
 
 from __future__ import annotations
 
@@ -81,12 +82,15 @@ def _node(prim, depth: int, local_layers: set[str]) -> dict:
             node["purpose"] = str(UsdGeom.Imageable(prim).GetPurposeAttr().Get() or "")
     except Exception:       # pragma: no cover - schema guard
         pass
+    # Default predicate minus "loaded": an instance whose payload is left unloaded
+    # (R4) must still be listed.
+    predicate = Usd.PrimIsActive & Usd.PrimIsDefined & ~Usd.PrimIsAbstract
     if prim.IsInstance() or depth >= MAX_DEPTH:
         # An instance hides its content (it lives in the referenced component) and a
         # depth cut hides children: both are shown as "..." by the UI.
-        node["truncated"] = prim.IsInstance() or bool(prim.GetChildren())
+        node["truncated"] = prim.IsInstance() or bool(prim.GetFilteredChildren(predicate))
         return node
-    children = list(prim.GetChildren())
+    children = list(prim.GetFilteredChildren(predicate))
     for child in children[:MAX_CHILDREN]:
         node["children"].append(_node(child, depth + 1, local_layers))
     node["truncated"] = len(children) > MAX_CHILDREN
@@ -103,7 +107,10 @@ def composition(file: str | Path) -> dict:
     path = Path(str(file))
     if not path.is_file():
         raise ValueError(f"fichier USD introuvable : {path}")
-    stage = Usd.Stage.Open(str(path))
+    # Open without payloads, then load only what the view shows: a set or group loads
+    # its own payload but not the payloads of the components it instances (their
+    # geometry would be read for nothing, the tree stops at instances anyway).
+    stage = Usd.Stage.Open(str(path), Usd.Stage.LoadNone)
     if stage is None:
         raise ValueError(f"USD illisible : {path.name}")
 
@@ -111,6 +118,11 @@ def composition(file: str | Path) -> dict:
     if not root:
         children = [p for p in stage.GetPseudoRoot().GetChildren() if p.IsDefined()]
         root = children[0] if children else None
+    if root:
+        kind = Usd.ModelAPI(root).GetKind() or ""
+        policy = (Usd.LoadWithoutDescendants if kind in ("assembly", "group")
+                  else Usd.LoadWithDescendants)
+        stage.Load(root.GetPath(), policy)
 
     root_id = stage.GetRootLayer().identifier
     # "Local" = the entity's own files (entry, payload, department / contents layers,

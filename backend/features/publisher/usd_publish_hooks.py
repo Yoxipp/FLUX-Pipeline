@@ -2,6 +2,7 @@
 #
 # One place for every writer (copy publish, direct writer, light export) so a USD
 # publish always gets the same treatment (ADR 0019):
+#   0. contract check of the version (USD strategy R3, warn only, modif_logs.json);
 #   1. purpose=proxy geometry beside the IMMUTABLE version (opt-in), so the asset can
 #      reference it instead of the raw render mesh;
 #   2. the asset's USD (component) is refreshed from its departments;
@@ -10,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from core.logger import get_logger
@@ -90,13 +92,47 @@ def _has_render_geometry(base: str) -> bool:
     return not (contrib["kind"] == "asset" and contrib["department"] in ("look", "rig"))
 
 
+def check_publish(dest_folder: Path, base: str, version_path: Path | None,
+                  *, user: str = "") -> list[dict]:
+    """USD contract check of the published version (USD strategy R3), warn only.
+
+    Findings are logged and appended to the folder's modif_logs.json (visible in the
+    Folder Manager file log). Returns them as [{"level", "msg", "prim"}]. Never raises.
+    """
+    if version_path is None or not Path(version_path).is_file():
+        return []
+    try:
+        from features.usd_assembler.validate.publish_check import check_published_usd
+
+        issues = check_published_usd(version_path, base)
+    except Exception as exc:    # noqa: BLE001 - a check never breaks a publish
+        log.warning("USD publish check skipped for %s: %s", base, exc)
+        return []
+    if not issues:
+        return []
+    for issue in issues:
+        log.warning("USD check %s: %s%s", base, issue.msg, f" [{issue.prim}]" if issue.prim else "")
+    match = re.search(r"_(v\d{3,})", Path(version_path).name) or re.search(
+        r"_(v\d{3,})", Path(version_path).parent.name)
+    try:
+        from features.publisher.modif_log import append_log
+
+        summary = " ; ".join(i.msg for i in issues[:3]) + (" ..." if len(issues) > 3 else "")
+        append_log(Path(dest_folder), base, match.group(1) if match else "",
+                   f"controle USD : {len(issues)} avertissement(s) : {summary}", user or "flux")
+    except Exception as exc:    # noqa: BLE001
+        log.debug("USD check log not written for %s: %s", base, exc)
+    return [{"level": i.level, "msg": i.msg, "prim": i.prim} for i in issues]
+
+
 def after_usd_publish(dest_folder: Path, base: str, ext: str,
                       version_path: Path | None, *, user: str = "") -> dict:
-    """Proxy + component / shot stage refresh for a freshly published USD.
-    {"proxy", "component", "shot"}."""
-    out: dict = {"proxy": None, "component": None, "shot": None}
+    """Contract check + proxy + component / shot stage refresh for a freshly published
+    USD. {"issues", "proxy", "component", "shot"}."""
+    out: dict = {"issues": [], "proxy": None, "component": None, "shot": None}
     if str(ext).lower() not in USD_EXTS:
         return out
+    out["issues"] = check_publish(dest_folder, base, version_path, user=user)
     try:
         if _has_render_geometry(base):
             out["proxy"] = generate_proxy_layer(version_path)

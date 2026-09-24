@@ -430,6 +430,11 @@ def _author(folder: Path, project: Path, name: str, version: str, instances: lis
     top.assetInfo = {"name": name, "version": version,
                      "identifier": Sdf.AssetPath(f"./{entry_path.name}")}
     top.payloadList.prependedItems = [Sdf.Payload(f"./{payload_path.name}")]
+    # Bound drawable while the payload is unloaded (USD strategy R2); built from the
+    # components' own hints, their geometry is not read.
+    from .extents import author_extents_hint, compute_extents_hint
+
+    author_extents_hint(top, compute_extents_hint(payload_path))
     entry.defaultPrim = name
     entry.customLayerData = {"flux": {
         "assembly": name, "version": version,

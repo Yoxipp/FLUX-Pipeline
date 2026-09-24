@@ -89,6 +89,10 @@ class ShotStage(unittest.TestCase):
             self.assertTrue(prim, n)
             self.assertTrue(prim.IsA(UsdSkel.Root))         # typeless casting prim: SkelRoot comes through
             self.assertTrue(stage.GetPrimAtPath(f"/assets/CHAR/DINGO_{n}/geo/render/body"))
+            # R1: contiguous model hierarchy, the casting instance is a real model.
+            self.assertTrue(Usd.ModelAPI(prim).IsModel(), n)
+        self.assertEqual(Usd.ModelAPI(stage.GetPrimAtPath("/assets")).GetKind(), "group")
+        self.assertEqual(Usd.ModelAPI(stage.GetPrimAtPath("/assets/CHAR")).GetKind(), "group")
         self.assertEqual((stage.GetStartTimeCode(), stage.GetEndTimeCode()), (1001.0, 1100.0))
         self.assertEqual(stage.GetTimeCodesPerSecond(), 24.0)
         self.assertEqual(UsdGeom.GetStageMetersPerUnit(stage), 1.0)
