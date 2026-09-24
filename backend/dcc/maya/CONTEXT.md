@@ -8,3 +8,5 @@
 `startup/flux_bridge.py` (ancien pont qui lisait `install_path.txt`) archive dans `old/backend/dcc/maya/startup/` le 2026-09-18 : le bloc userSetup d'`autostart.py` ouvre le port directement et remplace l'ancien bloc `flux_bridge`.
 
 `maya_keys.py` (U1, 2026-09-24) : plage de l'export anime = premiere / derniere cle (selection + hierarchie, ou scene ; cles pilotees `animCurveU*` ignorees), sinon la timeline. `GET /dcc/maya/anim-range?scope=` via `import_prep.call_maya_update(..., module="maya_keys")`. Houdini : `GET /dcc/houdini/anim-range` = playbar. Le Publisher remplit Start / End a l'activation d'ANIMATION (bouton "Cles" pour relire).
+
+`maya_instances.py` (U2, 2026-09-24) : instances d'un perso dans la scene (noeuds racine / namespaces commencant par NAME, ou imports FLUX de NAME via `flux_source`), numero lu dans le nom (`DINGO_02`, `DINGO2`) sinon premier libre. `GET /dcc/maya/character-instances?name=`. Le Publisher (shot, USD leger) les liste des que le perso est choisi, toutes cochees ; une anim publiee par instance cochee (`SEQ_SHOT_ANIM_DINGO` pour 01, `..._DINGO_02` ensuite), exportee depuis les meshes sous le noeud (`run_light_export(root=...)`).

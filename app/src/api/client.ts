@@ -183,6 +183,11 @@ export const api = {
         ? `/dcc/maya/anim-range?scope=${scope}${port ? `&port=${port}` : ''}`
         : '/dcc/houdini/anim-range'),
 
+  // Instances of one character in the Maya scene (U2): DINGO_01, DINGO_02...
+  getMayaCharacterInstances: (name: string, port?: number) =>
+    apiCall<{ ok: boolean; items: { node: string; label: string; instance: number; meshes: number }[] }>(
+      'GET', `/dcc/maya/character-instances?name=${encodeURIComponent(name)}${port ? `&port=${port}` : ''}`),
+
   // Detect a stuck ("zombie") Maya still holding the commandPort (port 7001).
   getMayaPortStatus: () =>
     apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),
@@ -279,6 +284,7 @@ export const api = {
     project_name: string
     asset:        string
     filename?:    string
+    root?:        string   // one character instance node (U2), overrides scope
     mesh?:        string
     root_joint?:  string
     frame_start?: number

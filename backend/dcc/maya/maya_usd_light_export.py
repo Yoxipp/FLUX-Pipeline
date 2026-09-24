@@ -348,8 +348,12 @@ def _build_light_asset(
     include_cam: bool = False,
     include_light: bool = False,
     scope: str = "selection",
+    root: str | None = None,
 ):
     """Extract a LightAsset from the Maya scene, honouring the include flags.
+
+    *root* (U2, multi-instance publish) restricts the export to the meshes under one
+    node (one character instance, e.g. the DINGO_02 reference); no scene fallback.
 
     *scope* "scene" takes the whole scene (every mesh when geo is included, else the
     skinned meshes + rig skeleton); "selection" takes the selected mesh(es), falling
@@ -378,7 +382,18 @@ def _build_light_asset(
     def _scene_fallback():
         return _scene_mesh_pairs() if include_geo else _scene_skin_pairs()
 
-    if scope == "scene":
+    if root:
+        pairs = []
+        for shp in (cmds.listRelatives(root, allDescendents=True, type="mesh", fullPath=True) or []):
+            if cmds.getAttr(shp + ".intermediateObject"):
+                continue
+            for m in (cmds.listRelatives(shp, parent=True, fullPath=True) or []):
+                sk = _skin_cluster(m)
+                if include_geo or sk:
+                    pairs.append((m, sk))
+        if not pairs:
+            log.error("light export: no mesh under %s", root)
+    elif scope == "scene":
         pairs = _scene_fallback()
     else:
         cand = [mesh] if mesh is not None else (cmds.ls(selection=True, long=True, type="transform") or [])
@@ -461,6 +476,7 @@ def run_light_export(
     include_cam: bool = False,
     include_light: bool = False,
     scope: str = "selection",
+    root: str | None = None,
 ) -> None:
     """Extract a light asset from Maya and write a JSON envelope to *result_path*.
 
@@ -496,7 +512,7 @@ def run_light_export(
                 asset, mesh, root_joint, frame_start, frame_end,
                 include_geo=include_geo, include_skel=include_skel,
                 include_anim=include_anim, include_weights=include_weights,
-                include_uv=include_uv, scope=scope,
+                include_uv=include_uv, scope=scope, root=root,
             )
             if light is not None:
                 data = dataclasses.asdict(light)

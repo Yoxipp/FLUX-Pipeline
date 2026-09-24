@@ -1197,6 +1197,21 @@ async def maya_anim_range(scope: str = "scene", port: int | None = None) -> dict
     return res
 
 
+@router.get("/maya/character-instances")
+async def maya_character_instances(name: str, port: int | None = None) -> dict:
+    """Instances of one character in the Maya scene (U2): top nodes / namespaces named
+    after it or FLUX imports of it, with their instance number (DINGO_02 -> 2)."""
+    target = await _maya_target(port)
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: _maya_call_json(
+        target, "run_list_instances", name, timeout=20.0, module="maya_instances"))
+    if res is None:
+        raise HTTPException(status_code=503, detail="Maya ne repond pas (commandPort).")
+    if not res.get("ok"):
+        raise HTTPException(status_code=500, detail=str(res.get("error") or "liste impossible"))
+    return res
+
+
 @router.get("/houdini/anim-range")
 async def houdini_anim_range() -> dict:
     """Houdini animation range (U1): the playbar range (caches and ROPs follow it)."""
@@ -1221,6 +1236,7 @@ class MayaLightExportRequest(BaseModel):
     frame_end:    int | None = None
     fmt:          str = "usd"
     scope:        str = "selection"   # "scene" | "selection"
+    root:         str | None = None   # one character instance node (U2), overrides scope
     # What to include in the light export (checkboxes in the Publisher).
     include_geo:     bool = True
     include_skel:    bool = True
@@ -1270,7 +1286,7 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)}, "
         f"include_geo={_arg(req.include_geo)}, include_skel={_arg(req.include_skel)}, "
         f"include_anim={_arg(req.include_anim)}, include_weights={_arg(req.include_weights)}, "
-        f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)})"
+        f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)}, root={_arg(req.root)})"
     )
 
     target_port = await _maya_target(req.port)

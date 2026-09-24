@@ -599,6 +599,11 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
 
 // ── Publisher ─────────────────────────────────────────────────────────────────
 
+// Character NAME of a shot animation token: DINGO_02 -> DINGO (U2).
+function characterBase(token: string): string {
+  return token.replace(/_\d+$/, '')
+}
+
 export function Publisher() {
   const { settings } = useSettings()
   const location = useLocation()
@@ -729,6 +734,10 @@ export function Publisher() {
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
   const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
+  // Multi-instance shot anim (U2): character instances found in Maya, ticked ones publish.
+  const [charInstances, setCharInstances] = useState<{ node: string; label: string; instance: number; meshes: number }[]>([])
+  const [charChecked, setCharChecked]     = useState<Set<string>>(new Set())
+  const [charLoading, setCharLoading]     = useState(false)
   // Who writes the USD of an asset task: null = the default for this task (FLUX when
   // the task has a department), true/false = the artist's explicit choice.
   const [fluxWriter, setFluxWriter]                 = useState<boolean | null>(null)
@@ -1071,6 +1080,33 @@ export function Publisher() {
   const seqCapable = (dcc === 'Houdini' && !animCapable && !['.hip', '.hiplc', '.hipnc'].includes(exportExt))
     || (dcc === 'Nuke' && exportExt !== '.nk')
 
+  // Character instances in Maya (U2): listed as soon as a shot animation of a
+  // character is being published, every instance ticked by default.
+  const shotCharName = mode === 'shot' && formatToken(sel.variante) && formatToken(sel.variante) !== 'null'
+    ? characterBase(formatToken(sel.variante)) : ''
+  const instancePicker = dcc === 'Maya' && mode === 'shot' && usdLayers
+    && ['.usd', '.usda', '.usdc'].includes(exportExt) && !!shotCharName
+  const loadInstances = useCallback(async (quiet: boolean) => {
+    if (!shotCharName) return
+    setCharLoading(true)
+    try {
+      const r = await api.getMayaCharacterInstances(shotCharName, readActiveInstancePort('Maya') ?? undefined)
+      setCharInstances(r.items)
+      setCharChecked(new Set(r.items.map(i => i.node)))
+      if (!quiet && r.items.length === 0) toast.info(`Aucune instance de ${shotCharName} dans Maya`)
+    } catch (e) {
+      setCharInstances([])
+      if (!quiet) toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCharLoading(false)
+    }
+  }, [shotCharName])
+
+  useEffect(() => {
+    if (instancePicker && mayaConnected) void loadInstances(true)
+    else { setCharInstances([]); setCharChecked(new Set()) }
+  }, [instancePicker, mayaConnected, loadInstances])
+
   // Fill Start / End from the DCC (U1): first / last key of what is exported, else
   // the timeline. Runs when ANIMATION is switched on and when the Maya scope changes.
   const fetchAnimRange = useCallback(async () => {
@@ -1133,6 +1169,30 @@ export function Publisher() {
         if (usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = shotCharacter ?? (formatToken(sel.name) || parts[2])
           if (!assetName) { toast.error('Choisis le perso animé (4e case)'); return }
+          const picked = mode === 'shot' ? charInstances.filter(i => charChecked.has(i.node)) : []
+          if (picked.length > 0) {
+            // One shot animation per ticked instance, from the meshes under its node.
+            const charName = characterBase(assetName)
+            for (const it of picked) {
+              const token = it.instance === 1 ? charName : `${charName}_${String(it.instance).padStart(2, '0')}`
+              const fn = `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${token}`
+              try {
+                const r = await api.exportMayaLightUsd({
+                  project_name: project, asset: charName, filename: fn, root: it.node,
+                  fmt: exportExt.replace('.', ''), scope: 'selection',
+                  frame_start: animOn ? frameStart : undefined, frame_end: animOn ? frameEnd : undefined,
+                  include_geo: usdInclude.geo, include_skel: usdInclude.skel, include_anim: usdInclude.anim,
+                  include_weights: usdInclude.weights, include_uv: usdInclude.uv,
+                  port: readActiveInstancePort('Maya') ?? undefined,
+                })
+                toast.success(`${fn} ${r.version}`)
+                r.warnings?.forEach(w => toast.warning(w))
+              } catch (e) {
+                toast.error(`${fn} : ${e instanceof Error ? e.message : String(e)}`)
+              }
+            }
+            return
+          }
           const res = await api.exportMayaLightUsd({
             project_name: project,
             asset:        assetName,
@@ -1878,6 +1938,53 @@ export function Publisher() {
                 )}
                 {on && animCapable && rangeInfo && (
                   <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 6 }}>{rangeInfo}</div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* INSTANCES — Maya shot animation (U2): tick the character instances to publish */}
+          {instancePicker && (() => {
+            const charName = shotCharName
+            return (
+              <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+                <SecTitle>INSTANCES</SecTitle>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: charInstances.length ? 8 : 0 }}>
+                  <Btn ghost disabled={charLoading} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={() => { void loadInstances(false) }}>
+                    <RefreshCw size={11} strokeWidth={2} />
+                    {charLoading ? 'Lecture…' : `Relire ${charName}`}
+                  </Btn>
+                  <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0 }}>
+                    {charInstances.length
+                      ? `${charChecked.size} / ${charInstances.length} coché(s) · une anim par instance`
+                      : 'Sans liste : une seule anim (scope ci-dessous)'}
+                  </div>
+                </div>
+                {charInstances.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {charInstances.map(it => {
+                      const on = charChecked.has(it.node)
+                      const tag = `${charName}_${String(it.instance).padStart(2, '0')}`
+                      return (
+                        <div key={it.node} title={it.node}
+                          onClick={() => setCharChecked(prev => {
+                            const next = new Set(prev)
+                            if (next.has(it.node)) next.delete(it.node); else next.add(it.node)
+                            return next
+                          })}
+                          style={{
+                            padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
+                            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
+                            border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                            background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
+                            color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                          {tag} · {it.label}
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
             )
