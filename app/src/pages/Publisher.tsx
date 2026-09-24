@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen, X } from 'lucide-react'
+import { Trash2, FolderOpen, X, RefreshCw } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
@@ -621,6 +621,8 @@ export function Publisher() {
   const [frameStart, setFrameStart] = useState(1)
   const [frameEnd, setFrameEnd]     = useState(100)
   const [frameStep, setFrameStep]   = useState(1)
+  // Where Start / End came from (U1): the keys of the DCC, its timeline, or typed by hand.
+  const [rangeInfo, setRangeInfo]   = useState('')
 
   // Per-format export options (Maya). Reset to the format's defaults whenever the
   // active extension changes — defaults reproduce the pre-options export exactly.
@@ -1068,6 +1070,26 @@ export function Publisher() {
   const animCapable = (dcc === 'Maya' || dcc === 'Houdini') && ANIM_EXTS.includes(exportExt)
   const seqCapable = (dcc === 'Houdini' && !animCapable && !['.hip', '.hiplc', '.hipnc'].includes(exportExt))
     || (dcc === 'Nuke' && exportExt !== '.nk')
+
+  // Fill Start / End from the DCC (U1): first / last key of what is exported, else
+  // the timeline. Runs when ANIMATION is switched on and when the Maya scope changes.
+  const fetchAnimRange = useCallback(async () => {
+    if (dcc !== 'Maya' && dcc !== 'Houdini') return
+    try {
+      const r = await api.getAnimRange(dcc, mayaScope, dcc === 'Maya' ? (readActiveInstancePort('Maya') ?? undefined) : undefined)
+      setFrameStart(r.start)
+      setFrameEnd(r.end)
+      setRangeInfo(r.source === 'keys'
+        ? `Clés ${r.start}-${r.end} (${r.curves} courbe${r.curves > 1 ? 's' : ''})`
+        : `Timeline ${r.start}-${r.end} (aucune clé)`)
+    } catch {
+      setRangeInfo(`${dcc} ne répond pas : plage à saisir`)
+    }
+  }, [dcc, mayaScope])
+
+  useEffect(() => {
+    if (animCapable && animRange) void fetchAnimRange()
+  }, [animCapable, animRange, fetchAnimRange])
 
   const handlePublish = useCallback(async () => {
     if (!project) { toast.error('Sélectionne un projet'); return }
@@ -1836,14 +1858,26 @@ export function Publisher() {
                     {fields.map(([lbl, val, set]) => (
                       <div key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                         <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
-                        <input type="number" value={val} onChange={e => set(Number(e.target.value))} style={{
+                        <input type="number" value={val} onChange={e => { set(Number(e.target.value)); setRangeInfo('') }} style={{
                           width: 56, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                           borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
                           color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
                         }} />
                       </div>
                     ))}
+                    {animCapable && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                        <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>&nbsp;</div>
+                        <Btn ghost style={{ height: 26, gap: 5 }} onClick={() => { void fetchAnimRange() }}>
+                          <RefreshCw size={11} strokeWidth={2} />
+                          Clés
+                        </Btn>
+                      </div>
+                    )}
                   </div>
+                )}
+                {on && animCapable && rangeInfo && (
+                  <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 6 }}>{rangeInfo}</div>
                 )}
               </div>
             )

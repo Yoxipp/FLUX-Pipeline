@@ -1181,6 +1181,36 @@ async def maya_update_imports(req: MayaUpdateImportsRequest) -> dict:
     return {"ok": not failed, "message": message, "items": plan}
 
 
+@router.get("/maya/anim-range")
+async def maya_anim_range(scope: str = "scene", port: int | None = None) -> dict:
+    """First / last key of the animation to export (U1): selection and its hierarchy
+    (scope=selection) or the whole scene; the playback range when there is no key."""
+    target = await _maya_target(port)
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: _maya_call_json(
+        target, "run_anim_range", "selection" if scope == "selection" else "scene",
+        timeout=20.0, module="maya_keys"))
+    if res is None:
+        raise HTTPException(status_code=503, detail="Maya ne repond pas (commandPort).")
+    if not res.get("ok"):
+        raise HTTPException(status_code=500, detail=str(res.get("error") or "plage introuvable"))
+    return res
+
+
+@router.get("/houdini/anim-range")
+async def houdini_anim_range() -> dict:
+    """Houdini animation range (U1): the playbar range (caches and ROPs follow it)."""
+    from dcc.houdini.client import houdini_client
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: houdini_client.run(
+        "result = [int(v) for v in hou.playbar.frameRange()]", timeout=10.0))
+    if not res or not res.get("ok"):
+        raise HTTPException(status_code=503, detail="Houdini ne repond pas.")
+    start, end = res["result"]
+    return {"ok": True, "start": start, "end": end, "source": "timeline", "curves": 0}
+
+
 class MayaLightExportRequest(BaseModel):
     project_name: str
     asset:        str

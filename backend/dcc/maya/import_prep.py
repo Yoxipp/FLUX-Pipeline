@@ -84,8 +84,9 @@ def drop_proxy_prims(layer) -> None:
             del parent.nameChildren[path.name]
 
 
-def call_maya_update(port: int, func: str, *args: str, timeout: float = 60.0) -> dict | None:
-    """Run ``dcc.maya.maya_update.<func>(*args, result_path)`` in Maya, return its JSON.
+def call_maya_update(port: int, func: str, *args: str, timeout: float = 60.0,
+                     module: str = "maya_update") -> dict | None:
+    """Run ``dcc.maya.<module>.<func>(*args, result_path)`` in Maya, return its JSON.
     Arguments travel as base64 (commandPort decodes with the system locale)."""
     import base64 as _b64
     import json as _json
@@ -105,8 +106,8 @@ def call_maya_update(port: int, func: str, *args: str, timeout: float = 60.0) ->
     decoded = ", ".join(f"_b64.b64decode('{_enc(a)}').decode('utf-8')" for a in (*args, result_path))
     cmd = (f"import sys, base64 as _b64; "
            f"sys.path.insert(0, _b64.b64decode('{_enc(backend_root)}').decode('utf-8')); "
-           f"sys.modules.pop('dcc.maya.maya_update', None); "
-           f"from dcc.maya import maya_update as _mu; _mu.{func}({decoded})")
+           f"sys.modules.pop('dcc.maya.{module}', None); "
+           f"from dcc.maya import {module} as _mu; _mu.{func}({decoded})")
     try:
         if send_command_direct(cmd, timeout=timeout, port=port) is None:
             return None

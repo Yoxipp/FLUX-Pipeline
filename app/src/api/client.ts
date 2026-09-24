@@ -175,6 +175,14 @@ export const api = {
   nukeImportPath: (project_name: string, rel_path: string) =>
     apiCall<{ ok: boolean; node: string; path: string }>('POST', '/dcc/nuke/import_path', { project_name, rel_path }),
 
+  // Animation range to export (U1): Maya = first / last key (selection or scene),
+  // playback range without keys; Houdini = playbar range.
+  getAnimRange: (dcc: 'Maya' | 'Houdini', scope: 'scene' | 'selection', port?: number) =>
+    apiCall<{ ok: boolean; start: number; end: number; source: 'keys' | 'timeline'; curves: number }>(
+      'GET', dcc === 'Maya'
+        ? `/dcc/maya/anim-range?scope=${scope}${port ? `&port=${port}` : ''}`
+        : '/dcc/houdini/anim-range'),
+
   // Detect a stuck ("zombie") Maya still holding the commandPort (port 7001).
   getMayaPortStatus: () =>
     apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),
