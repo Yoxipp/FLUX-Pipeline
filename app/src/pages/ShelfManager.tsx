@@ -208,12 +208,14 @@ export function ShelfManager() {
                   <ShelfBtn icon={<FluxLogo size={20} color={RIG_COLOR} />} label="RIG" />
                 </>
               ) : (
-                <>
-                  <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="KineFX" />
-                  <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5, minWidth: 0 }}>
-                    + HDAs FLUX (Import, Export, Anim, Shot...) dans otls/
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, fontSize: 11, lineHeight: 1.5 }}>
+                  <div style={{ color: 'var(--ink-2)' }}>
+                    HDAs FLUX dans otls/ : Import, Export, Anim, Shot, Crowd, Lighting
                   </div>
-                </>
+                  <div style={{ color: 'var(--ink-3)' }}>
+                    Shelf « Flux » : un outil, Import KineFX (perso skinné USD / FBX en KineFX, poids venus de Maya)
+                  </div>
+                </div>
               )}
             </div>
           </div>

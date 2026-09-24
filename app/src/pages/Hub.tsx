@@ -15,7 +15,7 @@ import type { LucideIcon } from 'lucide-react'
 const SHORTCUTS: { ic: LucideIcon; titleKey: string; subKey: string; path: string; active?: boolean }[] = [
   { ic: FolderOpen, titleKey: 'nav.folderManager', subKey: 'hub.sc.folderManager', path: '/projects', active: true },
   { ic: Upload,     titleKey: 'nav.publisher',     subKey: 'hub.sc.publisher',     path: '/publisher' },
-  { ic: Layers,     titleKey: 'nav.usdAssembler',  subKey: 'hub.sc.usd',           path: '/usd' },
+  { ic: Layers,     titleKey: 'nav.usd',  subKey: 'hub.sc.usd',           path: '/usd' },
   { ic: BookOpen,   titleKey: 'nav.shelfManager',  subKey: 'hub.sc.shelf',         path: '/shelf' },
   { ic: Activity,   titleKey: 'nav.activity',      subKey: 'hub.sc.activity',      path: '/activity' },
 ]

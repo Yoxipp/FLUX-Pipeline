@@ -137,7 +137,7 @@ export function DiskUsage() {
                   <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', width: 90, textAlign: 'right' }}>
                     {humanSize(p.size)}
                   </span>
-                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-4)', width: 60, textAlign: 'right', fontSize: 10 }}>
+                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', width: 60, textAlign: 'right', fontSize: 10 }}>
                     {p.file_count.toLocaleString('fr')} f.
                   </span>
                 </div>
@@ -149,10 +149,10 @@ export function DiskUsage() {
 
       <SecTitle>Fichiers les plus lourds</SecTitle>
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', gap: 12, padding: '6px 10px', fontSize: 9,
-                      textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-4)',
+        <div style={{ display: 'flex', gap: 12, padding: '7px 10px', fontSize: 10, fontWeight: 600,
+                      textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-2)',
                       background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
-          <span style={{ width: 90 }}>Taille</span>
+          <span style={{ width: 90, textAlign: 'right' }}>Taille</span>
           <span style={{ width: 90 }}>Modifié</span>
           <span style={{ flex: 1 }}>Chemin (relatif à DOSSIER_PROJETS)</span>
         </div>
@@ -164,19 +164,21 @@ export function DiskUsage() {
               <div key={`${row.rel}-${i}`}
                 onClick={() => void copyRel(row)}
                 title="Cliquer pour copier le chemin"
-                style={{ display: 'flex', gap: 12, padding: '5px 10px', fontSize: 11,
+                style={{ display: 'flex', gap: 12, padding: '6px 10px', fontSize: 12,
                          cursor: 'pointer',
                          borderBottom: i === rows.length - 1 ? 'none' : '1px solid var(--rule)',
-                         fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}
+                         fontFamily: 'var(--mono)', color: 'var(--ink)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <span style={{ width: 90, textAlign: 'right', color: 'var(--ink)' }}>
+                <span style={{ width: 90, textAlign: 'right', color: 'var(--ink)', fontWeight: 600 }}>
                   {humanSize(row.size)}
                 </span>
-                <span style={{ width: 90, color: 'var(--ink-4)' }}>{humanDate(row.mtime)}</span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {row.rel}
+                <span style={{ width: 90, color: 'var(--ink-2)' }}>{humanDate(row.mtime)}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {/* Folder in a softer tone, file name in full ink: the name is what you look for. */}
+                  <span style={{ color: 'var(--ink-2)' }}>{row.rel.slice(0, row.rel.lastIndexOf('/') + 1)}</span>
+                  <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{row.rel.slice(row.rel.lastIndexOf('/') + 1)}</span>
                 </span>
               </div>
             ))}
@@ -188,7 +190,7 @@ export function DiskUsage() {
 function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-4)' }}>
+      <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
         {label}
       </div>
       <div style={{ fontSize: 13, fontFamily: mono ? 'var(--mono)' : 'var(--sans)',
