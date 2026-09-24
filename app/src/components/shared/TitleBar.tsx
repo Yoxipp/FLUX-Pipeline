@@ -371,6 +371,8 @@ function AdvancedConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCan
   )
 }
 
+const IS_DETACHED_WINDOW = new URLSearchParams(window.location.search).get('detached') === '1'
+
 /* ── slide-to-confirm quit ── */
 function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
   const { t } = useI18n()
@@ -593,7 +595,9 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       <div className="no-drag" style={{ display: 'flex', gap: 7, alignItems: 'center', marginLeft: 4, flexShrink: 0 }}>
         <WinBtn hoverBg="#ffbd2e" icon={Minus}     action={() => window.electronAPI?.windowMinimize()} />
         <WinBtn hoverBg="#28c940" icon={Maximize2} action={() => window.electronAPI?.windowMaximize()} />
-        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => setConfirmClose(true)} />
+        {/* A detached page window (U4) closes at once; the slide-to-confirm is only for
+            the main window, which quits FLUX. */}
+        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => (IS_DETACHED_WINDOW ? window.electronAPI?.windowClose() : setConfirmClose(true))} />
       </div>
 
       {/* slide-to-confirm quit overlay */}
