@@ -61,3 +61,29 @@ def scan_instances(dcc: str, *, probe=None, timeout: float = _SCAN_TIMEOUT_S) ->
 def scan_all_instances(*, probe=None, timeout: float = _SCAN_TIMEOUT_S) -> dict[str, list[dict]]:
     """Discover instances for every known DCC. Returns {dcc: [instance, ...]}."""
     return {dcc: scan_instances(dcc, probe=probe, timeout=timeout) for dcc in DCC_PORT_RANGES}
+
+
+# ── Active instance (which one a publish / import talks to) ─────────────────
+# Chosen in the UI (sidebar menu, publish picker) and pushed here, so backend
+# clients with a single entry point (houdini_client) follow the same choice as the
+# routes that take an explicit port (Maya). In memory: a restart falls back to the
+# base port, the UI pushes its choice again.
+_ACTIVE_PORTS: dict[str, int] = {}
+
+
+def set_active_port(dcc: str, port: int | None) -> None:
+    """Remember the instance port of *dcc* the user works with (None clears it)."""
+    if dcc not in DCC_PORT_RANGES:
+        raise ValueError(f"unknown DCC: {dcc}")
+    if port is None:
+        _ACTIVE_PORTS.pop(dcc, None)
+        return
+    if int(port) not in dcc_port_range(dcc):
+        raise ValueError(f"port {port} outside the {dcc} range")
+    _ACTIVE_PORTS[dcc] = int(port)
+
+
+def get_active_port(dcc: str) -> int | None:
+    """Instance port chosen for *dcc*, or None (use the base port)."""
+    return _ACTIVE_PORTS.get(dcc)
+

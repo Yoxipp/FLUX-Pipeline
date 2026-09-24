@@ -164,6 +164,56 @@ async def _maya_target(port: int | None) -> int:
         raise HTTPException(status_code=503, detail=str(exc))
 
 
+class ActiveInstanceRequest(BaseModel):
+    dcc:  str
+    port: int | None = None
+
+
+@router.post("/active-instance")
+async def set_active_instance(req: ActiveInstanceRequest) -> dict:
+    """Instance of a DCC the user works with (sidebar menu, publish picker): clients
+    without an explicit port (Houdini) follow it."""
+    from core.dcc_instances import set_active_port
+
+    try:
+        set_active_port(req.dcc, req.port)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "dcc": req.dcc, "port": req.port}
+
+
+def _instance_scene(dcc: str, port: int) -> str:
+    """Open scene of one running instance ('' when unknown)."""
+    try:
+        if dcc == "Maya":
+            from dcc.maya.maya_connection import send_command_direct
+
+            res = send_command_direct(
+                "__import__('maya.cmds', fromlist=['cmds']).file(q=True, sceneName=True)",
+                timeout=2.0, port=port)
+            return (res or "").strip().strip("\x00").strip()
+        if dcc == "Houdini":
+            from dcc.houdini.client import HoudiniClient
+
+            return str(HoudiniClient(port=port)._get("/state").get("hip_file") or "")
+    except Exception:                       # noqa: BLE001 - a label is best effort
+        return ""
+    return ""
+
+
+@router.get("/instances/{dcc}")
+async def list_dcc_instances(dcc: str) -> dict:
+    """Running instances of *dcc* with their open scene, for the publish picker."""
+    from core.dcc_instances import get_active_port, scan_instances
+
+    loop = asyncio.get_running_loop()
+    items = await loop.run_in_executor(None, lambda: scan_instances(dcc))
+    for item in items:
+        item["scene"] = await loop.run_in_executor(
+            None, lambda p=item["port"]: _instance_scene(dcc, p)) or None
+    return {"dcc": dcc, "active": get_active_port(dcc), "instances": items}
+
+
 @router.post("/execute", response_model=CommandResult)
 async def execute_command(req: CommandRequest) -> CommandResult:
     """Send a Python command to a connected DCC instance via TCP socket."""

@@ -253,7 +253,12 @@ def _register_queue_processor(attempt: int = 0) -> None:
         print("[FLUX] hdefereval unavailable; event-loop callback not registered yet.")
 
 
-def start(port: int = FLUX_PORT) -> None:
+# Several Houdini can run at once: each takes the first free port of FLUX's Houdini
+# range (core.constants.DCC_PORT_RANGES["Houdini"]), FLUX lists them as instances.
+FLUX_PORT_COUNT = 8
+
+
+def start(port: int | None = None) -> None:
     global _httpd
     if _httpd is not None:
         _safe_status(f"[FLUX] Serveur Houdini déjà actif sur le port {_httpd.server_address[1]}")
@@ -261,13 +266,19 @@ def start(port: int = FLUX_PORT) -> None:
 
     # 1. Critical path: bind the HTTP server. This alone makes FLUX see Houdini as
     #    connected (the backend probes port 48884). If it fails, we are not connected.
-    try:
-        _httpd = _ThreadedHTTPServer(("127.0.0.1", port), _Handler)
-        threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http").start()
-    except Exception as exc:
-        _httpd = None
-        _safe_status(f"[FLUX] Erreur démarrage serveur : {exc}", "Error")
+    candidates = [port] if port else list(range(FLUX_PORT, FLUX_PORT + FLUX_PORT_COUNT))
+    last_exc = None
+    for candidate in candidates:
+        try:
+            _httpd = _ThreadedHTTPServer(("127.0.0.1", candidate), _Handler)
+            port = candidate
+            break
+        except OSError as exc:      # port taken by another Houdini: try the next one
+            _httpd, last_exc = None, exc
+    if _httpd is None:
+        _safe_status(f"[FLUX] Erreur démarrage serveur : {last_exc}", "Error")
         return
+    threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http").start()
 
     # 2. Best-effort: hook the main-thread queue drainer. A failure here must NOT
     #    tear down the already-bound server (that would drop the connection handle
