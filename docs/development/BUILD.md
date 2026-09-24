@@ -31,13 +31,27 @@ npm run build
 
 Sortie : `INSTALLEURS/FLUX-Setup-<version>.exe` (installeur NSIS assiste, par utilisateur, sans admin).
 
+### Version (x.x.xxx)
+
+`npm run build` lance `scripts/build.cjs`, qui incremente la version avant de builder :
+
+* chaque build : dernier nombre +1 (`0.1.011` -> `0.1.012`) ;
+* question "Incrementer une version mineure ?" (Entree = N) : `x.mineure+1.000` ;
+* question "Incrementer une version majeure ?" (Entree = N) : `majeure+1.0.000` (prioritaire sur mineure).
+
+Flags sans question : `node scripts/build.cjs --minor | --major | --no-prompt`.
+Source de verite : `package.json` `fluxVersion` (affichage). `version` reste un semver valide (`0.1.11`) car
+electron-builder refuse les zeros en tete. Le script reecrit aussi `backend/core/constants.py` `APP_VERSION`
+et `scripts/flux_version.nsh` (inclus par `installer.nsh`, cle registre `FluxVersion`). Si le build echoue,
+ces fichiers sont remis a la version precedente. Committer ces 3 fichiers apres un build publie.
+
 ### Etapes individuelles (debug)
 
 ```powershell
 npm run build:frontend   # Vite -> dist/
 npm run build:backend    # python -m PyInstaller scripts/backend.spec --distpath backend/dist -> backend/dist/flux_backend/
 npm run build:electron   # tsc -> dist-electron/
-npx electron-builder --config scripts/electron-builder.yml         # -> INSTALLEURS/
+npx electron-builder --config scripts/electron-builder.yml         # -> INSTALLEURS/ (sans bump de version, nom en semver)
 npx electron-builder --config scripts/electron-builder.yml --dir   # binaire sans installeur -> INSTALLEURS/win-unpacked/FLUX.exe
 ```
 

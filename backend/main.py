@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
+from core.constants import APP_VERSION
 from core.logger import get_logger
 from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, system, usd_assembler
 
@@ -93,7 +94,7 @@ async def lifespan(app: FastAPI):
     log.info("[FLUX] Backend shutting down")
 
 
-app = FastAPI(title="FLUX Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="FLUX Backend", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

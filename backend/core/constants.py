@@ -272,7 +272,7 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.1.0"
+APP_VERSION: str = "0.1.012"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out

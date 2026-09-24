@@ -1,6 +1,7 @@
 @echo off
 REM Double-clic = build l'installeur FLUX a jour (NSIS .exe).
 REM Enchaine : frontend (vite) + backend (pyinstaller) + electron + electron-builder.
+REM Version x.x.xxx incrementee a chaque build (questions mineure/majeure) : scripts\build.cjs.
 REM Sortie : INSTALLEURS\FLUX-Setup-<version>.exe
 setlocal
 cd /d "%~dp0"

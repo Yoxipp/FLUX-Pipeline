@@ -30,6 +30,7 @@ nsis:
   shortcutName: FLUX
   runAfterFinish: true
   # Nom de l'installeur généré : FLUX-Setup-<version>.exe
+  # scripts/build.cjs le remplace (-c.nsis.artifactName) par la version affichee x.x.xxx.
   artifactName: ${productName}-Setup-${version}.${ext}
   # Hooks custom (message "mise à jour détectée" vs "installation neuve")
   include: scripts/installer.nsh
