@@ -8,3 +8,5 @@ Hooks de donnees : `useDccStatus`, `useActiveInstances`, `useBackendStatus`, `us
 `useEnabledDccs` (V8 U10) : DCC actives par utilisateur (`/settings/enabled-dccs`, `USER/<user>/UserSettings/User.json` cle `enabled_dccs`). `null` = toutes. Evenement `flux:enabled-dccs`. Liste DCC partagee : `lib/dccs.ts`.
 
 Les intervalles viennent de `lib/pollIntervals.ts`.
+
+`useSessionState` (U3, 2026-09-24) : useState garde en memoire le temps de la session (Map de module, oublie au relancement). Folder Manager (`fm.*` : dossier, onglets), Production (`prod.selection` par projet, onglets de taches `prod.specTabs:<projet>`) : on revient ou on etait.

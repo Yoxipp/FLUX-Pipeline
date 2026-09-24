@@ -10,7 +10,7 @@
 // Phase 1 lands the ASSET grid + MenuEdit + MenuSpec end-to-end. The SHOT
 // timeline lives behind the mode toggle so Phase 2 slots in without a rewrite.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { useProject } from '../../ProjectContext'
@@ -20,6 +20,7 @@ import { ProductionAsset } from './ProductionAsset'
 import { ProductionShot } from './ProductionShot'
 import { MenuEdit } from './MenuEdit'
 import { MenuSpec } from './MenuSpec'
+import { useSessionState } from '../../hooks/useSessionState'
 
 type Mode = 'asset' | 'shot'
 export type Selection =
@@ -73,6 +74,8 @@ export interface FavoriteOpenTarget {
   subtask?: string
 }
 
+const NO_SELECTION: Selection = { kind: 'none' }
+
 export function Production() {
   const { project } = useProject()
   const { t } = useI18n()
@@ -81,7 +84,11 @@ export function Production() {
   const [mode, setMode]         = useLocalStr<Mode>(LS.mode, 'asset')
   const [editOpen, setEditOpen] = useLocalBool(LS.editOpen, true)
   const [specOpen, setSpecOpen] = useLocalBool(LS.specOpen, true)
-  const [selection, setSelection] = useState<Selection>({ kind: 'none' })
+  // Session-kept (U3): coming back to Production reselects the same entity (same project only).
+  const [selState, setSelState] = useSessionState<{ project: string; sel: Selection }>(
+    'prod.selection', { project: project || '', sel: { kind: 'none' } })
+  const selection: Selection = selState.project === (project || '') ? selState.sel : NO_SELECTION
+  const setSelection = useCallback((sel: Selection) => setSelState({ project: project || '', sel }), [project, setSelState])
   const [activeCategory, setActiveCategoryRaw] = useState<string | null>(() => {
     try { const s = localStorage.getItem(LS.category); return s || null } catch { return null }
   })
@@ -126,7 +133,13 @@ export function Production() {
   }
 
   // Reset selection + category when the project switches so we never point at a stale id.
-  useEffect(() => { setSelection({ kind: 'none' }); setActiveCategoryRaw(null) }, [project])
+  // Not on mount: the session selection and the stored category are restored (U3).
+  const prevProjectRef = useRef(project)
+  useEffect(() => {
+    if (prevProjectRef.current === project) return
+    prevProjectRef.current = project
+    setSelection({ kind: 'none' }); setActiveCategoryRaw(null)
+  }, [project])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep-link target from Activity (fav row click). Sits pending until the
   // matching asset can be located in the loaded production state, then hands

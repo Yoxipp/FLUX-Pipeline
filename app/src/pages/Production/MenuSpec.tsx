@@ -16,7 +16,8 @@
 // asset-centric — for shots and seqs we shim class/name so the component
 // stays untouched.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { readSession, writeSession } from '../../hooks/useSessionState'
 import { Pin, X } from 'lucide-react'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -150,12 +151,19 @@ function toAssetShim(res: ResolvedEntity): Asset {
   }
 }
 
+type SpecSnapshot = { tabs: Tab[]; activeKey: string; entityId: string | undefined }
+const specSessionKey = (project: string) => `prod.specTabs:${project}`
+
 export function MenuSpec({ state, setState, selection, publishesByTask, loading, initialOpen, onInitialOpenApplied }: Props) {
   const { t } = useI18n()
   const { project } = useProject()
 
-  const [tabs, setTabs]           = useState<Tab[]>([ROOT_TAB])
-  const [activeKey, setActiveKey] = useState<string>('root')
+  // Session snapshot (U3): open tabs come back when returning to Production.
+  const snap = useRef(project ? readSession<SpecSnapshot>(specSessionKey(project)) : undefined).current
+  const [tabs, setTabs]           = useState<Tab[]>(snap?.tabs ?? [ROOT_TAB])
+  const [activeKey, setActiveKey] = useState<string>(snap?.activeKey ?? 'root')
+  const lastEntityRef = useRef<string | undefined>(snap?.entityId)
+  const skipPinRestoreRef = useRef(Boolean(snap))
 
   const selectedRes: ResolvedEntity | null = useMemo(() => {
     if (selection.kind === 'asset' || selection.kind === 'shot' || selection.kind === 'seq') {
@@ -170,6 +178,11 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   // selection changes.
   useEffect(() => {
     if (!project) return
+    const id = selectedRes?.entity.id
+    // Store not loaded yet (selection set, entity unresolved) or same entity: keep tabs.
+    if (id === undefined && selection.kind !== 'none') return
+    if (id === lastEntityRef.current) return
+    lastEntityRef.current = id
     const pinnedKeys = new Set(readPinned(project).map(refToKey))
     setTabs(prev => {
       const kept = prev.filter(tab => tab.kind === 'root' || pinnedKeys.has(tab.key))
@@ -194,6 +207,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   // Restore pinned tabs when the active project changes.
   useEffect(() => {
     if (!project) { setTabs([]); setActiveKey('root'); return }
+    if (skipPinRestoreRef.current) { skipPinRestoreRef.current = false; return }   // session snapshot wins
     const pins = readPinned(project)
     const restored: Tab[] = pins.flatMap((p): Tab[] => {
       if (p.kind === 'entityRoot') {
@@ -208,6 +222,10 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     setTabs(restored)
     setActiveKey('root')
   }, [project])
+
+  useEffect(() => {
+    if (project) writeSession<SpecSnapshot>(specSessionKey(project), { tabs, activeKey, entityId: lastEntityRef.current })
+  }, [project, tabs, activeKey, selectedRes?.entity.id])
 
   // Garbage-collect tabs pointing at a removed entity/task.
   //

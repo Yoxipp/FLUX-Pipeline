@@ -17,6 +17,7 @@ import { useDccStatus } from '../hooks/useDccStatus'
 import { readActiveInstancePort } from '../hooks/useActiveInstances'
 import { PublishNote } from '../components/shared/PublishNote'
 import { FileLog } from '../components/shared/FileLog'
+import { useSessionState } from '../hooks/useSessionState'
 
 // DCCs the backend can import into (from the Folder Manager). Others have no
 // import bridge yet, so they never appear in "Ouvrir dans…".
@@ -1465,8 +1466,9 @@ function resolveOpenPath(absPath: string, workspace: string): NavLevel | null {
 // ── Composant principal ───────────────────────────────────────────────────────
 
 export function Projects() {
-  const [navStack, setNavStack] = useState<NavLevel[]>([{ kind: 'root' }])
-  const [navIdx, setNavIdx]     = useState(0)
+  // Session-kept (U3): coming back to the Folder Manager reopens the same folder.
+  const [navStack, setNavStack] = useSessionState<NavLevel[]>('fm.navStack', [{ kind: 'root' }])
+  const [navIdx, setNavIdx]     = useSessionState('fm.navIdx', 0)
   const nav = navStack[navIdx]
 
   const [items, setItems]                   = useState<ExplorerItem[]>([])
@@ -1495,8 +1497,8 @@ export function Projects() {
     setNavIdx(1)
   }, [settings?.workspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [tab, setTab]             = useState<Tab>('project')
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
+  const [tab, setTab]             = useSessionState<Tab>('fm.tab', 'project')
+  const [sidebarTab, setSidebarTab] = useSessionState<SidebarTab>('fm.sidebarTab', 'tous')
 
   // Explorer tile size (small / medium / large), persisted per-browser
   const [tileSize, setTileSize]   = useState<TileSize>(loadTileSize)
