@@ -147,8 +147,8 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     """Copy the bundled shelf file to the DCC user directory.
 
     For Maya, builds a single Flux shelf from the persisted tool selection.
-    For Houdini, also installs HDAs into houdiniX.Y/otls/ (non-fatal if it fails).
-    Returns (success, message).
+    For Houdini, also installs the FLUX HDAs into houdiniX.Y/otls/ (non-fatal if it
+    fails, reported in the message). Returns (success, message).
     """
     if dcc_name == "Maya":
         return install_flux_shelf(version)
@@ -181,11 +181,19 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
             except OSError as exc:
                 log.warning("Could not install shelf to Maya dir (non-fatal): %s", exc)
 
-    # NOTE: the Houdini importer/exporter HDAs are a technical dependency, not a
-    # shelf tool — they are installed by the Houdini autostart connection
-    # (dcc.houdini.autostart.install), so they are NOT installed here.
+    msg = f"Installed → {dest}"
+    if dcc_name == "Houdini":
+        # The FLUX HDAs ship with the Houdini shelf (the autostart installs them too).
+        # Non-blocking: an HDA failure never fails the shelf install.
+        try:
+            hda_ok, hda_msg = install_hdas(version)
+        except Exception as exc:    # noqa: BLE001
+            hda_ok, hda_msg = False, f"Error: {exc}"
+        if not hda_ok:
+            log.warning("HDA install failed (non-fatal): %s", hda_msg)
+        msg += f" | HDA : {hda_msg}" if hda_ok else f" | HDA non installes : {hda_msg}"
 
-    return True, f"Installed → {dest}"
+    return True, msg
 
 
 # ── Maya tools → single Flux shelf ────────────────────────────────────────────
@@ -194,7 +202,7 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
 # Only two user-facing tools ship on the Flux shelf: ANIM (animation) and RIG
 # (rigging toolbox). Order matches the shelf layout [ ANIM ] [ RIG ]. The old
 # "flux" pipeline button is not a shelf tool; the Houdini importer HDA is a
-# technical dependency installed via the Houdini autostart, not from the shelf.
+# technical dependency installed with the Houdini shelf and the autostart.
 MAYA_TOOLS: list[dict] = [
     {"id": "flux_anim", "label": "ANIM", "filename": "shelf_FluxAnimTool.mel"},
     {"id": "adam_rig",   "label": "RIG",  "filename": "shelf_AntRigToolbox.mel"},
@@ -318,7 +326,7 @@ def install_flux_shelf(version: str, selected_ids: list[str] | None = None) -> t
 def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     """Remove the Flux shelf file from the DCC user directory.
 
-    For Houdini, also removes HDAs from houdiniX.Y/otls/ (non-fatal if it fails).
+    For Houdini the HDAs are kept: the autostart still relies on them.
     Returns (success, message).
     """
     dest_dir = get_dcc_shelf_dir(dcc_name, version)
@@ -348,8 +356,8 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
                 except OSError as exc:
                     log.warning("Could not remove shelf from Maya dir (non-fatal): %s", exc)
 
-    # Houdini HDAs are removed by the autostart uninstall (they are a pipeline
-    # dependency, not a shelf tool), so they are NOT removed here.
+    # Houdini HDAs are NOT removed here: the autostart keeps using them (its
+    # uninstall removes them).
 
     return True, f"Removed: {target}"
 
