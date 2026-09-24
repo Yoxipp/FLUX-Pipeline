@@ -117,13 +117,45 @@ def _flatten_export_result(result) -> list[str]:
     return files
 
 
+def _complete_config(config: dict) -> dict:
+    """Fill what only Painter knows: every texture set of the open project when the
+    backend sent no exportList (Painter exports nothing without one), and a preset
+    given by name turned into its starter-assets resource URL."""
+    import substance_painter.resource as _res
+    import substance_painter.textureset as _ts
+
+    cfg = dict(config)
+    if not cfg.get("exportList"):
+        cfg["exportList"] = [{"rootPath": ts.name()} for ts in _ts.all_texture_sets()]
+    preset = str(cfg.get("defaultExportPreset") or "")
+    if preset and not preset.startswith("resource://"):
+        cfg["defaultExportPreset"] = _res.ResourceID(context="starter_assets", name=preset).url()
+    return cfg
+
+
 def _do_export(config: dict) -> dict:
     if not _SP_AVAILABLE:
         return {"status": "error", "msg": "substance_painter module not available"}
     try:
-        result = _sp_export.export_project_textures(config)
-        return {"status": "ok", "files": _flatten_export_result(result)}
+        import substance_painter.project as _project
+
+        if not _project.is_open():
+            return {"status": "error", "msg": "Aucun projet ouvert dans Painter"}
+        cfg = _complete_config(config)
+        if not cfg["exportList"]:
+            return {"status": "error", "msg": "Le projet Painter n'a aucun texture set"}
+        _diag(f"export: sets={[e['rootPath'] for e in cfg['exportList']]} preset={cfg.get('defaultExportPreset')}")
+        result = _sp_export.export_project_textures(cfg)
+        files = _flatten_export_result(result)
+        status = str(getattr(result, "status", ""))
+        if not files:
+            msg = str(getattr(result, "message", "") or status or "aucune map ecrite")
+            _diag(f"export produced no file: {msg}")
+            return {"status": "error", "msg": f"Export Painter vide : {msg}"}
+        _diag(f"export ok: {len(files)} file(s)")
+        return {"status": "ok", "files": files}
     except Exception as exc:  # noqa: BLE001
+        _diag(f"export failed: {exc!r}")
         return {"status": "error", "msg": str(exc)}
 
 

@@ -79,10 +79,12 @@ def publish_painter(
     if not project_path.exists():
         return {"ok": False, "error": f"Projet introuvable : {project}"}
 
+    log.info("Painter publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_painter_"))
     config = build_export_config(export_dir, preset, file_format, bit_depth)
     result = substance_client.export(config)
     if not result.get("ok"):
+        log.warning("Painter export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Painter export failed")}
 
     files = [Path(f) for f in result.get("files", [])]

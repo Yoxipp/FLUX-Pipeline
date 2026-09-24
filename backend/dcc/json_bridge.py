@@ -42,4 +42,8 @@ def send_json_line(host: str, port: int, payload: dict, timeout: float, *,
         return {"ok": False, "error": f"{protocol_error_prefix}not a JSON object"}
     if status_to_ok and "ok" not in result:
         result["ok"] = result.get("status") == "ok"
+    # Bridges report failures as {"status": "error", "msg": ...}: expose it as "error"
+    # so callers show the real reason instead of a generic "export failed".
+    if not result.get("ok") and "error" not in result and result.get("msg"):
+        result["error"] = str(result["msg"])
     return result

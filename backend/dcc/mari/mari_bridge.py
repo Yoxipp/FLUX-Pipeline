@@ -125,6 +125,8 @@ def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
     if action == "ping":
         ver = getattr(mari.app, "version", lambda: "")() if _MARI_AVAILABLE and mari else ""
+        # mari.app.version() is an AppVersion object: show "7.1v2", not its repr.
+        ver = ver.string() if hasattr(ver, "string") else ver
         return {"status": "ok", "version": f"Mari {ver}".strip()}
     if action == "export":
         path, fmt = cmd.get("export_path", ""), cmd.get("file_format", "tif")

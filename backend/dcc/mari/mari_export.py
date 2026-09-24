@@ -36,9 +36,11 @@ def publish_mari(
     if not project_path.exists():
         return {"ok": False, "error": f"Projet introuvable : {project}"}
 
+    log.info("Mari publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_mari_"))
     result = mari_client.export(str(export_dir), file_format)
     if not result.get("ok"):
+        log.warning("Mari export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Mari export failed")}
 
     files = [Path(f) for f in result.get("files", [])]
