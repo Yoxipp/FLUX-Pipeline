@@ -4,3 +4,5 @@
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
 `shelf_core.py` : installation shelves Maya/Houdini, deploiement des HDA FLUX (`deploy_houdini_hdas`, ex-installer), `_build_hdas_live`.
+
+Boutons pipeline toujours presents sur la shelf Flux Maya (`shelf_FluxPipeline.mel`) : MAJ, CAM (Camera Rig), LIGHT (Light Rig) (ADR 0023).

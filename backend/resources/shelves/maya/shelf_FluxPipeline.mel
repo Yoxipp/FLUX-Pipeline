@@ -1,4 +1,5 @@
-// shelf_FluxPipeline.mel — FLUX pipeline buttons, always added to the Flux shelf.
+// shelf_FluxPipeline.mel — FLUX pipeline buttons, always added to the Flux shelf
+// (MAJ, base Camera Rig, base Light Rig: ADR 0023).
 // Installed by the Flux Shelf Manager (merged into shelf_Flux.mel).
 
 global proc shelf_FluxPipeline() {
@@ -9,5 +10,21 @@ global proc shelf_FluxPipeline() {
         -imageOverlayLabel "MAJ"
         -sourceType   "python"
         -command      "from dcc.maya import maya_update; maya_update.update_imports()"
+    ;
+    shelfButton
+        -label        "CAM"
+        -annotation   "FLUX : Camera Rig de base (Root > Pan > Tilt > Cam, 35 mm, 36 x 24)"
+        -image1       "commandButton.png"
+        -imageOverlayLabel "CAM"
+        -sourceType   "python"
+        -command      "from dcc.maya import maya_rigs; maya_rigs.create_camera_rig()"
+    ;
+    shelfButton
+        -label        "LIGHT"
+        -annotation   "FLUX : Light Rig de base (key, fill, rim + dome)"
+        -image1       "commandButton.png"
+        -imageOverlayLabel "LIGHT"
+        -sourceType   "python"
+        -command      "from dcc.maya import maya_rigs; maya_rigs.create_light_rig()"
     ;
 }
