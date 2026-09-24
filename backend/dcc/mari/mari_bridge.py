@@ -34,6 +34,73 @@ PORT = int(os.environ.get("FLUX_MARI_PORT", "7070"))
 _server_sock: "socket.socket | None" = None
 
 
+# ── main-thread execution + diagnostic log (2026-09-24) ──────────────────────
+# The DCC API is not thread-safe: socket threads hand the work to the Qt main
+# thread through a queue polled by a QTimer (created at startup, on the main
+# thread). Without Qt the work runs inline. Every step is appended to
+# %TEMP%/flux_mari_bridge.log so "bridge ne repond pas" can be diagnosed without the DCC console.
+import queue as _queue
+import tempfile as _tempfile
+import time as _time
+
+_LOG_PATH = os.path.join(_tempfile.gettempdir(), "flux_mari_bridge.log")
+_jobs: "_queue.Queue" = _queue.Queue()
+_timer = None
+
+
+def _diag(msg: str) -> None:
+    try:
+        with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(_time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+    print("[FLUX] " + msg)
+
+
+def _drain() -> None:
+    while True:
+        try:
+            fn, box, done = _jobs.get_nowait()
+        except _queue.Empty:
+            return
+        try:
+            box["result"] = fn()
+        except Exception as exc:  # noqa: BLE001 - reported to the backend
+            box["result"] = {"status": "error", "msg": str(exc)}
+        done.set()
+
+
+def _start_main_thread_pump() -> None:
+    global _timer
+    if _timer is not None:
+        return
+    QtCore = None
+    for mod in ("PySide6", "PySide2"):
+        try:
+            QtCore = __import__(mod + ".QtCore", fromlist=["QtCore"])
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    if QtCore is None:
+        _diag("Qt not found: DCC calls run in the socket thread")
+        return
+    _timer = QtCore.QTimer()
+    _timer.timeout.connect(_drain)
+    _timer.start(50)
+
+
+def _on_main_thread(fn, timeout: float = 600.0) -> dict:
+    """Run fn() on the DCC main thread and return its result."""
+    if _timer is None:
+        return fn()
+    box: dict = {}
+    done = threading.Event()
+    _jobs.put((fn, box, done))
+    if not done.wait(timeout):
+        return {"status": "error", "msg": "DCC busy: no answer from the main thread"}
+    return box["result"]
+
+
 def _do_export(export_path: str, file_format: str) -> dict:
     if not _MARI_AVAILABLE:
         return {"status": "error", "msg": "mari module not available"}
@@ -60,7 +127,8 @@ def _dispatch(cmd: dict) -> dict:
         ver = getattr(mari.app, "version", lambda: "")() if _MARI_AVAILABLE and mari else ""
         return {"status": "ok", "version": f"Mari {ver}".strip()}
     if action == "export":
-        return _do_export(cmd.get("export_path", ""), cmd.get("file_format", "tif"))
+        path, fmt = cmd.get("export_path", ""), cmd.get("file_format", "tif")
+        return _on_main_thread(lambda: _do_export(path, fmt))
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 
@@ -103,9 +171,10 @@ def start() -> None:
         sock.listen(5)
         _server_sock = sock
         threading.Thread(target=_serve, args=(sock,), daemon=True).start()
-        print(f"[FLUX] Mari bridge listening on {HOST}:{PORT}")
+        _start_main_thread_pump()
+        _diag(f"Mari bridge listening on {HOST}:{PORT} (api={_MARI_AVAILABLE}, file={__file__})")
     except OSError as exc:
-        print(f"[FLUX] Mari bridge bind failed: {exc}")
+        _diag(f"Mari bridge bind failed on {HOST}:{PORT}: {exc}")
 
 
 # Mari imports every script of its Scripts folders at startup: start the server on

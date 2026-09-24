@@ -1,8 +1,9 @@
 """
 FLUX Substance Painter bridge plugin (V6 B2, SKELETON — finish/verify live).
 
-Place in Painter's Python plugins dir (installed by autostart.py). Painter loads
-every plugin module and calls start_plugin() at launch. This starts a small local
+Placed in Painter's python/startup dir (installed by autostart.py): Painter starts
+every startup module and calls start_plugin() at launch (a python/plugins module only
+runs once ticked in the Python menu, the cause of "bridge ne repond pas"). This starts a small local
 TCP server (newline-JSON) so the FLUX backend can ping Painter and trigger an
 export via the substance_painter API.
 
@@ -38,6 +39,73 @@ PORT = int(os.environ.get("FLUX_SUBSTANCE_PORT", "7030"))
 _server_sock: "socket.socket | None" = None
 
 
+# ── main-thread execution + diagnostic log (2026-09-24) ──────────────────────
+# The DCC API is not thread-safe: socket threads hand the work to the Qt main
+# thread through a queue polled by a QTimer (created at startup, on the main
+# thread). Without Qt the work runs inline. Every step is appended to
+# %TEMP%/flux_painter_bridge.log so "bridge ne repond pas" can be diagnosed without the DCC console.
+import queue as _queue
+import tempfile as _tempfile
+import time as _time
+
+_LOG_PATH = os.path.join(_tempfile.gettempdir(), "flux_painter_bridge.log")
+_jobs: "_queue.Queue" = _queue.Queue()
+_timer = None
+
+
+def _diag(msg: str) -> None:
+    try:
+        with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(_time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+    print("[FLUX] " + msg)
+
+
+def _drain() -> None:
+    while True:
+        try:
+            fn, box, done = _jobs.get_nowait()
+        except _queue.Empty:
+            return
+        try:
+            box["result"] = fn()
+        except Exception as exc:  # noqa: BLE001 - reported to the backend
+            box["result"] = {"status": "error", "msg": str(exc)}
+        done.set()
+
+
+def _start_main_thread_pump() -> None:
+    global _timer
+    if _timer is not None:
+        return
+    QtCore = None
+    for mod in ("PySide6", "PySide2"):
+        try:
+            QtCore = __import__(mod + ".QtCore", fromlist=["QtCore"])
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    if QtCore is None:
+        _diag("Qt not found: DCC calls run in the socket thread")
+        return
+    _timer = QtCore.QTimer()
+    _timer.timeout.connect(_drain)
+    _timer.start(50)
+
+
+def _on_main_thread(fn, timeout: float = 600.0) -> dict:
+    """Run fn() on the DCC main thread and return its result."""
+    if _timer is None:
+        return fn()
+    box: dict = {}
+    done = threading.Event()
+    _jobs.put((fn, box, done))
+    if not done.wait(timeout):
+        return {"status": "error", "msg": "DCC busy: no answer from the main thread"}
+    return box["result"]
+
+
 def _flatten_export_result(result) -> list[str]:
     """Best-effort: pull every written file path out of an export result."""
     files: list[str] = []
@@ -65,7 +133,8 @@ def _dispatch(cmd: dict) -> dict:
         ver = getattr(_sp, "__version__", "") if _sp else ""
         return {"status": "ok", "version": f"Substance Painter {ver}".strip()}
     if action == "export":
-        return _do_export(cmd.get("config", {}))
+        config = cmd.get("config", {})
+        return _on_main_thread(lambda: _do_export(config))
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 
@@ -109,13 +178,17 @@ def start_plugin() -> None:  # Painter entry point
         sock.listen(5)
         _server_sock = sock
         threading.Thread(target=_serve, args=(sock,), daemon=True).start()
-        print(f"[FLUX] Substance Painter bridge listening on {HOST}:{PORT}")
+        _start_main_thread_pump()
+        _diag(f"Substance Painter bridge listening on {HOST}:{PORT} (api={_SP_AVAILABLE})")
     except OSError as exc:
-        print(f"[FLUX] Substance Painter bridge bind failed: {exc}")
+        _diag(f"Substance Painter bridge bind failed on {HOST}:{PORT}: {exc}")
 
 
 def close_plugin() -> None:  # Painter entry point
-    global _server_sock
+    global _server_sock, _timer
+    if _timer is not None:
+        _timer.stop()
+        _timer = None
     if _server_sock is not None:
         try:
             _server_sock.close()

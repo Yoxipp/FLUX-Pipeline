@@ -1,8 +1,9 @@
 # autostart.py — install the FLUX bridge plugin into Substance Painter (V6 B2).
 #
 # Same is_installed / get_startup_file / install / uninstall shape as the other DCC
-# autostart modules so the router dispatches generically. Painter loads every .py in
-# its user python/plugins dir at launch and calls start_plugin().
+# autostart modules so the router dispatches generically. Painter starts every module
+# of its user python/startup dir at launch (start_plugin()); python/plugins modules only
+# run once ticked in the Python menu, so older installs there are moved to startup.
 
 from __future__ import annotations
 
@@ -17,7 +18,10 @@ log = get_logger(__name__)
 
 _PLUGIN_SRC = Path(__file__).resolve().parent / "substance_painter_bridge.py"
 _PLUGIN_NAME = "flux_substance_bridge.py"
-_PAINTER_PLUGINS = ("Adobe", "Adobe Substance 3D Painter", "python", "plugins")
+_PAINTER_PYTHON = ("Adobe", "Adobe Substance 3D Painter", "python")
+_PAINTER_PLUGINS = (*_PAINTER_PYTHON, "startup")
+# Before 2026-09-24 the bridge went to python/plugins (never started on its own).
+_OLD_SUBDIR = "plugins"
 
 
 def _plugins_dir() -> Path:
@@ -33,9 +37,14 @@ def _plugins_dir() -> Path:
     return documents_dir().joinpath(*_PAINTER_PLUGINS)
 
 
-def _legacy_file() -> Path:
-    """Copy left by older FLUX builds under ~/Documents (never read when redirected)."""
-    return (Path.home() / "Documents").joinpath(*_PAINTER_PLUGINS) / _PLUGIN_NAME
+def _legacy_files() -> list[Path]:
+    """Copies left by older FLUX builds: ~/Documents (never read when redirected) and
+    python/plugins (needs a manual tick in Painter)."""
+    return [
+        (Path.home() / "Documents").joinpath(*_PAINTER_PLUGINS) / _PLUGIN_NAME,
+        (Path.home() / "Documents").joinpath(*_PAINTER_PYTHON, _OLD_SUBDIR) / _PLUGIN_NAME,
+        _plugins_dir().parent / _OLD_SUBDIR / _PLUGIN_NAME,
+    ]
 
 
 def get_startup_file(exe_path: str | None = None) -> Path | None:
@@ -48,12 +57,12 @@ def is_installed(exe_path: str | None = None) -> bool:
 
 
 def _remove_legacy() -> None:
-    legacy = _legacy_file()
-    if legacy != get_startup_file() and legacy.exists():
-        try:
-            legacy.unlink()
-        except OSError as exc:
-            log.warning("Could not remove old Painter bridge %s: %s", legacy, exc)
+    for legacy in _legacy_files():
+        if legacy != get_startup_file() and legacy.exists():
+            try:
+                legacy.unlink()
+            except OSError as exc:
+                log.warning("Could not remove old Painter bridge %s: %s", legacy, exc)
 
 
 def install(exe_path: str | None = None) -> dict:

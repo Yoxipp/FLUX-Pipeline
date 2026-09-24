@@ -48,8 +48,24 @@ class PainterPluginsDir(unittest.TestCase):
         with mock.patch.object(sp, "documents_dir", return_value=Path("D:/Docs")):
             self.assertEqual(
                 sp._plugins_dir(),
-                Path("D:/Docs/Adobe/Adobe Substance 3D Painter/python/plugins"),
+                Path("D:/Docs/Adobe/Adobe Substance 3D Painter/python/startup"),
             )
+
+    def test_install_moves_old_plugins_copy_to_startup(self):
+        # python/plugins only runs once ticked in Painter: the bridge now lives in startup.
+        import tempfile
+
+        from dcc.substance_painter import autostart as sp
+        os.environ.pop("FLUX_SP_PLUGINS_DIR", None)
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(sp, "documents_dir", return_value=Path(d)):
+            old = Path(d, "Adobe", "Adobe Substance 3D Painter", "python", "plugins", sp._PLUGIN_NAME)
+            old.parent.mkdir(parents=True)
+            old.write_text("# old", encoding="utf-8")
+            self.assertTrue(sp.install()["success"])
+            self.assertTrue(sp.is_installed())
+            self.assertEqual(sp.get_startup_file().parent.name, "startup")
+            self.assertFalse(old.exists())
 
 
 if __name__ == "__main__":
