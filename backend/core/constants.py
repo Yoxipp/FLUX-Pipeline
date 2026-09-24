@@ -74,11 +74,20 @@ def _build_dcc_patterns() -> dict[str, list[str]]:
             rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe",
         ],
         "Nuke":       [rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"],   # [0-9] exclut CrashFeedback
-        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"],
-        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer\Adobe Substance 3D Designer.exe"],
+        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter*\Adobe Substance 3D Painter.exe",
+                       rf"{pf86}\Steam\steamapps\common\Substance 3D Painter*\Adobe Substance 3D Painter.exe",
+                       rf"{pf}\Allegorithmic\Substance Painter*\Substance Painter.exe"],
+        # Designer: Adobe install, Steam build, older Allegorithmic install.
+        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer*\Adobe Substance 3D Designer.exe",
+                       rf"{pf86}\Steam\steamapps\common\Substance 3D Designer*\Adobe Substance 3D Designer.exe",
+                       rf"{pf}\Allegorithmic\Substance Designer*\Substance Designer.exe"],
         "ZBrush":     [rf"{pf}\Maxon ZBrush*\ZBrush.exe",
                        rf"{pf86}\Maxon ZBrush*\ZBrush.exe"],
-        "Marvelous":  [rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner.exe"],
+        # Marvelous: school Enterprise build (Marvelous Designer Enterprise OnlineAuth /
+        # MarvelousDesigner_Enterprise_Online.exe) and the CLO-SET personal install.
+        "Marvelous":  [rf"{pf}\Marvelous Designer*\MarvelousDesigner*.exe",
+                       rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner*.exe",
+                       rf"{pf}\CLO Virtual Fashion\MarvelousDesigner*\MarvelousDesigner*.exe"],
         "Photoshop":  [rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
                        rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"],
         "Mari":       [rf"{pf}\Mari*\Bundle\bin\Mari*.exe"],

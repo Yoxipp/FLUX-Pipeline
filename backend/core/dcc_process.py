@@ -22,7 +22,8 @@ PROCESS_NAMES: dict[str, tuple[str, ...]] = {
     "Houdini":    ("houdini", "hindie", "happrentice", "hescape", "hython"),
     "Nuke":       ("nuke",),
     "SubstanceP": ("painter",),
-    "SubstanceD": ("designer",),
+    # Not bare "designer": Marvelous Designer would count as Substance Designer.
+    "SubstanceD": ("substance 3d designer", "substance designer"),
     "Marvelous":  ("marvelous",),
     "Photoshop":  ("photoshop",),
     "Mari":       ("mari",),
