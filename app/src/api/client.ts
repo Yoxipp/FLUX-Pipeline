@@ -689,9 +689,15 @@ export const api = {
 
 
   // pins: {slot: {task, instance, version} | {exclude: true} | null (automatic again)}
-  refreshUsdComponent: (project: string, name: string, pins?: Record<string, UsdSlotPin | null>) =>
-    apiCall<{ ok: boolean; changed: boolean; version: string | null; last?: string }>(
-      'POST', '/usd/component/refresh', { project, name, pins }),
+  // ADR 0023: components are created by hand, then edited through their recipe.
+  refreshUsdComponent: (project: string, name: string) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/refresh', { project, name }),
+  createUsdComponent: (project: string, name: string, departments: string[]) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/create', { project, name, departments }),
+  saveUsdComponent: (project: string, name: string, recipe: UsdComponentRecipe) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/save', { project, name, recipe }),
+  addProposedUsdComponent: (project: string, name: string) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/add-proposed', { project, name }),
 
   // A3: new versioned assembly (empty or copy of *source*) and edits (each = new version).
   createUsdAssembly: (project: string, name: string, source?: string) =>
@@ -846,28 +852,46 @@ export const api = {
 }
 
 // USD assembler library (GET /usd/library)
-// ADR 0019: one slot per department (model / look / rig), one variant per INSTANCE.
-export interface UsdSlotPin { instance?: string; version?: string; exclude?: boolean }
-export interface UsdSlotRef {
-  task: string | null; version: string | null; pin?: UsdSlotPin | null
-  default?: string | null                 // selected variant (instance)
-  variants?: Record<string, string>       // variant -> version
+// ADR 0023: a component is created by hand; its recipe lists files per department
+// (asset TYPE tokens), each with a kind, a format and targets (other files).
+export type UsdFileKind = 'geometry' | 'groom' | 'shader' | 'rig' | 'animation' | 'other'
+export interface UsdComponentFile {
+  id: string; label: string; department: string; kind: UsdFileKind; format: string
+  source: 'publish' | 'manual'
+  base?: string; instance?: string; variante?: string; version?: string   // publish ("latest" or vNNN)
+  path?: string                                                           // manual, project-relative
+  prim?: string
+  targets: string[]; proxy_of: string[]; depends: string[]
+  active: boolean
+  // library only: what the file resolves to now / in the current component version
+  resolved_version?: string | null; composed_version?: string | null; found?: boolean
+}
+export interface UsdComponentRecipe { departments: string[]; files: UsdComponentFile[] }
+export interface UsdProposedFile {
+  department: string; base: string; instance: string; variante: string; version: string
+  format: string; kind: UsdFileKind
 }
 export interface UsdComponentInfo {
   name: string
   class: string | null   // CLASS token (deep link to Production)
-  state: 'ok' | 'stale' | 'missing' | 'incomplete'
+  state: 'ok' | 'stale' | 'empty'
+  legacy: boolean        // written before ADR 0023: saved again in the new format on the next update
   version: string | null
   versions: string[]
-  slots: Record<string, UsdSlotRef>
-  published: Record<string, UsdSlotRef>
+  departments: string[]
+  files: UsdComponentFile[]
+  proposed: UsdProposedFile[]
+  warnings: string[]
   dir: string
   last: string | null
   used_by: string[]
 }
+export interface UsdComponentResult {
+  ok: boolean; changed: boolean; version: string | null; last?: string; warnings: string[]
+}
 export interface UsdAssemblyInstance {
   prim: string; asset_path: string; component: string | null; broken: boolean; follows_last: boolean
-  variants: Record<string, string>   // department -> variant picked by this instance
+  variants: Record<string, string>   // variant set (one per component file) -> variant picked by this instance
 }
 export interface UsdAssemblyInfo {
   name: string; file: string; instances: UsdAssemblyInstance[]; broken: number
@@ -887,7 +911,19 @@ export type UsdAssemblyOp =
   | { op: 'set_version'; name?: string; all?: boolean; version: string }
   | { op: 'set_variant'; name: string; department: string; variant: string }   // '' = component default
 export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
-export interface UsdLibrary { project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[] }
+export interface UsdLibrary {
+  project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[]
+  creatable: string[]      // asset NAMEs without a component (created by hand, ADR 0023)
+  departments: string[]    // asset TYPE tokens of the project
+  rules: UsdComponentRules
+}
+export interface UsdComponentRules {
+  kinds: UsdFileKind[]
+  default_kind: Record<string, UsdFileKind>          // TYPE -> kind
+  targets: Record<UsdFileKind, UsdFileKind[]>        // what a file of that kind may target
+  proxy: Partial<Record<UsdFileKind, UsdFileKind[]>> // what it may stand in for as a proxy
+  preview: UsdFileKind[]                             // never active in a component (ANIM)
+}
 export interface LoadTargets {
   what: 'asset' | 'decor' | 'shot' | 'layer' | 'file'
   legacy: boolean

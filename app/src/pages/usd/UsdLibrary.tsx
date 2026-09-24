@@ -1,9 +1,9 @@
 // UsdLibrary.tsx — the USD page content: everything already published in the project.
-// Left: assets (components, ADR 0018/0019) and decors (assemblies), with search.
+// Left: assets (components created by hand, ADR 0023) and decors (assemblies), with search.
 // Right: one entity in four views, like a documented USD pipeline tool (AYON scene
 // inventory / Solaris stage manager): Content (departments or instances, editable),
 // Versions, Composition (what the file really gives) and Dependencies.
-// Backend: GET /usd/library, /usd/composition, POST /usd/component/refresh,
+// Backend: GET /usd/library, /usd/composition, POST /usd/component/{create,save,refresh,add-proposed},
 // /usd/assembly/{create,edit,layout/publish}.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -12,19 +12,18 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
-import type { UsdAssemblyInfo, UsdAssemblyOp, UsdComponentInfo, UsdComposition, UsdCrowdCompat, UsdLibrary as Library, UsdPrimNode, UsdSlotPin, UsdSlotRef } from '../../api/client'
+import type {
+  UsdAssemblyInfo, UsdAssemblyOp, UsdComponentFile, UsdComponentInfo, UsdComponentRecipe, UsdComponentResult,
+  UsdComponentRules, UsdComposition, UsdCrowdCompat, UsdFileKind, UsdLibrary as Library, UsdPrimNode, UsdProposedFile,
+} from '../../api/client'
 import { useI18n } from '../../i18n'
 
 type Tab = 'components' | 'assemblies'
 type DetailTab = 'content' | 'versions' | 'composition' | 'deps'
 type Selection = { tab: Tab; name: string } | null
 
-// Asset departments, weak -> strong (ADR 0019) and the TYPE task that publishes each.
-const SLOT_ORDER = ['model', 'look', 'rig']
-const DEPT_TASK: Record<string, string> = { model: 'GEO', look: 'SHADING', rig: 'RIG' }
-
 const stateColor: Record<UsdComponentInfo['state'], string> = {
-  ok: 'var(--ok)', stale: 'var(--warn)', missing: 'var(--ink-3)', incomplete: 'var(--ink-4)',
+  ok: 'var(--ok)', stale: 'var(--warn)', empty: 'var(--ink-4)',
 }
 
 const mono: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 10.5 }
@@ -38,7 +37,6 @@ export function UsdLibrary({ project, projects, onProject }: {
   const [tab, setTab] = useState<Tab>('components')
   const [query, setQuery] = useState('')
   const [sel, setSel] = useState<Selection>(null)
-  const [busy, setBusy] = useState<string | null>(null)
   const [legacy, setLegacy] = useState<{ name: string; rel_path: string }[]>([])
 
   const load = useCallback(() => {
@@ -72,21 +70,6 @@ export function UsdLibrary({ project, projects, onProject }: {
     if (tabName === tab) return
     setTab(tabName)
     setSel(null)
-  }
-
-  async function refresh(name: string, pins?: Record<string, UsdSlotPin | null>) {
-    if (!project) return
-    setBusy(name)
-    try {
-      const res = await api.refreshUsdComponent(project, name, pins)
-      if (res.changed) toast.success(tr('usd.lib.generated', { name, version: res.version ?? '' }))
-      else toast.info(tr('usd.lib.unchanged'))
-      load()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
   }
 
   function goTo(tabName: Tab, name: string) {
@@ -139,6 +122,10 @@ export function UsdLibrary({ project, projects, onProject }: {
           </div>
         </div>
 
+        {tab === 'components' && lib && (
+          <NewComponent project={project} creatable={lib.creatable} departments={lib.departments}
+            onCreated={name => { load(); goTo('components', name) }} />
+        )}
         {tab === 'assemblies' && lib && (
           <NewAssembly project={project} assemblies={lib.assemblies}
             onCreated={name => { load(); goTo('assemblies', name) }} />
@@ -153,7 +140,7 @@ export function UsdLibrary({ project, projects, onProject }: {
                 <span style={{ ...mono, color: 'var(--ink-3)' }}>{c.version ?? '-'}</span>
                 <span style={{ width: 6, height: 6, borderRadius: 3, background: stateColor[c.state], flexShrink: 0 }} />
               </>}
-              sub={`${SLOT_ORDER.filter(s => c.slots[s] || c.published[s]).join(' · ') || '-'}${c.used_by.length ? `  ·  ${c.used_by.length} asm` : ''}`}
+              sub={`${c.departments.join(' · ') || '-'}  ·  ${tr('usd.comp.fileCount', { n: c.files.length })}${c.used_by.length ? `  ·  ${c.used_by.length} asm` : ''}`}
             />
           ))}
           {tab === 'assemblies' && assemblies.map(a => (
@@ -201,8 +188,8 @@ export function UsdLibrary({ project, projects, onProject }: {
       {/* ── right: detail ──────────────────────────────────────────────────── */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '14px 20px 20px' }}>
         {selComponent ? (
-          <ComponentDetail project={project} comp={selComponent} busy={busy === selComponent.name}
-            onRefresh={pins => refresh(selComponent.name, pins)} onOpenAssembly={n => goTo('assemblies', n)} />
+          <ComponentDetail project={project} comp={selComponent} departments={lib?.departments ?? []}
+            rules={lib?.rules as UsdComponentRules} onChanged={load} onOpenAssembly={n => goTo('assemblies', n)} />
         ) : selAssembly ? (
           <AssemblyDetail project={project} asm={selAssembly} components={lib?.components ?? []}
             onOpenComponent={n => goTo('components', n)} onChanged={load} />
@@ -246,81 +233,205 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-// Inline editor of one department: pick the default variant (instance) and its version.
-// Version "latest" keeps following that instance's LAST; a vNNN freezes it.
-function SlotEditor({ project, name, slot, current, busy, onApply, onCancel }: {
-  project: string; name: string; slot: string; current: UsdSlotRef | undefined; busy: boolean
-  onApply: (pin: UsdSlotPin | null) => void; onCancel: () => void
-}) {
-  const { t: tr } = useI18n()
-  const task = DEPT_TASK[slot] ?? ''
-  const [instances, setInstances] = useState<string[]>([])
-  const [instance, setInstance] = useState(current?.pin?.instance || current?.default || '')
-  const [versions, setVersions] = useState<string[]>([])
-  const [version, setVersion] = useState(current?.pin?.version ?? 'latest')
+// ── component (ADR 0023): created by hand, files per department with targets ──
 
-  useEffect(() => {
-    if (!task) { setInstances([]); return }
-    api.getUsdInstances(project, name, task)
-      .then(d => { setInstances(d.instances); setInstance(i => i || d.instances[0] || '') })
-      .catch(() => setInstances([]))
-  }, [project, name, task])
-  useEffect(() => {
-    if (!task || !instance) { setVersions([]); return }
-    api.getUsdLayers(project, name, task, instance)
-      .then(d => setVersions(Object.keys(d.versions)
-        .filter(label => label !== 'LAST')
-        .sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)))))
-      .catch(() => setVersions([]))
-  }, [project, name, task, instance])
+function toRecipe(comp: UsdComponentInfo): UsdComponentRecipe {
+  return {
+    departments: [...comp.departments],
+    files: comp.files.map(({ resolved_version: _r, composed_version: _c, found: _f, ...f }) => ({ ...f })),
+  }
+}
 
+function fmtOf(path: string): string {
+  const name = path.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? ''
+  if (name.endsWith('.bgeo.sc')) return 'bgeo.sc'
+  return name.includes('.') ? name.split('.').pop() ?? '' : ''
+}
+
+function makeId(label: string, taken: Set<string>): string {
+  let base = label.replace(/[^A-Za-z0-9_]/g, '_').replace(/^_+|_+$/g, '') || 'file'
+  if (!/^[A-Za-z_]/.test(base)) base = `f_${base}`
+  let out = base
+  for (let n = 2; taken.has(out); n++) out = `${base}_${n}`
+  return out
+}
+
+// Yellow panel (ADR 0023 point 9): informs only, never changes a selection.
+function WarningPanel({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) return null
   return (
-    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)' }}>
-      <span className="cap">{tr('usd.col.task')}</span>
-      <span style={{ ...mono, color: 'var(--ink-2)' }}>{task}</span>
-      <span className="cap">{tr('usd.lib.variant')}</span>
-      <select value={instance} onChange={e => { setInstance(e.target.value); setVersion('latest') }} style={{ ...selectStyle, width: 90 }}>
-        {instances.map(i => <option key={i} value={i}>{i}</option>)}
-      </select>
-      <span className="cap">{tr('usd.col.version')}</span>
-      <select value={version} onChange={e => setVersion(e.target.value)} style={{ ...selectStyle, width: 110, fontFamily: 'var(--mono)' }}>
-        <option value="latest">{tr('usd.lib.followLatest')}</option>
-        {versions.map(v => <option key={v} value={v}>{v}</option>)}
-      </select>
-      <div style={{ flex: 1 }} />
-      <Btn sm primary disabled={busy || !instance} onClick={() => onApply({ instance, version })}>
-        <Check size={11} strokeWidth={2} /> {tr('usd.lib.apply')}
-      </Btn>
-      {current?.pin && !current.pin.exclude && (
-        <Btn sm disabled={busy} onClick={() => onApply(null)} title={tr('usd.lib.autoHint')}>{tr('usd.lib.auto')}</Btn>
-      )}
-      {slot !== 'model' && (
-        <Btn sm ghost disabled={busy} onClick={() => onApply({ exclude: true })}>
-          <Trash2 size={11} strokeWidth={2} /> {tr('usd.lib.removeSlot')}
-        </Btn>
-      )}
-      <Btn sm ghost disabled={busy} onClick={onCancel}><X size={11} strokeWidth={2} /></Btn>
+    <div style={{
+      padding: '8px 10px', borderRadius: 6, border: '1px solid var(--warn)',
+      background: 'color-mix(in oklch, var(--warn) 10%, var(--paper-2))',
+      display: 'flex', flexDirection: 'column', gap: 3,
+    }}>
+      {warnings.map(w => (
+        <span key={w} style={{ fontSize: 11, color: 'var(--warn)', display: 'flex', gap: 6, alignItems: 'flex-start', lineHeight: 1.45 }}>
+          <AlertTriangle size={11} strokeWidth={2} style={{ flexShrink: 0, marginTop: 2 }} /> {w}
+        </span>
+      ))}
     </div>
   )
 }
 
-function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
-  project: string; comp: UsdComponentInfo; busy: boolean
-  onRefresh: (pins?: Record<string, UsdSlotPin | null>) => Promise<void>
-  onOpenAssembly: (name: string) => void
+function NewComponent({ project, creatable, departments, onCreated }: {
+  project: string; creatable: string[]; departments: string[]; onCreated: (name: string) => void
+}) {
+  const { t: tr } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+
+  async function create() {
+    setBusy(true)
+    try {
+      const res = await api.createUsdComponent(project, name, picked)
+      toast.success(tr('usd.lib.saved', { name, version: res.version ?? '' }))
+      setOpen(false); setName(''); setPicked([])
+      onCreated(name)
+    } catch (e) {
+      toast.error(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div style={{ padding: '0 14px 8px' }}>
+        <Btn sm ghost disabled={creatable.length === 0} title={creatable.length === 0 ? tr('usd.comp.noCreatable') : undefined}
+          onClick={() => setOpen(true)}>
+          <Plus size={11} strokeWidth={2} /> {tr('usd.comp.new')}
+        </Btn>
+      </div>
+    )
+  }
+  return (
+    <div className="card" style={{ margin: '0 14px 8px', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <select value={name} onChange={e => setName(e.target.value)} style={{ ...selectStyle, width: '100%', height: 26 }}>
+        <option value="">{tr('usd.comp.pickAsset')}</option>
+        {creatable.map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <span className="cap">{tr('usd.lib.departments')}</span>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {departments.map(d => (
+          <Pill key={d} active={picked.includes(d)} style={{ cursor: 'pointer' }}
+            onClick={() => setPicked(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d])}>{d}</Pill>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <Btn sm ghost disabled={busy} onClick={() => setOpen(false)}><X size={11} strokeWidth={2} /></Btn>
+        <Btn sm primary disabled={busy || !name || picked.length === 0} onClick={() => void create()}>
+          <Check size={11} strokeWidth={2} /> {tr('usd.lib.create')}
+        </Btn>
+      </div>
+    </div>
+  )
+}
+
+// Versions of one published base: "latest" follows its LAST, a vNNN freezes it.
+function VersionSelect({ project, name, file, disabled, onChange }: {
+  project: string; name: string; file: UsdComponentFile; disabled: boolean; onChange: (v: string) => void
+}) {
+  const { t: tr } = useI18n()
+  const [versions, setVersions] = useState<string[]>([])
+  useEffect(() => {
+    api.getUsdLayers(project, name, file.department, file.instance ?? '')
+      .then(d => setVersions(Object.keys(d.versions).filter(v => v !== 'LAST')
+        .sort((a, b) => Number(b.slice(1)) - Number(a.slice(1)))))
+      .catch(() => setVersions([]))
+  }, [project, name, file.department, file.instance])
+  const value = file.version ?? 'latest'
+  return (
+    <select value={value} disabled={disabled} onChange={e => onChange(e.target.value)}
+      style={{ ...selectStyle, width: 104, fontFamily: 'var(--mono)' }}>
+      <option value="latest">{tr('usd.lib.followLatest')}</option>
+      {!versions.includes(value) && value !== 'latest' && <option value={value}>{value}</option>}
+      {versions.map(v => <option key={v} value={v}>{v}</option>)}
+    </select>
+  )
+}
+
+function IdPills({ label, ids, candidates, disabled, onToggle }: {
+  label: string; ids: string[]; candidates: UsdComponentFile[]; disabled: boolean; onToggle: (id: string) => void
+}) {
+  if (candidates.length === 0) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', paddingLeft: 22 }}>
+      <span className="cap" style={{ width: 70 }}>{label}</span>
+      {candidates.map(c => (
+        <Pill key={c.id} active={ids.includes(c.id)} style={{ cursor: disabled ? 'default' : 'pointer' }}
+          onClick={() => { if (!disabled) onToggle(c.id) }}>{c.label}</Pill>
+      ))}
+    </div>
+  )
+}
+
+function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenAssembly }: {
+  project: string; comp: UsdComponentInfo; departments: string[]; rules: UsdComponentRules
+  onChanged: () => void; onOpenAssembly: (name: string) => void
 }) {
   const { t: tr } = useI18n()
   const navigate = useNavigate()
-  const [editing, setEditing] = useState<string | null>(null)
   const [tab, setTab] = useState<DetailTab>('content')
-  useEffect(() => { setEditing(null) }, [comp.name])
-  // Asset folder = parent of <NAME_path>/usd. Production opens on the model task.
+  const [draft, setDraft] = useState<UsdComponentRecipe>(() => toRecipe(comp))
+  const [manual, setManual] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { setDraft(toRecipe(comp)); setManual({}) }, [comp])
+  const dirty = JSON.stringify(draft) !== JSON.stringify(toRecipe(comp))
   const assetDir = comp.dir.replace(/[\\/]usd[\\/]?$/i, '')
-  const task = comp.published.model?.task ?? comp.published.rig?.task ?? 'GEO'
-  const slots = SLOT_ORDER
-  const canGenerate = comp.state === 'missing' || comp.state === 'stale'
+  const byId = new Map(comp.files.map(f => [f.id, f]))
+
+  async function run(call: () => Promise<UsdComponentResult>) {
+    setBusy(true)
+    try {
+      const res = await call()
+      if (res.changed) toast.success(tr('usd.lib.saved', { name: comp.name, version: res.version ?? '' }))
+      else toast.info(tr('usd.lib.noChange'))
+      onChanged()
+    } catch (e) {
+      toast.error(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const patch = (id: string, p: Partial<UsdComponentFile>) =>
+    setDraft(d => ({ ...d, files: d.files.map(f => f.id === id ? { ...f, ...p } : f) }))
+  const toggleIn = (id: string, field: 'targets' | 'proxy_of' | 'depends', other: string) =>
+    setDraft(d => ({ ...d, files: d.files.map(f => f.id !== id ? f : {
+      ...f, [field]: f[field].includes(other) ? f[field].filter(x => x !== other) : [...f[field], other] }) }))
+  const removeFile = (id: string) => setDraft(d => ({
+    ...d, files: d.files.filter(f => f.id !== id).map(f => ({
+      ...f, targets: f.targets.filter(x => x !== id), proxy_of: f.proxy_of.filter(x => x !== id),
+      depends: f.depends.filter(x => x !== id) })) }))
+  const taken = () => new Set(draft.files.map(f => f.id))
+
+  function addProposed(p: UsdProposedFile) {
+    const id = makeId(`${p.department.toLowerCase()}_${p.instance}${p.variante ? `_${p.variante}` : ''}`, taken())
+    setDraft(d => ({ ...d, files: [...d.files, {
+      id, label: p.base, department: p.department, kind: p.kind, format: p.format, source: 'publish',
+      base: p.base, instance: p.instance, variante: p.variante, version: 'latest',
+      targets: [], proxy_of: [], depends: [], active: !rules.preview.includes(p.kind),
+    }] }))
+  }
+
+  function addManual(dept: string) {
+    const path = (manual[dept] ?? '').trim()
+    if (!path || !fmtOf(path)) return
+    const stem = path.replace(/\\/g, '/').split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'file'
+    const kind = rules.default_kind[dept] ?? 'other'
+    setDraft(d => ({ ...d, files: [...d.files, {
+      id: makeId(stem, taken()), label: stem, department: dept, kind, format: fmtOf(path), source: 'manual',
+      path, targets: [], proxy_of: [], depends: [], active: !rules.preview.includes(kind),
+    }] }))
+    setManual(m => ({ ...m, [dept]: '' }))
+  }
+
+  const freeDepartments = departments.filter(d => !draft.departments.includes(d))
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 820 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 900 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <Box size={15} strokeWidth={1.75} color="var(--ink-3)" />
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{comp.name}</span>
@@ -332,7 +443,7 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
         </Btn>
         {comp.class && (
           <Btn sm ghost onClick={() => navigate('/production', {
-            state: { openFavorite: { project, class: comp.class, name: comp.name, task } },
+            state: { openFavorite: { project, class: comp.class, name: comp.name, task: comp.departments[0] ?? 'GEO' } },
           })}>
             <ClipboardList size={11} strokeWidth={2} /> {tr('usd.lib.openProduction')}
           </Btn>
@@ -342,10 +453,9 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
             <Copy size={11} strokeWidth={2} /> {tr('usd.lib.copyPath')}
           </Btn>
         )}
-        {canGenerate && (
-          <Btn sm primary disabled={busy} onClick={() => void onRefresh()}>
-            <RefreshCw size={11} strokeWidth={2} style={busy ? { animation: 'spin 1s linear infinite' } : undefined} />
-            {comp.state === 'missing' ? tr('usd.lib.generate') : tr('usd.lib.update')}
+        {comp.state === 'stale' && !dirty && (
+          <Btn sm primary disabled={busy} onClick={() => void run(() => api.refreshUsdComponent(project, comp.name))}>
+            <RefreshCw size={11} strokeWidth={2} /> {tr('usd.lib.update')}
           </Btn>
         )}
       </div>
@@ -353,61 +463,119 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
       <DetailTabs tab={tab} onTab={setTab} />
 
       {tab === 'content' && (<>
-      {(comp.state === 'missing' || comp.state === 'incomplete') && (
-        <div className="card" style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-3)', flex: 1, lineHeight: 1.5 }}>
-            {tr('usd.lib.howToCreate')}
-          </span>
-          <Btn sm ghost onClick={() => navigate('/publisher')}>
-            <Upload size={11} strokeWidth={2} /> {tr('usd.lib.openPublisher')}
+        <WarningPanel warnings={comp.warnings} />
+        {comp.legacy && (
+          <span className="lbl" style={{ fontSize: 10, color: 'var(--warn)' }}>{tr('usd.comp.legacy')}</span>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <SecTitle>{tr('usd.lib.departments')}</SecTitle>
+          <div style={{ flex: 1 }} />
+          {freeDepartments.length > 0 && (
+            <select value="" disabled={busy} title={tr('usd.comp.addDeptHint')}
+              onChange={e => { const d = e.target.value; if (d) setDraft(r => ({ ...r, departments: [...r.departments, d] })) }}
+              style={{ ...selectStyle, width: 170 }}>
+              <option value="">{tr('usd.comp.addDept')}</option>
+              {freeDepartments.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          )}
+          <Btn sm ghost disabled={busy || dirty || comp.proposed.length === 0} title={tr('usd.comp.addAllHint')}
+            onClick={() => void run(() => api.addProposedUsdComponent(project, comp.name))}>
+            <Plus size={11} strokeWidth={2} /> {tr('usd.comp.addAll')}
           </Btn>
         </div>
-      )}
-      <SecTitle>{tr('usd.lib.departments')}</SecTitle>
-      <div className="card" style={{ padding: '6px 10px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr 1fr 110px', gap: '6px 10px', alignItems: 'center' }}>
-          <span className="cap">{tr('usd.lib.col.slot')}</span>
-          <span className="cap">{tr('usd.lib.col.inComponent')}</span>
-          <span className="cap">{tr('usd.lib.col.published')}</span>
-          <span />
-          {slots.map(s => {
-            const inC = comp.slots[s], pub = comp.published[s]
-            const excluded = !!inC?.pin?.exclude
-            const pinned = !!inC?.pin && !excluded
-            const variantsText = (ref?: UsdSlotRef) => ref?.variants
-              ? Object.entries(ref.variants).map(([v, ver]) => `${v === ref.default ? '*' : ''}${v} ${ver}`).join(', ')
-              : ''
-            const differs = !pinned && !excluded && !!pub && (!inC || variantsText(inC) !== variantsText(pub))
-            const cells = [
-              <span key={`${s}-n`} style={{ fontSize: 11, color: 'var(--ink-2)' }}>{s}</span>,
-              <span key={`${s}-c`} style={{ ...mono, color: excluded ? 'var(--ink-4)' : 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                {excluded ? tr('usd.lib.removed') : inC ? `${inC.task} ${variantsText(inC)}` : '-'}
-                {pinned && (
-                  <span className="lbl" title={tr('usd.lib.pinnedHint')} style={{ fontSize: 9, color: 'var(--accent-hi)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <PinIcon size={9} strokeWidth={2} /> {inC?.pin?.version === 'latest' ? tr('usd.lib.pinnedTask') : tr('usd.lib.frozen')}
-                  </span>
-                )}
-              </span>,
-              <span key={`${s}-p`} style={{ ...mono, color: differs ? stateColor.stale : 'var(--ink-3)' }}>{pub ? `${pub.task} ${variantsText(pub)}` : '-'}</span>,
-              <div key={`${s}-a`} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                {comp.version && editing !== s && (
-                  <Btn sm ghost onClick={() => setEditing(s)}>
-                    <Pencil size={10} strokeWidth={2} /> {inC ? tr('usd.lib.changeLink') : tr('usd.lib.addSlot')}
-                  </Btn>
-                )}
-              </div>,
-            ]
-            if (editing === s) {
-              cells.push(
-                <SlotEditor key={`${s}-e`} project={project} name={comp.name} slot={s} current={inC} busy={busy}
-                  onCancel={() => setEditing(null)}
-                  onApply={pin => { void onRefresh({ [s]: pin }).then(() => setEditing(null)) }} />,
-              )
-            }
-            return cells
-          })}
-        </div>
-      </div>
+
+        {draft.departments.length === 0 && (
+          <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.comp.noDept')}</span>
+        )}
+        {draft.departments.map(dept => {
+          const files = draft.files.filter(f => f.department === dept)
+          const proposed = comp.proposed.filter(p => p.department === dept && !draft.files.some(f => f.base === p.base))
+          return (
+            <div key={dept} className="card" style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{dept}</span>
+                <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.comp.fileCount', { n: files.length })}</span>
+                <div style={{ flex: 1 }} />
+                <Btn sm ghost disabled={busy || files.length > 0} title={files.length > 0 ? tr('usd.comp.removeDeptHint') : tr('usd.lib.remove')}
+                  onClick={() => setDraft(r => ({ ...r, departments: r.departments.filter(d => d !== dept) }))}>
+                  <Trash2 size={10} strokeWidth={2} />
+                </Btn>
+              </div>
+
+              {files.map(f => {
+                const preview = rules.preview.includes(f.kind)
+                const others = draft.files.filter(o => o.id !== f.id)
+                const info = byId.get(f.id)
+                const nonUsd = !['usd', 'usda', 'usdc', 'usdz'].includes(f.format)
+                return (
+                  <div key={f.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="checkbox" checked={f.active} disabled={busy || preview}
+                        title={preview ? tr('usd.comp.previewOnly') : tr('usd.comp.activeHint')}
+                        onChange={e => patch(f.id, { active: e.target.checked })} />
+                      <span style={{ ...mono, color: 'var(--ink-2)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={f.source === 'publish' ? f.base : f.path}>{f.label}</span>
+                      <span className="lbl" style={{ fontSize: 9.5, color: nonUsd ? 'var(--warn)' : 'var(--ink-3)' }}>.{f.format}</span>
+                      <select value={f.kind} disabled={busy} onChange={e => patch(f.id, { kind: e.target.value as UsdFileKind })}
+                        style={{ ...selectStyle, width: 96 }}>
+                        {rules.kinds.map(k => <option key={k} value={k}>{tr(`usd.kind.${k}`)}</option>)}
+                      </select>
+                      {f.source === 'publish'
+                        ? <VersionSelect project={project} name={comp.name} file={f} disabled={busy} onChange={v => patch(f.id, { version: v })} />
+                        : <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', width: 104 }}>{tr('usd.comp.manual')}</span>}
+                      {info && info.found === false && (
+                        <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)' }}>{tr('usd.comp.notFound')}</span>
+                      )}
+                      <Btn sm ghost disabled={busy} title={tr('usd.lib.remove')} onClick={() => removeFile(f.id)}>
+                        <Trash2 size={10} strokeWidth={2} />
+                      </Btn>
+                    </div>
+                    <IdPills label={tr('usd.comp.targets')} ids={f.targets} disabled={busy}
+                      candidates={others.filter(o => (rules.targets[f.kind] ?? []).includes(o.kind))}
+                      onToggle={id => toggleIn(f.id, 'targets', id)} />
+                    <IdPills label={tr('usd.comp.proxyOf')} ids={f.proxy_of} disabled={busy}
+                      candidates={others.filter(o => (rules.proxy[f.kind] ?? []).includes(o.kind))}
+                      onToggle={id => toggleIn(f.id, 'proxy_of', id)} />
+                    <IdPills label={tr('usd.comp.depends')} ids={f.depends} disabled={busy} candidates={others}
+                      onToggle={id => toggleIn(f.id, 'depends', id)} />
+                  </div>
+                )
+              })}
+
+              {proposed.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
+                  <span className="cap" style={{ marginRight: 4 }}>{tr('usd.comp.proposed')}</span>
+                  {proposed.map(p => (
+                    <Pill key={p.base} style={{ cursor: 'pointer' }} onClick={() => addProposed(p)}>
+                      <Plus size={9} strokeWidth={2} /> {p.base} {p.version} .{p.format}
+                    </Pill>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input value={manual[dept] ?? ''} placeholder={tr('usd.comp.manualPath')}
+                  onChange={e => setManual(m => ({ ...m, [dept]: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') addManual(dept) }}
+                  style={{ ...selectStyle, flex: 1, fontFamily: 'var(--mono)', cursor: 'text' }} />
+                <Btn sm ghost disabled={busy || !fmtOf(manual[dept] ?? '')}
+                  title={fmtOf(manual[dept] ?? '') ? undefined : tr('usd.comp.needExt')} onClick={() => addManual(dept)}>
+                  <Plus size={11} strokeWidth={2} /> {tr('usd.lib.add')}
+                </Btn>
+              </div>
+            </div>
+          )
+        })}
+
+        {dirty && (
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+            <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-3)', flex: 1 }}>{tr('usd.comp.unsaved')}</span>
+            <Btn sm ghost disabled={busy} onClick={() => setDraft(toRecipe(comp))}><X size={11} strokeWidth={2} /> {tr('usd.comp.cancel')}</Btn>
+            <Btn sm primary disabled={busy} onClick={() => void run(() => api.saveUsdComponent(project, comp.name, draft))}>
+              <Check size={11} strokeWidth={2} /> {tr('usd.comp.save')}
+            </Btn>
+          </div>
+        )}
       </>)}
 
       {tab === 'versions' && <VersionsView versions={comp.versions} current={comp.version} />}
@@ -416,21 +584,14 @@ function ComponentDetail({ project, comp, busy, onRefresh, onOpenAssembly }: {
       {tab === 'deps' && (<>
       <SecTitle>{tr('usd.deps.sources')}</SecTitle>
       <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {SLOT_ORDER.filter(s => comp.published[s]).map(s => {
-          const pub = comp.published[s]
-          return (
-            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: 'var(--ink-2)', width: 60 }}>{s}</span>
-              <span style={{ ...mono, color: 'var(--ink-3)' }}>{pub.task}</span>
-              <span style={{ ...mono, color: 'var(--ink-3)' }}>
-                {Object.entries(pub.variants ?? {}).map(([v, ver]) => `${v} ${ver}`).join(' · ')}
-              </span>
-            </div>
-          )
-        })}
-        {SLOT_ORDER.every(s => !comp.published[s]) && (
-          <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>
-        )}
+        {comp.files.map(f => (
+          <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-2)', width: 70 }}>{f.department}</span>
+            <span style={{ ...mono, color: 'var(--ink-3)', flex: 1 }}>{f.source === 'publish' ? f.base : f.path}</span>
+            <span style={{ ...mono, color: 'var(--ink-3)' }}>{f.composed_version ?? ''}</span>
+          </div>
+        ))}
+        {comp.files.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>}
       </div>
 
       <SkeletonInfo project={project} name={comp.name} />
@@ -659,20 +820,17 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
               <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)', width: 40, textAlign: 'right' }}>
                 {i.follows_last ? tr('usd.lib.followLast') : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? tr('usd.lib.frozen'))}
               </span>
-              {/* ADR 0019: pick a department variant of the referenced component. */}
-              {SLOT_ORDER.map(dept => {
-                const choices = Object.keys(componentOf(i)?.slots[dept]?.variants ?? {})
-                if (choices.length < 2) return null
-                return (
-                  <select key={dept} value={i.variants?.[dept] ?? ''} disabled={busy}
-                    title={`${tr('usd.lib.variant')} ${dept}`}
-                    onChange={e => void edit([{ op: 'set_variant', name, department: dept, variant: e.target.value }])}
-                    style={{ ...selectStyle, width: 86, fontFamily: 'var(--mono)' }}>
-                    <option value="">{dept} ·</option>
-                    {choices.map(v => <option key={v} value={v}>{dept} {v}</option>)}
-                  </select>
-                )
-              })}
+              {/* ADR 0023: each component file is a variant set on / off; an instance may override it. */}
+              {(componentOf(i)?.files.length ?? 0) > 1 && componentOf(i)?.files.map(f => (
+                <select key={f.id} value={i.variants?.[f.id] ?? ''} disabled={busy}
+                  title={`${tr('usd.lib.variant')} ${f.label}`}
+                  onChange={e => void edit([{ op: 'set_variant', name, department: f.id, variant: e.target.value }])}
+                  style={{ ...selectStyle, width: 110, fontFamily: 'var(--mono)' }}>
+                  <option value="">{f.label} ·</option>
+                  <option value="on">{f.label} on</option>
+                  <option value="off">{f.label} off</option>
+                </select>
+              ))}
               {i.broken && (
                 <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 4 }}>
                   <AlertTriangle size={10} strokeWidth={2} /> {tr('usd.lib.broken')}
