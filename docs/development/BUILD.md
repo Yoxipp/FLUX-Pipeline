@@ -52,6 +52,9 @@ Compile `app/src/` en bundle statique `dist/`. `base: './'` dans `vite.config.ts
 
 `scripts/backend.spec` : entree `backend/main.py`, `datas=[("resources", "resources")]`, `collect_submodules`
 uvicorn/fastapi/pydantic (imports dynamiques), `collect_all("pxr")` (usd-core importe en lazy), exclut PySide6/PyQt5/tkinter.
+`app_datas` liste les fichiers non Python lus a cote du code (`Path(__file__)`) : YAML `flux_actions/config/*.yml`,
+`schema.json` des recettes USD, sources des plugins DCC copies dans les logiciels. Tout nouveau fichier de ce type
+doit y etre ajoute (sinon FileNotFoundError -> HTTP 500 en build seulement ; test `tests/system/test_frozen_bundle.py`).
 En mode frozen, `shelf_core.py` retrouve `resources/` via `sys._MEIPASS` ; `config.json` vit dans `%APPDATA%/FluxPipeline/`.
 
 ### 3. `build:electron` (tsc)

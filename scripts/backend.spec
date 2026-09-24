@@ -32,13 +32,29 @@ hidden = (
     + oiio_hidden
 )
 
+# Non-Python files the backend reads next to its own modules (Path(__file__)...).
+# PyInstaller only packs .py into the PYZ, so each must be listed here or the
+# frozen app hits FileNotFoundError (-> bare HTTP 500): the action YAML drive every
+# engine publish (Maya, Houdini, generic, texture conform, USD proxy), schema.json
+# validates USD recipes, and the DCC plugin sources are copied into the softwares.
+app_datas = [
+    (str(ROOT / "backend/flux_actions/config/*.yml"), "flux_actions/config"),
+    (str(ROOT / "backend/features/usd_assembler/recipe/schema.json"),
+     "features/usd_assembler/recipe"),
+    (str(ROOT / "backend/dcc/houdini/flux_houdini_server.py"), "dcc/houdini"),
+    (str(ROOT / "backend/dcc/mari/mari_bridge.py"), "dcc/mari"),
+    (str(ROOT / "backend/dcc/substance_painter/substance_painter_bridge.py"),
+     "dcc/substance_painter"),
+    (str(ROOT / "backend/dcc/zbrush/zbrush_bridge_plugin.py"), "dcc/zbrush"),
+]
+
 a = Analysis(
     [str(ROOT / "backend/main.py")],
     pathex=[str(ROOT / "backend")],
     binaries=pxr_binaries + oiio_binaries,
     datas=[
         (str(ROOT / "backend/resources"), "resources"),
-    ] + pxr_datas + oiio_datas,
+    ] + app_datas + pxr_datas + oiio_datas,
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],

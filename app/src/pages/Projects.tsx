@@ -2085,6 +2085,32 @@ export function Projects() {
     }
   }, [nav])
 
+  // Files a Houdini LOP loads directly (USD + Houdini's USD file format plugins).
+  const LOP_IMPORT_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz', '.abc', '.bgeo', '.sc', '.geo', '.obj',
+                                   '.fbx', '.vdb', '.gltf', '.glb', '.ply', '.stl'])
+  const LOP_MODE_LABELS = { reference: 'Reference', payload: 'Payload', sublayer: 'Sublayer' } as const
+
+  const handleImportHoudiniLop = useCallback(async (item: ExplorerItem, mode: keyof typeof LOP_MODE_LABELS) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    const label = LOP_MODE_LABELS[mode]
+    const id = toast.loading(`${label} de ${item.name} dans Houdini…`)
+    try {
+      const res = await api.houdiniImportLop(nav.project, rel_path, mode)
+      const r = res.result
+      const added = r?.mode?.endsWith('_added')
+      toast.success(added
+        ? `${item.name} ajouté à ${r?.node_path} (entrée ${r?.entry})`
+        : `${item.name} : ${label} LOP créé (${r?.node_path})`, { id })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)
+      toast.error(offline
+        ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
+        : `Import LOP échoué : ${msg}`, { id })
+    }
+  }, [nav])
+
   const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc', '.usd', '.usda', '.usdc', '.usdz'])
 
   const handleOpenInMaya = useCallback(async (item: ExplorerItem, relOverride?: string, mode: 'import' | 'proxy' = 'import') => {
@@ -2155,6 +2181,14 @@ export function Projects() {
     // V4 (ADR 0019 points 5 and 7): a USD file opens what the pipeline loads (the asset,
     // the decor or the shot), the department layer alone comes second, an old file never.
     const lt = loadTargets?.name === item.name ? loadTargets.lt : null
+    // Houdini LOP: this exact file as Reference / Payload / Sublayer, into the
+    // selected LOP of that kind or a new one (any USD-readable format).
+    const lopTargets = dccStatus['Houdini']?.connected && LOP_IMPORT_EXTS.has(ext)
+      ? (Object.keys(LOP_MODE_LABELS) as (keyof typeof LOP_MODE_LABELS)[]).map(mode => ({
+          dcc: `Houdini LOP : ${LOP_MODE_LABELS[mode]}`,
+          onClick: () => void handleImportHoudiniLop(item, mode),
+        }))
+      : []
     if (USD_EXTS.has(ext) && lt) {
       for (const t of lt.targets) {
         const label = t.primary ? t.label : 'couche seule'
@@ -2170,12 +2204,15 @@ export function Projects() {
       }
       if (lt.legacy) {
         targets.push({ dcc: 'Ancien fichier : supprimer (backup)', onClick: () => void handleDeleteLegacy(item) })
+      } else {
+        targets.push(...lopTargets)
       }
       return targets
     }
     if (dccStatus['Houdini']?.connected) {
       targets.push({ dcc: 'Houdini', onClick: () => void handleOpenInHoudini(item) })
     }
+    targets.push(...lopTargets)
     if (dccStatus['Maya']?.connected && MAYA_IMPORT_EXTS.has(ext)) {
       targets.push({ dcc: 'Maya', onClick: () => void handleOpenInMaya(item) })
     }
@@ -2187,7 +2224,7 @@ export function Projects() {
       targets.push({ dcc: 'Photoshop', onClick: () => void handleOpenInPhotoshop(item) })
     }
     return targets
-  }, [nav, dccStatus, loadTargets, handleOpenInHoudini, handleOpenInMaya, handleOpenInNuke, handleOpenInPhotoshop, handleDeleteLegacy, MAYA_IMPORT_EXTS, NUKE_IMPORT_EXTS, PS_OPEN_EXTS])
+  }, [nav, dccStatus, loadTargets, handleOpenInHoudini, handleImportHoudiniLop, LOP_IMPORT_EXTS, LOP_MODE_LABELS, handleOpenInMaya, handleOpenInNuke, handleOpenInPhotoshop, handleDeleteLegacy, MAYA_IMPORT_EXTS, NUKE_IMPORT_EXTS, PS_OPEN_EXTS])
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
@@ -2959,7 +2996,7 @@ export function Projects() {
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
-          onCopyHoudiniPath={ctxMenu.items.length === 1 && !ctxMenu.items[0].isDir ? () => void handleCopyHoudiniPath(ctxMenu.items[0]) : undefined}
+          onCopyHoudiniPath={ctxMenu.items.length === 1 ? () => void handleCopyHoudiniPath(ctxMenu.items[0]) : undefined}
           openInTargets={buildOpenInTargets(ctxMenu.items)}
           onClose={() => setCtxMenu(null)}
         />

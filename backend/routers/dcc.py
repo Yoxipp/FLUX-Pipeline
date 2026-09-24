@@ -470,6 +470,42 @@ async def dcc_load_targets(project: str, rel_path: str) -> dict:
     return await loop.run_in_executor(None, lambda: load_targets(project_path, target))
 
 
+class HoudiniLopImportRequest(BaseModel):
+    project:  str
+    rel_path: str
+    mode:     str = "reference"   # reference | payload | sublayer
+
+
+@router.post("/houdini/import/lop")
+async def houdini_import_lop(req: HoudiniLopImportRequest) -> dict:
+    """Load a project file in a LOP network as a Reference, Payload or Sublayer:
+    added to the selected LOP of that kind, else a new LOP wired after the selection
+    (see dcc.houdini.houdini_import.import_into_lop)."""
+    from core.paths import get_project_path, is_subpath
+    from dcc.houdini.houdini_import import import_into_lop
+
+    if req.mode not in ("reference", "payload", "sublayer"):
+        raise HTTPException(status_code=400, detail=f"Mode inconnu : {req.mode}")
+    pp = get_project_path(req.project)
+    target = (pp / req.rel_path).resolve()
+    if not pp.exists() or not is_subpath(target, pp.resolve()) or not target.is_file():
+        raise HTTPException(status_code=404, detail=f"Fichier introuvable : {req.rel_path}")
+    _refuse_legacy(pp, target)
+
+    file_value = str(target)
+    from flux_actions.switch import portable_paths_enabled
+    if portable_paths_enabled():
+        from core.paths import to_flux_token
+        file_value = to_flux_token(file_value)
+
+    loop = asyncio.get_running_loop()
+    resp = await loop.run_in_executor(
+        None, lambda: import_into_lop(file_value, req.mode, str(target)))
+    if not resp.get("ok"):
+        raise HTTPException(status_code=503, detail=resp.get("error", "Import LOP echoue"))
+    return resp
+
+
 @router.post("/houdini/importer/create_node")
 async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) -> dict:
     """Create a flux_importer node in the active Houdini network.
@@ -520,6 +556,19 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
             selected_file = to_flux_token(selected_file)
 
     loop = asyncio.get_running_loop()
+
+    # LOP context: a selected Reference / Sublayer LOP receives the file as a new
+    # entry, and a non-USD file (bgeo, abc, fbx...) is referenced (Houdini reads it
+    # through its USD file format plugins) instead of falling back to /obj.
+    if selected_file:
+        from dcc.houdini.houdini_import import import_into_lop
+        abs_sel = str(get_project_path(req.project) / req.rel_path.replace("/", "\\"))
+        lop = await loop.run_in_executor(
+            None, lambda: import_into_lop(selected_file, "auto", abs_sel))
+        if not lop.get("ok"):
+            raise HTTPException(status_code=503, detail=lop.get("error", "Import LOP echoue"))
+        if (lop.get("result") or {}).get("handled"):
+            return lop
 
     # Non-USD: the flux_importer HDA is USD-only, so a .bgeo/.abc/.fbx/.obj file
     # goes through a plain native import in the current pane (falls back to /obj

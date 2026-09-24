@@ -38,6 +38,8 @@ _ROP_PARM: dict[str, str] = {
     "alembic":      "filename",
     "rop_alembic":  "filename",
     "usdexport":    "lopoutput",
+    "usd_rop":      "lopoutput",    # USD ROP LOP (Solaris)
+    "usd":          "lopoutput",    # USD ROP (/out)
     "rop_fbx":      "sopoutput",
     "filmboxfbx":   "sopoutput",    # Filmbox FBX ROP (/out)
     "ifd":          "vm_picture",   # Mantra
@@ -313,11 +315,27 @@ def export_via_node(
         # Nodes created for this export only: destroyed after the cook, so repeated
         # publishes no longer pile up flux_export1, flux_export2... in the network.
         _tmp = []
+        _cat = _n.type().category().name()
+        _ctc = _n.childTypeCategory()
+        _is_lop = _cat == 'Lop' or (_ctc is not None and _ctc.name() == 'Lop')
         if _tname in _ropmap:
             _rop = _n
             _op = _ropmap[_tname]
+        elif _is_lop:
+            # Solaris: a LOP (or a LOP network such as /stage) is exported by a USD
+            # ROP LOP wired to it, created in the same LOP network.
+            if _ext not in ('.usd', '.usda', '.usdc'):
+                raise RuntimeError("A LOP node can only be exported to USD (got %s)" % _ext)
+            if _cat == 'Lop':
+                _parent, _lop = _n.parent(), _n
+            else:
+                _parent, _lop = _n, _n.displayNode()
+            if _lop is None:
+                raise RuntimeError("No LOP to export inside %s" % _n.path())
+            _rop = _parent.createNode('usd_rop', node_name='flux_export'); _op = 'lopoutput'
+            _tmp.append(_rop)
+            _rop.setFirstInput(_lop)
         else:
-            _cat = _n.type().category().name()
             if _cat == 'Sop':
                 _parent, _sop, _objroot = _n.parent(), _n, _n.parent()
             elif _n.childTypeCategory() and _n.childTypeCategory().name() == 'Sop':

@@ -8,8 +8,9 @@ import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Ensure backend/ is on sys.path when run directly
 sys.path.insert(0, os.path.dirname(__file__))
@@ -110,6 +111,20 @@ app.add_middleware(
 # Added after CORS so it runs first: browser requests without the per-launch token
 # are refused before reaching any route (security S1, see core/api_auth.py).
 app.add_middleware(ApiAuthMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+    """Log any uncaught route error to the FLUX log and hand its message to the front.
+
+    Without this a crash is a bare "HTTP 500" in the UI and the traceback only goes
+    to uvicorn's stderr, which the packaged app (console=False) never shows.
+    """
+    log.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Erreur interne ({type(exc).__name__}) : {exc}"},
+    )
 
 
 @app.get(api_auth.TOKEN_PATH, tags=["Health"])

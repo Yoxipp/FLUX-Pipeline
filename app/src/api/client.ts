@@ -612,6 +612,12 @@ export const api = {
       'POST', '/dcc/houdini/importer/create_node', params,
     ),
 
+  // LOP: add the file to the selected Reference / Sublayer LOP, else a new one.
+  houdiniImportLop: (project: string, rel_path: string, mode: 'reference' | 'payload' | 'sublayer') =>
+    apiCall<{ ok: boolean; result?: { node_path?: string; mode?: string; entry?: number } }>(
+      'POST', '/dcc/houdini/import/lop', { project, rel_path, mode },
+    ),
+
   // Shelf
   getShelves: () =>
     apiCall<Record<string, { versions: string[]; installed: Record<string, boolean>; hdas_installed: Record<string, boolean> }>>('GET', '/shelf'),
