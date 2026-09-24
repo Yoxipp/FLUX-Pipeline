@@ -76,8 +76,10 @@ def _publish_base(path: Path) -> tuple[str, str | None]:
 
 
 def _component_version_for(parent: Path, name: str, dept: str, version: str) -> str | None:
-    """Most recent component version whose *dept* slot uses publish *version*."""
-    from features.usd_assembler.component_auto import COMPONENT_EXT, _entry_flux
+    """Most recent component version that composes a *dept* file at publish *version*."""
+    from features.usd_assembler.component_auto import (
+        COMPONENT_EXT, _entry_flux, _json_field, department_layer,
+    )
 
     rx = re.compile(rf"^{re.escape(name)}_(v\d+)$")
     found = []
@@ -86,8 +88,15 @@ def _component_version_for(parent: Path, name: str, dept: str, version: str) -> 
         entry = d / f"{name}{COMPONENT_EXT}"
         if not m or not entry.is_file():
             continue
-        slot = ((_entry_flux(entry).get("slots") or {}).get(dept) or {})
-        if slot.get("version") == version:
+        flux = _entry_flux(entry)
+        signature = _json_field(flux, "signature")
+        if signature:
+            files = {f["id"]: f for f in (signature.get("recipe") or {}).get("files", [])}
+            hit = any(department_layer(files[fid]["department"])[0] == dept and f.get("version") == version
+                      for fid, f in (signature.get("files") or {}).items() if fid in files)
+        else:           # before ADR 0023: one slot per department
+            hit = ((flux.get("slots") or {}).get(dept) or {}).get("version") == version
+        if hit:
             found.append(m.group(1))
     return max(found, key=lambda v: int(v[1:])) if found else None
 

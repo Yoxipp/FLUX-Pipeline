@@ -11,7 +11,7 @@ from pxr import Gf, Sdf, Usd, UsdGeom
 from features.folder_manager import tokens as tok
 from features.usd_assembler import assembly_v2 as av
 from features.usd_assembler import layout_publish as lpub
-from features.usd_assembler.component_auto import refresh_component
+from features.usd_assembler.component_auto import add_proposed
 from features.usd_assembler.library import build_library
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
 
@@ -42,7 +42,7 @@ class LayoutPublish(unittest.TestCase):
         publish_light_asset(_asset(), self.project, fmt="usd",
                             dest_dir=self.project / "assets/chara/UTAH/model/null",
                             base_name="CHAR_GEO_UTAH_null")
-        refresh_component(self.project, "UTAH")
+        add_proposed(self.project, "UTAH", ["GEO"])      # created by hand (ADR 0023)
         av.create_assembly(self.project, "TOWN")
         av.edit_assembly(self.project, "TOWN", [{"op": "add", "component": "UTAH", "count": 2}])   # v002
 

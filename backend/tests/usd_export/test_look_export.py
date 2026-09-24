@@ -10,6 +10,7 @@ from unittest import mock
 
 from pxr import Sdf, Usd, UsdGeom, UsdShade
 
+from features.usd_assembler.component_auto import add_proposed
 from features.folder_manager import tokens as tok
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
 from features.usd_export.look_export import author_look_layer, publish_look_asset
@@ -147,6 +148,7 @@ class LookPublish(unittest.TestCase):
         publish_light_asset(asset, self.project, fmt="usda",
                             dest_dir=self.project / self._REL / "model" / "null",
                             base_name="CHAR_GEO_DAVID_null", user="adam")
+        add_proposed(self.project, "DAVID", ["GEO", "SHADING"])   # created by hand (ADR 0023)
 
     def test_look_publish_feeds_the_component_between_model_and_rig(self) -> None:
         self._publish_geo()
@@ -159,7 +161,8 @@ class LookPublish(unittest.TestCase):
         self.assertTrue((dest / "CHAR_SHADING_DAVID_null_v001"
                          / "CHAR_SHADING_DAVID_null_look.usda").is_file())
         self.assertTrue((dest / "CHAR_SHADING_DAVID_null_LAST.usda").is_file())
-        self.assertIsNotNone(res["component"])
+        self.assertIsNone(res["component"])          # a new publish is proposed, never added
+        res["component"] = add_proposed(self.project, "DAVID")["version"]
         # A look carries no render mesh: no proxy file may be written beside it.
         self.assertEqual(list((dest / "CHAR_SHADING_DAVID_null_v001").glob("*.proxy.usda")), [])
 

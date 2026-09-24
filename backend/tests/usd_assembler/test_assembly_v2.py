@@ -12,7 +12,7 @@ from pxr import Sdf, Usd, UsdGeom
 
 from features.folder_manager import tokens as tok
 from features.usd_assembler import assembly_v2 as av
-from features.usd_assembler.component_auto import refresh_component
+from features.usd_assembler.component_auto import add_proposed
 from features.usd_assembler.library import build_library
 from features.usd_assembler.resolve.flux_resolver import FluxResolver
 from features.usd_assembler.usd_assembler_core import assemble
@@ -47,7 +47,8 @@ class AssemblyV2(unittest.TestCase):
             publish_light_asset(_asset(), self.project, fmt="usd",
                                 dest_dir=self.project / tokens["NAME"][name] / "model" / "null",
                                 base_name=f"{cls}_GEO_{name}_null")
-        self.assertIsNotNone(refresh_component(self.project, "UTAH") or True)
+        for name in ("UTAH", "BARREL"):
+            add_proposed(self.project, name, ["GEO"])      # components are created by hand (ADR 0023)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -106,29 +107,29 @@ class AssemblyV2(unittest.TestCase):
         self.assertEqual([i["name"] for i in av.read_instances(self.project, "TOWN")], ["UTAH_01"])
 
     def test_instance_picks_a_component_variant(self) -> None:
-        # A second INSTANCE of UTAH is a variant of its model department (ADR 0019);
-        # each assembly instance can pick which one it shows.
+        # Each file of a component is a variant set on / off (ADR 0023); each assembly
+        # instance can pick what it shows.
         publish_light_asset(_asset(), self.project, fmt="usd",
                             dest_dir=self.project / "assets/chara/UTAH" / "model" / "B",
                             base_name="CHAR_GEO_UTAH_B")
-        refresh_component(self.project, "UTAH")
+        add_proposed(self.project, "UTAH")
         av.create_assembly(self.project, "TOWN")
         av.edit_assembly(self.project, "TOWN", [{"op": "add", "component": "UTAH", "count": 2}])
         res = av.edit_assembly(self.project, "TOWN", [
-            {"op": "set_variant", "name": "UTAH_02", "department": "model", "variant": "B"}])
+            {"op": "set_variant", "name": "UTAH_02", "department": "geo_B", "variant": "off"}])
         self.assertEqual(res["warnings"], [])
         stage = self._stage("TOWN")
-        self.assertEqual(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_01").GetVariantSet("model").GetVariantSelection(), "null")
-        self.assertEqual(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_02").GetVariantSet("model").GetVariantSelection(), "B")
+        self.assertEqual(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_01").GetVariantSet("geo_B").GetVariantSelection(), "on")
+        self.assertEqual(stage.GetPrimAtPath("/TOWN/CHAR/UTAH_02").GetVariantSet("geo_B").GetVariantSelection(), "off")
         inst = next(i for i in av.read_instances(self.project, "TOWN") if i["name"] == "UTAH_02")
-        self.assertEqual(inst["variants"], {"model": "B"})
+        self.assertEqual(inst["variants"], {"geo_B": "off"})
         # back to the component default, and an unknown variant is refused
         av.edit_assembly(self.project, "TOWN", [
-            {"op": "set_variant", "name": "UTAH_02", "department": "model", "variant": ""}])
+            {"op": "set_variant", "name": "UTAH_02", "department": "geo_B", "variant": ""}])
         self.assertEqual(av.read_instances(self.project, "TOWN")[1].get("variants", {}), {})
         with self.assertRaises(ValueError):
             av.edit_assembly(self.project, "TOWN", [
-                {"op": "set_variant", "name": "UTAH_01", "department": "model", "variant": "NOPE"}])
+                {"op": "set_variant", "name": "UTAH_01", "department": "geo_B", "variant": "NOPE"}])
 
     def test_noop_edit_and_errors(self) -> None:
         av.create_assembly(self.project, "TOWN")

@@ -12,6 +12,7 @@ from unittest import mock
 
 from pxr import Sdf, Usd, UsdSkel
 
+from features.usd_assembler.component_auto import add_proposed
 from features.folder_manager import tokens as tok
 from features.usd_export import AnimData, LightAsset, MeshData, SkeletonData, publish_light_asset
 from features.usd_export.departments import character_name, contribution, is_motion_only
@@ -75,6 +76,7 @@ class ShotAnimPublish(unittest.TestCase):
         publish_light_asset(_rig(), self.project, fmt="usda",
                             dest_dir=self.project / _REL / "model" / "null",
                             base_name="CHAR_GEO_DINGO_null", user="adam")
+        add_proposed(self.project, "DINGO", ["GEO"])     # components are created by hand (ADR 0023)
         self.dest = self.project / "shot" / "SEQ001" / "SHOT010" / "anim" / "dingo"
 
     def _publish(self, anim: AnimData | None = None) -> dict:

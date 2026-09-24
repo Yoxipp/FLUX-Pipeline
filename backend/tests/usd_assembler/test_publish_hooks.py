@@ -51,7 +51,11 @@ class ProxyReachesTheAsset(unittest.TestCase):
         stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/UTAH").GetPrim())
         _grid(stage, "/UTAH/geo/render/body")
         stage.GetRootLayer().Save()
+        from features.usd_assembler.component_auto import add_proposed, exists
+
         publish_file(src, self.project, "test", "adam", "PROJ")
+        if not exists(self.project, "UTAH"):
+            add_proposed(self.project, "UTAH", ["GEO"])  # created by hand (ADR 0023)
         return self.project / _NAME_REL / "model" / "null"
 
     def _faces(self, stage: Usd.Stage, path: str) -> int:

@@ -1,5 +1,5 @@
-# USD_ASSEMBLER_V2 A2: library of existing components (ADR 0018) and assemblies,
-# with state, used_by, instance -> component mapping and broken links.
+# USD_ASSEMBLER_V2 A2: library of existing components (created by hand, ADR 0023) and
+# assemblies, with state, used_by, instance -> component mapping and broken links.
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from features.folder_manager import tokens as tok
-from features.usd_assembler.component_auto import refresh_component
+from features.usd_assembler import component_auto as ca
 from features.usd_assembler.library import build_library, relink_instance
 from features.usd_assembler.resolve.flux_resolver import FluxResolver
 from features.usd_assembler.usd_assembler_core import assemble
@@ -40,6 +40,7 @@ class Library(unittest.TestCase):
         publish_light_asset(_asset(), self.project, fmt="usd",
                             dest_dir=self.project / _NAME_REL / "model" / "null",
                             base_name="CHAR_GEO_UTAH_null")
+        ca.add_proposed(self.project, "UTAH", ["GEO", "RIG"])     # v001 created, v002 filled
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -55,10 +56,21 @@ class Library(unittest.TestCase):
         lib = build_library(self.project)
         self.assertEqual([c["name"] for c in lib["components"]], ["UTAH"])
         comp = lib["components"][0]
-        self.assertEqual(comp["state"], "ok")
-        self.assertEqual(comp["version"], "v001")
-        self.assertEqual(comp["slots"]["model"]["task"], "GEO")
+        self.assertEqual((comp["state"], comp["version"], comp["departments"]), ("ok", "v002", ["GEO", "RIG"]))
+        self.assertEqual([(f["department"], f["resolved_version"], f["composed_version"]) for f in comp["files"]],
+                         [("GEO", "v001", "v001")])
         self.assertEqual(comp["class"], "CHAR")   # deep link to Production
+        self.assertEqual(lib["creatable"], ["EMPTY"])
+        self.assertIn("GEO", lib["departments"])
+        self.assertNotIn("MULT", lib["departments"])
+
+    def test_published_asset_without_component_is_not_listed(self) -> None:
+        publish_light_asset(_asset(), self.project, fmt="usd",
+                            dest_dir=self.project / "assets/chara/EMPTY/model/null",
+                            base_name="CHAR_GEO_EMPTY_null")
+        lib = build_library(self.project)
+        self.assertEqual([c["name"] for c in lib["components"]], ["UTAH"])
+        self.assertEqual(lib["creatable"], ["EMPTY"])
 
     def test_assembly_instances_and_used_by(self) -> None:
         self._assemble()
@@ -75,7 +87,8 @@ class Library(unittest.TestCase):
         usd_dir = self.project / _NAME_REL / "usd"
         shutil.rmtree(usd_dir)
         lib = build_library(self.project)
-        self.assertEqual(lib["components"][0]["state"], "missing")
+        self.assertEqual(lib["components"], [])
+        self.assertEqual(lib["creatable"], ["EMPTY", "UTAH"])
         self.assertEqual(lib["assemblies"][0]["broken"], 2)
 
     def _publish_rig(self) -> None:
@@ -83,29 +96,26 @@ class Library(unittest.TestCase):
                             dest_dir=self.project / _NAME_REL / "rig" / "null",
                             base_name="CHAR_RIG_UTAH_null")
 
-    def test_pin_survives_publish_and_can_be_cleared(self) -> None:
-        self._publish_rig()                               # v002: rig department
-        res = refresh_component(self.project, "UTAH",
-                                pins={"rig": {"instance": "null", "version": "v001"}})
-        self.assertEqual(res["version"], "v003")
-        self._publish_rig()                               # new RIG publish keeps the pin
-        comp = build_library(self.project)["components"][0]
-        self.assertEqual(comp["slots"]["rig"]["version"], "v001")
-        self.assertEqual(comp["slots"]["rig"]["pin"]["version"], "v001")
-        self.assertEqual(comp["published"]["rig"]["version"], "v002")
-        self.assertEqual(comp["state"], "ok")
-        res = refresh_component(self.project, "UTAH", pins={"rig": None})
-        self.assertEqual(res["slots"]["rig"]["version"], "v002")
-        self.assertNotIn("pin", res["slots"]["rig"])
-
-    def test_exclude_slot(self) -> None:
+    def test_frozen_file_survives_publish_and_proposals_are_listed(self) -> None:
         self._publish_rig()
-        res = refresh_component(self.project, "UTAH", pins={"rig": {"exclude": True}})
-        self.assertNotIn("rig", res["slots"])
         comp = build_library(self.project)["components"][0]
-        self.assertEqual(comp["slots"]["rig"]["pin"], {"exclude": True})
-        with self.assertRaises(ValueError):
-            refresh_component(self.project, "UTAH", pins={"model": {"exclude": True}})
+        self.assertEqual([p["base"] for p in comp["proposed"]], ["CHAR_RIG_UTAH_null"])
+        recipe = ca.current_recipe(self.project, "UTAH")
+        recipe["files"][0]["version"] = "v001"
+        ca.save_component(self.project, "UTAH", recipe)
+        publish_light_asset(_asset(), self.project, fmt="usd",
+                            dest_dir=self.project / _NAME_REL / "model" / "null",
+                            base_name="CHAR_GEO_UTAH_null")      # GEO v002
+        comp = build_library(self.project)["components"][0]
+        self.assertEqual((comp["files"][0]["composed_version"], comp["state"]), ("v001", "ok"))
+
+    def test_removed_file_leaves_the_component(self) -> None:
+        recipe = ca.current_recipe(self.project, "UTAH")
+        recipe["files"] = []
+        res = ca.save_component(self.project, "UTAH", recipe)
+        self.assertEqual(res["files"], {})
+        comp = build_library(self.project)["components"][0]
+        self.assertEqual((comp["state"], [p["base"] for p in comp["proposed"]]), ("empty", ["CHAR_GEO_UTAH_null"]))
 
     def test_relink_instance_to_frozen_version(self) -> None:
         self._assemble()

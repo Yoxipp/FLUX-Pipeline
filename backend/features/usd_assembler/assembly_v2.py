@@ -331,25 +331,19 @@ def apply_ops(project_path: str | Path, instances: list[dict], ops: list[dict]) 
 
 
 def _component_variants(project_path: Path, component: str, version: str) -> dict[str, list[str]]:
-    """{department: [variant...]} offered by a component entry (ADR 0019)."""
-    from pxr import Sdf
-
+    """{variant set: [variant...]} offered by a component entry (ADR 0019, one set per
+    file since ADR 0023)."""
     from features.publisher.last_pointer import read_layer_flux
+
+    from .component_auto import entry_variant_sets
 
     entry = _component_target(project_path, component, version)
     if entry.is_file() and entry.name.endswith(f"_LAST{COMPONENT_EXT}"):
-        # LAST is a pointer layer (ADR 0017): the slots live in the version it targets.
+        # LAST is a pointer layer (ADR 0017): the recipe lives in the version it targets.
         target = (read_layer_flux(entry) or {}).get("target")
         if target and (entry.parent / target).is_file():
             entry = entry.parent / target
-    layer = Sdf.Layer.OpenAsAnonymous(str(entry)) if entry.is_file() else None
-    if layer is None:
-        return {}
-    from .component_auto import _plain
-
-    flux = _plain(dict(layer.customLayerData).get("flux", {}))
-    slots = flux.get("slots") or {}
-    return {dept: sorted((s.get("variants") or {}).keys()) for dept, s in slots.items()}
+    return entry_variant_sets(entry) if entry.is_file() else {}
 
 
 def _keep_known_variants(project_path: Path, inst: dict) -> dict[str, str]:

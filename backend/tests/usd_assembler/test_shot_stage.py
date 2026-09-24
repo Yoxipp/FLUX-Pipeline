@@ -12,6 +12,7 @@ from unittest import mock
 
 from pxr import Sdf, Usd, UsdGeom, UsdSkel
 
+from features.usd_assembler.component_auto import add_proposed
 from features.folder_manager import tokens as tok
 from features.usd_assembler import shot_stage as ss
 from features.usd_export import AnimData, LightAsset, MeshData, SkeletonData, publish_light_asset
@@ -67,6 +68,7 @@ class ShotStage(unittest.TestCase):
         publish_light_asset(_rig(), self.project, fmt="usda",
                             dest_dir=self.project / _REL / "model" / "null",
                             base_name="CHAR_GEO_DINGO_null", user="adam")
+        add_proposed(self.project, "DINGO", ["GEO"])     # components are created by hand (ADR 0023)
 
     def _publish_anim(self, character="DINGO", times=(1001.0, 1002.0, 1003.0)) -> dict:
         return publish_light_asset(

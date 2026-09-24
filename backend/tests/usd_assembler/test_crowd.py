@@ -13,6 +13,7 @@ from pxr import Sdf, Usd, UsdSkel
 from features.folder_manager import tokens as tok
 from features.usd_assembler import crowd
 from features.usd_assembler import shot_stage as ss
+from features.usd_assembler.component_auto import add_proposed
 from features.usd_export import AnimData, LightAsset, MeshData, SkeletonData, publish_light_asset
 
 _ID = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
@@ -62,6 +63,7 @@ class Crowd(unittest.TestCase):
         publish_light_asset(asset, self.project, fmt="usda",
                             dest_dir=self.project / f"assets/chara/{name}/model/null",
                             base_name=f"CHAR_GEO_{name}_null", user="adam")
+        add_proposed(self.project, name, ["GEO"])      # components are created by hand (ADR 0023)
 
     def test_same_joints_same_signature(self) -> None:
         self.assertEqual(crowd.skeleton_signature(_BIPED), crowd.skeleton_signature(list(_BIPED)))

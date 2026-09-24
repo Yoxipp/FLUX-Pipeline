@@ -10,6 +10,7 @@ from unittest import mock
 
 from pxr import Sdf
 
+from features.usd_assembler.component_auto import add_proposed
 from features.folder_manager import tokens as tok
 from features.importer.load_target import delete_legacy_file, is_legacy_file, legacy_files, load_targets
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
@@ -42,6 +43,7 @@ class LoadTargets(unittest.TestCase):
         self.pub = publish_light_asset(_geo(), self.project, fmt="usda",
                                        dest_dir=self.project / _REL / "model" / "null",
                                        base_name="CHAR_GEO_DINGO_null", user="adam")
+        add_proposed(self.project, "DINGO", ["GEO"])     # components are created by hand (ADR 0023)
         self.asset_last = self.project / _REL / "usd" / "DINGO_LAST.usda"
 
     def test_a_department_layer_proposes_the_asset_first(self) -> None:
@@ -54,7 +56,7 @@ class LoadTargets(unittest.TestCase):
     def test_a_layer_version_proposes_the_asset_version_that_uses_it(self) -> None:
         r = load_targets(self.project, self.pub["version_root"])
         self.assertIn("v001", r["targets"][0]["label"])
-        self.assertTrue(r["targets"][0]["rel_path"].endswith("DINGO_v001/DINGO.usda"))
+        self.assertTrue(r["targets"][0]["rel_path"].endswith("DINGO_v002/DINGO.usda"))   # v001: created empty
 
     def test_the_asset_itself_opens_as_is(self) -> None:
         r = load_targets(self.project, self.asset_last)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from features.folder_manager import tokens as tok
 from features.usd_assembler import assembly_v2 as av
-from features.usd_assembler.component_auto import refresh_component
+from features.usd_assembler.component_auto import add_proposed
 from features.usd_assembler.inspect import composition
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
 
@@ -42,7 +42,7 @@ class Composition(unittest.TestCase):
             publish_light_asset(_asset(), self.project, fmt="usda",
                                 dest_dir=self.project / "assets/chara/UTAH/model" / instance,
                                 base_name=f"CHAR_GEO_UTAH_{instance}")
-        refresh_component(self.project, "UTAH")
+        add_proposed(self.project, "UTAH", ["GEO"])      # created by hand (ADR 0023)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -53,8 +53,9 @@ class Composition(unittest.TestCase):
         tree = comp["tree"]
         self.assertEqual((tree["path"], tree["kind"], tree["type"]), ("/UTAH", "component", "SkelRoot"))
         self.assertEqual(tree["arcs"][0]["arc"], "payload")
-        self.assertEqual(sorted(tree["variant_sets"]["model"]["variants"]), ["B", "null"])
-        self.assertEqual(tree["variant_sets"]["model"]["selection"], "null")
+        self.assertEqual(sorted(tree["variant_sets"]), ["geo_B", "geo_null"])      # one per file
+        self.assertEqual(sorted(tree["variant_sets"]["geo_B"]["variants"]), ["off", "on"])
+        self.assertEqual(tree["variant_sets"]["geo_B"]["selection"], "on")
         names = [c["name"] for c in tree["children"]]
         self.assertIn("geo", names)
         geo = next(c for c in tree["children"] if c["name"] == "geo")

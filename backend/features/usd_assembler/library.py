@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core.logger import get_logger
 
-from .component_auto import COMPONENT_EXT, DEPARTMENTS, _plain, collect_slots, component_dir
+from .component_auto import COMPONENT_EXT, component_dir
 
 log = get_logger("usd_assembler.library")
 
@@ -29,27 +29,6 @@ def _component_versions(parent: Path, name: str) -> list[str]:
             if m and p.is_dir() and (p / f"{name}{COMPONENT_EXT}").is_file():
                 out.append(m.group(1))
     return sorted(out, key=lambda v: int(v[1:]))
-
-
-def _entry_slots(entry: Path) -> dict:
-    """Departments recorded in a component entry (ADR 0019). A pre-0019 entry (slots
-    model / skel / look without variants) reads as out of date."""
-    from pxr import Sdf
-
-    layer = Sdf.Layer.OpenAsAnonymous(str(entry))
-    if layer is None:
-        return {}
-    flux = _plain(dict(layer.customLayerData).get("flux", {}))
-    slots = flux.get("slots") if isinstance(flux, dict) else None
-    out = {k: dict(v) for k, v in (slots or {}).items() if k in DEPARTMENTS and "variants" in v}
-    excluded = str(flux.get("excluded") or "") if isinstance(flux, dict) else ""
-    for dept in filter(None, excluded.split(",")):
-        out[str(dept)] = {"pin": {"exclude": True}}
-    return out
-
-
-def _variant_versions(slot: dict) -> dict[str, str]:
-    return {v: str(d.get("version")) for v, d in (slot.get("variants") or {}).items()}
 
 
 def _class_of(tokens: dict, name: str) -> str | None:
@@ -77,13 +56,54 @@ def _is_assembly_entry(entry: Path | None) -> bool:
     return bool(spec is not None and spec.kind == "assembly")
 
 
+def _component_info(project: Path, tokens: dict, name: str, parent: Path, versions: list[str]) -> dict:
+    """One created component (ADR 0023): recipe, what each file resolves to now, proposals."""
+    from features.publisher.publish_layout import last_version_label
+
+    from . import component_auto as ca
+    from . import component_recipe as cr
+
+    last_file = parent / f"{name}_LAST{COMPONENT_EXT}"
+    last = last_version_label(parent, name, COMPONENT_EXT) if last_file.is_file() else None
+    current = last or versions[-1]
+    entry = parent / f"{name}_{current}" / f"{name}{COMPONENT_EXT}"
+    composed = ca.entry_signature(entry)
+    warnings: list[str] = []
+    try:
+        recipe = ca.current_recipe(project, name) or cr.empty_recipe([])
+        resolved, warnings = ca.resolve_files(project, name, recipe)
+        proposed = ca.proposed_files(project, name, recipe)
+    except Exception as exc:          # unreadable publish tree: list the component anyway
+        log.info("Library: component %s unreadable: %s", name, exc)
+        recipe, resolved, proposed = cr.empty_recipe([]), {}, []
+        warnings = [f"component illisible : {exc}"]
+    files = []
+    for f in recipe["files"]:
+        res = resolved.get(f["id"])
+        files.append({**f, "resolved_version": res["version"] if res else None,
+                      "composed_version": (composed.get(f["id"]) or {}).get("version"),
+                      "found": res is not None})
+    legacy = not ca._entry_flux(entry).get("recipe")
+    stale = legacy or any(f["found"] and f["resolved_version"] != f["composed_version"] for f in files)         or set(composed) - set(resolved)
+    return {
+        "name": name, "class": _class_of(tokens, name),
+        "state": "stale" if stale else ("ok" if files else "empty"),
+        "legacy": legacy, "version": current, "versions": versions,
+        "departments": recipe["departments"], "files": files, "proposed": proposed,
+        "warnings": warnings + cr.warnings(recipe),
+        "dir": str(parent), "last": str(last_file) if last_file.is_file() else None,
+        "used_by": [],
+    }
+
+
 def list_components(project_path: str | Path) -> list[dict]:
-    """Every asset with a component or with publishes that could feed one.
+    """Components created in the project (ADR 0023: never proposed automatically).
 
     A decor (ADR 0019: an asset whose USD is an assembly) is listed by
     list_assemblies, not here."""
     from features.folder_manager.tokens import load_tokens
-    from features.publisher.publish_layout import last_version_label
+
+    from .assembly_v2 import current_entry as _assembly_entry
 
     project = Path(project_path)
     tokens = load_tokens(project)
@@ -92,44 +112,20 @@ def list_components(project_path: str | Path) -> list[dict]:
         parent = component_dir(project, name)
         if parent is None:
             continue
-        try:
-            published = {d: {"task": v["task"], "version": v["version"], "default": v["default"],
-                             "variants": _variant_versions(v)}
-                         for d, v in collect_slots(project, name).items()}
-        except Exception as exc:          # unreadable publish tree: list the asset anyway
-            log.info("Library: slots of %s unreadable: %s", name, exc)
-            published = {}
         versions = _component_versions(parent, name)
-        if not versions and not published:
+        if not versions or _is_assembly_entry(_assembly_entry(project, name)):
             continue
-        from .assembly_v2 import current_entry as _assembly_entry
-
-        if _is_assembly_entry(_assembly_entry(project, name)):
-            continue
-        last_file = parent / f"{name}_LAST{COMPONENT_EXT}"
-        last = last_version_label(parent, name, COMPONENT_EXT) if last_file.is_file() else None
-        current = last or (versions[-1] if versions else None)
-        slots = _entry_slots(parent / f"{name}_{current}" / f"{name}{COMPONENT_EXT}") if current else {}
-
-        if not current:
-            state = "missing" if "model" in published else "incomplete"
-        elif any(not (slots.get(d) or {}).get("pin")
-                 and _variant_versions(slots.get(d) or {}) != v["variants"]
-                 for d, v in published.items()):
-            state = "stale"
-        else:
-            state = "ok"
-        out.append({
-            "name": name, "class": _class_of(tokens, name),
-            "state": state, "version": current, "versions": versions,
-            "slots": {d: {"task": v.get("task"), "version": v.get("version"), "default": v.get("default"),
-                          "variants": _variant_versions(v),
-                          "pin": dict(v["pin"]) if v.get("pin") else None} for d, v in slots.items()},
-            "published": published,
-            "dir": str(parent), "last": str(last_file) if last_file.is_file() else None,
-            "used_by": [],
-        })
+        out.append(_component_info(project, tokens, name, parent, versions))
     return out
+
+
+def creatable_components(project_path: str | Path, components: list[dict],
+                         assemblies: list[dict]) -> list[str]:
+    """Asset NAMEs a component can be created for: no component, not a decor."""
+    from features.folder_manager.tokens import load_tokens
+
+    taken = {c["name"] for c in components} | {a["name"] for a in assemblies}
+    return [n for n in sorted(load_tokens(Path(project_path)).get("NAME", {})) if n not in taken]
 
 
 def _instances(layer, file: Path, components: dict[Path, str]) -> list[dict]:
@@ -234,7 +230,9 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
 
 
 def build_library(project_path: str | Path, assembly_subdir: str = DEFAULT_ASSEMBLY_SUBDIR) -> dict:
-    """{"components": [...], "assemblies": [...]} with components' ``used_by`` filled."""
+    """{"components", "assemblies", "creatable", "departments"} with components' ``used_by``."""
+    from .component_auto import available_departments
+
     components = list_components(project_path)
     assemblies = list_assemblies(project_path, assembly_subdir, components)
     by_name = {c["name"]: c for c in components}
@@ -243,7 +241,17 @@ def build_library(project_path: str | Path, assembly_subdir: str = DEFAULT_ASSEM
             comp = by_name.get(inst["component"] or "")
             if comp is not None and asm["name"] not in comp["used_by"]:
                 comp["used_by"].append(asm["name"])
-    return {"components": components, "assemblies": assemblies}
+    from . import component_recipe as cr
+
+    return {"components": components, "assemblies": assemblies,
+            "creatable": creatable_components(project_path, components, assemblies),
+            "departments": available_departments(project_path),
+            # The UI offers only what the backend accepts (one source of truth).
+            "rules": {"kinds": list(cr.KINDS),
+                      "default_kind": dict(cr.DEFAULT_KIND),
+                      "targets": {k: sorted(v) for k, v in cr.TARGET_KINDS.items()},
+                      "proxy": {k: sorted(v) for k, v in cr.PROXY_KINDS.items()},
+                      "preview": sorted(cr.PREVIEW_KINDS)}}
 
 
 def relink_instance(project_path: str | Path, file: str | Path, prim: str, component: str,

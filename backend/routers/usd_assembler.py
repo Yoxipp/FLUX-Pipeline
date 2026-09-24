@@ -235,8 +235,28 @@ async def list_usd_variantes(
 class ComponentRefreshRequest(BaseModel):
     name: str
     project: str | None = None
-    # {slot: {"task", "instance", "version"} | {"exclude": true} | null (automatic)}
-    pins: dict[str, dict | None] | None = None
+    user: str = ""
+
+
+class ComponentCreateRequest(BaseModel):
+    name: str
+    departments: list[str]
+    project: str | None = None
+    user: str = ""
+
+
+class ComponentSaveRequest(BaseModel):
+    name: str
+    recipe: dict                    # see features/usd_assembler/component_recipe.py
+    project: str | None = None
+    user: str = ""
+
+
+class ComponentCheckRequest(BaseModel):
+    name: str
+    version: str = "LAST"
+    active: dict[str, bool] = {}    # the importer's own toggles (never saved in the component)
+    project: str | None = None
 
 
 class RelinkRequest(BaseModel):
@@ -267,22 +287,74 @@ async def get_usd_library(project: str | None = None) -> dict:
     return {"project": name, **lib}
 
 
+def _component_result(res: dict | None) -> dict:
+    if res is None:
+        return {"ok": True, "changed": False, "version": None, "warnings": []}
+    return {"ok": True, "changed": True, "version": res["version"], "last": str(res["last"] or ""),
+            "warnings": res.get("warnings", [])}
+
+
+async def _component_call(fn) -> dict:
+    loop = asyncio.get_running_loop()
+    try:
+        return _component_result(await loop.run_in_executor(None, fn))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.exception("component operation failed")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/component/refresh")
 async def refresh_usd_component(req: ComponentRefreshRequest) -> dict:
-    """(Re)generate one asset's component from its latest GEO / RIG / SHADING publishes."""
+    """Re-compose an existing component from its recipe (latest publishes followed)."""
     _, project_path = _resolve_project(req.project)
     from features.usd_assembler.component_auto import refresh_component
 
+    return await _component_call(lambda: refresh_component(project_path, req.name, user=req.user))
+
+
+@router.post("/component/create")
+async def create_usd_component(req: ComponentCreateRequest) -> dict:
+    """Create a component by hand (ADR 0023): the departments picked by the artist."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.component_auto import create_component
+
+    res = await _component_call(lambda: create_component(project_path, req.name, req.departments, user=req.user))
+    log.info("USD component %s created (%s)", req.name, ", ".join(req.departments))
+    return res
+
+
+@router.post("/component/add-proposed")
+async def add_proposed_usd_component(req: ComponentRefreshRequest) -> dict:
+    """"Tout ajouter": every proposed publish of the component's departments joins it."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.component_auto import add_proposed
+
+    return await _component_call(lambda: add_proposed(project_path, req.name, user=req.user))
+
+
+@router.post("/component/save")
+async def save_usd_component(req: ComponentSaveRequest) -> dict:
+    """New component version from its edited recipe (files, kinds, targets, proxies)."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.component_auto import save_component
+
+    return await _component_call(lambda: save_component(project_path, req.name, req.recipe, user=req.user))
+
+
+@router.post("/component/check")
+async def check_usd_component(req: ComponentCheckRequest) -> dict:
+    """Files, greyed ones and warnings of a component for the importer's current toggles."""
+    _, project_path = _resolve_project(req.project)
+    from features.usd_assembler.component_auto import component_files
+
     loop = asyncio.get_running_loop()
     try:
-        res = await loop.run_in_executor(None, lambda: refresh_component(project_path, req.name, pins=req.pins))
-    except Exception as exc:
-        log.exception("component refresh failed")
+        return await loop.run_in_executor(
+            None, lambda: component_files(project_path, req.name, req.version, req.active))
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    if res is None:
-        return {"ok": True, "changed": False, "version": None}
-    log.info("USD component %s -> %s", req.name, res["version"])
-    return {"ok": True, "changed": True, "version": res["version"], "last": str(res["last"] or "")}
 
 
 class AssemblyCreateRequest(BaseModel):
