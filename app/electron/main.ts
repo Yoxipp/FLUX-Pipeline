@@ -1,6 +1,6 @@
 // main.ts — Electron main process: fenêtre native + sidecar Python.
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen, session, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import http from 'http'
@@ -137,7 +137,54 @@ async function createWindow(): Promise<void> {
       win?.webContents.openDevTools()
     }
   })
+
+  // Closing the main window closes the detached ones too (U4): no orphan window.
+  win.on('closed', () => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.close()
+    win = null
+  })
 }
+
+// ── Detached windows (U4, ADR 0027) ───────────────────────────────────────────
+// A sidebar page dragged out of the main window opens as its own window (same
+// preload, same session: the S1 token header applies). The main window keeps its
+// page. The renderer shows a sidebar-less shell when the URL carries ?detached=1.
+const DETACHABLE_ROUTES = new Set([
+  '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
+])
+
+function createDetachedWindow(route: string): void {
+  if (!DETACHABLE_ROUTES.has(route)) return
+  const cursor = screen.getCursorScreenPoint()
+  const child = new BrowserWindow({
+    width:           1100,
+    height:          760,
+    minWidth:        640,
+    minHeight:       480,
+    x:               Math.max(0, cursor.x - 120),
+    y:               Math.max(0, cursor.y - 16),
+    backgroundColor: '#0f0f0f',
+    icon:            ICON,
+    frame:           false,
+    webPreferences: {
+      preload:          path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration:  false,
+    },
+  })
+  if (!app.isPackaged) {
+    child.loadURL(`http://localhost:5173/?detached=1#${route}`).catch((err) =>
+      console.error('[Electron] detached loadURL failed:', err))
+  } else {
+    child.loadFile(path.join(__dirname, '../dist/index.html'), { query: { detached: '1' }, hash: route })
+      .catch((err) => console.error('[Electron] detached loadFile failed:', err))
+  }
+  child.webContents.on('before-input-event', (_event, input) => {
+    if (input.control && input.shift && input.key.toLowerCase() === 'i') child.webContents.openDevTools()
+  })
+}
+
+ipcMain.on('window:detach', (_event, route: string) => createDetachedWindow(String(route || '')))
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
 
@@ -233,9 +280,14 @@ function broadcastBackendStatus(status: BackendStatus, detail?: string): void {
 
 // ── Window controls (frameless) ───────────────────────────────────────────────
 
-ipcMain.on('window:minimize', () => win?.minimize())
-ipcMain.on('window:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
-ipcMain.on('window:close',    () => win?.close())
+// Each control acts on the window that sent it (main or detached, U4).
+const senderWindow = (e: Electron.IpcMainEvent) => BrowserWindow.fromWebContents(e.sender)
+ipcMain.on('window:minimize', (e) => senderWindow(e)?.minimize())
+ipcMain.on('window:maximize', (e) => {
+  const w = senderWindow(e)
+  if (w) (w.isMaximized() ? w.unmaximize() : w.maximize())
+})
+ipcMain.on('window:close',    (e) => senderWindow(e)?.close())
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 

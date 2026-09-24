@@ -30,14 +30,31 @@ function dccDot(status: DccStatusMap, key: string): string {
   return entry.connected ? 'ok' : ''
 }
 
-function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRed = false, onClick }: {
+// Drag a page out of the window (or right-click it) to open it in its own window (U4).
+// The drop point is checked against the window rectangle: a drop inside does nothing.
+function detachIfOutside(e: React.DragEvent, route: string) {
+  const { screenX: x, screenY: y } = e
+  if (x === 0 && y === 0) return      // cancelled drag (Escape)
+  const inside = x >= window.screenX && x <= window.screenX + window.outerWidth
+    && y >= window.screenY && y <= window.screenY + window.outerHeight
+  if (!inside) window.electronAPI?.detachPage?.(route)
+}
+
+function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRed = false, onClick, route }: {
   icon: React.ElementType; label: string; active?: boolean; indent?: boolean; notif?: number; notifRed?: boolean; onClick?: () => void
+  route?: string
 }) {
+  const detachable = !!route && !!window.electronAPI?.detachPage
   return (
     <div
       className={`nav${active ? ' active' : ''}`}
       style={indent ? { paddingLeft: 24 } : {}}
       onClick={onClick}
+      draggable={detachable}
+      onDragStart={detachable ? (e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', route!) }) : undefined}
+      onDragEnd={detachable ? (e => detachIfOutside(e, route!)) : undefined}
+      onContextMenu={detachable ? (e => { e.preventDefault(); window.electronAPI?.detachPage?.(route!) }) : undefined}
+      title={detachable ? 'Glisser hors de la fenetre ou clic droit : ouvrir dans une fenetre' : undefined}
     >
       <span className="glyph"><Icon size={13} strokeWidth={1.75} /></span>
       <span style={{ flex: 1 }}>{label}</span>
@@ -522,25 +539,25 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       flexShrink: 0,
     }}>
       <div style={{ padding: '10px 0 0' }}>
-        <NavItem icon={Home} label={t('nav.home')} active={pathname === '/'} notif={unreadMentions} notifRed onClick={() => navigate('/')} />
+        <NavItem icon={Home} label={t('nav.home')} active={pathname === '/'} notif={unreadMentions} notifRed route="/" onClick={() => navigate('/')} />
       </div>
 
       <NavGroup title="ASSETS">
-        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent onClick={() => navigate('/projects')} />
-        <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
+        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
+        <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent route="/publisher" onClick={() => navigate('/publisher')} />
         {/* Action engine test bench (Phase 2): route kept at /action-publish, hidden
             from the menu on purpose. It is NOT a replacement for the Publisher; it
             only proves the generic form + destination preview. Re-add when the rich
             Publisher's logic is wired through the engine. */}
-        <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
+        <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent route="/usd" onClick={() => navigate('/usd')} />
       </NavGroup>
 
       <NavGroup title="PIPELINE">
-        <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent onClick={() => navigate('/shelf')} />
-        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent onClick={() => navigate('/templates')} />
-        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent onClick={() => navigate('/production')} />
-        <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} onClick={() => navigate('/activity')} />
-        <NavItem icon={HardDrive}      label="Disque"                  active={pathname === '/disk'}       indent onClick={() => navigate('/disk')} />
+        <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent route="/shelf" onClick={() => navigate('/shelf')} />
+        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent route="/templates" onClick={() => navigate('/templates')} />
+        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent route="/production" onClick={() => navigate('/production')} />
+        <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
+        <NavItem icon={HardDrive}      label="Disque"                  active={pathname === '/disk'}       indent route="/disk" onClick={() => navigate('/disk')} />
       </NavGroup>
 
       <NavGroup title="LAUNCHER">

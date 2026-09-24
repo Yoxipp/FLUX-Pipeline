@@ -106,6 +106,10 @@ function FavoriteWatcher() {
 // Inner shell — only mounted after first-launch wizard completes.
 // Hooks that poll the backend (useActivity, useDccStatus) live here so they
 // never fire while FLUX_ROOT is unset, which would cause backend 500s.
+// A page dragged out of the main window (U4): no sidebar, no status bar, no
+// notification watchers (the main window already shows them).
+const DETACHED = new URLSearchParams(window.location.search).get('detached') === '1'
+
 function AppShell({ settings }: { settings: Settings }) {
   const dccStatus          = useDccStatus()
   const { unreadCount }    = useActivity()
@@ -125,7 +129,7 @@ function AppShell({ settings }: { settings: Settings }) {
         <BackendBanner />
 
         <div className="flex flex-1 min-h-0">
-          <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />
+          {!DETACHED && <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />}
 
           <main className="flex-1 min-h-0 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
             <Routes>
@@ -145,9 +149,9 @@ function AppShell({ settings }: { settings: Settings }) {
           </main>
         </div>
 
-        <StatusBar dccStatus={dccStatus} />
-        <MentionWatcher />
-        <FavoriteWatcher />
+        {!DETACHED && <StatusBar dccStatus={dccStatus} />}
+        {!DETACHED && <MentionWatcher />}
+        {!DETACHED && <FavoriteWatcher />}
       </div>
       <Toaster
         position="top-center"
