@@ -68,7 +68,11 @@ def _read_config_json() -> dict:
 def _write_config_json(data: dict) -> None:
     p = get_config_json_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Atomic: a reader (the running backend, a test) must never see a half-written
+    # file, which reads as {} and looks like "FLUX_ROOT is not set".
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def _update_config_json(key: str, value: str) -> None:
