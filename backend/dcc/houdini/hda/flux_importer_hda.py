@@ -381,9 +381,13 @@ def _check(node, key, active):
 
 def _file_label(f):
     txt = "%s  .%s" % (f.get("label", f["id"]), f.get("format", ""))
-    if f.get("proxy_of"):
+    if f.get("proxy") or f.get("proxy_of"):
         txt += "  (proxy)"
-    if not f.get("variant_set"):
+    if f.get("variant"):
+        txt += "  [%s = %s]" % (f.get("block", ""), f["variant"])
+    if f.get("arc") == "sublayer":
+        txt += "  (sublayer, toujours actif)"
+    elif not f.get("variant_set"):
         txt += "  (ancien component : a reenregistrer dans FLUX)"
     return txt
 
@@ -421,7 +425,7 @@ def _fill_component(node):
         _set_parm(node, multi, len(rows))
         for i, f in enumerate(rows, 1):
             # Proxies are on by default; the rest follows the component (anims: off).
-            default = True if f.get("proxy_of") else bool(f.get("active"))
+            default = True if (f.get("proxy") or f.get("proxy_of")) else bool(f.get("active"))
             _set_parm(node, "%s_id%d" % (prefix, i), f["id"])
             _set_parm(node, "%s_label%d" % (prefix, i), _file_label(f))
             _set_parm(node, "%s_on%d" % (prefix, i), 1 if mem.get(f["id"], default) else 0)
@@ -446,6 +450,7 @@ def on_component_toggle(node):
         return
     grey = set(f["id"] for f in r["files"] if f.get("greyed"))
     sets = dict((f["id"], f.get("variant_set")) for f in r["files"])
+    choices = dict((f["id"], f["variant"]) for f in r["files"] if f.get("variant"))
     state = {}
     for multi, prefix, _kinds in _COMP_FOLDERS:
         p = node.parm(multi)
@@ -457,7 +462,13 @@ def on_component_toggle(node):
                 continue
             # Greyed: the toggle keeps its value (memorized), the file is simply not applied.
             _set_parm(node, "%s_ok%d" % (prefix, i), 0 if fid in grey else 1)
-            if sets.get(fid):
+            if not sets.get(fid):
+                continue
+            if fid in choices:
+                # A variant choice of its block (ADR 0024): the checked one is selected.
+                if active.get(fid) and fid not in grey:
+                    state[sets[fid]] = choices[fid]
+            else:
                 state[sets[fid]] = "on" if active.get(fid) and fid not in grey else "off"
     _set_parm(node, "comp_state", json.dumps(state, sort_keys=True))
     warns = r.get("warnings") or []

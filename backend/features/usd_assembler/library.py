@@ -72,7 +72,8 @@ def _component_info(project: Path, tokens: dict, name: str, parent: Path, versio
     try:
         recipe = ca.current_recipe(project, name) or cr.empty_recipe([])
         resolved, warnings = ca.resolve_files(project, name, recipe)
-        proposed = ca.proposed_files(project, name, recipe)
+        # A new link may come from any task of the project (ADR 0024).
+        proposed = ca.proposed_files(project, name, recipe, ca.available_departments(project))
     except Exception as exc:          # unreadable publish tree: list the component anyway
         log.info("Library: component %s unreadable: %s", name, exc)
         recipe, resolved, proposed = cr.empty_recipe([]), {}, []
@@ -89,7 +90,9 @@ def _component_info(project: Path, tokens: dict, name: str, parent: Path, versio
         "name": name, "class": _class_of(tokens, name),
         "state": "stale" if stale else ("ok" if files else "empty"),
         "legacy": legacy, "version": current, "versions": versions,
+        "blocks": recipe.get("blocks") or [],
         "departments": recipe["departments"], "files": files, "proposed": proposed,
+        "variant_sets": ca.entry_variant_sets(entry),
         "warnings": warnings + cr.warnings(recipe),
         "dir": str(parent), "last": str(last_file) if last_file.is_file() else None,
         "used_by": [],

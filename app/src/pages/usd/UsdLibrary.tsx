@@ -1,5 +1,6 @@
 // UsdLibrary.tsx — the USD page content: everything already published in the project.
-// Left: assets (components created by hand, ADR 0023) and decors (assemblies), with search.
+// Left: assets (components created by hand, ADR 0023, links in blocks ADR 0024) and decors
+// (assemblies), with search.
 // Right: one entity in four views, like a documented USD pipeline tool (AYON scene
 // inventory / Solaris stage manager): Content (departments or instances, editable),
 // Versions, Composition (what the file really gives) and Dependencies.
@@ -13,8 +14,9 @@ import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
 import type {
-  UsdAssemblyInfo, UsdAssemblyOp, UsdComponentFile, UsdComponentInfo, UsdComponentRecipe, UsdComponentResult,
-  UsdComponentRules, UsdComposition, UsdCrowdCompat, UsdFileKind, UsdLibrary as Library, UsdPrimNode, UsdProposedFile,
+  UsdAssemblyInfo, UsdAssemblyOp, UsdComponentBlock, UsdComponentFile, UsdComponentInfo, UsdComponentRecipe,
+  UsdComponentResult, UsdComponentRules, UsdComposition, UsdCrowdCompat, UsdLibrary as Library, UsdLinkArc,
+  UsdPrimNode, UsdProposedFile,
 } from '../../api/client'
 import { useI18n } from '../../i18n'
 
@@ -123,7 +125,7 @@ export function UsdLibrary({ project, projects, onProject }: {
         </div>
 
         {tab === 'components' && lib && (
-          <NewComponent project={project} creatable={lib.creatable} departments={lib.departments}
+          <NewComponent project={project} creatable={lib.creatable}
             onCreated={name => { load(); goTo('components', name) }} />
         )}
         {tab === 'assemblies' && lib && (
@@ -140,7 +142,7 @@ export function UsdLibrary({ project, projects, onProject }: {
                 <span style={{ ...mono, color: 'var(--ink-3)' }}>{c.version ?? '-'}</span>
                 <span style={{ width: 6, height: 6, borderRadius: 3, background: stateColor[c.state], flexShrink: 0 }} />
               </>}
-              sub={`${c.departments.join(' · ') || '-'}  ·  ${tr('usd.comp.fileCount', { n: c.files.length })}${c.used_by.length ? `  ·  ${c.used_by.length} asm` : ''}`}
+              sub={`${c.blocks.map(b => b.name).join(' · ') || '-'}  ·  ${c.files.length} link${c.files.length > 1 ? 's' : ''}${c.used_by.length ? `  ·  ${c.used_by.length} asm` : ''}`}
             />
           ))}
           {tab === 'assemblies' && assemblies.map(a => (
@@ -233,11 +235,17 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-// ── component (ADR 0023): created by hand, files per department with targets ──
+// ── component (ADR 0023 + 0024): created by hand, links grouped in blocks ────
+
+const ARCS: { value: UsdLinkArc; label: string }[] = [
+  { value: 'reference', label: 'Ref' }, { value: 'sublayer', label: 'Sublayer' }, { value: 'payload', label: 'Payload' },
+]
+const ID_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 function toRecipe(comp: UsdComponentInfo): UsdComponentRecipe {
   return {
-    departments: [...comp.departments],
+    blocks: comp.blocks.map(b => ({ ...b })),
+    departments: [],   // derived from the links by the backend
     files: comp.files.map(({ resolved_version: _r, composed_version: _c, found: _f, ...f }) => ({ ...f })),
   }
 }
@@ -255,6 +263,8 @@ function makeId(label: string, taken: Set<string>): string {
   for (let n = 2; taken.has(out); n++) out = `${base}_${n}`
   return out
 }
+
+const cleanId = (s: string) => s.replace(/[^A-Za-z0-9_]/g, '_')
 
 // Yellow panel (ADR 0023 point 9): informs only, never changes a selection.
 function WarningPanel({ warnings }: { warnings: string[] }) {
@@ -274,21 +284,21 @@ function WarningPanel({ warnings }: { warnings: string[] }) {
   )
 }
 
-function NewComponent({ project, creatable, departments, onCreated }: {
-  project: string; creatable: string[]; departments: string[]; onCreated: (name: string) => void
+// New component: the asset only. Blocks model / look / rig come empty (ADR 0024).
+function NewComponent({ project, creatable, onCreated }: {
+  project: string; creatable: string[]; onCreated: (name: string) => void
 }) {
   const { t: tr } = useI18n()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
-  const [picked, setPicked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
 
   async function create() {
     setBusy(true)
     try {
-      const res = await api.createUsdComponent(project, name, picked)
+      const res = await api.createUsdComponent(project, name)
       toast.success(tr('usd.lib.saved', { name, version: res.version ?? '' }))
-      setOpen(false); setName(''); setPicked([])
+      setOpen(false); setName('')
       onCreated(name)
     } catch (e) {
       toast.error(errMsg(e))
@@ -308,24 +318,13 @@ function NewComponent({ project, creatable, departments, onCreated }: {
     )
   }
   return (
-    <div className="card" style={{ margin: '0 14px 8px', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <select value={name} onChange={e => setName(e.target.value)} style={{ ...selectStyle, width: '100%', height: 26 }}>
+    <div style={{ margin: '0 14px 8px', display: 'flex', gap: 6 }}>
+      <select autoFocus value={name} onChange={e => setName(e.target.value)} style={{ ...selectStyle, flex: 1, height: 26 }}>
         <option value="">{tr('usd.comp.pickAsset')}</option>
         {creatable.map(n => <option key={n} value={n}>{n}</option>)}
       </select>
-      <span className="cap">{tr('usd.lib.departments')}</span>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        {departments.map(d => (
-          <Pill key={d} active={picked.includes(d)} style={{ cursor: 'pointer' }}
-            onClick={() => setPicked(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d])}>{d}</Pill>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-        <Btn sm ghost disabled={busy} onClick={() => setOpen(false)}><X size={11} strokeWidth={2} /></Btn>
-        <Btn sm primary disabled={busy || !name || picked.length === 0} onClick={() => void create()}>
-          <Check size={11} strokeWidth={2} /> {tr('usd.lib.create')}
-        </Btn>
-      </div>
+      <Btn sm primary disabled={busy || !name} onClick={() => void create()}><Check size={11} strokeWidth={2} /></Btn>
+      <Btn sm ghost disabled={busy} onClick={() => setOpen(false)}><X size={11} strokeWidth={2} /></Btn>
     </div>
   )
 }
@@ -345,25 +344,152 @@ function VersionSelect({ project, name, file, disabled, onChange }: {
   const value = file.version ?? 'latest'
   return (
     <select value={value} disabled={disabled} onChange={e => onChange(e.target.value)}
-      style={{ ...selectStyle, width: 104, fontFamily: 'var(--mono)' }}>
-      <option value="latest">{tr('usd.lib.followLatest')}</option>
+      style={{ ...selectStyle, width: 70, fontFamily: 'var(--mono)' }}>
+      <option value="latest">{tr('usd.lib.followLast')}</option>
       {!versions.includes(value) && value !== 'latest' && <option value={value}>{value}</option>}
       {versions.map(v => <option key={v} value={v}>{v}</option>)}
     </select>
   )
 }
 
-function IdPills({ label, ids, candidates, disabled, onToggle }: {
-  label: string; ids: string[]; candidates: UsdComponentFile[]; disabled: boolean; onToggle: (id: string) => void
+// Small labelled checkbox of a link row.
+function Check2({ label, checked, disabled, title, onChange }: {
+  label: string; checked: boolean; disabled?: boolean; title?: string; onChange: (on: boolean) => void
 }) {
-  if (candidates.length === 0) return null
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', paddingLeft: 22 }}>
-      <span className="cap" style={{ width: 70 }}>{label}</span>
-      {candidates.map(c => (
-        <Pill key={c.id} active={ids.includes(c.id)} style={{ cursor: disabled ? 'default' : 'pointer' }}
-          onClick={() => { if (!disabled) onToggle(c.id) }}>{c.label}</Pill>
-      ))}
+    <label title={title} style={{
+      display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5,
+      color: disabled ? 'var(--ink-4)' : 'var(--ink-3)', cursor: disabled ? 'default' : 'pointer',
+    }}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
+      {label}
+    </label>
+  )
+}
+
+function LinkRow({ project, comp, link, files, rules, busy, onPatch, onRemove, onToggleTarget }: {
+  project: string; comp: UsdComponentInfo; link: UsdComponentFile; files: UsdComponentFile[]
+  rules: UsdComponentRules; busy: boolean
+  onPatch: (p: Partial<UsdComponentFile>) => void; onRemove: () => void; onToggleTarget: (id: string) => void
+}) {
+  const { t: tr } = useI18n()
+  const info = comp.files.find(f => f.id === link.id)
+  const sublayer = link.arc === 'sublayer'
+  // The name field stays open while it is being retyped (an empty name = no variant).
+  const [variantOn, setVariantOn] = useState(!!link.variant)
+  const showVariant = variantOn || !!link.variant
+  const canProxy = Object.keys(rules.proxy).includes(link.kind)
+  const needsTarget = link.kind === 'shader' || link.kind === 'animation'
+  const targets = files.filter(o => o.id !== link.id && (rules.targets[link.kind] ?? []).includes(o.kind))
+  const nonUsd = !['usd', 'usda', 'usdc', 'usdz'].includes(link.format)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {!sublayer && !link.variant && (
+          <input type="checkbox" checked={link.active} disabled={busy || rules.preview.includes(link.kind)}
+            title={tr('usd.comp.activeHint')} onChange={e => onPatch({ active: e.target.checked })} />
+        )}
+        <span style={{ ...mono, color: 'var(--ink-2)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={link.source === 'publish' ? link.base : link.path}>
+          {link.label}
+          <span style={{ color: nonUsd ? 'var(--warn)' : 'var(--ink-4)' }}> .{link.format}</span>
+        </span>
+        {info && info.found === false && (
+          <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)' }}>{tr('usd.comp.notFound')}</span>
+        )}
+        <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>{link.department}</span>
+        {link.source === 'publish'
+          ? <VersionSelect project={project} name={comp.name} file={link} disabled={busy} onChange={v => onPatch({ version: v })} />
+          : <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', width: 70 }}>{tr('usd.comp.manual')}</span>}
+        <Btn sm ghost disabled={busy} title={tr('usd.lib.remove')} onClick={onRemove}>
+          <Trash2 size={10} strokeWidth={2} />
+        </Btn>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingLeft: 22 }}>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {ARCS.map(a => (
+            <Pill key={a.value} active={link.arc === a.value} style={{ cursor: busy ? 'default' : 'pointer' }}
+              onClick={() => {
+                if (busy) return
+                if (a.value === 'sublayer') setVariantOn(false)
+                onPatch(a.value === 'sublayer' ? { arc: a.value, variant: '', proxy: false } : { arc: a.value })
+              }}>
+              {a.label}
+            </Pill>
+          ))}
+        </div>
+        <Check2 label={tr('usd.lib.variant')} checked={showVariant} disabled={busy || sublayer}
+          onChange={on => { setVariantOn(on); onPatch({ variant: on ? 'default' : '' }) }} />
+        {showVariant && (
+          <input value={link.variant} disabled={busy} placeholder={tr('usd.comp.variantName')}
+            onChange={e => onPatch({ variant: cleanId(e.target.value) })}
+            style={{ ...selectStyle, width: 110, fontFamily: 'var(--mono)', cursor: 'text',
+                     borderColor: ID_RE.test(link.variant) ? undefined : 'var(--err)' }} />
+        )}
+        <Check2 label="Proxy" checked={!!link.proxy} disabled={busy || sublayer || !canProxy}
+          title={canProxy ? tr('usd.comp.proxyHint') : tr('usd.comp.proxyKinds')}
+          onChange={on => onPatch({ proxy: on })} />
+        {needsTarget && targets.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+            <span className="cap">{tr('usd.comp.targets')}</span>
+            {targets.map(c => (
+              <Pill key={c.id} active={link.targets.includes(c.id)} style={{ cursor: busy ? 'default' : 'pointer' }}
+                onClick={() => { if (!busy) onToggleTarget(c.id) }}>{c.label}</Pill>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// "New link": pick a task, then one of its publishes or any file of the project.
+function NewLink({ comp, departments, taken, busy, onAdd }: {
+  comp: UsdComponentInfo; departments: string[]; taken: Set<string>; busy: boolean
+  onAdd: (dept: string, what: UsdProposedFile | string) => void
+}) {
+  const { t: tr } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [dept, setDept] = useState('')
+  const [pick, setPick] = useState('')
+  const [path, setPath] = useState('')
+  const publishes = comp.proposed.filter(p => p.department === dept && !taken.has(p.base))
+  const manual = pick === '__manual__'
+  const ok = !!dept && (manual ? !!fmtOf(path) : !!pick)
+
+  function reset() { setOpen(false); setDept(''); setPick(''); setPath('') }
+  function add() {
+    if (!ok) return
+    onAdd(dept, manual ? path.trim() : publishes.find(p => p.base === pick) as UsdProposedFile)
+    reset()
+  }
+
+  if (!open) {
+    return (
+      <div>
+        <Btn sm ghost disabled={busy} onClick={() => setOpen(true)}><Plus size={11} strokeWidth={2} /> New link</Btn>
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
+      <select autoFocus value={dept} onChange={e => { setDept(e.target.value); setPick('') }} style={{ ...selectStyle, width: 110 }}>
+        <option value="">{tr('usd.col.task')}</option>
+        {departments.map(d => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <select value={pick} disabled={!dept} onChange={e => setPick(e.target.value)} style={{ ...selectStyle, flex: 1, minWidth: 160, fontFamily: 'var(--mono)' }}>
+        <option value="">{dept && publishes.length === 0 ? tr('usd.comp.noPublish') : tr('usd.comp.pickFile')}</option>
+        {publishes.map(p => <option key={p.base} value={p.base}>{p.base} {p.version} .{p.format}</option>)}
+        <option value="__manual__">{tr('usd.comp.otherFile')}</option>
+      </select>
+      {manual && (
+        <input autoFocus value={path} placeholder={tr('usd.comp.manualPath')} onChange={e => setPath(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          title={fmtOf(path) ? undefined : tr('usd.comp.needExt')}
+          style={{ ...selectStyle, flex: 2, minWidth: 200, fontFamily: 'var(--mono)', cursor: 'text' }} />
+      )}
+      <Btn sm primary disabled={busy || !ok} onClick={add}><Check size={11} strokeWidth={2} /></Btn>
+      <Btn sm ghost onClick={reset}><X size={11} strokeWidth={2} /></Btn>
     </div>
   )
 }
@@ -376,12 +502,12 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
   const navigate = useNavigate()
   const [tab, setTab] = useState<DetailTab>('content')
   const [draft, setDraft] = useState<UsdComponentRecipe>(() => toRecipe(comp))
-  const [manual, setManual] = useState<Record<string, string>>({})
+  const [newBlock, setNewBlock] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setDraft(toRecipe(comp)); setManual({}) }, [comp])
+  useEffect(() => { setDraft(toRecipe(comp)); setNewBlock(null) }, [comp])
   const dirty = JSON.stringify(draft) !== JSON.stringify(toRecipe(comp))
   const assetDir = comp.dir.replace(/[\\/]usd[\\/]?$/i, '')
-  const byId = new Map(comp.files.map(f => [f.id, f]))
+  const invalid = draft.files.some(f => f.variant && !ID_RE.test(f.variant))
 
   async function run(call: () => Promise<UsdComponentResult>) {
     setBusy(true)
@@ -399,37 +525,51 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
 
   const patch = (id: string, p: Partial<UsdComponentFile>) =>
     setDraft(d => ({ ...d, files: d.files.map(f => f.id === id ? { ...f, ...p } : f) }))
-  const toggleIn = (id: string, field: 'targets' | 'proxy_of' | 'depends', other: string) =>
+  const toggleTarget = (id: string, other: string) =>
     setDraft(d => ({ ...d, files: d.files.map(f => f.id !== id ? f : {
-      ...f, [field]: f[field].includes(other) ? f[field].filter(x => x !== other) : [...f[field], other] }) }))
-  const removeFile = (id: string) => setDraft(d => ({
-    ...d, files: d.files.filter(f => f.id !== id).map(f => ({
-      ...f, targets: f.targets.filter(x => x !== id), proxy_of: f.proxy_of.filter(x => x !== id),
-      depends: f.depends.filter(x => x !== id) })) }))
-  const taken = () => new Set(draft.files.map(f => f.id))
-
-  function addProposed(p: UsdProposedFile) {
-    const id = makeId(`${p.department.toLowerCase()}_${p.instance}${p.variante ? `_${p.variante}` : ''}`, taken())
-    setDraft(d => ({ ...d, files: [...d.files, {
-      id, label: p.base, department: p.department, kind: p.kind, format: p.format, source: 'publish',
-      base: p.base, instance: p.instance, variante: p.variante, version: 'latest',
-      targets: [], proxy_of: [], depends: [], active: !rules.preview.includes(p.kind),
-    }] }))
+      ...f, targets: f.targets.includes(other) ? f.targets.filter(x => x !== other) : [...f.targets, other] }) }))
+  const removeFiles = (drop: (f: UsdComponentFile) => boolean) => setDraft(d => {
+    const gone = new Set(d.files.filter(drop).map(f => f.id))
+    return { ...d, files: d.files.filter(f => !gone.has(f.id)).map(f => ({
+      ...f, targets: f.targets.filter(x => !gone.has(x)), proxy_of: f.proxy_of.filter(x => !gone.has(x)),
+      depends: f.depends.filter(x => !gone.has(x)) })) }
+  })
+  const setBlock = (name: string, p: Partial<UsdComponentBlock>) =>
+    setDraft(d => ({ ...d, blocks: d.blocks.map(b => b.name === name ? { ...b, ...p } : b) }))
+  const removeBlock = (name: string) => {
+    removeFiles(f => f.block === name)
+    setDraft(d => ({ ...d, blocks: d.blocks.filter(b => b.name !== name) }))
+  }
+  const blockName = cleanId((newBlock ?? '').trim())
+  const blockOk = ID_RE.test(blockName) && !draft.blocks.some(b => b.name.toLowerCase() === blockName.toLowerCase())
+  function addBlock() {
+    if (!blockOk) return
+    setDraft(d => ({ ...d, blocks: [...d.blocks, { name: blockName, variant: '' }] }))
+    setNewBlock(null)
   }
 
-  function addManual(dept: string) {
-    const path = (manual[dept] ?? '').trim()
-    if (!path || !fmtOf(path)) return
-    const stem = path.replace(/\\/g, '/').split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'file'
-    const kind = rules.default_kind[dept] ?? 'other'
-    setDraft(d => ({ ...d, files: [...d.files, {
-      id: makeId(stem, taken()), label: stem, department: dept, kind, format: fmtOf(path), source: 'manual',
-      path, targets: [], proxy_of: [], depends: [], active: !rules.preview.includes(kind),
-    }] }))
-    setManual(m => ({ ...m, [dept]: '' }))
+  function addLink(block: string, dept: string, what: UsdProposedFile | string) {
+    const taken = new Set([...draft.files.map(f => f.id), ...draft.blocks.map(b => b.name)])
+    const kind = typeof what === 'string' ? (rules.default_kind[dept] ?? 'other') : what.kind
+    // A shader targets the geometries already there (editable), like "add all" did.
+    const targets = kind === 'shader' ? draft.files.filter(f => f.kind === 'geometry' || f.kind === 'groom').map(f => f.id) : []
+    const common = {
+      block, department: dept, kind, arc: 'reference' as UsdLinkArc, variant: '', proxy: false,
+      targets, proxy_of: [], depends: [], active: !rules.preview.includes(kind),
+    }
+    if (typeof what === 'string') {
+      const stem = what.replace(/\\/g, '/').split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'file'
+      setDraft(d => ({ ...d, files: [...d.files, {
+        ...common, id: makeId(stem, taken), label: stem, format: fmtOf(what), source: 'manual', path: what }] }))
+    } else {
+      const id = makeId(`${dept.toLowerCase()}_${what.instance}${what.variante ? `_${what.variante}` : ''}`, taken)
+      setDraft(d => ({ ...d, files: [...d.files, {
+        ...common, id, label: what.base, format: what.format, source: 'publish',
+        base: what.base, instance: what.instance, variante: what.variante, version: 'latest' }] }))
+    }
   }
 
-  const freeDepartments = departments.filter(d => !draft.departments.includes(d))
+  const usedBases = new Set(draft.files.map(f => f.base ?? ''))
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 900 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -450,7 +590,7 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
         )}
         {comp.last && (
           <Btn sm ghost onClick={() => copy(comp.last as string, tr('usd.lib.copied'))} title={comp.last}>
-            <Copy size={11} strokeWidth={2} /> {tr('usd.lib.copyPath')}
+            <Copy size={11} strokeWidth={2} />
           </Btn>
         )}
         {comp.state === 'stale' && !dirty && (
@@ -464,114 +604,58 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
 
       {tab === 'content' && (<>
         <WarningPanel warnings={comp.warnings} />
-        {comp.legacy && (
-          <span className="lbl" style={{ fontSize: 10, color: 'var(--warn)' }}>{tr('usd.comp.legacy')}</span>
-        )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <SecTitle>{tr('usd.lib.departments')}</SecTitle>
-          <div style={{ flex: 1 }} />
-          {freeDepartments.length > 0 && (
-            <select value="" disabled={busy} title={tr('usd.comp.addDeptHint')}
-              onChange={e => { const d = e.target.value; if (d) setDraft(r => ({ ...r, departments: [...r.departments, d] })) }}
-              style={{ ...selectStyle, width: 170 }}>
-              <option value="">{tr('usd.comp.addDept')}</option>
-              {freeDepartments.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          )}
-          <Btn sm ghost disabled={busy || dirty || comp.proposed.length === 0} title={tr('usd.comp.addAllHint')}
-            onClick={() => void run(() => api.addProposedUsdComponent(project, comp.name))}>
-            <Plus size={11} strokeWidth={2} /> {tr('usd.comp.addAll')}
-          </Btn>
-        </div>
-
-        {draft.departments.length === 0 && (
-          <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.comp.noDept')}</span>
-        )}
-        {draft.departments.map(dept => {
-          const files = draft.files.filter(f => f.department === dept)
-          const proposed = comp.proposed.filter(p => p.department === dept && !draft.files.some(f => f.base === p.base))
+        {draft.blocks.map(block => {
+          const links = draft.files.filter(f => f.block === block.name)
+          const variants = [...new Set(links.map(f => f.variant).filter(Boolean))] as string[]
           return (
-            <div key={dept} className="card" style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div key={block.name} className="card" style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{dept}</span>
-                <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.comp.fileCount', { n: files.length })}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{block.name}</span>
+                {variants.length > 0 && (
+                  <select value={variants.includes(block.variant) ? block.variant : variants[0]} disabled={busy}
+                    title={tr('usd.comp.defaultVariant')}
+                    onChange={e => setBlock(block.name, { variant: e.target.value })}
+                    style={{ ...selectStyle, width: 120, fontFamily: 'var(--mono)' }}>
+                    {variants.map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                )}
                 <div style={{ flex: 1 }} />
-                <Btn sm ghost disabled={busy || files.length > 0} title={files.length > 0 ? tr('usd.comp.removeDeptHint') : tr('usd.lib.remove')}
-                  onClick={() => setDraft(r => ({ ...r, departments: r.departments.filter(d => d !== dept) }))}>
+                <Btn sm ghost disabled={busy} title={tr('usd.comp.removeBlock')} onClick={() => removeBlock(block.name)}>
                   <Trash2 size={10} strokeWidth={2} />
                 </Btn>
               </div>
-
-              {files.map(f => {
-                const preview = rules.preview.includes(f.kind)
-                const others = draft.files.filter(o => o.id !== f.id)
-                const info = byId.get(f.id)
-                const nonUsd = !['usd', 'usda', 'usdc', 'usdz'].includes(f.format)
-                return (
-                  <div key={f.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="checkbox" checked={f.active} disabled={busy || preview}
-                        title={preview ? tr('usd.comp.previewOnly') : tr('usd.comp.activeHint')}
-                        onChange={e => patch(f.id, { active: e.target.checked })} />
-                      <span style={{ ...mono, color: 'var(--ink-2)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                        title={f.source === 'publish' ? f.base : f.path}>{f.label}</span>
-                      <span className="lbl" style={{ fontSize: 9.5, color: nonUsd ? 'var(--warn)' : 'var(--ink-3)' }}>.{f.format}</span>
-                      <select value={f.kind} disabled={busy} onChange={e => patch(f.id, { kind: e.target.value as UsdFileKind })}
-                        style={{ ...selectStyle, width: 96 }}>
-                        {rules.kinds.map(k => <option key={k} value={k}>{tr(`usd.kind.${k}`)}</option>)}
-                      </select>
-                      {f.source === 'publish'
-                        ? <VersionSelect project={project} name={comp.name} file={f} disabled={busy} onChange={v => patch(f.id, { version: v })} />
-                        : <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', width: 104 }}>{tr('usd.comp.manual')}</span>}
-                      {info && info.found === false && (
-                        <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)' }}>{tr('usd.comp.notFound')}</span>
-                      )}
-                      <Btn sm ghost disabled={busy} title={tr('usd.lib.remove')} onClick={() => removeFile(f.id)}>
-                        <Trash2 size={10} strokeWidth={2} />
-                      </Btn>
-                    </div>
-                    <IdPills label={tr('usd.comp.targets')} ids={f.targets} disabled={busy}
-                      candidates={others.filter(o => (rules.targets[f.kind] ?? []).includes(o.kind))}
-                      onToggle={id => toggleIn(f.id, 'targets', id)} />
-                    <IdPills label={tr('usd.comp.proxyOf')} ids={f.proxy_of} disabled={busy}
-                      candidates={others.filter(o => (rules.proxy[f.kind] ?? []).includes(o.kind))}
-                      onToggle={id => toggleIn(f.id, 'proxy_of', id)} />
-                    <IdPills label={tr('usd.comp.depends')} ids={f.depends} disabled={busy} candidates={others}
-                      onToggle={id => toggleIn(f.id, 'depends', id)} />
-                  </div>
-                )
-              })}
-
-              {proposed.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', borderTop: '1px solid var(--rule)', paddingTop: 6 }}>
-                  <span className="cap" style={{ marginRight: 4 }}>{tr('usd.comp.proposed')}</span>
-                  {proposed.map(p => (
-                    <Pill key={p.base} style={{ cursor: 'pointer' }} onClick={() => addProposed(p)}>
-                      <Plus size={9} strokeWidth={2} /> {p.base} {p.version} .{p.format}
-                    </Pill>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input value={manual[dept] ?? ''} placeholder={tr('usd.comp.manualPath')}
-                  onChange={e => setManual(m => ({ ...m, [dept]: e.target.value }))}
-                  onKeyDown={e => { if (e.key === 'Enter') addManual(dept) }}
-                  style={{ ...selectStyle, flex: 1, fontFamily: 'var(--mono)', cursor: 'text' }} />
-                <Btn sm ghost disabled={busy || !fmtOf(manual[dept] ?? '')}
-                  title={fmtOf(manual[dept] ?? '') ? undefined : tr('usd.comp.needExt')} onClick={() => addManual(dept)}>
-                  <Plus size={11} strokeWidth={2} /> {tr('usd.lib.add')}
-                </Btn>
-              </div>
+              {links.map(f => (
+                <LinkRow key={f.id} project={project} comp={comp} link={f} files={draft.files} rules={rules} busy={busy}
+                  onPatch={p => patch(f.id, p)} onRemove={() => removeFiles(x => x.id === f.id)}
+                  onToggleTarget={id => toggleTarget(f.id, id)} />
+              ))}
+              <NewLink comp={comp} departments={departments} taken={usedBases} busy={busy}
+                onAdd={(dept, what) => addLink(block.name, dept, what)} />
             </div>
           )
         })}
 
+        {newBlock === null ? (
+          <div>
+            <Btn sm ghost disabled={busy} onClick={() => setNewBlock('')}><Plus size={11} strokeWidth={2} /> {tr('usd.comp.addBlock')}</Btn>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input autoFocus value={newBlock} placeholder={tr('usd.comp.blockName')}
+              onChange={e => setNewBlock(cleanId(e.target.value))}
+              onKeyDown={e => { if (e.key === 'Enter') addBlock(); if (e.key === 'Escape') setNewBlock(null) }}
+              style={{ ...selectStyle, width: 180, fontFamily: 'var(--mono)', cursor: 'text' }} />
+            <Btn sm primary disabled={!blockOk} onClick={addBlock}><Check size={11} strokeWidth={2} /></Btn>
+            <Btn sm ghost onClick={() => setNewBlock(null)}><X size={11} strokeWidth={2} /></Btn>
+          </div>
+        )}
+
         {dirty && (
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-            <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-3)', flex: 1 }}>{tr('usd.comp.unsaved')}</span>
+            <div style={{ flex: 1 }} />
             <Btn sm ghost disabled={busy} onClick={() => setDraft(toRecipe(comp))}><X size={11} strokeWidth={2} /> {tr('usd.comp.cancel')}</Btn>
-            <Btn sm primary disabled={busy} onClick={() => void run(() => api.saveUsdComponent(project, comp.name, draft))}>
+            <Btn sm primary disabled={busy || invalid} onClick={() => void run(() => api.saveUsdComponent(project, comp.name, draft))}>
               <Check size={11} strokeWidth={2} /> {tr('usd.comp.save')}
             </Btn>
           </div>
@@ -682,6 +766,12 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
   const componentOf = (i: UsdAssemblyInfo['instances'][number]) =>
     components.find(c => c.name === i.component)
   const versionsOf = (name: string) => linkable.find(c => c.name === name)?.versions ?? []
+  // Nothing to pick when the component has a single on / off link.
+  const variantSetsOf = (i: UsdAssemblyInfo['instances'][number]) => {
+    const sets = Object.entries(componentOf(i)?.variant_sets ?? {})
+    const choices = sets.some(([, v]) => v.join() !== 'off,on')
+    return sets.length > 1 || choices ? sets : []
+  }
   const instName = (prim: string) => prim.split('/').pop() ?? prim
   const instVersion = (i: UsdAssemblyInfo['instances'][number]) =>
     i.follows_last ? 'LAST' : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? 'LAST')
@@ -820,17 +910,20 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
               <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)', width: 40, textAlign: 'right' }}>
                 {i.follows_last ? tr('usd.lib.followLast') : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? tr('usd.lib.frozen'))}
               </span>
-              {/* ADR 0023: each component file is a variant set on / off; an instance may override it. */}
-              {(componentOf(i)?.files.length ?? 0) > 1 && componentOf(i)?.files.map(f => (
-                <select key={f.id} value={i.variants?.[f.id] ?? ''} disabled={busy}
-                  title={`${tr('usd.lib.variant')} ${f.label}`}
-                  onChange={e => void edit([{ op: 'set_variant', name, department: f.id, variant: e.target.value }])}
-                  style={{ ...selectStyle, width: 110, fontFamily: 'var(--mono)' }}>
-                  <option value="">{f.label} ·</option>
-                  <option value="on">{f.label} on</option>
-                  <option value="off">{f.label} off</option>
-                </select>
-              ))}
+              {/* ADR 0023/0024: a variant set per toggled link (on / off) or per block (its variants);
+                  an instance may override the component default. */}
+              {variantSetsOf(i).map(([set, variants]) => {
+                const label = componentOf(i)?.files.find(f => f.id === set)?.label ?? set
+                return (
+                  <select key={set} value={i.variants?.[set] ?? ''} disabled={busy}
+                    title={`${tr('usd.lib.variant')} ${label}`}
+                    onChange={e => void edit([{ op: 'set_variant', name, department: set, variant: e.target.value }])}
+                    style={{ ...selectStyle, width: 110, fontFamily: 'var(--mono)' }}>
+                    <option value="">{label} ·</option>
+                    {variants.map(v => <option key={v} value={v}>{label} {v}</option>)}
+                  </select>
+                )
+              })}
               {i.broken && (
                 <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 4 }}>
                   <AlertTriangle size={10} strokeWidth={2} /> {tr('usd.lib.broken')}

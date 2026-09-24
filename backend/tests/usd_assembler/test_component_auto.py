@@ -62,7 +62,7 @@ class ManualComponent(unittest.TestCase):
                                    base_name=f"CHAR_{task}_{_NAME}_{instance}", user="adam")
 
     def _add_publishes(self, recipe: dict, **overrides) -> dict:
-        for p in ca.proposed_files(self.project, _NAME, recipe):
+        for p in ca.proposed_files(self.project, _NAME, recipe, ca.available_departments(self.project)):
             fid = f"{p['department'].lower()}_{p['instance']}"
             recipe["files"].append({"id": fid, "department": p["department"], "source": "publish",
                                     "base": p["base"], "instance": p["instance"],
@@ -90,7 +90,9 @@ class ManualComponent(unittest.TestCase):
     def test_manual_creation_with_existing_departments_only(self) -> None:
         res = ca.create_component(self.project, _NAME, ["GEO", "SHADING"])
         self.assertEqual(res["version"], "v001")
-        self.assertEqual(ca.current_recipe(self.project, _NAME), {"departments": ["GEO", "SHADING"], "files": []})
+        recipe = ca.current_recipe(self.project, _NAME)
+        self.assertEqual((recipe["departments"], recipe["files"]), (["GEO", "SHADING"], []))
+        self.assertEqual([b["name"] for b in recipe["blocks"]], ["model", "look", "rig"])     # ADR 0024
         with self.assertRaisesRegex(ValueError, "existe deja"):
             ca.create_component(self.project, _NAME, ["GEO"])
 
@@ -240,6 +242,92 @@ class ManualComponent(unittest.TestCase):
         self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/proxy/geo_low/low").IsValid())
         self.assertNotEqual(UsdGeom.Imageable(stage.GetPrimAtPath("/UTAH/geo/render/body")).ComputePurpose(),
                             "proxy")
+
+    # ── blocks and links (ADR 0024) ────────────────────────────────────────
+    def test_link_arcs_reference_payload_sublayer(self) -> None:
+        ca.create_component(self.project, _NAME)
+        recipe = ca.current_recipe(self.project, _NAME)
+        for fid, arc in (("ref", "reference"), ("pay", "payload"), ("sub", "sublayer")):
+            # a sublayer contributes under the asset root only: its file is authored there
+            prim = f"/{_NAME}/SUB" if arc == "sublayer" else f"/{fid.upper()}"
+            rel = self._manual(f"{_NAME_REL}/model/extra/{fid}.usda", prim)
+            recipe["files"].append({"id": fid, "block": "model", "department": "GEO", "source": "manual",
+                                    "path": rel, "arc": arc})
+        ca.save_component(self.project, _NAME, recipe)
+        stage = self._stage()
+        self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/render/ref/REF").IsValid() or
+                        stage.GetPrimAtPath("/UTAH/geo/render/ref").IsA(UsdGeom.Mesh))
+        pay = stage.GetPrimAtPath("/UTAH/geo/render/pay")
+        self.assertTrue(pay.HasAuthoredPayloads())
+        self.assertTrue(pay.IsA(UsdGeom.Mesh))
+        self.assertTrue(stage.GetPrimAtPath("/UTAH/SUB").IsA(UsdGeom.Mesh))
+        payload = Sdf.Layer.FindOrOpen(str(self.usd_dir / "UTAH_v002" / "UTAH_payload.usda"))
+        self.assertEqual([p.rsplit("/", 1)[-1] for p in payload.subLayerPaths], ["UTAH_model.usda", "sub.usda"])
+        view = ca.component_files(self.project, _NAME)
+        self.assertEqual({f["id"]: f["variant_set"] for f in view["files"]}, {"ref": "ref", "pay": "pay", "sub": ""})
+
+    def test_variants_are_exclusive_in_their_block(self) -> None:
+        ca.create_component(self.project, _NAME)
+        recipe = ca.current_recipe(self.project, _NAME)
+        for fid, variant in (("red", "red"), ("blue", "blue")):
+            rel = self._manual(f"{_NAME_REL}/model/extra/{fid}.usda", f"/{fid.upper()}")
+            recipe["files"].append({"id": fid, "block": "look", "department": "GEO", "source": "manual",
+                                    "path": rel, "variant": variant})
+        recipe["blocks"] = [dict(b, variant="blue") if b["name"] == "look" else b for b in recipe["blocks"]]
+        ca.save_component(self.project, _NAME, recipe)
+        saved = ca.current_recipe(self.project, _NAME)
+        self.assertEqual({f["id"]: f["active"] for f in saved["files"]}, {"red": False, "blue": True})
+        stage = self._stage()
+        vset = stage.GetPrimAtPath("/UTAH").GetVariantSet("look")
+        self.assertEqual(sorted(vset.GetVariantNames()), ["blue", "red"])
+        self.assertEqual(vset.GetVariantSelection(), "blue")
+        self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/render/blue").IsValid())
+        self.assertFalse(stage.GetPrimAtPath("/UTAH/geo/render/red").IsValid())
+        vset.SetVariantSelection("red")
+        self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/render/red").IsValid())
+        self.assertFalse(stage.GetPrimAtPath("/UTAH/geo/render/blue").IsValid())
+        view = ca.component_files(self.project, _NAME)
+        self.assertEqual({(f["id"], f["variant_set"], f["variant"]) for f in view["files"]},
+                         {("red", "look", "red"), ("blue", "look", "blue")})
+
+    def test_proxy_checkbox_stands_in_for_its_block(self) -> None:
+        self._publish("GEO", "model", ["Root"])
+        self._publish("GEO", "model", ["Root"], instance="low", mesh="low")
+        ca.create_component(self.project, _NAME)
+        recipe = self._add_publishes(ca.current_recipe(self.project, _NAME),
+                                     geo_low={"block": "model", "proxy": True},
+                                     geo_null={"block": "model"})
+        ca.save_component(self.project, _NAME, recipe)
+        low = next(f for f in ca.current_recipe(self.project, _NAME)["files"] if f["id"] == "geo_low")
+        self.assertEqual(low["proxy_of"], ["geo_null"])
+        stage = self._stage()
+        proxy = stage.GetPrimAtPath("/UTAH/geo/proxy/geo_low")
+        self.assertEqual(UsdGeom.Imageable(proxy).ComputePurpose(), "proxy")
+
+    def test_block_and_link_rules(self) -> None:
+        from features.usd_assembler import component_recipe as cr
+
+        def norm(blocks, files):
+            return cr.normalize({"blocks": blocks, "files": files}, ["GEO", "SHADING", "RIG"])
+
+        link = {"id": "a", "department": "GEO", "source": "manual", "path": "a.usd"}
+        self.assertEqual(norm(["model"], [dict(link, block="model")])["departments"], ["GEO"])
+        with self.assertRaisesRegex(ValueError, "block en double"):
+            norm(["model", "Model"], [])
+        with self.assertRaisesRegex(ValueError, "nom de block invalide"):
+            norm(["my block"], [])
+        with self.assertRaisesRegex(ValueError, "absent du component"):
+            norm(["model"], [dict(link, block="look")])
+        with self.assertRaisesRegex(ValueError, "ni proxy ni variante"):
+            norm(["model"], [dict(link, block="model", arc="sublayer", variant="v1")])
+        with self.assertRaisesRegex(ValueError, "arc inconnu"):
+            norm(["model"], [dict(link, block="model", arc="inherit")])
+        with self.assertRaisesRegex(ValueError, "proxy doit etre"):
+            norm(["look"], [dict(link, block="look", department="SHADING", proxy=True)])
+        # A block without blocks key (recipe before ADR 0024): one per task, named after it.
+        old = cr.normalize({"departments": ["GEO", "SHADING"], "files": [link]}, ["GEO", "SHADING"])
+        self.assertEqual(([b["name"] for b in old["blocks"]], old["files"][0]["block"]),
+                         (["model", "look"], "model"))
 
     # ── compatibility ──────────────────────────────────────────────────────
     def test_component_before_adr_0023_is_read_as_a_recipe(self) -> None:

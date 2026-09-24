@@ -240,7 +240,8 @@ class ComponentRefreshRequest(BaseModel):
 
 class ComponentCreateRequest(BaseModel):
     name: str
-    departments: list[str]
+    departments: list[str] = []
+    blocks: list[str] | None = None     # ADR 0024: model / look / rig when omitted
     project: str | None = None
     user: str = ""
 
@@ -320,8 +321,9 @@ async def create_usd_component(req: ComponentCreateRequest) -> dict:
     _, project_path = _resolve_project(req.project)
     from features.usd_assembler.component_auto import create_component
 
-    res = await _component_call(lambda: create_component(project_path, req.name, req.departments, user=req.user))
-    log.info("USD component %s created (%s)", req.name, ", ".join(req.departments))
+    res = await _component_call(lambda: create_component(project_path, req.name, req.departments,
+                                                         blocks=req.blocks, user=req.user))
+    log.info("USD component %s created (%s)", req.name, ", ".join(req.blocks or req.departments))
     return res
 
 

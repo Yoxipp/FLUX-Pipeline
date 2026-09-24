@@ -1,12 +1,17 @@
 # component_recipe.py — what a component is made of (ADR 0023). Pure python, no pxr.
 #
-# A component is created by hand. Its recipe lists the departments it uses (asset TYPE
-# tokens of the project, each at most once) and any number of files per department:
-#   {"departments": ["GEO", "SHADING", ...],
-#    "files": [{"id", "label", "department", "kind", "format",
+# A component is created by hand. Its recipe groups its files ("links") in blocks
+# (ADR 0024: free names, model / look / rig by default); each link names its task
+# (``department``, an asset TYPE token of the project) and how it is composed:
+#   {"blocks": [{"name": "model", "variant": "<default variant>"}, ...],
+#    "departments": ["GEO", "SHADING", ...],                  (tasks used by the links)
+#    "files": [{"id", "label", "block", "department", "kind", "format",
 #               "source": "publish" | "manual",
 #               "base", "instance", "variante", "version"   (publish: resolved by FluxResolver)
 #               "path"                                       (manual: project-relative posix)
+#               "arc": "reference" | "payload" | "sublayer",
+#               "variant": ""  (else: one choice of the block's variantSet, exclusive),
+#               "proxy": bool  (stands in for the other links of its block),
 #               "prim", "targets": [id], "proxy_of": [id], "depends": [id], "active": bool}]}
 # Targets are other files of the same component: a shader targets geometries, an
 # animation its rig. A file is never applied to an incompatible target: normalize()
@@ -48,6 +53,11 @@ PORTABLE_FORMATS = USD_FORMATS
 # checks) has no Alembic / FBX plugin, Maya USD depends on its build.
 HOUDINI_READS = frozenset({"abc", "fbx", "obj", "bgeo", "bgeo.sc", "vdb"})
 
+ARCS: tuple[str, ...] = ("reference", "payload", "sublayer")
+DEFAULT_BLOCKS: tuple[str, ...] = ("model", "look", "rig")
+# Block a link of an older recipe (before ADR 0024) lands in, from its task.
+BLOCK_OF_TASK: dict[str, str] = {"GEO": "model", "SHADING": "look", "LOOKDEV": "look", "RIG": "rig"}
+
 _ID_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _VERSION_RE = re.compile(r"v\d+")
 _EXCLUDED_TYPES = frozenset({"MULT"})     # ADR 0019: kept to read old publishes, never offered
@@ -81,8 +91,28 @@ def make_id(label: str, taken: set[str] | frozenset[str] = frozenset()) -> str:
     return out
 
 
-def empty_recipe(departments: list[str]) -> dict:
-    return {"departments": list(departments), "files": []}
+def default_block(department: str) -> str:
+    dept = str(department).upper()
+    return BLOCK_OF_TASK.get(dept) or make_id(dept.lower())
+
+
+def empty_recipe(departments: list[str], blocks: list[str] | None = None) -> dict:
+    names = list(blocks) if blocks is not None else list(DEFAULT_BLOCKS)
+    return {"blocks": [{"name": b, "variant": ""} for b in names],
+            "departments": list(departments), "files": []}
+
+
+def _blocks(recipe: dict) -> list[dict]:
+    """Blocks of *recipe*; an older recipe gets one per task used (model / look / rig names)."""
+    raw = recipe.get("blocks")
+    if raw is None:
+        names: list[str] = []
+        for dept in [*(recipe.get("departments") or []),
+                     *[f.get("department") or "" for f in recipe.get("files") or []]]:
+            if dept and default_block(dept) not in names:
+                names.append(default_block(dept))
+        return [{"name": n, "variant": ""} for n in names]
+    return [{"name": b, "variant": ""} if isinstance(b, str) else dict(b) for b in raw]
 
 
 def _ids(value) -> list[str]:
@@ -104,6 +134,16 @@ def normalize(recipe: dict, available: list[str]) -> dict:
             raise ValueError(f"departement en double : {dept}")
         departments.append(dept)
 
+    blocks: list[dict] = []
+    for b in _blocks(recipe):
+        bname = str(b.get("name") or "").strip()
+        if not _ID_RE.fullmatch(bname):
+            raise ValueError(f"nom de block invalide : {bname!r} (lettres, chiffres, _)")
+        if bname.lower() in {x["name"].lower() for x in blocks}:
+            raise ValueError(f"block en double : {bname}")
+        blocks.append({"name": bname, "variant": str(b.get("variant") or "")})
+    block_names = {b["name"] for b in blocks}
+
     files: list[dict] = []
     seen: set[str] = set()
     for raw in recipe.get("files") or []:
@@ -114,14 +154,29 @@ def normalize(recipe: dict, available: list[str]) -> dict:
             raise ValueError(f"identifiant de fichier en double : {fid}")
         seen.add(fid)
         dept = str(raw.get("department") or "").upper()
+        if dept not in available:
+            raise ValueError(f"{fid} : task {dept or '?'} inexistante dans le projet")
         if dept not in departments:
-            raise ValueError(f"{fid} : departement {dept or '?'} absent du component")
+            departments.append(dept)             # the tasks used come from the links
+        block = str(raw.get("block") or default_block(dept))
+        if block not in block_names:
+            if raw.get("block"):
+                raise ValueError(f"{fid} : block {block} absent du component")
+            blocks.append({"name": block, "variant": ""})
+            block_names.add(block)
         kind = str(raw.get("kind") or default_kind(dept))
         if kind not in KINDS:
             raise ValueError(f"{fid} : type inconnu {kind!r}")
+        arc = str(raw.get("arc") or "reference")
+        if arc not in ARCS:
+            raise ValueError(f"{fid} : arc inconnu {arc!r}")
+        variant = str(raw.get("variant") or "").strip()
+        if variant and not _ID_RE.fullmatch(variant):
+            raise ValueError(f"{fid} : nom de variante invalide {variant!r} (lettres, chiffres, _)")
         source = str(raw.get("source") or "")
-        f: dict = {"id": fid, "label": str(raw.get("label") or fid), "department": dept,
-                   "kind": kind, "source": source, "prim": str(raw.get("prim") or "")}
+        f: dict = {"id": fid, "label": str(raw.get("label") or fid), "block": block,
+                   "department": dept, "kind": kind, "source": source, "arc": arc,
+                   "variant": variant, "prim": str(raw.get("prim") or "")}
         if source == "publish":
             if not raw.get("base"):
                 raise ValueError(f"{fid} : publish sans base")
@@ -146,8 +201,34 @@ def normalize(recipe: dict, available: list[str]) -> dict:
         f["targets"] = _ids(raw.get("targets"))
         f["proxy_of"] = _ids(raw.get("proxy_of"))
         f["depends"] = _ids(raw.get("depends"))
+        f["proxy"] = bool(raw["proxy"]) if "proxy" in raw else bool(f["proxy_of"])
+        if f["proxy"] and kind not in PROXY_KINDS:
+            raise ValueError(f"{f['label']} : un proxy doit etre une geometrie ou un groom")
+        if arc == "sublayer" and (f["proxy"] or variant):
+            raise ValueError(f"{f['label']} : un sublayer ne peut etre ni proxy ni variante")
         f["active"] = bool(raw.get("active", kind not in PREVIEW_KINDS)) and kind not in PREVIEW_KINDS
         files.append(f)
+
+    # Proxy checkbox (ADR 0024): the link stands in for the other links of its block.
+    for f, raw in zip(files, recipe.get("files") or []):
+        if f["proxy"] and "proxy" in raw:
+            f["proxy_of"] = [o["id"] for o in files if o["block"] == f["block"] and o["id"] != f["id"]
+                             and not o["proxy"] and o["kind"] in PROXY_KINDS[f["kind"]]]
+        elif not f["proxy"]:
+            f["proxy_of"] = []
+    # Exclusive variants: one variantSet per block (named after it), one choice active.
+    for b in blocks:
+        names = variant_names(files, b["name"])
+        if not names:
+            b["variant"] = ""
+            continue
+        if b["name"] in seen:
+            raise ValueError(f"block {b['name']} : meme nom qu'un fichier, renommer l'un des deux")
+        if b["variant"] not in names:
+            b["variant"] = names[0]
+        for f in files:
+            if f["block"] == b["name"] and f["variant"]:
+                f["active"] = f["variant"] == b["variant"] and f["kind"] not in PREVIEW_KINDS
 
     by_id = {f["id"]: f for f in files}
     for f in files:
@@ -166,7 +247,21 @@ def normalize(recipe: dict, available: list[str]) -> dict:
         for tid in f["depends"]:
             if tid not in by_id or tid == f["id"]:
                 raise ValueError(f"{f['id']} : dependance inconnue {tid}")
-    return {"departments": departments, "files": files}
+    return {"blocks": blocks, "departments": departments, "files": files}
+
+
+def variant_names(files: list[dict], block: str) -> list[str]:
+    """Variant choices of *block*, in link order (several links may share one)."""
+    out: list[str] = []
+    for f in files:
+        if f.get("block") == block and f.get("variant") and f["variant"] not in out:
+            out.append(f["variant"])
+    return out
+
+
+def toggled(f: dict) -> bool:
+    """A link with its own on / off variantSet (not a sublayer, not a variant choice)."""
+    return f.get("arc", "reference") != "sublayer" and not f.get("variant")
 
 
 def active_map(recipe: dict, active: dict[str, bool] | None = None) -> dict[str, bool]:
@@ -241,7 +336,18 @@ def warnings(recipe: dict, active: dict[str, bool] | None = None) -> list[str]:
         if len(proxies) > 1:
             out.append(f"ATTENTION : plusieurs proxies actifs pour {by_id[tid]['label']} : {', '.join(proxies)}.")
 
+    chosen: dict[str, set[str]] = {}
     for f in files:
+        if f.get("variant") and state.get(f["id"]):
+            chosen.setdefault(f.get("block", ""), set()).add(f["variant"])
+    for block, names in chosen.items():
+        if len(names) > 1:
+            out.append(f"ATTENTION : plusieurs variantes actives dans le block {block} "
+                       f"({', '.join(sorted(names))}) : une seule est appliquee.")
+
+    for f in files:
+        if f.get("arc") == "sublayer" and f["kind"] == "animation":
+            out.append(f"{f['label']} : animation en sublayer, jamais liee a un rig.")
         if f["kind"] in ("shader", "animation") and f["targets"] and f["id"] in grey and state.get(f["id"]):
             out.append(f"{f['label']} est grise : aucune de ses cibles n'est active.")
         msg = format_warning(f["format"]) if state.get(f["id"]) else None

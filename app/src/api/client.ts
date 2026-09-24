@@ -692,8 +692,9 @@ export const api = {
   // ADR 0023: components are created by hand, then edited through their recipe.
   refreshUsdComponent: (project: string, name: string) =>
     apiCall<UsdComponentResult>('POST', '/usd/component/refresh', { project, name }),
-  createUsdComponent: (project: string, name: string, departments: string[]) =>
-    apiCall<UsdComponentResult>('POST', '/usd/component/create', { project, name, departments }),
+  // ADR 0024: created with empty blocks (model / look / rig unless *blocks* is given).
+  createUsdComponent: (project: string, name: string, blocks?: string[]) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/create', { project, name, blocks }),
   saveUsdComponent: (project: string, name: string, recipe: UsdComponentRecipe) =>
     apiCall<UsdComponentResult>('POST', '/usd/component/save', { project, name, recipe }),
   addProposedUsdComponent: (project: string, name: string) =>
@@ -852,12 +853,16 @@ export const api = {
 }
 
 // USD assembler library (GET /usd/library)
-// ADR 0023: a component is created by hand; its recipe lists files per department
-// (asset TYPE tokens), each with a kind, a format and targets (other files).
+// ADR 0023 + 0024: a component is created by hand; its recipe groups links (files) in
+// blocks; each link names its task (asset TYPE token), how it is composed (arc), an
+// optional variant name (exclusive choice in its block) and a proxy flag.
 export type UsdFileKind = 'geometry' | 'groom' | 'shader' | 'rig' | 'animation' | 'other'
+export type UsdLinkArc = 'reference' | 'sublayer' | 'payload'
+export interface UsdComponentBlock { name: string; variant: string }   // variant = default choice
 export interface UsdComponentFile {
-  id: string; label: string; department: string; kind: UsdFileKind; format: string
+  id: string; label: string; block: string; department: string; kind: UsdFileKind; format: string
   source: 'publish' | 'manual'
+  arc: UsdLinkArc; variant: string; proxy: boolean
   base?: string; instance?: string; variante?: string; version?: string   // publish ("latest" or vNNN)
   path?: string                                                           // manual, project-relative
   prim?: string
@@ -866,7 +871,7 @@ export interface UsdComponentFile {
   // library only: what the file resolves to now / in the current component version
   resolved_version?: string | null; composed_version?: string | null; found?: boolean
 }
-export interface UsdComponentRecipe { departments: string[]; files: UsdComponentFile[] }
+export interface UsdComponentRecipe { blocks: UsdComponentBlock[]; departments: string[]; files: UsdComponentFile[] }
 export interface UsdProposedFile {
   department: string; base: string; instance: string; variante: string; version: string
   format: string; kind: UsdFileKind
@@ -878,9 +883,11 @@ export interface UsdComponentInfo {
   legacy: boolean        // written before ADR 0023: saved again in the new format on the next update
   version: string | null
   versions: string[]
+  blocks: UsdComponentBlock[]
   departments: string[]
   files: UsdComponentFile[]
-  proposed: UsdProposedFile[]
+  proposed: UsdProposedFile[]   // publishes of every task not linked yet
+  variant_sets: Record<string, string[]>   // of the current version (assembly instances pick in them)
   warnings: string[]
   dir: string
   last: string | null

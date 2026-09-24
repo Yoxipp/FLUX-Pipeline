@@ -9,10 +9,13 @@
 #                                                    assetInfo, payload, recipe in customLayerData
 #   <NAME_path>/usd/<NAME>_vNNN/<NAME>_payload.usda  def /<NAME>, sublayers the department
 #                                                    layers strong -> weak (anim > rig > look > model)
+#                                                    and the links composed as "sublayer" (ADR 0024)
 #   <NAME_path>/usd/<NAME>_vNNN/<NAME>_<dept>.usda   over /<NAME>, one variantSet per FILE
 #                                                    ("on" = its contribution, "off" = nothing),
 #                                                    so several files of a department are active
-#                                                    at once and each toggles on its own
+#                                                    at once and each toggles on its own; links
+#                                                    named as variants share their block's
+#                                                    variantSet (one choice at a time, ADR 0024)
 #   <NAME_path>/usd/<NAME>_LAST.usda                 pointer layer (ADR 0017)
 # Paths are relative (ADR 0010). The importer only changes variant selections on its own
 # stage: its choices never modify the component.
@@ -179,7 +182,7 @@ def current_recipe(project_path: str | Path, name: str) -> dict | None:
     recipe = _json_field(flux, "recipe")
     if recipe:
         # Departments removed from the project tokens are dropped, never invented.
-        recipe = {"departments": [d for d in recipe.get("departments", []) if d in available],
+        recipe = {**recipe, "departments": [d for d in recipe.get("departments", []) if d in available],
                   "files": [f for f in recipe.get("files", []) if f.get("department") in available]}
         return cr.normalize(_drop_dangling(recipe), available)
     return _legacy_recipe(project_path, name, flux, available)
@@ -271,12 +274,13 @@ def resolve_files(project_path: str | Path, name: str, recipe: dict) -> tuple[di
     return out, warnings
 
 
-def proposed_files(project_path: str | Path, name: str, recipe: dict) -> list[dict]:
-    """Published bases of the component's departments not yet in its recipe."""
+def proposed_files(project_path: str | Path, name: str, recipe: dict,
+                   departments: list[str] | None = None) -> list[dict]:
+    """Published bases of *departments* (default: the component's) not yet in its recipe."""
     resolver = FluxResolver(project_path)
     used = {(f["department"], f.get("base")) for f in recipe["files"] if f["source"] == "publish"}
     out = []
-    for dept in recipe["departments"]:
+    for dept in recipe["departments"] if departments is None else departments:
         for pub in resolver.list_publish_bases(name, dept):
             if (dept, pub["base"]) in used:
                 continue
@@ -334,19 +338,31 @@ def _reference(rel: str, prim: str):
     return Sdf.Reference(rel, Sdf.Path(prim)) if prim else Sdf.Reference(rel)
 
 
+def _add_arc(spec, f: dict, rel: str, prim: str) -> None:
+    """Reference (default) or payload of *rel* on *spec*, after the arcs already there
+    (several links may fill the same variant)."""
+    from pxr import Sdf
+
+    if f.get("arc") == "payload":
+        item = Sdf.Payload(rel, Sdf.Path(prim)) if prim else Sdf.Payload(rel)
+        spec.payloadList.prependedItems = [*spec.payloadList.prependedItems, item]
+    else:
+        spec.referenceList.prependedItems = [*spec.referenceList.prependedItems, _reference(rel, prim)]
+
+
 def _author_on(on, token: str, f: dict, res: dict, folder: Path, resolved: dict, by_id: dict) -> None:
     """What the "on" variant of file *f* contributes to /<token>."""
     from pxr import Sdf
 
     rel = _rel(res["path"], folder)
     root_prim = f"/{res['prim']}" if res["prim"] else ""
-    if f["proxy_of"]:
+    if f.get("proxy") or f["proxy_of"]:
         # A linked proxy lives in /<NAME>/geo/proxy/<id> (where the importers hide proxies
         # in "Geo complete"), purpose=proxy. A FLUX publish brings its render meshes.
         item = _def(_def(_def(on, "geo"), "proxy"), f["id"])
         render = f"{root_prim}/geo/render" if root_prim else ""
         use = render if render and f["format"] in cr.USD_FORMATS and _has_prim(res["path"], render) else root_prim
-        item.referenceList.prependedItems = [_reference(rel, use)]
+        _add_arc(item, f, rel, use)
         purpose = Sdf.AttributeSpec(item, "purpose", Sdf.ValueTypeNames.Token, Sdf.VariabilityUniform)
         purpose.default = "proxy"
         return
@@ -354,7 +370,7 @@ def _author_on(on, token: str, f: dict, res: dict, folder: Path, resolved: dict,
         anim_rel = f"{root_prim}/skel/Anim" if root_prim else ""
         use = anim_rel if anim_rel and f["format"] in cr.USD_FORMATS and _has_prim(res["path"], anim_rel) else root_prim
         item = _def(_def(on, "anims"), f["id"])
-        item.referenceList.prependedItems = [_reference(rel, use)]
+        _add_arc(item, f, rel, use)
         # Bound on the skeleton of each TARGET rig only: never on the other rigs.
         for rig in f["targets"]:
             skel = (resolved.get(rig) or {}).get("skeleton", "")
@@ -372,9 +388,9 @@ def _author_on(on, token: str, f: dict, res: dict, folder: Path, resolved: dict,
         for part in where:
             spec = _def(spec, part)
         spec = _def(spec, f["id"])
-        spec.referenceList.prependedItems = [_reference(rel, root_prim)]
+        _add_arc(spec, f, rel, root_prim)
         return
-    on.referenceList.prependedItems = [_reference(rel, root_prim)]
+    _add_arc(on, f, rel, root_prim)
 
 
 # Where a file with its own root prim lands under /<NAME> (Solaris component layout).
@@ -384,7 +400,8 @@ _CHILD_OF_KIND: dict[str, tuple[str, ...]] = {
 
 
 def _author_department(folder: Path, name: str, token: str, dept: str, files: list[dict],
-                       resolved: dict, effective: dict[str, bool], by_id: dict) -> Path:
+                       resolved: dict, effective: dict[str, bool], by_id: dict,
+                       selected: dict[str, str]) -> Path:
     from pxr import Sdf
 
     path = folder / f"{name}_{dept}{COMPONENT_EXT}"
@@ -395,6 +412,16 @@ def _author_department(folder: Path, name: str, token: str, dept: str, files: li
         res = resolved.get(f["id"])
         if res is None:
             continue
+        if f.get("variant"):
+            # One choice of its block's variantSet: the block's selected variant wins.
+            block = f["block"]
+            vset = root.variantSets.get(block) or Sdf.VariantSetSpec(root, block)
+            var = vset.variants.get(f["variant"]) or Sdf.VariantSpec(vset, f["variant"])
+            _author_on(var.primSpec, token, f, res, folder, resolved, by_id)
+            root.variantSelections[block] = selected[block]
+            if block not in names:
+                names.append(block)
+            continue
         vset = Sdf.VariantSetSpec(root, f["id"])
         Sdf.VariantSpec(vset, OFF)
         _author_on(Sdf.VariantSpec(vset, ON).primSpec, token, f, res, folder, resolved, by_id)
@@ -404,6 +431,17 @@ def _author_department(folder: Path, name: str, token: str, dept: str, files: li
     layer.defaultPrim = token
     layer.Save()
     return path
+
+
+def _selected_variants(recipe: dict, resolved: dict) -> dict[str, str]:
+    """{block: selected variant} for the blocks with at least one variant link found."""
+    out: dict[str, str] = {}
+    for b in recipe.get("blocks") or []:
+        found = [f["variant"] for f in recipe["files"]
+                 if f["block"] == b["name"] and f.get("variant") and f["id"] in resolved]
+        if found:
+            out[b["name"]] = b["variant"] if b["variant"] in found else found[0]
+    return out
 
 
 def _signature(recipe: dict, resolved: dict, ref_folder: Path) -> dict:
@@ -430,25 +468,36 @@ def _author(folder: Path, name: str, token: str, version: str, recipe: dict,
     by_dept: dict[str, list[dict]] = {}
     for f in recipe["files"]:
         by_dept.setdefault(f["department"], []).append(f)
-    layers = []
+    selected = _selected_variants(recipe, resolved)
+    layers: list[tuple[int, int, str]] = []      # (strength, 0 layer / 1 sublayer link, path)
     for task in recipe["departments"]:
         dept, strength = department_layer(task)
         files = [f for f in by_dept.get(task, []) if f["id"] in resolved]
+        # A "sublayer" link joins the payload's layer stack, right under its task layer.
+        for f in files:
+            if f.get("arc") == "sublayer":
+                layers.append((strength, 1, _rel(resolved[f["id"]]["path"], folder)))
+        files = [f for f in files if f.get("arc") != "sublayer"]
         if files:
-            layers.append((strength, _author_department(folder, name, token, dept, files, resolved,
-                                                        effective, by_id)))
-    layers.sort(key=lambda sl: -sl[0])
+            path = _author_department(folder, name, token, dept, files, resolved, effective, by_id, selected)
+            layers.append((strength, 0, f"./{path.name}"))
+    layers.sort(key=lambda sl: (-sl[0], sl[1]))
 
     payload_path = folder / f"{name}_payload{COMPONENT_EXT}"
     payload = Sdf.Layer.CreateNew(str(payload_path))
     Sdf.PrimSpec(payload, token, Sdf.SpecifierDef)       # typeless: department types come through
-    payload.subLayerPaths[:] = [f"./{p.name}" for _, p in layers]
+    payload.subLayerPaths[:] = [p for _, _, p in layers]
     payload.defaultPrim = token
     for key, value in meta.items():
         payload.pseudoRoot.SetInfo(key, value)
     payload.Save()
 
-    variant_sets = {fid: [OFF, ON] for fid in resolved}
+    variant_sets: dict[str, list[str]] = {f["id"]: [OFF, ON] for f in recipe["files"]
+                                          if f["id"] in resolved and cr.toggled(f)}
+    for block in selected:
+        variant_sets[block] = [v for v in cr.variant_names(recipe["files"], block)
+                               if any(f["id"] in resolved and f.get("variant") == v
+                                      for f in recipe["files"] if f["block"] == block)]
     entry_path = folder / f"{name}{COMPONENT_EXT}"
     entry = Sdf.Layer.CreateNew(str(entry_path))
     root = Sdf.PrimSpec(entry, token, Sdf.SpecifierDef)
@@ -483,6 +532,13 @@ def _compose(project_path: str | Path, name: str, recipe: dict, *, user: str = "
     if parent is None:
         raise ValueError(f"asset inconnu : {name}")
     resolved, warnings = resolve_files(project_path, name, recipe)
+    token = sanitize_token(name)
+    for f in recipe["files"]:
+        res = resolved.get(f["id"])
+        if f.get("arc") == "sublayer" and res and res["prim"] and res["prim"] != token:
+            # the component payload only composes /<NAME>: a sublayer elsewhere is invisible
+            warnings.append(f"{f['label']} : sublayer dont la racine /{res['prim']} n'est pas /{token}, "
+                            "son contenu n'apparait pas dans le component")
     # The version folder is always one level under parent: same relative strings.
     signature = _signature(recipe, resolved, parent / f"{name}_v000")
     previous = _json_field(_entry_flux(_latest_entry(parent, name)), "signature")
@@ -492,7 +548,6 @@ def _compose(project_path: str | Path, name: str, recipe: dict, *, user: str = "
     ver = reserve_version(parent, name, COMPONENT_EXT)
     folder = sequence_folder(parent, name, ver)
     version = format_version(ver)
-    token = sanitize_token(name)
     try:
         entry, variant_sets = _author(folder, name, token, version, recipe, resolved, signature)
     except Exception:
@@ -523,13 +578,14 @@ def _check_asset(project_path: str | Path, name: str) -> Path:
     return parent
 
 
-def create_component(project_path: str | Path, name: str, departments: list[str], *,
-                     user: str = "") -> dict:
-    """Create the component of asset *name* by hand (ADR 0023): its departments, no file yet."""
+def create_component(project_path: str | Path, name: str, departments: list[str] | None = None, *,
+                     blocks: list[str] | None = None, user: str = "") -> dict:
+    """Create the component of asset *name* by hand (ADR 0023): no file yet, empty blocks
+    (model / look / rig unless *blocks* says otherwise, ADR 0024)."""
     _check_asset(project_path, name)
     if exists(project_path, name):
         raise ValueError(f"le component {name} existe deja")
-    recipe = cr.normalize(cr.empty_recipe(departments), available_departments(project_path))
+    recipe = cr.normalize(cr.empty_recipe(departments or [], blocks), available_departments(project_path))
     return _compose(project_path, name, recipe, user=user, force=True, note="component cree")
 
 
@@ -561,7 +617,10 @@ def add_proposed(project_path: str | Path, name: str, departments: list[str] | N
                          taken)
         taken.add(fid)
         added.add(fid)
-        recipe["files"].append({"id": fid, "label": label, "department": p["department"],
+        block = cr.default_block(p["department"])
+        if all(b["name"] != block for b in recipe["blocks"]):
+            recipe["blocks"].append({"name": block, "variant": ""})
+        recipe["files"].append({"id": fid, "label": label, "block": block, "department": p["department"],
                                 "kind": p["kind"], "source": "publish", "base": p["base"],
                                 "instance": p["instance"], "variante": p["variante"],
                                 "format": p["format"], "version": "latest"})
@@ -631,6 +690,14 @@ def refresh_from_publish(project_path: str | Path, base: str, *, user: str = "")
 
 # ── what the UI / importer read ──────────────────────────────────────────────
 
+def _set_of(f: dict, sets: dict[str, list[str]]) -> str:
+    """Variant set the importer drives for *f*: its own (on / off), its block's (variant
+    choice) or none (sublayer: always there)."""
+    if f.get("variant"):
+        return f["block"] if f["variant"] in sets.get(f["block"], []) else ""
+    return f["id"] if cr.toggled(f) and f["id"] in sets else ""
+
+
 def component_files(project_path: str | Path, name: str, version: str = "LAST",
                     active: dict[str, bool] | None = None) -> dict:
     """Files of a component version for the importer: recipe entries + variant set,
@@ -658,7 +725,7 @@ def component_files(project_path: str | Path, name: str, version: str = "LAST",
     return {
         "name": name, "version": entry.parent.name.rsplit("_", 1)[-1],
         "legacy": not flux.get("recipe"),
-        "files": [{**f, "variant_set": f["id"] if f["id"] in sets else "",
-                   "greyed": f["id"] in grey} for f in recipe["files"]],
+        "files": [{**f, "variant_set": _set_of(f, sets), "greyed": f["id"] in grey}
+                  for f in recipe["files"]],
         "warnings": cr.warnings(recipe, active),
     }
