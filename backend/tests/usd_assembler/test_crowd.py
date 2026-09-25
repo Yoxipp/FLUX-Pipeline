@@ -143,6 +143,31 @@ class Crowd(unittest.TestCase):
         self.assertEqual(anim.GetJointTransformTimeSamples(), [5.0, 5.5, 6.0])
         self.assertEqual(stage.GetDefaultPrim().GetPath(), Sdf.Path("/crowd"))
 
+    def test_preview_without_shot_and_without_anim_places_static_agents(self) -> None:
+        # 2026-09-26: a project without shots, no anim: the agents must still show.
+        res = crowd.build_crowd(self.project, "", "", "crowd", [{"p": [1, 0, 0]}], components=["DOG"], clips=[])
+        self.assertEqual(res["agents"], 1)
+        self.assertEqual(Path(res["path"]).parent, self.project / "shot" / "crowd_work")
+        stage = Usd.Stage.Open(str(res["path"]))
+        agent = stage.GetPrimAtPath("/crowd/crowd/agent_0001")
+        self.assertTrue(agent.IsValid() and agent.GetChildren())
+        self.assertFalse(agent.HasRelationship("skel:animationSource"))
+        with self.assertRaises(ValueError):
+            crowd.build_crowd(self.project, "", "", "crowd", [{"p": [0, 0, 0]}], components=["DOG"],
+                              clips=[], publish=True)
+
+    def test_asset_without_component_uses_the_input_file(self) -> None:
+        geo = Path(self._tmp.name) / "ogre.usda"
+        stage = Usd.Stage.CreateNew(str(geo))
+        stage.DefinePrim("/OGRE/body", "Mesh")
+        stage.GetRootLayer().Save()
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                components=["OGRE"], clips=[],
+                                sources={"OGRE": {"file": geo.as_posix(), "prim": "/OGRE"}})
+        self.assertEqual(res["agents"], 1)
+        crowd_stage = Usd.Stage.Open(str(res["path"]))
+        self.assertTrue(crowd_stage.GetPrimAtPath("/crowd/crowd/agent_0001/body").IsValid())
+
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
         res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["BOB", "TIM"],

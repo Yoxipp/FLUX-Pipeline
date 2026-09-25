@@ -162,3 +162,33 @@ class CrowdShots(unittest.TestCase):
                 res = asyncio.run(dcc_router.houdini_crowd_shots("P"))
         self.assertEqual(res["shots"], [{"seq": "SEQ001", "shot": "SHOT010"}, {"seq": "SEQ002", "shot": "SHOT020"}])
         self.assertIn("/dcc/houdini/crowd/shots", flux_crowd_hda.MODULE_FUNCTIONS)
+
+    def test_shot_folders_without_token_are_listed(self) -> None:
+        # 2026-09-26: shot folders made by hand (no SHOT token) left the menu empty.
+        import asyncio
+        from unittest import mock
+
+        from features.folder_manager import tokens as tok
+        from routers import dcc as dcc_router
+
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d) / "P"
+            (project / "shot" / "SEQ010" / "SHOT0010").mkdir(parents=True)
+            tok.save_tokens(project, tok.build_default_tokens())
+            with mock.patch("core.paths.get_project_path", return_value=project):
+                res = asyncio.run(dcc_router.houdini_crowd_shots("P"))
+            self.assertIn("SEQ010/SHOT0010", tok.load_tokens(project)["SHOT"])
+        self.assertEqual(res["shots"], [{"seq": "SEQ010", "shot": "SHOT0010"}])
+
+    def test_empty_answers_are_not_cached(self) -> None:
+        ns: dict = {}
+        exec(flux_crowd_hda.MODULE_FUNCTIONS, ns)
+        calls = []
+
+        def fetch():
+            calls.append(1)
+            return [], True
+
+        ns["_cached"]("k", fetch)
+        ns["_cached"]("k", fetch)
+        self.assertEqual(len(calls), 2)

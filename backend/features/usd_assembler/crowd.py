@@ -202,8 +202,12 @@ def _frozen(path: Path) -> Path:
 
 
 def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, agents: list[dict],
-                       clip_files: dict[str, Path], *, freeze: bool = False) -> dict:
+                       clip_files: dict[str, Path], *, freeze: bool = False,
+                       sources: dict[str, dict] | None = None) -> dict:
     """Write the crowd layer *dest*: /crowd/<GROUP>/agent_NNNN (relative references only).
+
+    *sources* ({asset: {"file", "prim"}}, from FLUX Crowd input 1): used for an asset
+    without a FLUX component, so it still shows (static mesh, 2026-09-26).
 
     Returns {"path", "agents", "warnings"}."""
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel
@@ -220,6 +224,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
         # group kind: the agents (components) stay a valid model hierarchy.
         Usd.ModelAPI(UsdGeom.Scope.Define(stage, scope).GetPrim()).SetKind("group")
     targets: dict[str, str] = {}
+    target_prims: dict[str, Sdf.Path] = {}
     starts: dict[str, float] = {}
     written = 0
     for a in agents:
@@ -227,7 +232,13 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
         if comp not in targets:
             parent = component_dir(project, comp)
             last = parent / f"{comp}_LAST{COMPONENT_EXT}" if parent is not None else None
-            if last is None or not last.is_file():
+            src = (sources or {}).get(comp) or {}
+            if (last is None or not last.is_file()) and src.get("file") and Path(src["file"]).is_file():
+                warnings.append(f"{comp} : pas de component FLUX, fichier de l'entree 1 utilise")
+                targets[comp] = _rel(Path(src["file"]), dest.parent)
+                if src.get("prim") and Sdf.Path.IsValidPathString(src["prim"]):
+                    target_prims[comp] = Sdf.Path(src["prim"])
+            elif last is None or not last.is_file():
                 warnings.append(f"{comp} : pas d'USD d'asset, agents ignores")
                 targets[comp] = ""
             else:
@@ -242,7 +253,10 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
             continue
         path = f"/crowd/{grp}/{a['name']}"
         prim = stage.DefinePrim(path)          # typeless: the component's SkelRoot comes through
-        prim.GetReferences().AddReference(targets[comp])
+        if comp in target_prims:
+            prim.GetReferences().AddReference(targets[comp], target_prims[comp])
+        else:
+            prim.GetReferences().AddReference(targets[comp])
         Usd.ModelAPI(prim).SetKind("component")
         xf = UsdGeom.Xformable(prim)
         xf.AddTranslateOp().Set(Gf.Vec3d(*a["p"]))
@@ -321,8 +335,12 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
                 offset: tuple[float, float] = (0.0, 0.0), speed: tuple[float, float] = (1.0, 1.0),
                 publish: bool = False, user: str = "",
                 component_weights: dict[str, float] | None = None,
-                clip_weights: dict[str, float] | None = None) -> dict:
+                clip_weights: dict[str, float] | None = None,
+                sources: dict[str, dict] | None = None) -> dict:
     """Preview (work file in the shot) or publish (SEQ_SHOT_CROWD[_GROUP], vNNN + LAST) a crowd.
+
+    A preview needs no shot (2026-09-26: a project without shots must still show
+    the agents): it is then written in <project>/shot/crowd_work. A publish needs one.
 
     Returns {"path", "agents", "warnings", "version" (publish only), "stage" (publish only)}."""
     from features.folder_manager.naming_validator import format_version
@@ -340,10 +358,15 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
                          component_weights=component_weights, clip_weights=clip_weights, fits=fits)
     no_clip = sorted({c for c in components if fits is not None and not (fits.get(c, set()) & set(known))})
     grp = sanitize_token(group) or "crowd"
-    base = f"{ss.entity(seq, shot)}_{CROWD_TYPE}" + ("" if grp.lower() == "crowd" else f"_{grp.upper()}")
+    suffix = "" if grp.lower() == "crowd" else f"_{grp.upper()}"
+    has_shot = bool(seq and shot)
+    if publish and not has_shot:
+        raise ValueError("publier une foule demande une sequence et un shot")
+    base = (f"{ss.entity(seq, shot)}_" if has_shot else "") + CROWD_TYPE + suffix
     if not publish:
-        dest = ss.stage_dir(project, seq, shot) / "crowd_work" / f"{base}.usda"
-        res = author_crowd_layer(dest, project, grp, agents, by_base)
+        work = ss.stage_dir(project, seq, shot) if has_shot else project / "shot"
+        dest = work / "crowd_work" / f"{base}.usda"
+        res = author_crowd_layer(dest, project, grp, agents, by_base, sources=sources)
         res["warnings"] = ([f"clip inconnu : {c}" for c in unknown]
                            + [f"aucune anim ne va sur le rig de {c} : pose de repos" for c in no_clip]
                            + res["warnings"])
@@ -363,7 +386,8 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     ver = reserve_version(parent, base, ".usda")
     folder = sequence_folder(parent, base, ver)
     try:
-        res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base, freeze=True)
+        res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base, freeze=True,
+                                 sources=sources)
     except Exception:
         discard_rendered_version(parent, base, ".usda", ver, is_sequence=True)
         raise
