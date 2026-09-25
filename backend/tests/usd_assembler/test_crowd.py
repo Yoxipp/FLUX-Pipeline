@@ -108,7 +108,8 @@ class Crowd(unittest.TestCase):
         ref = layer.GetPrimAtPath("/crowd/crowd/agent_0001").referenceList.prependedItems[0]
         self.assertFalse(os.path.isabs(ref.assetPath))
         anim_ref = layer.GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim").referenceList.prependedItems[0]
-        self.assertEqual(anim_ref.layerOffset, Sdf.LayerOffset(4.0, 0.5))
+        # Clip starts at frame 1: speed pivots on it (offset 4 + 1 * (1 - 0.5)).
+        self.assertEqual(anim_ref.layerOffset, Sdf.LayerOffset(4.5, 0.5))
         stage = Usd.Stage.Open(str(res["path"]))
         agent = stage.GetPrimAtPath("/crowd/crowd/agent_0002")
         self.assertTrue(agent.IsA(UsdSkel.Root))
@@ -118,8 +119,9 @@ class Crowd(unittest.TestCase):
         query = cache.GetSkelQuery(UsdSkel.Skeleton(stage.GetPrimAtPath("/crowd/crowd/agent_0002/skel/Skeleton")))
         anim = query.GetAnimQuery()
         self.assertTrue(anim)
-        # Speed 2, offset 4: clip frame 3 plays at stage frame 3 / 2 + 4 = 5.5.
-        self.assertEqual(anim.GetJointTransformTimeSamples(), [4.5, 5.0, 5.5])
+        # Speed 2, offset 4: the clip's first frame (1) plays at 1 + 4 = 5, then twice as fast.
+        self.assertEqual(anim.GetJointTransformTimeSamples(), [5.0, 5.5, 6.0])
+        self.assertEqual(stage.GetDefaultPrim().GetPath(), Sdf.Path("/crowd"))
 
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]

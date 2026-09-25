@@ -183,6 +183,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
         # group kind: the agents (components) stay a valid model hierarchy.
         Usd.ModelAPI(UsdGeom.Scope.Define(stage, scope).GetPrim()).SetKind("group")
     targets: dict[str, str] = {}
+    starts: dict[str, float] = {}
     written = 0
     for a in agents:
         comp = a["component"]
@@ -215,15 +216,41 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                 anim_path = f"{path}/crowd_anim"
                 anim = stage.DefinePrim(anim_path)
                 clip_root = _clip_root(src)
-                # Speed 2 = the clip plays twice as fast: stage time = clip time / speed + offset.
+                # Speed 2 = the clip plays twice as fast, around its FIRST frame (not frame 0,
+                # which pushed a 1001 clip to frame ~500: agents frozen during the shot):
+                # stage time = start + offset + (clip time - start) / speed.
+                start = starts.setdefault(str(src), _clip_start(src, clip_root))
+                scale = 1.0 / a["speed"]
                 anim.GetReferences().AddReference(
                     _rel(src, dest.parent), Sdf.Path(f"/{clip_root}/skel/Anim"),
-                    Sdf.LayerOffset(a["offset"], 1.0 / a["speed"]))
+                    Sdf.LayerOffset(a["offset"] + start * (1.0 - scale), scale))
                 UsdSkel.BindingAPI.Apply(prim).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
         written += 1
+    # FLUX layer contract (ADR 0011): default prim, meters, Y up.
+    stage.SetDefaultPrim(stage.GetPrimAtPath("/crowd"))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
     layer.customLayerData = {"flux": {"role": "crowd", "group": grp, "agents": str(written)}}
     layer.Save()
     return {"path": dest, "agents": written, "warnings": warnings}
+
+
+def _clip_start(path: Path, root: str) -> float:
+    """First frame of a clip: its stage start, else its first joint sample, else 0."""
+    from pxr import Usd
+
+    try:
+        clip = Usd.Stage.Open(str(path), Usd.Stage.LoadNone)
+        if clip.HasAuthoredTimeCodeRange():
+            return float(clip.GetStartTimeCode())
+        anim = clip.GetPrimAtPath(f"/{root}/skel/Anim")
+        for attr in (anim.GetAttributes() if anim else []):
+            samples = attr.GetTimeSamples()
+            if samples:
+                return float(samples[0])
+    except Exception:           # noqa: BLE001 - the offset falls back to frame 0
+        pass
+    return 0.0
 
 
 def _clip_root(path: Path) -> str:
