@@ -257,7 +257,8 @@ const EMPTY_SEL: ComposerSel = { category: '', name: '', task: '', instance: '',
 
 // Texture-map nomenclature: many real-world aliases -> ONE canonical token. A file
 // whose name contains any alias as a segment (e.g. Mesh_basecolor, Mesh_nrm.1001)
-// is tagged with the canonical token (BCOL, NORM, ...). Extend freely.
+// is tagged with the canonical token (BCOL, NORM, ...). Extend freely, and keep the
+// backend twin in sync (backend/dcc/texture_publish.py MAP_ALIASES: Painter / Mari).
 const MAP_ALIASES: Record<string, string[]> = {
   BCOL:    ['bcol', 'basecolor', 'base_color', 'albedo', 'diffuse', 'diff', 'color', 'col'],
   ROUGH:   ['rough', 'roughness', 'rgh'],
@@ -267,7 +268,7 @@ const MAP_ALIASES: Record<string, string[]> = {
   BUMP:    ['bump'],
   DISP:    ['disp', 'displacement', 'displace', 'height'],
   ZDISP:   ['zdisp'],
-  AO:      ['ao', 'occlusion'],
+  AO:      ['ao', 'occlusion', 'ambientocclusion'],
   OPACITY: ['opacity', 'alpha', 'mask'],
   EMISS:   ['emiss', 'emissive', 'emission', 'emit'],
   SSS:     ['sss', 'subsurface', 'scatter'],
@@ -1397,6 +1398,7 @@ export function Publisher() {
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked })
         const n = res.published?.length ?? 0
         toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') {
         // File ingest (Level 1): local files, Substance Designer (.sbsar/maps) and
         // Marvelous (.abc/.zprj/.obj). Same token-composed naming; the dedicated DCC

@@ -86,9 +86,9 @@ def map_token_from_filename(filename: str) -> str:
     Painter names maps like ``TextureSet_BaseColor.png`` / ``..._Roughness.1001.png``.
     We take the last alpha segment before any UDIM/frame number as the map token.
     """
-    from dcc.texture_publish import split_map_name
+    from dcc.texture_publish import canonical_map_token, split_map_name
 
-    return split_map_name(filename)[0]
+    return canonical_map_token(filename) or split_map_name(filename)[0]
 
 
 def publish_painter(

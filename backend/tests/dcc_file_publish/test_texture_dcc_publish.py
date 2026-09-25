@@ -58,8 +58,8 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertEqual(br._map_label("$textureSet_Height.$udim"), "Height")
 
     def test_map_token_from_filename(self):
-        self.assertEqual(se.map_token_from_filename("HeroBody_BaseColor.png"), "BASECOLOR")
-        self.assertEqual(se.map_token_from_filename("HeroBody_Roughness.1001.exr"), "ROUGHNESS")
+        self.assertEqual(se.map_token_from_filename("HeroBody_BaseColor.png"), "BCOL")
+        self.assertEqual(se.map_token_from_filename("HeroBody_Roughness.1001.exr"), "ROUGH")
 
 
 class PublishPainter(unittest.TestCase):
@@ -80,8 +80,8 @@ class PublishPainter(unittest.TestCase):
         self.assertEqual(len(out["published"]), 2)
         # each map ingested with a composed FLUX target name (map token uppercased)
         names = [k.kwargs.get("target_name") or k.args[5] for k in pf.call_args_list]
-        self.assertIn("CHAR_TEX_HERO_BASECOLOR", names)
-        self.assertIn("CHAR_TEX_HERO_ROUGHNESS", names)
+        self.assertIn("CHAR_TEX_HERO_BCOL", names)
+        self.assertIn("CHAR_TEX_HERO_ROUGH", names)
 
     def test_export_failure(self):
         with mock.patch("core.paths.get_project_path", return_value=Path("/proj")), \
