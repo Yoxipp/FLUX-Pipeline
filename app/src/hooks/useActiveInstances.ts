@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { DccStatusMap } from '../types'
+import { api } from '../api/client'
 
 const LS_KEY = 'flux.activeInstance'   // { [dccStatusKey]: port }
 
@@ -38,6 +39,13 @@ export function readActiveInstancePort(dccKey: string): number | null {
   } catch {
     return null
   }
+}
+
+/** Store the chosen instance port of a DCC (localStorage + backend, so the Houdini
+ *  client follows it). Used by the publish picker outside the sidebar hook. */
+export function writeActiveInstancePort(dccKey: string, port: number): void {
+  writeMap({ ...readMap(), [dccKey]: port })
+  void api.setActiveInstance(dccKey, port).catch(() => { /* backend down: next push */ })
 }
 
 export interface ActiveInstances {
@@ -81,6 +89,14 @@ export function useActiveInstances(status: DccStatusMap): ActiveInstances {
     },
     [status, map],
   )
+
+  // The backend keeps the choice in memory (restart = base port): push it on every
+  // change, and once on mount.
+  useEffect(() => {
+    for (const [dccKey, port] of Object.entries(map)) {
+      void api.setActiveInstance(dccKey, port).catch(() => { /* backend down */ })
+    }
+  }, [map])
 
   const setActivePort = useCallback((dccKey: string, port: number) => {
     setMap((prev) => {

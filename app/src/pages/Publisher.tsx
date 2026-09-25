@@ -15,7 +15,7 @@ import { api } from '../api/client'
 import type { UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
-import { readActiveInstancePort } from '../hooks/useActiveInstances'
+import { readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
 import { toast } from 'sonner'
 
 // Publish endpoints return version_str already prefixed with "v" (format_version
@@ -1437,17 +1437,40 @@ export function Publisher() {
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
+  // Several Maya / Houdini open: ask which one publishes before starting.
+  const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; label: string; scene: string | null }[] } | null>(null)
+  const requestPublish = useCallback(async () => {
+    if (publishing) return
+    if (dcc === 'Maya' || dcc === 'Houdini') {
+      try {
+        const r = await api.getDccInstances(dcc)
+        if (r.instances.length > 1) {
+          setInstancePick({ dcc, items: r.instances })
+          return
+        }
+      } catch { /* listing failed: publish on the current instance */ }
+    }
+    void handlePublish()
+  }, [dcc, publishing, handlePublish])
+  const publishOn = (port: number) => {
+    if (!instancePick) return
+    writeActiveInstancePort(instancePick.dcc, port)
+    setInstancePick(null)
+    // Houdini follows the backend choice: let it land before the publish call.
+    void api.setActiveInstance(instancePick.dcc, port).catch(() => undefined).then(() => handlePublish())
+  }
+
   // Ctrl/Cmd+P → publish (also prevents the browser print dialog)
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault()
-        if (!publishing) void handlePublish()
+        void requestPublish()
       }
     }
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
-  }, [handlePublish, publishing])
+  }, [requestPublish])
 
   const filename = buildFilename()
 
@@ -2247,10 +2270,53 @@ export function Publisher() {
         {dcc === 'ZBrush' && (
           <Btn ghost onClick={handleCancelZBrush}>Annuler</Btn>
         )}
-        <Btn primary onClick={() => void handlePublish()}>
+        <Btn primary onClick={() => void requestPublish()}>
           {publishing ? 'Publication…' : 'Publish →'}
         </Btn>
       </div>
+
+      {/* Instance picker: several Maya / Houdini are open */}
+      {instancePick && (
+        <div onClick={() => setInstancePick(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div className="card" onClick={e => e.stopPropagation()} style={{
+            width: 440, maxWidth: '100%', padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
+            background: 'var(--paper-2)', boxShadow: 'var(--shadow-md)',
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+              Publier depuis quel {instancePick.dcc} ?
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+              {instancePick.items.length} instances ouvertes. Le choix reste actif pour les prochains publishs.
+            </div>
+            {instancePick.items.map(it => {
+              const active = readActiveInstancePort(instancePick.dcc) === it.port
+              const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : 'Scène sans nom'
+              return (
+                <div key={it.port} onClick={() => publishOn(it.port)} title={it.scene ?? ''} style={{
+                  padding: '9px 12px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
+                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--rule-2)'),
+                  background: active ? 'var(--accent-soft)' : 'var(--paper)',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scene}</div>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      port {it.port}{it.scene ? ` · ${it.scene}` : ''}
+                    </div>
+                  </div>
+                  {active && <span style={{ fontSize: 10, color: 'var(--accent-hi)', flexShrink: 0 }}>actif</span>}
+                </div>
+              )
+            })}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Btn ghost onClick={() => setInstancePick(null)}>Annuler</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
