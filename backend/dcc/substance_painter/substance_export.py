@@ -28,29 +28,56 @@ def build_export_config(
     size: int | None = None,
     padding: str = "infinite",
     dilation: int = 16,
+    maps: list[str] | None = None,
+    map_params: dict[str, dict] | None = None,
 ) -> dict:
     """Return a substance_painter.export config (pure, testable structure).
 
     *size*: output width in pixels (power of two), None = each texture set's own size.
     *padding*: Painter dilation algorithm (infinite, passthrough, transparent, color,
-    diffusion); *dilation* in pixels for the non-infinite ones."""
+    diffusion); *dilation* in pixels for the non-infinite ones.
+    *maps*: output maps of the preset to export (their fileName), None = all of them.
+    *map_params*: {fileName: {"bit_depth", "size"}} overriding the defaults per map
+    (2026-09-25: bit depth and size chosen map by map)."""
     params: dict = {"fileFormat": file_format, "bitDepth": bit_depth,
                     "paddingAlgorithm": padding or "infinite", "dithering": False}
     if params["paddingAlgorithm"] not in ("infinite", "passthrough"):
         params["dilationDistance"] = int(dilation)
     if size:
-        params["sizeLog2"] = max(7, min(13, int(size).bit_length() - 1))
+        params["sizeLog2"] = _size_log2(size)
+    export_params: list[dict] = [{"parameters": params}]
+    for fid, over in sorted((map_params or {}).items()):
+        if maps and fid not in maps:
+            continue
+        p: dict = {}
+        if over.get("bit_depth"):
+            p["bitDepth"] = str(over["bit_depth"])
+        if over.get("size"):
+            p["sizeLog2"] = _size_log2(over["size"])
+        if p:
+            # Later entries win over the global one for the maps they filter.
+            export_params.append({"filter": {"outputMaps": [fid]}, "parameters": p})
     cfg: dict = {
         "exportPath": str(export_path).replace("\\", "/"),
         "exportShaderParams": False,
         "defaultExportPreset": preset,
         # Painter refuses the export ("impossible de resoudre l'algorithme de
         # dilatation") when parameters are given without a padding algorithm.
-        "exportParameters": [{"parameters": params}],
+        "exportParameters": export_params,
     }
     if texture_sets:
         cfg["exportList"] = [{"rootPath": ts} for ts in texture_sets]
+        if maps:
+            for entry in cfg["exportList"]:
+                entry["filter"] = {"outputMaps": list(maps)}
+    elif maps:
+        # No set listed: the bridge lists every set, then applies this filter.
+        cfg["fluxOutputMaps"] = list(maps)
     return cfg
+
+
+def _size_log2(size) -> int:
+    return max(7, min(13, int(size).bit_length() - 1))
 
 
 def map_token_from_filename(filename: str) -> str:
@@ -80,8 +107,11 @@ def publish_painter(
     size: int | None = None,
     padding: str = "infinite",
     dilation: int = 16,
+    maps: list[str] | None = None,
+    map_params: dict[str, dict] | None = None,
 ) -> dict:
-    """Export Painter maps and ingest them into FLUX (one publish per map).
+    """Export Painter maps and ingest them into FLUX (one publish per map, so only the
+    ticked maps get a texture folder).
 
     Returns {ok, published:[paths], tx:[paths]} or {ok: False, error}.
     """
@@ -94,7 +124,8 @@ def publish_painter(
     log.info("Painter publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_painter_"))
     config = build_export_config(export_dir, preset, file_format, bit_depth,
-                                 texture_sets or None, size, padding, dilation)
+                                 texture_sets or None, size, padding, dilation,
+                                 maps or None, map_params)
     result = substance_client.export(config)
     if not result.get("ok"):
         log.warning("Painter export failed: %s", result.get("error"))

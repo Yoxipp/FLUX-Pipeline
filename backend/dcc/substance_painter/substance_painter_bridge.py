@@ -125,10 +125,15 @@ def _complete_config(config: dict) -> dict:
     import substance_painter.textureset as _ts
 
     cfg = dict(config)
+    # Only the maps ticked in FLUX (their fileName in the preset), on every set.
+    maps = cfg.pop("fluxOutputMaps", None)
     if not cfg.get("exportList"):
         cfg["exportList"] = [{"rootPath": ts.name()} for ts in _ts.all_texture_sets()]
+    if maps:
+        for entry in cfg["exportList"]:
+            entry.setdefault("filter", {})["outputMaps"] = list(maps)
     preset = str(cfg.get("defaultExportPreset") or "")
-    if preset and not preset.startswith("resource://"):
+    if preset and "://" not in preset:
         cfg["defaultExportPreset"] = _res.ResourceID(context="starter_assets", name=preset).url()
     return cfg
 
@@ -186,9 +191,53 @@ def _do_info() -> dict:
             name = os.path.basename(_project.file_path() or "")
         except Exception:  # noqa: BLE001
             pass
-        return {"status": "ok", "project": name, "texture_sets": sets}
+        return {"status": "ok", "project": name, "texture_sets": sets, "presets": _presets()}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "msg": str(exc)}
+
+
+def _map_label(file_name: str) -> str:
+    """"$textureSet_BaseColor(.$udim)" -> "BaseColor": the map part of an output name."""
+    import re
+
+    label = re.sub(r"\([^)]*\)", "", str(file_name))          # optional groups
+    label = re.sub(r"\$[A-Za-z]+", "", label).strip("_.- ")
+    return label or str(file_name)
+
+
+def _presets() -> list[dict]:
+    """Export presets Painter really has (2026-09-25: "USD Preview Surface" was a
+    guessed name Painter did not know), each with its output maps:
+    [{"name", "url", "maps": [{"id": fileName, "label"}]}]."""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(name, url, preset) -> None:
+        if not name or name in seen:
+            return
+        seen.add(name)
+        maps = []
+        try:
+            for m in preset.list_output_maps() or []:
+                fid = m.get("fileName") if isinstance(m, dict) else None
+                if fid and all(x["id"] != fid for x in maps):
+                    maps.append({"id": fid, "label": _map_label(fid)})
+        except Exception:  # noqa: BLE001 - a preset without readable maps stays usable
+            pass
+        out.append({"name": str(name), "url": str(url or ""), "maps": maps})
+
+    try:
+        for p in _sp_export.list_resource_export_presets():
+            rid = p.resource_id
+            _add(getattr(rid, "name", ""), rid.url(), p)
+    except Exception as exc:  # noqa: BLE001
+        _diag(f"resource export presets unreadable: {exc!r}")
+    try:
+        for p in _sp_export.list_predefined_export_presets():
+            _add(getattr(p, "name", ""), getattr(p, "url", ""), p)
+    except Exception as exc:  # noqa: BLE001
+        _diag(f"predefined export presets unreadable: {exc!r}")
+    return sorted(out, key=lambda x: x["name"].lower())
 
 
 def _dispatch(cmd: dict) -> dict:

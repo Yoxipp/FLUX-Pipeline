@@ -20,13 +20,14 @@ export const PAINTER_OPTIONS: ExportOption[] = [
       { value: 'PBR Specular Glossiness',           label: 'PBR Specular Glossiness' },
       { value: 'Arnold (AiStandard)',               label: 'Arnold (AiStandard)' },
       { value: 'Unreal Engine 4 (Packed)',          label: 'Unreal Engine 4 (Packed)' },
-      { value: 'USD Preview Surface Metallic',      label: 'USD Preview Surface' },
     ] },
   { key: 'bit_depth', label: 'Bit depth', type: 'enum', default: '8', tier: 'common',
     choices: [
-      { value: '8',  label: '8 bit' },
-      { value: '16', label: '16 bit' },
-      { value: '32', label: '32 bit' },
+      // Painter bitDepth values: 8, 16, 16f, 32f (a plain "32" is not one of them).
+      { value: '8',   label: '8 bit' },
+      { value: '16',  label: '16 bit' },
+      { value: '16f', label: '16 bit float' },
+      { value: '32f', label: '32 bit float' },
     ] },
   { key: 'size', label: 'Taille', type: 'enum', default: '', tier: 'common',
     choices: [

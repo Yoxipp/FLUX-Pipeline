@@ -111,6 +111,9 @@ async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Co
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
+// An export preset of the open Painter, with the output maps it writes (fileName = id).
+export interface PainterPreset { name: string; url: string; maps: { id: string; label: string }[] }
+
 export const api = {
   // Settings
   getSettings: () =>
@@ -402,12 +405,15 @@ export const api = {
     size?:        number
     padding?:     string
     dilation?:    number
+    maps?:        string[]                                              // output maps of the preset (fileName)
+    map_params?:  Record<string, { bit_depth?: string; size?: number }>  // per map overrides
   }) =>
     apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/substance/publish', payload),
 
   // What can be exported from the open Painter project / Mari geo (Publisher options).
   getSubstanceInfo: () =>
-    apiCall<{ ok: boolean; project: string; texture_sets: { name: string; udim?: boolean; resolution?: number }[] }>(
+    apiCall<{ ok: boolean; project: string; texture_sets: { name: string; udim?: boolean; resolution?: number }[];
+              presets?: PainterPreset[] }>(
       'GET', '/dcc/substance/info', undefined, 25000),
   getMariInfo: () =>
     apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number }[] }>(

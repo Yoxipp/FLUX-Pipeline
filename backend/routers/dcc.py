@@ -1932,6 +1932,8 @@ class SubstancePublishRequest(BaseModel):
     size:         int | None = None         # output width, None = the set's own size
     padding:      str = "infinite"          # Painter dilation algorithm
     dilation:     int = 16                  # pixels, for the non-infinite algorithms
+    maps:         list[str] | None = None   # output maps of the preset (fileName), None = all
+    map_params:   dict[str, dict] | None = None   # {fileName: {"bit_depth", "size"}}
 
 
 @router.post("/substance/publish")
@@ -1949,6 +1951,7 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
             req.instance, req.preset, req.file_format, req.bit_depth,
             req.conform_tx, req.description or "", user,
             req.texture_sets, req.size, req.padding, req.dilation,
+            req.maps, req.map_params,
         ),
     )
     if not result.get("ok"):

@@ -35,6 +35,28 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertNotIn("dilationDistance", infinite)
         self.assertNotIn("sizeLog2", infinite)
 
+    def test_only_the_ticked_maps_with_their_own_bit_depth_and_size(self):
+        # 2026-09-25: map by map like Mari, bit depth and size per map.
+        cfg = se.build_export_config("/tmp/out", "P", "png", "8", ["Body"], None, maps=[
+            "$textureSet_BaseColor", "$textureSet_Height"], map_params={
+            "$textureSet_Height": {"bit_depth": "32", "size": 2048},
+            "$textureSet_Normal": {"bit_depth": "16"}})       # not ticked: ignored
+        self.assertEqual(cfg["exportList"], [{"rootPath": "Body", "filter": {
+            "outputMaps": ["$textureSet_BaseColor", "$textureSet_Height"]}}])
+        self.assertEqual(cfg["exportParameters"][1], {"filter": {"outputMaps": ["$textureSet_Height"]},
+                                                      "parameters": {"bitDepth": "32", "sizeLog2": 11}})
+        self.assertEqual(len(cfg["exportParameters"]), 2)
+        # every set: the bridge applies the filter after listing them
+        cfg = se.build_export_config("/tmp/out", "P", maps=["$textureSet_Height"])
+        self.assertEqual(cfg["fluxOutputMaps"], ["$textureSet_Height"])
+        self.assertNotIn("exportList", cfg)
+
+    def test_bridge_map_labels(self):
+        from dcc.substance_painter import substance_painter_bridge as br
+        self.assertEqual(br._map_label("$textureSet_BaseColor"), "BaseColor")
+        self.assertEqual(br._map_label("$mesh_$textureSet_Normal(_$colorSpace)"), "Normal")
+        self.assertEqual(br._map_label("$textureSet_Height.$udim"), "Height")
+
     def test_map_token_from_filename(self):
         self.assertEqual(se.map_token_from_filename("HeroBody_BaseColor.png"), "BASECOLOR")
         self.assertEqual(se.map_token_from_filename("HeroBody_Roughness.1001.exr"), "ROUGHNESS")

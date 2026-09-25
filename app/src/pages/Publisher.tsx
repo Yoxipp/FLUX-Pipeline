@@ -12,11 +12,16 @@ import { photoshopSchemaForExt, defaultPhotoshopOptions } from '../lib/photoshop
 import { PAINTER_OPTIONS, defaultPainterOptions } from '../lib/painterExportOptions'
 import { MARI_OPTIONS, defaultMariOptions } from '../lib/mariExportOptions'
 import { api } from '../api/client'
-import type { UsdTaskContribution } from '../api/client'
+import type { PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
 import { toast } from 'sonner'
+
+// Painter per-map overrides: "Defaut" = the export options above (bit depth / taille).
+const MAP_DEFAULT = '__default__'
+const MAP_BIT_DEPTHS: [string, string][] = [[MAP_DEFAULT, 'Défaut'], ['8', '8 bit'], ['16', '16 bit'], ['16f', '16 bit float'], ['32f', '32 bit float']]
+const MAP_SIZES: [string, string][] = [[MAP_DEFAULT, 'Défaut'], ['512', '512'], ['1024', '1K'], ['2048', '2K'], ['4096', '4K'], ['8192', '8K']]
 
 // Publish endpoints return version_str already prefixed with "v" (format_version
 // -> "v001"), but the fallback path can return a bare "001". Normalise to exactly
@@ -721,6 +726,12 @@ export function Publisher() {
   const [texChecked, setTexChecked] = useState<Set<string>>(new Set())
   const [texSource, setTexSource]   = useState('')
   const [texLoading, setTexLoading] = useState(false)
+  // Painter: the presets it really has, and the maps of the chosen one (2026-09-25:
+  // map by map like Mari, bit depth and size per map, only the ticked maps publish).
+  const [painterPresets, setPainterPresets] = useState<PainterPreset[]>([])
+  const [mapChecked, setMapChecked] = useState<Set<string>>(new Set())
+  const [mapOpts, setMapOpts] = useState<Record<string, { bit_depth: string; size: string }>>({})
+  const curPreset = painterPresets.find(p => p.url === painterOpts.preset || p.name === painterOpts.preset)
 
   // Generic connection status for socket-bridge DCCs (Nuke/Painter/Mari/Photoshop):
   // one polling effect pings the active DCC's key with retry, like Maya/ZBrush, so a
@@ -1335,7 +1346,9 @@ export function Publisher() {
         })
         toast.success(`${versionLabel(res.version_str)} → Photoshop`)
       } else if (dcc === 'Painter' || dcc === 'Mari') {
-        if (!bridgeStatus.connected) {
+        // The ping can fail while the bridge answers (a busy app): once its texture sets /
+        // channels were read, the publish is tried and reports its own error.
+        if (!bridgeStatus.connected && texItems.length === 0) {
           toast.error(`${dcc} non connecté : ouvre ${dcc} avec le bridge FLUX actif`)
           return
         }
@@ -1358,6 +1371,16 @@ export function Publisher() {
         const picked = texItems.length > 0 && texChecked.size < texItems.length
           ? texItems.map(t => t.name).filter(n => texChecked.has(n)) : undefined
         if (picked && picked.length === 0) { toast.error(dcc === 'Painter' ? 'Coche au moins un texture set' : 'Coche au moins un channel'); return }
+        const presetMaps = curPreset?.maps ?? []
+        const pickedMaps = presetMaps.length && mapChecked.size < presetMaps.length
+          ? presetMaps.map(m => m.id).filter(id => mapChecked.has(id)) : undefined
+        if (dcc === 'Painter' && pickedMaps && pickedMaps.length === 0) { toast.error('Coche au moins une map'); return }
+        const mapParams: Record<string, { bit_depth?: string; size?: number }> = {}
+        for (const m of presetMaps) {
+          const o = mapOpts[m.id]
+          if (!o || !mapChecked.has(m.id)) continue
+          if (o.bit_depth || o.size) mapParams[m.id] = { bit_depth: o.bit_depth || undefined, size: o.size ? Number(o.size) : undefined }
+        }
         const res = dcc === 'Painter'
           ? await api.publishSubstance({
               ...tokens,
@@ -1368,6 +1391,8 @@ export function Publisher() {
               size:         painterOpts.size ? Number(painterOpts.size) : undefined,
               padding:      String(painterOpts.padding ?? 'infinite'),
               dilation:     Number(painterOpts.dilation ?? 16),
+              maps:         pickedMaps,
+              map_params:   Object.keys(mapParams).length ? mapParams : undefined,
             })
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked })
         const n = res.published?.length ?? 0
@@ -1461,6 +1486,7 @@ export function Publisher() {
         })))
         setTexSource(r.project || 'Aucun projet ouvert')
         setTexChecked(new Set(r.texture_sets.map(t => t.name)))
+        setPainterPresets(r.presets ?? [])
       } else {
         const r = await api.getMariInfo()
         setTexItems(r.channels.map(c => ({ name: c.name, detail: c.size ? `${c.size}px` : '' })))
@@ -1475,6 +1501,17 @@ export function Publisher() {
     }
   }, [dcc])
   useEffect(() => { void loadTexItems() }, [loadTexItems])
+
+  // Presets read from Painter: keep the chosen one if Painter has it, else PBR Metallic
+  // Roughness (or the first). A new preset ticks all of its maps.
+  useEffect(() => {
+    if (!painterPresets.length || curPreset) return
+    const pick = painterPresets.find(p => p.name === 'PBR Metallic Roughness') ?? painterPresets[0]
+    setPainterOpts(prev => ({ ...prev, preset: pick.url || pick.name }))
+  }, [painterPresets, curPreset])
+  useEffect(() => {
+    setMapChecked(new Set((curPreset?.maps ?? []).map(m => m.id)))
+  }, [curPreset])
 
   // Several Maya / Houdini open: ask which one publishes before starting.
   const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; label: string; scene: string | null }[] } | null>(null)
@@ -2180,11 +2217,73 @@ export function Publisher() {
           {dcc === 'Painter' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
+              {painterPresets.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>Export preset</span>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Select value={curPreset ? (curPreset.url || curPreset.name) : undefined}
+                      onValueChange={v => setPainterOpts(prev => ({ ...prev, preset: v }))}>
+                      <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 260, fontSize: 10 }} />
+                      <SelectContent>
+                        {painterPresets.map(p => <SelectItem key={p.url || p.name} value={p.url || p.name}>{p.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
               <ExportOptions
-                schema={PAINTER_OPTIONS}
+                schema={painterPresets.length > 0 ? PAINTER_OPTIONS.filter(o => o.key !== 'preset') : PAINTER_OPTIONS}
                 values={painterOpts}
                 onChange={(k, v) => setPainterOpts(prev => ({ ...prev, [k]: v }))}
               />
+            </div>
+          )}
+
+          {/* MAPS (Painter): the output maps of the preset, each with its own bit depth / size. */}
+          {dcc === 'Painter' && (curPreset?.maps.length ?? 0) > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>MAPS <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{curPreset?.name}</span></SecTitle>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Btn ghost style={{ height: 26 }} onClick={() => setMapChecked(new Set((curPreset?.maps ?? []).map(m => m.id)))}>Tout</Btn>
+                <Btn ghost style={{ height: 26 }} onClick={() => setMapChecked(new Set())}>Aucun</Btn>
+                <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{mapChecked.size} / {curPreset?.maps.length}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {(curPreset?.maps ?? []).map(m => {
+                  const on = mapChecked.has(m.id)
+                  const o = mapOpts[m.id] ?? { bit_depth: '', size: '' }
+                  const setO = (k: 'bit_depth' | 'size', v: string) =>
+                    setMapOpts(prev => ({ ...prev, [m.id]: { ...o, [k]: v === MAP_DEFAULT ? '' : v } }))
+                  return (
+                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div title={m.id}
+                        onClick={() => setMapChecked(prev => { const n = new Set(prev); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n })}
+                        style={{
+                          flex: 1, minWidth: 0, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
+                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
+                          color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                        {m.label}
+                      </div>
+                      <Select value={o.bit_depth || MAP_DEFAULT} onValueChange={v => setO('bit_depth', v)} disabled={!on}>
+                        <SelectTrigger style={{ height: 24, width: 96, fontSize: 10 }} />
+                        <SelectContent>
+                          {MAP_BIT_DEPTHS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Select value={o.size || MAP_DEFAULT} onValueChange={v => setO('size', v)} disabled={!on}>
+                        <SelectTrigger style={{ height: 24, width: 96, fontSize: 10 }} />
+                        <SelectContent>
+                          {MAP_SIZES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 
