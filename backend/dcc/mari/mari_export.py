@@ -27,8 +27,14 @@ def publish_mari(
     description: str = "",
     user: str = "unknown",
     channels: list[str] | None = None,
+    channel_params: dict[str, dict] | None = None,
 ) -> dict:
-    """Export Mari channels and ingest them into FLUX (one publish per channel)."""
+    """Export Mari channels and ingest them into FLUX (one publish per channel).
+
+    Mari writes each channel losslessly (tif 8 bits, exr float: faster than png too);
+    FLUX then writes each map in its own format / bit depth / size (*channel_params*
+    {channel: {"format", "bit_depth", "size"}}, missing = *file_format* at the channel's
+    own depth and size)."""
     from core.paths import get_project_path
     from dcc.mari.client import mari_client
 
@@ -38,7 +44,7 @@ def publish_mari(
 
     log.info("Mari publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_mari_"))
-    result = mari_client.export(str(export_dir), file_format, channels or None)
+    result = mari_client.export(str(export_dir), "auto", channels or None)
     if not result.get("ok"):
         log.warning("Mari export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Mari export failed")}
@@ -46,14 +52,22 @@ def publish_mari(
     from dcc.substance_painter.substance_export import _conform_published, _exported_files
     from dcc.texture_publish import publish_maps
 
-    files = _exported_files(export_dir, result.get("files", []))
+    files = [f for f in _exported_files(export_dir, result.get("files", [])) if "$UDIM" not in f.name]
     if not files:
         return {"ok": False, "error": "Mari export produced no channels"}
+
+    from dcc.texture_convert import convert_maps
+
+    conv_dir = Path(tempfile.mkdtemp(prefix="flux_mari_maps_"))
+    files, conv_warnings = convert_maps(files, conv_dir, channel_params or {}, file_format,
+                                        key_of=lambda f: f.name.split(".")[0])
+    if not files:
+        return {"ok": False, "error": "Aucune map convertie : " + " ; ".join(conv_warnings[:3])}
 
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
                                        variante, description, user, whole_name=True)
-    warnings = [f"non exporte : {e}" for e in result.get("errors") or []] + warnings
+    warnings = [f"Mari : {e}" for e in result.get("errors") or []] + conv_warnings + warnings
     for w in warnings:
         log.warning("Mari publish: %s", w)
     tx_paths = _conform_published(published, "Mari") if (conform_tx and published) else []

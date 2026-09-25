@@ -1960,6 +1960,13 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
     return result
 
 
+@router.get("/texture/formats")
+async def texture_formats() -> dict:
+    """Bit depths each texture format holds (Publisher: per-map format / depth menus)."""
+    from dcc.texture_convert import FORMAT_DEPTHS, SIZES
+    return {"formats": {k: list(v) for k, v in FORMAT_DEPTHS.items()}, "sizes": list(SIZES)}
+
+
 @router.get("/substance/info")
 async def substance_info() -> dict:
     """Texture sets of the open Painter project (Publisher export options)."""
@@ -2009,6 +2016,7 @@ class MariPublishRequest(BaseModel):
     description:  str | None = None
     user:         str | None = None
     channels:     list[str] | None = None   # None / [] = every channel of the current geo
+    channel_params: dict[str, dict] | None = None   # {channel: {"format", "bit_depth", "size"}}
 
 
 @router.post("/mari/publish")
@@ -2024,7 +2032,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
         lambda: publish_mari(
             req.project_name, req.class_token, req.task_token, req.name_token,
             req.instance, req.file_format, req.conform_tx, req.description or "", user,
-            req.channels,
+            req.channels, req.channel_params,
         ),
     )
     if not result.get("ok"):
