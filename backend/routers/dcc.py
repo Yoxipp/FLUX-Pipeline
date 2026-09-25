@@ -2295,6 +2295,53 @@ async def houdini_importer_module() -> dict:
     return {"code": _MODULE_FUNCTIONS}
 
 
+@router.get("/houdini/exporter/module")
+async def houdini_exporter_module() -> dict:
+    """PythonModule of the FLUX Export HDA (SOP / LOP / OBJ), exec()'d by its bootstrap."""
+    from dcc.houdini.hda.flux_exporter_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/exporter/tokens")
+async def houdini_exporter_tokens(project: str = "") -> dict:
+    """Projects + token map for the FLUX Export menus (same data as the importer)."""
+    return await houdini_importer_tokens(project)
+
+
+class HoudiniExporterRequest(BaseModel):
+    project: str
+    filename: str                       # CLASS_TYPE_NAME_INSTANCE, as the Publisher builds it
+    format: str                         # "bgeo.sc", "abc", "usd", ...
+    source_path: str                    # the FLUX Export node (SOP / LOP) or the picked object
+    frame_range: list[int] | None = None
+    description: str = ""
+    houdini_port: int | None = None     # the Houdini that asked (several can run)
+    user: str | None = None
+
+
+@router.post("/houdini/exporter/export")
+async def houdini_exporter_export(req: HoudiniExporterRequest) -> dict:
+    """Publish from the FLUX Export HDA: same workflow as the Publisher's Houdini ROP publish."""
+    if req.houdini_port:
+        from core.dcc_instances import set_active_port
+        set_active_port("Houdini", req.houdini_port)
+    fmt = req.format.strip().lstrip(".")
+    if not fmt:
+        raise HTTPException(status_code=400, detail="Format manquant")
+    animated = bool(req.frame_range and len(req.frame_range) == 3)
+    return await houdini_publish(HoudiniPublishRequest(
+        project_name=req.project,
+        filename=req.filename,
+        extension="." + fmt,
+        rop_node_path=req.source_path,
+        # bgeo / obj write one file per frame; abc / usd / fbx one animated file.
+        is_sequence=animated and fmt in ("bgeo.sc", "bgeo", "obj"),
+        frame_range=req.frame_range if animated else None,
+        description=req.description,
+        user=req.user,
+    ))
+
+
 @router.get("/houdini/anim/module")
 async def houdini_anim_module() -> dict:
     """PythonModule of the FLUX Anim HDA, exec()'d by its bootstrap (no rebuild on fix)."""

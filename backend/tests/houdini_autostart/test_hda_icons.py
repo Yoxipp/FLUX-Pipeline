@@ -26,7 +26,9 @@ class HdaIcons(unittest.TestCase):
             "importer": flux_importer_hda._build_code("x.hda", pm),
             "importer_lop": flux_importer_lop_hda._build_code("x.hda", pm),
             "anim": flux_anim_hda._build_code("x.hda"),
-            "exporter": flux_exporter_hda._build_code("x.hda", flux_exporter_hda.PYTHON_MODULE),
+            "exporter": flux_exporter_hda._build_code("x.hda", "Sop"),
+            "exporter_lop": flux_exporter_hda._build_code("x.hda", "Lop"),
+            "exporter_obj": flux_exporter_hda._build_code("x.hda", "Object"),
             "lighting": flux_lighting_hda._build_code("x.hda"),
             "shot": flux_shot_switch_hda._build_code("x.hda"),
             "crowd": flux_crowd_hda._build_code("x.hda"),
@@ -49,6 +51,38 @@ class CrowdHda(unittest.TestCase):
             self.assertIn(token, code)
         for fn in ("def generate", "def publish", "def menu_assets", "def menu_clips"):
             self.assertIn(fn, flux_crowd_hda.MODULE_FUNCTIONS)
+
+
+class ExporterHda(unittest.TestCase):
+    """2026-09-25: "FLUX offline" with the bridge green (the backend served none of
+    the exporter routes), and the node always landed in /obj."""
+
+    def test_the_exporter_builds_in_sop_lop_and_obj(self) -> None:
+        compile(flux_exporter_hda.BOOTSTRAP, "bootstrap", "exec")
+        compile(flux_exporter_hda.MODULE_FUNCTIONS, "module", "exec")
+        for context, category in (("Sop", "sopNodeTypeCategory"), ("Lop", "lopNodeTypeCategory"),
+                                  ("Object", "objNodeTypeCategory")):
+            with self.subTest(context):
+                code = flux_exporter_hda._build_code("x.hda", context)
+                compile(code, "build", "exec")
+                self.assertIn(category, code)
+                self.assertIn("_NAME = 'flux_exporter'", code)
+        self.assertIn('"source_obj"', flux_exporter_hda._build_code("x.hda", "Object"))
+        self.assertNotIn('"source_obj"', flux_exporter_hda._build_code("x.hda", "Lop"))
+
+    def test_the_backend_serves_every_route_the_exporter_calls(self) -> None:
+        from routers.dcc import router
+        paths = {r.path for r in router.routes}
+        for route in ("/houdini/exporter/module", "/houdini/exporter/tokens", "/houdini/exporter/export"):
+            self.assertIn(route, paths)
+        for route in ("/dcc/houdini/exporter/module", "/dcc/houdini/exporter/tokens",
+                      "/dcc/houdini/exporter/export"):
+            self.assertIn(route, flux_exporter_hda.BOOTSTRAP + flux_exporter_hda.MODULE_FUNCTIONS)
+
+    def test_publish_runs_off_the_main_thread(self) -> None:
+        # FLUX cooks through the Houdini bridge on the main thread: a blocking callback
+        # would make both sides wait on each other.
+        self.assertIn("threading.Thread(target=_work", flux_exporter_hda.MODULE_FUNCTIONS)
 
 
 if __name__ == "__main__":

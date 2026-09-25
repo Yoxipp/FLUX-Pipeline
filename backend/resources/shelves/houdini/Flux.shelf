@@ -12,19 +12,26 @@ import hou
 TYPE_NAME = "flux_importer"
 pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
 here = pane.pwd() if pane else None
-cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory())
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
         if hou.nodeType(c, TYPE_NAME) is not None]
 if not cats:
     hou.ui.displayMessage(
         "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
         severity=hou.severityType.Error)
     raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
 if here is not None and here.childTypeCategory() in cats:
     parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
 elif hou.lopNodeTypeCategory() in cats:
-    parent = hou.node("/stage")
-else:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
     parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
 node = parent.createNode(TYPE_NAME)
 node.moveToGoodPosition()
 node.setSelected(True, clear_all_selected=True)
@@ -34,26 +41,33 @@ if pane is not None and pane.pwd() != parent:
   </tool>
 
   <tool name="flux_tool_export" label="FLUX Export" icon="opdef:/Sop/flux_exporter?IconSVG">
-    <helpText><![CDATA[Publish SOP geometry to FLUX (versioned vNNN + LAST).]]></helpText>
+    <helpText><![CDATA[Publish to FLUX (vNNN + LAST): SOP geometry, LOP stage, or an /obj geo object.]]></helpText>
     <script scriptType="python"><![CDATA[
 import hou
 
 TYPE_NAME = "flux_exporter"
 pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
 here = pane.pwd() if pane else None
-cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory())
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
         if hou.nodeType(c, TYPE_NAME) is not None]
 if not cats:
     hou.ui.displayMessage(
         "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
         severity=hou.severityType.Error)
     raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
 if here is not None and here.childTypeCategory() in cats:
     parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
 elif hou.lopNodeTypeCategory() in cats:
-    parent = hou.node("/stage")
-else:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
     parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
 node = parent.createNode(TYPE_NAME)
 node.moveToGoodPosition()
 node.setSelected(True, clear_all_selected=True)
@@ -70,19 +84,26 @@ import hou
 TYPE_NAME = "flux_anim"
 pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
 here = pane.pwd() if pane else None
-cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory())
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
         if hou.nodeType(c, TYPE_NAME) is not None]
 if not cats:
     hou.ui.displayMessage(
         "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
         severity=hou.severityType.Error)
     raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
 if here is not None and here.childTypeCategory() in cats:
     parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
 elif hou.lopNodeTypeCategory() in cats:
-    parent = hou.node("/stage")
-else:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
     parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
 node = parent.createNode(TYPE_NAME)
 node.moveToGoodPosition()
 node.setSelected(True, clear_all_selected=True)
@@ -99,19 +120,26 @@ import hou
 TYPE_NAME = "flux_shot"
 pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
 here = pane.pwd() if pane else None
-cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory())
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
         if hou.nodeType(c, TYPE_NAME) is not None]
 if not cats:
     hou.ui.displayMessage(
         "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
         severity=hou.severityType.Error)
     raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
 if here is not None and here.childTypeCategory() in cats:
     parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
 elif hou.lopNodeTypeCategory() in cats:
-    parent = hou.node("/stage")
-else:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
     parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
 node = parent.createNode(TYPE_NAME)
 node.moveToGoodPosition()
 node.setSelected(True, clear_all_selected=True)
@@ -128,19 +156,26 @@ import hou
 TYPE_NAME = "flux_crowd"
 pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
 here = pane.pwd() if pane else None
-cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory())
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
         if hou.nodeType(c, TYPE_NAME) is not None]
 if not cats:
     hou.ui.displayMessage(
         "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
         severity=hou.severityType.Error)
     raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
 if here is not None and here.childTypeCategory() in cats:
     parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
 elif hou.lopNodeTypeCategory() in cats:
-    parent = hou.node("/stage")
-else:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
     parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
 node = parent.createNode(TYPE_NAME)
 node.moveToGoodPosition()
 node.setSelected(True, clear_all_selected=True)
@@ -157,19 +192,26 @@ import hou
 TYPE_NAME = "flux_lighting"
 pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
 here = pane.pwd() if pane else None
-cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory())
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
         if hou.nodeType(c, TYPE_NAME) is not None]
 if not cats:
     hou.ui.displayMessage(
         "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
         severity=hou.severityType.Error)
     raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
 if here is not None and here.childTypeCategory() in cats:
     parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
 elif hou.lopNodeTypeCategory() in cats:
-    parent = hou.node("/stage")
-else:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
     parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
 node = parent.createNode(TYPE_NAME)
 node.moveToGoodPosition()
 node.setSelected(True, clear_all_selected=True)
