@@ -20,6 +20,23 @@ log = get_logger(__name__)
 _PIP_PACKAGE = "photoshop-python-api"
 
 
+# MK_E_UNAVAILABLE: no running Photoshop registered in COM, the normal state when it is
+# closed. The status poll hits it every few seconds (2026-09-25: the log was flooded).
+_MK_E_UNAVAILABLE = -2147221021
+_last_attach_error: str | None = None
+
+
+def _log_attach_failure(exc: Exception) -> None:
+    """Log a COM attach failure once per distinct reason, never "Photoshop closed"."""
+    global _last_attach_error
+    msg = str(exc)
+    if _MK_E_UNAVAILABLE in getattr(exc, "args", ()) or str(_MK_E_UNAVAILABLE) in msg:
+        return
+    if msg != _last_attach_error:
+        _last_attach_error = msg
+        log.debug("Photoshop COM attach failed: %s", msg)
+
+
 def library_available() -> bool:
     """True when photoshop-python-api can be imported in the backend env."""
     try:
@@ -101,7 +118,7 @@ def status() -> dict:
             "error": f"comtypes indisponible: {exc}",
         }
     except Exception as exc:  # noqa: BLE001 - Photoshop not running / COM not answering
-        log.debug("Photoshop COM attach failed: %s", exc)
+        _log_attach_failure(exc)
         return {
             "reason": "not_running",
             "lib_installed": True,
