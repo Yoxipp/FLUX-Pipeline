@@ -9,7 +9,7 @@ import type { ExportOption } from './mayaExportOptions'
 export type { ExportOption }
 
 export const MARI_OPTIONS: ExportOption[] = [
-  { key: 'conform_tx', label: 'Conform .tx (Karma)', type: 'bool', default: false, tier: 'common' },
+  { key: 'conform_tx', label: 'Conform .tx (Karma)', type: 'bool', default: true, tier: 'common' },
 ]
 
 // Build the default value map.
