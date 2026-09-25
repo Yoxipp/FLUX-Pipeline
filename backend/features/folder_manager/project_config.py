@@ -47,6 +47,11 @@ PROJECT_SCHEMA: dict = {
         "ocio_config": {"type": "string"},
         "env":         {"type": "object", "additionalProperties": {"type": "string"}},
         "storage":     {"type": "object"},
+        # Painter export presets of the project (Publisher offers only those).
+        "texturing": {
+            "type": "object",
+            "properties": {"painter_presets": {"type": "array", "items": {"type": "string"}}},
+        },
     },
 }
 

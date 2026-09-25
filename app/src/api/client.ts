@@ -589,8 +589,13 @@ export const api = {
   setCurrentProject: (project: string) =>
     apiCall<{ project: string }>('PUT', '/project/current', { project }),
 
-  createProject: (name: string) =>
-    apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name }),
+  createProject: (name: string, painter_presets?: string[]) =>
+    apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name, painter_presets: painter_presets ?? null }),
+  // Painter export presets: shipped with FLUX (bundled) and those of a project.
+  getPainterPresets: (project?: string) =>
+    apiCall<{ bundled: string[]; project: string[] }>('GET', `/dcc/substance/presets${project ? `?project=${encodeURIComponent(project)}` : ''}`),
+  putPainterPresets: (project: string, presets: string[]) =>
+    apiCall<{ project: string[] }>('PUT', '/dcc/substance/presets', { project, presets }),
 
   // Hard-delete a whole project folder. Destructive: only call after the typed
   // confirmation in the Archives view.

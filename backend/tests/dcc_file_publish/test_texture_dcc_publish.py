@@ -52,22 +52,27 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertEqual(cfg["fluxOutputMaps"], ["$textureSet_Height"])
         self.assertNotIn("exportList", cfg)
 
-    def test_every_shader_channel_can_be_exported(self):
-        # 2026-09-25: coat, anisotropy, user channels were not listed (preset maps only).
+    def test_shader_channels_are_added_on_top_of_the_preset(self):
+        # 2026-09-26: the project preset (FLUX_BEAUTY_MAPS) + channels it lacks.
         chans = [{"id": "coatRoughness", "label": "Coat Roughness", "gray": True},
                  {"id": "baseColor", "label": "Base Color", "gray": False}]
-        cfg = se.build_export_config("/tmp/out", "PBR Metallic Roughness", "exr", "16", ["Body"],
-                                     maps=["$textureSet_CoatRoughness"], channels=chans,
+        cfg = se.build_export_config("/tmp/out", "FLUX_BEAUTY_MAPS", "exr", "16", ["Body"],
+                                     maps=["DIFFUSE"], channels=chans,
                                      map_params={"$textureSet_CoatRoughness": {"bit_depth": "32f"}})
-        self.assertEqual(cfg["defaultExportPreset"], se.CHANNEL_PRESET)
+        self.assertEqual(cfg["defaultExportPreset"], "FLUX_BEAUTY_MAPS")
+        self.assertEqual(cfg["exportList"], [
+            {"rootPath": "Body", "filter": {"outputMaps": ["DIFFUSE"]}},
+            {"rootPath": "Body", "exportPreset": se.CHANNEL_PRESET,
+             "filter": {"outputMaps": ["$textureSet_CoatRoughness", "$textureSet_BaseColor"]}}])
         preset = cfg["exportPresets"][0]
         self.assertEqual(preset["name"], se.CHANNEL_PRESET)
-        coat = preset["maps"][0]
-        self.assertEqual(coat["fileName"], "$textureSet_CoatRoughness")
-        self.assertEqual(coat["channels"], [{"destChannel": "L", "srcChannel": "L",
-                                             "srcMapType": "documentMap", "srcMapName": "coatRoughness"}])
+        self.assertEqual(preset["maps"][0]["channels"], [{"destChannel": "L", "srcChannel": "L",
+                                                          "srcMapType": "documentMap", "srcMapName": "coatRoughness"}])
         self.assertEqual([c["destChannel"] for c in preset["maps"][1]["channels"]], ["R", "G", "B"])
-        self.assertEqual(cfg["exportList"][0]["filter"]["outputMaps"], ["$textureSet_CoatRoughness"])
+        # channels only: no preset entry; every set: the bridge builds the entries
+        cfg = se.build_export_config("/tmp/out", "P", maps=[], channels=chans[:1])
+        self.assertTrue(cfg["fluxSkipPreset"])
+        self.assertEqual(cfg["fluxExtraMaps"], ["$textureSet_CoatRoughness"])
 
     def test_bridge_channel_names_and_inline_preset(self):
         from types import SimpleNamespace

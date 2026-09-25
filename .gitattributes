@@ -9,3 +9,4 @@
 *.abc    binary
 *.exr    binary
 *.tx     binary
+*.spexp  binary
