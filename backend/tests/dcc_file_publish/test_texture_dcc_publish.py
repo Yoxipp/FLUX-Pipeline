@@ -51,6 +51,31 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertEqual(cfg["fluxOutputMaps"], ["$textureSet_Height"])
         self.assertNotIn("exportList", cfg)
 
+    def test_every_shader_channel_can_be_exported(self):
+        # 2026-09-25: coat, anisotropy, user channels were not listed (preset maps only).
+        chans = [{"id": "coatRoughness", "label": "Coat Roughness", "gray": True},
+                 {"id": "baseColor", "label": "Base Color", "gray": False}]
+        cfg = se.build_export_config("/tmp/out", "PBR Metallic Roughness", "exr", "16", ["Body"],
+                                     maps=["$textureSet_CoatRoughness"], channels=chans,
+                                     map_params={"$textureSet_CoatRoughness": {"bit_depth": "32f"}})
+        self.assertEqual(cfg["defaultExportPreset"], se.CHANNEL_PRESET)
+        preset = cfg["exportPresets"][0]
+        self.assertEqual(preset["name"], se.CHANNEL_PRESET)
+        coat = preset["maps"][0]
+        self.assertEqual(coat["fileName"], "$textureSet_CoatRoughness")
+        self.assertEqual(coat["channels"], [{"destChannel": "L", "srcChannel": "L",
+                                             "srcMapType": "documentMap", "srcMapName": "coatRoughness"}])
+        self.assertEqual([c["destChannel"] for c in preset["maps"][1]["channels"]], ["R", "G", "B"])
+        self.assertEqual(cfg["exportList"][0]["filter"]["outputMaps"], ["$textureSet_CoatRoughness"])
+
+    def test_bridge_channel_names_and_inline_preset(self):
+        from types import SimpleNamespace
+
+        from dcc.substance_painter import substance_painter_bridge as br
+        self.assertEqual(br._channel_map_name(SimpleNamespace(name="CoatRoughness")), "coatRoughness")
+        self.assertEqual(br._channel_map_name(SimpleNamespace(name="IOR")), "ior")
+        self.assertEqual(br._channel_map_name(SimpleNamespace(name="User0")), "user0")
+
     def test_bridge_map_labels(self):
         from dcc.substance_painter import substance_painter_bridge as br
         self.assertEqual(br._map_label("$textureSet_BaseColor"), "BaseColor")

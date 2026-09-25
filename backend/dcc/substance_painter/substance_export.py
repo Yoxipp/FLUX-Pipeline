@@ -30,6 +30,7 @@ def build_export_config(
     dilation: int = 16,
     maps: list[str] | None = None,
     map_params: dict[str, dict] | None = None,
+    channels: list[dict] | None = None,
 ) -> dict:
     """Return a substance_painter.export config (pure, testable structure).
 
@@ -57,6 +58,10 @@ def build_export_config(
         if p:
             # Later entries win over the global one for the maps they filter.
             export_params.append({"filter": {"outputMaps": [fid]}, "parameters": p})
+    if channels:
+        # "Canaux du shader": one map per picked channel of the stack, whatever the preset
+        # knows (coat, anisotropy, user channels...). Map id = its fileName.
+        preset = CHANNEL_PRESET
     cfg: dict = {
         "exportPath": str(export_path).replace("\\", "/"),
         "exportShaderParams": False,
@@ -65,6 +70,8 @@ def build_export_config(
         # dilatation") when parameters are given without a padding algorithm.
         "exportParameters": export_params,
     }
+    if channels:
+        cfg["exportPresets"] = [channel_preset(channels)]
     if texture_sets:
         cfg["exportList"] = [{"rootPath": ts} for ts in texture_sets]
         if maps:
@@ -74,6 +81,30 @@ def build_export_config(
         # No set listed: the bridge lists every set, then applies this filter.
         cfg["fluxOutputMaps"] = list(maps)
     return cfg
+
+
+CHANNEL_PRESET = "FLUX_channels"
+
+
+def channel_map_id(channel: dict) -> str:
+    """fileName of the map exported for one stack channel: $textureSet_<Label>."""
+    import re
+
+    label = re.sub(r"[^A-Za-z0-9]", "", str(channel.get("label") or channel["id"])) or channel["id"]
+    return f"$textureSet_{label}"
+
+
+def channel_preset(channels: list[dict]) -> dict:
+    """An export preset with one map per channel: grey channels as L, colour ones as RGB."""
+    maps = []
+    for ch in channels:
+        comps = ("L",) if ch.get("gray") else ("R", "G", "B")
+        maps.append({
+            "fileName": channel_map_id(ch),
+            "channels": [{"destChannel": c, "srcChannel": c, "srcMapType": "documentMap",
+                          "srcMapName": ch["id"]} for c in comps],
+        })
+    return {"name": CHANNEL_PRESET, "maps": maps}
 
 
 def _size_log2(size) -> int:
@@ -109,6 +140,7 @@ def publish_painter(
     dilation: int = 16,
     maps: list[str] | None = None,
     map_params: dict[str, dict] | None = None,
+    channels: list[dict] | None = None,
 ) -> dict:
     """Export Painter maps and ingest them into FLUX (one publish per map, so only the
     ticked maps get a texture folder).
@@ -125,7 +157,7 @@ def publish_painter(
     export_dir = Path(tempfile.mkdtemp(prefix="flux_painter_"))
     config = build_export_config(export_dir, preset, file_format, bit_depth,
                                  texture_sets or None, size, padding, dilation,
-                                 maps or None, map_params)
+                                 maps or None, map_params, channels or None)
     result = substance_client.export(config)
     if not result.get("ok"):
         log.warning("Painter export failed: %s", result.get("error"))

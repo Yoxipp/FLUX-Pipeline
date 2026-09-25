@@ -133,7 +133,8 @@ def _complete_config(config: dict) -> dict:
         for entry in cfg["exportList"]:
             entry.setdefault("filter", {})["outputMaps"] = list(maps)
     preset = str(cfg.get("defaultExportPreset") or "")
-    if preset and "://" not in preset:
+    inline = {str(p.get("name")) for p in cfg.get("exportPresets") or []}
+    if preset and "://" not in preset and preset not in inline:
         cfg["defaultExportPreset"] = _res.ResourceID(context="starter_assets", name=preset).url()
     return cfg
 
@@ -191,7 +192,8 @@ def _do_info() -> dict:
             name = os.path.basename(_project.file_path() or "")
         except Exception:  # noqa: BLE001
             pass
-        return {"status": "ok", "project": name, "texture_sets": sets, "presets": _presets()}
+        return {"status": "ok", "project": name, "texture_sets": sets, "presets": _presets(),
+                "channels": _channels(_ts)}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "msg": str(exc)}
 
@@ -203,6 +205,50 @@ def _map_label(file_name: str) -> str:
     label = re.sub(r"\([^)]*\)", "", str(file_name))          # optional groups
     label = re.sub(r"\$[A-Za-z]+", "", label).strip("_.- ")
     return label or str(file_name)
+
+
+def _channel_map_name(ctype) -> str:
+    """Painter's export name of a channel type: BaseColor -> baseColor, IOR -> ior."""
+    raw = getattr(ctype, "name", str(ctype)).split(".")[-1]
+    if raw.isupper():
+        return raw.lower()
+    return raw[:1].lower() + raw[1:]
+
+
+def _channels(_ts) -> list[dict]:
+    """Every channel of every texture set's stack (2026-09-25: coat, anisotropy,
+    user channels... were missing, the list only came from the export preset):
+    [{"id": export map name, "label", "gray": one component}], deduplicated."""
+    out: dict[str, dict] = {}
+    for ts in _ts.all_texture_sets():
+        try:
+            stacks = ts.all_stacks() if hasattr(ts, "all_stacks") else [ts.get_stack()]
+        except Exception:  # noqa: BLE001
+            continue
+        for stack in stacks:
+            try:
+                chans = stack.all_channels()
+            except Exception:  # noqa: BLE001
+                continue
+            for ctype, ch in chans.items():
+                cid = _channel_map_name(ctype)
+                if cid in out:
+                    continue
+                label = ""
+                try:
+                    label = ch.label() if hasattr(ch, "label") else ""
+                except Exception:  # noqa: BLE001
+                    label = ""
+                if not label:
+                    import re as _re
+                    label = _re.sub(r"(?<!^)(?=[A-Z])", " ", getattr(ctype, "name", cid)).strip()
+                gray = False
+                try:
+                    gray = "L" in str(ch.format()).split(".")[-1] and "RGB" not in str(ch.format())
+                except Exception:  # noqa: BLE001
+                    gray = False
+                out[cid] = {"id": cid, "label": str(label), "gray": bool(gray)}
+    return sorted(out.values(), key=lambda c: c["label"].lower())
 
 
 def _presets() -> list[dict]:

@@ -1934,6 +1934,7 @@ class SubstancePublishRequest(BaseModel):
     dilation:     int = 16                  # pixels, for the non-infinite algorithms
     maps:         list[str] | None = None   # output maps of the preset (fileName), None = all
     map_params:   dict[str, dict] | None = None   # {fileName: {"bit_depth", "size"}}
+    channels:     list[dict] | None = None  # "Canaux du shader": [{"id", "label", "gray"}]
 
 
 @router.post("/substance/publish")
@@ -1951,7 +1952,7 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
             req.instance, req.preset, req.file_format, req.bit_depth,
             req.conform_tx, req.description or "", user,
             req.texture_sets, req.size, req.padding, req.dilation,
-            req.maps, req.map_params,
+            req.maps, req.map_params, req.channels,
         ),
     )
     if not result.get("ok"):

@@ -113,6 +113,8 @@ async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Co
 
 // An export preset of the open Painter, with the output maps it writes (fileName = id).
 export interface PainterPreset { name: string; url: string; maps: { id: string; label: string }[] }
+// A channel of the texture sets' stacks (coat, anisotropy, user...): id = Painter export name.
+export interface PainterChannel { id: string; label: string; gray: boolean }
 
 // One group of operations of the cleaning scan (backend features/folder_manager/asset_cleanup.py).
 export interface CleanupItem {
@@ -417,13 +419,14 @@ export const api = {
     dilation?:    number
     maps?:        string[]                                              // output maps of the preset (fileName)
     map_params?:  Record<string, { bit_depth?: string; size?: number }>  // per map overrides
+    channels?:    PainterChannel[]                                      // "Canaux du shader" mode
   }) =>
     apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/substance/publish', payload),
 
   // What can be exported from the open Painter project / Mari geo (Publisher options).
   getSubstanceInfo: () =>
     apiCall<{ ok: boolean; project: string; texture_sets: { name: string; udim?: boolean; resolution?: number }[];
-              presets?: PainterPreset[] }>(
+              presets?: PainterPreset[]; channels?: PainterChannel[] }>(
       'GET', '/dcc/substance/info', undefined, 25000),
   getMariInfo: () =>
     apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number }[] }>(
