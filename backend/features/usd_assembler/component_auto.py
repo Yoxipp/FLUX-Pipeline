@@ -703,9 +703,14 @@ def _set_of(f: dict, sets: dict[str, list[str]]) -> str:
 
 
 def component_files(project_path: str | Path, name: str, version: str = "LAST",
-                    active: dict[str, bool] | None = None) -> dict:
+                    active: dict[str, bool] | None = None,
+                    previous: dict[str, bool] | None = None) -> dict:
     """Files of a component version for the importer: recipe entries + variant set,
-    greyed state and warnings for the *active* toggles (the importer's own state)."""
+    greyed state and warnings for the *active* toggles (the importer's own state).
+
+    ``active`` in the answer = the toggles after "one shader per geometry, one
+    animation per rig" (*previous* = the toggles before the click, so the file just
+    checked wins); the importer writes them back on its toggles."""
     parent = component_dir(project_path, name)
     if parent is None:
         raise ValueError(f"asset inconnu : {name}")
@@ -725,11 +730,13 @@ def component_files(project_path: str | Path, name: str, version: str = "LAST",
     else:
         recipe = _legacy_recipe(project_path, name, flux, available_departments(project_path))
     sets = entry_variant_sets(entry)
+    active = cr.exclusive_by_target(recipe, active, previous)
     grey = cr.greyed(recipe, active)
     return {
         "name": name, "version": entry.parent.name.rsplit("_", 1)[-1],
         "legacy": not flux.get("recipe"),
         "files": [{**f, "variant_set": _set_of(f, sets), "greyed": f["id"] in grey}
                   for f in recipe["files"]],
+        "active": active,
         "warnings": cr.warnings(recipe, active),
     }

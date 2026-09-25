@@ -257,6 +257,7 @@ class ComponentCheckRequest(BaseModel):
     name: str
     version: str = "LAST"
     active: dict[str, bool] = {}    # the importer's own toggles (never saved in the component)
+    previous: dict[str, bool] | None = None   # toggles before the click (exclusivity winner)
     project: str | None = None
 
 
@@ -354,7 +355,8 @@ async def check_usd_component(req: ComponentCheckRequest) -> dict:
     loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(
-            None, lambda: component_files(project_path, req.name, req.version, req.active))
+            None, lambda: component_files(project_path, req.name, req.version, req.active,
+                                          req.previous))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

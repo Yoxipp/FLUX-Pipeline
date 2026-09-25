@@ -374,10 +374,38 @@ def _component_key(node):
     key = _sval(node, "lib_item")
     return key if key.startswith("component:") else ""
 
-def _check(node, key, active):
+def _check(node, key, active, previous=None):
+    # previous = toggles before the click: the file just checked wins its geometry /
+    # rig (one shader per geometry, one animation per rig), the backend decides.
     return _post("/usd/component/check", {
         "project": _pval(node, "project"), "name": key.split(":", 1)[1],
-        "version": _pval(node, "lib_version") or "LAST", "active": active})
+        "version": _pval(node, "lib_version") or "LAST", "active": active,
+        "previous": previous})
+
+def _write_toggles(node, active):
+    """Put the backend's corrected toggles back on the node (parm.set never fires the
+    callback, so no loop)."""
+    for multi, prefix, _kinds in _COMP_FOLDERS:
+        p = node.parm(multi)
+        if p is None:
+            continue
+        for i in range(1, p.eval() + 1):
+            fid = _sval(node, "%s_id%d" % (prefix, i))
+            if fid in active:
+                _set_parm(node, "%s_on%d" % (prefix, i), 1 if active[fid] else 0)
+
+def _groom_full(node):
+    """Grooms whose "Proxy" box is off: shown complete in the viewport."""
+    out = []
+    p = node.parm("groom_files")
+    if p is None:
+        return out
+    for i in range(1, p.eval() + 1):
+        fid = _sval(node, "groom_id%d" % i)
+        box = node.parm("groom_proxy%d" % i)
+        if fid and box is not None and not box.eval():
+            out.append(fid)
+    return out
 
 def _file_label(f):
     txt = "%s  .%s" % (f.get("label", f["id"]), f.get("format", ""))
@@ -424,8 +452,13 @@ def _fill_component(node):
         rows = groups.get((multi, prefix), [])
         _set_parm(node, multi, len(rows))
         for i, f in enumerate(rows, 1):
-            # Proxies are on by default; the rest follows the component (anims: off).
-            default = True if (f.get("proxy") or f.get("proxy_of")) else bool(f.get("active"))
+            # Proxies are on by default; anims (preview) off; the rest follows the component.
+            if f.get("proxy") or f.get("proxy_of"):
+                default = True
+            elif f.get("kind") == "animation":
+                default = False
+            else:
+                default = bool(f.get("active"))
             _set_parm(node, "%s_id%d" % (prefix, i), f["id"])
             _set_parm(node, "%s_label%d" % (prefix, i), _file_label(f))
             _set_parm(node, "%s_on%d" % (prefix, i), 1 if mem.get(f["id"], default) else 0)
@@ -442,12 +475,18 @@ def on_component_toggle(node):
         return
     active = _toggles(node)
     memory = _json_parm(node, "comp_memory", {})
-    memory[key] = active
-    _set_parm(node, "comp_memory", json.dumps(memory, sort_keys=True))
-    r = _check(node, key, active)
+    previous = memory.get(key)
+    r = _check(node, key, active, previous)
     if "files" not in r:
         _set_status(node, "Component illisible : " + str(r.get("error") or r.get("detail") or "?"))
         return
+    if isinstance(r.get("active"), dict):
+        # One shader per geometry, one animation per rig: the losers are unchecked.
+        active = dict(active, **dict((k, v) for k, v in r["active"].items() if k in active))
+        _write_toggles(node, active)
+    memory[key] = active
+    _set_parm(node, "comp_memory", json.dumps(memory, sort_keys=True))
+    _set_parm(node, "comp_groom_full", json.dumps(_groom_full(node)))
     grey = set(f["id"] for f in r["files"] if f.get("greyed"))
     sets = dict((f["id"], f.get("variant_set")) for f in r["files"])
     choices = dict((f["id"], f["variant"]) for f in r["files"] if f.get("variant"))

@@ -55,6 +55,26 @@ if prim is not None and prim.IsValid():
     for name, selection in sorted(state.items()):
         if sets.HasVariantSet(name):
             sets.GetVariantSet(name).SetVariantSelection(selection)
+# Grooms with their "Proxy" box off: complete curves in the viewport, proxy hidden
+# (ADR 0026 thinned "<curves>_proxy" siblings, purpose=proxy).
+try:
+    groom_full = json.loads(hda.evalParm("comp_groom_full") or "[]")
+except Exception:
+    groom_full = []
+if prim is not None and prim.IsValid() and groom_full:
+    from pxr import Usd, UsdGeom
+    for gid in groom_full:
+        root = stage.GetPrimAtPath(prim.GetPath().AppendPath("groom/" + gid))
+        if not root:
+            continue
+        for p in Usd.PrimRange(root):
+            if not p.IsA(UsdGeom.BasisCurves):
+                continue
+            img = UsdGeom.Imageable(p)
+            if img.GetPurposeAttr().Get() == UsdGeom.Tokens.proxy:
+                img.CreateVisibilityAttr().Set(UsdGeom.Tokens.invisible)
+            else:
+                img.CreatePurposeAttr().Set(UsdGeom.Tokens.default_)
 warnings = hda.evalParm("comp_warnings")
 if warnings:
     try:
@@ -75,7 +95,8 @@ _comp.addParmTemplate(_warn)
 for _hidden in (hou.ToggleParmTemplate("comp_has_warn", "has warnings", default_value=False, is_hidden=True),
                 hou.StringParmTemplate("comp_state", "state", 1, default_value=("{}",), is_hidden=True),
                 hou.StringParmTemplate("comp_key", "key", 1, default_value=("",), is_hidden=True),
-                hou.StringParmTemplate("comp_memory", "memory", 1, default_value=("{}",), is_hidden=True)):
+                hou.StringParmTemplate("comp_memory", "memory", 1, default_value=("{}",), is_hidden=True),
+                hou.StringParmTemplate("comp_groom_full", "groom full", 1, default_value=("[]",), is_hidden=True)):
     _comp.addParmTemplate(_hidden)
 for _multi, _prefix, _label in COMPONENT_FOLDERS:
     _m = hou.FolderParmTemplate(_multi, _label, folder_type=hou.folderType.MultiparmBlock)
@@ -87,6 +108,15 @@ for _multi, _prefix, _label in COMPONENT_FOLDERS:
     _on.setJoinWithNext(True)
     _lbl = hou.StringParmTemplate(_prefix + "_label#", "Fichier", 1, default_value=("",))
     _m.addParmTemplate(_on)
+    if _prefix == "groom":
+        # ADR 0026: the thinned proxy in the viewport (on), or the complete groom.
+        _px = hou.ToggleParmTemplate("groom_proxy#", "Proxy", default_value=True,
+                                     script_callback="hou.phm().on_component_toggle(kwargs['node'])",
+                                     script_callback_language=_PY,
+                                     help="On: light proxy (1 curve in 10) in the viewport, full groom at render. "
+                                          "Off: the full groom in the viewport too.")
+        _px.setJoinWithNext(True)
+        _m.addParmTemplate(_px)
     _m.addParmTemplate(_lbl)
     _m.addParmTemplate(hou.StringParmTemplate(_prefix + "_id#", "id", 1, default_value=("",), is_hidden=True))
     _m.addParmTemplate(hou.ToggleParmTemplate(_prefix + "_ok#", "ok", default_value=True, is_hidden=True))

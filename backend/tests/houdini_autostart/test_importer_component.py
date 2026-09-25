@@ -95,7 +95,8 @@ class ImporterComponent(unittest.TestCase):
         def post(path, payload):
             self.assertEqual(path, "/usd/component/check")
             try:
-                return ca.component_files(self.project, payload["name"], payload["version"], payload["active"])
+                return ca.component_files(self.project, payload["name"], payload["version"], payload["active"],
+                                          payload.get("previous"))
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
         self.ns["_post"] = post
@@ -120,13 +121,13 @@ class ImporterComponent(unittest.TestCase):
                                          "rig": "on", "walk": "off", "run": "off"})
         self.assertEqual(n.evalParm("comp_has_warn"), 0)
 
-    def test_two_animations_on_one_rig_warn_and_stay_selected(self) -> None:
+    def test_one_animation_per_rig_the_last_checked_wins(self) -> None:
+        # ADR 0028: checking a second animation of the same rig unchecks the first.
         self.ns["_fill_component"](self.node)
         self._toggle("anim", "walk", True)
         self._toggle("anim", "run", True)
-        self.assertEqual(self.node.evalParm("comp_has_warn"), 1)
-        self.assertIn("plusieurs animations ciblent le meme rig", self.node.evalParm("comp_warnings"))
-        self.assertEqual((self._state()["walk"], self._state()["run"]), ("on", "on"))
+        self.assertEqual((self._state()["walk"], self._state()["run"]), ("off", "on"))
+        self.assertEqual(self.node.evalParm(f"anim_on{self.node.row('anim', 'walk')}"), 0)
 
     def test_shader_greyed_without_geometry_then_restored(self) -> None:
         self.ns["_fill_component"](self.node)

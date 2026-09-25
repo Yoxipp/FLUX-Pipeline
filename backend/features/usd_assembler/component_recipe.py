@@ -273,6 +273,34 @@ def active_map(recipe: dict, active: dict[str, bool] | None = None) -> dict[str,
     return out
 
 
+def exclusive_by_target(recipe: dict, active: dict[str, bool] | None = None,
+                        previous: dict[str, bool] | None = None) -> dict[str, bool]:
+    """One shader per geometry, one animation per rig (importer, 2026-09-25).
+
+    Among the files of one target-bound kind, a target (a geometry for a shader, a rig
+    for an animation) is claimed by one active file only. The file just switched on
+    (on in *active*, off in *previous*) wins, then the recipe order. Files sharing a
+    claimed target are switched off; files on other targets are untouched
+    (checking the body shader leaves the beak's own shader alone). Returns the toggles.
+    """
+    state = active_map(recipe, active)
+    before = active_map(recipe, previous) if previous is not None else state
+    files = recipe.get("files") or []
+    for kind in sorted(TARGET_BOUND_KINDS):
+        group = [f for f in files if f["kind"] == kind and f.get("targets")]
+        fresh = [f for f in group if state.get(f["id"]) and not before.get(f["id"])]
+        order = fresh + [f for f in group if f not in fresh]
+        claimed: set[str] = set()
+        for f in order:
+            if not state.get(f["id"]):
+                continue
+            if claimed.intersection(f["targets"]):
+                state[f["id"]] = False
+                continue
+            claimed.update(f["targets"])
+    return state
+
+
 def greyed(recipe: dict, active: dict[str, bool] | None = None) -> set[str]:
     """Files bound to targets (shaders, animations) with no active target: greyed.
     Their own toggle is kept (memorized) and applies again once a target is back."""
