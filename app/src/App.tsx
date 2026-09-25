@@ -14,6 +14,7 @@ import { useFavorites, eventMatchesFavorite } from './hooks/useFavorites'
 import { useSettings }   from './hooks/useSettings'
 import { parseFluxFilename } from './pages/Production/util'
 import { Hub }           from './pages/Hub'
+import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
 import { ActionPublish } from './pages/ActionPublish'
 import { ActionGraph }   from './pages/ActionGraph'
@@ -132,6 +133,7 @@ function AppShell({ settings }: { settings: Settings }) {
           {!DETACHED && <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />}
 
           <main className="flex-1 min-h-0 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
+            <PageErrorBoundary>
             <Routes>
               <Route path="/"          element={<Hub />} />
               <Route path="/publisher" element={<Publisher />} />
@@ -146,6 +148,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/advanced"  element={<AdvancedSettings />} />
               <Route path="/disk"      element={<DiskUsage />} />
             </Routes>
+            </PageErrorBoundary>
           </main>
         </div>
 
