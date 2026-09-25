@@ -8,6 +8,7 @@ import { api } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
 import { useProject } from '../ProjectContext'
 import { toast } from 'sonner'
+import { CleanupPanel } from './disk/CleanupPanel'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -146,6 +147,8 @@ export function DiskUsage() {
           </div>
         </div>
       )}
+
+      <CleanupPanel activeProject={activeProject || null} />
 
       <SecTitle>Fichiers les plus lourds</SecTitle>
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, overflow: 'hidden' }}>
