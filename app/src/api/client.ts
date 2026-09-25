@@ -893,7 +893,8 @@ export const api = {
 // optional variant name (exclusive choice in its block) and a proxy flag.
 export type UsdFileKind = 'geometry' | 'groom' | 'shader' | 'rig' | 'animation' | 'other'
 export type UsdLinkArc = 'reference' | 'sublayer' | 'payload'
-export interface UsdComponentBlock { name: string; variant: string }   // variant = default choice
+// variant = default choice; deferred = heavy block loaded apart (payload, ADR 0031)
+export interface UsdComponentBlock { name: string; variant: string; deferred?: boolean }
 export interface UsdComponentFile {
   id: string; label: string; block: string; department: string; kind: UsdFileKind; format: string
   source: 'publish' | 'manual'

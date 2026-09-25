@@ -182,6 +182,10 @@ _disp = hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                              menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                              help="Proxy: purpose=proxy mesh in the viewport. Geo complete: the "
                                   "render mesh is shown (purpose default) and the proxy hidden.")
+# ADR 0031: loading the heavy geometry is the importer's choice (payload loaded or not).
+_loadgeo = hou.ToggleParmTemplate("load_geo", "Charger la geo", default_value=True,
+                                  help="Decoche : l'asset reste decharge (payload), le viewport et les "
+                                       "caches restent legers. Le rendu charge tout.")
 # Set by resolve: 1 = a shot stage (sublayered, ADR 0020), 0 = an asset / decor (referenced).
 _as_sub = hou.ToggleParmTemplate("as_sublayer", "Shot (sublayer)", default_value=False, is_hidden=True)
 COMPONENT_FOLDERS = {COMPONENT_FOLDERS!r}
@@ -191,12 +195,14 @@ if _anchor is not None:
     _ptg.insertBefore(_anchor, _auto)
     _ptg.insertBefore(_anchor, _prim)
     _ptg.insertBefore(_anchor, _disp)
+    _ptg.insertBefore(_anchor, _loadgeo)
     _ptg.insertBefore(_anchor, _as_sub)
     _ptg.insertBefore(_anchor, _comp)
 else:
     _ptg.append(_auto)
     _ptg.append(_prim)
     _ptg.append(_disp)
+    _ptg.append(_loadgeo)
     _ptg.append(_as_sub)
     _ptg.append(_comp)
 _btn = _ptg.find("btn_resolve")
@@ -247,7 +253,16 @@ _sw = _sub.createNode("switch", "geo_display")
 _sw.setInput(0, _apply)
 _sw.setInput(1, _hide)
 _sw.parm("input").setExpression('ch("../geo_display")', hou.exprLanguage.Hscript)
-_out.setInput(0, _sw)
+# "Charger la geo" off: the prim's payloads stay unloaded (Configure Stage load rules).
+_unload = _sub.createNode("configurestage", "unload_geo")
+_unload.setInput(0, _sw)
+_unload.parm("editload").set("addremove")
+_unload.parm("unloadpaths").set('`chs("../prim_path")`')
+_ld = _sub.createNode("switch", "load_geo")
+_ld.setInput(0, _unload)
+_ld.setInput(1, _sw)
+_ld.parm("input").setExpression('ch("../load_geo")', hou.exprLanguage.Hscript)
+_out.setInput(0, _ld)
 _sub.layoutChildren()
 
 _asset = _sub.createDigitalAsset(name=_NAME, hda_file_name=_HDA_PATH, description={LABEL!r},

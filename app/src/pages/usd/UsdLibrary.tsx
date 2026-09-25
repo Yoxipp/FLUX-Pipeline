@@ -237,9 +237,6 @@ function errMsg(e: unknown): string {
 
 // ── component (ADR 0023 + 0024): created by hand, links grouped in blocks ────
 
-const ARCS: { value: UsdLinkArc; label: string }[] = [
-  { value: 'reference', label: 'Ref' }, { value: 'sublayer', label: 'Sublayer' }, { value: 'payload', label: 'Payload' },
-]
 const ID_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 function toRecipe(comp: UsdComponentInfo): UsdComponentRecipe {
@@ -406,18 +403,15 @@ function LinkRow({ project, comp, link, files, rules, busy, onPatch, onRemove, o
         </Btn>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingLeft: 22 }}>
-        <div style={{ display: 'flex', gap: 2 }}>
-          {ARCS.map(a => (
-            <Pill key={a.value} active={link.arc === a.value} style={{ cursor: busy ? 'default' : 'pointer' }}
-              onClick={() => {
-                if (busy) return
-                if (a.value === 'sublayer') setVariantOn(false)
-                onPatch(a.value === 'sublayer' ? { arc: a.value, variant: '', proxy: false } : { arc: a.value })
-              }}>
-              {a.label}
+        {sublayer && (
+          // ADR 0031: the arc is set by FLUX; an older sublayer link stays until switched back.
+          <span title={tr('usd.comp.legacySublayer')}>
+            <Pill active style={{ cursor: busy ? 'default' : 'pointer' }}
+              onClick={() => { if (!busy) onPatch({ arc: 'reference' as UsdLinkArc }) }}>
+              {tr('usd.comp.legacySublayerShort')}
             </Pill>
-          ))}
-        </div>
+          </span>
+        )}
         <Check2 label={tr('usd.lib.variant')} checked={showVariant} disabled={busy || sublayer}
           onChange={on => { setVariantOn(on); onPatch({ variant: on ? 'default' : '' }) }} />
         {showVariant && (
@@ -621,6 +615,8 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
                   </select>
                 )}
                 <div style={{ flex: 1 }} />
+                <Check2 label={tr('usd.comp.deferred')} checked={!!block.deferred} disabled={busy}
+                  onChange={on => setBlock(block.name, { deferred: on })} />
                 <Btn sm ghost disabled={busy} title={tr('usd.comp.removeBlock')} onClick={() => removeBlock(block.name)}>
                   <Trash2 size={10} strokeWidth={2} />
                 </Btn>

@@ -57,3 +57,29 @@ class ExclusiveTargets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ArcRule(unittest.TestCase):
+    """ADR 0031: the arc is derived; a heavy ("deferred") block loads apart."""
+
+    def _norm(self, blocks, files):
+        return cr.normalize({"blocks": blocks, "files": files}, ["GEO", "GROOM"])
+
+    def test_links_are_references_unless_their_block_is_deferred(self) -> None:
+        r = self._norm([{"name": "model"}, {"name": "hair", "deferred": True}], [
+            {"id": "body", "block": "model", "department": "GEO", "source": "manual", "path": "a/body.usd",
+             "arc": "payload"},
+            {"id": "fur", "block": "hair", "department": "GROOM", "source": "manual", "path": "a/fur.usd"},
+        ])
+        arcs = {f["id"]: f["arc"] for f in r["files"]}
+        # An older payload link makes its block deferred; the rest follows the block.
+        self.assertEqual(arcs, {"body": "payload", "fur": "payload"})
+        self.assertTrue(all(b["deferred"] for b in r["blocks"]))
+
+    def test_plain_block_gives_references_and_keeps_old_sublayers(self) -> None:
+        r = self._norm([{"name": "model"}], [
+            {"id": "body", "block": "model", "department": "GEO", "source": "manual", "path": "a/body.usd"},
+            {"id": "old", "block": "model", "department": "GEO", "source": "manual", "path": "a/old.usd",
+             "arc": "sublayer"},
+        ])
+        self.assertEqual({f["id"]: f["arc"] for f in r["files"]}, {"body": "reference", "old": "sublayer"})

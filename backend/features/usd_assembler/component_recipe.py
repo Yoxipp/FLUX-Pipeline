@@ -141,7 +141,9 @@ def normalize(recipe: dict, available: list[str]) -> dict:
             raise ValueError(f"nom de block invalide : {bname!r} (lettres, chiffres, _)")
         if bname.lower() in {x["name"].lower() for x in blocks}:
             raise ValueError(f"block en double : {bname}")
-        blocks.append({"name": bname, "variant": str(b.get("variant") or "")})
+        # deferred (ADR 0031): the block is heavy and loads apart (its links as payloads).
+        blocks.append({"name": bname, "variant": str(b.get("variant") or ""),
+                       "deferred": bool(b.get("deferred"))})
     block_names = {b["name"] for b in blocks}
 
     files: list[dict] = []
@@ -162,7 +164,7 @@ def normalize(recipe: dict, available: list[str]) -> dict:
         if block not in block_names:
             if raw.get("block"):
                 raise ValueError(f"{fid} : block {block} absent du component")
-            blocks.append({"name": block, "variant": ""})
+            blocks.append({"name": block, "variant": "", "deferred": False})
             block_names.add(block)
         kind = str(raw.get("kind") or default_kind(dept))
         if kind not in KINDS:
@@ -208,6 +210,17 @@ def normalize(recipe: dict, available: list[str]) -> dict:
             raise ValueError(f"{f['label']} : un sublayer ne peut etre ni proxy ni variante")
         f["active"] = bool(raw.get("active", kind not in PREVIEW_KINDS)) and kind not in PREVIEW_KINDS
         files.append(f)
+
+    # Arc (ADR 0031): no longer chosen per link. A link of a "deferred" block is a payload
+    # (loads apart), any other a reference inside the department layer; an older recipe's
+    # payload link makes its block deferred, its sublayer links stay as they were.
+    deferred = {b["name"] for b in blocks if b["deferred"]}
+    deferred |= {f["block"] for f in files if f["arc"] == "payload"}
+    for b in blocks:
+        b["deferred"] = b["name"] in deferred
+    for f in files:
+        if f["arc"] != "sublayer":
+            f["arc"] = "payload" if f["block"] in deferred else "reference"
 
     # Proxy checkbox (ADR 0024): the link stands in for the other links of its block.
     for f, raw in zip(files, recipe.get("files") or []):
