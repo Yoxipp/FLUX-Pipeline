@@ -114,12 +114,15 @@ async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Co
 // An export preset of the open Painter, with the output maps it writes (fileName = id).
 export interface PainterPreset { name: string; url: string; maps: { id: string; label: string }[] }
 
-// One finding of the cleaning scan (backend features/folder_manager/asset_cleanup.py).
+// One group of operations of the cleaning scan (backend features/folder_manager/asset_cleanup.py).
 export interface CleanupItem {
-  path: string; kind: 'temp' | 'old_layout' | 'wrong_place' | 'old_map_name' | 'empty_dir'
-  reason: string; files: number; bytes: number; safe: boolean; warning?: string; used_by?: string; dir?: boolean
+  id: string
+  kind: 'temp' | 'old_layout' | 'wrong_place' | 'old_map_name' | 'empty_dir'
+  action: 'move' | 'drop_dup' | 'drop_tmp' | 'rm_empty' | 'warn'
+  path: string; target: string; reason: string; files: number; bytes: number
+  safe: boolean; warning: string; names: string[]
 }
-export interface CleanupScan { scope: string; root: string; items: CleanupItem[]; unknown: string[] }
+export interface CleanupScan { scope: string; items: CleanupItem[]; unknown: string[] }
 
 export const api = {
   // Settings
@@ -545,16 +548,16 @@ export const api = {
   // Cleaning to the current FLUX layout (Disque page): only what is certain moves.
   scanCleanup: (project: string, asset?: string) =>
     apiCall<CleanupScan>('GET', `/folder/projects/${encodeURIComponent(project)}/cleanup${asset ? `?asset=${encodeURIComponent(asset)}` : ''}`, undefined, 300000),
-  applyCleanup: (project: string, paths: string[], asset?: string) =>
-    apiCall<{ moved: string[]; errors: string[]; backup: string }>(
-      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup`, { asset: asset || null, paths }, 300000),
+  applyCleanup: (project: string, ids: string[], asset?: string) =>
+    apiCall<{ done: number; moved: number; dropped: number; errors: string[]; journal: string }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup`, { asset: asset || null, ids }, 300000),
   getCleanupBackups: (project: string) =>
     apiCall<{ backups: { id: string; files: number }[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/cleanup/backups`),
-  restoreCleanup: (project: string, backup_id: string) =>
+  restoreCleanup: (project: string, journal_id: string) =>
     apiCall<{ restored: number; already_there: string[] }>(
-      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup/restore`, { backup_id }, 300000),
+      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup/restore`, { journal_id }, 300000),
   cloneProject: (project: string, new_name: string) =>
-    apiCall<{ project: string; files: number; left_out: number }>(
+    apiCall<{ project: string; files: number; moved: number; dropped: number; warnings: number }>(
       'POST', `/folder/projects/${encodeURIComponent(project)}/clone`, { new_name }, 3600000),
 
   getAssets: (project: string, class_token?: string) =>

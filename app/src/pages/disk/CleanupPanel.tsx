@@ -1,7 +1,7 @@
-// CleanupPanel — bring an asset or a whole project back to the current FLUX layout
-// (2026-09-25). The rules live in the backend and follow the running FLUX code
-// (asset_cleanup.py): only what is certain can be moved, to <project>/_backup_flux,
-// and a cleanup can be restored. Anything unsure is a warning, never touched.
+// CleanupPanel — put an asset or a whole project back on the current FLUX layout
+// (2026-09-25, ADR 0033). The rules live in the backend and follow the running FLUX
+// code (asset_cleanup.py): files go back to their FLUX place, identical duplicates are
+// dropped, a journal undoes it. Anything unsure is a warning, never touched.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Sparkles, RotateCcw, Copy } from 'lucide-react'
@@ -12,12 +12,12 @@ import { toast } from 'sonner'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-const KIND_LABEL: Record<CleanupItem['kind'], string> = {
-  temp:         'Temporaire',
-  old_layout:   'Ancien rangement',
-  wrong_place:  'Hors de son dossier',
-  old_map_name: 'Ancien nom de map',
-  empty_dir:    'Dossier vide',
+const ACTION_LABEL: Record<CleanupItem['action'], string> = {
+  move:     'Remettre à sa place',
+  drop_dup: 'Doublon identique',
+  drop_tmp: 'Temporaire',
+  rm_empty: 'Dossier vide',
+  warn:     'Gardé',
 }
 
 function humanSize(n: number): string {
@@ -66,7 +66,7 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
     try {
       const r = await api.scanCleanup(project, asset || undefined)
       setScan(r)
-      setPicked(new Set(r.items.filter(i => i.safe).map(i => i.path)))
+      setPicked(new Set(r.items.filter(i => i.safe).map(i => i.id)))
     } catch (e) {
       toast.error(errMsg(e))
     } finally {
@@ -76,11 +76,11 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
 
   const apply = async () => {
     if (!project || picked.size === 0) return
-    if (!window.confirm(`Déplacer ${picked.size} élément(s) dans ${project}/_backup_flux ? (restaurable)`)) return
+    if (!window.confirm(`Appliquer ${picked.size} opération(s) ? (annulable)`)) return
     setBusy(true)
     try {
       const r = await api.applyCleanup(project, [...picked], asset || undefined)
-      toast.success(`${r.moved.length} élément(s) rangé(s)${r.backup ? ` dans ${r.backup}` : ''}`)
+      toast.success(`${r.moved} fichier(s) remis à leur place, ${r.dropped} doublon(s) / temporaire(s) retiré(s)`)
       r.errors.slice(0, 3).forEach(e => toast.warning(e))
       loadBackups()
       await analyse()
@@ -92,12 +92,12 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
   }
 
   const restore = async (id: string) => {
-    if (!window.confirm(`Remettre en place le nettoyage du ${id} ?`)) return
+    if (!window.confirm(`Annuler le nettoyage du ${id} ?`)) return
     setBusy(true)
     try {
       const r = await api.restoreCleanup(project, id)
-      toast.success(`${r.restored} fichier(s) remis en place`)
-      if (r.already_there.length) toast.warning(`${r.already_there.length} chemin(s) déjà repris, laissés dans la sauvegarde`)
+      toast.success(`${r.restored} fichier(s) remis comme avant`)
+      if (r.already_there.length) toast.warning(`${r.already_there.length} chemin(s) repris depuis : laissés tels quels`)
       loadBackups()
       setScan(null)
     } catch (e) {
@@ -109,11 +109,12 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
 
   const clone = async () => {
     if (!project || !cloneName.trim()) return
-    if (!window.confirm(`Cloner ${project} en ${cloneName.trim()} sans ce qui est rangeable ? Le projet d'origine ne change pas.`)) return
+    if (!window.confirm(`Cloner ${project} en ${cloneName.trim()}, remis sur la structure FLUX actuelle ? Le projet d'origine ne change pas.`)) return
     setBusy(true)
     try {
       const r = await api.cloneProject(project, cloneName.trim())
-      toast.success(`Projet ${r.project} créé : ${r.files} fichier(s), ${r.left_out} élément(s) laissés de côté`)
+      toast.success(`Projet ${r.project} créé : ${r.moved} fichier(s) remis à leur place, ${r.dropped} doublon(s) retiré(s)`)
+      if (r.warnings) toast.warning(`${r.warnings} avertissement(s) : à voir en analysant ${r.project}`)
       api.getProjects().then(p => setProjects(p.projects)).catch(() => undefined)
     } catch (e) {
       toast.error(errMsg(e))
@@ -124,14 +125,14 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
 
   const safeItems = scan?.items.filter(i => i.safe) ?? []
   const warnItems = scan?.items.filter(i => !i.safe) ?? []
-  const pickedBytes = safeItems.filter(i => picked.has(i.path)).reduce((n, i) => n + i.bytes, 0)
+  const pickedFiles = safeItems.filter(i => picked.has(i.id)).reduce((n, i) => n + Math.max(i.files, 1), 0)
 
   return (
     <div style={{ marginBottom: 20 }}>
       <SecTitle>Nettoyage (structure FLUX actuelle)</SecTitle>
       <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 10, lineHeight: 1.5 }}>
-        Les règles suivent le code FLUX en cours : seul ce qui est sûr peut être rangé dans <code>_backup_flux</code>{' '}
-        (restaurable), le reste est un avertissement et n'est jamais touché.
+        Les règles suivent le code FLUX en cours : chaque fichier publié est remis à sa place FLUX, un doublon identique
+        est retiré, et seul ce qui est sûr se fait (annulable). Le reste est un avertissement et n'est jamais touché.
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         <select value={project} onChange={e => setProject(e.target.value)} style={selectStyle}>
@@ -150,7 +151,7 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
         <input value={cloneName} onChange={e => setCloneName(e.target.value)} disabled={!project}
           placeholder="NOM_DU_CLONE" style={{ ...selectStyle, width: 170, fontFamily: 'var(--mono)' }} />
         <Btn onClick={() => { void clone() }} disabled={!project || !cloneName.trim() || busy}
-          title="Copie du projet sans ce qui est rangeable ; l'original ne change pas">
+          title="Copie du projet remise sur la structure FLUX actuelle ; l'original ne change pas">
           <Copy size={12} strokeWidth={2} />
           Cloner propre
         </Btn>
@@ -160,39 +161,41 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
         <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, overflow: 'hidden', marginBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', fontSize: 11,
                         background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
-            <span><b>{safeItems.length}</b> rangeable(s)</span>
+            <span><b>{safeItems.length}</b> opération(s)</span>
             <span style={{ color: 'var(--warn)' }}><b>{warnItems.length}</b> avertissement(s)</span>
             <span style={{ color: 'var(--ink-3)' }}>{scan.unknown.length} fichier(s) non FLUX gardé(s)</span>
             <div style={{ flex: 1 }} />
-            <Btn ghost sm onClick={() => setPicked(new Set(safeItems.map(i => i.path)))}>Tout</Btn>
+            <Btn ghost sm onClick={() => setPicked(new Set(safeItems.map(i => i.id)))}>Tout</Btn>
             <Btn ghost sm onClick={() => setPicked(new Set())}>Aucun</Btn>
             <Btn primary sm onClick={() => { void apply() }} disabled={busy || picked.size === 0}>
-              Ranger {picked.size} ({humanSize(pickedBytes)})
+              Appliquer ({pickedFiles} élément(s))
             </Btn>
           </div>
           {scan.items.length === 0 && (
-            <div style={{ padding: 12, fontSize: 11, color: 'var(--ink-3)' }}>Rien à ranger : tout suit la structure FLUX.</div>
+            <div style={{ padding: 12, fontSize: 11, color: 'var(--ink-3)' }}>Rien à faire : tout suit la structure FLUX.</div>
           )}
           {[...safeItems, ...warnItems].map(i => {
-            const on = picked.has(i.path)
+            const on = picked.has(i.id)
             return (
-              <div key={i.path}
+              <div key={i.id}
                 onClick={() => {
                   if (!i.safe) return
-                  setPicked(prev => { const n = new Set(prev); if (n.has(i.path)) n.delete(i.path); else n.add(i.path); return n })
+                  setPicked(prev => { const n = new Set(prev); if (n.has(i.id)) n.delete(i.id); else n.add(i.id); return n })
                 }}
                 style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '6px 10px', fontSize: 11,
-                         borderBottom: '1px solid var(--rule)', cursor: i.safe ? 'pointer' : 'default',
-                         opacity: i.safe ? 1 : 0.85 }}>
+                         borderBottom: '1px solid var(--rule)', cursor: i.safe ? 'pointer' : 'default' }}>
                 <div style={{ width: 14, paddingTop: 1 }}>
                   {i.safe ? <Check on={on} /> : <span title="Pas sûr : gardé" style={{ color: 'var(--warn)' }}>!</span>}
                 </div>
-                <span style={{ width: 130, color: 'var(--ink-2)', flexShrink: 0 }}>{KIND_LABEL[i.kind]}</span>
+                <span style={{ width: 140, color: i.safe ? 'var(--ink-2)' : 'var(--warn)', flexShrink: 0 }}>{ACTION_LABEL[i.action]}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={i.path}>{i.path}{i.dir ? '/' : ''}</div>
+                    title={i.target ? `${i.path} -> ${i.target}` : i.path}>
+                    {i.path}/{i.target && i.action === 'move' ? <span style={{ color: 'var(--accent-hi)' }}>{'  →  '}{i.target}/</span> : null}
+                  </div>
                   <div style={{ color: i.safe ? 'var(--ink-3)' : 'var(--warn)', fontSize: 10 }}>
-                    {i.safe ? i.reason : `${i.reason} · ${i.warning ?? ''}`}
+                    {i.reason}{i.warning ? ` · ${i.warning}` : ''}
+                    {i.names.length > 0 && <span style={{ fontFamily: 'var(--mono)' }}>{' · '}{i.names.join(', ')}{i.files > i.names.length ? '…' : ''}</span>}
                   </div>
                 </div>
                 <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', width: 110, textAlign: 'right', flexShrink: 0 }}>
@@ -216,10 +219,10 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
 
       {backups.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
-          <span style={{ color: 'var(--ink-3)' }}>Nettoyages restaurables :</span>
+          <span style={{ color: 'var(--ink-3)' }}>Nettoyages annulables :</span>
           {backups.slice(0, 6).map(b => (
             <Btn key={b.id} ghost sm onClick={() => { void restore(b.id) }} disabled={busy}
-              title={`Remettre en place les ${b.files} fichier(s) de ce nettoyage`}>
+              title={`Remettre comme avant les ${b.files} fichier(s) de ce nettoyage`}>
               <RotateCcw size={11} strokeWidth={2} />
               {b.id} ({b.files})
             </Btn>

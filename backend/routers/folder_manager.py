@@ -732,15 +732,16 @@ async def delete_item(req: ItemDelete) -> dict:
 
 # ── cleaning to the current FLUX layout (Disque page, 2026-09-25) ────────────
 # The rules come from the running FLUX code (features/folder_manager/asset_cleanup.py):
-# only what is certain moves, to <project>/_backup_flux/<date>/, and can be restored.
+# only what is certain happens (files put back at their FLUX place, identical duplicates
+# dropped), a journal allows undoing it; anything unsure is a warning.
 
 class CleanupApply(BaseModel):
     asset: str | None = None        # None = the whole project
-    paths: list[str]
+    ids: list[str]                  # item ids of the scan
 
 
 class CleanupRestore(BaseModel):
-    backup_id: str
+    journal_id: str
 
 
 class ProjectClone(BaseModel):
@@ -767,11 +768,11 @@ async def get_cleanup(project_name: str, asset: str | None = None) -> dict:
 
 @router.post("/projects/{project_name}/cleanup")
 async def post_cleanup(project_name: str, req: CleanupApply) -> dict:
-    """Move the picked (certain) items to _backup_flux/<date>/."""
+    """Run the picked (certain) items: files back at their FLUX place, duplicates dropped."""
     from features.folder_manager import asset_cleanup as ac
 
     project_path = _require_project(project_name)
-    return await _cleanup_call(lambda: ac.apply_cleanup(project_path, req.asset or None, req.paths))
+    return await _cleanup_call(lambda: ac.apply_cleanup(project_path, req.asset or None, req.ids))
 
 
 @router.get("/projects/{project_name}/cleanup/backups")
@@ -784,16 +785,16 @@ async def get_cleanup_backups(project_name: str) -> dict:
 
 @router.post("/projects/{project_name}/cleanup/restore")
 async def post_cleanup_restore(project_name: str, req: CleanupRestore) -> dict:
-    """Put a cleanup back (never overwrites a path taken since)."""
+    """Undo a cleanup from its journal (never overwrites a path taken since)."""
     from features.folder_manager import asset_cleanup as ac
 
     project_path = _require_project(project_name)
-    return await _cleanup_call(lambda: ac.restore_cleanup(project_path, req.backup_id))
+    return await _cleanup_call(lambda: ac.restore_cleanup(project_path, req.journal_id))
 
 
 @router.post("/projects/{project_name}/clone")
 async def post_project_clone(project_name: str, req: ProjectClone) -> dict:
-    """Clean copy of the project next to it (the original is not touched)."""
+    """Copy of the project next to it, put on the current layout (the original is not touched)."""
     from features.folder_manager import asset_cleanup as ac
 
     project_path = _require_project(project_name)
