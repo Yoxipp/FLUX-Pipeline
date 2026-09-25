@@ -40,6 +40,7 @@ def _parse_int(label: str) -> int:
 
 class ProjectCreate(BaseModel):
     name: str
+    painter_presets: list[str] | None = None    # Painter export presets of the project
 
 
 @router.get("/projects/{project_name}/tokens")
@@ -89,7 +90,8 @@ async def post_project(req: ProjectCreate) -> dict:
         raise HTTPException(status_code=409, detail=f"Projet '{req.name}' existe déjà")
     loop = asyncio.get_running_loop()
     try:
-        path = await loop.run_in_executor(None, lambda: create_project(req.name))
+        path = await loop.run_in_executor(
+            None, lambda: create_project(req.name, painter_presets=req.painter_presets))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"name": req.name, "path": str(path)}

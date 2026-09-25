@@ -7,7 +7,7 @@ import {
   HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw, Lock,
   Grid3x3, Grid2x2, Square, FileDown,
 } from 'lucide-react'
-import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { Check, FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
 import type { LoadTargets } from '../api/client'
 import type { Preset } from '../types'
@@ -537,14 +537,24 @@ function NavContext({ project }: { project: string }) {
 
 // ── Onglets panneau droit ─────────────────────────────────────────────────────
 
-function TabProject({ onCreateProject }: { onCreateProject: (name: string) => Promise<void> }) {
+function TabProject({ onCreateProject }: { onCreateProject: (name: string, painterPresets: string[]) => Promise<void> }) {
   const [name, setName]     = useState('')
   const [status, setStatus] = useState('')
+  // Painter export presets of the project (2026-09-26): the Publisher offers only those.
+  const [bundled, setBundled] = useState<string[]>([])
+  const [presets, setPresets] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    api.getPainterPresets().then(r => {
+      setBundled(r.bundled)
+      const beauty = r.bundled.find(n => /BEAUTY/i.test(n)) ?? r.bundled[0]
+      setPresets(new Set(beauty ? [beauty] : []))
+    }).catch(() => undefined)
+  }, [])
 
   const handleCreate = async () => {
     if (!name.trim()) return
     try {
-      await onCreateProject(name.trim())
+      await onCreateProject(name.trim(), [...presets])
       setStatus('✓ Créé')
       setName('')
     } catch (e) {
@@ -558,6 +568,24 @@ function TabProject({ onCreateProject }: { onCreateProject: (name: string) => Pr
         <div className="cap" style={{ marginBottom: 4 }}>NOM</div>
         <InputField value={name} onChange={setName} placeholder="ex: NEW_PROJECT" />
       </div>
+      {bundled.length > 0 && (
+        <div>
+          <div className="cap" style={{ marginBottom: 4 }}>PRESETS D'EXPORT PAINTER</div>
+          {bundled.map(p => {
+            const on = presets.has(p)
+            return (
+              <div key={p} onClick={() => setPresets(prev => { const n = new Set(prev); if (n.has(p)) n.delete(p); else n.add(p); return n })}
+                style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0', cursor: 'pointer', fontSize: 11,
+                         fontFamily: 'var(--mono)', color: on ? 'var(--ink)' : 'var(--ink-3)' }}>
+                <Check on={on} />{p}
+              </div>
+            )
+          })}
+          <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>
+            Le Publisher ne proposera que ceux-là. Aucun coché : tous les presets de Painter.
+          </div>
+        </div>
+      )}
       {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
       <div style={{ flex: 1 }} />
       <PanelBtn primary onClick={() => void handleCreate()} disabled={!name.trim()}>Create Project</PanelBtn>
@@ -2021,8 +2049,8 @@ export function Projects() {
     void api.updateSettings({ last_project: name })
   }, [])
 
-  const handleCreateProject = useCallback(async (name: string) => {
-    await api.createProject(name)
+  const handleCreateProject = useCallback(async (name: string, painterPresets: string[] = []) => {
+    await api.createProject(name, painterPresets)
     await loadItems()
     setActiveProject(name)
   }, [loadItems])

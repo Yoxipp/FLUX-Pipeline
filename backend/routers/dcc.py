@@ -1969,6 +1969,36 @@ async def texture_formats() -> dict:
     return {"formats": {k: list(v) for k, v in FORMAT_DEPTHS.items()}, "sizes": list(SIZES)}
 
 
+class PainterPresetsUpdate(BaseModel):
+    project: str
+    presets: list[str]
+
+
+@router.get("/substance/presets")
+async def substance_presets(project: str = "") -> dict:
+    """Export presets FLUX ships, and those the project uses (Publisher offers only them)."""
+    from core.paths import get_project_path
+    from dcc.substance_painter.presets import bundled_presets, project_presets
+
+    proj: list[str] = []
+    if project and get_project_path(project).exists():
+        proj = project_presets(get_project_path(project))
+    return {"bundled": bundled_presets(), "project": proj}
+
+
+@router.put("/substance/presets")
+async def put_substance_presets(req: PainterPresetsUpdate) -> dict:
+    """Change the Painter export presets of a project."""
+    from core.paths import get_project_path
+    from features.folder_manager.project_init import set_painter_presets
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    set_painter_presets(project_path, req.presets)
+    return {"project": req.presets}
+
+
 @router.get("/substance/info")
 async def substance_info() -> dict:
     """Texture sets of the open Painter project (Publisher export options)."""

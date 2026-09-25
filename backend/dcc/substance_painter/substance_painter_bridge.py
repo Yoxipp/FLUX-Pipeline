@@ -125,17 +125,44 @@ def _complete_config(config: dict) -> dict:
     import substance_painter.textureset as _ts
 
     cfg = dict(config)
-    # Only the maps ticked in FLUX (their fileName in the preset), on every set.
+    # Only the maps ticked in FLUX (their fileName in the preset), on every set, plus the
+    # shader channels added on top (inline FLUX preset).
     maps = cfg.pop("fluxOutputMaps", None)
-    if not cfg.get("exportList"):
-        cfg["exportList"] = [{"rootPath": ts.name()} for ts in _ts.all_texture_sets()]
-    if maps:
-        for entry in cfg["exportList"]:
-            entry.setdefault("filter", {})["outputMaps"] = list(maps)
-    preset = str(cfg.get("defaultExportPreset") or "")
+    skip_preset = cfg.pop("fluxSkipPreset", False)
+    extra = cfg.pop("fluxExtraMaps", None)
     inline = {str(p.get("name")) for p in cfg.get("exportPresets") or []}
-    if preset and "://" not in preset and preset not in inline:
-        cfg["defaultExportPreset"] = _res.ResourceID(context="starter_assets", name=preset).url()
+    if not cfg.get("exportList"):
+        entries = []
+        for ts in _ts.all_texture_sets():
+            if not skip_preset:
+                entry = {"rootPath": ts.name()}
+                if maps:
+                    entry["filter"] = {"outputMaps": list(maps)}
+                entries.append(entry)
+            if extra and inline:
+                entries.append({"rootPath": ts.name(), "exportPreset": sorted(inline)[0],
+                                "filter": {"outputMaps": list(extra)}})
+        cfg["exportList"] = entries
+
+    def _url(name: str) -> str:
+        if not name or "://" in name or name in inline:
+            return name
+        # A studio preset installed by FLUX sits in the user's assets, a shipped one in
+        # Painter's starter assets.
+        for ctx in ("your_assets", "starter_assets"):
+            try:
+                for p in _sp_export.list_resource_export_presets():
+                    rid = p.resource_id
+                    if getattr(rid, "name", "") == name and getattr(rid, "context", ctx) == ctx:
+                        return rid.url()
+            except Exception:  # noqa: BLE001
+                break
+        return _res.ResourceID(context="starter_assets", name=name).url()
+
+    cfg["defaultExportPreset"] = _url(str(cfg.get("defaultExportPreset") or ""))
+    for entry in cfg["exportList"]:
+        if entry.get("exportPreset"):
+            entry["exportPreset"] = _url(str(entry["exportPreset"]))
     return cfg
 
 
