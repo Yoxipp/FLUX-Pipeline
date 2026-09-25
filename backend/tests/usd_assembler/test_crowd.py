@@ -88,6 +88,26 @@ class Crowd(unittest.TestCase):
         self.assertEqual(flux["joint_count"], 3)
         self.assertEqual(crowd.component_skeleton(self.project, "BOB")["signature"], flux["skeleton_signature"])
 
+    def test_weights_draw_more_of_an_asset_and_a_clip(self) -> None:
+        # 2026-09-25: "pouvoir choisir si on veut plus de tel asset, plus de telle anim".
+        pts = [{"p": [i, 0, 0]} for i in range(400)]
+        a = crowd.plan_agents(pts, ["BOB", "TIM"], ["walk", "run"], seed=3,
+                              component_weights={"BOB": 3, "TIM": 1}, clip_weights={"walk": 1, "run": 0})
+        bob = sum(1 for x in a if x["component"] == "BOB")
+        self.assertTrue(250 < bob < 350, bob)
+        self.assertEqual({x["clip"] for x in a}, {"walk"})
+        a = crowd.plan_agents(pts, ["BOB", "TIM"], [], seed=3, component_weights={"BOB": 0, "TIM": 1})
+        self.assertEqual({x["component"] for x in a}, {"TIM"})
+
+    def test_an_agent_only_plays_a_clip_of_its_rig(self) -> None:
+        pts = [{"p": [i, 0, 0]} for i in range(60)]
+        a = crowd.plan_agents(pts, ["BOB", "DOG"], ["walk", "trot"], seed=1,
+                              fits={"BOB": {"walk"}, "DOG": {"trot"}})
+        for x in a:
+            self.assertEqual(x["clip"], {"BOB": "walk", "DOG": "trot"}[x["component"]])
+        a = crowd.plan_agents(pts, ["BOB"], ["trot"], seed=1, fits={"BOB": {"walk"}})
+        self.assertEqual({x["clip"] for x in a}, {""})
+
     def test_agents_are_deterministic_with_a_seed(self) -> None:
         pts = [{"p": [i, 0, 0]} for i in range(20)]
         a = crowd.plan_agents(pts, ["BOB", "TIM"], ["c"], seed=7, offset=(0, 10), speed=(0.5, 2))

@@ -141,20 +141,42 @@ def compatibility(project_path: str | Path, names: list[str] | None = None) -> d
 
 # ── A7: crowd layer ──────────────────────────────────────────────────────────
 
+def _weighted(rng: random.Random, items: list[str], weights: dict[str, float] | None) -> str:
+    """One of *items*; with *weights* ({item: w >= 0}) the draw follows them (missing = 1)."""
+    if not weights:
+        return rng.choice(items)
+    w = [max(0.0, float(weights.get(i, 1.0))) for i in items]
+    if not any(w):
+        return rng.choice(items)
+    return rng.choices(items, weights=w, k=1)[0]
+
+
 def plan_agents(points: list[dict], components: list[str], clips: list[str], *, seed: int = 0,
-                offset: tuple[float, float] = (0.0, 0.0), speed: tuple[float, float] = (1.0, 1.0)) -> list[dict]:
+                offset: tuple[float, float] = (0.0, 0.0), speed: tuple[float, float] = (1.0, 1.0),
+                component_weights: dict[str, float] | None = None,
+                clip_weights: dict[str, float] | None = None,
+                fits: dict[str, set[str]] | None = None) -> list[dict]:
     """One agent per point: component, clip, time offset and speed drawn with *seed*.
 
-    *points*: [{"p": [x, y, z], "ry": degrees (optional), "scale": s (optional)}]."""
+    *points*: [{"p": [x, y, z], "ry": degrees (optional), "scale": s (optional)}].
+    *component_weights* / *clip_weights*: "more of this asset / this animation" (FLUX Crowd
+    rows, 2026-09-25). *fits*: {component: clip bases its skeleton plays}; an agent
+    only gets a clip that fits its asset (none fits: rest pose)."""
     if not components:
         raise ValueError("aucun asset pour la foule")
+    comps = [c for c in components if not component_weights or float(component_weights.get(c, 1.0)) > 0] \
+        or list(components)
     rng = random.Random(seed)
     agents = []
     for i, pt in enumerate(points):
+        comp = _weighted(rng, comps, component_weights)
+        usable = [c for c in clips if fits is None or c in fits.get(comp, set())]
+        if clip_weights:
+            usable = [c for c in usable if float(clip_weights.get(c, 1.0)) > 0]
         agents.append({
             "name": f"agent_{i + 1:04d}",
-            "component": rng.choice(components),
-            "clip": rng.choice(clips) if clips else "",
+            "component": comp,
+            "clip": _weighted(rng, usable, clip_weights) if usable else "",
             "p": [float(v) for v in (pt.get("p") or [0, 0, 0])[:3]],
             "ry": float(pt.get("ry") or 0.0),
             "scale": float(pt.get("scale") or 1.0),
@@ -297,7 +319,9 @@ def ensure_crowd_token(project_path: str | Path) -> None:
 def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, points: list[dict], *,
                 components: list[str], clips: list[str], seed: int = 0,
                 offset: tuple[float, float] = (0.0, 0.0), speed: tuple[float, float] = (1.0, 1.0),
-                publish: bool = False, user: str = "") -> dict:
+                publish: bool = False, user: str = "",
+                component_weights: dict[str, float] | None = None,
+                clip_weights: dict[str, float] | None = None) -> dict:
     """Preview (work file in the shot) or publish (SEQ_SHOT_CROWD[_GROUP], vNNN + LAST) a crowd.
 
     Returns {"path", "agents", "warnings", "version" (publish only), "stage" (publish only)}."""
@@ -308,14 +332,21 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     project = Path(project_path)
     by_base = {c["base"]: Path(c["last"]) for c in list_clips(project)}
     unknown = [c for c in clips if c not in by_base]
-    agents = plan_agents(points, components, [c for c in clips if c in by_base], seed=seed,
-                         offset=offset, speed=speed)
+    known = [c for c in clips if c in by_base]
+    # Each agent only plays a clip its asset's skeleton holds.
+    compat = compatibility(project, list(components)).get("assets", {}) if known else {}
+    fits = {c: set(compat.get(c, {}).get("clips", [])) for c in components} if known else None
+    agents = plan_agents(points, components, known, seed=seed, offset=offset, speed=speed,
+                         component_weights=component_weights, clip_weights=clip_weights, fits=fits)
+    no_clip = sorted({c for c in components if fits is not None and not (fits.get(c, set()) & set(known))})
     grp = sanitize_token(group) or "crowd"
     base = f"{ss.entity(seq, shot)}_{CROWD_TYPE}" + ("" if grp.lower() == "crowd" else f"_{grp.upper()}")
     if not publish:
         dest = ss.stage_dir(project, seq, shot) / "crowd_work" / f"{base}.usda"
         res = author_crowd_layer(dest, project, grp, agents, by_base)
-        res["warnings"] = [f"clip inconnu : {c}" for c in unknown] + res["warnings"]
+        res["warnings"] = ([f"clip inconnu : {c}" for c in unknown]
+                           + [f"aucune anim ne va sur le rig de {c} : pose de repos" for c in no_clip]
+                           + res["warnings"])
         return res
 
     from features.publisher import last_pointer as lp
@@ -346,6 +377,8 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     append_log(parent, base, version, f"foule {grp} : {res['agents']} agent(s)", user or "flux")
     hooked = after_usd_publish(parent, base, ".usda", root, user=user)
     res.update(version=version, base=base, stage=(hooked.get("shot") or {}).get("version"))
-    res["warnings"] = [f"clip inconnu : {c}" for c in unknown] + res["warnings"]
+    res["warnings"] = ([f"clip inconnu : {c}" for c in unknown]
+                       + [f"aucune anim ne va sur le rig de {c} : pose de repos" for c in no_clip]
+                       + res["warnings"])
     log.info("Crowd %s %s: %d agents", base, version, res["agents"])
     return res

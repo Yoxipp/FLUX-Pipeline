@@ -47,3 +47,20 @@ _def.save(_HDA_PATH)
 hou.hda.installFile(_HDA_PATH, oplibraries_file=None, change_oplibraries_file=False)
 _asset.destroy()
 '''
+
+# After FINALIZE: names the inputs (_INPUT_LABELS) in the network editor, from the
+# definition installed at _HDA_PATH (category _CATEGORY). Cosmetic: never fails a build.
+INPUT_LABELS = r'''
+try:
+    import re as _re
+    _d = hou.hdaDefinition(_CATEGORY, _NAME, _HDA_PATH)
+    _ds = _d.sections()["DialogScript"]
+    _txt = _re.sub(r'\n[ \t]*inputlabel[ \t]+\d+[ \t]+"[^"\n]*"', "", _ds.contents())
+    _ins = "".join('\n    inputlabel\t%d\t"%s"' % (_i + 1, _l) for _i, _l in enumerate(_INPUT_LABELS))
+    _txt = _re.sub(r'(\n[ \t]*label[ \t]+[^\n]*)', lambda _m: _m.group(1) + _ins, _txt, count=1)
+    _ds.setContents(_txt)
+    _d.save(_HDA_PATH)
+    hou.hda.installFile(_HDA_PATH, oplibraries_file=None, change_oplibraries_file=False)
+except Exception:
+    pass
+'''

@@ -47,10 +47,36 @@ class CrowdHda(unittest.TestCase):
         compile(code, "build", "exec")
         compile(flux_crowd_hda.MODULE_FUNCTIONS, "module", "exec")
         compile(flux_crowd_hda.BOOTSTRAP, "bootstrap", "exec")
-        for token in ('"geo_display"', '"points_sop"', "StringToggle", "/crowd/**/geo/proxy"):
+        for token in ('"geo_display"', '"points_sop"', "StringToggle", "/crowd/**/geo/proxy",
+                      "max_num_inputs=3", '_rows("asset"', '_rows("clip"', '"btn_inputs"'):
             self.assertIn(token, code)
-        for fn in ("def generate", "def publish", "def menu_assets", "def menu_clips"):
+        for fn in ("def generate", "def publish", "def menu_assets", "def menu_clips", "def read_inputs",
+                   "def _input_points", "def _input_assets", "def _input_clips", '"component_weights"'):
             self.assertIn(fn, flux_crowd_hda.MODULE_FUNCTIONS)
+
+    def test_the_inputs_are_named_assets_points_anims(self) -> None:
+        from unittest import mock
+
+        from dcc.houdini.hda.hda_common import INPUT_LABELS
+
+        class _Sec:
+            text = ('{\n    name\tflux_crowd\n    script\tflux_crowd\n    label\t"FLUX Crowd"\n\n'
+                    '    inputlabel\t1\t"Sub-Network Input #1"\n    parm {\n    }\n}\n')
+
+            def contents(self):
+                return self.text
+
+            def setContents(self, t):
+                self.text = t
+
+        sec = _Sec()
+        hou = mock.MagicMock()
+        hou.hdaDefinition.return_value.sections.return_value = {"DialogScript": sec}
+        exec(INPUT_LABELS, {"hou": hou, "_CATEGORY": 1, "_NAME": "flux_crowd", "_HDA_PATH": "x.hda",
+                            "_INPUT_LABELS": ("Assets", "Points", "Anims")})
+        self.assertNotIn("Sub-Network", sec.text)
+        self.assertIn('label\t"FLUX Crowd"\n    inputlabel\t1\t"Assets"\n    inputlabel\t2\t"Points"\n'
+                      '    inputlabel\t3\t"Anims"', sec.text)
 
 
 class ExporterHda(unittest.TestCase):

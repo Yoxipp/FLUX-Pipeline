@@ -1,7 +1,14 @@
 """
 FLUX - Houdini "FLUX Crowd" HDA for Solaris (A7, ADR 0022).
 
-Draws agents on the points of a SOP and writes the shot crowd layer:
+Three inputs (2026-09-25): 1 = the assets (e.g. several FLUX Import in a Merge),
+2 = the scatter points (any points prim: SOP Import, SOP Create...), 3 = the animations
+(FLUX Import of ANIM clips). FLUX lists them in rows with a weight each ("more of this
+asset / this animation"); each point gets an asset drawn with those weights and an
+animation drawn among those its skeleton plays. Without an input, the older menus /
+"Points" SOP below are used. The node outputs the crowd layer only: merge it into the shot.
+
+Draws agents on the points and writes the shot crowd layer:
   * menus: project, sequence, shot, group (one crowd layer per group);
   * assets: the assets with a skeleton (several can be picked; they should share a rig,
     same signature), clips: the animation clips that fit every picked asset;
@@ -58,6 +65,7 @@ except Exception:
     def generate(node): _offline(node, "generate")
     def publish(node): _offline(node, "publish")
     def reload(node): _offline(node, "reload")
+    def read_inputs(node): _offline(node, "read_inputs")
     def on_created(node): pass
     def on_loaded(node): pass
 '''
@@ -228,6 +236,167 @@ def _points(node):
         out.append(item)
     return out
 
+# ── inputs (1 assets, 2 points, 3 animations) and weight rows ─────────────────
+_MAX_ROWS = 16
+
+def _input_stage(node, i):
+    try:
+        n = node.input(i)
+    except Exception:
+        n = None
+    if n is None:
+        return None
+    try:
+        return n.stage()
+    except Exception:
+        return None
+
+def _input_assets(node):
+    """FLUX asset names on input 1 (assetInfo name of each component), None if unwired."""
+    stage = _input_stage(node, 0)
+    if stage is None:
+        return None
+    from pxr import Usd
+    out = []
+    it = iter(Usd.PrimRange(stage.GetPseudoRoot()))
+    for prim in it:
+        if prim.IsPseudoRoot():
+            continue
+        model = Usd.ModelAPI(prim)
+        name = (model.GetAssetInfo() or {}).get("name") or (prim.GetName() if model.GetKind() == "component" else "")
+        if name:
+            if name not in out:
+                out.append(str(name))
+            it.PruneChildren()
+    return out
+
+def _input_points(node):
+    """[{"p", "ry", "scale"}] from the first points prim of input 2, None if unwired."""
+    stage = _input_stage(node, 1)
+    if stage is None:
+        return None
+    import hou
+    from pxr import Gf, Usd, UsdGeom
+    t = Usd.TimeCode(hou.frame())
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.PointBased):
+            continue
+        pb = UsdGeom.PointBased(prim)
+        pts = pb.GetPointsAttr().Get(t) or []
+        xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(t)
+        api = UsdGeom.PrimvarsAPI(prim)
+        def _pv(name):
+            v = api.GetPrimvar(name)
+            return v.ComputeFlattened(t) if v and v.HasValue() else None
+        orient = _pv("orient")
+        normals = _pv("N")
+        if normals is None:
+            normals = pb.GetNormalsAttr().Get(t)
+        scale = _pv("pscale")
+        if scale is None and prim.IsA(UsdGeom.Points):
+            widths = UsdGeom.Points(prim).GetWidthsAttr().Get(t)
+            scale = [w * 0.5 for w in widths] if widths else None     # width = 2 * pscale
+        out = []
+        for i, p in enumerate(pts):
+            wp = xf.Transform(Gf.Vec3d(p[0], p[1], p[2]))
+            ry = 0.0
+            if orient is not None and i < len(orient):
+                q = orient[i]
+                rot = Gf.Rotation(Gf.Quatd(float(q.GetReal()), Gf.Vec3d(q.GetImaginary())))
+                z = rot.TransformDir(Gf.Vec3d(0, 0, 1))
+                ry = math.degrees(math.atan2(z[0], z[2]))
+            elif normals is not None and i < len(normals):
+                n = normals[i]
+                if abs(n[0]) + abs(n[2]) > 1e-9:
+                    ry = math.degrees(math.atan2(n[0], n[2]))
+            item = {"p": [wp[0], wp[1], wp[2]], "ry": ry}
+            if scale is not None and i < len(scale) and scale[i] > 0:
+                item["scale"] = float(scale[i])
+            out.append(item)
+        return out
+    return []
+
+def _input_clips(node, compat):
+    """Published clips (bases) animating input 3, None if unwired."""
+    stage = _input_stage(node, 2)
+    if stage is None:
+        return None
+    from pxr import UsdSkel
+    bases = sorted((c["base"] for c in compat.get("clips", [])), key=len, reverse=True)
+    out = []
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdSkel.Animation):
+            continue
+        for spec in prim.GetPrimStack():
+            ident = os.path.basename(spec.layer.identifier or "")
+            hit = next((b for b in bases if ident.startswith(b + "_") or ident.startswith(b + ".")), None)
+            if hit:
+                if hit not in out:
+                    out.append(hit)
+                break
+    return out
+
+def _json(node, name, default):
+    try:
+        return json.loads(_pval(node, name) or "null") or default
+    except Exception:
+        return default
+
+def _fill_rows(node, prefix, names, labels):
+    """One row per name with its weight; a weight set earlier on this node comes back."""
+    if node.parm(prefix + "_count") is None:
+        return
+    memory = _json(node, prefix + "_memory", {})
+    for i in range(1, int(node.evalParm(prefix + "_count")) + 1):
+        old = _pval(node, "%s_id%d" % (prefix, i))
+        if old:
+            memory[old] = float(node.evalParm("%s_w%d" % (prefix, i)))
+    names = list(names)[:_MAX_ROWS]
+    _set(node, prefix + "_count", len(names))
+    for i in range(1, _MAX_ROWS + 1):
+        name = names[i - 1] if i <= len(names) else ""
+        _set(node, "%s_id%d" % (prefix, i), name)
+        _set(node, "%s_label%d" % (prefix, i), labels.get(name, name) if name else "")
+        if name:
+            _set(node, "%s_w%d" % (prefix, i), memory.get(name, 1.0))
+    _set(node, prefix + "_memory", json.dumps(memory, sort_keys=True))
+
+def _weights(node, prefix):
+    out = {}
+    if node.parm(prefix + "_count") is None:
+        return out
+    for i in range(1, int(node.evalParm(prefix + "_count")) + 1):
+        name = _pval(node, "%s_id%d" % (prefix, i))
+        if name:
+            out[name] = float(node.evalParm("%s_w%d" % (prefix, i)))
+    return out
+
+def read_inputs(node, quiet=False):
+    """Assets of input 1 and clips of input 3 into the weight rows (menus if unwired)."""
+    compat = _compat(node)
+    known = compat.get("assets", {})
+    assets = _input_assets(node)
+    if assets is None:
+        assets = _picked(node, "assets")
+    clips = _input_clips(node, compat)
+    if clips is None:
+        clips = _picked(node, "clips")
+    labels = {}
+    for a in assets:
+        info = known.get(a)
+        labels[a] = ("%s  (%d joints)" % (a, info.get("joint_count", 0))) if info else a + "  (pas de squelette FLUX)"
+    _fill_rows(node, "asset", assets, labels)
+    clip_labels = {}
+    for c in compat.get("clips", []):
+        lbl = "%s %s" % (c["asset"], c["clip"])
+        if c.get("range"):
+            lbl += "  %d-%d" % tuple(c["range"])
+        clip_labels[c["base"]] = lbl
+    _fill_rows(node, "clip", clips, clip_labels)
+    if not quiet:
+        _status(node, "%d asset(s), %d anim(s)" % (len(assets), len(clips)))
+    return assets, clips
+
 def _reload(node):
     n = node.node("sublayer")
     btn = n.parm("reload") if n is not None else None
@@ -241,16 +410,19 @@ def _build(node, publish):
     project, seq, shot = _pval(node, "project"), _pval(node, "seq"), _pval(node, "shot")
     if not (project and seq and shot):
         _status(node, "Choisis projet / sequence / shot"); return
-    assets = _picked(node, "assets")
+    assets, clips = read_inputs(node, quiet=True)
     if not assets:
-        _status(node, "Choisis au moins un asset"); return
-    pts = _points(node)
+        _status(node, "Aucun asset : branche des FLUX Import sur l'entree 1 (ou choisis-les dans les menus)"); return
+    pts = _input_points(node)
     if pts is None:
-        _status(node, "Remplis Points (un SOP de points)"); return
+        pts = _points(node)
+    if pts is None:
+        _status(node, "Aucun point : branche des points sur l'entree 2 (ou remplis Points)"); return
     if not pts:
-        _status(node, "Le SOP de Points n'a aucun point"); return
+        _status(node, "Les points de l'entree 2 sont vides"); return
     payload = {"project": project, "seq": seq, "shot": shot, "group": _pval(node, "group") or "crowd",
-               "points": pts, "components": assets, "clips": _picked(node, "clips"),
+               "points": pts, "components": assets, "clips": clips,
+               "component_weights": _weights(node, "asset"), "clip_weights": _weights(node, "clip"),
                "seed": int(node.evalParm("seed")),
                "offset": [node.evalParm("offsetx"), node.evalParm("offsety")],
                "speed": [node.evalParm("speedx"), node.evalParm("speedy")],
@@ -300,6 +472,7 @@ def _build_code(hda_path: str) -> str:
     _snapshot = snapshot('hou.lopNodeTypeCategory()', NODE_NAME).replace("{{", "{").replace("}}", "}")
     _restore = RESTORE
     from dcc.houdini.hda.hda_common import FINALIZE as _finalize, ICON_PATH as icon_path
+    from dcc.houdini.hda.hda_common import INPUT_LABELS as input_labels
 
     return f'''
 import hou
@@ -310,6 +483,9 @@ _ICON_PATH = {icon_path!r}
 _NAME = {NODE_NAME!r}
 _PY = hou.scriptLanguage.Python
 _PM_CODE = {BOOTSTRAP!r}
+MAX_ROWS = 16
+_CATEGORY = hou.lopNodeTypeCategory()
+_INPUT_LABELS = ("Assets", "Points", "Anims")
 
 def _menu(name, label, default, fn, help_txt, toggle=False):
     t = hou.StringParmTemplate(name, label, 1, default_value=(default,), help=help_txt)
@@ -326,13 +502,42 @@ _ptg.append(_menu("shot", "Shot", "", "menu_shot", "Shot that receives the crowd
 _ptg.append(hou.StringParmTemplate("group", "Groupe", 1, default_value=("crowd",),
                                    help="One crowd layer per group (SEQ_SHOT_CROWD_<GROUPE>)"))
 _ptg.append(hou.SeparatorParmTemplate("sep_agents"))
-_ptg.append(hou.StringParmTemplate("points_sop", "Points", 1, default_value=("",),
-                                   string_type=hou.stringParmType.NodeReference,
-                                   help="SOP whose points place the agents (P, orient or N, pscale)"))
-_ptg.append(_menu("assets", "Assets", "", "menu_assets",
-                  "Assets drawn per agent (same rig = same skeleton signature)", toggle=True))
-_ptg.append(_menu("clips", "Clips", "", "menu_clips",
-                  "Animation clips that fit every picked asset (empty = rest pose)", toggle=True))
+_ptg.append(hou.ButtonParmTemplate("btn_inputs", "Lire les entrees",
+                                   script_callback="hou.phm().read_inputs(kwargs['node'])",
+                                   script_callback_language=_PY,
+                                   help="Entree 1 : assets, entree 2 : points, entree 3 : anims"))
+
+def _rows(prefix, label, help_txt):
+    f = hou.FolderParmTemplate(prefix + "_folder", label, folder_type=hou.folderType.Collapsible)
+    f.setConditional(hou.parmCondType.HideWhen, "{{ " + prefix + "_count == 0 }}")
+    f.addParmTemplate(hou.IntParmTemplate(prefix + "_count", "count", 1, default_value=(0,), is_hidden=True))
+    f.addParmTemplate(hou.StringParmTemplate(prefix + "_memory", "memory", 1, default_value=("{{}}",), is_hidden=True))
+    for i in range(1, MAX_ROWS + 1):
+        n = str(i)
+        hide = "{{ " + prefix + "_id" + n + ' == "" }}'
+        w = hou.FloatParmTemplate(prefix + "_w" + n, "Poids", 1, default_value=(1.0,), min=0.0, max=10.0,
+                                  min_is_strict=True, help=help_txt)
+        w.setConditional(hou.parmCondType.HideWhen, hide)
+        w.setJoinWithNext(True)
+        f.addParmTemplate(w)
+        l = hou.StringParmTemplate(prefix + "_label" + n, "", 1, default_value=("",))
+        l.setConditional(hou.parmCondType.HideWhen, hide)
+        f.addParmTemplate(l)
+        f.addParmTemplate(hou.StringParmTemplate(prefix + "_id" + n, "id", 1, default_value=("",), is_hidden=True))
+    return f
+
+_ptg.append(_rows("asset", "Assets (entree 1)", "Plus haut = plus d'agents de cet asset. 0 = jamais."))
+_ptg.append(_rows("clip", "Anims (entree 3)", "Plus haut = cette anim plus souvent. 0 = jamais. "
+                                              "Chaque agent ne recoit qu'une anim de son rig."))
+_menus = hou.FolderParmTemplate("no_inputs", "Sans entrees (menus)", folder_type=hou.folderType.Collapsible)
+_menus.addParmTemplate(hou.StringParmTemplate("points_sop", "Points", 1, default_value=("",),
+                                            string_type=hou.stringParmType.NodeReference,
+                                            help="Used when input 2 is empty: SOP whose points place the agents"))
+_menus.addParmTemplate(_menu("assets", "Assets", "", "menu_assets",
+                           "Used when input 1 is empty (same rig = same skeleton signature)", toggle=True))
+_menus.addParmTemplate(_menu("clips", "Clips", "", "menu_clips",
+                           "Used when input 3 is empty (clips that fit every picked asset)", toggle=True))
+_ptg.append(_menus)
 _ptg.append(hou.IntParmTemplate("seed", "Graine (seed)", 1, default_value=(0,)))
 _ptg.append(hou.FloatParmTemplate("offset", "Decalage min / max", 2, default_value=(0.0, 0.0),
                                   help="Time offset of each agent's clip, in frames"))
@@ -368,8 +573,8 @@ for _c in _sub.children():
         _c.destroy()
 _out = next((c for c in _sub.children() if c.type().name() == "output"), None) \\
     or _sub.createNode("output", "output0")
+# The inputs are sources (assets, points, clips): the node outputs the crowd layer alone.
 _subl = _sub.createNode("sublayer", "sublayer")
-_subl.setInput(0, _sub.indirectInputs()[0])
 _subl.parm("filepath1").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
 _full = _sub.createNode("configureprimitive", "show_render_geo")
 _full.setInput(0, _subl)
@@ -389,8 +594,9 @@ _out.setInput(0, _sw)
 _sub.layoutChildren()
 
 _asset = _sub.createDigitalAsset(name=_NAME, hda_file_name=_HDA_PATH, description={LABEL!r},
-                                 min_num_inputs=0, max_num_inputs=1, version="1.0")
+                                 min_num_inputs=0, max_num_inputs=3, version="1.0")
 {_finalize}
+{input_labels}
 {_restore}
 result = {{"ok": True, "path": _HDA_PATH, "node_type": "Lop/" + _NAME}}
 '''
