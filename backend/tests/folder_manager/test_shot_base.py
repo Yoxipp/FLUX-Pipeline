@@ -82,8 +82,12 @@ class ShotHipScene(unittest.TestCase):
         shutil.rmtree(self.project, ignore_errors=True)
 
     def test_built_from_an_empty_scene_with_the_licence_extension(self) -> None:
-        script = hst._gen_script(None, "C:/p/SEQ001_SHOT010_light", "$HIP/a", "$HIP/b")
+        script = hst._gen_script(None, "C:/p/SEQ001_SHOT010_light", "flux_shot",
+                                 {"project": "PROJ", "seq": "SEQ001", "shot": "SHOT010"})
         compile(script, "gen", "exec")
+        self.assertIn("'flux_shot'", script)
+        self.assertIn("'shot': 'SHOT010'", script)
+        self.assertIn('createNode("lopnet", "stage")', script)
         self.assertIn("hou.hipFile.clear(", script)
         self.assertIn("licenseCategory()", script)
         self.assertIn("'C:/p/SEQ001_SHOT010_light' + _ext", script)

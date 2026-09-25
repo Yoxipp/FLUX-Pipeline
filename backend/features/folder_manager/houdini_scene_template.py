@@ -13,7 +13,8 @@
 #
 # Mechanism (see §3 of the RETAKES-2 spec):
 #   1. offline via `hython` ONLY — a separate, isolated process. hython loads the
-#      base template, drops/repoints the FLUX Lighting HDA, and saves the .hip.
+#      base template, drops FLUX Lighting (sequence rig) or FLUX Shot (shot), sets its
+#      project / seq / shot, and saves the .hip (ADR 0030).
 #   2. no hython (or a save failure) → warn + {"ok": False}, never raise.
 #
 # IMPORTANT — never author in a live session. The generation script does
@@ -24,7 +25,7 @@
 # the .hip is simply not generated — the folders / tokens / USD layers still stand.
 #
 # License note (§7, fixed 2026-09-19): the scene is built from an EMPTY file (only a
-# FLUX Lighting node) and saved with the extension of the licence: .hip (commercial),
+# FLUX node) and saved with the extension of the licence: .hip (commercial),
 # .hiplc (indie), .hipnc (education / apprentice), like the sequence scene (A5). The old way loaded
 # the .hipnc seed first, which turned a commercial hython non commercial and made its
 # .hip save fail: no shot ever got a scene. A team template is only loaded when it is a
@@ -118,9 +119,11 @@ def _find_hython() -> Path | None:
 
 # ── the generation script run by hython / houdini_client ─────────────────────────
 
-def _gen_script(template: str | None, dest_base: str, usd_input_rel: str, usd_output_rel: str) -> str:
-    """Return Python that starts from *template* (None = empty scene), sets the FLUX
-    Lighting node and saves ``dest_base`` + the licence's extension.
+def _gen_script(template: str | None, dest_base: str, node_type: str = "flux_lighting",
+                parms: dict | None = None) -> str:
+    """Return Python that starts from *template* (None = empty scene), finds or drops the
+    FLUX node *node_type* in /stage (flux_lighting for a sequence, flux_shot for a shot),
+    sets its *parms* (project, seq, shot) and saves ``dest_base`` + the licence's extension.
 
     Runs inside hython only. Assigns a JSON-serialisable dict to `result`. Paths are
     $HIP-relative so the saved scene stays portable.
@@ -134,26 +137,27 @@ try:
     else:
         hou.hipFile.clear(suppress_save_prompt=True)
 
-    stage = hou.node("/stage") or hou.node("/").createNode("stage")
+    stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
 
-    # Find an existing FLUX Lighting node, else drop one (HDA must be installed).
+    # Find the FLUX node of the template, else drop one (HDA must be installed).
+    _type = {node_type!r}
     node = None
     for n in stage.allSubChildren():
         try:
-            if n.type().name().startswith("flux_lighting"):
+            if n.type().name().startswith(_type):
                 node = n
                 break
         except Exception:
             pass
     if node is None:
         try:
-            node = stage.createNode("flux_lighting")
+            node = stage.createNode(_type)
         except Exception as exc:
-            result = {{"ok": False, "error": "flux_lighting HDA not installed: %s" % exc}}
+            result = {{"ok": False, "error": "%s HDA not installed: %s" % (_type, exc)}}
             node = None
 
     if node is not None:
-        for pname, pval in (("usd_input", {usd_input_rel!r}), ("usd_output", {usd_output_rel!r})):
+        for pname, pval in {dict(parms or {})!r}.items():
             p = node.parm(pname)
             if p is not None:
                 p.set(pval)
@@ -212,7 +216,7 @@ def _run_offline(script: str) -> dict:
                 pass
 
 
-def _generate(template: Path | None, dest_base: Path, usd_input_rel: str, usd_output_rel: str) -> dict:
+def _generate(template: Path | None, dest_base: Path, node_type: str, parms: dict) -> dict:
     """Author the .hip via an ISOLATED hython process only — NEVER a live session.
 
     The script does hou.hipFile.load()+save(); running it in a connected Houdini
@@ -222,7 +226,7 @@ def _generate(template: Path | None, dest_base: Path, usd_input_rel: str, usd_ou
     USD layers created by the caller still stand; nothing is ever raised.
     """
     script = _gen_script(str(template) if template else None, str(dest_base).replace("\\", "/"),
-                         usd_input_rel, usd_output_rel)
+                         node_type, parms)
 
     res = _run_offline(script)
     if res.get("ok"):
@@ -256,11 +260,9 @@ def create_sequence_hip_scene(seq_path: Path, seq_label: str) -> dict:
 
     template = loadable_template(project_path, _SEQ_TEMPLATE_NAMES)
 
-    # $HIP is the scene's own usd/lighting dir. Seq root USD sits one level up.
-    usd_input = "$HIP/../{seq}.usda".format(seq=seq_label)
-    usd_output = "$HIP/{seq}_light.usda".format(seq=seq_label)
-
-    res = _generate(template, dest_base, usd_input, usd_output)
+    # FLUX Lighting (sequence light rig): publishes SEQ_LIGHT vNNN + LAST, never in place.
+    res = _generate(template, dest_base, "flux_lighting",
+                    {"project": project_path.name, "seq": seq_label})
     if res.get("ok"):
         return {"ok": True, "created": [res["path"]], "path": res["path"]}
     return {"ok": False, "error": res.get("error"), "created": []}
@@ -282,12 +284,10 @@ def create_shot_hip_scene(shot_path: Path, seq_label: str, shot_label: str) -> d
 
     template = loadable_template(project_path, _SHOT_TEMPLATE_NAMES)
 
-    # $HIP is shot/usd/lighting. Shot root USD sits one level up; it already
-    # sublayers the sequence light rig (strong → weak).
-    usd_input = "$HIP/../{entity}.usda".format(entity=entity)
-    usd_output = "$HIP/{entity}_light.usda".format(entity=entity)
-
-    res = _generate(template, dest_base, usd_input, usd_output)
+    # FLUX Shot: loads the shot stage (which sublayers the sequence rig), publishes the
+    # shot lights as SEQ_SHOT_LIGHT (ADR 0020 / 0021).
+    res = _generate(template, dest_base, "flux_shot",
+                    {"project": project_path.name, "seq": seq_label, "shot": shot_label})
     if res.get("ok"):
         return {"ok": True, "created": [res["path"]], "path": res["path"]}
     return {"ok": False, "error": res.get("error"), "created": []}

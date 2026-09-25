@@ -2429,6 +2429,54 @@ class ShotLightPublishRequest(BaseModel):
     user: str | None = None
 
 
+@router.get("/houdini/lighting/module")
+async def houdini_lighting_module() -> dict:
+    """PythonModule of the FLUX Lighting HDA, exec()'d by its bootstrap (no rebuild on fix)."""
+    from dcc.houdini.hda.flux_lighting_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/lighting/sequences")
+async def houdini_lighting_sequences(project: str) -> dict:
+    """Sequences + their published light rig (FLUX Lighting menus)."""
+    from core.paths import get_project_path
+    from features.usd_assembler.shot_light import list_sequences
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    loop = asyncio.get_running_loop()
+    return {"sequences": await loop.run_in_executor(None, lambda: list_sequences(project_path))}
+
+
+class SequenceLightPublishRequest(BaseModel):
+    project: str
+    seq: str
+    file: str               # layers written by the FLUX Lighting node (temp file)
+    user: str | None = None
+
+
+@router.post("/houdini/sequence-light/publish")
+async def houdini_sequence_light_publish(req: SequenceLightPublishRequest) -> dict:
+    """Publish the sequence light rig exported by FLUX Lighting (SEQ_LIGHT vNNN + LAST)."""
+    from core import config
+    from core.paths import get_project_path
+    from features.usd_assembler.shot_light import publish_sequence_light
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    user = req.user or config.get("username") or ""
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: publish_sequence_light(
+            req.file, project_path, req.seq, user=user))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "base": res["base"], "version": res["version"], "last": str(res["last"] or ""),
+            "sequence_root": res["sequence_root"], "warnings": res["warnings"]}
+
+
 @router.post("/houdini/shot-light/publish")
 async def houdini_shot_light_publish(req: ShotLightPublishRequest) -> dict:
     """Publish the shot light rig exported by the FLUX Shot node (SEQ_SHOT_LIGHT)."""
