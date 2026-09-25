@@ -67,6 +67,7 @@ except Exception as _offline_err:
             return
         node.parm("status_msg").set("FLUX offline : démarre le backend puis clique ↺ Resolve")
     move_to_local = use_hub = on_created = on_loaded = on_lib_filter = on_component_toggle = _noop
+    on_dept_change = _noop
 '''
 
 
@@ -430,10 +431,61 @@ def _clear_rows(node, prefix, start):
 def _set_label(node, name, text):
     _set_parm(node, name, text)
 
+# ── composition per department (ADR 0032, /stage importer) ─────────────────────
+# "Par departement": FLUX Import composes each department layer of the component itself,
+# with the arc picked per row (reference / payload under prim_path, sublayer, off).
+_MAX_DEPTS = 8
+_ARCS = ("reference", "payload", "sublayer", "off")
+
+def _dept_rows(node, layers):
+    """Fill the rows from the component's department layers; restore this node's arcs."""
+    if node.parm("dept_count") is None:
+        return                       # HDA built before ADR 0032
+    key = _sval(node, "comp_key")
+    memory = _json_parm(node, "dept_memory", {})
+    mem = memory.get(key, {})
+    layers = list(layers or [])[:_MAX_DEPTS]
+    _set_parm(node, "dept_count", len(layers))
+    for i in range(1, _MAX_DEPTS + 1):
+        lay = layers[i - 1] if i <= len(layers) else None
+        _set_parm(node, "dept_id%d" % i, lay["id"] if lay else "")
+        _set_parm(node, "dept_file%d" % i, lay["path"].replace(chr(92), "/") if lay else "")
+        _set_parm(node, "dept_label%d" % i, lay["label"] if lay else "")
+        arc = mem.get(lay["id"], "sublayer" if lay and lay.get("link") else "reference") if lay else "reference"
+        _set_parm(node, "dept_arc%d" % i, _ARCS.index(arc) if arc in _ARCS else 0)
+    on_dept_change(node)
+
+def _arc_of(node, i):
+    v = _sval(node, "dept_arc%d" % i)
+    if v.isdigit():                  # menu set by index
+        v = _ARCS[int(v)] if int(v) < len(_ARCS) else "reference"
+    return v if v in _ARCS else "reference"
+
+def on_dept_change(node):
+    """An arc (or the mode) changed: route each department file to its LOP entry."""
+    if node.parm("dept_count") is None:
+        return
+    key = _sval(node, "comp_key")
+    memory = _json_parm(node, "dept_memory", {})
+    arcs = {}
+    for i in range(1, _MAX_DEPTS + 1):
+        did = _sval(node, "dept_id%d" % i)
+        path = _sval(node, "dept_file%d" % i)
+        arc = _arc_of(node, i) if did else "off"
+        if did:
+            arcs[did] = arc
+        _set_parm(node, "dept_ref%d" % i, path if arc in ("reference", "payload") else "")
+        _set_parm(node, "dept_rtype%d" % i, "payload" if arc == "payload" else "file")
+        _set_parm(node, "dept_sub%d" % i, path if arc == "sublayer" else "")
+    if key:
+        memory[key] = arcs
+        _set_parm(node, "dept_memory", json.dumps(memory, sort_keys=True))
+
 def _clear_component(node):
     for multi, prefix, _kinds in _COMP_FOLDERS:
         _set_parm(node, multi, 0)
         _clear_rows(node, prefix, 1)
+    _dept_rows(node, [])
     _set_parm(node, "comp_key", "")
     _set_parm(node, "comp_state", "{}")
     _set_parm(node, "comp_warnings", "")
@@ -478,6 +530,7 @@ def _fill_component(node):
     _set_parm(node, "comp_key", key)
     memory[key] = _toggles(node)
     _set_parm(node, "comp_memory", json.dumps(memory, sort_keys=True))
+    _dept_rows(node, r.get("layers"))
     on_component_toggle(node)
 
 def on_component_toggle(node):
@@ -528,6 +581,11 @@ def on_component_toggle(node):
     for fid, vset in sets.items():
         if vset and fid in choices and vset not in state:
             state[vset] = "off"
+    # The component has rig files and none is checked: its skinned GEO still carries a
+    # skeleton (skel/Skeleton, for the skin weights); apply_component deactivates it.
+    rigs = [f["id"] for f in r["files"] if f.get("kind") == "rig"]
+    if rigs and not any(active.get(fid) and fid not in grey for fid in rigs):
+        state["__no_rig__"] = True
     _set_parm(node, "comp_state", json.dumps(state, sort_keys=True))
     warns = r.get("warnings") or []
     _set_parm(node, "comp_warnings", "\\n".join(warns))

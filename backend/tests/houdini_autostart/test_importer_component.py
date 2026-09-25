@@ -205,10 +205,86 @@ class ImporterComponent(unittest.TestCase):
         self.assertTrue(stage.GetPrimAtPath("/assets/UTAH/geo/render/body").IsValid())
         self.assertEqual(warnings, [])
 
+    def _apply(self, stage) -> None:
+        node = self.node
+
+        class _Lop:
+            def parent(self):
+                return node
+
+            def editableStage(self):
+                return stage
+
+            def addWarning(self, msg):
+                pass
+
+        hou = mock.MagicMock()
+        hou.pwd.return_value = _Lop()
+        exec(flux_importer_lop_hda.APPLY_COMPONENT, {"hou": hou})
+
+    def test_rig_unchecked_deactivates_the_skeleton_of_the_skinned_geo(self) -> None:
+        # Live 2026-09-25 (OGRE): rig unchecked, the grey bones and "Skeleton" stayed:
+        # a skinned GEO publish carries its own skel/Skeleton (for the skin weights).
+        from pxr import UsdSkel
+        self.ns["_fill_component"](self.node)
+        self.assertNotIn("__no_rig__", self._state())
+        self._toggle("other", "rig", False)
+        self.assertTrue(self._state()["__no_rig__"])
+        stage = Usd.Stage.CreateInMemory()
+        stage.DefinePrim("/assets/UTAH").GetReferences().AddReference(
+            str(self.project / "assets/chara/UTAH/usd/UTAH_LAST.usda"))
+        UsdSkel.Root.Define(stage, "/assets/UTAH/skel")
+        UsdSkel.Skeleton.Define(stage, "/assets/UTAH/skel/Skeleton")
+        self._apply(stage)
+        self.assertFalse(stage.GetPrimAtPath("/assets/UTAH/skel/Skeleton").IsActive())
+        self.assertTrue(stage.GetPrimAtPath("/assets/UTAH/geo/render/body").IsValid())
+        self._toggle("other", "rig", True)
+        self.assertNotIn("__no_rig__", self._state())
+
+    def test_each_department_gets_its_own_arc(self) -> None:
+        # ADR 0032: "Par departement", reference / payload / sublayer / off per layer.
+        self.ns["_fill_component"](self.node)
+        n = self.node.evalParm("dept_count")
+        labels = [self.node.evalParm(f"dept_label{i}") for i in range(1, n + 1)]
+        self.assertEqual(sorted(labels), ["ANIM", "LOOK", "MODEL", "RIG"])
+        row = labels.index("RIG") + 1
+        path = self.node.evalParm(f"dept_file{row}")
+        self.assertTrue(Path(path).is_file())
+        # default: reference under prim_path
+        self.assertEqual((self.node.evalParm(f"dept_ref{row}"), self.node.evalParm(f"dept_rtype{row}"),
+                          self.node.evalParm(f"dept_sub{row}")), (path, "file", ""))
+        for arc, expected in (("payload", (path, "payload", "")), ("sublayer", ("", "file", path)),
+                              ("off", ("", "file", ""))):
+            self.node.parm(f"dept_arc{row}").set(arc)
+            self.ns["on_dept_change"](self.node)
+            self.assertEqual((self.node.evalParm(f"dept_ref{row}"), self.node.evalParm(f"dept_rtype{row}"),
+                              self.node.evalParm(f"dept_sub{row}")), expected, arc)
+        # A sublayered department is defined under its own root and gets the selections.
+        model = labels.index("MODEL") + 1
+        stage = Usd.Stage.CreateInMemory()
+        stage.GetRootLayer().subLayerPaths.append(self.node.evalParm(f"dept_file{model}"))
+        self.assertFalse(stage.GetPrimAtPath("/UTAH").IsDefined())
+        self.ns["on_component_toggle"](self.node)
+        self._apply(stage)
+        self.assertTrue(stage.GetPrimAtPath("/UTAH").IsDefined())
+        self.assertTrue(any(p.IsA(UsdGeom.Mesh) for p in Usd.PrimRange(stage.GetPrimAtPath("/UTAH"))))
+        # The choice is remembered per component, like the toggles.
+        self.node.parm("lib_item").set("component:BOX")
+        self.ns["_fill_component"](self.node)
+        self.assertEqual(self.node.evalParm("dept_count"), 1)
+        self.node.parm("lib_item").set("component:UTAH")
+        self.ns["_fill_component"](self.node)
+        self.assertEqual(self.node.evalParm(f"dept_arc{row}"), 3)       # "off"
+        # A shot or a decor: no rows.
+        self.node.parm("lib_item").set("shot:SEQ001/SHOT010")
+        self.ns["_fill_component"](self.node)
+        self.assertEqual(self.node.evalParm("dept_count"), 0)
+
     def test_the_lop_build_script_has_the_component_folders(self) -> None:
         code = flux_importer_lop_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)
         compile(code, "build", "exec")
-        for needle in ('"comp_folder"', '"apply_component"', "on_component_toggle",
+        for needle in ('"comp_folder"', '"apply_component"', "on_component_toggle", '"dept_folder"',
+                       '"dept_references"', '"dept_sublayers"', '"compose_mode"', "on_dept_change",
                        "_full.setInput(0, _apply)", "folderType.Collapsible", "MAX_ROWS"):
             self.assertIn(needle, code)
         # Fixed rows filled by FLUX: no + / - (no multiparm), empty sections hidden.

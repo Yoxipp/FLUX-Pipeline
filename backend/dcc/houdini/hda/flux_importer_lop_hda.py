@@ -37,6 +37,10 @@ NODE_NAME = "flux_importer"
 # Rows per section: fixed (no + / - : FLUX fills them from the component, an empty row
 # is hidden). A component never holds this many files of one kind.
 MAX_ROWS = 32
+# Department layers of a component FLUX Import can compose itself (ADR 0032).
+MAX_DEPTS = 8
+DEPT_ARCS = ("reference", "payload", "sublayer", "off")
+DEPT_ARC_LABELS = ("Reference", "Payload", "Sublayer", "Off")
 
 # (count parm, parm prefix, label) of the component content (ADR 0023).
 COMPONENT_FOLDERS = (("geo_files", "geo", "GEO"), ("groom_files", "groom", "GROOM"),
@@ -53,12 +57,29 @@ try:
     state = json.loads(hda.evalParm("comp_state") or "{}")
 except Exception:
     state = {}
-prim = stage.GetPrimAtPath(hda.evalParm("prim_path")) if state else None
-if prim is not None and prim.IsValid():
-    sets = prim.GetVariantSets()
+no_rig = bool(state.pop("__no_rig__", False))
+prim = stage.GetPrimAtPath(hda.evalParm("prim_path")) if state or no_rig else None
+# A department composed as a sublayer (ADR 0032) keeps its own root /<NAME>.
+roots = [p for p in (prim, stage.GetPrimAtPath("/" + hda.evalParm("prim_path").rstrip("/").rsplit("/", 1)[-1]))
+         if p is not None and p.IsValid()]
+for root in roots:
+    if not root.IsDefined():
+        # Department layers only hold "over /<NAME>": sublayered alone, nothing under
+        # the root would be defined (the component's payload is what defines it).
+        stage.DefinePrim(root.GetPath())
+    sets = root.GetVariantSets()
     for name, selection in sorted(state.items()):
         if sets.HasVariantSet(name):
             sets.GetVariantSet(name).SetVariantSelection(selection)
+# Every rig file unchecked: the skeleton a skinned GEO publish carries (skel/Skeleton,
+# needed by its skin weights) is deactivated too, so no bone is left in the viewport
+# or the scene graph (2026-09-25, OGRE).
+if no_rig:
+    from pxr import Usd, UsdSkel
+    for root in roots:
+        for p in list(Usd.PrimRange(root)):
+            if p.IsA(UsdSkel.Skeleton) or p.IsA(UsdSkel.Animation):
+                p.SetActive(False)
 # Grooms with their "Proxy" box off: complete curves in the viewport, proxy hidden
 # (ADR 0026 thinned "<curves>_proxy" siblings, purpose=proxy).
 try:
@@ -134,6 +155,37 @@ for _multi, _prefix, _label in COMPONENT_FOLDERS:
         _m.addParmTemplate(hou.StringParmTemplate(_prefix + "_id" + _n, "id", 1, default_value=("",), is_hidden=True))
         _m.addParmTemplate(hou.ToggleParmTemplate(_prefix + "_ok" + _n, "ok", default_value=True, is_hidden=True))
     _comp.addParmTemplate(_m)
+# ADR 0032: how each department layer of the component comes in (component = its own arcs).
+_arcs = hou.FolderParmTemplate("dept_folder", "Composition", folder_type=hou.folderType.Collapsible)
+_arcs.setConditional(hou.parmCondType.HideWhen, "{ dept_count == 0 }")
+_arcs.addParmTemplate(hou.IntParmTemplate("dept_count", "dept count", 1, default_value=(0,), is_hidden=True))
+_arcs.addParmTemplate(hou.StringParmTemplate("dept_memory", "dept memory", 1, default_value=("{}",), is_hidden=True))
+_dmode = hou.MenuParmTemplate("dept_mode", "Mode", ("component", "departments"),
+                              menu_labels=("Component FLUX (auto)", "Par departement"), default_value=0,
+                              script_callback="hou.phm().on_dept_change(kwargs['node'])",
+                              script_callback_language=_PY,
+                              help="Component: the component as FLUX composed it. Par departement: each "
+                                   "department layer comes in with the arc chosen below.")
+_arcs.addParmTemplate(_dmode)
+for _i in range(1, MAX_DEPTS + 1):
+    _n = str(_i)
+    _hide = '{ dept_id' + _n + ' == "" } { dept_mode == component }'
+    _arc = hou.MenuParmTemplate("dept_arc" + _n, "Arc", DEPT_ARCS, menu_labels=DEPT_ARC_LABELS,
+                                default_value=0,
+                                script_callback="hou.phm().on_dept_change(kwargs['node'])",
+                                script_callback_language=_PY,
+                                help="Reference: under the asset prim. Payload: same, unloadable. "
+                                     "Sublayer: the layer joins the stage (its prims keep /<NAME>). "
+                                     "Off: the department is left out.")
+    _arc.setConditional(hou.parmCondType.HideWhen, _hide)
+    _arc.setJoinWithNext(True)
+    _arcs.addParmTemplate(_arc)
+    _dl = hou.StringParmTemplate("dept_label" + _n, "Departement", 1, default_value=("",))
+    _dl.setConditional(hou.parmCondType.HideWhen, _hide)
+    _arcs.addParmTemplate(_dl)
+    for _h in ("dept_id", "dept_file", "dept_ref", "dept_rtype", "dept_sub"):
+        _arcs.addParmTemplate(hou.StringParmTemplate(_h + _n, _h, 1, default_value=("",), is_hidden=True))
+_comp.addParmTemplate(_arcs)
 """
 LABEL = "FLUX Import"
 # SOP-only parms of the /obj importer (KineFX character switch, copy to $HIP).
@@ -189,6 +241,9 @@ _loadgeo = hou.ToggleParmTemplate("load_geo", "Charger la geo", default_value=Tr
 # Set by resolve: 1 = a shot stage (sublayered, ADR 0020), 0 = an asset / decor (referenced).
 _as_sub = hou.ToggleParmTemplate("as_sublayer", "Shot (sublayer)", default_value=False, is_hidden=True)
 COMPONENT_FOLDERS = {COMPONENT_FOLDERS!r}
+MAX_DEPTS = {MAX_DEPTS!r}
+DEPT_ARCS = {DEPT_ARCS!r}
+DEPT_ARC_LABELS = {DEPT_ARC_LABELS!r}
 {_COMPONENT_PARMS}
 _anchor = _ptg.find("sep_resolved")
 if _anchor is not None:
@@ -233,9 +288,27 @@ _load = _sub.createNode("switch", "load_mode")
 _load.setInput(0, _ref)
 _load.setInput(1, _subl)
 _load.parm("input").setExpression('ch("../as_sublayer")', hou.exprLanguage.Hscript)
+# ADR 0032: "Par departement": each department layer with its own arc (sublayers first,
+# then references / payloads under prim_path). An empty entry composes nothing.
+_dsub = _sub.createNode("sublayer", "dept_sublayers")
+_dsub.setInput(0, _sub.indirectInputs()[0])
+_dsub.parm("num_files").set(MAX_DEPTS)
+_dref = _sub.createNode("reference", "dept_references")
+_dref.setInput(0, _dsub)
+_dref.parm("num_files").set(MAX_DEPTS)
+for _i in range(1, MAX_DEPTS + 1):
+    _dsub.parm("filepath%d" % _i).setExpression('chs("../dept_sub%d")' % _i, hou.exprLanguage.Hscript)
+    _dref.parm("filepath%d" % _i).setExpression('chs("../dept_ref%d")' % _i, hou.exprLanguage.Hscript)
+    _dref.parm("primpath%d" % _i).setExpression('chs("../prim_path")', hou.exprLanguage.Hscript)
+    _dref.parm("reftype%d" % _i).setExpression('chs("../dept_rtype%d")' % _i, hou.exprLanguage.Hscript)
+_mode = _sub.createNode("switch", "compose_mode")
+_mode.setInput(0, _load)
+_mode.setInput(1, _dref)
+_mode.parm("input").setExpression('if(ch("../dept_count") > 0, ch("../dept_mode"), 0)',
+                                  hou.exprLanguage.Hscript)
 # ADR 0023: the importer's own choices (variant selections), never saved in the component.
 _apply = _sub.createNode("pythonscript", "apply_component")
-_apply.setInput(0, _load)
+_apply.setInput(0, _mode)
 _apply.parm("python").set({APPLY_COMPONENT!r})
 # "Geo complete": render meshes shown in the viewport (purpose default), proxy hidden.
 # Two patterns: the asset itself (prim_path/geo) and every asset below it (a shot: /assets/**).

@@ -266,6 +266,26 @@ class ManualComponent(unittest.TestCase):
         view = ca.component_files(self.project, _NAME)
         self.assertEqual({f["id"]: f["variant_set"] for f in view["files"]}, {"ref": "ref", "pay": "pay", "sub": ""})
 
+    def test_importer_gets_the_department_layers_to_compose_itself(self) -> None:
+        # ADR 0032: FLUX Import may compose each department layer with its own arc.
+        self._publish("GEO", "model", ["Root"])
+        ca.create_component(self.project, _NAME, ["GEO"])
+        recipe = self._add_publishes(ca.current_recipe(self.project, _NAME))
+        rel = self._manual(f"{_NAME_REL}/model/extra/sub.usda", f"/{_NAME}/SUB")
+        recipe["files"].append({"id": "sub", "block": "model", "department": "GEO", "source": "manual",
+                                "path": rel, "arc": "sublayer"})
+        ca.save_component(self.project, _NAME, recipe)
+        layers = ca.component_files(self.project, _NAME)["layers"]
+        self.assertEqual([(l["id"], l["link"]) for l in layers], [("model", False), ("sub", True)])
+        self.assertTrue(all(Path(l["path"]).is_file() for l in layers))
+        # Referenced alone under the importer's prim, the department brings its geometry.
+        stage = Usd.Stage.CreateInMemory()
+        prim = stage.DefinePrim("/assets/UTAH")
+        prim.GetReferences().AddReference(layers[0]["path"])
+        prim.GetVariantSets().GetVariantSet("geo_null").SetVariantSelection("on")
+        meshes = [p for p in Usd.PrimRange(prim) if p.IsA(UsdGeom.Mesh)]
+        self.assertTrue(meshes)
+
     def test_variants_are_exclusive_in_their_block(self) -> None:
         ca.create_component(self.project, _NAME)
         recipe = ca.current_recipe(self.project, _NAME)

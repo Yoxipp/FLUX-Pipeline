@@ -702,6 +702,35 @@ def _set_of(f: dict, sets: dict[str, list[str]]) -> str:
     return f["id"] if cr.toggled(f) and f["id"] in sets else ""
 
 
+def department_layers(entry: Path) -> list[dict]:
+    """Layers of a component version, strong -> weak, as its payload sublayers them:
+    one per department (<NAME>_<dept>.usda) plus the links composed as sublayers.
+
+    FLUX Import can compose them itself, each with its own arc (reference, payload or
+    sublayer) instead of the component's (ADR 0032)."""
+    from pxr import Sdf
+
+    name = entry.stem
+    payload = entry.parent / f"{name}_payload{COMPONENT_EXT}"
+    layer = Sdf.Layer.FindOrOpen(str(payload)) if payload.is_file() else None
+    if layer is None:
+        return []
+    out: list[dict] = []
+    taken: set[str] = set()
+    for sub in layer.subLayerPaths:
+        path = Path(sub) if os.path.isabs(sub) else (entry.parent / sub)
+        path = Path(os.path.normpath(str(path)))
+        stem = path.stem
+        own = stem.startswith(name + "_") and path.parent == entry.parent
+        dept = stem[len(name) + 1:] if own else stem
+        lid = cr.make_id(dept, taken)
+        taken.add(lid)
+        out.append({"id": lid, "department": dept,
+                    "label": dept.upper() if own else f"{stem} (sublayer du component)",
+                    "path": str(path), "link": not own})
+    return out
+
+
 def component_files(project_path: str | Path, name: str, version: str = "LAST",
                     active: dict[str, bool] | None = None,
                     previous: dict[str, bool] | None = None) -> dict:
@@ -739,4 +768,5 @@ def component_files(project_path: str | Path, name: str, version: str = "LAST",
                   for f in recipe["files"]],
         "active": active,
         "warnings": cr.warnings(recipe, active),
+        "layers": department_layers(entry),
     }
