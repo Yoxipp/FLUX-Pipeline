@@ -164,8 +164,23 @@ def plan_agents(points: list[dict], components: list[str], clips: list[str], *, 
     return agents
 
 
+def _frozen(path: Path) -> Path:
+    """The vNNN a LAST pointer layer targets (ADR 0017), else *path* itself."""
+    from pxr import Sdf
+
+    if not Path(path).stem.endswith("_LAST"):
+        return Path(path)
+    layer = Sdf.Layer.FindOrOpen(str(path))
+    subs = list(layer.subLayerPaths) if layer is not None else []
+    if len(subs) == 1:
+        target = (Path(path).parent / subs[0]).resolve()
+        if target.is_file():
+            return target
+    return Path(path)
+
+
 def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, agents: list[dict],
-                       clip_files: dict[str, Path]) -> dict:
+                       clip_files: dict[str, Path], *, freeze: bool = False) -> dict:
     """Write the crowd layer *dest*: /crowd/<GROUP>/agent_NNNN (relative references only).
 
     Returns {"path", "agents", "warnings"}."""
@@ -194,6 +209,12 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                 warnings.append(f"{comp} : pas d'USD d'asset, agents ignores")
                 targets[comp] = ""
             else:
+                # A publish is frozen (ADR 0017): the farm renders the versions of today,
+                # not whatever LAST points to later. The preview follows LAST.
+                if freeze:
+                    from .component_auto import _latest_entry
+
+                    last = _latest_entry(parent, comp) or last
                 targets[comp] = _rel(last, dest.parent)
         if not targets[comp]:
             continue
@@ -213,6 +234,8 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
             if src is None:
                 warnings.append(f"clip {clip} introuvable")
             else:
+                if freeze:
+                    src = _frozen(src)
                 anim_path = f"{path}/crowd_anim"
                 anim = stage.DefinePrim(anim_path)
                 clip_root = _clip_root(src)
@@ -309,7 +332,7 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     ver = reserve_version(parent, base, ".usda")
     folder = sequence_folder(parent, base, ver)
     try:
-        res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base)
+        res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base, freeze=True)
     except Exception:
         discard_rendered_version(parent, base, ".usda", ver, is_sequence=True)
         raise

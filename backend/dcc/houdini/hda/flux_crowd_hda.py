@@ -81,7 +81,8 @@ def _get(path, **params):
         with urllib.request.urlopen(url, timeout=10) as r:
             return json.loads(r.read())
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        # "_offline": FLUX not reachable: never cached.
+        return {"ok": False, "error": str(exc), "_offline": True}
 
 def _post(path, payload):
     req = urllib.request.Request(f"http://127.0.0.1:{_flux_port()}" + path,
@@ -98,16 +99,26 @@ def _post(path, payload):
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-_TTL = 30.0
+# Assets / clips change rarely and their scan is heavy: a long TTL, prefetched in a
+# thread when the node is created or the scene opens, so menus open instantly.
+_TTL = 120.0
 _cache = {}
 
 def _cached(key, fetch):
+    """fetch() -> (data, ok). Only good answers are cached: an error is retried."""
     now = time.monotonic()
     if key in _cache and now < _cache[key][0]:
         return _cache[key][1]
-    data = fetch()
-    _cache[key] = (now + _TTL, data)
+    data, ok = fetch()
+    if ok:
+        _cache[key] = (now + _TTL, data)
     return data
+
+def _fetch(path, field, empty, **params):
+    r = _get(path, **params)
+    if field is None:
+        return (r if not r.get("_offline") else empty), not r.get("_offline")
+    return r.get(field, empty), not r.get("_offline")
 
 def _pval(node, name):
     p = node.parm(name)
@@ -132,7 +143,7 @@ def _shots(node):
     if not project:
         return []
     return _cached("shots:" + project,
-                   lambda: _get("/dcc/houdini/shot_switch/shots", project=project).get("shots", []))
+                   lambda: _fetch("/dcc/houdini/shot_switch/shots", "shots", [], project=project))
 
 def _compat(node, fresh=False):
     project = _pval(node, "project")
@@ -141,14 +152,14 @@ def _compat(node, fresh=False):
     key = "compat:" + project
     if fresh:
         _cache.pop(key, None)
-    return _cached(key, lambda: _get("/usd/crowd/compat", project=project) or {"assets": {}, "clips": []})
+    return _cached(key, lambda: _fetch("/usd/crowd/compat", None, {"assets": {}, "clips": []}, project=project))
 
 def _picked(node, name):
     return [v for v in _pval(node, name).split() if v]
 
 def menu_project(node):
-    projects = _cached("projects", lambda: _get("/dcc/houdini/importer/tokens").get("projects", []))
-    return _flat(projects) if projects else ["", "aucun projet"]
+    projects = _cached("projects", lambda: _fetch("/dcc/houdini/importer/tokens", "projects", []))
+    return _flat(projects) if projects else ["", "FLUX injoignable ou aucun projet"]
 
 def menu_seq(node):
     return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot"]
@@ -248,13 +259,17 @@ def _build(node, publish):
     r = _post("/dcc/houdini/crowd/build", payload)
     if not r.get("ok"):
         _status(node, "Echec : %s" % r.get("error", "?")); return
-    _set(node, "resolved_path", str(r.get("path", "")).replace(chr(92), "/"))
-    _reload(node)
     msg = "%d agent(s)" % r.get("agents", 0)
     if publish:
-        msg = "Publie %s %s (stage %s) : %s" % (r.get("base", ""), r.get("version", ""),
-                                               r.get("stage") or "inchange", msg)
+        # The shot stage now sublayers the published crowd (LAST): the preview is dropped
+        # so the agents are never there twice (FLUX Shot > Resolve shows the publish).
+        _set(node, "resolved_path", "")
+        _reload(node)
+        msg = "Publie %s %s (stage %s) : %s. Visible via FLUX Shot (Resolve)" % (
+            r.get("base", ""), r.get("version", ""), r.get("stage") or "inchange", msg)
     else:
+        _set(node, "resolved_path", str(r.get("path", "")).replace(chr(92), "/"))
+        _reload(node)
         msg = "Apercu : " + msg
     if r.get("warnings"):
         msg += "  |  " + " ; ".join(r["warnings"][:3])
@@ -275,7 +290,7 @@ def on_created(node):
     threading.Thread(target=lambda: (_shots(node), _compat(node)), daemon=True).start()
 
 def on_loaded(node):
-    pass
+    threading.Thread(target=lambda: (_shots(node), _compat(node)), daemon=True).start()
 '''
 
 

@@ -135,6 +135,11 @@ class Crowd(unittest.TestCase):
         stage = Usd.Stage.Open(str(ss.last_file(self.project, "SEQ001", "SHOT010")))
         self.assertTrue(any("SEQ001_SHOT010_CROWD" in layer.identifier for layer in stage.GetLayerStack()))
         self.assertTrue(stage.GetPrimAtPath("/crowd/crowd/agent_0002/geo/render/body"))
+        # Frozen (ADR 0017): the published crowd references the component and clip versions.
+        layer = Sdf.Layer.FindOrOpen(str(folder / "SEQ001_SHOT010_CROWD_v001" / "SEQ001_SHOT010_CROWD.usda"))
+        refs = [r.assetPath for path in ("/crowd/crowd/agent_0001", "/crowd/crowd/agent_0001/crowd_anim")
+                for r in layer.GetPrimAtPath(path).referenceList.prependedItems]
+        self.assertTrue(refs and not any("_LAST" in r for r in refs), refs)
 
 
 if __name__ == "__main__":
