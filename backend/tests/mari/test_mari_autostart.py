@@ -83,3 +83,33 @@ class PainterPluginsDir(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MariBusy(unittest.TestCase):
+    """2026-09-26: Mari freezes during a big export; FLUX said "ne repond pas" and gave
+    up after 120 s while Mari was still writing."""
+
+    def test_an_export_marks_mari_busy_and_waits_long(self):
+        from dcc.mari import client
+
+        seen = {}
+
+        def fake_send(payload, timeout=120.0):
+            seen["timeout"] = timeout
+            seen["ping"] = client.mari_client.ping()
+            seen["info"] = client.mari_client.info()
+            return {"ok": True, "files": []}
+
+        with mock.patch.object(client, "_send", side_effect=fake_send):
+            client.mari_client.export("/tmp/x", "auto")
+        self.assertGreaterEqual(seen["timeout"], 3600)
+        self.assertTrue(seen["ping"]["ok"] and seen["ping"]["busy"])
+        self.assertFalse(seen["info"]["ok"])
+        self.assertIsNone(client.busy_since())
+
+    def test_same_named_channels_get_their_own_id(self):
+        from types import SimpleNamespace
+
+        from dcc.mari import mari_bridge as b
+        chs = [SimpleNamespace(name=lambda n=n: n) for n in ("AO", "AO", "AO")]
+        self.assertEqual([i for i, _ in b._channel_ids(chs)], ["AO", "AO (2)", "AO (3)"])

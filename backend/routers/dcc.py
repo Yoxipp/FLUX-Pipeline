@@ -391,7 +391,8 @@ async def ping_dcc(dcc_key: str) -> dict:
         except Exception as exc:  # noqa: BLE001 - a probe never breaks the poll
             log.debug("Ping %s failed: %s", dcc_key, exc)
             result = {}
-        answer = {"connected": bool(result.get("ok", False)), "version": result.get("version")}
+        answer = {"connected": bool(result.get("ok", False)), "version": result.get("version"),
+                  "busy": bool(result.get("busy", False))}
         _ping_cache[dcc_key] = (time.monotonic(), answer)
     return answer
 

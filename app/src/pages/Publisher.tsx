@@ -1486,12 +1486,20 @@ export function Publisher() {
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
+  // The app a texture list belongs to: a slow answer (Mari busy exporting) that lands
+  // after switching to Painter must not fill Painter's list (2026-09-26).
+  const texDccRef = useRef(dcc)
   const loadTexItems = useCallback(async () => {
+    texDccRef.current = dcc
     if (dcc !== 'Painter' && dcc !== 'Mari') return
+    const asked = dcc
+    const stale = () => texDccRef.current !== asked
+    setTexItems([]); setTexChecked(new Set()); setTexSource('')
     setTexLoading(true)
     try {
       if (dcc === 'Painter') {
         const r = await api.getSubstanceInfo()
+        if (stale()) return
         setTexItems(r.texture_sets.map(t => ({
           name: t.name, detail: [t.resolution ? `${t.resolution}px` : '', t.udim ? 'UDIM' : ''].filter(Boolean).join(' · '),
         })))
@@ -1501,6 +1509,7 @@ export function Publisher() {
         setPainterChannels(r.channels ?? [])
       } else {
         const r = await api.getMariInfo()
+        if (stale()) return
         setTexItems(r.channels.map(c => ({
           name: c.name,
           detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : ''].filter(Boolean).join(' '),
@@ -1509,10 +1518,11 @@ export function Publisher() {
         setTexChecked(new Set(r.channels.map(c => c.name)))
       }
     } catch (e) {
+      if (stale()) return
       setTexItems([])
       setTexSource(e instanceof Error ? e.message : String(e))
     } finally {
-      setTexLoading(false)
+      if (!stale()) setTexLoading(false)
     }
   }, [dcc])
   useEffect(() => { void loadTexItems() }, [loadTexItems])
