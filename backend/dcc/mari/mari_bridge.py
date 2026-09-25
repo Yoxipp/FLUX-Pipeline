@@ -143,6 +143,18 @@ def _depth(channel) -> int:
         return 8
 
 
+def _describe(geo, channel) -> str:
+    """Tiles / size / layers of a channel, for the log (where a slow export spends time)."""
+    bits = []
+    for label, fn in (("tuiles", lambda: len(geo.patchList())), ("px", lambda: int(channel.width())),
+                      ("calques", lambda: len(channel.layerList()))):
+        try:
+            bits.append(f"{fn()} {label}")
+        except Exception:  # noqa: BLE001 - informative only
+            pass
+    return ", ".join(bits)
+
+
 def _container(channel, file_format: str) -> str:
     """"auto": a lossless file that holds the channel's depth (FLUX converts it after to
     the format / depth / size picked for the map): tif for 8 bits, exr for float."""
@@ -172,6 +184,7 @@ def _do_export(export_path: str, file_format: str, channels: list | None = None)
             fmt = _container(channel, file_format)
             out = os.path.join(export_path, f"{name}.$UDIM.{fmt}")
             t0 = _time.time()
+            _diag(f"Mari channel start {name} ({fmt}, {_depth(channel)} bits, {_describe(geo, channel)})")
             try:
                 # Flattened: every layer of the channel merged, as it shows in Mari.
                 if hasattr(channel, "exportImagesFlattened"):
