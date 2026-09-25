@@ -1584,7 +1584,7 @@ export function Publisher() {
     zbrushConnected, zbrushExportOpts,
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts, texItems, texChecked,
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
-    mapRows, mapChecked, mapOpts, mapSource, painterChannels,
+    mapRows, mapChecked, mapOpts, painterChannels, channelRows,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
