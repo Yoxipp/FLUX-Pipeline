@@ -1,5 +1,5 @@
 """
-FLUX Mari bridge plugin (V6 B7, SKELETON — finish/verify live).
+FLUX Mari bridge plugin (V6 B7, verify live).
 
 Runs inside Mari (the `mari` module). Starts a local TCP server (newline-JSON) so
 the FLUX backend can ping Mari and trigger a channel export.
@@ -153,10 +153,9 @@ def _do_export(export_path: str, file_format: str, channels: list | None = None)
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
     if action == "ping":
-        ver = getattr(mari.app, "version", lambda: "")() if _MARI_AVAILABLE and mari else ""
-        # mari.app.version() is an AppVersion object: show "7.1v2", not its repr.
-        ver = ver.string() if hasattr(ver, "string") else ver
-        return {"status": "ok", "version": f"Mari {ver}".strip()}
+        # No Mari API call here: this runs on a socket thread (the version is read once,
+        # on the main thread, when the bridge starts).
+        return {"status": "ok", "version": f"Mari {_VERSION}".strip()}
     if action == "info":
         return _on_main_thread(_do_info, timeout=20.0)
     if action == "export":
@@ -194,19 +193,43 @@ def _serve(sock: socket.socket) -> None:
         threading.Thread(target=_handle, args=(conn,), daemon=True).start()
 
 
+_VERSION = ""
+
+
+def _read_version() -> str:
+    try:
+        ver = mari.app.version()
+        # mari.app.version() is an AppVersion object: show "7.1v2", not its repr.
+        return ver.string() if hasattr(ver, "string") else str(ver)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def start() -> None:
-    global _server_sock
+    global _server_sock, _VERSION
     if _server_sock is not None:
         return
+    # FLUX installs the bridge in every folder Mari may read: when Mari runs two
+    # copies, the second one must not try to bind the port again.
+    import builtins
+    if getattr(builtins, "_flux_mari_bridge_started", False):
+        _diag(f"Mari bridge already running, copy ignored ({globals().get('__file__', '?')})")
+        return
+    # Mari may exec() the script without __file__.
+    here = globals().get("__file__", "?")
+    _diag(f"Mari bridge loaded by Mari ({here})")
+    if _MARI_AVAILABLE:
+        _VERSION = _read_version()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((HOST, PORT))
         sock.listen(5)
         _server_sock = sock
+        builtins._flux_mari_bridge_started = True
         threading.Thread(target=_serve, args=(sock,), daemon=True).start()
         _start_main_thread_pump()
-        _diag(f"Mari bridge listening on {HOST}:{PORT} (api={_MARI_AVAILABLE}, file={__file__})")
+        _diag(f"Mari bridge listening on {HOST}:{PORT} (api={_MARI_AVAILABLE}, file={here})")
     except OSError as exc:
         _diag(f"Mari bridge bind failed on {HOST}:{PORT}: {exc}")
 

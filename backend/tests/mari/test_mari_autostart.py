@@ -25,20 +25,33 @@ class MariScriptsDir(unittest.TestCase):
             os.environ.pop("FLUX_MARI_SCRIPTS_DIR", None)
             self.assertEqual(autostart._scripts_dir(), Path("E:/studio/mari"))
 
-    def test_install_removes_legacy_copy(self):
+    def test_install_writes_every_folder_mari_may_read(self):
+        # 2026-09-25: bridge installed, Mari open, still orange. One copy in the
+        # OneDrive Documents (or the first MARI_SCRIPT_PATH entry) is not always read.
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            legacy = tmp / "legacy"
-            legacy.mkdir()
-            (legacy / "flux_mari_bridge.py").write_text("old")
-            with mock.patch.dict(os.environ, {"FLUX_MARI_SCRIPTS_DIR": str(tmp / "scripts")}), \
-                    mock.patch.object(autostart, "_LEGACY_DIR", legacy):
+            env = {"MARI_SCRIPT_PATH": str(tmp / "studio")}
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch.object(autostart, "_documents_dir", return_value=tmp / "OneDrive" / "Documents"), \
+                    mock.patch.object(Path, "home", return_value=tmp / "home"):
+                os.environ.pop("FLUX_MARI_SCRIPTS_DIR", None)
                 res = autostart.install()
                 self.assertTrue(res["success"], res)
+                for d in (tmp / "studio", tmp / "OneDrive" / "Documents" / "Mari" / "Scripts",
+                          tmp / "home" / "Documents" / "Mari" / "Scripts", tmp / "home" / "Mari" / "Scripts"):
+                    self.assertTrue((d / "flux_mari_bridge.py").is_file(), d)
                 self.assertTrue(autostart.is_installed())
-                self.assertFalse((legacy / "flux_mari_bridge.py").exists())
+                self.assertIn("Bridge installe dans", autostart.diagnose())
                 self.assertTrue(autostart.uninstall()["success"])
                 self.assertFalse(autostart.is_installed())
+
+    def test_diagnose_quotes_the_bridge_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            logf = Path(tmp) / "flux_mari_bridge.log"
+            logf.write_text("a\nMari bridge bind failed on 127.0.0.1:7070: in use\n")
+            with mock.patch.object(autostart, "_BRIDGE_LOG", logf), \
+                    mock.patch.dict(os.environ, {"FLUX_MARI_SCRIPTS_DIR": str(Path(tmp) / "s")}):
+                self.assertIn("bind failed", autostart.diagnose())
 
 
 class PainterPluginsDir(unittest.TestCase):

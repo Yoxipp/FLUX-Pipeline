@@ -1968,6 +1968,17 @@ async def substance_info() -> dict:
     return res
 
 
+def _mari_error(error: str | None, default: str) -> str:
+    """Mari's error, plus where the bridge is and its log when Mari does not answer."""
+    from dcc.mari import autostart as mari_autostart
+
+    msg = error or default
+    low = msg.lower()
+    if any(k in low for k in ("refused", "timed out", "timeout", "10061", "111", "no answer", "unreachable")):
+        msg = f"Mari ne repond pas sur le port du bridge ({msg}). {mari_autostart.diagnose()}"
+    return msg
+
+
 @router.get("/mari/info")
 async def mari_info() -> dict:
     """Channels of Mari's current geo (Publisher export options)."""
@@ -1976,7 +1987,7 @@ async def mari_info() -> dict:
     loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, mari_client.info)
     if not res.get("ok"):
-        raise HTTPException(status_code=503, detail=res.get("error", "Mari ne repond pas"))
+        raise HTTPException(status_code=503, detail=_mari_error(res.get("error"), "Mari ne repond pas"))
     return res
 
 
@@ -2013,7 +2024,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
         ),
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=503, detail=result.get("error", "Mari publish failed"))
+        raise HTTPException(status_code=503, detail=_mari_error(result.get("error"), "Mari publish failed"))
     return result
 
 
