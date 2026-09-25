@@ -10,6 +10,9 @@ import type { ExportOption } from '../../lib/mayaExportOptions'
 
 type Values = Record<string, unknown>
 
+// Stand-in for an empty choice value inside the Radix Select (see the enum branch).
+const EMPTY = '__flux_empty__'
+
 interface Props {
   schema: ExportOption[]
   values: Values
@@ -41,16 +44,20 @@ function Row({ opt, values, onChange }: { opt: ExportOption; values: Values; onC
   }
 
   if (opt.type === 'enum') {
-    const val = String(values[opt.key] ?? opt.default)
+    // Radix Select throws on an empty-string item value (the whole page went grey when
+    // Painter was picked: its "Taille" choice '' = size of the texture set). '' travels
+    // as EMPTY inside the Select only; the stored value stays ''.
+    const toSel = (v: string) => (v === '' ? EMPTY : v)
+    const val = toSel(String(values[opt.key] ?? opt.default))
     // Full-width row so long labels + the select never overflow the column.
     return (
       <div style={{ ...wrap, gridColumn: '1 / -1' }}>
         <span style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap', flexShrink: 0 }}>{opt.label}</span>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
-          <Select value={val} onValueChange={v => onChange(opt.key, v)}>
+          <Select value={val} onValueChange={v => onChange(opt.key, v === EMPTY ? '' : v)}>
             <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 200, fontSize: 10 }} />
             <SelectContent>
-              {(opt.choices ?? []).map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+              {(opt.choices ?? []).map(c => <SelectItem key={c.value} value={toSel(c.value)}>{c.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
