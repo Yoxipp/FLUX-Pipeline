@@ -85,18 +85,26 @@ def _get(path, **params):
         with urllib.request.urlopen(url, timeout=3) as r:
             return json.loads(r.read())
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        # "_offline": FLUX not reachable (not started, busy): never cached, never read
+        # as "nothing published".
+        return {"ok": False, "error": str(exc), "_offline": True}
 
 _TTL = 30.0
 _cache = {}
 
 def _cached(key, fetch):
+    """fetch() -> (data, ok). Only good answers are cached: an error is retried."""
     now = time.monotonic()
     if key in _cache and now < _cache[key][0]:
         return _cache[key][1]
-    data = fetch()
-    _cache[key] = (now + _TTL, data)
+    data, ok = fetch()
+    if ok:
+        _cache[key] = (now + _TTL, data)
     return data
+
+def _fetch_items(project):
+    r = _get("/dcc/houdini/anim/publishes", project=project)
+    return r.get("items", []), not r.get("_offline")
 
 def _pval(node, name):
     p = node.parm(name)
@@ -123,7 +131,7 @@ def _items(node, fresh=False):
     key = "anims:" + project
     if fresh:
         _cache.pop(key, None)
-    return _cached(key, lambda: _get("/dcc/houdini/anim/publishes", project=project).get("items", []))
+    return _cached(key, lambda: _fetch_items(project))
 
 def _filtered(node, *fields):
     items = _items(node)
@@ -134,8 +142,11 @@ def _filtered(node, *fields):
     return items
 
 def menu_project(node):
-    projects = _cached("projects", lambda: _get("/dcc/houdini/importer/tokens").get("projects", []))
-    return _flat(projects) if projects else ["", "aucun projet"]
+    def _fetch():
+        r = _get("/dcc/houdini/importer/tokens")
+        return r.get("projects", []), not r.get("_offline")
+    projects = _cached("projects", _fetch)
+    return _flat(projects) if projects else ["", "FLUX injoignable ou aucun projet"]
 
 def menu_seq(node):
     return _flat(sorted({i["seq"] for i in _items(node)})) or ["", "aucune anim publiee"]
@@ -184,12 +195,20 @@ def menu_target(node):
     return _flat(prims) if prims else ["", "rien en entree"]
 
 def _auto_target(node, item):
+    """Casting prim of the animated character in the input (DINGO_02 -> .../DINGO_02,
+    DINGO -> .../DINGO_01 or .../DINGO), or "" when the input has none: never a made-up
+    path, the Reference LOP would create a ghost prim."""
     prims = _asset_prims(_input_stage(node))
-    for wanted in (item.get("character"), item.get("name")):
+    char = item.get("character") or ""
+    name = item.get("name") or ""
+    wanted = [char, name]
+    if char and char == name:
+        wanted.insert(1, name + "_01")
+    for w in wanted:
         for p in prims:
-            if wanted and p.rsplit("/", 1)[-1] == wanted:
+            if w and p.rsplit("/", 1)[-1] == w:
                 return p
-    return "/assets/" + (item.get("character") or item.get("name") or "asset")
+    return ""
 
 def _reload(node):
     ref = node.node("reference")
@@ -270,31 +289,55 @@ def apply_frame_range(node):
     hou.setFrame(start)
     _status(node, "Plage appliquee : images %d-%d a %g fps" % (start, end, fps))
 
-def resolve_path(node):
+def resolve_path(node, check=True):
     if not _pval(node, "project"):
         _status(node, "Choisis un projet"); return
-    _items(node, fresh=True)
+    project = _pval(node, "project")
+    _cache.pop("anims:" + project, None)
+    items, ok = _fetch_items(project)
+    if not ok:
+        # Keep the current file: the scene stays as it was until FLUX answers again.
+        _status(node, "FLUX injoignable : fichier actuel garde. Demarre FLUX puis clique Resolve"); return
+    _cache["anims:" + project] = (time.monotonic() + _TTL, items)
     item = _current(node)
     if item is None:
         _set(node, "resolved_path", "")
         _status(node, "Aucune anim publiee pour ces tokens"); return
+    versions = item.get("versions", {}) or {}
     version = _pval(node, "version") or "LAST"
-    path = item["last"] if version == "LAST" else item.get("versions", {}).get(version, "")
+    if version != "LAST" and version not in versions:
+        # Another character / shot was picked: its versions differ, follow its LAST.
+        version = "LAST"
+        _set(node, "version", "LAST")
+    path = item.get("last") if version == "LAST" else versions.get(version, "")
+    if not path and version == "LAST" and versions:
+        path = versions[sorted(versions)[-1]]      # no LAST pointer: newest version
     if not path:
         _set(node, "resolved_path", "")
         _status(node, "Version introuvable : " + version); return
     _set(node, "resolved_path", path.replace(chr(92), "/"))
     auto = node.parm("target_auto")
     if auto is None or auto.eval():
-        _set(node, "target_prim", _auto_target(node, item))
+        target = _auto_target(node, item)
+        if target:
+            _set(node, "target_prim", target)
+        else:
+            _reload(node)
+            _status(node, "ATTENTION : aucun perso %s dans l'entree (branche le FLUX Import ou FLUX Shot)"
+                    % (item.get("character") or item.get("name") or "?"))
+            return
     _reload(node)
-    _status(node, _check(node, _pval(node, "target_prim")))
+    if check:
+        _status(node, _check(node, _pval(node, "target_prim")))
+    else:
+        _status(node, "Charge : " + os.path.basename(_pval(node, "resolved_path")))
 
 def on_created(node):
     threading.Thread(target=lambda: _items(node), daemon=True).start()
 
 def on_loaded(node):
-    resolve_path(node)
+    # No forced cook while a scene opens (slow with several nodes): Resolve checks.
+    resolve_path(node, check=False)
 '''
 
 
