@@ -1,5 +1,5 @@
 ﻿# maya_shelf.py — programmatic Flux shelf creation inside Maya.
-# Called by flux_bridge.py at startup when the MEL shelf file is absent.
+# Not called at startup any more (the old flux_bridge.py was archived to old/, 2026-09-18).
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _MAYA_PORT  = DCC_PORTS["Maya"]
 # Build Connect command without nested quotes
 _CONNECT_CMD = (
     "import maya.cmds as mc; "
-    f"mc.commandPort(name=':{_MAYA_PORT}', sourceType='python')"
+    f"mc.commandPort(name='127.0.0.1:{_MAYA_PORT}', sourceType='python')"
 )
 
 _BUTTONS: list[dict[str, str]] = [

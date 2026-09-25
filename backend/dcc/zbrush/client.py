@@ -14,9 +14,9 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import socket
 from typing import Any
+
+from dcc.json_bridge import send_json_line
 
 ZBRUSH_BRIDGE_PORT = 9876
 ZBRUSH_BRIDGE_HOST = "127.0.0.1"
@@ -73,38 +73,23 @@ class ZBrushClient:
         Used for user-initiated cancels so the UI doesn't hang if ZBrush isn't frozen."""
         return self._send({"action": "cancel"}, timeout=3.0)
 
+    def release(self, timeout: float = 3.0) -> dict:
+        """Force-release ZBrush from the freeze loop by sending 'stop'.
+
+        Used by the user-initiated cancel and by the app-close release hook. Sends
+        'stop' (breaks the freeze immediately) with a short timeout so the caller
+        never hangs when ZBrush is closed or not frozen (the bridge acks stop when
+        idle). Idempotent: safe to call repeatedly."""
+        return self._send({"action": "stop"}, timeout=timeout)
+
     # ------------------------------------------------------------------
     # Low-level
     # ------------------------------------------------------------------
 
     def _send(self, payload: dict, timeout: float = 10.0) -> dict:
         """Send a JSON command and receive the JSON response (newline-framed)."""
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(timeout)
-                s.connect((self.host, self.port))
-                s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-
-                # Read until newline (response may be chunked)
-                buf = b""
-                while b"\n" not in buf:
-                    chunk = s.recv(4096)
-                    if not chunk:
-                        break
-                    buf += chunk
-
-                line = buf.split(b"\n")[0]
-                result = json.loads(line.decode("utf-8"))
-
-                # Normalise: bridge returns {"status": "ok"}, expose as {"ok": True}
-                if "ok" not in result:
-                    result["ok"] = result.get("status") == "ok"
-                return result
-
-        except (ConnectionRefusedError, socket.timeout, OSError) as exc:
-            return {"ok": False, "error": str(exc)}
-        except (json.JSONDecodeError, Exception) as exc:
-            return {"ok": False, "error": f"Protocol error: {exc}"}
+        return send_json_line(self.host, self.port, payload, timeout,
+                              protocol_error_prefix="Protocol error: ")
 
 
 # Module-level singleton

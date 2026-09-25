@@ -11,7 +11,6 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 # ── cross-process append lock ────────────────────────────────────────────────
 # The JSONL append path must be atomic across INSTANCES (different machines on
@@ -359,23 +358,3 @@ def append_jsonl(path: Path | str, entries: list[dict]) -> bool:
             return False
 
 
-def update_json(path: Path | str, key: str, value: Any) -> bool:
-    """Read JSON dict, set *key* to *value*, write back atomically."""
-    data = read_json(path)
-    if not isinstance(data, dict):
-        data = {}
-    data[key] = value
-    return write_json(path, data)
-
-
-def append_to_list(path: Path | str, list_key: str, item: Any) -> bool:
-    """Read JSON dict, append *item* to data[list_key], write back atomically."""
-    data = read_json(path)
-    if not isinstance(data, dict):
-        data = {}
-    lst = data.get(list_key, [])
-    if not isinstance(lst, list):
-        lst = []
-    lst.append(item)
-    data[list_key] = lst
-    return write_json(path, data)

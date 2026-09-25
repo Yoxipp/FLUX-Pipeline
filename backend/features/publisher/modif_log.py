@@ -5,20 +5,20 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from core.constants import JSON_MODIF_LOG
-from core.json_manager import read_json, write_json
 from core.logger import get_logger
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
+
+# Metadata frontier (V5): the per-folder modif log goes through the repository
+# instead of json_manager directly. The document is the JSON array itself,
+# addressed by its folder (the resolver appends the file name).
+_COLLECTION = "modif_log"
 
 
 def _now() -> tuple[str, str]:
     dt = datetime.now()
     return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
-
-
-def _log_path(folder_path: Path) -> Path:
-    return folder_path / JSON_MODIF_LOG
 
 
 def append_log(
@@ -42,20 +42,20 @@ def append_log(
         "modification": modification,
         "user":         user,
     }
-    path = _log_path(folder_path)
-    logs = read_json(path)
+    doc_id = str(folder_path)
+    logs = get_repository().get(_COLLECTION, doc_id)
     if not isinstance(logs, list):
         logs = []
     logs.append(entry)
-    ok = write_json(path, logs)
+    ok = get_repository().set(_COLLECTION, doc_id, logs)
     if not ok:
-        log.error("Failed to write modif_logs.json at %s", path)
+        log.error("Failed to write modif_logs.json for %s", folder_path)
     return ok
 
 
 def read_logs(folder_path: Path) -> list[dict]:
     """Return all log entries sorted by date/time descending."""
-    raw = read_json(_log_path(folder_path))
+    raw = get_repository().get(_COLLECTION, str(folder_path))
     if not isinstance(raw, list):
         return []
     return sorted(raw, key=lambda e: (e.get("date", ""), e.get("time", "")), reverse=True)

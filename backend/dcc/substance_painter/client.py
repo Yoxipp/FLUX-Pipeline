@@ -1,0 +1,36 @@
+# client.py — backend-side client for the FLUX Substance Painter bridge.
+#
+# Painter's `substance_painter` module runs ONLY inside Painter, so FLUX talks to an
+# in-app plugin over a local socket (newline-JSON), like Nuke/ZBrush.
+
+from __future__ import annotations
+
+from typing import Any
+
+from core.constants import DCC_PORTS
+from dcc.json_bridge import send_json_line
+
+SUBSTANCE_BRIDGE_HOST = "127.0.0.1"
+# Canonical Painter port: the base of its assigned range in DCC_PORT_RANGES, so
+# the status scan (scan_instances) and this ping hit the same port.
+SUBSTANCE_BRIDGE_PORT = DCC_PORTS.get("SubstanceP", 7030)
+
+
+def _send(payload: dict, timeout: float = 120.0) -> dict:
+    return send_json_line(SUBSTANCE_BRIDGE_HOST, SUBSTANCE_BRIDGE_PORT, payload, timeout)
+
+
+class SubstancePainterClient:
+    def ping(self) -> dict:
+        return _send({"action": "ping"}, timeout=2.0)
+
+    def info(self) -> dict:
+        """Texture sets of the open Painter project: {ok, project, texture_sets}."""
+        return _send({"action": "info"}, timeout=20.0)
+
+    def export(self, config: dict[str, Any]) -> dict:
+        """Ask Painter to export project textures with *config*; returns {ok, files}."""
+        return _send({"action": "export", "config": config})
+
+
+substance_client = SubstancePainterClient()

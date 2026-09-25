@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMinimize: (): void => ipcRenderer.send('window:minimize'),
   windowMaximize: (): void => ipcRenderer.send('window:maximize'),
   windowClose:    (): void => ipcRenderer.send('window:close'),
+  // Open a page in its own window at the cursor (U4, sidebar drag out).
+  detachPage:     (route: string): void => ipcRenderer.send('window:detach', route),
 
   // Backend health/recovery. The renderer shows a reconnect banner from these.
   getBackendStatus: (): Promise<string> => ipcRenderer.invoke('backend:getStatus'),

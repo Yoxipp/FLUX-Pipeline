@@ -20,11 +20,6 @@ if TYPE_CHECKING:
     from ..registry import Registry
 
 
-def _as_asset_path(path) -> str:
-    """Return a forward-slashed asset path string (USD convention)."""
-    return str(path).replace(os.sep, "/")
-
-
 class StageComposer:
     """Compose a recipe into an in-memory Usd.Stage.
 
@@ -133,7 +128,10 @@ class StageComposer:
 
         Falls back to an absolute posix path when the layer lives on another drive
         (Windows ``relpath`` raises across drives), keeping the root reopenable.
+        A relative input path is kept as-is (already anchored by the caller).
         """
+        if not Path(path).is_absolute():
+            return Path(path).as_posix()
         if out_dir is not None:
             try:
                 return os.path.relpath(str(path), str(out_dir)).replace(os.sep, "/")
@@ -150,7 +148,7 @@ class StageComposer:
             Usd.ModelAPI(prim).SetKind(kind)
 
         if contrib.asset is not None:
-            prim.GetPayloads().AddPayload(_as_asset_path(contrib.asset.path))
+            prim.GetPayloads().AddPayload(self._layer_ref(contrib.asset.path, self._ctx.output_dir))
 
         if contrib.opinions.get("default_prim"):
             stage.SetDefaultPrim(prim)
@@ -181,7 +179,7 @@ class StageComposer:
         prim = stage.DefinePrim(contrib.prim_path, contrib.opinions.get("prim_type", "Xform"))
 
         if contrib.asset is not None:
-            prim.GetReferences().AddReference(_as_asset_path(contrib.asset.path))
+            prim.GetReferences().AddReference(self._layer_ref(contrib.asset.path, self._ctx.output_dir))
 
         self._apply_xform(prim, contrib.opinions.get("xform"))
 

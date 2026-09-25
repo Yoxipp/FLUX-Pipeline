@@ -12,11 +12,10 @@ if TYPE_CHECKING:
     from ..context import AssemblyContext
     from ..recipe.model import LayerSpec
 
-# Documented default variantSet templates; overridden by
-# config['component_variants']. First variant of each set is the default.
+# Default variantSet templates; overridden by config['component_variants']. First
+# variant of each set is the default. No "purpose" set (purpose is a prim attribute:
+# geo/render vs geo/proxy) and no "lod" unless a project declares real LODs (P-USD-8).
 DEFAULT_COMPONENT_VARIANTS: dict[str, tuple[str, ...]] = {
-    "lod": ("hi", "mid", "lo"),
-    "purpose": ("render", "proxy"),
     "look": ("default",),
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -6,11 +6,13 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check,
+  ClipboardList, AlertTriangle, Check, X, HardDrive,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
 import { useActiveInstances } from '../../hooks/useActiveInstances'
+import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { DCC_STATUS_KEYS, SOFTWARE } from '../../lib/dccs'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -21,30 +23,6 @@ interface Props {
   unreadCount: number
 }
 
-// Mapping frontend key → backend DCC_PORTS key (backend uses capitalized/abbreviated names)
-const DCC_STATUS_KEYS: Record<string, string> = {
-  maya:               'Maya',
-  houdini:            'Houdini',
-  nuke:               'Nuke',
-  substance_painter:  'SubstanceP',
-  substance_designer: 'SubstanceD',
-  zbrush:             'ZBrush',
-  marvelous:          'Marvelous',
-  photoshop:          'Photoshop',
-  mari:               'Mari',
-}
-
-const SOFTWARE = [
-  { name: 'Maya',      key: 'maya' },
-  { name: 'Houdini',   key: 'houdini' },
-  { name: 'Nuke',      key: 'nuke' },
-  { name: 'Marvelous', key: 'marvelous' },
-  { name: 'Painter',   key: 'substance_painter' },
-  { name: 'Designer',  key: 'substance_designer' },
-  { name: 'Mari',      key: 'mari' },
-  { name: 'ZBrush',    key: 'zbrush' },
-  { name: 'Photoshop', key: 'photoshop' },
-]
 
 function dccDot(status: DccStatusMap, key: string): string {
   const entry = status[DCC_STATUS_KEYS[key] ?? key]
@@ -52,14 +30,31 @@ function dccDot(status: DccStatusMap, key: string): string {
   return entry.connected ? 'ok' : ''
 }
 
-function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRed = false, onClick }: {
+// Drag a page out of the window (or right-click it) to open it in its own window (U4).
+// The drop point is checked against the window rectangle: a drop inside does nothing.
+function detachIfOutside(e: React.DragEvent, route: string) {
+  const { screenX: x, screenY: y } = e
+  if (x === 0 && y === 0) return      // cancelled drag (Escape)
+  const inside = x >= window.screenX && x <= window.screenX + window.outerWidth
+    && y >= window.screenY && y <= window.screenY + window.outerHeight
+  if (!inside) window.electronAPI?.detachPage?.(route)
+}
+
+function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRed = false, onClick, route }: {
   icon: React.ElementType; label: string; active?: boolean; indent?: boolean; notif?: number; notifRed?: boolean; onClick?: () => void
+  route?: string
 }) {
+  const detachable = !!route && !!window.electronAPI?.detachPage
   return (
     <div
       className={`nav${active ? ' active' : ''}`}
       style={indent ? { paddingLeft: 24 } : {}}
       onClick={onClick}
+      draggable={detachable}
+      onDragStart={detachable ? (e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', route!) }) : undefined}
+      onDragEnd={detachable ? (e => detachIfOutside(e, route!)) : undefined}
+      onContextMenu={detachable ? (e => { e.preventDefault(); window.electronAPI?.detachPage?.(route!) }) : undefined}
+      title={detachable ? 'Glisser hors de la fenetre ou clic droit : ouvrir dans une fenetre' : undefined}
     >
       <span className="glyph"><Icon size={13} strokeWidth={1.75} /></span>
       <span style={{ flex: 1 }}>{label}</span>
@@ -124,6 +119,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const { pathname } = useLocation()
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
   const [findingAll, setFindingAll]           = useState(false)
@@ -136,6 +132,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
   const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
   const [nukeServerOk,    setNukeServerOk]          = useState<boolean | null>(null)
+  const [painterServerOk, setPainterServerOk]       = useState<boolean | null>(null)
+  const [mariServerOk,    setMariServerOk]          = useState<boolean | null>(null)
+  // Photoshop (COM, no plugin): reason drives the row control state.
+  const [psReason, setPsReason]                     = useState<'ok' | 'lib_missing' | 'not_running' | null>(null)
+  const [psBusy,   setPsBusy]                        = useState(false)
 
   // New Scene: the active project's presets drive the per-soft menu + button colour.
   const { project: activeProject } = useProject()
@@ -146,6 +147,28 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   // Multi-instance (cluster C): which instance each DCC targets. The selector row
   // control only appears when a DCC exposes more than one running instance.
   const { activePort, setActivePort } = useActiveInstances(dccStatus)
+
+  // Close an instance: normal close first (the DCC may ask to save); if it stays,
+  // the toast offers "Forcer" (kill, unsaved work lost).
+  const closeInstance = useCallback(async (statusKey: string, name: string, port: number, force = false) => {
+    const label = `${name} :${port}`
+    try {
+      const r = await api.closeDccInstance(statusKey, port, force)
+      if (r.closed) { toast.success(`${label} ferme`); return }
+      if (r.needs_force) {
+        toast.warning(`${label} ne s'est pas ferme`, {
+          description: "Une fenetre d'enregistrement est peut-etre ouverte dans le logiciel, ou la session n'a pas de fenetre. "
+            + 'Forcer ferme sans enregistrer.',
+          duration: 12000,
+          action: { label: 'Forcer', onClick: () => { void closeInstance(statusKey, name, port, true) } },
+        })
+        return
+      }
+      toast.error(r.message, { duration: 8000 })
+    } catch (e) {
+      toast.error(`Fermeture de ${label} : ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
+    }
+  }, [])
   const [instMenu, setInstMenu] = useState<{ statusKey: string; name: string; y: number } | null>(null)
 
   // Load the active project's presets (for button colour + menu), refresh on edits.
@@ -189,6 +212,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('nuke').then(p => setNukeServerOk(p.connected)).catch(() => setNukeServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('substance_painter').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, substance_painter: r.installed }))
+      if (r.installed) {
+        api.pingDcc('substance_painter').then(p => setPainterServerOk(p.connected)).catch(() => setPainterServerOk(false))
+      }
+    }).catch(() => {})
+    api.getDccAutostart('mari').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, mari: r.installed }))
+      if (r.installed) {
+        api.pingDcc('mari').then(p => setMariServerOk(p.connected)).catch(() => setMariServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -217,6 +252,54 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.nuke])
+
+  // Poll Painter bridge every 5 s when the plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.substance_painter) { setPainterServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('substance_painter').then(p => setPainterServerOk(p.connected)).catch(() => setPainterServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.substance_painter])
+
+  // Poll Mari bridge every 5 s when the plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.mari) { setMariServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('mari').then(p => setMariServerOk(p.connected)).catch(() => setMariServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.mari])
+
+  // Poll Photoshop COM state every 5 s (no plugin; state = lib/running/ok).
+  useEffect(() => {
+    const poll = () =>
+      api.photoshopStatus().then(s => setPsReason(s.reason)).catch(() => setPsReason(null))
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Photoshop control click: install the lib when missing, else refresh state.
+  const handlePhotoshop = useCallback(async () => {
+    if (psBusy) return
+    setPsBusy(true)
+    try {
+      if (psReason === 'lib_missing') {
+        const r = await api.photoshopInstall()
+        if (r.ok) toast.success('photoshop-python-api installé')
+        else toast.error(r.message)
+      }
+      const s = await api.photoshopStatus()
+      setPsReason(s.reason)
+      if (s.reason === 'ok') toast.success(`Photoshop connecté${s.version ? ` (${s.version})` : ''}`)
+      else if (s.reason === 'not_running') toast('Ouvre Photoshop pour connecter')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Vérification Photoshop échouée')
+    } finally {
+      setPsBusy(false)
+    }
+  }, [psBusy, psReason])
 
   // Poll ZBrush bridge when plugin is installed.
   // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
@@ -313,10 +396,14 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     if (key === 'zbrush')  setZbrushServerOk(value)
     if (key === 'maya')    setMayaServerOk(value)
     if (key === 'nuke')    setNukeServerOk(value)
+    if (key === 'substance_painter') setPainterServerOk(value)
+    if (key === 'mari')    setMariServerOk(value)
   }
 
+  const PLUG_KEYS = ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari']
+
   const handleToggleAutostart = async (key: string) => {
-    if (key !== 'houdini' && key !== 'zbrush' && key !== 'maya' && key !== 'nuke') return
+    if (!PLUG_KEYS.includes(key)) return
     setAutostartLoading(prev => new Set(prev).add(key))
     try {
       if (autostartInstalled[key]) {
@@ -452,24 +539,29 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       flexShrink: 0,
     }}>
       <div style={{ padding: '10px 0 0' }}>
-        <NavItem icon={Home} label={t('nav.home')} active={pathname === '/'} notif={unreadMentions} notifRed onClick={() => navigate('/')} />
+        <NavItem icon={Home} label={t('nav.home')} active={pathname === '/'} notif={unreadMentions} notifRed route="/" onClick={() => navigate('/')} />
       </div>
 
       <NavGroup title="ASSETS">
-        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent onClick={() => navigate('/projects')} />
-        <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent onClick={() => navigate('/publisher')} />
-        <NavItem icon={Layers}     label={t('nav.usdAssembler')}  active={pathname === '/usd'}       indent onClick={() => navigate('/usd')} />
+        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
+        <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent route="/publisher" onClick={() => navigate('/publisher')} />
+        {/* Action engine test bench (Phase 2): route kept at /action-publish, hidden
+            from the menu on purpose. It is NOT a replacement for the Publisher; it
+            only proves the generic form + destination preview. Re-add when the rich
+            Publisher's logic is wired through the engine. */}
+        <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent route="/usd" onClick={() => navigate('/usd')} />
       </NavGroup>
 
       <NavGroup title="PIPELINE">
-        <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent onClick={() => navigate('/shelf')} />
-        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent onClick={() => navigate('/templates')} />
-        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent onClick={() => navigate('/production')} />
-        <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} onClick={() => navigate('/activity')} />
+        <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent route="/shelf" onClick={() => navigate('/shelf')} />
+        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent route="/templates" onClick={() => navigate('/templates')} />
+        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent route="/production" onClick={() => navigate('/production')} />
+        <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
+        <NavItem icon={HardDrive}      label="Disque"                  active={pathname === '/disk'}       indent route="/disk" onClick={() => navigate('/disk')} />
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
-        {SOFTWARE.map(s => {
+        {SOFTWARE.filter(s => isDccEnabled(s.key)).map(s => {
           const dot       = dccDot(dccStatus, s.key)
           const connected = dot === 'ok'
           const isLoading = launching.has(s.key)
@@ -480,10 +572,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const isZBrush       = s.key === 'zbrush'
           const isMaya         = s.key === 'maya'
           const isNuke         = s.key === 'nuke'
-          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke
+          const isPainter      = s.key === 'substance_painter'
+          const isMari         = s.key === 'mari'
+          const isPhotoshop    = s.key === 'photoshop'
+          // Plug slot has three kinds: a 'toggle' installs/removes an in-app bridge
+          // (Houdini/Maya/Nuke/ZBrush/Painter/Mari); Photoshop has no plugin (external
+          // COM) so it shows a one-line hint instead; Designer/Marvelous are Level-1
+          // file ingest with no bridge → no control at all (no dead button).
+          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke || isPainter || isMari
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : null
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : isPainter ? painterServerOk : isMari ? mariServerOk : null
           // AutoStart state colors: ORANGE = autostart installed but the software isn't
           // launched/connected yet · GREEN = launched + connected. No red state anymore.
           const plugConnected  = hasPlug && autoInstalled && serverOk === true
@@ -550,11 +649,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 </TooltipContent>
               </Tooltip>
 
-              {/* port local — plugin/autostart toggle (Houdini + ZBrush) ou placeholder */}
+              {/* port local — bridge toggle (Houdini/Maya/Nuke/ZBrush/Painter/Mari) */}
+              {hasPlug && (
               <Tooltip>
                 <TooltipTrigger asChild>
               <div
-                onClick={() => { if (hasPlug && !autoLoading) void handleToggleAutostart(s.key) }}
+                onClick={() => { if (!autoLoading) void handleToggleAutostart(s.key) }}
                 className="scale-hover-lg"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
@@ -563,8 +663,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   flexShrink: 0,
                   background: plugConnected ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : plugWaiting ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
                   color: plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--ink-4)',
-                  cursor: hasPlug ? (autoLoading ? 'default' : 'pointer') : 'not-allowed',
-                  opacity: hasPlug ? 1 : 0.4,
+                  cursor: autoLoading ? 'default' : 'pointer',
                   transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
                 }}
               >
@@ -577,8 +676,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               </div>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {!hasPlug ? 'Connexion port local · prochainement' :
-                   autoLoading ? '…' :
+                  {autoLoading ? '…' :
                    isHoudini
                      ? (autoInstalled ? 'Autostart installé · clic pour désinstaller' : "Installer l'autostart dans 123.py")
                    : isMaya
@@ -589,11 +687,58 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                      ? (autoInstalled
                          ? (serverOk === true ? 'Connecté · bridge Nuke 7003' : 'Autostart installé · clic pour désinstaller')
                          : 'Installer le bridge Nuke (init.py)')
+                   : isPainter
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Painter' : 'Bridge installé · clic pour désinstaller')
+                         : 'Installer le bridge Painter (dossier plugins)')
+                   : isMari
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Mari' : 'Bridge installé · clic pour désinstaller')
+                         : 'Installer le bridge Mari (dossier Scripts)')
                      : (autoInstalled
                          ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}
                 </TooltipContent>
               </Tooltip>
+              )}
+
+              {/* Photoshop — no in-app plugin (external COM). Actionable state:
+                  GREEN = connected · ORANGE = lib present but PS not running ·
+                  grey = lib missing (click installs it). */}
+              {isPhotoshop && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    onClick={() => { if (!psBusy) void handlePhotoshop() }}
+                    className="scale-hover-lg"
+                    style={{
+                      width: 16, height: 16, borderRadius: 4,
+                      border: '1px solid ' + (psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--rule-2)'),
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                      background: psReason === 'ok' ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : psReason === 'not_running' ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
+                      color: psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--ink-4)',
+                      cursor: psBusy ? 'default' : 'pointer',
+                      transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
+                    }}
+                  >
+                    {psBusy
+                      ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+                      : psReason === 'lib_missing'
+                        ? <ArrowDownToLine size={8} strokeWidth={2} />
+                        : <Plug size={8} strokeWidth={2} />
+                    }
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {psBusy ? '…' :
+                   psReason === 'ok' ? 'Photoshop connecté (COM)'
+                   : psReason === 'not_running' ? 'Lib OK · ouvre Photoshop pour connecter'
+                   : psReason === 'lib_missing' ? 'Clic : installer photoshop-python-api'
+                   : 'Vérifier Photoshop'}
+                </TooltipContent>
+              </Tooltip>
+              )}
 
               {/* zombie Maya — instance bloquée occupant le port 7001, reap au clic */}
               {mayaStuck && (
@@ -837,7 +982,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         )
       })()}
 
-      {/* Instance picker — choose which running instance of a DCC the pipeline targets. */}
+      {/* Instance picker — choose which running instance of a DCC the pipeline targets,
+          or close one (X: like the window's close button; "Forcer" only if it stays). */}
       {instMenu && (() => {
         const insts = dccStatus[instMenu.statusKey]?.instances ?? []
         const current = activePort(instMenu.statusKey)
@@ -876,6 +1022,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                       {inst.scene ? inst.scene : inst.pid ? `pid ${inst.pid}` : inst.label}
                     </span>
                     {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
+                    <span
+                      role="button"
+                      title={`Fermer ${instMenu.name} :${inst.port}`}
+                      onClick={e => { e.stopPropagation(); setInstMenu(null); void closeInstance(instMenu.statusKey, instMenu.name, inst.port) }}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16,
+                               borderRadius: 4, color: 'var(--ink-4)', flexShrink: 0 }}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--err)'; e.currentTarget.style.background = 'var(--paper)' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = 'var(--ink-4)'; e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <X size={10} strokeWidth={2.25} />
+                    </span>
                   </button>
                 )
               })}

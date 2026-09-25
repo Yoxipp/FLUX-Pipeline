@@ -66,6 +66,7 @@ export interface FileEntry {
   size: number
   modified: string
   is_dir: boolean
+  legacy?: boolean               // old flat Constructor file of usd/assembly (V4): never imported
 }
 
 // Template library preset (RETAKES-3): a reusable model file the team links once
@@ -108,6 +109,74 @@ export interface PublishResult {
   success: boolean
   dest_path: string | null
   message: string
+  tx_paths?: string[] | null      // .tx written by the texture conform (switch on)
+  proxy_path?: string | null      // purpose=proxy USD written at publish (switch on)
+}
+
+// ── Action engine (declarative YAML actions) ───────────────────────────────
+// One field the generic front form renders. Mirrors a backend ParameterBuffer
+// plus the (step, command) address that locates it inside the action.
+export interface ActionField {
+  step:     string
+  command:  string
+  name:     string
+  type:     string          // str | text | path | int | float | bool | select | ...
+  value:    unknown
+  label:    string
+  tooltip:  string | null
+  hide:     boolean
+  ask_user: boolean
+  prompt:   boolean
+  status:   string
+}
+
+export interface ActionFormResponse {
+  action: string
+  fields: ActionField[]
+}
+
+export interface ActionPreviewResponse {
+  resolved:  boolean
+  dest_path: string | null
+  message:   string
+}
+
+// ── Node flow (read-only graph view of a YAML action) ────────────────────────
+
+export interface ActionGraphParam {
+  name:  string
+  type:  string
+  label: string
+  value: unknown
+  wired: boolean          // fed from another command's output (never user-typed)
+  hide:  boolean
+}
+
+export interface ActionGraphNode {
+  id:       string        // "step.command"
+  position: { x: number; y: number }
+  data: {
+    label:   string
+    command: string       // registry key
+    step:    string
+    index:   number
+    status:  string
+    params:  ActionGraphParam[]
+  }
+}
+
+export interface ActionGraphEdge {
+  id:     string
+  source: string
+  target: string
+  kind:   'order' | 'dataflow'
+  label?: string
+}
+
+export interface ActionGraph {
+  name:  string
+  nodes: ActionGraphNode[]
+  edges: ActionGraphEdge[]
 }
 
 export interface HoudiniPublishPayload {
@@ -210,9 +279,18 @@ export interface ProductionSequence {
   order: number
   origin?: 'user' | 'auto'
   tasks: ProductionTask[]
-  assets: { id: string; ref: string }[]
+  assets: CastingLink[]
   task_details?: Record<string, ProductionTaskDetail>
   notes?: string
+}
+
+// Casting link (ADR 0020): count = number of instances in the shot stage (NAME_01, NAME_02...),
+// origin "auto" = added because an animation was published for that character.
+export interface CastingLink {
+  id: string
+  ref: string
+  count?: number
+  origin?: 'user' | 'auto'
 }
 
 export interface ProductionShot {
@@ -225,8 +303,10 @@ export interface ProductionShot {
   inherit_tasks: boolean
   inherit_assets: boolean
   tasks: ProductionTask[]
-  assets: { id: string; ref: string }[]
+  assets: CastingLink[]
   task_details?: Record<string, ProductionTaskDetail>
+  frame_start?: number            // shot frame range (ADR 0020), written on the shot stage
+  frame_end?: number
 }
 
 export interface ProductionState {

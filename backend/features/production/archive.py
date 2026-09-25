@@ -161,6 +161,31 @@ def archive_folder(project_path: Path, rel: str) -> str:
     return archived_rel
 
 
+def drop_tokens_under(project_path: Path, rel: str) -> list[str]:
+    """Remove the NAME / SEQ / SHOT tokens pointing at *rel* or inside it, after an archive.
+
+    Live 2026-09-19: an archived shot kept its SHOT token, so anything walking the tokens
+    (Publisher menus, a later Production save, shot listings) brought it back.
+    Returns the removed ``SECTION/value`` keys."""
+    from features.folder_manager.tokens import save_tokens
+
+    root = _norm(rel)
+    if not root:
+        return []
+    tokens = load_tokens(project_path)
+    removed = []
+    for section in ("NAME", "SEQ", "SHOT"):
+        entries = tokens.get(section) or {}
+        for key in [k for k, v in entries.items()
+                    if _norm(str(v)) == root or _norm(str(v)).startswith(root + "/")]:
+            del entries[key]
+            removed.append(f"{section}/{key}")
+    if removed:
+        save_tokens(project_path, tokens)
+        log.info("Tokens dropped with the archive of %s: %s", root, removed)
+    return removed
+
+
 # ── disk -> logical prune ─────────────────────────────────────────────────────
 
 def prune_absent_auto(project_path: Path, production: dict) -> int:

@@ -20,6 +20,9 @@ from features.publisher.publish_core import resolve_publish_path
 log = get_logger(__name__)
 
 _VERSION_RE = re.compile(r"^v(\d+)$", re.IGNORECASE)
+_LAYERED_DIR_RE = re.compile(r"^(.+)_v(\d+)$", re.IGNORECASE)
+# The asset's generated USD folder (component_auto.COMPONENT_SUBDIR); never a task.
+COMPONENT_SUBDIR = "usd"
 
 # ── backend-side TTL cache ────────────────────────────────────────────────────
 _BCACHE: dict = {}
@@ -128,9 +131,9 @@ def _scan_instances(project_path: Path, class_tok: str, type_tok: str, name_tok:
 # ── iter scan ─────────────────────────────────────────────────────────────────
 
 def _extract_ext(p: Path) -> str:
-    if p.name.endswith(".bgeo.sc"):
-        return ".bgeo.sc"
-    return p.suffix.lower()
+    """Data extension, compound ones included; a LAST .link reports its target's."""
+    from features.publisher.last_pointer import parse_published_name
+    return parse_published_name(p.name)[1].lower()
 
 
 # Preference order when several formats exist for the same asset — pick the one a
@@ -153,10 +156,8 @@ def _import_ext_rank(ext: str) -> int:
 
 def _extract_iter_stem(filename: str) -> tuple[str, str]:
     """Return (base_without_iter, iter_label) for a filename stem."""
-    if filename.endswith(".bgeo.sc"):
-        stem = filename[: -len(".bgeo.sc")]
-    else:
-        stem = filename.rsplit(".", 1)[0]
+    from features.publisher.last_pointer import parse_published_name
+    stem = parse_published_name(filename)[0]
     parts = stem.split("_")
     if not parts:
         return stem, ""
@@ -210,6 +211,11 @@ def _scan_iters(
             has_last = True
         elif _VERSION_RE.match(ver):
             versions.add(int(ver[1:]))
+    # Layered USD version folders (ADR 0017 U3c): <base>_vNNN/<base>.<usd ext>.
+    for d in folder.iterdir():
+        m = _LAYERED_DIR_RE.match(d.name)
+        if m and d.is_dir() and any((d / f"{m.group(1)}{e}").is_file() for e in (".usd", ".usda", ".usdc")):
+            versions.add(int(m.group(2)))
 
     result: list[str] = []
     if has_last:
@@ -259,28 +265,165 @@ def resolve_import_path(
 
     # published_files descends into the nested <base>_<FMT>_{LAST,Vnnn}/ folders
     # as well as the legacy flat files, so import resolves under either layout.
+    from features.publisher.last_pointer import link_target, parse_published_name
     from features.publisher.publish_layout import published_files
     candidates: list[Path] = []
     for p in published_files(folder):
-        ext = _extract_ext(p)
-        if ext == ".json":
+        stem, ext, role = parse_published_name(p.name)
+        if ext.lower() == ".json":
             continue
-        if p.name.endswith(".bgeo.sc"):
-            stem = p.name[: -len(".bgeo.sc")]
-        else:
-            stem = p.stem
         su = stem.upper()
         # Exact stem, or the same stem with a VARIANTE token in the middle
         # (e.g. CHAR_RIG_DOMINICK_ALLBODY_NORMAL_LAST).
         if su == exact_stem or (su.startswith(prefix) and su.endswith(suffix)):
+            if role == "link":
+                # LAST .link (ADR 0017): load the real vNNN file; a sequence target
+                # folder is handled by the sequence fallback below.
+                target = link_target(p)
+                if target is not None and target.is_file():
+                    candidates.append(target)
+                continue
             candidates.append(p)
 
     if candidates:
         best = min(candidates, key=lambda p: _import_ext_rank(_extract_ext(p)))
         return {"ok": True, "path": str(best), "ext": _extract_ext(best), "exists": True}
 
+    # Layered USD version folder (ADR 0017 U3c): <base>_vNNN/<base>.<usd ext>.
+    layered = _resolve_layered_usd(folder, prefix, suffix, exact_stem)
+    if layered is not None:
+        return {"ok": True, "path": str(layered), "ext": layered.suffix.lower(), "exists": True}
+
+    # No flat file matched — try the sequence layout. Nuke/Houdini publish a frame
+    # sequence as a versioned SUBFOLDER <base>_<ITER>/ holding <base>_<ITER>.<frame>.<ext>
+    # files (there is no _LAST sequence, so iter=LAST maps to the newest version).
+    seq = _resolve_sequence(folder, prefix, suffix, exact_stem, iter_u)
+    if seq is not None:
+        return seq
+
     return {"ok": False, "path": None, "ext": "", "exists": False,
-            "error": f"File not found: {exact_stem}.* (nor a variante)"}
+            "error": f"File not found: {exact_stem}.* (nor a variante, nor a sequence)"}
+
+
+_FRAME_RE = re.compile(r"^\d+$")
+
+
+def _resolve_layered_usd(folder: Path, prefix: str, suffix: str, exact_stem: str) -> Path | None:
+    """Root layer of a layered USD version folder ``<base>_vNNN/<base>.<usd ext>``."""
+    try:
+        subdirs = sorted(d for d in folder.iterdir() if d.is_dir())
+    except OSError:
+        return None
+    for d in subdirs:
+        du = d.name.upper()
+        if not (du == exact_stem or (du.startswith(prefix) and du.endswith(suffix))):
+            continue
+        base = d.name[: -len(suffix)]
+        for ext in (".usd", ".usda", ".usdc"):
+            root = d / f"{base}{ext}"
+            if root.is_file():
+                return root
+    return None
+
+
+def _resolve_sequence(
+    folder: Path,
+    prefix: str,
+    suffix: str,
+    exact_stem: str,
+    iter_u: str,
+) -> dict | None:
+    """Resolve a frame-sequence version folder for the given tokens.
+
+    Sequences live in a versioned subfolder ``<base>_<ITER>/`` next to the flat
+    files, holding ``<base>_<ITER>.<frame>.<ext>`` frames. There is never a _LAST
+    sequence folder, so ``iter=LAST`` maps to the highest ``vNNN`` version.
+
+    Returns a resolve dict with ``is_sequence=True`` plus ``first``/``last`` and a
+    ``frame_pattern`` (path with a printf ``%0Nd`` frame token). ``path`` stays a
+    real first-frame file so callers that only read ``path`` still get a valid file.
+    Returns None when no matching sequence folder exists.
+    """
+    try:
+        subdirs = [d for d in folder.iterdir() if d.is_dir()]
+    except OSError:
+        return None
+
+    # Keep the version folders whose name matches the token stem (exact or variante),
+    # mapping each to its trailing ITER label (LAST / vNNN).
+    versioned: list[tuple[str, Path]] = []
+    for d in subdirs:
+        du = d.name.upper()
+        if du == exact_stem or (du.startswith(prefix) and du.endswith(suffix)):
+            versioned.append((iter_u, d))
+        elif du.startswith(prefix):
+            iter_label = du[len(prefix):].split("_")[-1]
+            if iter_label == ACTIVE_VERSION_LABEL or _VERSION_RE.match(iter_label):
+                versioned.append((iter_label, d))
+    if not versioned:
+        return None
+
+    if iter_u == ACTIVE_VERSION_LABEL:
+        # LAST → the newest version (a real _LAST folder wins if one exists).
+        last_dirs = [d for lbl, d in versioned if lbl == ACTIVE_VERSION_LABEL]
+        if last_dirs:
+            chosen = last_dirs[0]
+        else:
+            numbered = [(int(lbl[1:]), d) for lbl, d in versioned if _VERSION_RE.match(lbl)]
+            if not numbered:
+                return None
+            chosen = max(numbered, key=lambda t: t[0])[1]
+    else:
+        matches = [d for lbl, d in versioned if lbl == iter_u]
+        if not matches:
+            return None
+        chosen = matches[0]
+
+    return _sequence_from_folder(chosen)
+
+
+def _sequence_from_folder(seq_dir: Path) -> dict | None:
+    """Build the sequence resolve dict from a version folder of frame files."""
+    seq_stem = seq_dir.name
+    prefix = seq_stem + "."
+    frames: list[int] = []
+    ext = ""
+    for p in seq_dir.iterdir():
+        if not p.is_file() or not p.name.startswith(prefix):
+            continue
+        remainder = p.name[len(prefix):]           # "<frame>.<ext...>"
+        frame_str, dot, ext_rest = remainder.partition(".")
+        if not dot or not _FRAME_RE.match(frame_str):
+            continue
+        frames.append(int(frame_str))
+        ext = "." + ext_rest
+    if not frames:
+        return None
+
+    frames.sort()
+    # Padding comes from the on-disk frame token width (e.g. 0001 → 4) so the pattern
+    # matches exactly what was written.
+    pad_width = 4
+    for p in seq_dir.iterdir():
+        if p.is_file() and p.name.startswith(prefix):
+            digits = p.name[len(prefix):].partition(".")[0]
+            if digits.isdigit():
+                pad_width = len(digits)
+                break
+
+    frame_token = f"%0{pad_width}d"
+    frame_pattern = seq_dir / f"{seq_stem}.{frame_token}{ext}"
+    first_file = seq_dir / f"{seq_stem}.{frames[0]:0{pad_width}d}{ext}"
+    return {
+        "ok": True,
+        "path": str(first_file),
+        "ext": ext,
+        "exists": True,
+        "is_sequence": True,
+        "first": frames[0],
+        "last": frames[-1],
+        "frame_pattern": str(frame_pattern),
+    }
 
 
 # ── path → token reverse lookup ───────────────────────────────────────────────
@@ -351,8 +494,12 @@ def _extract_type_instance(segs: list[str], type_by_subpath: dict[str, str]) -> 
     Tries 2-segment match first (e.g. 'model'+'sculpt' → SCULPT),
     then 1-segment match (e.g. 'cloth' → CLOTH), then plain uppercase fallback.
     File-like segments (containing a dot) are never treated as instance or type.
+    The asset's USD folder (<NAME>/usd, ADR 0018) is NOT a task: it holds the generated
+    asset entry, so it resolves to no TYPE rather than to a made-up "USD" task.
     """
     if not segs:
+        return "", ""
+    if segs[0].lower() == COMPONENT_SUBDIR:
         return "", ""
 
     if len(segs) >= 2:
@@ -372,28 +519,3 @@ def _extract_type_instance(segs: list[str], type_by_subpath: dict[str, str]) -> 
 
 # ── file listing ──────────────────────────────────────────────────────────────
 
-def list_import_files(
-    project_path: Path,
-    class_filter: str | None = None,
-    name_filter: str | None = None,
-    last_only: bool = True,
-) -> list[dict]:
-    """List pipeline files with basic metadata for the HDA file browser."""
-    from features.importer.file_browser import list_files
-
-    paths = list_files(
-        project_path,
-        class_filter=class_filter,
-        name_filter=name_filter,
-        last_only=last_only,
-    )
-    result = []
-    for p in paths:
-        ext = _extract_ext(p)
-        result.append({
-            "name":    p.name,
-            "path":    str(p),
-            "ext":     ext,
-            "version": ACTIVE_VERSION_LABEL if f"_{ACTIVE_VERSION_LABEL}." in p.name else "",
-        })
-    return result

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,6 +18,36 @@ from .validate.validator import AssemblyValidator, Issue
 
 if TYPE_CHECKING:  # pragma: no cover
     from .resolve.base import AssetResolver
+
+log = logging.getLogger(__name__)
+
+
+def _maybe_author_proxy(root: Path) -> Path | None:
+    """Author purpose=proxy geometry for the assembled root, ON by default.
+
+    Reuses the publish-time proxy generator and its opt-out switch
+    (FLUX_PROXY_USD / FLUX_PROXY_REDUCTION). Proxy generation must never break an
+    assembly, so every failure is swallowed and reported as None. Returns the
+    written proxy layer path when one was produced.
+    """
+    try:
+        from flux_actions.switch import proxy_usd_enabled, proxy_usd_reduction
+        from features.publisher.usd_proxy import generate_proxy, is_usd_asset
+    except Exception:  # noqa: BLE001 - optional deps (pxr / fast-simplification)
+        return None
+
+    if not proxy_usd_enabled() or not is_usd_asset(root):
+        return None
+    try:
+        result = generate_proxy(root, target_reduction=proxy_usd_reduction())
+    except Exception:  # noqa: BLE001 - proxy must never break an assembly
+        log.exception("USD proxy a échoué pour %s", root)
+        return None
+    if result.status != "converted":
+        return None
+    log.info("USD proxy (assemblage): %s -> %s (%s tris -> %s)",
+             root.name, result.dst, result.tris_in, result.tris_out)
+    return result.dst
 
 
 @dataclass(frozen=True)
@@ -71,4 +102,10 @@ def assemble(
     written = StageWriter().write_all(
         stage, composer.department_layers(), dest_dir, root_name
     )
-    return AssemblyResult(root=written[0], layers=tuple(written), issues=tuple(issues))
+    # Auto-generate proxy geometry for the assembled root (opt-out). A produced
+    # proxy layer is appended to the written layers so callers can see it.
+    layers = list(written)
+    proxy_layer = _maybe_author_proxy(written[0])
+    if proxy_layer is not None and proxy_layer not in layers:
+        layers.append(proxy_layer)
+    return AssemblyResult(root=written[0], layers=tuple(layers), issues=tuple(issues))

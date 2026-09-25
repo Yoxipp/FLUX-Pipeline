@@ -1,0 +1,41 @@
+# publish_houdini.yml — publish the open Houdini scene as a declarative action.
+#
+# Two ordered steps, one command each:
+#   select -> select_houdini_publish : validate the scene name + format, carry intent
+#   cook   -> houdini_export         : cook the ROP straight into the resolved dest
+#
+# Houdini writes big caches (muscle sims) DIRECTLY to the destination, so there is
+# NO temp file and NO copy step (unlike publish_maya.yml). The cook command reuses
+# dcc.houdini.houdini_export.publish_houdini_rop whole — it resolves the versioned
+# path, archives the previous LAST, sets the ROP output and cooks in one block.
+# Data flows by named reference (value: {from: "step.command.output_key"}).
+# Production context (project_path, user, project_name) is injected at run time.
+
+name: publish_houdini
+shelf: publish
+
+steps:
+
+  select:
+    index: 10
+    commands:
+      select:
+        command: select_houdini_publish
+        # base_name / extension / rop_node_path / is_sequence set at run time (UI or runner).
+
+  cook:
+    index: 20
+    commands:
+      cook:
+        command: houdini_export
+        parameters:
+          base_name:
+            value: {from: "select.select.base_name"}
+          extension:
+            value: {from: "select.select.extension"}
+          rop_node_path:
+            value: {from: "select.select.rop_node_path"}
+          is_sequence:
+            value: {from: "select.select.is_sequence"}
+          # frame_range / frame_padding / options / attr_filter / description
+          # set at run time when needed (fed by the runner, like frame_range).

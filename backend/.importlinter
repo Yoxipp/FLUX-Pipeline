@@ -1,0 +1,33 @@
+# import-linter contracts — architecture guards for Flux (run: lint-imports).
+#
+# V5 storage frontier: the feature "stores" must persist metadata through the
+# MetadataRepository (core.repository_factory.get_repository), never by calling
+# core.json_manager directly. Only the JSON backend (core.json_repository) may
+# talk to json_manager. This contract fails the check if a store regresses.
+#
+# Scope note: routers/ (the HTTP layer) is intentionally NOT a source here — it
+# still uses json_manager for the ETag helpers (file_validator/sig_token/stat_sig),
+# a caching concern, not a store. core/ modules are not sources either (json_manager
+# is core, and json_repository legitimately delegates to it). Chosen with the maintainer.
+
+[importlinter]
+root_packages =
+    core
+    features
+    utils
+    routers
+    flux_core
+    flux_actions
+
+[importlinter:contract:no-json-manager-in-stores]
+name = Stores go through MetadataRepository, not core.json_manager directly
+type = forbidden
+source_modules =
+    features
+    utils
+forbidden_modules =
+    core.json_manager
+# Only flag DIRECT imports: a store may reach json_manager transitively through the
+# legitimate path (repository_factory -> json_repository -> json_manager); what the
+# rule forbids is a store importing json_manager itself.
+allow_indirect_imports = true

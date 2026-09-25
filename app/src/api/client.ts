@@ -1,6 +1,9 @@
 // client.ts — HTTP client vers FastAPI Python backend (127.0.0.1:8765).
 
 import type {
+  ActionFormResponse,
+  ActionGraph,
+  ActionPreviewResponse,
   ActivityEvent,
   ChatMention,
   ChatMessage,
@@ -108,6 +111,21 @@ async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Co
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
+// An export preset of the open Painter, with the output maps it writes (fileName = id).
+export interface PainterPreset { name: string; url: string; maps: { id: string; label: string }[] }
+// A channel of the texture sets' stacks (coat, anisotropy, user...): id = Painter export name.
+export interface PainterChannel { id: string; label: string; gray: boolean }
+
+// One group of operations of the cleaning scan (backend features/folder_manager/asset_cleanup.py).
+export interface CleanupItem {
+  id: string
+  kind: 'temp' | 'old_layout' | 'wrong_place' | 'old_map_name' | 'empty_dir'
+  action: 'move' | 'drop_dup' | 'drop_tmp' | 'rm_empty' | 'warn'
+  path: string; target: string; reason: string; files: number; bytes: number
+  safe: boolean; warning: string; names: string[]
+}
+export interface CleanupScan { scope: string; items: CleanupItem[]; unknown: string[] }
+
 export const api = {
   // Settings
   getSettings: () =>
@@ -139,6 +157,13 @@ export const api = {
   setUserData: (patch: Record<string, unknown>) =>
     apiCall<Record<string, unknown>>('PUT', '/settings/user-data', patch),
 
+  // Per-user enabled DCCs (null = all enabled)
+  getEnabledDccs: () =>
+    apiCall<{ known: string[]; enabled: string[] | null }>('GET', '/settings/enabled-dccs'),
+
+  setEnabledDccs: (enabled: string[] | null) =>
+    apiCall<{ known: string[]; enabled: string[] | null }>('PUT', '/settings/enabled-dccs', { enabled }),
+
   // DCC
   findDccExe: (dcc: string) =>
     apiCall<{ dcc: string; path: string | null; found: boolean }>('GET', `/dcc/find/${dcc}`),
@@ -149,11 +174,53 @@ export const api = {
   pingDcc: (dcc: string) =>
     apiCall<{ connected: boolean; version: string | null }>('GET', `/dcc/${dcc}/ping`),
 
+  // Photoshop (COM, no in-app plugin): actionable state + library bootstrap.
+  photoshopStatus: () =>
+    apiCall<{ reason: 'ok' | 'lib_missing' | 'not_running'; lib_installed: boolean; connected: boolean; version: string | null; error: string | null }>(
+      'GET', '/dcc/photoshop/status'),
+
+  photoshopInstall: () =>
+    apiCall<{ ok: boolean; already: boolean; installed: boolean; frozen: boolean; message: string }>(
+      'POST', '/dcc/photoshop/install'),
+
+  photoshopOpen: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; error: string | null }>('POST', '/dcc/photoshop/open', { project_name, rel_path }),
+
+  // Create a Read node in Nuke from a project-relative file (Folder Manager).
+  nukeImportPath: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; node: string; path: string }>('POST', '/dcc/nuke/import_path', { project_name, rel_path }),
+
+  // Animation range to export (U1): Maya = first / last key (selection or scene),
+  // playback range without keys; Houdini = playbar range.
+  getAnimRange: (dcc: 'Maya' | 'Houdini', scope: 'scene' | 'selection', port?: number) =>
+    apiCall<{ ok: boolean; start: number; end: number; source: 'keys' | 'timeline'; curves: number }>(
+      'GET', dcc === 'Maya'
+        ? `/dcc/maya/anim-range?scope=${scope}${port ? `&port=${port}` : ''}`
+        : '/dcc/houdini/anim-range'),
+
+  // Running instances of a DCC with their open scene (publish picker), and the
+  // instance FLUX works with (backend clients without a port follow it: Houdini).
+  getDccInstances: (dcc: string) =>
+    apiCall<{ dcc: string; active: number | null; instances: { id: string; port: number; label: string; scene: string | null }[] }>(
+      'GET', `/dcc/instances/${encodeURIComponent(dcc)}`),
+  setActiveInstance: (dcc: string, port: number | null) =>
+    apiCall<{ ok: boolean }>('POST', '/dcc/active-instance', { dcc, port }),
+
+  // Instances of one character in the Maya scene (U2): DINGO_01, DINGO_02...
+  getMayaCharacterInstances: (name: string, port?: number) =>
+    apiCall<{ ok: boolean; items: { node: string; label: string; instance: number; meshes: number }[] }>(
+      'GET', `/dcc/maya/character-instances?name=${encodeURIComponent(name)}${port ? `&port=${port}` : ''}`),
+
   // Detect a stuck ("zombie") Maya still holding the commandPort (port 7001).
   getMayaPortStatus: () =>
     apiCall<{ stuck: boolean; pid: number | null; name: string | null }>('GET', '/dcc/maya/port_status'),
 
   // Terminate a stuck Maya holding the commandPort (re-verified server-side before killing).
+  // Close one running instance of a DCC (sidebar instance menu). force = kill (unsaved work lost).
+  closeDccInstance: (dcc: string, port: number, force = false) =>
+    apiCall<{ closed: boolean; pid: number | null; needs_force: boolean; message: string }>(
+      'POST', `/dcc/instances/${encodeURIComponent(dcc)}/close`, { port, force }),
+
   reapMayaPort: () =>
     apiCall<{ killed: boolean; pid: number | null; message: string }>('POST', '/dcc/maya/reap'),
 
@@ -180,6 +247,26 @@ export const api = {
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
 
+  // Action engine (declarative): the generic form renders these fields, and the
+  // preview resolves the destination without copying anything.
+  getPublishForm: () =>
+    apiCall<ActionFormResponse>('GET', '/actions/publish/form'),
+
+  previewPublish: (payload: {
+    source_path: string
+    project_name: string
+    user?: string
+    target_name?: string
+  }) => apiCall<ActionPreviewResponse>('POST', '/actions/publish/preview', payload),
+
+  // Node flow (read-only): the graph of a YAML action, rendered with React Flow.
+  // On demand only (opened from the hidden bench page); never polled.
+  getActionGraphList: () =>
+    apiCall<string[]>('GET', '/actions/graph/list'),
+
+  getActionGraph: (name: string) =>
+    apiCall<ActionGraph>('GET', `/actions/${encodeURIComponent(name)}/graph`),
+
   getHoudiniState: () =>
     apiCall<HoudiniState>('GET', '/dcc/houdini/state'),
 
@@ -191,8 +278,16 @@ export const api = {
     apiCall<{ cmd: string; backend: string }>('GET', '/dcc/maya/connect_cmd'),
 
   // port targets a specific Maya instance (multi-instance); omit → base commandPort.
-  importFileInMaya: (project_name: string, rel_path: string, port?: number) =>
-    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path, port }),
+  importFileInMaya: (project_name: string, rel_path: string, port?: number, mode: 'import' | 'proxy' = 'import') =>
+    apiCall<{ ok: boolean; file: string }>('POST', '/dcc/maya/import', { project_name, rel_path, port, mode }),
+  // V4: what "Ouvrir dans..." loads for a file (asset / decor / shot first, layer second).
+  getLoadTargets: (project: string, rel_path: string) =>
+    apiCall<LoadTargets>('GET', `/dcc/load-targets?${new URLSearchParams({ project, rel_path })}`),
+  // Old Constructor files (usd/assembly): list, and move to <project>/_backup_flux (never a hard delete).
+  getUsdLegacy: (project: string) =>
+    apiCall<{ files: { name: string; rel_path: string }[] }>('GET', `/usd/legacy?${new URLSearchParams({ project })}`),
+  deleteUsdLegacy: (project: string, rel_path: string) =>
+    apiCall<{ ok: boolean; backup: string }>('POST', '/usd/legacy/delete', { project, rel_path }),
 
   publishMaya: (payload: {
     project_name: string
@@ -200,7 +295,7 @@ export const api = {
     extension:    string
     scope?:       string
     is_sequence?: boolean
-    frame_range?: [number, number]
+    frame_range?: [number, number] | [number, number, number]
     export_options?: Record<string, unknown>
     description?: string
     user?:        string
@@ -212,6 +307,7 @@ export const api = {
     project_name: string
     asset:        string
     filename?:    string
+    root?:        string   // one character instance node (U2), overrides scope
     mesh?:        string
     root_joint?:  string
     frame_start?: number
@@ -225,7 +321,7 @@ export const api = {
     include_uv?:      boolean
     port?:            number
   }) =>
-    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+    apiCall<{ ok: boolean; asset: string; version: string; root: string; warnings?: string[] }>(
       'POST', '/dcc/maya/export-usd', payload),
 
   exportHoudiniLightUsd: (payload: {
@@ -243,8 +339,29 @@ export const api = {
     include_weights?: boolean
     include_uv?:      boolean
   }) =>
-    apiCall<{ ok: boolean; asset: string; version: string; root: string }>(
+    apiCall<{ ok: boolean; asset: string; version: string; root: string; warnings?: string[] }>(
       'POST', '/dcc/houdini/export-usd', payload),
+
+  // Look department (ADR 0019 A1b): the DCC exports its materials, the backend
+  // rewrites them into /<NAME>/mtl + bindings and publishes the look layer.
+  exportMayaLookUsd: (payload: {
+    project_name: string
+    filename:     string
+    fmt?:         string
+    scope?:       string
+    user?:        string
+    port?:        number
+  }) =>
+    apiCall<LookExportResult>('POST', '/dcc/maya/export-usd-look', payload),
+
+  exportHoudiniLookUsd: (payload: {
+    project_name: string
+    filename:     string
+    lop_node?:    string
+    fmt?:         string
+    user?:        string
+  }) =>
+    apiCall<LookExportResult>('POST', '/dcc/houdini/export-usd-look', payload),
 
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>
@@ -253,16 +370,98 @@ export const api = {
   cancelZBrush: () =>
     apiCall<{ cancelled: boolean }>('POST', '/dcc/zbrush/cancel'),
 
-  // Activity
-  getActivity: (params?: { limit?: number; user?: string; action?: string; project?: string }) => {
-    const qs = new URLSearchParams()
-    if (params?.limit)   qs.set('limit', String(params.limit))
-    if (params?.user)    qs.set('user', params.user)
-    if (params?.action)  qs.set('action', params.action)
-    if (params?.project) qs.set('project', params.project)
-    return apiCall<{ events: ActivityEvent[]; unread_count: number }>('GET', `/activity?${qs}`)
-  },
+  // Nuke — publish acts on the selected node: FLUX builds a Write with the chosen
+  // options, renders it into the versioned layout, removes it (.nk = scriptSaveAs).
+  publishNuke: (payload: {
+    project_name:   string
+    filename:       string
+    extension:      string
+    export_options?: Record<string, unknown>
+    is_sequence?:   boolean
+    frame_range?:   [number, number]
+    node_name?:     string
+    colorspace?:    string
+    description?:   string
+    user?:          string
+  }) =>
+    apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean }>(
+      'POST', '/dcc/nuke/publish', payload),
 
+  // Photoshop — save the active document into the FLUX layout over COM.
+  publishPhotoshop: (payload: {
+    project_name:   string
+    filename:       string
+    extension:      string
+    export_options?: Record<string, unknown>
+    description?:   string
+    user?:          string
+  }) =>
+    apiCall<{ ok: boolean; path: string; version: number; version_str: string }>(
+      'POST', '/dcc/photoshop/publish', payload),
+
+  // Substance Painter — export maps via the in-app bridge, ingest under FLUX tokens,
+  // optionally conform to .tx. Token-driven (class/task/name/instance).
+  publishSubstance: (payload: {
+    project_name: string
+    class_token:  string
+    task_token:   string
+    name_token:   string
+    instance?:    string
+    preset?:      string
+    file_format?: string
+    bit_depth?:   string
+    conform_tx?:  boolean
+    description?: string
+    user?:        string
+    texture_sets?: string[]
+    size?:        number
+    padding?:     string
+    dilation?:    number
+    maps?:        string[]                                              // output maps of the preset (fileName)
+    map_params?:  Record<string, { bit_depth?: string; size?: number }>  // per map overrides
+    channels?:    PainterChannel[]                                      // "Canaux du shader" mode
+  }) =>
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/substance/publish', payload),
+
+  // What can be exported from the open Painter project / Mari geo (Publisher options).
+  getSubstanceInfo: () =>
+    apiCall<{ ok: boolean; project: string; texture_sets: { name: string; udim?: boolean; resolution?: number }[];
+              presets?: PainterPreset[]; channels?: PainterChannel[] }>(
+      'GET', '/dcc/substance/info', undefined, 25000),
+  getMariInfo: () =>
+    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number }[] }>(
+      'GET', '/dcc/mari/info', undefined, 25000),
+
+  // Mari — export channels via the in-app bridge, ingest under FLUX tokens,
+  // optionally conform to .tx.
+  publishMari: (payload: {
+    project_name: string
+    class_token:  string
+    task_token:   string
+    name_token:   string
+    instance?:    string
+    file_format?: string
+    conform_tx?:  boolean
+    description?: string
+    user?:        string
+    channels?:    string[]
+  }) =>
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/mari/publish', payload),
+
+  // Level 1 file ingest (Substance Designer / Marvelous Designer): the artist
+  // exports a file from the app; FLUX ingests it under FLUX naming. One method per
+  // soft for a clear per-DCC entry point.
+  publishDesigner: (payload: {
+    project_name: string; source_path: string; target_name: string
+    description?: string; user?: string
+  }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/designer/publish', payload),
+
+  publishMarvelous: (payload: {
+    project_name: string; source_path: string; target_name: string
+    description?: string; user?: string
+  }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/marvelous/publish', payload),
+
+  // Activity
   // Conditional variants used by the shared feed poller (FeedsProvider): send
   // the stored ETag, get a 304 (keep state) when nothing changed.
   getActivityConditional: (limit: number, etag?: string) =>
@@ -288,16 +487,42 @@ export const api = {
   sendChat: (message: string, user?: string) =>
     apiCall<{ success: boolean }>('POST', '/activity/chat', { message, user }),
 
-  getMentions: (user?: string, unread_only?: boolean) =>
-    apiCall<{ mentions: ChatMention[]; unread_count: number }>(
-      'GET',
-      `/activity/chat/mentions${user || unread_only ? `?${user ? `user=${encodeURIComponent(user)}` : ''}${user && unread_only ? '&' : ''}${unread_only ? 'unread_only=true' : ''}` : ''}`,
-    ),
-
   markMentionsRead: (user?: string) =>
     apiCall<{ success: boolean }>('POST', '/activity/chat/mentions/read', { user }),
 
   // Files
+  // N8: deep settings (project.json + publish switches of this machine).
+  getAdvancedSettings: (project?: string) =>
+    apiCall<{ project: AdvancedProject | null; switches: Record<string, AdvancedSwitch> }>(
+      'GET', `/settings/advanced${project ? `?project=${encodeURIComponent(project)}` : ''}`),
+  putAdvancedProject: (project: string, values: Record<string, unknown>) =>
+    apiCall<AdvancedProject>('PUT', '/settings/advanced/project', { project, values }),
+  putAdvancedSwitches: (values: Record<string, boolean | number | null>) =>
+    apiCall<Record<string, AdvancedSwitch>>('PUT', '/settings/advanced/switches', { values }),
+
+  // N7: note of a published file (modif_logs.json): the version clicked + the history.
+  getPublishNote: (project_name: string, relPath: string) =>
+    apiCall<{ base: string; version: string | null; latest: PublishNoteEntry | null; history: PublishNoteEntry[] }>(
+      'GET', `/files/projects/${encodeURIComponent(project_name)}/publish-note?rel_path=${encodeURIComponent(relPath)}`),
+
+  // Raw modif_logs.json entries touching a file, plus the folder's full log
+  // (fallback when the file is not a publish output but the folder has a log).
+  getFileLog: (project_name: string, relPath: string) =>
+    apiCall<{
+      base: string; version: string | null;
+      matched: Record<string, unknown>[];
+      folder_log: Record<string, unknown>[];
+      folder_path: string;
+    }>('GET', `/files/projects/${encodeURIComponent(project_name)}/file-log?rel_path=${encodeURIComponent(relPath)}`),
+
+  // Disk manager: heaviest files under DOSSIER_PROJETS, optionally scoped to a project.
+  getDiskUsage: (project?: string, limit = 200) =>
+    apiCall<{
+      root: string; total_bytes: number; file_count: number;
+      top_files: { rel: string; project: string; size: number; mtime: number }[];
+      by_project: { project: string; size: number; file_count: number }[];
+    }>('GET', `/system/disk-usage?limit=${limit}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
+
   browseProject: (project_name: string, subpath?: string) =>
     apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
 
@@ -322,6 +547,21 @@ export const api = {
   // confirmation in the Archives view.
   deleteProject: (name: string) =>
     apiCall<{ deleted: string }>('DELETE', `/folder/projects/${encodeURIComponent(name)}`),
+
+  // Cleaning to the current FLUX layout (Disque page): only what is certain moves.
+  scanCleanup: (project: string, asset?: string) =>
+    apiCall<CleanupScan>('GET', `/folder/projects/${encodeURIComponent(project)}/cleanup${asset ? `?asset=${encodeURIComponent(asset)}` : ''}`, undefined, 300000),
+  applyCleanup: (project: string, ids: string[], asset?: string) =>
+    apiCall<{ done: number; moved: number; dropped: number; errors: string[]; journal: string }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup`, { asset: asset || null, ids }, 300000),
+  getCleanupBackups: (project: string) =>
+    apiCall<{ backups: { id: string; files: number }[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/cleanup/backups`),
+  restoreCleanup: (project: string, journal_id: string) =>
+    apiCall<{ restored: number; already_there: string[] }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/cleanup/restore`, { journal_id }, 300000),
+  cloneProject: (project: string, new_name: string) =>
+    apiCall<{ project: string; files: number; moved: number; dropped: number; warnings: number }>(
+      'POST', `/folder/projects/${encodeURIComponent(project)}/clone`, { new_name }, 3600000),
 
   getAssets: (project: string, class_token?: string) =>
     apiCall<{ assets: string[] }>('GET', `/folder/projects/${project}/assets${class_token ? `?class_token=${class_token}` : ''}`),
@@ -441,6 +681,12 @@ export const api = {
       'POST', '/dcc/houdini/importer/create_node', params,
     ),
 
+  // LOP: add the file to the selected Reference / Sublayer LOP, else a new one.
+  houdiniImportLop: (project: string, rel_path: string, mode: 'reference' | 'payload' | 'sublayer') =>
+    apiCall<{ ok: boolean; result?: { node_path?: string; mode?: string; entry?: number } }>(
+      'POST', '/dcc/houdini/import/lop', { project, rel_path, mode },
+    ),
+
   // Shelf
   getShelves: () =>
     apiCall<Record<string, { versions: string[]; installed: Record<string, boolean>; hdas_installed: Record<string, boolean> }>>('GET', '/shelf'),
@@ -469,8 +715,9 @@ export const api = {
 
   // Published layered-USD versions for a component slot (feeds the slot editor's
   // version dropdown). Empty `versions` when nothing is published for asset+task.
-  getUsdLayers: (project: string, asset: string, task: string) => {
+  getUsdLayers: (project: string, asset: string, task: string, instance = '') => {
     const qs = new URLSearchParams({ project, asset, task })
+    if (instance) qs.set('instance', instance)
     return apiCall<{
       project: string
       asset: string
@@ -496,6 +743,59 @@ export const api = {
     if (instance) qs.set('instance', instance)
     return apiCall<{ project: string; asset: string; task: string; instance: string; variantes: string[] }>('GET', `/usd/variantes?${qs}`)
   },
+
+  // Existing components (ADR 0018) and assemblies of the project (assembler default view).
+  getUsdLibrary: (project: string) => {
+    const qs = new URLSearchParams({ project })
+    return apiCall<UsdLibrary>('GET', `/usd/library?${qs}`)
+  },
+
+  // Crowd (A6, ADR 0022): which assets share a rig and which clips fit them.
+  getUsdCrowdCompat: (project: string) => {
+    const qs = new URLSearchParams({ project })
+    return apiCall<UsdCrowdCompat>('GET', `/usd/crowd/compat?${qs}`)
+  },
+
+
+  // pins: {slot: {task, instance, version} | {exclude: true} | null (automatic again)}
+  // ADR 0023: components are created by hand, then edited through their recipe.
+  refreshUsdComponent: (project: string, name: string) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/refresh', { project, name }),
+  // ADR 0024: created with empty blocks (model / look / rig unless *blocks* is given).
+  createUsdComponent: (project: string, name: string, blocks?: string[]) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/create', { project, name, blocks }),
+  saveUsdComponent: (project: string, name: string, recipe: UsdComponentRecipe) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/save', { project, name, recipe }),
+  addProposedUsdComponent: (project: string, name: string) =>
+    apiCall<UsdComponentResult>('POST', '/usd/component/add-proposed', { project, name }),
+
+  // A3: new versioned assembly (empty or copy of *source*) and edits (each = new version).
+  createUsdAssembly: (project: string, name: string, source?: string) =>
+    apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/create', { project, name, source }),
+  editUsdAssembly: (project: string, name: string, ops: UsdAssemblyOp[]) =>
+    apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
+  // The department table (ADR 0019): which task writes which USD department.
+  getUsdDepartments: () =>
+    apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number>
+              shot_tasks?: Record<string, UsdTaskContribution> }>(
+      'GET', '/usd/departments'),
+
+  // Read-only composition of a published USD file (prims, variants, layers used).
+  getUsdComposition: (project: string, file: string) => {
+    const qs = new URLSearchParams({ project, file })
+    return apiCall<UsdComposition>('GET', `/usd/composition?${qs}`)
+  },
+
+  // Read instance placements from the open DCC: layout vNNN + LAST, then a new assembly version.
+  publishUsdLayout: (project: string, name: string, dcc: 'houdini' | 'maya') =>
+    apiCall<UsdAssemblyEditResult & { layout_version: string; layout: string; placements: number }>(
+      'POST', '/usd/assembly/layout/publish', { project, name, dcc }),
+
+  // Point one assembly instance at a component LAST or a frozen vNNN.
+
+  relinkUsdInstance: (project: string, file: string, prim: string, component: string, version: string) =>
+    apiCall<{ ok: boolean; prim: string; asset_path: string }>(
+      'POST', '/usd/assembly/relink', { project, file, prim, component, version }),
 
   // ── Production Tab ─────────────────────────────────────────────────────────
   // GET returns production + reconciled publishes; PUT replaces the store.
@@ -619,4 +919,142 @@ export const api = {
     apiCall<{ ok: boolean; dest: string }>(
       'POST', `/production/${encodeURIComponent(project)}/ref/export`,
       { rel_path: relPath, name, dest_path: destPath }),
+}
+
+// USD assembler library (GET /usd/library)
+// ADR 0023 + 0024: a component is created by hand; its recipe groups links (files) in
+// blocks; each link names its task (asset TYPE token), how it is composed (arc), an
+// optional variant name (exclusive choice in its block) and a proxy flag.
+export type UsdFileKind = 'geometry' | 'groom' | 'shader' | 'rig' | 'animation' | 'other'
+export type UsdLinkArc = 'reference' | 'sublayer' | 'payload'
+// variant = default choice; deferred = heavy block loaded apart (payload, ADR 0031)
+export interface UsdComponentBlock { name: string; variant: string; deferred?: boolean }
+export interface UsdComponentFile {
+  id: string; label: string; block: string; department: string; kind: UsdFileKind; format: string
+  source: 'publish' | 'manual'
+  arc: UsdLinkArc; variant: string; proxy: boolean
+  base?: string; instance?: string; variante?: string; version?: string   // publish ("latest" or vNNN)
+  path?: string                                                           // manual, project-relative
+  prim?: string
+  targets: string[]; proxy_of: string[]; depends: string[]
+  active: boolean
+  // library only: what the file resolves to now / in the current component version
+  resolved_version?: string | null; composed_version?: string | null; found?: boolean
+}
+export interface UsdComponentRecipe { blocks: UsdComponentBlock[]; departments: string[]; files: UsdComponentFile[] }
+export interface UsdProposedFile {
+  department: string; base: string; instance: string; variante: string; version: string
+  format: string; kind: UsdFileKind
+}
+export interface UsdComponentInfo {
+  name: string
+  class: string | null   // CLASS token (deep link to Production)
+  state: 'ok' | 'stale' | 'empty'
+  legacy: boolean        // written before ADR 0023: saved again in the new format on the next update
+  version: string | null
+  versions: string[]
+  blocks: UsdComponentBlock[]
+  departments: string[]
+  files: UsdComponentFile[]
+  proposed: UsdProposedFile[]   // publishes of every task not linked yet
+  variant_sets: Record<string, string[]>   // of the current version (assembly instances pick in them)
+  warnings: string[]
+  dir: string
+  last: string | null
+  used_by: string[]
+}
+export interface UsdComponentResult {
+  ok: boolean; changed: boolean; version: string | null; last?: string; warnings: string[]
+}
+export interface UsdAssemblyInstance {
+  prim: string; asset_path: string; component: string | null; broken: boolean; follows_last: boolean
+  variants: Record<string, string>   // variant set (one per component file) -> variant picked by this instance
+}
+export interface UsdAssemblyInfo {
+  name: string; file: string; instances: UsdAssemblyInstance[]; broken: number
+  version: string | null      // current vNNN (null = legacy flat file)
+  versions: string[]
+  legacy: boolean             // old builder file, converted on first edit
+  layout: string | null       // layout LAST published from a DCC
+  layout_version: string | null   // layout vNNN pinned by the current assembly version
+}
+// A3 edit operations (backend assembly_v2.apply_ops).
+export type UsdAssemblyOp =
+  | { op: 'add'; component: string; count?: number; version?: string }
+  | { op: 'remove'; name: string }
+  | { op: 'duplicate'; name: string }
+  | { op: 'rename'; name: string; new_name: string }
+  | { op: 'relink'; name: string; component: string; version?: string }
+  | { op: 'set_version'; name?: string; all?: boolean; version: string }
+  | { op: 'set_variant'; name: string; department: string; variant: string }   // '' = component default
+export interface UsdAssemblyEditResult { ok: boolean; changed: boolean; version: string | null; warnings: string[] }
+export interface UsdLibrary {
+  project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[]
+  creatable: string[]      // asset NAMEs without a component (created by hand, ADR 0023)
+  departments: string[]    // asset TYPE tokens of the project
+  rules: UsdComponentRules
+}
+export interface UsdComponentRules {
+  kinds: UsdFileKind[]
+  default_kind: Record<string, UsdFileKind>          // TYPE -> kind
+  targets: Record<UsdFileKind, UsdFileKind[]>        // what a file of that kind may target
+  proxy: Partial<Record<UsdFileKind, UsdFileKind[]>> // what it may stand in for as a proxy
+  preview: UsdFileKind[]                             // never active in a component (ANIM)
+}
+export interface LoadTargets {
+  what: 'asset' | 'decor' | 'shot' | 'layer' | 'file'
+  legacy: boolean
+  message: string
+  targets: { label: string; rel_path: string; primary: boolean; what: string }[]
+}
+export interface UsdTaskContribution {
+  department: string
+  what: string
+  // Which exporter writes this department: the skinned-mesh/skeleton one, or the look one.
+  writer: 'light' | 'look'
+  include: { geo: boolean; skel: boolean; anim: boolean; weights: boolean; uv: boolean }
+}
+export interface LookExportResult {
+  ok: boolean; asset: string; version: string; root: string
+  materials: number; bindings: number; warnings?: string[]
+}
+export interface UsdPrimNode {
+  path: string; name: string; type: string; kind: string; purpose: string
+  instanceable: boolean
+  variant_sets: Record<string, { selection: string; variants: string[] }>
+  arcs: { arc: string; asset: string; prim: string }[]
+  children: UsdPrimNode[]
+  truncated: boolean
+}
+// N8 "Parametres avances" (GET /settings/advanced).
+export interface AdvancedProject {
+  name: string; project_id: string; last_modes: string[]; warnings: string[]
+  values: {
+    fps: number; resolution: [number, number]; ocio_config: string; env: Record<string, string>
+    usd: { meters_per_unit: number; up_axis: string }
+    storage: { last_mode: Record<string, string>; last_link_threshold_gb: number }
+  }
+}
+export interface AdvancedSwitch {
+  value: boolean | number; saved: boolean | number | null; env: string; source: 'page' | 'lancement' | 'defaut'
+}
+
+export interface PublishNoteEntry {
+  name: string; date: string; time: string; version: string; modification: string; user: string
+}
+
+// Crowd (A6, ADR 0022): shared skeletons and animation clips (GET /usd/crowd/compat).
+export interface UsdCrowdClip {
+  base: string; asset: string; clip: string; last: string
+  joints: string[]; range: [number, number] | null; fps: number
+}
+export interface UsdCrowdCompat {
+  assets: Record<string, { signature: string; joint_count: number; compatible: string[]; clips: string[] }>
+  clips: UsdCrowdClip[]
+}
+
+export interface UsdComposition {
+  file: string; default_prim: string
+  layers: { path: string; root: boolean }[]
+  tree: UsdPrimNode | null
 }

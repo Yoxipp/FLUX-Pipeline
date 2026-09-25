@@ -29,6 +29,9 @@ class MeshData:
     # face_vertex_indices). Empty = no UVs authored.
     uvs: list[tuple[float, float]] = field(default_factory=list)
     uv_indices: list[int] = field(default_factory=list)
+    # Full DCC path of the mesh ("|grp|body" in Maya), used only to tell apart two
+    # meshes with the same leaf name (see mesh_prim_names). "" = unknown.
+    path: str = ""
 
 
 @dataclass
@@ -52,6 +55,7 @@ class AnimData:
     translations: list[list[Vec3]]    # [time][joint]
     rotations: list[list[Quat]]       # [time][joint]
     scales: list[list[Vec3]]          # [time][joint]
+    fps: float | None = None          # scene frame rate (layer timeCodesPerSecond)
 
 
 @dataclass
@@ -127,6 +131,7 @@ def light_asset_from_dict(d: dict) -> LightAsset:
                                  if m.get("geom_bind_transform") else None),
             uvs=[tuple(uv) for uv in m.get("uvs", [])],
             uv_indices=list(m.get("uv_indices", [])),
+            path=str(m.get("path") or ""),
         )
         for m in d.get("meshes", [])
     ]
@@ -139,6 +144,7 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             translations=[[tuple(v) for v in row] for row in a["translations"]],
             rotations=[[tuple(q) for q in row] for row in a["rotations"]],
             scales=[[tuple(v) for v in row] for row in a["scales"]],
+            fps=(float(a["fps"]) if a.get("fps") else None),
         )
     cameras = [
         CameraData(
@@ -199,3 +205,47 @@ def filter_animated_joints(
         if moves:
             animated.append(joint)
     return animated
+
+
+def _path_segments(path: str) -> list[str]:
+    """DCC path -> segments without namespaces ("|ns:grp|body" / "/grp/body")."""
+    return [seg.rsplit(":", 1)[-1] for seg in path.replace("|", "/").split("/") if seg]
+
+
+def mesh_prim_names(items: list[tuple[str, str]], sanitize) -> list[str]:
+    """Prim names under geo/render for meshes given as (leaf name, DCC path).
+
+    Shared by the model layer and the look layer so a binding lands on the right mesh.
+    A unique leaf name is kept as is. Meshes sharing a leaf name take the shortest
+    unique tail of their path, joined by "_" ("|charA|body" -> "charA_body"). Without
+    a usable path, "_2", "_3"... are appended in order (never overwrite a mesh).
+    """
+    leaves = [sanitize(name) for name, _ in items]
+    out = list(leaves)
+    groups: dict[str, list[int]] = {}
+    for i, leaf in enumerate(leaves):
+        groups.setdefault(leaf, []).append(i)
+    taken = {leaf for leaf, idx in groups.items() if len(idx) == 1}
+    for leaf, idx in groups.items():
+        if len(idx) < 2:
+            continue
+        segs = {i: _path_segments(items[i][1]) for i in idx}
+        depth = max((len(v) for v in segs.values()), default=0)
+        chosen: dict[int, str] = {}
+        for k in range(2, depth + 1):
+            names = {i: sanitize("_".join(segs[i][-k:])) for i in idx if len(segs[i]) >= k}
+            if len(names) == len(idx) and len(set(names.values())) == len(idx):
+                chosen = names
+                break
+        n = 1
+        for i in idx:
+            name = chosen.get(i)
+            if not name or name in taken:
+                name = leaf if n == 1 else f"{leaf}_{n}"
+                while name in taken:
+                    n += 1
+                    name = f"{leaf}_{n}"
+                n += 1
+            taken.add(name)
+            out[i] = name
+    return out

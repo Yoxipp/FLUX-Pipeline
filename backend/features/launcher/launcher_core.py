@@ -24,11 +24,14 @@ _CREATE_NEW_PROCESS_GROUP = 0x00000200
 # read $HOME/houdiniX.Y instead of %USERPROFILE%/Documents/houdiniX.Y, so the user's
 # prefs, desktops, shelves and HDAs never load. FLUX_PORT is deliberately KEPT so the
 # Houdini importer HDA bootstrap can still find the backend.
+# PYTHONUSERBASE is set by the Microsoft Store Python that runs the dev backend: Houdini
+# (also py3.13) then adds that user site to sys.path and imports the pip usd-core pxr
+# instead of its own, which breaks every LopNode.stage() and Python LOP.
 _ENV_LEAK_VARS: tuple[str, ...] = (
     "_MEIPASS", "_MEIPASS2", "_PYI_ARCHIVE_FILE", "_PYI_APPLICATION_HOME_DIR",
     "PYINSTALLER_RESET_ENVIRONMENT",
     "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
-    "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE", "PYTHONHASHSEED",
+    "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE", "PYTHONHASHSEED", "PYTHONUSERBASE",
     "SSL_CERT_FILE", "SSL_CERT_DIR",
     "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
 )
@@ -59,6 +62,9 @@ _FRONTEND_KEY_MAP: dict[str, str] = {
     "mari":               "Mari",
 }
 
+# Public list of launcher keys (per-user enabled_dccs validation, V8 U10).
+DCC_FRONTEND_KEYS: frozenset[str] = frozenset(_FRONTEND_KEY_MAP)
+
 
 # ── public API ────────────────────────────────────────────────────────────────
 
@@ -80,6 +86,18 @@ def get_installed_dccs() -> dict[str, str]:
                 found[frontend_key] = sorted(matches)[-1]
                 break
     return found
+
+
+# Characters cmd.exe still interprets inside double quotes: a quote ends the quoting
+# (then & | > run extra commands) and %VAR% is expanded. Refused in launch arguments.
+_CMD_UNSAFE_CHARS = ('"', "%", "\n", "\r")
+
+
+def _cmd_quoted(value: str) -> str:
+    """Return *value* double-quoted for cmd.exe, refusing anything that could escape it."""
+    if any(ch in value for ch in _CMD_UNSAFE_CHARS):
+        raise ValueError(f"unsafe character in launch argument: {value!r}")
+    return f'"{value}"'
 
 
 def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
@@ -106,7 +124,9 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
         if os.name == "nt":
             # `start "" "<exe>" [scene]` — the empty "" is start's window-title arg.
             # The DCC is reparented away from the backend, so taskkill /T won't reach it.
-            cmd = f'start "" "{exe}"' + (f' "{scene}"' if scene else "")
+            # Every argument is quoted and checked (security S4): a scene path holding
+            # a quote or %VAR% could otherwise inject commands through the shell.
+            cmd = 'start "" ' + " ".join(_cmd_quoted(str(a)) for a in ([exe, scene] if scene else [exe]))
             subprocess.Popen(
                 cmd, shell=True, close_fds=True, env=env,
                 creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
@@ -117,14 +137,9 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
             subprocess.Popen(args, start_new_session=True, close_fds=True, env=env)
         log.info("Launched %s — %s%s", dcc_name, exe, f" (scene: {scene})" if scene else "")
         return True
-    except OSError as e:
+    except (OSError, ValueError) as e:
         log.error("Failed to launch %s: %s", dcc_name, e)
         return False
-
-
-def get_custom_exe_path(dcc_name: str) -> str | None:
-    """Return user-configured exe path for *dcc_name*, or None."""
-    return config.get_dcc_exe(dcc_name)
 
 
 def set_custom_exe_path(dcc_name: str, path: str) -> None:

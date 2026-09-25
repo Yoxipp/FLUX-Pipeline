@@ -37,6 +37,11 @@ FLUX_UPDATE/*.exe
 TEST/
 .flux
 
+# ...but flux_actions/config holds SOURCE action YAML, not runtime.
+# The CONFIG/ rule above catches it on case-insensitive filesystems; keep it.
+!backend/flux_actions/config/
+!backend/flux_actions/config/*.yml
+
 # OS
 .DS_Store
 Thumbs.db
@@ -50,3 +55,17 @@ flux_dev.log
 
 # Houdini HDA auto-backups (createDigitalAsset)
 backend/resources/shelves/houdini/backup/
+
+# AI agent tooling: local settings and vendored third-party skills are not FLUX
+# source (skills are reinstalled from skills-lock.json / `npx gitnexus analyze`).
+.local/settings.local.json
+.local/settings.local.json
+.local/skills/*
+.local/skills/*
+# FLUX-owned skills (USD knowledge, VFX USD Survival Guide adapted, Apache-2.0) are versioned.
+!.local/skills/flux-usd-pipeline/
+!.local/skills/usd-*/
+.agents/
+
+# Session scratch files
+scratchpad/

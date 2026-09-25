@@ -192,7 +192,7 @@ export function ShelfManager() {
               <div style={{ display: 'flex', gap: 16 }}>
                 <Badge ok={shelfOk} label={shelfOk ? 'Shelf installé' : 'Shelf absent'} />
                 {isHoudini && (
-                  <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés (Autostart)' : 'HDAs absents (via Autostart)'} />
+                  <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés' : 'HDAs absents'} />
                 )}
               </div>
             </div>
@@ -201,43 +201,45 @@ export function ShelfManager() {
           {/* aperçu shelf */}
           <div>
             <SecTitle>Aperçu du shelf</SecTitle>
-            <div className="card" style={{ padding: '14px 20px', display: 'flex', gap: 20, alignItems: 'center', minHeight: 62 }}>
+            <div className="card" style={{ padding: '14px 20px', display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', minHeight: 62 }}>
               {dcc === 'Maya' ? (
                 <>
                   <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="ANIM" />
                   <ShelfBtn icon={<FluxLogo size={20} color={RIG_COLOR} />} label="RIG" />
                 </>
               ) : (
-                <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
-                  Rien à installer sur le shelf. Le HDA de l'importer est géré par l'Autostart Houdini.
-                </div>
+                <>
+                  {/* One button per FLUX node (HDA): same list as resources/shelves/houdini/Flux.shelf. */}
+                  {['Import', 'Export', 'Anim', 'Shot', 'Crowd', 'Lighting'].map(l => (
+                    <ShelfBtn key={l} icon={<FluxLogo size={20} color={ANIM_COLOR} />} label={l} />
+                  ))}
+                </>
               )}
             </div>
           </div>
 
-          {/* actions — Maya only. Houdini has no shelf tool to install: the importer
-              HDA is a pipeline dependency installed by the Houdini Autostart. */}
+          {/* actions. Houdini: installing the shelf also installs (or rebuilds, when
+              Houdini is connected) the FLUX HDAs; removing it keeps them (Autostart). */}
           <div>
             <SecTitle>Actions</SecTitle>
-            {dcc === 'Maya' ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
-                  <Zap size={12} strokeWidth={2} />
-                  Installer le shelf
-                </Btn>
-                <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
-                  <RefreshCw size={11} strokeWidth={2} />
-                  Màj
-                </Btn>
-                <Btn ghost disabled={!version || busy} style={{ height: 32, gap: 5 }} onClick={handleRemove}>
-                  <Trash2 size={11} strokeWidth={2} />
-                  Retirer
-                </Btn>
-              </div>
-            ) : (
-              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5 }}>
-                Aucune installation manuelle pour Houdini. Le HDA de l'importer s'installe
-                automatiquement quand tu connectes Houdini via l'Autostart du Launcher.
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
+                <Zap size={12} strokeWidth={2} />
+                {isHoudini ? 'Installer shelf + HDAs' : 'Installer le shelf'}
+              </Btn>
+              <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
+                <RefreshCw size={11} strokeWidth={2} />
+                Màj
+              </Btn>
+              <Btn ghost disabled={!version || busy} style={{ height: 32, gap: 5 }} onClick={handleRemove}>
+                <Trash2 size={11} strokeWidth={2} />
+                Retirer
+              </Btn>
+            </div>
+            {isHoudini && (
+              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
+                Installer copie la shelf et les HDAs (reconstruits si Houdini est ouvert).
+                Retirer enlève la shelf seulement : l'Autostart garde les HDAs.
               </div>
             )}
           </div>

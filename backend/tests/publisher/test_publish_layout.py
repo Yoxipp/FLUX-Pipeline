@@ -29,47 +29,42 @@ class FlatPublishLayout(unittest.TestCase):
         self.assertEqual(format_suffix(".fbx"), "FBX")
         self.assertEqual(format_suffix("usd"), "USD")
 
-    def test_first_publish_writes_flat_last(self):
+    def test_first_publish_writes_version_then_last(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            src = _src(tmp, "export.usd", "v1")
+            src = _src(tmp, "export.abc", "v1")
             dest = tmp / "all"
             path, ver = publish_into_layout(src, dest, _BASE)
             self.assertEqual(ver, 1)
-            # active lands flat in the shared folder at a stable path
-            self.assertEqual(path, dest / f"{_BASE}_LAST.usd")
-            self.assertTrue(path.exists())
+            # ADR 0017: v001 exists as soon as it is published, LAST is a copy of it
+            self.assertEqual((dest / f"{_BASE}_v001.abc").read_text(), "v1")
+            self.assertEqual(path, dest / f"{_BASE}_LAST.abc")
             self.assertEqual(path.read_text(), "v1")
-            # no archived version yet (only LAST)
-            self.assertEqual(highest_flat_version(dest, _BASE), 0)
+            self.assertTrue((dest / f"{_BASE}_LAST.abc.flux.json").is_file())
+            self.assertEqual(highest_flat_version(dest, _BASE), 1)
             self.assertFalse(versions_dir(dest).exists())
 
-    def test_second_publish_archives_previous_last(self):
+    def test_second_publish_never_rewrites_versions(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             dest = tmp / "all"
-            p1, v1 = publish_into_layout(_src(tmp, "a.usd", "v1"), dest, _BASE)
-            p2, v2 = publish_into_layout(_src(tmp, "b.usd", "v2"), dest, _BASE)
-            self.assertEqual(v1, 1)
-            self.assertEqual(v2, 2)
-            # v001 archived flat in the shared folder, beside the active LAST
-            arch = dest / f"{_BASE}_v001.usd"
-            self.assertTrue(arch.exists())
-            self.assertEqual(arch.read_text(), "v1")
-            # active LAST now holds v2 at a stable flat path
-            active = dest / f"{_BASE}_LAST.usd"
-            self.assertEqual(p2, active)
-            self.assertTrue(active.exists())
-            self.assertEqual(active.read_text(), "v2")
+            _p1, v1 = publish_into_layout(_src(tmp, "a.abc", "v1"), dest, _BASE)
+            p2, v2 = publish_into_layout(_src(tmp, "b.abc", "v2"), dest, _BASE)
+            self.assertEqual((v1, v2), (1, 2))
+            self.assertEqual((dest / f"{_BASE}_v001.abc").read_text(), "v1")
+            self.assertEqual((dest / f"{_BASE}_v002.abc").read_text(), "v2")
+            self.assertEqual(p2, dest / f"{_BASE}_LAST.abc")
+            self.assertEqual(p2.read_text(), "v2")
+            self.assertFalse((dest / f"{_BASE}_v003.abc").exists())
 
     def test_last_path_is_stable_across_publishes(self):
         # The whole point of the flat layout: the active path never changes.
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             dest = tmp / "all"
-            p1, _ = publish_into_layout(_src(tmp, "a.usd", "1"), dest, _BASE)
-            p2, _ = publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
-            p3, _ = publish_into_layout(_src(tmp, "c.usd", "3"), dest, _BASE)
+            p1, _ = publish_into_layout(_src(tmp, "a.abc", "1"), dest, _BASE)
+            p2, _ = publish_into_layout(_src(tmp, "b.abc", "2"), dest, _BASE)
+            p3, _ = publish_into_layout(_src(tmp, "c.abc", "3"), dest, _BASE)
             self.assertEqual(p1, p2)
             self.assertEqual(p2, p3)
             self.assertEqual(p3.read_text(), "3")
@@ -78,31 +73,25 @@ class FlatPublishLayout(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             dest = tmp / "all"
-            publish_into_layout(_src(tmp, "a.usd", "1"), dest, _BASE)
-            publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
-            _, v3 = publish_into_layout(_src(tmp, "c.usd", "3"), dest, _BASE)
+            publish_into_layout(_src(tmp, "a.abc", "1"), dest, _BASE)
+            publish_into_layout(_src(tmp, "b.abc", "2"), dest, _BASE)
+            _, v3 = publish_into_layout(_src(tmp, "c.abc", "3"), dest, _BASE)
             self.assertEqual(v3, 3)
-            self.assertTrue((dest / f"{_BASE}_v001.usd").exists())
-            self.assertTrue((dest / f"{_BASE}_v002.usd").exists())
-            self.assertEqual(highest_flat_version(dest, _BASE), 2)
+            self.assertEqual(highest_flat_version(dest, _BASE), 3)
 
     def test_formats_are_independent_lineages(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             dest = tmp / "all"
-            # publish USD twice, FBX once
-            publish_into_layout(_src(tmp, "a.usd", "u1"), dest, _BASE)
-            _, uv2 = publish_into_layout(_src(tmp, "b.usd", "u2"), dest, _BASE)
+            publish_into_layout(_src(tmp, "a.abc", "u1"), dest, _BASE)
+            _, av2 = publish_into_layout(_src(tmp, "b.abc", "u2"), dest, _BASE)
             _, fv1 = publish_into_layout(_src(tmp, "c.fbx", "f1"), dest, _BASE)
-            self.assertEqual(uv2, 2)
+            self.assertEqual(av2, 2)
             self.assertEqual(fv1, 1)  # FBX starts its own line at v001
-            # both formats share one folder, each with its own independent LAST
-            self.assertTrue((dest / f"{_BASE}_LAST.usd").exists())
+            self.assertTrue((dest / f"{_BASE}_LAST.abc").exists())
             self.assertTrue((dest / f"{_BASE}_LAST.fbx").exists())
-            # USD has an archive, FBX does not yet
-            self.assertTrue((dest / f"{_BASE}_v001.usd").exists())
-            self.assertFalse((dest / f"{_BASE}_v001.fbx").exists())
-            self.assertEqual(highest_flat_version(dest, _BASE, ".fbx"), 0)
+            self.assertFalse((dest / f"{_BASE}_v002.fbx").exists())
+            self.assertEqual(highest_flat_version(dest, _BASE, ".fbx"), 1)
 
 
 class LayoutReaders(unittest.TestCase):
@@ -117,8 +106,8 @@ class LayoutReaders(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             dest = tmp / "all"
-            publish_into_layout(_src(tmp, "a.usd", "1"), dest, _BASE)
-            publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
+            publish_into_layout(_src(tmp, "a.abc", "1"), dest, _BASE)
+            publish_into_layout(_src(tmp, "b.abc", "2"), dest, _BASE)
             self.assertEqual(get_last_file(dest, _BASE).read_text(), "2")
             self.assertEqual(find_version_file(dest, _BASE, "v001").read_text(), "1")
             self.assertIsNone(find_version_file(dest, _BASE, "v999"))
@@ -133,10 +122,11 @@ class LayoutReaders(unittest.TestCase):
             seq.mkdir()
             (seq / f"{_BASE}_v001.0001.exr").write_text("frame")
             publish_into_layout(_src(tmp, "a.usd", "1"), dest, _BASE)
-            publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
+            publish_into_layout(_src(tmp, "b.abc", "2"), dest, _BASE)
             names = {p.name for p in published_files(dest, _BASE)}
             self.assertIn(f"{_BASE}_LAST.usd", names)          # active
-            self.assertIn(f"{_BASE}_v001.usd", names)          # archived flat
+            self.assertIn(f"{_BASE}_v001.usd", names)          # version
+            self.assertNotIn(f"{_BASE}_LAST.abc.flux.json", names)  # sidecar hidden
             self.assertNotIn(f"{_BASE}_v001.0001.exr", names)  # sequence not slurped
 
     def test_get_next_version_counts_flat(self):
@@ -144,9 +134,9 @@ class LayoutReaders(unittest.TestCase):
             tmp = Path(tmp)
             dest = tmp / "all"
             publish_into_layout(_src(tmp, "a.usd", "1"), dest, _BASE)
-            publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)  # v001 archived
-            self.assertEqual(highest_version_any(dest, _BASE), 1)
-            self.assertEqual(get_next_version(dest, _BASE), 2)
+            publish_into_layout(_src(tmp, "b.usd", "2"), dest, _BASE)
+            self.assertEqual(highest_version_any(dest, _BASE), 2)
+            self.assertEqual(get_next_version(dest, _BASE), 3)
 
     def test_archive_flat_last_keeps_active(self):
         with tempfile.TemporaryDirectory() as tmp:

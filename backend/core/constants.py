@@ -74,11 +74,20 @@ def _build_dcc_patterns() -> dict[str, list[str]]:
             rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe",
         ],
         "Nuke":       [rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"],   # [0-9] exclut CrashFeedback
-        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter\Adobe Substance 3D Painter.exe"],
-        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer\Adobe Substance 3D Designer.exe"],
+        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter*\Adobe Substance 3D Painter.exe",
+                       rf"{pf86}\Steam\steamapps\common\Substance 3D Painter*\Adobe Substance 3D Painter.exe",
+                       rf"{pf}\Allegorithmic\Substance Painter*\Substance Painter.exe"],
+        # Designer: Adobe install, Steam build, older Allegorithmic install.
+        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer*\Adobe Substance 3D Designer.exe",
+                       rf"{pf86}\Steam\steamapps\common\Substance 3D Designer*\Adobe Substance 3D Designer.exe",
+                       rf"{pf}\Allegorithmic\Substance Designer*\Substance Designer.exe"],
         "ZBrush":     [rf"{pf}\Maxon ZBrush*\ZBrush.exe",
                        rf"{pf86}\Maxon ZBrush*\ZBrush.exe"],
-        "Marvelous":  [rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner.exe"],
+        # Marvelous: school Enterprise build (Marvelous Designer Enterprise OnlineAuth /
+        # MarvelousDesigner_Enterprise_Online.exe) and the CLO-SET personal install.
+        "Marvelous":  [rf"{pf}\Marvelous Designer*\MarvelousDesigner*.exe",
+                       rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner*.exe",
+                       rf"{pf}\CLO Virtual Fashion\MarvelousDesigner*\MarvelousDesigner*.exe"],
         "Photoshop":  [rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
                        rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"],
         "Mari":       [rf"{pf}\Mari*\Bundle\bin\Mari*.exe"],
@@ -103,6 +112,9 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "CHAR":   "assets/chara",
     "PROPS":  "assets/props",
     "ENV":    "assets/enviros",
+    # A set (assembly of components) is an asset like any other (ADR 0019): it has a
+    # NAME token, a folder, and its USD lives in <NAME>/usd like a component's.
+    "SET":    "assets/sets",
     "FXRIG":  "assets/fx_rig",
     # CFX_Rig is no longer a flat CLASS — it lives per-character under
     # assets/chara/<CHARACTER_NAME>/CFX_Rig (scaffolded by asset_creator).
@@ -110,6 +122,20 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "ANIM":   "shot/{seq}/{shot}/anim",
     "FX":     "shot/{seq}/{shot}/fx",
     "CFX":    "shot/{seq}/{shot}/cfx",
+    "CROWD":  "shot/{seq}/{shot}/crowd",
+    "LIGHT":  "lighting/{seq}",
+    "COMP":   "comp/{seq}/{shot}",
+}
+
+# Default TYPE token map for a SHOT (ADR 0019: the department of a shot is its TYPE,
+# exactly like an asset's). Same folders as the legacy shot CLASS tokens above, which
+# stay for the old CLASS_SEQ_SHOT names.
+DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
+    "LAYOUT": "shot/{seq}/{shot}/layout",
+    "ANIM":   "shot/{seq}/{shot}/anim",
+    "FX":     "shot/{seq}/{shot}/fx",
+    "CFX":    "shot/{seq}/{shot}/cfx",
+    "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
 }
@@ -125,6 +151,8 @@ DEFAULT_TYPE_TOKENS: dict[str, str] = {
     "GROOM":   "groom",
     "RIG":     "rig",
     "CFX":     "CFX_Rig",
+    # Kept so old "mult" publishes still resolve; the Publisher no longer offers it
+    # (ADR 0019: one publish = one department).
     "MULT":    "mult",
     "REF":     "reference",
 }
@@ -176,7 +204,9 @@ ARCHIVE_STEM_MENTIONS: str  = "chatMentions"
 
 # Per-project JSON filenames
 JSON_TOKENS: str     = "tokens.json"        # project root
+JSON_PROJECT: str    = "project.json"       # project root - project config + project_id (ADR 0006)
 JSON_PRODUCTION: str = "production.json"    # project root — Production Tab store
+JSON_LOCKS: str      = "locks.json"         # project root — folder lock registry
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
 
 # Per-user settings
@@ -251,9 +281,10 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.1.0"
+APP_VERSION: str = "0.1.012"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out
+CONNECT_TIMEOUT_S:   float = 0.5    # localhost connect: a closed bridge port must fail fast
 MONITOR_INTERVAL_MS: int   = 2000   # connection monitor polling interval (ms)
 CHAT_POLL_INTERVAL_MS: int = 2000   # team chat refresh interval (ms)

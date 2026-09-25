@@ -53,12 +53,13 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         proj = _project()
         dest = _publish(proj, 1)
         ir._BCACHE.clear()
-        self.assertEqual(ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST), ["LAST"])
+        self.assertEqual(ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST), ["LAST", "v001"])
         res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["ext"], ".usd")
         self.assertEqual(Path(res["path"]), dest / f"{_BASE}_LAST.usd")
-        self.assertEqual(Path(res["path"]).read_text(), "v1")
+        # ADR 0017: USD LAST is a pointer layer on the version
+        self.assertIn(f"@./{_BASE}_v001.usd@", Path(res["path"]).read_text())
 
     def test_second_publish_exposes_last_and_v001(self):
         proj = _project()
@@ -66,14 +67,14 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         ir._BCACHE.clear()
         self.assertEqual(
             ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST),
-            ["LAST", "v001"],
+            ["LAST", "v002", "v001"],
         )
-        # LAST -> newest bytes at the stable flat path
+        # LAST -> stable flat path, pointing at the newest version
         last = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
         self.assertTrue(last["ok"], last)
         self.assertEqual(Path(last["path"]), dest / f"{_BASE}_LAST.usd")
-        self.assertEqual(Path(last["path"]).read_text(), "v2")
-        # v001 -> archived flat file in the shared folder, beside LAST
+        self.assertIn(f"@./{_BASE}_v002.usd@", Path(last["path"]).read_text())
+        # v001 -> immutable version file in the shared folder, beside LAST
         v1 = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
         self.assertTrue(v1["ok"], v1)
         self.assertEqual(Path(v1["path"]), dest / f"{_BASE}_v001.usd")
@@ -85,6 +86,65 @@ class ImporterResolveFlatLayout(unittest.TestCase):
         ir._BCACHE.clear()
         res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v999")
         self.assertFalse(res["ok"])
+
+
+class ImporterResolveLayeredUsd(unittest.TestCase):
+    """ADR 0017 U3c: layered USD versions live in <base>_vNNN/<base>.usd."""
+
+    def setUp(self):
+        ir._BCACHE.clear()
+
+    def test_version_folder_root_layer_is_listed_and_resolved(self):
+        proj = _project()
+        dest = resolve_publish_path(proj, f"{_BASE}_LAST.usd")
+        for n in (1, 2):
+            vdir = dest / f"{_BASE}_v00{n}"
+            vdir.mkdir(parents=True)
+            (vdir / f"{_BASE}.usd").write_text("#usda 1.0\n")
+            (vdir / f"{_BASE}_skel.usd").write_text("#usda 1.0\n")
+        self.assertEqual(ir.get_available_iters(proj, _CLASS, _TYPE, _NAME, _INST), ["v002", "v001"])
+        res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(Path(res["path"]), dest / f"{_BASE}_v001" / f"{_BASE}.usd")
+
+
+class ImporterResolveSequenceLayout(unittest.TestCase):
+    """Frame-sequence import: <base>_vNNN/<base>_vNNN.<frame>.<ext> (Nuke/Houdini)."""
+
+    def setUp(self):
+        ir._BCACHE.clear()
+
+    def _publish_sequence(self, project: Path, ver: int, frames: range) -> None:
+        """Lay a Nuke-style EXR version folder <base>_vNNN/<base>_vNNN.<frame>.exr."""
+        dest = resolve_publish_path(project, f"{_BASE}_LAST.exr")
+        seq_dir = dest / f"{_BASE}_v{ver:03d}"
+        seq_dir.mkdir(parents=True, exist_ok=True)
+        for f in frames:
+            (seq_dir / f"{_BASE}_v{ver:03d}.{f:04d}.exr").write_text("x")
+
+    def test_last_maps_to_newest_version_sequence(self):
+        proj = _project()
+        # Two published sequence versions; LAST must resolve the newest (v002).
+        self._publish_sequence(proj, 1, range(1001, 1004))
+        self._publish_sequence(proj, 2, range(1001, 1006))
+        ir._BCACHE.clear()
+        res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "LAST")
+        self.assertTrue(res["ok"], res)
+        self.assertTrue(res["is_sequence"])
+        self.assertEqual((res["first"], res["last"]), (1001, 1005))
+        self.assertTrue(res["frame_pattern"].endswith("_v002.%04d.exr"))
+        # path stays a real first-frame file for callers that only read `path`.
+        self.assertTrue(Path(res["path"]).exists())
+
+    def test_explicit_version_sequence(self):
+        proj = _project()
+        self._publish_sequence(proj, 1, range(1001, 1004))
+        self._publish_sequence(proj, 2, range(1001, 1006))
+        ir._BCACHE.clear()
+        res = ir.resolve_import_path(proj, _CLASS, _TYPE, _NAME, _INST, "v001")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual((res["first"], res["last"]), (1001, 1003))
+        self.assertTrue(res["frame_pattern"].endswith("_v001.%04d.exr"))
 
 
 if __name__ == "__main__":

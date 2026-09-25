@@ -80,7 +80,7 @@ def log_event(
 
     act_path = path or get_activity_path()
     # Append + rotate: bounds the hot file and archives the overflow (Phase 3).
-    ok = append_events(act_path, [entry], ARCHIVE_STEM_ACTIVITY)
+    ok = append_events(act_path, [entry], ARCHIVE_STEM_ACTIVITY, "activity_log")
     if not ok:
         log.error("Failed to write activite.json at %s", act_path)
     return ok

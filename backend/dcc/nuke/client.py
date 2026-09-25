@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
-import socket
-
 from core.constants import DCC_PORTS, SOCKET_TIMEOUT_S
 from core.logger import get_logger
+from dcc.json_bridge import send_json_line
 
 log = get_logger(__name__)
 
@@ -14,26 +12,7 @@ _PORT = DCC_PORTS.get("Nuke", 7003)
 
 
 def _send(payload: dict, timeout: float = SOCKET_TIMEOUT_S) -> dict:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        sock.connect(("127.0.0.1", _PORT))
-        sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-        buf = b""
-        while b"\n" not in buf:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-        line = buf.split(b"\n")[0].decode("utf-8", "replace").strip()
-        return json.loads(line) if line else {"ok": False, "error": "empty response"}
-    except (OSError, ValueError) as exc:
-        return {"ok": False, "error": str(exc)}
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
+    return send_json_line("127.0.0.1", _PORT, payload, timeout, status_to_ok=False)
 
 
 class NukeClient:

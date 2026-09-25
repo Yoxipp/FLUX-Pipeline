@@ -9,11 +9,15 @@ import {
 } from 'lucide-react'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
+import type { LoadTargets } from '../api/client'
 import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
 import { readActiveInstancePort } from '../hooks/useActiveInstances'
+import { PublishNote } from '../components/shared/PublishNote'
+import { FileLog } from '../components/shared/FileLog'
+import { useSessionState } from '../hooks/useSessionState'
 
 // DCCs the backend can import into (from the Folder Manager). Others have no
 // import bridge yet, so they never appear in "Ouvrir dans…".
@@ -46,7 +50,9 @@ function loadTileSize(): TileSize {
   return 'md'
 }
 
-interface ExplorerItem { name: string; isDir: boolean }
+interface ExplorerItem { name: string; isDir: boolean; legacy?: boolean }
+
+const USD_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz'])
 
 interface SavedItem {
   label:   string
@@ -96,7 +102,8 @@ const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custo
 // FX is the display label for the FXRIG class). Name/Instance/Variante come from disk.
 const FINDER_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX']
 const FINDER_CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
-const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'MULT']
+// One task = one USD department (ADR 0019); MULT is kept on disk for old publishes only.
+const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'ANIM']
 
 const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: typeof Star }[] = [
   { id: 'favoris',  label: 'Favoris',  icon: Star },
@@ -150,12 +157,13 @@ const VER_NUM_BG  = '#E8912A'
 // ..._USD_V003 → { format: 'USD', version: 'V003' }. Returns {} when the name is
 // not a versioned publish (plain assets/tasks/instances), so no badge is drawn.
 function parseVersionMeta(name: string): { version?: string; format?: string } {
-  // Drop a real file extension first so the version token is the last segment.
-  const dot = name.lastIndexOf('.')
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const parts = stem.split('_')
-  if (parts.length < 2) return {}
-  const last = parts[parts.length - 1]
+  // The version token is the last "_" segment up to its first dot, so multi-dot
+  // names keep their badge: X_LAST.bgeo.sc, X_LAST.bgeo.sc.link (ADR 0017).
+  const us = name.lastIndexOf('_')
+  if (us <= 0) return {}
+  const parts = name.slice(0, us).split('_')
+  const last = name.slice(us + 1).split('.')[0]
+  parts.push(last)
   const m = /^(LAST|v\d+|V\d+)$/.exec(last)
   if (!m) return {}
   const version = last.toUpperCase()
@@ -215,10 +223,33 @@ const EXT_BADGE: Record<string, { bg: string; fg: string }> = {
   ma:   { bg: '#1E88C8', fg: '#fff' },
   mb:   { bg: '#1565A8', fg: '#fff' },
   ztl:  { bg: '#D03030', fg: '#fff' },
+  hip:   { bg: '#C8541E', fg: '#fff' },
+  hiplc: { bg: '#C8541E', fg: '#fff' },
+  hipnc: { bg: '#C8541E', fg: '#fff' },
+  bgeo:  { bg: '#B8661E', fg: '#fff' },
+  'bgeo.sc': { bg: '#B8661E', fg: '#fff' },
+  vdb:   { bg: '#4A6FA5', fg: '#fff' },
+  exr:   { bg: '#6A4FA0', fg: '#fff' },
+  nk:    { bg: '#D0A020', fg: '#1a1a1a' },
+  psd:   { bg: '#2A6FC0', fg: '#fff' },
+  fbx:   { bg: '#5E6B78', fg: '#fff' },
 }
+// Any other format still gets a neutral chip.
+const EXT_BADGE_DEFAULT = { bg: '#4A4A4A', fg: '#fff' }
+// Chip text for extensions too long for the 26px chip.
+const EXT_LABEL: Record<string, string> = { 'bgeo.sc': 'BGEO', 'bgeo.gz': 'BGEO', hiplc: 'HIPLC', hipnc: 'HIPNC' }
 
+// Format of a publish entry: a LAST .link / .flux.json reports its target's format and
+// compound extensions stay whole (X_LAST.bgeo.sc.link -> 'bgeo.sc', ADR 0017).
 function getExt(filename: string): string {
-  return filename.split('.').pop()?.toLowerCase() ?? ''
+  let name = filename.toLowerCase()
+  if (name.endsWith('.flux.json')) name = name.slice(0, -'.flux.json'.length)
+  else if (name.endsWith('.link')) name = name.slice(0, -'.link'.length)
+  for (const comp of ['.bgeo.sc', '.bgeo.gz', '.geo.sc', '.geo.gz']) {
+    if (name.endsWith(comp)) return comp.slice(1)
+  }
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot + 1) : ''
 }
 
 function FileSvg({ size = 36, selected = false, ext = '', version }: {
@@ -226,7 +257,7 @@ function FileSvg({ size = 36, selected = false, ext = '', version }: {
 }) {
   const body   = selected ? 'var(--accent)'    : 'var(--ink-2)'
   const corner = selected ? 'var(--accent-hi)' : 'var(--ink-3)'
-  const badge  = EXT_BADGE[ext]
+  const badge  = ext ? (EXT_BADGE[ext] ?? EXT_BADGE_DEFAULT) : undefined
   return (
     <svg width={size} height={Math.round(size * 1.22)} viewBox="0 0 30 37" fill="none">
       <path d="M2 0 L20 0 L30 10 L30 35 Q30 37 28 37 L2 37 Q0 37 0 35 L0 2 Q0 0 2 0Z" fill={body} />
@@ -238,7 +269,7 @@ function FileSvg({ size = 36, selected = false, ext = '', version }: {
           <rect x="2" y="25" width="26" height="10" rx="2" fill={badge.bg} />
           <text x="15" y="33" textAnchor="middle" fontSize="6.5" fontWeight="700"
             fontFamily="monospace" fill={badge.fg} letterSpacing="0.3">
-            {ext.toUpperCase()}
+            {(EXT_LABEL[ext] ?? ext.toUpperCase()).slice(0, 5)}
           </text>
         </>
       )}
@@ -861,7 +892,7 @@ function MoveModal({ items, project, currentSubpath, onConfirm, onCancel }: {
   )
 }
 
-function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, openInTargets, onClose }: {
+function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, onCopyHoudiniPath, openInTargets, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -876,6 +907,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
   onMove:           () => void
   onDelete:         () => void
   onCopyPath?:      () => void
+  onCopyHoudiniPath?: () => void
   // Every currently-connected, import-capable DCC for this item (built from live status).
   openInTargets?:   { dcc: string; onClick: () => void }[]
   onClose:          () => void
@@ -940,6 +972,7 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           {row('Copier le chemin', false, () => { onCopyPath(); onClose() })}
+          {onCopyHoudiniPath && row('Copier le chemin Houdini ($FLUX)', false, () => { onCopyHoudiniPath(); onClose() })}
         </>
       )}
       {canEdit && (
@@ -1139,6 +1172,10 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   const [entries, setEntries]   = useState<ExplorerItem[]>([])
   const [loading, setLoading]   = useState(false)
   const [err, setErr]           = useState('')
+  // Permanent-delete selection (only inside a project's ARCHIVE folder).
+  const [selected, setSelected]   = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting]   = useState(false)
 
   useEffect(() => {
     let ok = true
@@ -1147,6 +1184,9 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   }, [])
 
   useEffect(() => {
+    // Reset the delete selection whenever we change folder.
+    setSelected(new Set())
+    setConfirming(false)
     if (!cur) { setEntries([]); return }
     let ok = true
     setLoading(true); setErr('')
@@ -1204,6 +1244,42 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   }
   const relStr = cur.sub.slice(1).join('/')   // hide the leading "ARCHIVE"
 
+  const toggle = (name: string) => {
+    setConfirming(false)
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  // Permanent hard-delete of the selected archive entries (backend is
+  // Windows-safe: force_rmtree/force_remove). Two-step confirm before firing.
+  const doDelete = async () => {
+    if (selected.size === 0 || deleting) return
+    setDeleting(true)
+    try {
+      for (const name of selected) {
+        await api.deleteItem(cur.project, cur.sub, name)
+      }
+      const removed = selected.size
+      setSelected(new Set())
+      setConfirming(false)
+      // Reload the current folder.
+      const d = await api.browseProject(cur.project, cur.sub.join('/'))
+      setEntries([
+        ...d.folders.map(f => ({ name: f.name, isDir: true })),
+        ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
+      ])
+      toast.success(`${removed} élément${removed > 1 ? 's' : ''} supprimé${removed > 1 ? 's' : ''}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Suppression échouée')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={_hdr}>
@@ -1211,6 +1287,35 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
         <span style={{ color: 'var(--ink-2)' }}>{cur.project}</span>
         {relStr && <span style={{ color: 'var(--ink-4)' }}>/ {relStr}</span>}
       </div>
+      {selected.size > 0 && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+            {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
+          </span>
+          <span style={{ flex: 1 }} />
+          {confirming ? (
+            <>
+              <span
+                onClick={() => !deleting && setConfirming(false)}
+                style={{ fontSize: 10, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
+              >Annuler</span>
+              <span
+                onClick={doDelete}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
+              >
+                <Trash2 size={11} strokeWidth={1.75} /> {deleting ? 'Suppression…' : 'Confirmer la suppression définitive'}
+              </span>
+            </>
+          ) : (
+            <span
+              onClick={() => setConfirming(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+            >
+              <Trash2 size={11} strokeWidth={1.75} /> Supprimer
+            </span>
+          )}
+        </div>
+      )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
         {loading ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Chargement…</div>
@@ -1218,14 +1323,23 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{err}</div>
         ) : entries.length === 0 ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Vide</div>
-        ) : entries.map((it, i) => (
+        ) : entries.map((it, i) => {
+          const isSel = selected.has(it.name)
+          return (
           <div
             key={i}
             onClick={() => { if (it.isDir) setCur({ project: cur.project, sub: [...cur.sub, it.name] }) }}
-            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default' }}
+            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default', background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            onMouseLeave={e => (e.currentTarget.style.background = isSel ? 'var(--accent-soft)' : 'transparent')}
           >
+            <input
+              type="checkbox"
+              checked={isSel}
+              onClick={e => e.stopPropagation()}
+              onChange={() => toggle(it.name)}
+              style={{ flexShrink: 0, accentColor: 'var(--accent)', cursor: 'pointer' }}
+            />
             {it.isDir ? <FolderSvg size={22} /> : <div style={{ width: 22, textAlign: 'center', color: 'var(--ink-4)', fontSize: 12 }}>·</div>}
             <span style={{ flex: 1, fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
             <span
@@ -1234,7 +1348,8 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
               style={{ flexShrink: 0, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
             >Ouvrir</span>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -1351,8 +1466,9 @@ function resolveOpenPath(absPath: string, workspace: string): NavLevel | null {
 // ── Composant principal ───────────────────────────────────────────────────────
 
 export function Projects() {
-  const [navStack, setNavStack] = useState<NavLevel[]>([{ kind: 'root' }])
-  const [navIdx, setNavIdx]     = useState(0)
+  // Session-kept (U3): coming back to the Folder Manager reopens the same folder.
+  const [navStack, setNavStack] = useSessionState<NavLevel[]>('fm.navStack', [{ kind: 'root' }])
+  const [navIdx, setNavIdx]     = useSessionState('fm.navIdx', 0)
   const nav = navStack[navIdx]
 
   const [items, setItems]                   = useState<ExplorerItem[]>([])
@@ -1381,8 +1497,8 @@ export function Projects() {
     setNavIdx(1)
   }, [settings?.workspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [tab, setTab]             = useState<Tab>('project')
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('tous')
+  const [tab, setTab]             = useSessionState<Tab>('fm.tab', 'project')
+  const [sidebarTab, setSidebarTab] = useSessionState<SidebarTab>('fm.sidebarTab', 'tous')
 
   // Explorer tile size (small / medium / large), persisted per-browser
   const [tileSize, setTileSize]   = useState<TileSize>(loadTileSize)
@@ -1399,6 +1515,8 @@ export function Projects() {
 
   // Context menu & delete confirm
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null)
+  // V4: what "Ouvrir dans..." loads for the right-clicked USD file (asset first, layer second).
+  const [loadTargets,    setLoadTargets]    = useState<{ name: string; lt: LoadTargets } | null>(null)
   const [deleteConfirm,  setDeleteConfirm]  = useState<ExplorerItem[] | null>(null)
   const [deleteProjectTarget, setDeleteProjectTarget] = useState<SavedItem | null>(null)
   const [deleteError,    setDeleteError]    = useState('')
@@ -1676,7 +1794,7 @@ export function Projects() {
         const d = await api.browseProject(nav.project, subpath || undefined)
         setItems([
           ...d.folders.map(f => ({ name: f.name, isDir: true })),
-          ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
+          ...(d.files ?? []).map(f => ({ name: f.name, isDir: false, legacy: !!f.legacy })),
         ])
       }
     } catch { setItems([]) }
@@ -1888,7 +2006,15 @@ export function Projects() {
     setSelectedNames(newSel)
     const ctxItems = items.filter(it => newSel.has(it.name))
     setCtxMenu({ x: e.clientX, y: e.clientY, items: ctxItems })
-  }, [selectedNames, items])
+    setLoadTargets(null)
+    const one = ctxItems.length === 1 ? ctxItems[0] : null
+    if (one && !one.isDir && nav.kind === 'inside' && USD_EXTS.has('.' + (one.name.split('.').pop() ?? '').toLowerCase())) {
+      const rel = [...nav.subpath, one.name].join('/')
+      api.getLoadTargets(nav.project, rel)
+        .then(lt => setLoadTargets({ name: one.name, lt }))
+        .catch(() => setLoadTargets(null))
+    }
+  }, [selectedNames, items, nav])
 
   const handleSetProject = useCallback((name: string) => {
     setActiveProject(name)
@@ -1927,9 +2053,11 @@ export function Projects() {
     await loadItems()
   }, [nav, loadItems, pushUndo])
 
-  const handleOpenInHoudini = useCallback(async (item: ExplorerItem) => {
+  const handleOpenInHoudini = useCallback(async (item: ExplorerItem, relOverride?: string) => {
     if (nav.kind !== 'inside') return
-    const rel_path = [...nav.subpath, item.name].join('/')
+    const rel_path = relOverride ?? [...nav.subpath, item.name].join('/')
+    // DCC imports can take a while (big USD stages): keep a spinner toast until done.
+    const id = toast.loading(`Import de ${item.name} dans Houdini…`)
     try {
       const tok = await api.getFluxTokensFromPath(nav.project, rel_path)
       const res = await api.createFluxImporterNode({
@@ -1944,53 +2072,161 @@ export function Projects() {
       // Node is created but resolve can still find nothing (asset missing for these
       // tokens, or FLUX unreachable from Houdini) — warn instead of a false success.
       if (res.result?.mode === 'replaced') {
-        toast.success(`${item.name} : path mis à jour sur le node sélectionné`)
+        toast.success(`${item.name} : path mis à jour sur le node sélectionné`, { id })
       } else if (res.result?.resolved_path) {
-        toast.success(`${item.name} importé dans Houdini`)
+        toast.success(`${item.name} importé dans Houdini`, { id })
       } else {
-        toast.warning(`Node créé mais fichier non résolu pour ${item.name} — clique ↺ Resolve dans le node`)
+        toast.warning(`Node créé mais fichier non résolu pour ${item.name} : clique ↺ Resolve dans le node`, { id })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
       const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)
       toast.error(offline
         ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
-        : `Import Houdini échoué : ${msg}`)
+        : `Import Houdini échoué : ${msg}`, { id })
+    }
+  }, [nav])
+
+  // Files a Houdini LOP loads directly (USD + Houdini's USD file format plugins).
+  const LOP_IMPORT_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz', '.abc', '.bgeo', '.sc', '.geo', '.obj',
+                                   '.fbx', '.vdb', '.gltf', '.glb', '.ply', '.stl'])
+  const LOP_MODE_LABELS = { reference: 'Reference', payload: 'Payload', sublayer: 'Sublayer' } as const
+
+  const handleImportHoudiniLop = useCallback(async (item: ExplorerItem, mode: keyof typeof LOP_MODE_LABELS) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    const label = LOP_MODE_LABELS[mode]
+    const id = toast.loading(`${label} de ${item.name} dans Houdini…`)
+    try {
+      const res = await api.houdiniImportLop(nav.project, rel_path, mode)
+      const r = res.result
+      const added = r?.mode?.endsWith('_added')
+      toast.success(added
+        ? `${item.name} ajouté à ${r?.node_path} (entrée ${r?.entry})`
+        : `${item.name} : ${label} LOP créé (${r?.node_path})`, { id })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      const offline = /urlopen|refused|connect|actively refused|WinError/i.test(msg)
+      toast.error(offline
+        ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
+        : `Import LOP échoué : ${msg}`, { id })
     }
   }, [nav])
 
   const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc', '.usd', '.usda', '.usdc', '.usdz'])
 
-  const handleOpenInMaya = useCallback(async (item: ExplorerItem) => {
+  const handleOpenInMaya = useCallback(async (item: ExplorerItem, relOverride?: string, mode: 'import' | 'proxy' = 'import') => {
     if (nav.kind !== 'inside') return
-    const rel_path = [...nav.subpath, item.name].join('/')
+    const rel_path = relOverride ?? [...nav.subpath, item.name].join('/')
+    const id = toast.loading(`Import de ${item.name} dans Maya…`)
     try {
-      await api.importFileInMaya(nav.project, rel_path, readActiveInstancePort('Maya') ?? undefined)
-      toast.success(`${item.name} importé dans Maya`)
+      await api.importFileInMaya(nav.project, rel_path, readActiveInstancePort('Maya') ?? undefined, mode)
+      toast.success(`${item.name} importé dans Maya`, { id })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
       toast.error(msg.includes('répond pas')
         ? 'Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
-        : `Import Maya échoué : ${msg}`)
+        : `Import Maya échoué : ${msg}`, { id })
+    }
+  }, [nav])
+
+  // Nuke Read supports image/plate formats; Photoshop opens raster/PSD files.
+  const NUKE_IMPORT_EXTS = new Set(['.exr', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.dpx', '.mov', '.psd', '.hdr', '.tga'])
+  const PS_OPEN_EXTS     = new Set(['.psd', '.psb', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif'])
+
+  const handleOpenInNuke = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    const id = toast.loading(`Import de ${item.name} dans Nuke…`)
+    try {
+      await api.nukeImportPath(nav.project, rel_path)
+      toast.success(`${item.name} → Nuke (Read)`, { id })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      toast.error(`Import Nuke échoué : ${msg}`, { id })
+    }
+  }, [nav])
+
+  const handleOpenInPhotoshop = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    const id = toast.loading(`Ouverture de ${item.name} dans Photoshop…`)
+    try {
+      await api.photoshopOpen(nav.project, rel_path)
+      toast.success(`${item.name} ouvert dans Photoshop`, { id })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      toast.error(`Ouverture Photoshop échouée : ${msg}`, { id })
     }
   }, [nav])
 
   // "Open in" targets = every currently-CONNECTED DCC that can import this file.
   // Only Maya & Houdini have an import bridge today; add a branch here to onboard more.
+  const handleDeleteLegacy = useCallback(async (item: ExplorerItem) => {
+    if (nav.kind !== 'inside') return
+    const rel_path = [...nav.subpath, item.name].join('/')
+    try {
+      const res = await api.deleteUsdLegacy(nav.project, rel_path)
+      toast.success(`${item.name} deplace dans le backup du projet`, { description: res.backup })
+      await loadItems()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+  }, [nav, loadItems])
+
   const buildOpenInTargets = useCallback((items: ExplorerItem[]): { dcc: string; onClick: () => void }[] => {
     if (nav.kind !== 'inside' || items.length !== 1) return []
     const item = items[0]
     if (item.isDir) return []
     const ext = '.' + (item.name.split('.').pop() ?? '').toLowerCase()
     const targets: { dcc: string; onClick: () => void }[] = []
+    // V4 (ADR 0019 points 5 and 7): a USD file opens what the pipeline loads (the asset,
+    // the decor or the shot), the department layer alone comes second, an old file never.
+    const lt = loadTargets?.name === item.name ? loadTargets.lt : null
+    // Houdini LOP: this exact file as Reference / Payload / Sublayer, into the
+    // selected LOP of that kind or a new one (any USD-readable format).
+    const lopTargets = dccStatus['Houdini']?.connected && LOP_IMPORT_EXTS.has(ext)
+      ? (Object.keys(LOP_MODE_LABELS) as (keyof typeof LOP_MODE_LABELS)[]).map(mode => ({
+          dcc: `Houdini LOP : ${LOP_MODE_LABELS[mode]}`,
+          onClick: () => void handleImportHoudiniLop(item, mode),
+        }))
+      : []
+    if (USD_EXTS.has(ext) && lt) {
+      for (const t of lt.targets) {
+        const label = t.primary ? t.label : 'couche seule'
+        if (dccStatus['Houdini']?.connected) {
+          targets.push({ dcc: `Houdini : ${label}`, onClick: () => void handleOpenInHoudini(item, t.rel_path) })
+        }
+        if (dccStatus['Maya']?.connected) {
+          targets.push({ dcc: `Maya : ${label} (aplati)`, onClick: () => void handleOpenInMaya(item, t.rel_path) })
+          if (t.primary) {
+            targets.push({ dcc: `Maya : ${label} (proxy USD, variantes)`, onClick: () => void handleOpenInMaya(item, t.rel_path, 'proxy') })
+          }
+        }
+      }
+      if (lt.legacy) {
+        targets.push({ dcc: 'Ancien fichier : supprimer (backup)', onClick: () => void handleDeleteLegacy(item) })
+      } else {
+        targets.push(...lopTargets)
+      }
+      return targets
+    }
     if (dccStatus['Houdini']?.connected) {
       targets.push({ dcc: 'Houdini', onClick: () => void handleOpenInHoudini(item) })
     }
+    targets.push(...lopTargets)
     if (dccStatus['Maya']?.connected && MAYA_IMPORT_EXTS.has(ext)) {
       targets.push({ dcc: 'Maya', onClick: () => void handleOpenInMaya(item) })
     }
+    if (dccStatus['Nuke']?.connected && NUKE_IMPORT_EXTS.has(ext)) {
+      targets.push({ dcc: 'Nuke', onClick: () => void handleOpenInNuke(item) })
+    }
+    // Photoshop is external COM (no scan entry); offer it for raster/PSD files.
+    if (PS_OPEN_EXTS.has(ext)) {
+      targets.push({ dcc: 'Photoshop', onClick: () => void handleOpenInPhotoshop(item) })
+    }
     return targets
-  }, [nav, dccStatus, handleOpenInHoudini, handleOpenInMaya, MAYA_IMPORT_EXTS])
+  }, [nav, dccStatus, loadTargets, handleOpenInHoudini, handleImportHoudiniLop, LOP_IMPORT_EXTS, LOP_MODE_LABELS, handleOpenInMaya, handleOpenInNuke, handleOpenInPhotoshop, handleDeleteLegacy, MAYA_IMPORT_EXTS, NUKE_IMPORT_EXTS, PS_OPEN_EXTS])
 
   const handleMove = useCallback(async (targets: ExplorerItem[], newSubpath: string[]) => {
     if (nav.kind !== 'inside') return
@@ -2193,6 +2429,20 @@ export function Projects() {
       toast.error('Impossible de copier le chemin')
     }
   }, [nav, settings?.workspace])
+
+  // Copy the path as $FLUX/DOSSIER_PROJETS/... — pasteable directly in any
+  // Houdini string parm (the flux.json / autostart sets $FLUX to the pipe root).
+  const handleCopyHoudiniPath = useCallback(async (item: ExplorerItem) => {
+    const parts = nav.kind === 'root'
+      ? ['$FLUX', 'DOSSIER_PROJETS', item.name]
+      : ['$FLUX', 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
+    try {
+      await navigator.clipboard.writeText(parts.join('/'))
+      toast.success('Chemin Houdini copié')
+    } catch {
+      toast.error('Impossible de copier le chemin')
+    }
+  }, [nav])
 
   const recentSidebarItems = recents.slice(0, 5)
 
@@ -2646,6 +2896,12 @@ export function Projects() {
                           <div title={item.name} style={{ fontSize: TILE_SIZES[tileSize].font, textAlign: 'center', color: isSel ? 'var(--ink)' : 'var(--ink-2)', fontWeight: isSel ? 500 : 400, wordBreak: 'break-all', lineHeight: 1.3, maxWidth: '100%' }}>
                             {item.name}
                           </div>
+                          {item.legacy && (
+                            <span title="Ancien fichier du Constructeur : plus propose a l'import (clic droit pour le supprimer)"
+                              style={{ fontSize: 9, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--rule-2)', color: 'var(--ink-3)', background: 'var(--paper-2)' }}>
+                              ancien
+                            </span>
+                          )}
                         </div>
                       )
                     })}
@@ -2691,6 +2947,14 @@ export function Projects() {
             )}
           </div>
 
+          {/* N7: note of the selected published file (hidden when it has none) */}
+          {nav.kind === 'inside' && selectedNames.size === 1 && (
+            <>
+              <PublishNote project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
+              <FileLog     project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
+            </>
+          )}
+
           {/* Projet actif + Set Project */}
           <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
             <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
@@ -2734,6 +2998,7 @@ export function Projects() {
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onCopyPath={ctxMenu.items.length === 1 ? () => void handleCopyPath(ctxMenu.items[0]) : undefined}
+          onCopyHoudiniPath={ctxMenu.items.length === 1 ? () => void handleCopyHoudiniPath(ctxMenu.items[0]) : undefined}
           openInTargets={buildOpenInTargets(ctxMenu.items)}
           onClose={() => setCtxMenu(null)}
         />

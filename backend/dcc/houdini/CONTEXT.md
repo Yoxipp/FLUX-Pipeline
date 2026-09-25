@@ -1,92 +1,22 @@
-# CONTEXT — Houdini DCC Integration
+# CONTEXT - `backend/dcc/houdini/`
 
-> Domain: backend / DCC integration
-> Path: backend/dcc/houdini/
-> Last updated: 2026-05-15
-> Key internal dependencies: core.constants (HOUDINI_HTTP_PORT via DCC_PORTS), routers/dcc.py (consumer)
+> Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/backend__dcc__houdini.md`.
+> Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-## 1. Module Role
+`flux_houdini_server.py` (HTTP in-app 48884..48891, refuse les navigateurs S2), `client.py`, `houdini_export.py` / `houdini_import.py` / `houdini_usd_light_export.py`, `autostart.py` (package `packages/flux.json` + favoris `jump.pref` `$FLUX/` et `$FLUX/DOSSIER_PROJETS/` ajoutes a l'installation, retires a la desinstallation), `hda/` (HDA importer/exporter/lighting), `startup/`.
 
-Provides HTTP client and autostart management for Houdini DCC integration. The module encapsulates two concerns:
-- **Client side** (backend FLUX) : synchronous HTTP client that communicates with a server running inside Houdini
-- **Autostart management** : installs and removes FLUX bootstrap code in Houdini's startup script (123.py) without requiring Houdini to be open
+Ne jamais ecrire dans `houdini.env` (crash Houdini 22). Ne jamais exposer le `usd-core` pip au Python de Houdini.
 
-The Houdini server (`flux_houdini_server.py`) runs inside Houdini on port 48884, exposing endpoints for code execution, state queries, and event streaming. The client and autostart utilities operate independently of Houdini's process, allowing backend FLUX to manage the DCC lifecycle and communication.
+Import USD "Ouvrir dans Houdini" (2026-09-17) : toujours par contexte (`create_usd_context_import`, sonde pxr `features/importer/usd_probe.py`) : `/stage` = Reference LOP (`/assets/<X>` component ou skeleton, `/sets/<X>` assembly), `/obj` ou SOP = HDA `flux_importer` dont la Source vise le meme fichier (`library_import.importer_source_for_file` : tokens si le publish se resout sur ce fichier, Bibliotheque pour un component / assembly LAST ou vNNN, sinon chemin libre) ; sans HDA : `kinefx::usdcharacterimport` si skeleton, sinon `usdimport`. Tokens : un USD en couches `<base>_vNNN/<base>.usd` est liste et resolu par iteration. Export SOP `.usd*` = `usdexport` (plage = un fichier anime), jamais `rop_geometry`.
 
-## 2. When to Read This Module
+Import LOP Reference / Payload / Sublayer (2026-09-24) : `import_into_lop` + `POST /dcc/houdini/import/lop` (menu "Houdini LOP : Reference / Payload / Sublayer" du Folder Manager). Tout format lisible par le USD de Houdini 22 (`LOP_FILE_EXTS` : usd*, abc, bgeo(.sc), geo, obj, fbx, vdb, gltf/glb, ply, stl), charge tel quel par les plugins de format, sans SOP. Node selectionne du meme genre (Reference LOP pour reference et payload, Sublayer LOP) : fichier ajoute en nouvelle entree (ou dans la derniere vide) ; sinon nouveau LOP branche apres la selection (sinon le display), hors reseau LOP -> `/stage`. Payload = Reference LOP `reftypeN = payload`. Prim : `reference_prim_path` pour un USD, `/<nom du fichier>` sinon. "Ouvrir dans Houdini" (mode auto) en contexte LOP : ajoute au Reference / Sublayer selectionne, reference un non-USD (plus de repli dans /obj), un USD sans cette selection garde le flux `flux_importer`. Code valide en hython 22.
+Launcher : `PYTHONUSERBASE` retire de l'env (sinon Houdini charge le pxr pip du Python Store).
+HDA `flux_importer` (2026-09-17) : parm `source_mode` = Publish (tokens) / Bibliotheque USD (`/dcc/houdini/importer/library`, `library_resolve`) / Chemin libre (`probe?file=`). Bibliotheque (2026-09-19) : `lib_kind` (asset / decor / shot) -> `lib_class` (assets) ou `lib_seq` (shots) -> `lib_item` filtre ; les items du backend portent `kind`, `class`, `seq`, `name` ; `on_lib_filter` garde l'element s'il passe le filtre, `_sync_lib_filters` (au resolve) recale les menus sur `lib_item`. Un USD avec skeleton passe `usd_character` a 1 : sortie 1 = mesh boneCapture (`kinefx::usdcharacterimport`), sorties 2-3 = skeleton repos / anime. Le module Python est servi par le backend (relancer FLUX), le `.hda` (parms, noeuds internes) est rebuild dans `resources/shelves/houdini/` puis recopie par `reconcile_installed_dccs` au demarrage.
 
-- **Integrating new DCC (Maya, Nuke, etc.)** : Use this module as a reference pattern — replicate client.py + autostart.py structure
-- **Adding commands to Houdini execution** : Read client.py to understand available methods and SSE subscription pattern
-- **Debugging autostart failures** : Read autostart.py to understand prefs dir detection, startup file location, and idempotent marker logic
-- **Extending HTTP server endpoints** : Read flux_houdini_server.py and client.py in parallel to add new request/response pairs
-- **Handling DCC lifecycle from routers** : Read routers/dcc.py alongside this module to see how autostart and client are invoked
+Layout d'assembly (2026-09-17) : `houdini_layout.collect_layout(name)` lit les matrices locales des instances `<ASM>/<CLASS>/<INSTANCE>` sur le stage du node LOP selectionne (sinon display node) et les renvoie au backend (`features/usd_assembler/layout_publish.py` ecrit le layer). Rien n'est ecrit par Houdini.
 
-## 3. Files Present
+Icone des HDA FLUX (2026-09-19) : section `IconSVG` = `resources/shelves/houdini/flux_hda.svg`, `setIcon("opdef:.?IconSVG")`. Pas de PNG en `IconImage` : Houdini 22 ne le dessine pas.
 
-| File | Type | Role | Public Exports / Elements |
-|---|---|---|---|
-| `__init__.py` | module | Package entry point, exports singleton and autostart module | `HoudiniClient`, `houdini_client`, `autostart` |
-| `flux_houdini_server.py` | script | HTTP server that runs inside Houdini; deployed to AppData on install | `start(port)`, `stop()` |
-| `client.py` | module | Synchronous HTTP client for backend FLUX → Houdini server | `HoudiniClient`, `houdini_client`, `HOUDINI_HTTP_PORT` |
-| `autostart.py` | module | Installs/removes FLUX bootstrap block in Houdini's 123.py | `get_prefs_dir`, `get_startup_file`, `is_installed`, `install`, `uninstall` |
-| `startup/__init__.py` | module | Reserved for future Houdini startup hooks | (empty stub) |
+Contenu du component dans FLUX Import /stage (ADR 0023, 2026-09-24) : Source Bibliotheque + Asset -> dossier "Contenu du component" : multiparms GEO / GROOM / LOOKDEV / ANIM (preview) / AUTRES, une case par fichier (`<prefix>_on#`, id cache `<prefix>_id#`, `<prefix>_ok#` = 0 grise la case). Les cases vivent sur le node (`comp_memory` par component) ; `on_component_toggle` appelle `POST /usd/component/check` (grises + avertissements, jamais de deselection) et ecrit `comp_state` ; le LOP interne `apply_component` (Python Script) pose les selections de variantes sur `prim_path` et un warning de node. Proxies actifs par defaut, anims eteintes. Le SOP `/obj` n'a pas ce dossier. ADR 0024 : un link a variante pilote le variantSet de son block (case cochee = variante selectionnee, `[block = variante]` dans le libelle) ; un link en sublayer est affiche "toujours actif" (pas de set).
 
-## 4. Useful Relations
-
-**Consumed by** : `routers/dcc.py` — endpoints `GET/POST/DELETE /{dcc_key}/autostart` et `GET /{dcc_key}/ping`
-
-**Déployé vers** : `%APPDATA%/FLUX/dcc/houdini/flux_houdini_server.py` (copié par `autostart.install()`)
-
-**Modifie** : `%USERPROFILE%/Documents/houdiniX.Y/scripts/123.py` (bloc autostart délimité par marqueurs)
-
-**Référence de pattern** : Ce module définit le template pour les futures intégrations DCC — client, autostart, serveur in-process
-
-## 5. Module Entry Points
-
-- **Depuis routers/dcc.py** :
-  - `from dcc.houdini import autostart` — gérer le script de démarrage
-  - `from dcc.houdini.client import houdini_client` — exécuter du code et interroger l'état
-
-- **Depuis Houdini (123.py)** :
-  - `import flux_houdini_server` → appelle automatiquement `start()` à l'import
-
-- **Pour publisher/importer futurs** :
-  - `houdini_client.run(code_str)` — exécuter du Python dans le main thread de Houdini
-  - `houdini_client.subscribe(callback)` — écouter les événements SSE de Houdini
-
-## 6. Per-File Detail
-
-### `__init__.py`
-**Role:** Namespace du package ; exporte le singleton client et le module autostart pour consommation par routers/dcc.py.
-
-### `flux_houdini_server.py`
-**Role:** Serveur HTTP tournant dans l'interpréteur Python de Houdini. Déployé dans `%APPDATA%/FLUX/dcc/houdini/` et importé par 123.py au démarrage de Houdini. Expose des endpoints REST et SSE pour que le backend FLUX interroge l'état, exécute du code, et reçoive des événements en temps réel.
-
-Exécute le code soumis sur le main thread de Houdini via `hou.ui.addEventLoopCallback`. Affiche un `hou.ui.setStatusMessage` à l'activation.
-
-**Exports publics :** `start(port)`, `stop()` — endpoints : `/ping`, `/state`, `/run`, `/events`
-
-### `client.py`
-**Role:** Client HTTP synchrone (stdlib urllib) côté backend FLUX. Communique avec `flux_houdini_server` sans dépendance Houdini ; importable dans tout environnement Python.
-
-**Exports publics :**
-- `HoudiniClient(host, port)` — méthodes : `ping()`, `is_connected()`, `state()`, `run(code)`, `selected_nodes()`, `get_parm(path, name)`, `set_parm(path, name, value)`, `subscribe(callback)`
-- `houdini_client` — singleton par défaut (localhost:48884)
-- `HOUDINI_HTTP_PORT` — constante port (48884)
-
-### `autostart.py`
-**Role:** Gère l'installation et la suppression du bloc FLUX dans 123.py sans Houdini ouvert. Détecte le dossier prefs, déploie le script serveur dans AppData, et insère un bloc délimité par marqueurs (idempotent).
-
-Ordre de détection du dossier prefs : `HOUDINI_USER_PREF_DIR` env var → version extraite du chemin exe → scan `Documents/houdiniX.Y`.
-
-**Exports publics :** `get_prefs_dir(exe_path)`, `get_startup_file(exe_path)`, `is_installed(exe_path)`, `install(exe_path)`, `uninstall(exe_path)` — toutes retournent `{"success": bool, "message": str, ...}`
-
-### `startup/__init__.py`
-**Role:** Stub vide, réservé pour de futurs hooks de démarrage Houdini spécifiques.
-
-## 7. Maintenance Notes
-
-- **Déploiement serveur** : `flux_houdini_server.py` est recopié dans AppData à chaque `autostart.install()` — la version en production est toujours à jour après installation.
-- **Port** : 48884 défini dans `core.constants.DCC_PORTS["Houdini"]` — utilisé pour le probe TCP du WebSocket de statut et par le client HTTP.
-- **Idempotence** : Les marqueurs `# >>> FLUX autostart` / `# <<< FLUX autostart` garantissent qu'un double appel à `install()` n'insère pas de doublon.
-- **Ajout d'un nouveau DCC** : Répliquer client.py + autostart.py, enregistrer dans `_AUTOSTART_MODULES` de routers/dcc.py, ajouter le port dans constants.DCC_PORTS.
+FLUX Shot pour une scene a plusieurs shots (ADR 0023, briques du template du mainteneur) : `_branch_end` suit la branche du shot (s'arrete avant un merge ou un ROP) pour le light rig du shot et le rendu ; boutons "Creer le ROP du shot" (`/out/RENDER_<SEQ>_<SHOT>`, Karma, plage / camera / `render_picture` du node), "Rendre ce shot", "Rendre la sequence" (tous les FLUX Shot de la sequence, un echec n'arrete pas les autres). Plus de scene de sequence generee par FLUX (`houdini_sequence_scene.py` supprime).

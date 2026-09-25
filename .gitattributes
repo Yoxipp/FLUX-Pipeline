@@ -1,0 +1,11 @@
+# Binary assets: never diff or convert line endings.
+*.hda    binary
+*.hip    binary
+*.hipnc  binary
+*.png    binary
+*.ico    binary
+*.exe    binary
+*.usdc   binary
+*.abc    binary
+*.exr    binary
+*.tx     binary

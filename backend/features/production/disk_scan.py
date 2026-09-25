@@ -77,6 +77,12 @@ def scan_project_assets(
     return out
 
 
+# Generated USD folders (asset component, shot stage : ADR 0018 / 0020) hold versions,
+# not work: never read as a task (else Production grows a "USD" task whose subtasks
+# are version folders, and the create-only sync copies them into other shots).
+_NOT_TASK_DIRS = frozenset({"usd"})
+
+
 def scan_project_shots(
     project_path: Path,
     class_tokens: dict[str, str],
@@ -137,7 +143,7 @@ def scan_project_shots(
                 key: tuple[str, str | None] = (seq_dir.name.upper(), shot_dir.name.upper())
                 entry = out_map.setdefault(key, {"seq": key[0], "shot": key[1], "tasks": []})
                 for task_dir in _sorted_subdirs(shot_dir):
-                    if not _dir_has_child(task_dir):
+                    if task_dir.name.lower() in _NOT_TASK_DIRS or not _dir_has_child(task_dir):
                         continue
                     token = class_task_map.get(task_dir.name.lower(), task_dir.name.upper())
                     subtasks = [
@@ -162,7 +168,7 @@ def _walk_asset(asset_dir: Path, disk_to_type: dict[str, str]) -> list[dict]:
     """Return the tasks (with subtasks) for one asset directory."""
     tasks: list[dict] = []
     for task_dir in _sorted_subdirs(asset_dir):
-        if not _dir_has_child(task_dir):
+        if task_dir.name.lower() in _NOT_TASK_DIRS or not _dir_has_child(task_dir):
             continue
         token = disk_to_type.get(task_dir.name.lower(), task_dir.name.upper())
         subtasks = [

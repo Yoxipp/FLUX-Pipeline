@@ -33,10 +33,21 @@ _VERSION_LABEL = "v{num:03d}"
 _ACTIVE = "LAST"
 
 # Layer kinds a layered publish may hold (the file suffix after <base>_).
-LAYER_KINDS: tuple[str, ...] = ("model", "skel", "anim", "cam", "light")
+LAYER_KINDS: tuple[str, ...] = ("model", "skel", "anim", "cam", "light", "look")
 
 # A version folder is "<base>_LAST" or "<base>_vNNN".
 _VER_FOLDER_RE = re.compile(r"^(?P<base>.+)_(?P<ver>LAST|v\d+)$")
+
+
+def _default_prim(path: Path) -> str:
+    """defaultPrim of a published layer: the NAME token since ADR 0019, the publish base before."""
+    try:
+        from pxr import Sdf
+
+        layer = Sdf.Layer.OpenAsAnonymous(str(path))
+        return layer.defaultPrim if layer is not None else ""
+    except Exception:
+        return ""
 
 
 class FluxResolver:
@@ -81,7 +92,7 @@ class FluxResolver:
 
     # ── layered-publish discovery (component v2) ────────────────────────────────
     def _scan_version_folders(
-        self, parent: Path, instance: str = "", variante: str = ""
+        self, parent: Path, instance: str = "", variante: str = "", base_name: str = "",
     ) -> dict[str, dict]:
         """Return {version_label: {"base", "folder", "layers": [kind...]}}.
 
@@ -110,6 +121,8 @@ class FluxResolver:
                 if not m:
                     continue
                 base, ver = m.group("base"), m.group("ver")
+                if base_name and base != base_name:
+                    continue
                 if want_var and not self._folder_has_variante(folder, want_var):
                     continue
                 layers = [
@@ -118,7 +131,31 @@ class FluxResolver:
                     if next(iter(folder.glob(f"{base}_{kind}.*")), None) is not None
                 ]
                 found[ver] = {"base": base, "folder": folder, "layers": layers}
+        if _ACTIVE not in found:
+            self._add_derived_last(found)
         return found
+
+    @staticmethod
+    def _add_derived_last(found: dict[str, dict]) -> None:
+        """ADR 0017: LAST is no longer a folder but a <base>_LAST.<usd ext> pointer layer
+        beside the vNNN/ folders. Map "LAST" to the version it points at (highest vNNN
+        when the pointer is missing or unreadable), with that concrete "version"."""
+        from features.publisher import last_pointer as lp
+
+        versions = {v: info for v, info in found.items() if v.startswith("v") and v[1:].isdigit()}
+        if not versions:
+            return
+        target = None
+        for info in versions.values():
+            for ext in lp.LAYER_EXTS:
+                last = lp.read_last(info["folder"].parent, info["base"], ext)
+                if last and last.get("version") in versions:
+                    target = last["version"]
+                    break
+            if target:
+                break
+        target = target or max(versions, key=lambda v: int(v[1:]))
+        found[_ACTIVE] = {**versions[target], "version": target}
 
     @staticmethod
     def _variante_of_layer_file(name: str) -> str:
@@ -170,7 +207,12 @@ class FluxResolver:
         base = self._project / name_rel
         if not base.exists():
             return []
-        return sorted(p.name for p in base.iterdir() if p.is_dir())
+        # Folder -> TYPE key ("model" -> "GEO"); unknown folders keep their name. The
+        # component folder "usd" is not a task.
+        by_folder = {str(v).replace("\\", "/").strip("/").split("/")[0]: k
+                     for k, v in tokens.get("TYPE", {}).items() if v}
+        return sorted({by_folder.get(p.name, p.name) for p in base.iterdir()
+                       if p.is_dir() and p.name != "usd"})
 
     def list_instances(self, asset: str, task: str = "") -> list[str]:
         """Instance leaves published for *asset* (optionally scoped to *task*).
@@ -198,6 +240,51 @@ class FluxResolver:
                 if p.is_dir() and not _VER_FOLDER_RE.match(p.name):
                     insts.add(p.name)
         return sorted(insts)
+
+    def list_publish_bases(self, asset: str, task: str, instance: str = "") -> list[dict]:
+        """Every published base of *asset*/*task*: ``[{"base", "instance", "variante"}]``.
+
+        A base is ``CLASS_TYPE_NAME_INSTANCE[_VARIANTE]``: two publishes of the same
+        instance that differ by their VARIANTE are two different things (ADR 0019), so
+        each one is listed separately (layered version folders and plain files alike).
+        """
+        from features.folder_manager.naming_validator import parse_filename
+        from features.publisher import last_pointer as lp
+
+        try:
+            parent = self._publish_parent(asset, task)
+        except ResolveError:
+            return []
+        if not parent.exists():
+            return []
+        if instance:
+            leaf = parent / instance.lower()
+            leaves = [leaf] if leaf.exists() else []
+        else:
+            leaves = [parent] + sorted(p for p in parent.iterdir() if p.is_dir())
+        out: dict[tuple[str, str], dict] = {}
+        for inst in leaves:
+            if not inst.exists():
+                continue
+            leaf_name = inst.name if inst != parent else ""
+            for entry in sorted(inst.iterdir()):
+                base = ""
+                if entry.is_dir():
+                    m = _VER_FOLDER_RE.match(entry.name)
+                    base = m.group("base") if m else ""
+                elif entry.is_file():
+                    stem, ext, role = lp.parse_published_name(entry.name)
+                    if role == "data" and ext.lower() in (".usd", ".usda", ".usdc"):
+                        m = re.fullmatch(r"(?P<base>.+)_v\d+", stem)
+                        base = m.group("base") if m else ""
+                if not base:
+                    continue
+                parsed = parse_filename(f"{base}.usd") or {}
+                out[(leaf_name, base)] = {
+                    "base": base, "instance": leaf_name or str(parsed.get("INSTANCE") or ""),
+                    "variante": str(parsed.get("VARIANTE") or ""),
+                }
+        return [out[k] for k in sorted(out)]
 
     def list_variantes(self, asset: str, task: str, instance: str = "") -> list[str]:
         """VARIANTE tokens published for *asset*/*task* (optionally one *instance*).
@@ -267,17 +354,96 @@ class FluxResolver:
             )
         return ResolvedAsset(
             path=matches[0],
-            default_prim=sanitize_token(base),
+            default_prim=_default_prim(matches[0]) or sanitize_token(base),
             version=self._freeze_label(want, scanned),
+        )
+
+    def _scan_flat_usd(self, parent: Path, instance: str = "", base_name: str = "") -> dict[str, dict]:
+        """Plain USD publishes ``<inst>/<base>_vNNN.<usd ext>`` (one file, no layers).
+
+        Returns {version_label: {"base", "path"}}; LAST maps to the version its pointer
+        layer targets (ADR 0017), else to the highest vNNN.
+        """
+        from features.publisher import last_pointer as lp
+
+        found: dict[str, dict] = {}
+        if not parent.exists():
+            return found
+        if instance:
+            leaf = parent / instance.lower()
+            candidates = [leaf] if leaf.exists() else []
+        else:
+            candidates = [parent] + sorted(p for p in parent.iterdir() if p.is_dir())
+        for inst in candidates:
+            if not inst.exists():
+                continue
+            for file in sorted(p for p in inst.iterdir() if p.is_file()):
+                stem, ext, role = lp.parse_published_name(file.name)
+                if role != "data" or ext.lower() not in (".usd", ".usda", ".usdc"):
+                    continue
+                m = re.fullmatch(r"(?P<base>.+)_(?P<ver>v\d+)", stem)
+                if m and (not base_name or m.group("base") == base_name):
+                    found[m.group("ver")] = {"base": m.group("base"), "path": file}
+            if not found:
+                continue
+            target = None
+            for ext in lp.LAYER_EXTS:
+                last = lp.read_last(inst, next(iter(found.values()))["base"], ext)
+                if last and last.get("version") in found:
+                    target = last["version"]
+                    break
+            target = target or max(found, key=lambda v: int(v[1:]))
+            found[_ACTIVE] = {**found[target], "version": target}
+        return found
+
+    def resolve_root(
+        self, asset: str, task: str, version: str = "latest", instance: str = "",
+        base_name: str = "",
+    ) -> ResolvedAsset:
+        """Freeze the ROOT file of one publish, for a department contribution (ADR 0019).
+
+        Layered publish: the version folder's ``<base>.<usd ext>`` (all its layers
+        composed). Plain publish: the ``<base>_vNNN.<usd ext>`` file itself.
+        """
+        parent = self._publish_parent(asset, task)
+        scanned = self._scan_version_folders(parent, instance, base_name=base_name)
+        flat = self._scan_flat_usd(parent, instance, base_name=base_name)
+        want = _ACTIVE if version in ("latest", "LAST") else version
+        info = scanned.get(want)
+        if info is not None:
+            base, folder = info["base"], info["folder"]
+            for ext in (".usd", ".usda", ".usdc"):
+                root = folder / f"{base}{ext}"
+                if root.is_file():
+                    return ResolvedAsset(path=root, default_prim=_default_prim(root) or sanitize_token(base),
+                                         version=self._freeze_label(want, scanned))
+        flat_info = flat.get(want)
+        if flat_info is not None:
+            root = flat_info["path"]
+            label = flat_info.get("version", want) if want == _ACTIVE else want
+            return ResolvedAsset(path=root, default_prim=_default_prim(root) or sanitize_token(flat_info["base"]),
+                                 version=label)
+        avail = ", ".join(sorted(set(scanned) | set(flat))) or "<none>"
+        raise ResolveError(
+            f"version '{version}' not found for '{asset}' (task '{task}', instance "
+            f"'{instance or '*'}'); available: {avail}"
         )
 
     @staticmethod
     def _freeze_label(label: str, scanned: dict[str, dict]) -> str:
-        """Turn the active LAST into a concrete version label for determinism."""
+        """Turn the active LAST into a concrete version label for determinism.
+
+        Only labels that EXIST on disk are returned: the highest published vNNN, or
+        LAST itself for a legacy ``<base>_LAST/`` folder that never had a version
+        number. Never the next version (it is not published yet, so a shot frozen on
+        it would point at nothing).
+        """
         if label != _ACTIVE:
             return label
+        if scanned.get(_ACTIVE, {}).get("version"):
+            return scanned[_ACTIVE]["version"]
         nums = [int(v[1:]) for v in scanned if v.startswith("v") and v[1:].isdigit()]
-        return _VERSION_LABEL.format(num=(max(nums) + 1) if nums else 1)
+        return _VERSION_LABEL.format(num=max(nums)) if nums else _ACTIVE
 
     # ── legacy single-root resolution (assembly / old component) ────────────────
     def _root_dir(self, asset: str) -> Path:
@@ -301,7 +467,10 @@ class FluxResolver:
             last = get_last_file(folder, base)
             if last is None:
                 raise ResolveError(f"no published USD for asset '{asset}' in {folder}")
-            frozen = _VERSION_LABEL.format(num=max(get_next_version(folder, base) - 1, 1))
+            from features.publisher.last_pointer import full_ext
+            from features.publisher.publish_layout import last_version_label
+            frozen = (last_version_label(folder, base, full_ext(last.name))
+                      or _VERSION_LABEL.format(num=max(get_next_version(folder, base) - 1, 1)))
             return ResolvedAsset(path=last, default_prim=default_prim, version=frozen)
 
         matches = sorted(folder.glob(f"{base}_{version}.*")) if folder.exists() else []

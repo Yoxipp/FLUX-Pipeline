@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight, SlidersHorizontal } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
 import { FluxLogo } from './Logo'
@@ -8,6 +9,8 @@ import { Console } from './Console'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
+import { SOFTWARE } from '../../lib/dccs'
+import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 
 interface Props {
   username: string | null
@@ -56,6 +59,16 @@ function SettingsPopover({ username }: { username: string }) {
   const [changing, setChanging]     = useState(false)
   const [accentKey, setAccentKey]   = useState('orange')
   const [logColors, setLogColors]   = useState<Record<string, string>>({})
+  const { isEnabled: isDccEnabled, setEnabled: setEnabledDccs } = useEnabledDccs()
+  const [advancedAsk, setAdvancedAsk] = useState(false)
+  const navigate = useNavigate()
+
+  // Every DCC stays listed here; unchecked ones are hidden from Launcher + StatusBar.
+  const toggleDcc = (key: string) => {
+    const current = SOFTWARE.map(s => s.key).filter(isDccEnabled)
+    const next = current.includes(key) ? current.filter(k => k !== key) : [...current, key]
+    void setEnabledDccs(next).catch(() => {})
+  }
 
   useEffect(() => {
     api.getSettings().then(s => {
@@ -219,6 +232,24 @@ function SettingsPopover({ username }: { username: string }) {
         </div>
       </div>
 
+      {/* logiciels (per-user enabled DCCs) */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.dccs')}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 8px' }}>
+          {SOFTWARE.map(s => (
+            <label key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={isDccEnabled(s.key)}
+                onChange={() => toggleDcc(s.key)}
+                style={{ accentColor: 'var(--accent)', cursor: 'pointer', margin: 0 }}
+              />
+              {s.name}
+            </label>
+          ))}
+        </div>
+      </div>
+
       {/* interface */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.interface')}</div>
@@ -266,6 +297,27 @@ function SettingsPopover({ username }: { username: string }) {
         </div>
       </div>
 
+      {/* parametres avances (N8) */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div
+          onClick={() => setAdvancedAsk(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 10px', borderRadius: 7,
+            border: '1px solid var(--rule-2)', background: 'var(--paper)',
+            fontSize: 11, color: 'var(--ink-3)', cursor: 'pointer',
+          }}
+        >
+          <SlidersHorizontal size={11} strokeWidth={1.75} />
+          Parametres avances
+        </div>
+      </div>
+      {advancedAsk && createPortal(
+        <AdvancedConfirm
+          onCancel={() => setAdvancedAsk(false)}
+          onConfirm={() => { setAdvancedAsk(false); navigate('/advanced') }}
+        />, document.body)}
+
       {/* version */}
       {version && (
         <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
@@ -277,6 +329,49 @@ function SettingsPopover({ username }: { username: string }) {
     </div>
   )
 }
+
+/* ── "Parametres avances": warning, then type Understand (N8) ── */
+const ADVANCED_PHRASE = 'Understand'
+
+function AdvancedConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  const [typed, setTyped] = useState('')
+  const match = typed === ADVANCED_PHRASE
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onCancel])
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '22px 24px', minWidth: 340, maxWidth: 420, boxShadow: 'var(--shadow)' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Parametres avances</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 14, lineHeight: 1.5 }}>
+          Modifier ces reglages peut casser le projet (unites USD, stockage des versions, publish).
+          A ne toucher que si tu sais ce que tu fais.
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 8 }}>
+          Tape <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>{ADVANCED_PHRASE}</code> pour continuer.
+        </div>
+        <input
+          autoFocus value={typed} onChange={e => setTyped(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && match) onConfirm() }}
+          placeholder={ADVANCED_PHRASE} spellCheck={false} autoCapitalize="off" autoCorrect="off"
+          style={{ width: '100%', boxSizing: 'border-box', marginBottom: 18, padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)',
+                   background: 'var(--paper-2)', color: 'var(--ink)', border: `1px solid ${match ? 'var(--accent)' : 'var(--rule-2)'}`, borderRadius: 6, outline: 'none' }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn primary" onClick={() => { if (match) onConfirm() }}
+               style={{ cursor: match ? 'pointer' : 'not-allowed', opacity: match ? 1 : 0.5 }}>
+            Ouvrir
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const IS_DETACHED_WINDOW = new URLSearchParams(window.location.search).get('detached') === '1'
 
 /* ── slide-to-confirm quit ── */
 function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
@@ -500,7 +595,9 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       <div className="no-drag" style={{ display: 'flex', gap: 7, alignItems: 'center', marginLeft: 4, flexShrink: 0 }}>
         <WinBtn hoverBg="#ffbd2e" icon={Minus}     action={() => window.electronAPI?.windowMinimize()} />
         <WinBtn hoverBg="#28c940" icon={Maximize2} action={() => window.electronAPI?.windowMaximize()} />
-        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => setConfirmClose(true)} />
+        {/* A detached page window (U4) closes at once; the slide-to-confirm is only for
+            the main window, which quits FLUX. */}
+        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => (IS_DETACHED_WINDOW ? window.electronAPI?.windowClose() : setConfirmClose(true))} />
       </div>
 
       {/* slide-to-confirm quit overlay */}

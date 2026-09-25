@@ -8,15 +8,21 @@ from datetime import datetime
 from pathlib import Path
 
 from core.constants import ARCHIVE_STEM_MENTIONS
-from core.json_manager import append_jsonl, cached_read_jsonl, read_jsonl
 from core.logger import get_logger
 from core.paths import (
     get_chat_path, get_mentions_path, get_mentions_read_path, get_users_dir,
 )
+from core.repository_factory import get_repository
 from features.activity.history import append_events
 from features.activity.read_state import is_read, load_read_ids, mark_read
 
 log = get_logger(__name__)
+
+# Metadata frontier (V5): the two feeds go through the repository, addressed by
+# their own path (transitional doc_id), so callers keep passing the path they
+# already compute (default or test-injected).
+_CHAT_COLLECTION = "chat_log"
+_MENTIONS_COLLECTION = "mentions_log"
 
 _PING_RE = re.compile(r"@(\w+)")
 
@@ -49,7 +55,7 @@ def send_message(user: str, message: str, path: Path | None = None) -> bool:
     chat_path = path or get_chat_path()
     # Append-only JSONL: one atomic write, so concurrent senders never clobber
     # each other's message (was a read-modify-write of the whole array).
-    ok = append_jsonl(chat_path, [entry])
+    ok = get_repository().append_log(_CHAT_COLLECTION, str(chat_path), [entry])
     if not ok:
         log.error("Failed to write teamChat.json at %s", chat_path)
         return ok
@@ -64,7 +70,7 @@ def send_message(user: str, message: str, path: Path | None = None) -> bool:
 
 def get_messages(limit: int = 100, path: Path | None = None) -> list[dict]:
     """Return up to *limit* messages in chronological order (oldest first)."""
-    messages = cached_read_jsonl(path or get_chat_path())   # read-only → cached JSONL
+    messages = get_repository().read_log(_CHAT_COLLECTION, str(path or get_chat_path()))
     messages.sort(key=lambda m: (m.get("date", ""), m.get("time", "")))
     return messages[-limit:]
 
@@ -118,7 +124,7 @@ def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: st
     ]
     mpath = get_mentions_path()
     # Append + rotate: bounds the hot file and archives the overflow (Phase 3).
-    if not append_events(mpath, new_entries, ARCHIVE_STEM_MENTIONS):
+    if not append_events(mpath, new_entries, ARCHIVE_STEM_MENTIONS, _MENTIONS_COLLECTION):
         log.error("Failed to write chatMentions.json at %s", mpath)
 
 
@@ -138,7 +144,7 @@ def get_mentions(user: str, unread_only: bool = False, path: Path | None = None)
     is overlaid from the companion set-file (Phase 5).
     """
     who = (user or "").upper()
-    mentions = cached_read_jsonl(path or get_mentions_path())   # read-only → cached JSONL
+    mentions = get_repository().read_log(_MENTIONS_COLLECTION, str(path or get_mentions_path()))
     read_ids = load_read_ids(_mentions_read_path(path))
     out = [
         {**m, "read": is_read(m, read_ids)}
@@ -169,7 +175,9 @@ def get_mentions_and_unread(
     stat already taken for the ETag rather than issuing a second one (Phase 4).
     """
     who = (user or "").upper()
-    mentions = cached_read_jsonl(path or get_mentions_path(), sig=sig)
+    mentions = get_repository().read_log(
+        _MENTIONS_COLLECTION, str(path or get_mentions_path()), sig=sig,
+    )
     read_ids = load_read_ids(_mentions_read_path(path))
     mine = [m for m in mentions if str(m.get("to_user", "")).upper() == who]
     unread = sum(1 for m in mine if not is_read(m, read_ids))
@@ -188,7 +196,9 @@ def mark_mentions_read(user: str, path: Path | None = None) -> bool:
     The append-only mentions log is never rewritten.
     """
     who = (user or "").upper()
-    mentions = read_jsonl(path or get_mentions_path())   # fresh: live ids
+    mentions = get_repository().read_log(
+        _MENTIONS_COLLECTION, str(path or get_mentions_path()), fresh=True,
+    )   # fresh: live ids
     live_ids = {str(m.get("id", "")) for m in mentions}
     mine_ids = {str(m.get("id", "")) for m in mentions if str(m.get("to_user", "")).upper() == who}
     return mark_read(_mentions_read_path(path), mine_ids, live_ids=live_ids)

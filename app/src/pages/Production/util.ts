@@ -1,7 +1,5 @@
 // Shared helpers for the Production Tab.
 
-import type { ProductionState } from '../../types'
-
 export const CATEGORY_ORDER = ['CHAR', 'PROPS', 'ENV', 'FXRIG'] as const
 export type Category = (typeof CATEGORY_ORDER)[number]
 
@@ -70,15 +68,6 @@ export function expandFluxPath(stored: string, workspace: string | null | undefi
   if (stored.startsWith('$FLUX/')) return workspace ? `${workspace}/${stored.slice('$FLUX/'.length)}` : stored
   if (stored === '$FLUX') return workspace ?? stored
   return stored
-}
-
-// Collect every TYPE token already used across assets/shots — used to seed
-// autocomplete suggestions for the "Linked TYPE tokens" input on new tasks.
-export function collectUsedTypeTokens(state: ProductionState): string[] {
-  const s = new Set<string>()
-  for (const a of state.assets) for (const t of a.tasks) for (const tk of t.type_tokens) s.add(tk.toUpperCase())
-  for (const sh of state.shots) for (const t of sh.tasks) for (const tk of t.type_tokens) s.add(tk.toUpperCase())
-  return [...s].sort()
 }
 
 // Filename parser that mirrors backend `reconcile.parse_publish_event`:
@@ -150,10 +139,4 @@ export function parseFluxFilename(filename: string, knownTypeTokens: Set<string>
     if (nk && !lk) return n
   }
   return n
-}
-
-export function collectAllTaskNames(state: ProductionState): string[] {
-  const s = new Set<string>()
-  for (const a of state.assets) for (const t of a.tasks) s.add(t.name.toUpperCase())
-  return [...s].sort()
 }

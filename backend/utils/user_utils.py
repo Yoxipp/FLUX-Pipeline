@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from core import config, paths
-from core.constants import JSON_USER_SETTINGS
-from core.json_manager import read_json, write_json
 from core.logger import get_logger
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
+
+# Metadata frontier (V5): the per-user settings blob (User.json) goes through the
+# repository. It is a plain dict document, addressed by the user name (the resolver
+# builds USER/<name>/UserSettings/User.json), routed get/set like tokens.json.
+_COLLECTION = "user_settings"
 
 
 def get_current_user() -> str | None:
@@ -84,15 +86,15 @@ def delete_user(name: str) -> tuple[bool, str]:
 
     Refuses to delete the currently active user (switch first). Returns (ok, message).
     """
-    import shutil
-
     name = (name or "").strip().upper()
     if not user_exists(name):
         return False, f"Artiste introuvable : {name}"
     if get_current_user() == name:
         return False, "Impossible de supprimer l'artiste actif — change d'utilisateur d'abord."
     try:
-        shutil.rmtree(paths.get_user_dir(name))
+        # force_rmtree clears read-only bits first (UserSettings files are often
+        # read-only), otherwise Windows fails the delete with WinError 5.
+        paths.force_rmtree(paths.get_user_dir(name))
     except OSError as exc:
         log.error("delete_user %s failed: %s", name, exc)
         return False, f"Échec de la suppression : {exc}"
@@ -103,26 +105,57 @@ def delete_user(name: str) -> tuple[bool, str]:
 # ── Per-user settings blob (favorites / recents / archived, …) ────────────────
 # Stored at FLUX_ROOT/USER/<name>/UserSettings/User.json — on the shared drive,
 # so a user's data follows them across machines and never leaks between users.
-
-def _user_settings_path(name: str) -> Path:
-    return paths.get_user_dir(name) / "UserSettings" / JSON_USER_SETTINGS
-
+# The path is built by the "user_settings" resolver in repository_factory.
 
 def read_user_data(name: str) -> dict:
     """Return the user's settings blob, or {} if none / unreadable."""
     try:
-        data = read_json(_user_settings_path(name))
+        data = get_repository().get(_COLLECTION, name)
         return data if isinstance(data, dict) else {}
     except (RuntimeError, OSError):
         return {}
 
 
 def write_user_data(name: str, data: dict) -> bool:
-    """Persist (overwrite) the user's settings blob. Returns True on success."""
+    """Persist (overwrite) the user's settings blob. Returns True on success.
+
+    The repository's set() writes atomically and creates the parent directory,
+    so no explicit ensure_dir is needed (behaviour identical to the old path).
+    """
     try:
-        path = _user_settings_path(name)
-        paths.ensure_dir(path.parent)
-        return write_json(path, data)
+        return get_repository().set(_COLLECTION, name, data)
     except (RuntimeError, OSError):
         return False
+
+
+# ── Enabled DCCs (V8 U10) ─────────────────────────────────────────────────────
+# Per-user list of launcher keys ("maya", "houdini", ...) stored in User.json under
+# "enabled_dccs". Absent key = every DCC enabled (compat with existing users).
+_ENABLED_DCCS_KEY = "enabled_dccs"
+
+
+def get_enabled_dccs(name: str) -> list[str] | None:
+    """Return the user's enabled DCC keys, or None when not set (= all enabled)."""
+    value = read_user_data(name).get(_ENABLED_DCCS_KEY)
+    if not isinstance(value, list):
+        return None
+    return [k for k in value if isinstance(k, str)]
+
+
+def set_enabled_dccs(name: str, keys: list[str] | None, known: set[str]) -> list[str] | None:
+    """Persist the enabled DCC keys (unknown keys dropped, sorted, deduplicated).
+
+    None removes the preference (back to all enabled). Returns the stored value.
+    """
+    data = read_user_data(name)
+    if keys is None:
+        data.pop(_ENABLED_DCCS_KEY, None)
+        stored = None
+    else:
+        wanted = {k for k in keys if isinstance(k, str)}
+        stored = [k for k in sorted(known) if k in wanted]
+        data[_ENABLED_DCCS_KEY] = stored
+    if not write_user_data(name, data):
+        raise OSError(f"cannot write user settings for '{name}'")
+    return stored
 

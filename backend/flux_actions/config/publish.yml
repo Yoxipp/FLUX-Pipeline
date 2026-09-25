@@ -1,0 +1,48 @@
+# publish.yml — reproduce the current local publish as a declarative action.
+#
+# Three ordered steps, one command each:
+#   select  -> select_publish     : pick source, compute the FLUX filename
+#   resolve -> build_output_path  : resolve the destination folder
+#   publish -> copy_publish       : versioned copy + logs into the resolved folder
+#
+# The copy step CONSUMES the resolve step's output (output_path) instead of
+# recomputing the path: one resolution, fed forward by reference.
+#
+# Data flows by named reference (value: {from: "step.command.output_key"}).
+# Production context (project_path, user, project_name) is injected at run time
+# via the action context snapshot, not through parameters.
+
+name: publish
+shelf: publish
+
+steps:
+
+  select:
+    index: 10
+    commands:
+      select:
+        command: select_publish
+        # source_path / target_name are set at run time (UI or runner).
+
+  resolve:
+    index: 20
+    commands:
+      output:
+        command: build_output_path
+        parameters:
+          filename:
+            value: {from: "select.select.filename"}
+
+  publish:
+    index: 30
+    commands:
+      publish:
+        command: copy_publish
+        parameters:
+          source_path:
+            value: {from: "select.select.source_path"}
+          output_path:
+            value: {from: "resolve.output.output_path"}
+          filename:
+            value: {from: "select.select.filename"}
+          # description is set at run time (UI or runner).

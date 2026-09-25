@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from core.logger import get_logger
+from core.paths import get_flux_root
 
 log = get_logger(__name__)
 
@@ -25,18 +26,17 @@ _BLOCK_END   = "# <<< FLUX autostart"
 # ASCII-only on purpose: houdini.env is parsed by Houdini (not Python), avoid cp1252 risk.
 _ENV_BEGIN = "# >>> FLUX env - do not edit manually"
 _ENV_END   = "# <<< FLUX env"
+# FLUX no longer writes a houdini.env block (it used to set PYTHONNOUSERSITE=1);
+# the markers stay so _remove_env_block can clean up blocks left by older versions.
 
-# houdini.env block. PYTHONNOUSERSITE=1 stops Houdini's embedded Python from adding
-# the per-user site-packages to sys.path. Without it, a pip-installed usd-core in the
-# user site (the FLUX backend runs on the same Python minor as Houdini) gets loaded on
-# top of Houdini's bundled USD → two USD builds → fatal Tf class-wrapper clash that
-# breaks every LOP/USD viewer state. houdini.env is read before Python starts, so the
-# user site is never added. This is the reliable, launch-path-independent fix.
-_ENV_BLOCK = (
-    f"{_ENV_BEGIN}\n"
-    f"PYTHONNOUSERSITE = 1\n"
-    f"{_ENV_END}"
-)
+# Houdini package file that injects $FLUX (priority n3, F1).
+# A Houdini package (JSON under <prefs>/packages/) is the SideFX-native way to set
+# environment variables per install. We use it instead of houdini.env on purpose:
+# houdini.env is the file whose PYTHONNOUSERSITE line hard-crashed Houdini 22.0, so
+# it stays untouched (see _install_to). $FLUX = the local pipeline root, so a .hip
+# saved as "$FLUX/DOSSIER_PROJETS/..." stays portable across machines with different
+# roots. A plain FLUX variable is inert and cannot cause the user-site USD clash.
+_PACKAGE_FILENAME = "flux.json"
 
 
 # ---------------------------------------------------------------------------
@@ -201,41 +201,6 @@ def _deploy_server(scripts_dir: Path) -> None:
     shutil.copy2(src, scripts_dir / "flux_houdini_server.py")
 
 
-def _write_env_block(prefs_dir: Path) -> bool:
-    """Upsert the FLUX block in prefs_dir/houdini.env. Idempotent. Best-effort.
-
-    Returns True if the block is present after the call, False on write failure.
-    """
-    env_file = prefs_dir / "houdini.env"
-    try:
-        existing = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
-    except OSError:
-        existing = ""
-
-    if _ENV_BEGIN in existing:
-        b_start = existing.find(_ENV_BEGIN)
-        b_end   = existing.find(_ENV_END, b_start)
-        if b_end > b_start:
-            old_fragment = existing[b_start : b_end + len(_ENV_END)]
-            if old_fragment == _ENV_BLOCK:
-                return True  # already current
-            new_content = existing.replace(old_fragment, _ENV_BLOCK)
-        else:
-            new_content = existing  # malformed; fall through to append below
-            if _ENV_END not in existing:
-                new_content = existing + f"\n{_ENV_BLOCK}\n"
-    else:
-        sep = "" if existing.endswith("\n") or not existing else "\n"
-        new_content = f"{existing}{sep}\n{_ENV_BLOCK}\n"
-
-    try:
-        prefs_dir.mkdir(parents=True, exist_ok=True)
-        env_file.write_text(new_content, encoding="utf-8")
-        return True
-    except OSError:
-        return False
-
-
 def _remove_env_block(prefs_dir: Path) -> None:
     """Remove the FLUX block from prefs_dir/houdini.env, if present."""
     env_file = prefs_dir / "houdini.env"
@@ -259,16 +224,122 @@ def _remove_env_block(prefs_dir: Path) -> None:
         pass
 
 
+def _flux_package_text(root: Path) -> str:
+    """Return the flux.json package content that sets $FLUX to *root*.
+
+    Forward slashes on purpose: valid JSON on every OS and Houdini's preferred
+    path form (no backslash escaping). Two-space indent for readability.
+    """
+    import json
+    payload = {"env": [{"FLUX": root.as_posix()}]}
+    return json.dumps(payload, indent=2) + "\n"
+
+
+def _write_flux_package(prefs_dir: Path, root: Path | None) -> bool:
+    """Upsert <prefs_dir>/packages/flux.json so Houdini resolves $FLUX. Best-effort.
+
+    Idempotent: rewrites only when the content changed (root moved). Returns True
+    if the package is present and current after the call. When *root* is unknown
+    (workspace not set yet) nothing is written and False is returned — we never
+    inject an empty or guessed root.
+    """
+    if root is None:
+        return False
+    pkg_file = prefs_dir / "packages" / _PACKAGE_FILENAME
+    desired = _flux_package_text(root)
+    try:
+        if pkg_file.exists() and pkg_file.read_text(encoding="utf-8") == desired:
+            return True  # already current
+    except OSError:
+        pass
+    try:
+        pkg_file.parent.mkdir(parents=True, exist_ok=True)
+        pkg_file.write_text(desired, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+# File chooser favourites (Locations). jump.pref = plain text, one path per line, env
+# vars kept as-is by Houdini, each entry ends with '/', no empty line.
+_JUMP_PREF_FILENAME = "jump.pref"
+_JUMP_ENTRIES = ("$FLUX/", "$FLUX/DOSSIER_PROJETS/")
+
+
+def _write_flux_jump_pref(prefs_dir: Path) -> bool:
+    """Add the $FLUX favourites to <prefs_dir>/jump.pref, keeping the user's own entries.
+
+    Idempotent and best-effort: returns True when both entries are present after the call.
+    """
+    jump = prefs_dir / _JUMP_PREF_FILENAME
+    try:
+        lines = jump.read_text(encoding="utf-8").splitlines() if jump.exists() else []
+    except OSError:
+        return False
+    lines = [ln for ln in lines if ln.strip()]
+    missing = [e for e in _JUMP_ENTRIES if e not in lines]
+    if not missing:
+        return True
+    try:
+        prefs_dir.mkdir(parents=True, exist_ok=True)
+        jump.write_text("\n".join(lines + missing) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _remove_flux_jump_pref(prefs_dir: Path) -> None:
+    """Remove only the FLUX entries from jump.pref (file deleted if left empty)."""
+    jump = prefs_dir / _JUMP_PREF_FILENAME
+    try:
+        lines = jump.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError):
+        return
+    kept = [ln for ln in lines if ln.strip() and ln not in _JUMP_ENTRIES]
+    try:
+        if kept:
+            jump.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        else:
+            jump.unlink()
+    except OSError:
+        pass
+
+
+def _remove_flux_package(prefs_dir: Path) -> None:
+    """Remove <prefs_dir>/packages/flux.json, if present. Best-effort."""
+    pkg_file = prefs_dir / "packages" / _PACKAGE_FILENAME
+    try:
+        pkg_file.unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 # The autostart block. homeHoudiniDirectory() resolves the scripts dir AT RUNTIME
 # inside Houdini, so the same block works regardless of which prefs dir Houdini uses.
+# It also sets $FLUX from the *currently running* FLUX backend (agnostic of the pipe
+# folder that installed the autostart): each Houdini launch asks the live backend for
+# its root and overrides the value the flux.json package set at install time. When no
+# FLUX is up, the package value is kept as a fallback.
 _NEW_BLOCK = (
     f"{_BLOCK_BEGIN}\n"
     f"try:\n"
     f"    import sys as _flux_sys, os as _flux_os, hou as _flux_hou\n"
+    f"    # Dynamic $FLUX: whichever FLUX is currently running wins over the installed value.\n"
+    f"    try:\n"
+    f"        import urllib.request as _flux_ureq, json as _flux_json, pathlib as _flux_pl\n"
+    f"        _flux_port_file = _flux_pl.Path(_flux_os.environ.get('APPDATA', '')) / 'FLUX' / 'backend_port'\n"
+    f"        _flux_port = int(_flux_port_file.read_text().strip()) if _flux_port_file.exists() else 8765\n"
+    f"        with _flux_ureq.urlopen('http://127.0.0.1:' + str(_flux_port) + '/system/flux-root', timeout=1.0) as _r:\n"
+    f"            _flux_root = _flux_json.loads(_r.read().decode()).get('root') or ''\n"
+    f"        if _flux_root:\n"
+    f"            _flux_hou.putenv('FLUX', _flux_root.replace('\\\\', '/'))\n"
+    f"            print('[FLUX] $FLUX -> ' + _flux_root)\n"
+    f"    except Exception as _flux_env_exc:\n"
+    f"        print('[FLUX] $FLUX left to flux.json package (no live backend): ' + str(_flux_env_exc))\n"
     f"    _flux_sys.path.insert(0, _flux_os.path.join(_flux_hou.homeHoudiniDirectory(), 'scripts'))\n"
     f"    import flux_houdini_server\n"
     f"except Exception as _flux_exc:\n"
@@ -354,6 +425,11 @@ def _install_to(prefs_dir: Path) -> dict:
     # states, not the SOP usdimport the FLUX importer uses.
     _remove_env_block(prefs_dir)
 
+    # Inject $FLUX via a Houdini package (separate file, never houdini.env). Best-effort:
+    # a package write failure must not block the autostart install itself.
+    _write_flux_package(prefs_dir, get_flux_root())
+    _write_flux_jump_pref(prefs_dir)
+
     startup = scripts / "123.py"
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
@@ -366,6 +442,8 @@ def _install_to(prefs_dir: Path) -> dict:
             "try:" not in old_fragment
             or "homeHoudiniDirectory" not in old_fragment
             or "__file__" in old_fragment
+            # New: dynamic $FLUX from the running backend (2026-09-22).
+            or "system/flux-root" not in old_fragment
         )
         if needs_upgrade:
             try:
@@ -422,6 +500,8 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
     removed_any = False
     for prefs_dir in _all_prefs_dirs(houdini_exe_path):
         _remove_env_block(prefs_dir)
+        _remove_flux_package(prefs_dir)
+        _remove_flux_jump_pref(prefs_dir)
         startup = prefs_dir / "scripts" / "123.py"
         if not startup.exists():
             continue

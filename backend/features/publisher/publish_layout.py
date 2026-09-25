@@ -1,45 +1,32 @@
-# publish_layout.py — single-folder publish layout with a STABLE active path.
+# publish_layout.py - single-folder publish layout (ADR 0017).
 #
 # Layout produced inside the token-resolved publish folder <dest>:
-#   <dest>/<base>_LAST.ext      active version  (stable path, overwritten in place)
-#   <dest>/<base>_vNNN.ext      archived versions (flat, alongside the active)
+#   <dest>/<base>_vNNN.ext       immutable version, written first (never overwritten)
+#   <dest>/<base>_LAST.ext       LAST derived from it: USD pointer layer, or copy + .flux.json
+#   <dest>/<base>_LAST.ext.link  LAST as a JSON pointer (heavy files, sequences)
+# See last_pointer.py for the three LAST forms and their classification.
 #
-# ONE folder holds every format of one versioned element side by side:
-#   Model/
-#     Model_LAST.ma   Model_v001.ma
-#     Model_LAST.fbx  Model_v001.fbx
-#     Model_LAST.usd  Model_v001.usd
-# The file *name* is what carries the format (the extension) and the version — the
-# folder is never split by extension. The active file <dest>/<base>_LAST.ext keeps a
-# permanent path (its name never changes across republishes), so any downstream
-# reference to it auto-updates to the newest bytes with no re-link. This fixes the
-# "folder-per-VERSION breaks LAST" bug (the old <base>_<FMT>_LAST/ folder was renamed
-# every publish, moving the LAST path and staling downstream links).
+# ONE folder holds every format of one versioned element side by side; the extension
+# is the format token and each extension has its own vNNN lineage. The LAST path is
+# stable, so downstream references auto-update. Houdini frame SEQUENCES keep their own
+# <base>_vNNN/ folder directly under <dest>.
 #
-# Versions are per-format (the extension is the format token), so a USD publish and
-# an FBX publish never share a version line — each extension has its own LAST + vNNN
-# lineage inside the shared folder. Archiving copies the current active to
-# <base>_vNNN.ext before the new active is written, so LAST never disappears. Houdini
-# frame SEQUENCES keep their own <base>_vNNN/ folder directly under <dest> (a sequence
-# is versioned at the folder level, frames inside) — out of scope here.
-#
-# Readers below ALSO accept, for backward compat, the older per-format subfolder
-# layout (<dest>/<ext>/<base>_{LAST,vNNN}.ext), the nested per-format layout
-# (<dest>/<FMT>/<base>_<FMT>_{LAST,Vnnn}/…), the fmt-less light-export layout
-# (<base>_LAST/<base>.ext), and the legacy versions/ subfolder — so nothing already
-# on disk stops resolving. No data is ever migrated or moved (creation never
-# destroys); old publishes just keep resolving where they are.
+# Readers below ALSO accept, for backward compat, a LAST copy without metadata (pre
+# 0017), the older per-format subfolder layout (<dest>/<ext>/<base>_{LAST,vNNN}.ext),
+# the nested per-format layout (<dest>/<FMT>/<base>_<FMT>_{LAST,Vnnn}/...), the fmt-less
+# light-export layout (<base>_LAST/<base>.ext) and the legacy versions/ subfolder. No
+# data is ever migrated or moved.
 
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 
 from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_version, get_base_name
+from features.publisher import last_pointer as lp
 
 log = get_logger(__name__)
 
@@ -142,11 +129,13 @@ def highest_flat_version(dest_folder: Path, base: str, ext: str | None = None) -
         if not d.is_dir():
             continue
         for p in d.iterdir():
-            if not p.is_file():
+            if not p.is_file() or lp.is_temp_name(p.name):
                 continue
-            if ext is not None and p.suffix.lower() != ext.lower():
+            stem, p_ext, role = lp.parse_published_name(p.name)
+            if role != "data":
                 continue
-            stem = p.name[: -len(p.suffix)] if p.suffix else p.name
+            if ext is not None and p_ext.lower() != ext.lower():
+                continue
             if not stem.startswith(f"{base}_"):
                 continue
             m = _FLAT_VER_RE.search(stem)
@@ -186,87 +175,180 @@ def highest_version(dest_folder: Path, base: str, fmt: str) -> int:
     return n
 
 
-def _archive_last(active: Path, archived: Path, base: str, ver: int, ext: str, padding: int) -> None:
-    """Rename the LAST folder to its versioned name and rename its inner file too."""
-    active.rename(archived)
-    old_inner = archived / f"{base}_{ACTIVE_VERSION_LABEL}{ext}"
-    if old_inner.exists():
-        old_inner.rename(archived / f"{base}_{format_version(ver, padding)}{ext}")
-    else:
-        log.warning("Archived LAST folder %s had no inner %s_LAST%s", archived.name, base, ext)
-
-
-def archive_last_folder(dest_folder: Path, base: str, fmt: str, ext: str,
-                        padding: int = DEFAULT_PADDING) -> int | None:
-    """Archive the current LAST folder for *base*/*fmt* to ``<FMT>/<base>_<FMT>_Vnnn``.
-
-    For writers that render straight into the LAST folder (e.g. a Houdini ROP): call
-    this before the render so the previous active version is preserved. Returns the
-    version number the archived LAST took, or None when there was no LAST yet.
-    """
-    active = last_folder(dest_folder, base, fmt)
-    if not active.exists():
-        return None
-    ver = highest_version(dest_folder, base, fmt) + 1
-    _archive_last(active, version_folder(dest_folder, base, fmt, ver, padding),
-                  base, ver, ext, padding)
-    return ver
-
-
 def publish_into_layout(
     source_path: Path,
     dest_folder: Path,
     base_name: str,
     *,
     padding: int = DEFAULT_PADDING,
+    user: str = "",
+    settings: dict | None = None,
 ) -> tuple[Path, int]:
-    """Copy *source_path* into the per-format single-file publish layout.
+    """Publish *source_path* (a single file) into *dest_folder* (ADR 0017).
 
-    The active version is written at a STABLE path directly in *dest_folder* and
-    overwritten in place; the previous active (if any) is first archived flat beside
-    it in that same folder:
-        <dest>/<base>_LAST.ext      active  (stable — auto-updates downstream)
-        <dest>/<base>_vNNN.ext      archived, side by side
-    All formats share the folder; versions are per-format (the extension is the format
-    token). Returns (active_path, new_version_number). Raises OSError on copy failure.
+    1. A LAST copy without metadata (pre 0017) is archived as the next vNNN.
+    2. The source is written as an immutable <base>_vNNN.ext (temp + rename).
+    3. LAST is derived: USD pointer layer, copy + .flux.json, or .link.
+    Returns (active_path, version): the LAST file, or the version file when LAST is a
+    .link or could not be updated (locked). Raises OSError when the version write fails.
     """
-    ext = source_path.suffix
+    ext = lp.full_ext(source_path.name)
     ensure_dir(dest_folder)
+    if settings is None:
+        settings = lp.load_storage_settings(dest_folder)
 
-    active = flat_last_path(dest_folder, base_name, ext)
-    next_ver = highest_flat_version(dest_folder, base_name, ext) + 1
+    archive_legacy_last(dest_folder, base_name, ext, padding)
+    first = highest_flat_version(dest_folder, base_name, ext) + 1
+    version_path, ver = lp.write_version(source_path, dest_folder, base_name, ext, first, padding)
 
-    if active.exists():
-        # Archive the current LAST to <ext>/<base>_v{next_ver}.ext (copy, so the LAST
-        # path never disappears), then the fresh publish becomes v{next_ver+1}.
-        shutil.copy2(active, flat_version_path(dest_folder, base_name, next_ver, ext, padding))
-        new_ver = next_ver + 1
-    else:
-        new_ver = next_ver  # first publish for this format -> v001
+    mode = lp.classify(ext, lp.path_size(version_path), settings=settings)
+    last = lp.write_last(dest_folder, base_name, ext, version_path, ver, mode,
+                         user=user, padding=padding)
+    if last is None or mode == lp.MODE_LINK:
+        return version_path, ver
+    return last, ver
 
-    # Overwrite the active file in place: its path is permanent, so any downstream
-    # reference to <ext>/<base>_LAST.ext resolves to the newest bytes with no re-link.
-    shutil.copy2(source_path, active)
-    return active, new_ver
+
+def archive_legacy_last(dest_folder: Path, base: str, ext: str,
+                        padding: int = DEFAULT_PADDING) -> int | None:
+    """Archive a LAST copy that has no metadata (pre ADR 0017) as the next vNNN.
+
+    Such a LAST holds bytes that never got a version file. Returns the version it took,
+    or None when there is nothing to archive (no LAST, or LAST already derived).
+    """
+    info = lp.read_last(dest_folder, base, ext)
+    if info is None or info["mode"] != lp.MODE_LEGACY:
+        return None
+    first = highest_flat_version(dest_folder, base, ext) + 1
+    _path, ver = lp.write_version(info["path"], dest_folder, base, ext, first, padding)
+    return ver
+
+
+def highest_sequence_version(dest_folder: Path, base: str, ext: str | None = None) -> int:
+    """Highest <base>_vNNN/ sequence folder (0 when none). With *ext*, only folders
+    holding frames of that extension count (empty folders always count)."""
+    rx = re.compile(re.escape(base) + r"_v(\d+)$", re.IGNORECASE)
+    n = 0
+    if not dest_folder.is_dir():
+        return 0
+    for d in dest_folder.iterdir():
+        m = rx.match(d.name)
+        if not m or not d.is_dir():
+            continue
+        if ext is not None:
+            names = [p.name.lower() for p in d.iterdir()]
+            if names and not any(name.endswith(ext.lower()) for name in names):
+                continue
+        n = max(n, int(m.group(1)))
+    return n
+
+
+def reserve_version(dest_folder: Path, base: str, ext: str, *,
+                    padding: int = DEFAULT_PADDING) -> int:
+    """Version number for a writer that renders straight to disk (ROP, script save).
+
+    Archives a legacy LAST first, then returns the first NNN whose <base>_vNNN.ext file
+    and <base>_vNNN/ sequence folder are both free. The writer targets that path, then
+    calls finalize_rendered_version.
+    """
+    ensure_dir(dest_folder)
+    archive_legacy_last(dest_folder, base, ext, padding)
+    ver = max(highest_flat_version(dest_folder, base, ext),
+              highest_sequence_version(dest_folder, base, ext)) + 1
+    while (flat_version_path(dest_folder, base, ver, ext, padding).exists()
+           or (dest_folder / f"{base}_{format_version(ver, padding)}").exists()):
+        ver += 1
+    return ver
+
+
+def sequence_folder(dest_folder: Path, base: str, ver: int,
+                    padding: int = DEFAULT_PADDING) -> Path:
+    """Frame sequence version folder <dest>/<base>_vNNN/."""
+    return dest_folder / f"{base}_{format_version(ver, padding)}"
+
+
+def _after_usd_publish(dest_folder: Path, base: str, ext: str, version_path: Path,
+                       user: str) -> None:
+    """ADR 0019: proxy layer + the asset's USD (component), from the written version."""
+    from features.publisher.usd_publish_hooks import after_usd_publish
+
+    after_usd_publish(dest_folder, base, ext, version_path, user=user)
+
+
+def finalize_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, *,
+                              is_sequence: bool = False, pattern: str | None = None,
+                              user: str = "", padding: int = DEFAULT_PADDING) -> Path | None:
+    """Derive LAST once a writer has rendered version *ver* in place (ADR 0017).
+
+    Single file: <base>_vNNN.ext ; sequence: <base>_vNNN/ with *pattern* as the frame
+    file name. Returns the active path (LAST, or the version when LAST is a .link or
+    locked), or None when the version is missing on disk (failed cook).
+    """
+    version_path = (sequence_folder(dest_folder, base, ver, padding) if is_sequence
+                    else flat_version_path(dest_folder, base, ver, ext, padding))
+    if not version_path.exists() or (is_sequence and not any(version_path.iterdir())):
+        log.warning("Rendered version missing, LAST not updated: %s", version_path)
+        return None
+    settings = lp.load_storage_settings(dest_folder)
+    mode = lp.classify(ext, lp.path_size(version_path), is_sequence=is_sequence,
+                       settings=settings)
+    last = lp.write_last(dest_folder, base, ext, version_path, ver, mode,
+                         user=user, padding=padding, pattern=pattern)
+    if not is_sequence:
+        _after_usd_publish(dest_folder, base, ext, version_path, user)
+    if last is None or mode == lp.MODE_LINK:
+        return version_path
+    return last
+
+
+def discard_rendered_version(dest_folder: Path, base: str, ext: str, ver: int, *,
+                             is_sequence: bool = False, padding: int = DEFAULT_PADDING) -> None:
+    """Remove the partial output of a failed writer for a reserved version."""
+    target = (sequence_folder(dest_folder, base, ver, padding) if is_sequence
+              else flat_version_path(dest_folder, base, ver, ext, padding))
+    try:
+        if target.is_dir():
+            import shutil
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink()
+    except OSError as exc:
+        log.warning("Could not remove failed output %s: %s", target, exc)
+    # A first publish that fails must not leave an empty instance folder behind
+    # (e.g. DINGO/shading/null): rmdir only succeeds on an empty folder.
+    try:
+        if dest_folder.is_dir() and not any(dest_folder.iterdir()):
+            dest_folder.rmdir()
+    except OSError:
+        pass
+
+
+def next_publish_version(dest_folder: Path, base: str, ext: str) -> int:
+    """Version number the next publish of *ext* will take (preflight label)."""
+    ext = ext if ext.startswith(".") else f".{ext}"
+    n = highest_flat_version(dest_folder, base, ext)
+    info = lp.read_last(dest_folder, base, ext)
+    if info is not None and info["mode"] == lp.MODE_LEGACY:
+        n += 1
+    return n + 1
 
 
 def archive_flat_last(dest_folder: Path, base: str, ext: str,
                       padding: int = DEFAULT_PADDING) -> int | None:
-    """Archive the current flat LAST file to <ext>/<base>_vNNN.ext before a writer
-    overwrites it.
+    """Prepare a writer that renders straight into <base>_LAST.ext (ROP writers).
 
-    For writers that render straight into the active path (e.g. a Houdini ROP): call
-    this before the cook so the previous active version is preserved. Copies (does not
-    move) so a failed cook still leaves LAST intact. Returns the version number the
-    archived LAST took, or None when there was no LAST yet.
+    Legacy LAST (no metadata): copied to the next vNNN, as before. Derived LAST (0017):
+    its bytes already exist as a vNNN, so only the metadata is dropped (the writer's
+    output must not be mistaken for that version). Returns the highest version on disk
+    for *ext* (the writer's output is that + 1), or None when there was no LAST.
     """
-    active = flat_last_path(dest_folder, base, ext)
-    if not active.exists():
+    info = lp.read_last(dest_folder, base, ext)
+    if info is None:
         return None
-    ver = highest_flat_version(dest_folder, base, ext) + 1
-    ensure_dir(dest_folder)
-    shutil.copy2(active, flat_version_path(dest_folder, base, ver, ext, padding))
-    return ver
+    if info["mode"] == lp.MODE_LEGACY:
+        return archive_legacy_last(dest_folder, base, ext, padding)
+    lp.forget_last(dest_folder, base, ext)
+    return highest_flat_version(dest_folder, base, ext) or None
 
 
 # ── readers (nested-layout discovery; used by resolvers/importer) ────────────────
@@ -325,6 +407,16 @@ def _inner(folder: Path, stem: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def _is_listed(name: str) -> bool:
+    """False for LAST sidecars and in-flight temp files."""
+    return not lp.is_temp_name(name) and lp.parse_published_name(name)[2] != "meta"
+
+
+def _base_of(name: str) -> str:
+    stem, ext, _role = lp.parse_published_name(name)
+    return get_base_name(f"{stem}{ext}" if ext else stem)
+
+
 def published_files(folder: Path, base: str | None = None):
     """Yield published data files under *folder* from every layout.
 
@@ -337,13 +429,13 @@ def published_files(folder: Path, base: str | None = None):
     if not folder.exists():
         return
     for p in sorted(folder.iterdir()):
-        if p.is_file():
-            if base is None or get_base_name(p.name) == base:
+        if p.is_file() and _is_listed(p.name):
+            if base is None or _base_of(p.name) == base:
                 yield p
-    # current layout: flat files (LAST + vNNN) inside each per-format subfolder
+    # older layout: flat files (LAST + vNNN) inside each per-format subfolder
     for fd in _format_dirs(folder):
         for p in sorted(fd.iterdir()):
-            if p.is_file() and (base is None or get_base_name(p.name) == base):
+            if p.is_file() and _is_listed(p.name) and (base is None or _base_of(p.name) == base):
                 yield p
     # archived flat versions live in the versions/ subfolder (legacy)
     vdir = versions_dir(folder)
@@ -359,10 +451,31 @@ def published_files(folder: Path, base: str | None = None):
                 yield f
 
 
-def find_last_file(folder: Path, base: str, fmt: str | None = None) -> Path | None:
-    """Return the active LAST file for *base*.
+def last_extensions(folder: Path, base: str) -> list[str]:
+    """Extensions that have a flat LAST (file or .link) for *base*, sorted."""
+    stem = f"{base}_{ACTIVE_VERSION_LABEL}"
+    exts: set[str] = set()
+    if folder.is_dir():
+        for p in folder.glob(f"{stem}.*"):
+            if not p.is_file() or lp.is_temp_name(p.name):
+                continue
+            p_stem, ext, role = lp.parse_published_name(p.name)
+            if role != "meta" and p_stem == stem and ext:
+                exts.add(ext)
+    return sorted(exts, key=str.lower)
 
-    Current layout: <dest>/<base>_LAST.ext (flat file, all formats sharing *folder*).
+
+def last_version_label(folder: Path, base: str, ext: str) -> str | None:
+    """vNNN recorded in the LAST metadata of *ext*, None for legacy or missing LAST."""
+    info = lp.read_last(folder, base, ext if ext.startswith(".") else f".{ext}")
+    return info["version"] if info else None
+
+
+def find_last_file(folder: Path, base: str, fmt: str | None = None) -> Path | None:
+    """Return the file to load for the LAST of *base*.
+
+    Current layout: <dest>/<base>_LAST.ext (pointer layer or copy) or the target of
+    <dest>/<base>_LAST.ext.link (ADR 0017), all formats sharing *folder*.
     Falls back to the older per-format subfolder (<dest>/<ext>/<base>_LAST.ext), the
     legacy nested LAST folders, and the fmt-less light-export layout
     (<base>_LAST/<base>.ext). With *fmt* given, only that format is considered;
@@ -371,15 +484,11 @@ def find_last_file(folder: Path, base: str, fmt: str | None = None) -> Path | No
     if not folder.exists():
         return None
     stem = f"{base}_{ACTIVE_VERSION_LABEL}"
-    # current flat layout: <dest>/<base>_LAST.ext (name carries the format)
-    if fmt:
-        cand = folder / f"{stem}.{fmt.lstrip('.').lower()}"
-        if cand.is_file():
-            return cand
-    else:
-        hit = sorted(p for p in folder.glob(f"{stem}.*") if p.is_file())
-        if hit:
-            return hit[0]
+    # current flat layout: derived LAST, .link or legacy copy (name carries the format)
+    for ext in ([f".{fmt.lstrip('.').lower()}"] if fmt else last_extensions(folder, base)):
+        info = lp.read_last(folder, base, ext)
+        if info is not None:
+            return info["target"]
     # older per-format subfolder layout: <dest>/<ext>/<base>_LAST.ext
     if fmt:
         fd = format_dir(folder, fmt)

@@ -10,6 +10,11 @@ import core.json_manager as jm
 from core.json_manager import read_jsonl
 from features.activity import history
 
+# These assert the on-disk JSONL rotation/archive behaviour, so pin the JSON
+# backend: a dev config.json flipped to sqlite would otherwise route the store
+# through SQLite and fail the file-format assertions for an unrelated reason.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
 
 def _ev(i: int, month: str = "09") -> dict:
     """A synthetic event with a deterministic, monotonically increasing sort key."""
@@ -37,7 +42,7 @@ class RotationTest(unittest.TestCase):
         total = 50
         for i in range(total):
             self.assertTrue(history.append_events(
-                hot, [_ev(i)], "activite", max_events=10, max_days=3650, slack=5))
+                hot, [_ev(i)], "activite", "activity_log", max_events=10, max_days=3650, slack=5))
 
         hot_events = read_jsonl(hot)
         # Bounded: never exceeds max_events + slack.
@@ -53,7 +58,7 @@ class RotationTest(unittest.TestCase):
     def test_hot_keeps_the_newest_events(self):
         hot = self._tmp / "activite.json"
         for i in range(50):
-            history.append_events(hot, [_ev(i)], "activite",
+            history.append_events(hot, [_ev(i)], "activite", "activity_log",
                                   max_events=10, max_days=3650, slack=5)
         hot_events = read_jsonl(hot)
         # The most recent event must remain in the hot file (feed correctness).
@@ -62,7 +67,7 @@ class RotationTest(unittest.TestCase):
     def test_no_rotation_below_threshold(self):
         hot = self._tmp / "activite.json"
         for i in range(12):    # 12 <= max(10)+slack(5)=15 → no rotation
-            history.append_events(hot, [_ev(i)], "activite",
+            history.append_events(hot, [_ev(i)], "activite", "activity_log",
                                   max_events=10, max_days=3650, slack=5)
         self.assertFalse(self._archive.exists())
 
@@ -72,7 +77,7 @@ class RotationTest(unittest.TestCase):
         recent = [_ev(i, month="09") for i in range(20)]
         stale = [{"id": f"old{i}", "date": "2020-01-01", "time": "00:00", "read": False}
                  for i in range(2)]
-        history.append_events(hot, stale + recent, "activite",
+        history.append_events(hot, stale + recent, "activite", "activity_log",
                               max_events=10, max_days=30, slack=5)
         hot_events = read_jsonl(hot)
         # Stale (2020) events must not remain in the hot file.
@@ -83,7 +88,7 @@ class RotationTest(unittest.TestCase):
     def test_archive_read_is_newest_first_and_paginates(self):
         hot = self._tmp / "activite.json"
         for i in range(50):
-            history.append_events(hot, [_ev(i)], "activite",
+            history.append_events(hot, [_ev(i)], "activite", "activity_log",
                                   max_events=10, max_days=3650, slack=5)
         p1, more1 = history.read_archive_events("activite", limit=5, offset=0)
         p2, _ = history.read_archive_events("activite", limit=5, offset=5)

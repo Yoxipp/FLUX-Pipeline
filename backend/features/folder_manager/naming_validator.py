@@ -17,7 +17,6 @@ from core.constants import (
 _FORBIDDEN = re.compile(r'[\\/:*?"<>|&\s]')
 _VERSION_RE = re.compile(r'^v(\d+)$', re.IGNORECASE)
 _SEQ_RE  = re.compile(r'^SEQ(\d+)$', re.IGNORECASE)
-_SHOT_RE = re.compile(r'^SHOT(\d+)$', re.IGNORECASE)
 
 
 # ── token formatting ──────────────────────────────────────────────────────────
@@ -81,25 +80,6 @@ def build_asset_filename(
     return f"{name}.{extension.lstrip('.')}" if extension else name
 
 
-def build_shot_filename(
-    class_token: str,
-    seq_token: str,
-    shot_token: str,
-    instance: str = DEFAULT_INSTANCE,
-    version: str = ACTIVE_VERSION_LABEL,
-    extension: str = "",
-) -> str:
-    parts = [
-        format_token(class_token),
-        seq_token.upper(),
-        shot_token.upper(),
-        format_token(instance) if instance else DEFAULT_INSTANCE,
-        version.upper(),
-    ]
-    name = "_".join(parts)
-    return f"{name}.{extension.lstrip('.')}" if extension else name
-
-
 # ── filename parsing ──────────────────────────────────────────────────────────
 
 def parse_filename(filename: str) -> dict | None:
@@ -108,10 +88,8 @@ def parse_filename(filename: str) -> dict | None:
     Returns a dict with keys matching TOKEN_TYPES / TOKEN_TYPES_SHOT,
     plus 'extension' and 'is_shot'. Returns None if unparseable.
     """
-    stem, _, ext = filename.rpartition(".")
-    if not stem:
-        stem = filename
-        ext = ""
+    stem = _strip_ext(filename)
+    ext = filename[len(stem) + 1:]
 
     parts = stem.split("_")
     if not parts or not parts[0]:
@@ -123,11 +101,29 @@ def parse_filename(filename: str) -> dict | None:
     iter_val = parts[-1] if has_iter else ""
     core = parts[:-1] if has_iter else list(parts)
 
-    # shot: CLASS_SEQ###_SHOT###_VARIANTE  (VARIANTE replaces the old instance slot)
+    # shot, current form (ADR 0019): SEQ###_SHOT###_TYPE[_VARIANTE] — the department
+    # sits where an asset has its TYPE. "CLASS" repeats it so old readers still work.
+    if core and _SEQ_RE.match(core[0]):
+        dept = core[2] if len(core) > 2 else ""
+        variante = core[3] if len(core) > 3 else DEFAULT_INSTANCE
+        return {
+            "CLASS":     dept,
+            "TYPE":      dept,
+            "SEQ":       core[0],
+            "SHOT":      core[1] if len(core) > 1 else "",
+            "INSTANCE":  variante,   # kept for back-compat with path resolution
+            "VARIANTE":  variante,
+            "ITER":      iter_val,
+            "extension": ext,
+            "is_shot":   True,
+        }
+
+    # shot, legacy form: CLASS_SEQ###_SHOT###[_VARIANTE]
     if len(core) >= 2 and _SEQ_RE.match(core[1]):
         variante = core[3] if len(core) > 3 else DEFAULT_INSTANCE
         return {
             "CLASS":     core[0],
+            "TYPE":      core[0],
             "SEQ":       core[1],
             "SHOT":      core[2] if len(core) > 2 else "",
             "INSTANCE":  variante,   # kept for back-compat with path resolution
@@ -152,11 +148,42 @@ def parse_filename(filename: str) -> dict | None:
     }
 
 
+def build_shot_filename(
+    seq: str,
+    shot: str,
+    type_token: str,
+    variante: str = DEFAULT_INSTANCE,
+    version: str = ACTIVE_VERSION_LABEL,
+    extension: str = "",
+) -> str:
+    """Return a shot filename: SEQ###_SHOT###_TYPE[_VARIANTE]_ITER (ADR 0019).
+
+    Unlike build_asset_filename (whose output only feeds path resolution), this keeps
+    the case of *variante* and *version* so it can name a real published file.
+    """
+    parts = [format_token(seq), format_token(shot), format_token(type_token),
+             variante or DEFAULT_INSTANCE, version]
+    name = "_".join(p for p in parts if p)
+    return f"{name}.{extension.lstrip('.')}" if extension else name
+
+
+# Multi-dot extensions that Path.suffix / rpartition would cut in two.
+_COMPOUND_EXTS = (".bgeo.sc", ".bgeo.gz", ".geo.sc", ".geo.gz")
+
+
+def _strip_ext(filename: str) -> str:
+    """*filename* without its extension, compound ones included ('a.bgeo.sc' -> 'a')."""
+    low = filename.lower()
+    for comp in _COMPOUND_EXTS:
+        if low.endswith(comp) and len(filename) > len(comp):
+            return filename[: -len(comp)]
+    stem, _, _ = filename.rpartition(".")
+    return stem or filename
+
+
 def get_base_name(filename: str) -> str:
     """Return CLASS_TYPE_NAME_instance without version or extension."""
-    stem, _, _ = filename.rpartition(".")
-    if not stem:
-        stem = filename
+    stem = _strip_ext(filename)
     parts = stem.split("_")
     # strip last part if it looks like a version or LAST
     if parts and (parts[-1].upper() == ACTIVE_VERSION_LABEL or _VERSION_RE.match(parts[-1])):
@@ -166,12 +193,9 @@ def get_base_name(filename: str) -> str:
 
 def strip_version(filename: str) -> str:
     """Return filename without the _vXXX or _LAST suffix (keeps extension)."""
-    stem, sep, ext = filename.rpartition(".")
-    if not stem:
-        stem = filename
-        sep = ext = ""
-    base = get_base_name(stem)
-    return f"{base}{sep}{ext}" if sep else base
+    stem = _strip_ext(filename)
+    ext = filename[len(stem):]
+    return f"{get_base_name(stem)}{ext}"
 
 
 # ── validation ────────────────────────────────────────────────────────────────

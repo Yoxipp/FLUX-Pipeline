@@ -8,15 +8,18 @@ import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Ensure backend/ is on sys.path when run directly
 sys.path.insert(0, os.path.dirname(__file__))
 
-from core import config
+from core import api_auth, config
+from core.api_auth import ApiAuthMiddleware
+from core.constants import APP_VERSION
 from core.logger import get_logger
-from routers import activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, usd_assembler
+from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, system, usd_assembler
 
 log = get_logger("main")
 
@@ -39,17 +42,31 @@ async def lifespan(app: FastAPI):
     if saved_user:
         config.set_current_user(saved_user)
         log.info("[FLUX] Active user: %s", saved_user)
-    # Re-stage bundled Houdini HDAs (copy-if-newer). Keeps a dev who pulled updated
-    # .hda in sync so the offline shelf install works without a live rebuild.
+    # Self-heal frozen installs whose config.json drifted from prefs.json (older
+    # wizard wrote username only to prefs.json, leaving is_first_launch stuck at
+    # True and the front-end looping through the first-launch wizard forever).
     try:
-        from installer.install_ops import deploy_houdini_hdas
-        deploy_houdini_hdas()
-    except Exception as exc:  # never block startup on a staging hiccup
-        log.warning("[FLUX] HDA re-stage skipped: %s", exc)
-    # Auto-update already-installed DCC shelves/HDAs when FLUX now ships a newer
-    # copy (runs AFTER the re-stage above so it compares against fresh staging).
-    # This is what carries the importer format_switch fix onto machines with a
-    # stale flux_importer.hda, and keeps the Maya shelf in sync (ANIM + RIG only).
+        from core import paths
+        if saved_user and not paths.get_config_username():
+            paths.set_config_username(saved_user)
+            log.info("[FLUX] Mirrored username to config.json (self-heal)")
+        saved_workspace = config.get("workspace")
+        if saved_workspace and not paths.get_flux_root():
+            paths.set_flux_root(saved_workspace)
+            log.info("[FLUX] Mirrored workspace to config.json (self-heal)")
+    except Exception as exc:  # never block startup on a bootstrap hiccup
+        log.warning("[FLUX] Bootstrap self-heal skipped: %s", exc)
+    # Publish switches saved in "Parametres avances" (N8, decision D1) -> env of this process.
+    try:
+        from features.settings.advanced import apply_saved_switches
+        applied = apply_saved_switches()
+        if applied:
+            log.info("[FLUX] Advanced switches applied: %s", applied)
+    except Exception as exc:  # never block startup on a prefs hiccup
+        log.warning("[FLUX] Advanced switches skipped: %s", exc)
+    # Keep the Maya shelf / autostart in sync with this FLUX. Houdini HDAs are only
+    # ever (re)built live from source (Shelf Manager or Houdini autostart): FLUX no
+    # longer ships .hda files, whose old copies used to overwrite fresh builds.
     try:
         from features.shelf_manager.shelf_core import reconcile_installed_dccs
         updated = reconcile_installed_dccs()
@@ -58,10 +75,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # never block startup on a reconcile hiccup
         log.warning("[FLUX] DCC auto-update skipped: %s", exc)
     yield
+    # Best-effort: release ZBrush if a freeze is active, so a graceful shutdown never
+    # leaves it frozen. Electron hard-kills the sidecar on quit (this may not run),
+    # so the app-close release also fires from the Electron side before the kill.
+    try:
+        from dcc.zbrush.client import zbrush_client
+        zbrush_client.release(timeout=1.0)
+    except Exception as exc:  # never block shutdown on a ZBrush hiccup
+        log.debug("[FLUX] ZBrush release on shutdown skipped: %s", exc)
     log.info("[FLUX] Backend shutting down")
 
 
-app = FastAPI(title="FLUX Backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="FLUX Backend", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,6 +101,30 @@ app.add_middleware(
     # is explicitly exposed. Required by the Phase 2 304 short-circuit.
     expose_headers=["ETag"],
 )
+# Added after CORS so it runs first: browser requests without the per-launch token
+# are refused before reaching any route (security S1, see core/api_auth.py).
+app.add_middleware(ApiAuthMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+    """Log any uncaught route error to the FLUX log and hand its message to the front.
+
+    Without this a crash is a bare "HTTP 500" in the UI and the traceback only goes
+    to uvicorn's stderr, which the packaged app (console=False) never shows.
+    """
+    log.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Erreur interne ({type(exc).__name__}) : {exc}"},
+    )
+
+
+@app.get(api_auth.TOKEN_PATH, tags=["Health"])
+async def api_token() -> dict:
+    """Hand the per-launch API token to the Electron main process (non-browser only,
+    enforced by ApiAuthMiddleware)."""
+    return {"token": api_auth.API_TOKEN}
 
 @app.get("/health", tags=["Health"])
 async def health() -> dict:
@@ -87,6 +136,7 @@ async def health() -> dict:
 
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])
 app.include_router(publish.router,        prefix="/publish",        tags=["Publisher"])
+app.include_router(actions.router,        prefix="/actions",        tags=["Actions"])
 app.include_router(activity.router,       prefix="/activity",       tags=["Activity"])
 app.include_router(files.router,          prefix="/files",          tags=["Files"])
 app.include_router(settings.router,       prefix="/settings",       tags=["Settings"])
@@ -96,6 +146,7 @@ app.include_router(usd_assembler.router,  prefix="/usd",            tags=["UsdAs
 app.include_router(logs.router,           prefix="/logs",           tags=["Logs"])
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
 app.include_router(production.router,     prefix="/production",     tags=["Production"])
+app.include_router(system.router,         prefix="/system",         tags=["System"])
 
 
 if __name__ == "__main__":

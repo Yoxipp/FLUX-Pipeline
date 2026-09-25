@@ -11,11 +11,16 @@ from core.constants import (
     THEME_DEFAULT_BG, THEME_DEFAULT_SURFACE,
     THEME_DEFAULT_FG, THEME_DEFAULT_ACCENT,
 )
-from core.json_manager import read_json, write_json
 from core.logger import get_logger
-from core.paths import get_config_json_path, get_prefs_path, get_users_dir
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
+
+# Metadata frontier (V5 Phase 1a): config is one document in the "config"
+# collection. The factory resolves it to get_prefs_path(); no store here touches
+# json_manager directly anymore.
+_COLLECTION = "config"
+_DOC = "prefs"
 
 # ── Default config structure ──────────────────────────────────────────────────
 
@@ -43,11 +48,14 @@ _active_user: str | None = None
 # ── Internal read/write ───────────────────────────────────────────────────────
 
 def _load() -> dict:
-    return read_json(get_prefs_path())  # type: ignore[return-value]
+    # get() returns None for a missing file; callers expect a dict, so default to {}
+    # (preserves the old read_json({} on missing) contract).
+    data = get_repository().get(_COLLECTION, _DOC)
+    return data if isinstance(data, dict) else {}
 
 
 def _save(data: dict) -> None:
-    ok = write_json(get_prefs_path(), data)
+    ok = get_repository().set(_COLLECTION, _DOC, data)
     if not ok:
         log.warning("Could not write prefs file")
 
@@ -55,9 +63,17 @@ def _save(data: dict) -> None:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def is_first_launch() -> bool:
-    """Return True if config.json is missing workspace or username."""
-    cfg = _load()
-    return not (cfg.get("workspace") and cfg.get("username"))
+    """Return True only when config.json (the FILE) lacks workspace or username.
+
+    Bootstrap keys (workspace, username) belong to config.json, never the metadata
+    repository: the repository's own location depends on the workspace, so a workspace
+    stored inside it can drift, and a momentarily unreadable backend (e.g. a SQLite db
+    on a synced OneDrive folder that is offloaded at startup) must NOT make a configured
+    install look fresh and re-prompt for the workspace. Reading the file directly keeps
+    the first-launch verdict independent of the backend's availability.
+    """
+    from core import paths
+    return not (paths.get_flux_root() and paths.get_config_username())
 
 
 def create_user(name: str, workspace: str | Path) -> None:

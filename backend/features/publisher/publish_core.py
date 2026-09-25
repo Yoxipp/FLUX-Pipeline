@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.activity.activity_writer import log_publish
@@ -13,8 +12,8 @@ from features.folder_manager.naming_validator import (
 )
 from features.folder_manager.tokens import get_path_for_token, load_tokens
 from features.publisher.modif_log import append_log
+from features.publisher.last_pointer import full_ext
 from features.publisher.publish_layout import publish_into_layout
-from features.publisher.version_resolver import get_last_file
 
 log = get_logger(__name__)
 
@@ -40,9 +39,13 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     instance = parsed["INSTANCE"].lower() if parsed["INSTANCE"] else "null"
 
     if parsed["is_shot"]:
-        class_rel = get_path_for_token(tokens, "CLASS", parsed["CLASS"])
+        # ADR 0019: the department of a shot is its TYPE (TYPE_SHOT tokens); projects
+        # written before that carry it in their CLASS tokens.
+        dept = parsed.get("TYPE") or parsed["CLASS"]
+        class_rel = (get_path_for_token(tokens, "TYPE_SHOT", dept)
+                     or get_path_for_token(tokens, "CLASS", dept))
         if class_rel is None:
-            log.warning("CLASS token not found: %s", parsed["CLASS"])
+            log.warning("Shot department token not found: %s", dept)
             return None
         try:
             rel = class_rel.format(seq=parsed["SEQ"], shot=parsed["SHOT"])
@@ -65,33 +68,75 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     return project_path / name_rel / type_sub / instance
 
 
-# ── versioning ─────────────────────────────────────────────────────────────────
+# ── logical filename ─────────────────────────────────────────────────────────
 
-def rename_last_to_versioned(
-    dest_folder: Path,
-    base_name: str,
-    next_version: int,
-    padding: int = DEFAULT_PADDING,
-) -> Path | None:
-    """Rename the existing LAST file to a versioned name.
+def resolve_publish_filename(source_path: Path, target_name: str | None = None) -> str:
+    """Return the logical FLUX filename to publish under.
 
-    Returns the new versioned path, or None if no LAST existed.
+    *target_name* : when the source file is NOT named with FLUX tokens (e.g. a
+    local image ``Capture.png``), the caller passes the composed token name
+    (``CHAR_REF_HERO_null``). The source then only provides the bytes and its
+    extension; the destination is named from *target_name*. When omitted, the
+    source filename itself must be a valid FLUX name (DCC exports already are).
     """
-    last_file = get_last_file(dest_folder, base_name)
-    if last_file is None:
-        return None
+    if target_name:
+        return target_name if Path(target_name).suffix else f"{target_name}{source_path.suffix}"
+    return source_path.name
 
-    version_str = format_version(next_version, padding)
-    ext = last_file.suffix
-    versioned_path = dest_folder / f"{base_name}_{version_str}{ext}"
+
+# ── copy half ──────────────────────────────────────────────────────────────────
+
+def copy_publish(
+    source_path: Path,
+    dest_folder: Path,
+    filename: str,
+    description: str,
+    user: str,
+    project_name: str,
+) -> Path | None:
+    """Archive the previous version and copy *source_path* into *dest_folder*.
+
+    This is the copy half of a publish. It does NOT resolve anything: it consumes
+    an already-resolved destination folder (the output of ``resolve_publish_path``
+    / ``build_output_path``) instead of recomputing the path itself.
+
+    Steps:
+      1. Write the immutable <base>_vNNN.ext, then derive LAST (ADR 0017)
+      2. Append entry to modif_logs.json
+      3. Append event to activite.json
+
+    *filename* is the logical FLUX name; it only supplies the base name for the
+    archived/active files. *dest_folder* is where they land.
+
+    Returns the LAST path (or the version file when LAST is a .link) on success,
+    None on failure.
+    """
+    ensure_dir(dest_folder)
+
+    base_name = get_base_name(filename)
 
     try:
-        last_file.rename(versioned_path)
-        log.debug("Renamed %s → %s", last_file.name, versioned_path.name)
-        return versioned_path
+        dest_path, new_ver = publish_into_layout(source_path, dest_folder, base_name, user=user)
     except OSError as e:
-        log.error("Failed to rename LAST → versioned: %s", e)
+        log.error("File copy failed: %s", e)
         return None
+
+    # modif log stays at the shared publish folder (spans all versions/formats)
+    append_log(dest_folder, base_name, format_version(new_ver), description, user)
+    # Log the VERSIONED name (not the _LAST alias) so the publish history shows each
+    # distinct version; dest_path.parent is the publish folder for the "open folder" UX.
+    versioned_name = f"{base_name}_{format_version(new_ver)}{full_ext(source_path.name)}"
+    log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent)
+
+    log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
+    # ADR 0019: proxy layer + asset (component) refresh, both on the immutable version.
+    from features.publisher.publish_layout import flat_version_path
+    from features.publisher.usd_publish_hooks import after_usd_publish
+
+    ext = full_ext(source_path.name)
+    after_usd_publish(dest_folder, base_name, ext,
+                      flat_version_path(dest_folder, base_name, new_ver, ext), user=user)
+    return dest_path
 
 
 # ── main publish ───────────────────────────────────────────────────────────────
@@ -106,29 +151,16 @@ def publish_file(
 ) -> Path | None:
     """Publish *source_path* into the correct folder inside *project_path*.
 
-    Steps:
-      1. Parse the logical filename → tokens
-      2. Resolve destination folder from tokens.json
-      3. Compute next version number
-      4. Rename existing LAST → vXXX
-      5. Copy source → dest as *_LAST.ext
-      6. Append entry to modif_logs.json
-      7. Append event to activite.json
+    Thin wrapper over the two halves of a publish:
+      1. resolve  -> logical name + destination folder (no side effect)
+      2. copy     -> archive previous version, copy, write logs
 
-    *target_name* : when the source file is NOT named with FLUX tokens (e.g. a
-    local image ``Capture.png``), the caller passes the composed token name
-    (``CHAR_REF_HERO_null``). The source then only provides the bytes and its
-    extension; the destination is named from *target_name*. When omitted, the
-    source filename itself must be a valid FLUX name (DCC exports already are).
+    *target_name* : see :func:`resolve_publish_filename`.
 
     Returns the destination LAST path on success, None on failure.
     """
-    if target_name:
-        filename = target_name if Path(target_name).suffix else f"{target_name}{source_path.suffix}"
-    else:
-        filename = source_path.name
-    parsed = parse_filename(filename)
-    if parsed is None:
+    filename = resolve_publish_filename(source_path, target_name)
+    if parse_filename(filename) is None:
         log.error("Unparseable filename: %s", filename)
         return None
 
@@ -137,27 +169,12 @@ def publish_file(
         log.error("Cannot resolve publish path for: %s", filename)
         return None
 
-    ensure_dir(dest_folder)
-
-    base_name = get_base_name(filename)
-
-    # Flat single-file layout: the active version keeps a stable path and past
-    # versions are archived under versions/.
-    #   <dest>/<base>_LAST.ext            (active, one per format)
-    #   <dest>/versions/<base>_vNNN.ext   (archived on the next publish)
-    try:
-        dest_path, new_ver = publish_into_layout(source_path, dest_folder, base_name)
-    except OSError as e:
-        log.error("File copy failed: %s", e)
-        return None
-
-    # modif log stays at the shared publish folder (spans all versions/formats)
-    append_log(dest_folder, base_name, format_version(new_ver), description, user)
-    # Log the VERSIONED name (not the _LAST alias) so the publish history shows each
-    # distinct version; dest_path.parent is the publish folder for the "open folder" UX.
-    versioned_name = f"{base_name}_{format_version(new_ver)}{dest_path.suffix}"
-    log_publish(user, versioned_name, project_name or project_path.name, dest_folder=dest_path.parent)
-
-    log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
-    return dest_path
+    return copy_publish(
+        source_path,
+        dest_folder,
+        filename,
+        description,
+        user,
+        project_name or project_path.name,
+    )
 

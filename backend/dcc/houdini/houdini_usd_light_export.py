@@ -77,41 +77,65 @@ _EXTRACT_CODE = textwrap.dedent(r'''
         m4 = hou.Matrix4(m3) * hou.hmath.buildTranslate(pt.position())
         return m4
 
-    def _skeleton(geo):
-        joints, worlds = [], []
-        for pt in geo.points():
+    def _hierarchy(geo):
+        # KineFX: joint names are leaves ("joint2"), the hierarchy is the topology
+        # (each polyline goes parent -> child). UsdSkel wants path tokens
+        # ("joint1/joint2"), parents first. Names that already hold "/" are kept.
+        pts = list(geo.points())
+        leaf, world, parent = {{}}, {{}}, {{}}
+        for pt in pts:
             try:
                 nm = pt.attribValue("name")
             except Exception:
                 nm = ""
-            if not nm:
-                nm = "joint%d" % pt.number()
-            joints.append(nm)
-            worlds.append(_world4(pt))
-        by_name = {{n: w for n, w in zip(joints, worlds)}}
-        bind, rest = [], []
-        for n, w in zip(joints, worlds):
+            leaf[pt.number()] = nm or ("joint%d" % pt.number())
+            world[pt.number()] = _world4(pt)
+        for prim in geo.prims():
+            vs = prim.vertices()
+            for i in range(1, len(vs)):
+                child = vs[i].point().number()
+                if child not in parent:
+                    parent[child] = vs[i - 1].point().number()
+        children = {{}}
+        for c, par in parent.items():
+            children.setdefault(par, []).append(c)
+        order, path = [], {{}}
+        def _walk(n, prefix):
+            path[n] = leaf[n] if ("/" in leaf[n] or not prefix) else prefix + "/" + leaf[n]
+            order.append(n)
+            for c in sorted(children.get(n, [])):
+                if c not in path:
+                    _walk(c, path[n])
+        for pt in pts:
+            n = pt.number()
+            if n not in parent and n not in path:
+                _walk(n, "")
+        for pt in pts:          # cycles / leftovers: keep them, flat
+            n = pt.number()
+            if n not in path:
+                path[n] = leaf[n]; order.append(n)
+        return order, path, world, parent
+
+    def _skeleton(geo):
+        order, path, world, parent = _hierarchy(geo)
+        joints, bind, rest = [], [], []
+        for n in order:
+            joints.append(path[n])
+            w = world[n]
             bind.append(list(w.asTuple()))
-            parent = n.rsplit("/", 1)[0] if "/" in n else None
-            pw = by_name.get(parent) if parent else None
+            pw = world.get(parent[n]) if n in parent else None
             local = (w * pw.inverted()) if pw is not None else w
             rest.append(list(local.asTuple()))
         return joints, bind, rest
 
     def _local_map(geo):
-        # joint name -> local 4x4 (for animation sampling / filtering).
-        worlds = {{}}
-        for pt in geo.points():
-            try:
-                nm = pt.attribValue("name")
-            except Exception:
-                nm = "joint%d" % pt.number()
-            worlds[nm] = _world4(pt)
+        # joint path -> local 4x4 (for animation sampling / filtering).
+        order, path, world, parent = _hierarchy(geo)
         out = {{}}
-        for nm, w in worlds.items():
-            parent = nm.rsplit("/", 1)[0] if "/" in nm else None
-            pw = worlds.get(parent) if parent else None
-            out[nm] = (w * pw.inverted()) if pw is not None else w
+        for n in order:
+            w = world[n]
+            pw = world.get(parent[n]) if n in parent else None
+            out[path[n]] = (w * pw.inverted()) if pw is not None else w
         return out
 
     def _mesh_geo(geo):
@@ -151,7 +175,8 @@ _EXTRACT_CODE = textwrap.dedent(r'''
                 # match longest joint token that ends the region path
                 idx = None
                 for j, ji in jset.items():
-                    if base.endswith(j):
+                    # joints are paths ("joint1/joint2"): match the full path or the leaf
+                    if base.endswith(j) or base.rsplit("/", 1)[-1] == j.rsplit("/", 1)[-1]:
                         if idx is None or len(j) > len(joints[idx]):
                             idx = ji
                 region_to_joint.append(idx if idx is not None else 0)
@@ -226,7 +251,7 @@ _EXTRACT_CODE = textwrap.dedent(r'''
                     moving = []
                     for jn in range(len(joints)):
                         first = per_time[0][jn]
-                        if any(any(abs(a - b) > 1e-6 for a, b in zip(per_time[ti][jn], first)) for ti in range(1, len(times))):
+                        if any(any(abs(a - b) > 1e-4 for a, b in zip(per_time[ti][jn], first)) for ti in range(1, len(times))):
                             moving.append(jn)
                     if moving:
                         def _decomp(m16):
@@ -249,6 +274,7 @@ _EXTRACT_CODE = textwrap.dedent(r'''
                             "translations": translations,
                             "rotations": rotations,
                             "scales": scales,
+                            "fps": hou.fps(),
                         }}
 
             if not meshes and not joints:
@@ -322,7 +348,8 @@ def run_light_export(
             light, Path(project_path), fmt=fmt, dest_dir=dest_dir, base_name=base_name
         )
         log.info("Houdini light USD export published: %s (%s)", asset, pub["version"])
-        return {"ok": True, "asset": asset, "version": pub["version"], "root": str(pub["root"])}
+        return {"ok": True, "asset": asset, "version": pub["version"], "root": str(pub["root"]),
+                "warnings": pub.get("warnings", [])}
     except Exception as exc:
         log.error("Houdini light export publish failed: %s", exc)
         return {"ok": False, "error": str(exc)}

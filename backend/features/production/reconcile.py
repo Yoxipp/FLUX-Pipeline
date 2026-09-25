@@ -139,7 +139,23 @@ def parse_flux_filename(filename: str) -> dict | None:
     iter_val = parts[-1].upper() if has_iter else ""
     core = parts[:-1] if has_iter else list(parts)
 
-    # shot: CLASS_SEQ###_SHOT###_INSTANCE[_VARIANTE]
+    # shot, current form (ADR 0019): SEQ###_SHOT###_TASK[_VARIANTE]
+    if core and _SEQ_RE.match(core[0]):
+        dept = core[2].upper() if len(core) > 2 else ""
+        return {
+            "CLASS":     dept,
+            "SEQ":       core[0].upper(),
+            "SHOT":      core[1].upper() if len(core) > 1 else "",
+            "INSTANCE":  core[3].upper() if len(core) > 3 else "",
+            "VARIANTE":  core[4].upper() if len(core) > 4 else "",
+            "TASK":      dept,
+            "NAME":      "",
+            "ITER":      iter_val,
+            "extension": ext,
+            "is_shot":   True,
+        }
+
+    # shot, legacy form: CLASS_SEQ###_SHOT###_INSTANCE[_VARIANTE]
     if len(core) >= 2 and _SEQ_RE.match(core[1]):
         return {
             "CLASS":     core[0].upper(),
@@ -147,7 +163,7 @@ def parse_flux_filename(filename: str) -> dict | None:
             "SHOT":      core[2].upper() if len(core) > 2 else "",
             "INSTANCE":  core[3].upper() if len(core) > 3 else "",
             "VARIANTE":  core[4].upper() if len(core) > 4 else "",
-            "TASK":      "",
+            "TASK":      core[0].upper(),
             "NAME":      "",
             "ITER":      iter_val,
             "extension": ext,

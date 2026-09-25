@@ -462,7 +462,10 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
 
     Returns {"ok": True, "local_path": "...", "abs_path": "..."} or {"ok": False, "error": "..."}.
     """
-    src = Path(file_path)
+    # A caller may hand us a portable "$FLUX/..." token (F2). Resolve it back to a
+    # local absolute for the disk copy. from_flux_token is a no-op on plain paths.
+    from core.paths import from_flux_token
+    src = Path(from_flux_token(file_path))
     if not src.is_file():
         return {"ok": False, "error": f"Fichier introuvable : {src}"}
 
@@ -499,3 +502,323 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
     local_path = f"{rel_prefix}/{dest.name}" if rel_prefix else str(dest)
     log.info("Copied %s → %s", src.name, local_path)
     return {"ok": True, "local_path": local_path, "abs_path": str(dest)}
+
+
+def create_native_import_in_context(file_path: str | Path) -> dict:
+    """Import *file_path* natively (no flux_importer HDA) in the active pane.
+
+    The FLUX importer HDA is USD-specific: for a non-USD file (bgeo, abc, fbx, obj,
+    …) "Open in Houdini" must skip it and drop a plain import node fitting the
+    extension. This picks the pane's pwd() as target: /obj wraps in a Geometry
+    node; a SOP network takes the node in-place; a LOP context falls back to
+    /obj (LOP has no native importer for non-USD).
+
+    Returns {"ok": True, "result": {"node_path", "mode", "resolved_path"}}.
+    """
+    ext = _get_ext(file_path)
+    entry = _EXT_MAP.get(ext)
+    if entry is None:
+        return {"ok": False, "error": f"Extension non supportee par l'import natif : {ext}"}
+    node_type, parm_name = entry
+    file_str = str(file_path).replace("\\", "/")
+    node_name = f"flux_import_{_node_name_from(file_path)}"
+    candidates = repr([parm_name] + list(_FALLBACK_FILE_PARMS))
+
+    # FBX = KineFX character import (same treatment as create_character_import_node).
+    if ext == ".fbx":
+        node_type = "kinefx::fbxcharacterimport"
+
+    code = textwrap.dedent(f"""\
+        import hou
+        try:
+            _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            _pwd  = _pane.pwd() if _pane else hou.node("/obj")
+        except Exception:
+            _pwd = hou.node("/obj")
+        if _pwd is None:
+            _pwd = hou.node("/obj")
+        _cat = _pwd.childTypeCategory()
+        # LOP has no native importer for non-USD: fall back to /obj so the file
+        # still lands somewhere useful instead of an "incompatible" error.
+        if _cat not in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory()):
+            _pwd = hou.node("/obj")
+            _cat = _pwd.childTypeCategory()
+        if _cat == hou.objNodeTypeCategory():
+            _net = _pwd.createNode("geo", node_name={node_name!r})
+        else:
+            _net = _pwd
+        _node = _net.createNode({node_type!r}, node_name={node_name!r})
+        _set = False
+        for _pn in {candidates}:
+            if _pn and _node.parm(_pn) is not None:
+                _node.parm(_pn).set({file_str!r}); _set = True; break
+        # Version-agnostic fallback: a FileReference string parm, else any "file" parm.
+        if not _set:
+            for _p in _node.parms():
+                _t = _p.parmTemplate()
+                try:
+                    if (_t.type() == hou.parmTemplateType.String
+                            and _t.stringType() == hou.stringParmType.FileReference):
+                        _p.set({file_str!r}); _set = True; break
+                except Exception:
+                    pass
+        if not _set:
+            for _p in _node.parms():
+                if "file" in _p.name().lower():
+                    _p.set({file_str!r}); _set = True; break
+        _node.setSelected(True, clear_all_selected=True)
+        _node.setDisplayFlag(True)
+        if hasattr(_node, "setRenderFlag"):
+            _node.setRenderFlag(True)
+        result = {{"node_path": _node.path(), "mode": "native_" + {node_type!r},
+                   "resolved_path": {file_str!r}, "file_set": _set}}
+    """)
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        r = resp.get("result") or {}
+        log.info("Native import %s -> %s (%s)", Path(file_str).name, r.get("node_path"), r.get("mode"))
+    else:
+        log.error("create_native_import_in_context failed: %s", resp.get("error"))
+    return resp
+
+
+def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None) -> dict:
+    """Import a USD file according to the active network pane (2026-09-17).
+
+    * LOP network (/stage, lopnet): the LOP ``flux_importer`` HDA (same parms as in
+      /obj, 2026-09-18) at ``probe_prim_path``, wired after the selected (else
+      displayed) LOP, display flag moved to it; a plain Reference LOP without the HDA.
+    * /obj or SOP network: the ``flux_importer`` HDA set from *importer* (parm values
+      from features.importer.library_import.importer_source_for_file: tokens, USD
+      library or free path) so the asset stays changeable (2026-09-17). Without
+      the HDA: ``kinefx::usdcharacterimport`` when the stage has a skeleton, else
+      ``usdimport``. /obj gets a new Geometry node to hold the SOP.
+    *probe* comes from features.importer.usd_probe (backend pxr). *file_path* may be
+    a portable ``$FLUX/...`` token: both node types expand variables.
+    Returns {"ok", "result": {"node_path", "mode", "resolved_path"}} or {"ok": False, "error"}.
+    """
+    from features.importer.usd_probe import reference_prim_path
+
+    file_str = str(file_path).replace("\\", "/")
+    prim_path = reference_prim_path(probe)
+    has_skel = bool(probe.get("has_skel"))
+    importer_parms = dict(importer or {})
+    name = re.sub(r"[^A-Za-z0-9_]", "_", probe.get("default_prim") or _node_name_from(file_path)) or "usd"
+
+    code = textwrap.dedent(f"""\
+        import hou
+        try:
+            _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            _pwd = _pane.pwd() if _pane else hou.node("/obj")
+        except Exception:
+            _pwd = hou.node("/obj")
+        if _pwd is None:
+            _pwd = hou.node("/obj")
+        _cat = _pwd.childTypeCategory()
+        _name = {name!r}
+        if _cat == hou.lopNodeTypeCategory():
+            _sel = [n for n in hou.selectedNodes() if n.parent() == _pwd]
+            _prev = _sel[0] if _sel else _pwd.displayNode()
+            _importer = {importer_parms!r}
+            if _importer and hou.lopNodeTypeCategory().nodeType("flux_importer") is not None:
+                # Same FLUX Import node as in /obj (2026-09-18): changeable asset,
+                # reload on resolve (Houdini keeps stale USD files otherwise).
+                _node = _pwd.createNode("flux_importer", node_name="flux_import_" + _name)
+                if _prev is not None:
+                    _node.setInput(0, _prev)
+                for _pn in ("project", "source_mode", "flux_class", "flux_type", "flux_name",
+                            "flux_instance", "flux_iter", "lib_item", "lib_version", "free_path"):
+                    if _pn in _importer and _node.parm(_pn) is not None:
+                        _node.parm(_pn).set(_importer[_pn])
+                _node.parm("prim_path").set({prim_path!r})
+                _node.hdaModule().resolve_path(_node)
+                _mode = "lop_flux_importer_" + str(_importer.get("source_mode", ""))
+            else:
+                _node = _pwd.createNode("reference", node_name="flux_ref_" + _name)
+                _node.parm("filepath1").set({file_str!r})
+                _node.parm("primpath1").set({prim_path!r})
+                if _prev is not None:
+                    _node.setInput(0, _prev)
+                _mode = "lop_reference"
+            if _prev is not None:
+                _node.setPosition(_prev.position() + hou.Vector2(0, -1.2))
+            _node.setDisplayFlag(True)
+        elif _cat in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory()):
+            _net = _pwd.createNode("geo", node_name="flux_" + _name) if _cat == hou.objNodeTypeCategory() else _pwd
+            _importer = {importer_parms!r}
+            if _importer and hou.sopNodeTypeCategory().nodeType("flux_importer") is not None:
+                _node = _net.createNode("flux_importer", node_name="flux_import_" + _name)
+                # Order matters: project and source first, the menus below read them.
+                for _pn in ("project", "source_mode", "flux_class", "flux_type", "flux_name",
+                            "flux_instance", "flux_iter", "lib_item", "lib_version", "free_path"):
+                    if _pn in _importer and _node.parm(_pn) is not None:
+                        _node.parm(_pn).set(_importer[_pn])
+                # .set() does not fire callbacks: resolve explicitly with the node's module.
+                _node.hdaModule().resolve_path(_node)
+                _mode = "sop_flux_importer_" + str(_importer.get("source_mode", ""))
+            elif {has_skel!r}:
+                _node = _net.createNode("kinefx::usdcharacterimport", node_name="flux_character_" + _name)
+                _node.parm("usdsource").set("file")
+                _node.parm("usdfile").set({file_str!r})
+                _mode = "sop_character"
+            else:
+                _node = _net.createNode("usdimport", node_name="flux_usd_" + _name)
+                for _pn in ("filepath1", "filepath", "file"):
+                    if _node.parm(_pn) is not None:
+                        _node.parm(_pn).set({file_str!r}); break
+                _mode = "sop_usdimport"
+            _node.setDisplayFlag(True)
+            if hasattr(_node, "setRenderFlag"):
+                _node.setRenderFlag(True)
+        else:
+            raise RuntimeError(
+                "Contexte '" + _pwd.path() + "' incompatible avec un import USD : "
+                "place-toi dans /stage (LOP), /obj ou un reseau SOP."
+            )
+        _node.setSelected(True, clear_all_selected=True)
+        result = {{"node_path": _node.path(), "mode": _mode, "resolved_path": {file_str!r}}}
+    """)
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        r = resp.get("result") or {}
+        log.info("USD context import %s -> %s (%s)", Path(file_str).name, r.get("node_path"), r.get("mode"))
+    else:
+        log.error("create_usd_context_import failed: %s", resp.get("error"))
+    return resp
+
+
+
+# Files a Houdini LOP (Reference / Payload / Sublayer) can load directly: USD plus
+# the formats Houdini 22 registers as USD file format plugins (checked in hython:
+# Sdf.FileFormat.FindAllFileFormatExtensions). Geometry files are translated on the
+# fly by Houdini, so no import SOP is needed in /stage.
+LOP_FILE_EXTS: frozenset[str] = frozenset({
+    ".usd", ".usda", ".usdc", ".usdz",
+    ".abc", ".bgeo", ".bgeo.sc", ".geo", ".obj", ".fbx", ".vdb",
+    ".gltf", ".glb", ".ply", ".stl",
+})
+
+LOP_IMPORT_MODES = ("auto", "reference", "payload", "sublayer")
+
+
+def import_into_lop(file_path: str, mode: str = "auto", abs_path: str | None = None) -> dict:
+    """Load *file_path* in a LOP network as a Reference, a Payload or a Sublayer.
+
+    *mode*:
+      * ``reference`` / ``payload`` / ``sublayer``: explicit. When the selected LOP is
+        already of that kind (Reference LOP for reference and payload, Sublayer LOP),
+        the file is added to it as a new entry (or fills its empty last entry);
+        otherwise a new LOP is created, wired after the selection (else the display
+        node). Outside a LOP network the node goes to the selected LOP's network,
+        else /stage.
+      * ``auto`` ("Open in Houdini"): only acts in a LOP context. Adds to a selected
+        Reference / Sublayer LOP (keeping its entry type), else references a
+        non-USD file. A USD file without such a selection is left to the flux_importer
+        flow: returns ``{"handled": False}``.
+
+    *file_path* is what the node stores (may be a portable ``$FLUX/...`` token, the
+    parm expands it); *abs_path* is the local file used to probe a USD default prim.
+    Returns {"ok", "result": {"handled", "node_path", "mode", "entry", "resolved_path"}}.
+    """
+    if mode not in LOP_IMPORT_MODES:
+        return {"ok": False, "error": f"Mode d'import LOP inconnu : {mode}"}
+    ext = _get_ext(file_path)
+    if ext not in LOP_FILE_EXTS:
+        if mode == "auto":
+            return {"ok": True, "result": {"handled": False, "reason": f"{ext} not LOP-readable"}}
+        return {"ok": False, "error": f"Extension non lisible par un LOP : {ext}"}
+
+    is_usd = ext in {".usd", ".usda", ".usdc", ".usdz"}
+    prim_path = "/" + _node_name_from(file_path)
+    if is_usd and abs_path:
+        from features.importer.usd_probe import probe_usd, reference_prim_path
+        try:
+            prim_path = reference_prim_path(probe_usd(abs_path))
+        except Exception as exc:  # a probe failure must not block the import
+            log.warning("USD probe failed for %s: %s", abs_path, exc)
+    file_str = str(file_path).replace("\\", "/")
+    name = _node_name_from(file_path)
+
+    code = textwrap.dedent(f"""\
+        import hou
+        _mode = {mode!r}
+        _lop = hou.lopNodeTypeCategory()
+        _net = None
+        try:
+            _pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+            _pwd = _pane.pwd() if _pane else None
+        except Exception:
+            _pwd = None
+        if _pwd is not None and _pwd.childTypeCategory() == _lop:
+            _net = _pwd
+        _lsel = [n for n in hou.selectedNodes() if n.type().category() == _lop]
+        if _net is None and _lsel:
+            _net = _lsel[0].parent()
+        if _net is None and _mode != "auto":
+            _net = hou.node("/stage")
+        result = {{"handled": False, "reason": "not a LOP context"}}
+        if _net is not None:
+            _sel = [n for n in _lsel if n.parent() == _net]
+            _sel = _sel[0] if _sel else None
+            try:
+                _core = _sel.type().nameComponents()[2] if _sel is not None else ""
+            except Exception:
+                _core = _sel.type().name() if _sel is not None else ""
+            if _mode == "auto":
+                _want = _core if _core in ("reference", "sublayer") else ("" if {is_usd!r} else "reference")
+            else:
+                _want = "sublayer" if _mode == "sublayer" else "reference"
+            if _want:
+                _add = _sel is not None and _core == _want
+                if _add:
+                    _node = _sel
+                else:
+                    _prefix = {{"reference": "flux_ref_", "payload": "flux_payload_",
+                                "sublayer": "flux_sublayer_"}}.get(_mode, "flux_ref_")
+                    _node = _net.createNode(_want, node_name=_prefix + {name!r})
+                    _prev = _sel if _sel is not None else _net.displayNode()
+                    if _prev is not None and _prev != _node:
+                        _node.setInput(0, _prev)
+                        _node.setPosition(_prev.position() + hou.Vector2(0, -1.2))
+                # New entry, or the empty last one (a fresh node has one empty entry).
+                _np = _node.parm("num_files")
+                _n = _np.eval()
+                _last = _node.parm("filepath%d" % _n).eval().strip() if _n else "x"
+                if _last:
+                    _np.set(_n + 1)
+                    _i = _n + 1
+                else:
+                    _i = _n
+                _node.parm("filepath%d" % _i).set({file_str!r})
+                if _want == "reference":
+                    if _mode == "payload":
+                        _rt = "payload"
+                    elif _mode == "reference":
+                        _rt = "file"
+                    else:
+                        # auto: follow the node's previous entry (payload stays payload).
+                        _prt = _node.parm("reftype%d" % (_i - 1)) if _i > 1 else None
+                        _rt = _prt.eval() if _prt is not None and _prt.eval() in ("file", "payload") else "file"
+                    _node.parm("reftype%d" % _i).set(_rt)
+                    _node.parm("primpath%d" % _i).set({prim_path!r})
+                    _kind = "payload" if _rt == "payload" else "reference"
+                else:
+                    _kind = "sublayer"
+                if not _add:
+                    _node.setDisplayFlag(True)
+                _node.setSelected(True, clear_all_selected=True)
+                result = {{"handled": True, "node_path": _node.path(), "entry": _i,
+                           "mode": "lop_" + _kind + ("_added" if _add else "_created"),
+                           "resolved_path": {file_str!r}}}
+            else:
+                result = {{"handled": False, "reason": "USD without Reference/Sublayer selected"}}
+    """)
+    resp = houdini_client.run(code)
+    if resp.get("ok"):
+        r = resp.get("result") or {}
+        if r.get("handled"):
+            log.info("LOP import %s -> %s (%s, entry %s)", Path(file_str).name,
+                     r.get("node_path"), r.get("mode"), r.get("entry"))
+    else:
+        log.error("import_into_lop failed: %s", resp.get("error"))
+    return resp

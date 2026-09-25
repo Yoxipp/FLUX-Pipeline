@@ -4,19 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
-
-# Lazily imported to avoid circular deps at module level
-_installer_paths = None
-
-
-def _get_installer_paths():
-    global _installer_paths
-    if _installer_paths is None:
-        from installer import installer_paths as _ip
-        _installer_paths = _ip
-    return _installer_paths
 
 from core.constants import (
     FLUX_ROOT_DIRS,
@@ -36,6 +26,12 @@ def _get_exe_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _frozen_appdata_dir() -> Path:
+    """Return %APPDATA%/FluxPipeline/, the user-writable data dir of the installed app."""
+    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return Path(appdata) / "FluxPipeline"
+
+
 def get_config_json_path() -> Path:
     """Return the config.json path.
 
@@ -44,7 +40,7 @@ def get_config_json_path() -> Path:
     Dev (non-frozen):  project root / config.json (existing behaviour).
     """
     if getattr(sys, "frozen", False):
-        return _get_installer_paths().get_appdata_dir() / "config.json"
+        return _frozen_appdata_dir() / "config.json"
     return _get_exe_dir() / "config.json"
 
 
@@ -55,7 +51,7 @@ def get_prefs_path() -> Path:
     Dev (non-frozen):  config.json next-to-project-root (existing behavior)
     """
     if getattr(sys, "frozen", False):
-        return _get_installer_paths().get_prefs_path()
+        return _frozen_appdata_dir() / "prefs.json"
     return get_config_json_path()
 
 
@@ -72,7 +68,11 @@ def _read_config_json() -> dict:
 def _write_config_json(data: dict) -> None:
     p = get_config_json_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Atomic: a reader (the running backend, a test) must never see a half-written
+    # file, which reads as {} and looks like "FLUX_ROOT is not set".
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def _update_config_json(key: str, value: str) -> None:
@@ -92,6 +92,97 @@ def get_flux_root() -> Path | None:
 def set_flux_root(path: Path | str) -> None:
     """Persist workspace path to config.json next to the exe."""
     _update_config_json("workspace", str(Path(path)))
+
+
+# ── Metadata backend selection (config.json, bootstrap) ──────────────────────
+# Which persistence backend the repository factory builds. Read from config.json
+# directly (NOT through the repository - the factory would recurse). Default
+# "json" so nothing changes until the maintainer flips it after validating the migration.
+
+def get_metadata_backend() -> str:
+    """Return the configured metadata backend name ("json" by default)."""
+    value = _read_config_json().get("metadata_backend")
+    return str(value).strip().lower() if value else "json"
+
+
+def get_sqlite_path() -> Path | None:
+    """Return the configured SQLite base path, or None when unset."""
+    value = _read_config_json().get("sqlite_path")
+    return Path(value) if value else None
+
+
+# Folder names of sync clients that replicate a folder between machines. A SQLite
+# base in (or serving) such a folder is unsafe: the client copies a half-written
+# base, and other machines never see the local writes.
+_SYNCED_DIR_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive")
+
+
+def _is_remote_drive(path: Path) -> bool:
+    """True when *path* sits on a mapped network drive (Windows only)."""
+    if sys.platform != "win32":
+        return False
+    drive = path.drive
+    if not drive or drive.startswith("\\\\"):
+        return False
+    try:
+        import ctypes
+        drive_remote = 4
+        return ctypes.windll.kernel32.GetDriveTypeW(f"{drive}\\") == drive_remote
+    except (AttributeError, OSError):
+        return False
+
+
+def shared_location_reason(path: Path | str | None) -> str | None:
+    """Return why *path* is a synced or network location, or None when local.
+
+    Used by the repository factory to refuse SQLite where several machines share
+    the files (V8 U0). Name based, no read of the target: works for a base that
+    does not exist yet.
+    """
+    if not path:
+        return None
+    raw = str(path)
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        return "network share (UNC path)"
+    p = Path(raw)
+    for env in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+        root = os.environ.get(env)
+        if not root:
+            continue
+        try:
+            p.resolve().relative_to(Path(root).resolve())
+            return f"synced folder ({env})"
+        except (ValueError, OSError):
+            pass
+    for part in p.parts:
+        low = part.casefold()
+        if any(marker in low for marker in _SYNCED_DIR_MARKERS):
+            return f"synced folder ({part})"
+    if _is_remote_drive(p):
+        return "network drive"
+    return None
+
+
+# ── Storage backend selection (config.json, big-files frontier) ──────────────
+# Which StorageLocator the storage factory builds, and where the big files live.
+# Read from config.json directly, like the metadata backend. Defaults keep today's
+# behaviour: the local backend, rooted at the projects dir, until the maintainer sets a root.
+
+def get_storage_backend() -> str:
+    """Return the configured storage backend name ("local" by default)."""
+    value = _read_config_json().get("storage_backend")
+    return str(value).strip().lower() if value else "local"
+
+
+def get_storage_root() -> Path | None:
+    """Return the configured big-files root, or None to use the projects dir.
+
+    None means "default to DOSSIER_PROJETS", so the resolved paths match today's
+    layout. An explicit value (local dir, UNC NAS, synced cloud folder) redirects
+    every resolved path under it, without touching any feature.
+    """
+    value = _read_config_json().get("storage_root")
+    return Path(value) if value else None
 
 
 # ── Install username (config.json, chosen at first launch) ───────────────────
@@ -221,6 +312,57 @@ def path_exists_safe(path: Path) -> bool:
         return False
 
 
+def _clear_readonly_and_retry(func, path) -> None:
+    """rmtree error handler: drop the read-only bit, then retry the failed op.
+
+    On Windows shutil.rmtree raises PermissionError (WinError 5, "Accès refusé") the
+    moment it hits a read-only file or directory — common in archived publishes. We
+    chmod +write and re-run the exact op that failed (unlink / rmdir).
+    """
+    import os as _os
+    import stat as _stat
+    try:
+        _os.chmod(path, _stat.S_IWRITE)
+        func(path)
+    except OSError:
+        # Genuinely locked/held elsewhere: let the final rmtree raise so the caller
+        # surfaces a real error instead of silently leaving a half-deleted tree.
+        pass
+
+
+def force_rmtree(path: Path | str) -> None:
+    """Recursively delete *path*, clearing read-only bits that block Windows.
+
+    Plain shutil.rmtree fails with WinError 5 on read-only entries; this retries each
+    failing entry after making it writable. No-op when the path does not exist.
+    """
+    import shutil as _shutil
+    import sys as _sys
+    p = Path(path)
+    if not p.exists():
+        return
+    if _sys.version_info >= (3, 12):
+        # onexc replaced the deprecated onerror in 3.12; signature is (func, path, exc).
+        _shutil.rmtree(p, onexc=lambda func, pth, _exc: _clear_readonly_and_retry(func, pth))
+    else:
+        _shutil.rmtree(p, onerror=lambda func, pth, _exc: _clear_readonly_and_retry(func, pth))
+
+
+def force_remove(path: Path | str) -> None:
+    """Delete a file or a whole directory tree, clearing read-only bits (Windows-safe)."""
+    import os as _os
+    import stat as _stat
+    p = Path(path)
+    if p.is_dir():
+        force_rmtree(p)
+        return
+    try:
+        p.unlink()
+    except PermissionError:
+        _os.chmod(p, _stat.S_IWRITE)
+        p.unlink()
+
+
 def normalize_path(path: Path | str) -> Path:
     """Resolve to absolute, normalise separators (handles UNC and OneDrive paths)."""
     return Path(path).resolve()
@@ -233,4 +375,53 @@ def is_subpath(child: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+# ── $FLUX portable token (priority n3) ────────────────────────────────────────
+# A path stored as "$FLUX/DOSSIER_PROJETS/..." is machine-independent: each user
+# resolves $FLUX to their own local pipeline root (get_flux_root). These helpers
+# convert at the backend <-> DCC boundary; they NEVER change how absolutes are
+# built on disk. Additive on purpose (paths.py is the single source of truth).
+
+FLUX_TOKEN = "$FLUX"
+
+
+def to_flux_token(path: Path | str, root: Path | None = None) -> str:
+    """Return *path* as a portable "$FLUX/..." string when it sits under the
+    local pipeline root, else the path unchanged (as a string).
+
+    A path outside the root (external asset, temp, other drive) is left absolute
+    on purpose: only pipeline paths get the token.
+    """
+    root = Path(root) if root else get_flux_root()
+    p = Path(path)
+    if root is None:
+        return str(p)
+    try:
+        rel = normalize_path(p).relative_to(normalize_path(root))
+    except (ValueError, OSError):
+        return str(p)
+    rel_posix = rel.as_posix()
+    return FLUX_TOKEN if rel_posix == "." else f"{FLUX_TOKEN}/{rel_posix}"
+
+
+def from_flux_token(token: Path | str, root: Path | None = None) -> Path:
+    """Resolve a "$FLUX/..." token back to an absolute Path on this machine.
+
+    Accepts "$FLUX" and "${FLUX}" forms. A value without the token is returned as
+    a Path unchanged. Raises if the token is used but FLUX_ROOT is not set.
+    """
+    s = str(token)
+    prefix = None
+    for form in (FLUX_TOKEN, "${FLUX}"):
+        if s == form or s.startswith(form + "/") or s.startswith(form + "\\"):
+            prefix = form
+            break
+    if prefix is None:
+        return Path(s)
+    root = Path(root) if root else get_flux_root()
+    if root is None:
+        raise RuntimeError("FLUX_ROOT is not set; cannot resolve $FLUX token.")
+    rest = s[len(prefix):].lstrip("/\\")
+    return root / rest if rest else root
 

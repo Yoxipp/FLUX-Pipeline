@@ -36,7 +36,7 @@ interface Props {
 // H zoom == per-shot width. Min is intentionally tiny so a whole sequence can be
 // squashed to a compact overview (shots become thin slivers); the number/label
 // just clip out at small sizes.
-const ZOOM_MIN = 10
+const ZOOM_MIN = 3
 const ZOOM_MAX = 260
 const ZOOM_DEF = 120
 const LS_ZOOM = 'flux.production.shot.zoom'
@@ -143,8 +143,9 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   // Column widths per seq: at least one seq-block wide, growing with shot count.
   // Shots are small fixed-size squares — they don't stretch with the horizontal
   // zoom (which controls seq width instead).
-  const gap = 6
-  const shotGap = 4
+  // Gaps shrink with the zoom so a squashed sequence stays a compact row of slivers.
+  const gap = pxPerBlock < 12 ? 3 : 6
+  const shotGap = pxPerBlock < 12 ? 1 : 4
   const shotSquare = Math.max(24, Math.min(42, Math.round(effShotH * 0.62)))
   // Timeline is purely visual (no create/delete by resize). The horizontal zoom
   // slider sizes EACH SHOT directly; the sequence column is just the sum of its
@@ -297,10 +298,10 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <ArrowDownUp size={11} strokeWidth={1.75} color="var(--ink-3)" style={{ transform: 'rotate(90deg)' }} />
           <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
-          <button onClick={() => setZoom(pxPerBlock - 20)} style={_zoomBtn}><Minus size={11} strokeWidth={2} /></button>
-          <input type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={5} value={pxPerBlock}
+          <button onClick={() => setZoom(pxPerBlock <= 20 ? pxPerBlock - 2 : pxPerBlock - 20)} style={_zoomBtn}><Minus size={11} strokeWidth={2} /></button>
+          <input type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={1} value={pxPerBlock}
                  onChange={e => setZoom(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <button onClick={() => setZoom(pxPerBlock + 20)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
+          <button onClick={() => setZoom(pxPerBlock < 20 ? pxPerBlock + 2 : pxPerBlock + 20)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{pxPerBlock}px</span>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -369,7 +370,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         }}>
           {/* Single horizontal scroll container. Header cells stick to the left
               via position:sticky so they stay visible while the lanes scroll. */}
-          <div ref={scrollWrapRef} style={{ overflowX: 'auto', overflowY: 'hidden', position: 'relative' }}>
+          <div ref={scrollWrapRef} className="timeline-scroll" style={{ overflowX: 'scroll', overflowY: 'hidden', position: 'relative' }}>
             <div style={{ minWidth: HEADER_W + contentW, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               {/* Bookmark overlay — vertical markers spanning ruler + tracks */}
               {bookmarkPositions.map((p, i) => (
@@ -678,6 +679,11 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
   const [dragOver, setDragOver] = useState(false)
   const bigFs = Math.max(9, Math.min(30, Math.round(height * 0.34)))
   const smallFs = Math.max(8, Math.min(18, Math.round(height * 0.22)))
+  // Text only when it fits: a narrow clip is a plain colored bar (name in the tooltip),
+  // never a cut number spilling over its neighbours.
+  const pad = width >= 36 ? 8 : width >= 16 ? 2 : 0
+  const showBig = width - 2 * pad >= Math.ceil(big.length * bigFs * 0.62)
+  const showSmall = showBig && width - 2 * pad >= 3 * smallFs
   return (
     <div
       draggable
@@ -695,9 +701,9 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
         // border-box so the given width INCLUDES padding/border — otherwise each
         // clip renders ~16px wider than `width`, and the shot row overflows past
         // the sequence clip (their widths both derive from the same colWidths).
-        width, height, minWidth: Math.min(width, 24), boxSizing: 'border-box',
+        width, height, minWidth: width, flexShrink: 0, boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        borderRadius: 5,
+        borderRadius: width >= 12 ? 5 : 2,
         background: color,
         color: 'var(--paper)',
         border: `1px solid color-mix(in oklch, ${color} 75%, black 20%)`,
@@ -710,14 +716,14 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
           : 'none',
         fontFamily: 'var(--sans)',
         cursor: 'pointer', userSelect: 'none',
-        overflow: 'hidden', padding: '4px 8px',
+        overflow: 'hidden', padding: `4px ${pad}px`,
         transition: 'filter 0.12s, box-shadow 0.15s',
         position: 'relative', zIndex: 1,
       }}
       onMouseEnter={e => (e.currentTarget.style.filter = 'brightness(1.08)')}
       onMouseLeave={e => (e.currentTarget.style.filter = 'brightness(1)')}
     >
-      {badge && (
+      {badge && showBig && (
         <span style={{
           position: 'absolute', top: 3, right: 4,
           fontFamily: 'var(--mono)', fontSize: 7, fontWeight: 700,
@@ -726,10 +732,10 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
           letterSpacing: '0.06em', pointerEvents: 'none',
         }}>{badge}</span>
       )}
-      <span style={{
-        fontWeight: 600, fontSize: bigFs, lineHeight: 1, letterSpacing: 0,
-      }}>{big}</span>
-      {small && (
+      {showBig && <span style={{
+        fontWeight: 600, fontSize: bigFs, lineHeight: 1, letterSpacing: 0, whiteSpace: 'nowrap',
+      }}>{big}</span>}
+      {small && showSmall && (
         <span style={{
           marginTop: 2, fontSize: smallFs, fontWeight: 500, letterSpacing: 0,
           opacity: 0.92, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

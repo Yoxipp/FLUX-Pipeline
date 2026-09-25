@@ -14,13 +14,18 @@ import { useFavorites, eventMatchesFavorite } from './hooks/useFavorites'
 import { useSettings }   from './hooks/useSettings'
 import { parseFluxFilename } from './pages/Production/util'
 import { Hub }           from './pages/Hub'
+import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
+import { ActionPublish } from './pages/ActionPublish'
+import { ActionGraph }   from './pages/ActionGraph'
 import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
-import { UsdAssembler }  from './pages/UsdAssembler'
+import { UsdPage }       from './pages/usd/UsdPage'
 import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
+import { AdvancedSettings } from './pages/AdvancedSettings'
+import { DiskUsage } from './pages/DiskUsage'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
@@ -102,6 +107,10 @@ function FavoriteWatcher() {
 // Inner shell — only mounted after first-launch wizard completes.
 // Hooks that poll the backend (useActivity, useDccStatus) live here so they
 // never fire while FLUX_ROOT is unset, which would cause backend 500s.
+// A page dragged out of the main window (U4): no sidebar, no status bar, no
+// notification watchers (the main window already shows them).
+const DETACHED = new URLSearchParams(window.location.search).get('detached') === '1'
+
 function AppShell({ settings }: { settings: Settings }) {
   const dccStatus          = useDccStatus()
   const { unreadCount }    = useActivity()
@@ -121,25 +130,31 @@ function AppShell({ settings }: { settings: Settings }) {
         <BackendBanner />
 
         <div className="flex flex-1 min-h-0">
-          <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />
+          {!DETACHED && <Sidebar dccStatus={dccStatus} unreadCount={unreadCount} />}
 
           <main className="flex-1 min-h-0 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
+            <PageErrorBoundary>
             <Routes>
               <Route path="/"          element={<Hub />} />
               <Route path="/publisher" element={<Publisher />} />
+              <Route path="/action-publish" element={<ActionPublish />} />
+              <Route path="/action-graph" element={<ActionGraph />} />
               <Route path="/activity"  element={<Activity />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
-              <Route path="/usd"       element={<UsdAssembler />} />
+              <Route path="/usd"       element={<UsdPage />} />
               <Route path="/templates" element={<TemplateEditor />} />
               <Route path="/production" element={<Production />} />
+              <Route path="/advanced"  element={<AdvancedSettings />} />
+              <Route path="/disk"      element={<DiskUsage />} />
             </Routes>
+            </PageErrorBoundary>
           </main>
         </div>
 
-        <StatusBar dccStatus={dccStatus} />
-        <MentionWatcher />
-        <FavoriteWatcher />
+        {!DETACHED && <StatusBar dccStatus={dccStatus} />}
+        {!DETACHED && <MentionWatcher />}
+        {!DETACHED && <FavoriteWatcher />}
       </div>
       <Toaster
         position="top-center"

@@ -126,6 +126,7 @@ def _extract_mesh(mesh: str, skin: str | None, joints_dag: list[str],
 
     data = MeshData(
         name=mesh_short,
+        path=mesh,
         points=points,
         face_vertex_counts=vtx_counts,
         face_vertex_indices=vtx_indices,
@@ -215,12 +216,18 @@ def _extract_anim(joints_dag: list[str], tokens: list[str], frame_start: int, fr
     translations = [[trs_per_time[ti][j][0] for j in keep] for ti in range(len(times))]
     rotations    = [[trs_per_time[ti][j][1] for j in keep] for ti in range(len(times))]
     scales       = [[trs_per_time[ti][j][2] for j in keep] for ti in range(len(times))]
+    try:
+        import maya.mel as mel
+        fps = float(mel.eval("currentTimeUnitToFPS()"))
+    except Exception:
+        fps = None
     return AnimData(
         joints=animated,
         times=[float(t) for t in times],
         translations=translations,
         rotations=rotations,
         scales=scales,
+        fps=fps,
     )
 
 
@@ -314,6 +321,19 @@ def _scene_skin_pairs() -> list[tuple[str, str]]:
     return pairs
 
 
+def _scene_mesh_pairs() -> list[tuple[str, str | None]]:
+    """Every mesh transform in the scene, paired with its skinCluster (or None).
+
+    Used for geo-only exports where an unskinned mesh is still valid output.
+    """
+    pairs: list[tuple[str, str | None]] = []
+    for shp in (cmds.ls(type="mesh", noIntermediate=True, long=True) or []):
+        for tr in (cmds.listRelatives(shp, parent=True, fullPath=True) or []):
+            tr = (cmds.ls(tr, long=True) or [tr])[0]
+            pairs.append((tr, _skin_cluster(tr)))
+    return pairs
+
+
 def _build_light_asset(
     asset: str,
     mesh: str | None,
@@ -328,13 +348,18 @@ def _build_light_asset(
     include_cam: bool = False,
     include_light: bool = False,
     scope: str = "selection",
+    root: str | None = None,
 ):
     """Extract a LightAsset from the Maya scene, honouring the include flags.
 
-    *scope* "scene" takes EVERY skinned mesh + the rig skeleton (no manual selection
-    needed); "selection" takes the selected skinned mesh(es), falling back to the whole
-    scene when nothing skinned is selected. The skeleton is the joint chain under the
-    root; the anim layer keeps only the joints that actually move.
+    *root* (U2, multi-instance publish) restricts the export to the meshes under one
+    node (one character instance, e.g. the DINGO_02 reference); no scene fallback.
+
+    *scope* "scene" takes the whole scene (every mesh when geo is included, else the
+    skinned meshes + rig skeleton); "selection" takes the selected mesh(es), falling
+    back to the scene when nothing usable is selected. A geo-only export accepts plain
+    unskinned meshes; the skeleton is the joint chain under the root, and the anim layer
+    keeps only the joints that actually move.
 
     Dependency rules: skin weights need geo + skel; anim needs skel. Excluded data is
     simply not extracted, and the authoring core skips the matching layer.
@@ -351,9 +376,25 @@ def _build_light_asset(
     cameras = _extract_cameras(scope, sel_set) if include_cam else []
     lights = _extract_lights(scope, sel_set) if include_light else []
 
-    # Collect (mesh, skinCluster) pairs — only needed for geo/skel/weights/anim.
-    if scope == "scene":
-        pairs = _scene_skin_pairs()
+    # Collect (mesh, skinCluster) pairs. The skinCluster is optional for a geo-only
+    # export: a plain unskinned mesh is still valid output, and only skel/anim/weights
+    # actually need one. _scene_fallback picks the matching scene sweep.
+    def _scene_fallback():
+        return _scene_mesh_pairs() if include_geo else _scene_skin_pairs()
+
+    if root:
+        pairs = []
+        for shp in (cmds.listRelatives(root, allDescendents=True, type="mesh", fullPath=True) or []):
+            if cmds.getAttr(shp + ".intermediateObject"):
+                continue
+            for m in (cmds.listRelatives(shp, parent=True, fullPath=True) or []):
+                sk = _skin_cluster(m)
+                if include_geo or sk:
+                    pairs.append((m, sk))
+        if not pairs:
+            log.error("light export: no mesh under %s", root)
+    elif scope == "scene":
+        pairs = _scene_fallback()
     else:
         cand = [mesh] if mesh is not None else (cmds.ls(selection=True, long=True, type="transform") or [])
         pairs = []
@@ -362,10 +403,10 @@ def _build_light_asset(
             if not cmds.listRelatives(m, shapes=True, type="mesh"):
                 continue
             sk = _skin_cluster(m)
-            if sk:
+            if include_geo or sk:                 # keep unskinned meshes for geo export
                 pairs.append((m, sk))
-        if not pairs and (include_geo or include_skel):   # fall back to the whole scene
-            pairs = _scene_skin_pairs()
+        if not pairs and (include_geo or include_skel):   # nothing usable selected → whole scene
+            pairs = _scene_fallback()
 
     seen: set[str] = set()
     pairs = [(m, sk) for m, sk in pairs if not (m in seen or seen.add(m))]
@@ -375,9 +416,12 @@ def _build_light_asset(
     anim = None
 
     if pairs:
+        # First skinCluster among the pairs (a geo-only selection may have none).
+        first_sk = next((sk for _, sk in pairs if sk), None)
+
         # Skeleton root: provided, else walk up from the first skin's first influence.
-        if root_joint is None:
-            infl = cmds.skinCluster(pairs[0][1], q=True, inf=True) or []
+        if root_joint is None and first_sk is not None:
+            infl = cmds.skinCluster(first_sk, q=True, inf=True) or []
             if infl:
                 node = (cmds.ls(infl[0], long=True) or [infl[0]])[0]
                 while True:
@@ -395,8 +439,8 @@ def _build_light_asset(
         if frame_end is None:
             frame_end = int(cmds.playbackOptions(q=True, max=True))
 
-        if include_skel and joints_dag:
-            skeleton = _extract_skeleton(joints_dag, tokens, pairs[0][1])
+        if include_skel and joints_dag and first_sk is not None:
+            skeleton = _extract_skeleton(joints_dag, tokens, first_sk)
         if include_geo:
             for m, sk in pairs:
                 meshes.append(_extract_mesh(
@@ -407,7 +451,8 @@ def _build_light_asset(
             anim = _extract_anim(joints_dag, tokens, frame_start, frame_end)
 
     if not meshes and not skeleton.joints and not cameras and not lights:
-        log.error("light export: nothing to export (%s) — no skinned mesh, camera or light", scope)
+        log.error("light export: nothing to export (%s). Select a mesh (geo-only needs no "
+                  "skinCluster), or enable a camera/light.", scope)
         return None
 
     log.info("light export: %d mesh(es), %d cam, %d light, scope=%s",
@@ -431,6 +476,7 @@ def run_light_export(
     include_cam: bool = False,
     include_light: bool = False,
     scope: str = "selection",
+    root: str | None = None,
 ) -> None:
     """Extract a light asset from Maya and write a JSON envelope to *result_path*.
 
@@ -466,7 +512,7 @@ def run_light_export(
                 asset, mesh, root_joint, frame_start, frame_end,
                 include_geo=include_geo, include_skel=include_skel,
                 include_anim=include_anim, include_weights=include_weights,
-                include_uv=include_uv, scope=scope,
+                include_uv=include_uv, scope=scope, root=root,
             )
             if light is not None:
                 data = dataclasses.asdict(light)

@@ -9,11 +9,15 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from core.json_manager import read_json, write_json
 from core.logger import get_logger
-from core.paths import get_project_production_path
+from core.repository_factory import get_repository
 
 log = get_logger(__name__)
+
+# Metadata frontier (V5 Phase 1a): production.json is one document in the
+# "production" collection, keyed by project name. The factory resolves it to
+# get_project_production_path(); no store here touches json_manager directly.
+_COLLECTION = "production"
 
 SCHEMA_VERSION = 1
 
@@ -34,8 +38,7 @@ def load_production(project_name: str) -> dict:
     Missing keys are healed against the default schema so callers can rely on
     every top-level list being present.
     """
-    path = get_project_production_path(project_name)
-    data = read_json(path)
+    data = get_repository().get(_COLLECTION, project_name)
     if not isinstance(data, dict):
         return default_schema()
     return _heal(data)
@@ -43,8 +46,7 @@ def load_production(project_name: str) -> dict:
 
 def save_production(project_name: str, data: dict) -> bool:
     """Write production.json atomically. Returns True on success."""
-    path = get_project_production_path(project_name)
-    ok = write_json(path, _heal(data))
+    ok = get_repository().set(_COLLECTION, project_name, _heal(data))
     if not ok:
         log.error("Failed to write production.json for project %r", project_name)
     return ok

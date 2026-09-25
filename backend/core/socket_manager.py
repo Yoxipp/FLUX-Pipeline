@@ -129,8 +129,7 @@ class SocketManager:
                 return None
             try:
                 sock.sendall((command + "\n").encode("utf-8"))
-                response = sock.recv(_BUFFER_SIZE).decode("utf-8", errors="replace").strip()
-                return response
+                return _recv_response(sock).decode("utf-8", errors="replace").strip()
             except OSError as e:
                 log.warning("send_command failed for port %d: %s", port, e)
                 self._socks[port] = None
@@ -155,6 +154,34 @@ class SocketManager:
                 sock.close()
             except OSError:
                 pass
+
+
+_IDLE_S = 0.3   # silence that ends a response with no delimiter
+_DELIMITERS = (b"\n", b"\x00")   # FLUX bridges end a reply with a newline, Maya with a NUL
+
+
+def _recv_response(sock: socket.socket) -> bytes:
+    """One whole response: read until it ends with a delimiter, the DCC goes quiet
+    (_IDLE_S) or closes. A single recv(4096) used to cut long or split answers."""
+    chunks = [sock.recv(_BUFFER_SIZE)]
+    if not chunks[0] or chunks[0].endswith(_DELIMITERS):
+        return chunks[0]
+    previous = sock.gettimeout()
+    sock.settimeout(_IDLE_S)
+    try:
+        while True:
+            try:
+                more = sock.recv(_BUFFER_SIZE)
+            except socket.timeout:
+                break
+            if not more:
+                break
+            chunks.append(more)
+            if more.endswith(_DELIMITERS):
+                break
+    finally:
+        sock.settimeout(previous)
+    return b"".join(chunks)
 
 
 # Module-level singleton — import and use directly

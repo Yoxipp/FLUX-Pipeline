@@ -71,13 +71,13 @@ class AuthorLightAsset(unittest.TestCase):
 
             root = stage.GetPrimAtPath("/CHAR_hero")
             self.assertTrue(root and root.IsA(UsdSkel.Root))
-            self.assertTrue(stage.GetPrimAtPath("/CHAR_hero/Skeleton").IsA(UsdSkel.Skeleton))
-            self.assertTrue(stage.GetPrimAtPath("/CHAR_hero/body").IsValid())
+            self.assertTrue(stage.GetPrimAtPath("/CHAR_hero/skel/Skeleton").IsA(UsdSkel.Skeleton))
+            self.assertTrue(stage.GetPrimAtPath("/CHAR_hero/geo/render/body").IsValid())
 
-            skel = UsdSkel.Skeleton(stage.GetPrimAtPath("/CHAR_hero/Skeleton"))
+            skel = UsdSkel.Skeleton(stage.GetPrimAtPath("/CHAR_hero/skel/Skeleton"))
             self.assertEqual(list(skel.GetJointsAttr().Get()), ["Root", "Root/Hip"])
 
-            anim = UsdSkel.Animation(stage.GetPrimAtPath("/CHAR_hero/Anim"))
+            anim = UsdSkel.Animation(stage.GetPrimAtPath("/CHAR_hero/skel/Anim"))
             self.assertEqual(list(anim.GetJointsAttr().Get()), ["Root/Hip"])
             # animated joint carries two translation samples
             self.assertEqual(anim.GetTranslationsAttr().GetNumTimeSamples(), 2)
@@ -87,15 +87,15 @@ class AuthorLightAsset(unittest.TestCase):
             paths = author_light_asset(_sample_asset(with_anim=False), d, fmt="usda")
             self.assertNotIn("anim", paths)
             stage = Usd.Stage.Open(str(paths["root"]))
-            self.assertFalse(stage.GetPrimAtPath("/CHAR_hero/Anim").IsValid())
+            self.assertFalse(stage.GetPrimAtPath("/CHAR_hero/skel/Anim").IsValid())
 
     def test_binding_targets_skeleton(self):
         with tempfile.TemporaryDirectory() as d:
             paths = author_light_asset(_sample_asset(), d, fmt="usda")
             stage = Usd.Stage.Open(str(paths["root"]))
-            binding = UsdSkel.BindingAPI(stage.GetPrimAtPath("/CHAR_hero/body"))
+            binding = UsdSkel.BindingAPI(stage.GetPrimAtPath("/CHAR_hero/geo/render/body"))
             targets = binding.GetSkeletonRel().GetTargets()
-            self.assertEqual([str(t) for t in targets], ["/CHAR_hero/Skeleton"])
+            self.assertEqual([str(t) for t in targets], ["/CHAR_hero/skel/Skeleton"])
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
@@ -12,13 +13,24 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
 from core.logger import get_logger
 
 from ..usd_assembler.structure.naming import sanitize_token
-from .contract import AnimData, LightAsset, Mat4, MeshData, SkeletonData, filter_animated_joints
+from .contract import (
+    AnimData, LightAsset, Mat4, MeshData, SkeletonData, filter_animated_joints, mesh_prim_names,
+)
 
-__all__ = ["author_light_asset", "filter_animated_joints"]
+__all__ = ["ANIM_SUBPATH", "GEO_RENDER_SCOPE", "SKELETON_SUBPATH", "author_light_asset",
+           "author_motion_only", "filter_animated_joints"]
 
 log = get_logger("usd_export.skel")
 
 _IDENTITY: Mat4 = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+
+# Prim layout inside the root (ADR 0019, SideFX Component Builder + UsdSkel):
+#   /<NAME>                 SkelRoot
+#   /<NAME>/geo/render/<m>  meshes          /<NAME>/geo/proxy  (usd_proxy)
+#   /<NAME>/skel/Skeleton   /<NAME>/skel/Anim
+GEO_RENDER_SCOPE = "geo/render"
+SKELETON_SUBPATH = "skel/Skeleton"
+ANIM_SUBPATH = "skel/Anim"
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -36,19 +48,36 @@ def _new_stage(path: Path, fmt: str) -> Usd.Stage:
 
 # ── layer authoring ──────────────────────────────────────────────────────────────
 
+def _define_scopes(stage: Usd.Stage, path: str) -> None:
+    """Scope prims for every missing ancestor between the root and *path* (Solaris layout)."""
+    parts = [p for p in path.split("/") if p]
+    for i in range(2, len(parts)):
+        sub = "/" + "/".join(parts[:i])
+        if not stage.GetPrimAtPath(sub):
+            UsdGeom.Scope.Define(stage, sub)
+
+
 def _author_model_layer(
     path: Path, root_path: str, skel_path: str, asset: str,
     meshes: list[MeshData], fmt: str,
 ) -> None:
-    """Model layer: the SkelRoot + skinned meshes (the heavy geometry)."""
+    """Model layer: the SkelRoot + skinned meshes under geo/render (the heavy geometry)."""
     stage = _new_stage(path, fmt)
     root = UsdSkel.Root.Define(stage, root_path)
     stage.SetDefaultPrim(root.GetPrim())
+    render_path = f"{root_path}/{GEO_RENDER_SCOPE}"
+    _define_scopes(stage, f"{render_path}/x")
 
-    for mesh in meshes:
-        mpath = f"{root_path}/{sanitize_token(mesh.name)}"
+    prim_names = mesh_prim_names([(m.name, m.path) for m in meshes], sanitize_token)
+    for mesh, prim_name in zip(meshes, prim_names):
+        mpath = f"{render_path}/{prim_name}"
         gmesh = UsdGeom.Mesh.Define(stage, mpath)
-        gmesh.CreatePointsAttr(Vt.Vec3fArray([Gf.Vec3f(*p) for p in mesh.points]))
+        points = Vt.Vec3fArray([Gf.Vec3f(*p) for p in mesh.points])
+        gmesh.CreatePointsAttr(points)
+        # Rest bound: bbox caches, viewport culling and the component extentsHint read it.
+        extent = UsdGeom.PointBased.ComputeExtent(points) if len(points) else None
+        if extent is not None:
+            gmesh.CreateExtentAttr(extent)
         gmesh.CreateFaceVertexCountsAttr(Vt.IntArray(mesh.face_vertex_counts))
         gmesh.CreateFaceVertexIndicesAttr(Vt.IntArray(mesh.face_vertex_indices))
 
@@ -79,6 +108,7 @@ def _author_skel_layer(
     """Skel layer: the Skeleton prim (topology + bind/rest pose)."""
     stage = _new_stage(path, fmt)
     stage.OverridePrim(root_path)   # SkelRoot type comes from the model layer
+    _define_scopes(stage, skel_path)
     skel = UsdSkel.Skeleton.Define(stage, skel_path)
     skel.CreateJointsAttr(Vt.TokenArray(skeleton.joints))
     skel.CreateBindTransformsAttr(Vt.Matrix4dArray([_mat(m) for m in skeleton.bind_transforms]))
@@ -94,6 +124,7 @@ def _author_anim_layer(
     """Anim layer: a UsdSkelAnimation carrying ONLY the animated joints."""
     stage = _new_stage(path, fmt)
     stage.OverridePrim(root_path)
+    _define_scopes(stage, anim_path)
     uanim = UsdSkel.Animation.Define(stage, anim_path)
     uanim.CreateJointsAttr(Vt.TokenArray(anim.joints))
 
@@ -186,6 +217,74 @@ def _author_light_layer(path: Path, root_path: str, lights, fmt: str) -> None:
     stage.GetRootLayer().Save()
 
 
+def _set_time_range(layer: Sdf.Layer, anim: AnimData) -> None:
+    """Frame range + frame rate, so a DCC timeline knows how long the motion lasts."""
+    if anim.times:
+        layer.startTimeCode = float(min(anim.times))
+        layer.endTimeCode = float(max(anim.times))
+    if anim.fps:
+        layer.timeCodesPerSecond = float(anim.fps)
+        layer.framesPerSecond = float(anim.fps)
+
+
+def author_motion_only(asset: LightAsset, dest_dir: str | Path, *, fmt: str = "usda",
+                       root_name: str | None = None) -> dict[str, Path]:
+    """Motion only (2026-09-18): ``{asset}_anim`` holds the moving joints of the
+    skeleton animation under ``/<root>/skel/Anim`` and binds it as the animation source
+    of ``/<root>``; no skeleton, no geometry (they come from the asset's rig and model).
+    Referenced onto an asset prim, it animates that asset. The root ``{asset}`` file
+    sublayers it and carries the same frame range. Returns {"anim", "root"} -> Path.
+    """
+    if asset.anim is None or not asset.anim.joints:
+        raise ValueError("aucune anim : rien ne bouge sur la plage demandee")
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    token = sanitize_token(root_name or asset.asset)
+    root_path = f"/{token}"
+    anim_path = f"{root_path}/{ANIM_SUBPATH}"
+
+    anim_p = dest / f"{asset.asset}_anim.{fmt}"
+    stage = _new_stage(anim_p, fmt)
+    stage.OverridePrim(root_path)
+    _define_scopes(stage, anim_path)
+    uanim = UsdSkel.Animation.Define(stage, anim_path)
+    uanim.CreateJointsAttr(Vt.TokenArray(asset.anim.joints))
+    t_attr = uanim.CreateTranslationsAttr()
+    r_attr = uanim.CreateRotationsAttr()
+    s_attr = uanim.CreateScalesAttr()
+    for i, t in enumerate(asset.anim.times):
+        t_attr.Set(Vt.Vec3fArray([Gf.Vec3f(*v) for v in asset.anim.translations[i]]), t)
+        r_attr.Set(Vt.QuatfArray([Gf.Quatf(q[3], q[0], q[1], q[2])
+                                  for q in asset.anim.rotations[i]]), t)
+        s_attr.Set(Vt.Vec3hArray([Gf.Vec3h(*v) for v in asset.anim.scales[i]]), t)
+    binding = UsdSkel.BindingAPI.Apply(stage.GetPrimAtPath(root_path))
+    binding.CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+    # Defining skel/Anim also defined its ancestors: the root stays an "over", the
+    # asset it is referenced onto owns it.
+    stage.GetRootLayer().GetPrimAtPath(root_path).specifier = Sdf.SpecifierOver
+    stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
+    _set_time_range(stage.GetRootLayer(), asset.anim)
+    stage.GetRootLayer().Save()
+
+    root_p = dest / f"{asset.asset}.{fmt}"
+    root_layer = _new_stage(root_p, fmt).GetRootLayer()
+    root_layer.subLayerPaths = [anim_p.name]
+    root_layer.defaultPrim = token
+    _set_time_range(root_layer, asset.anim)
+    root_layer.Save()
+    log.info("Authored motion-only anim %s (%d joints, %d frames) -> %s",
+             asset.asset, len(asset.anim.joints), len(asset.anim.times), root_p.name)
+    return {"anim": anim_p, "root": root_p}
+
+
+def skeleton_signature(joints: list[str]) -> str:
+    """12 hex chars of the ordered joint paths ("" without joints): same signature =
+    same rig, whatever the geometry (crowd A6, ADR 0022)."""
+    if not joints:
+        return ""
+    return hashlib.sha1("\n".join(str(j) for j in joints).encode("utf-8")).hexdigest()[:12]
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def author_light_asset(
@@ -194,12 +293,14 @@ def author_light_asset(
     *,
     fmt: str = "usda",
     version_label: str | None = None,
+    root_name: str | None = None,
 ) -> dict[str, Path]:
     """Author the light layered asset into *dest_dir*.
 
     Writes ``{asset}_model``, ``{asset}_skel``, optional ``{asset}_anim`` and a root
-    ``{asset}`` that sublayers them strong->weak (anim, skel, model). The root's
-    defaultPrim is the asset token. When *version_label* is given it is appended to
+    ``{asset}`` that sublayers them strong->weak (anim, skel, model). The prim root
+    (and defaultPrim) is *root_name* (the NAME token, ADR 0019), else the asset token;
+    file names always use ``asset.asset``. When *version_label* is given it is appended to
     every file name (e.g. ``{asset}_model_v001``); the default (None) uses plain names,
     which suits a per-version output folder.
     Returns a dict of {"model","skel","anim"(optional),"root"} -> Path.
@@ -207,10 +308,10 @@ def author_light_asset(
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
 
-    token = sanitize_token(asset.asset)
+    token = sanitize_token(root_name or asset.asset)
     root_path = f"/{token}"
-    skel_path = f"{root_path}/Skeleton"
-    anim_path = f"{root_path}/Anim"
+    skel_path = f"{root_path}/{SKELETON_SUBPATH}"
+    anim_path = f"{root_path}/{ANIM_SUBPATH}"
 
     _suffix_ver = f"_{version_label}" if version_label else ""
 
@@ -255,6 +356,11 @@ def author_light_asset(
     root_layer = root_stage.GetRootLayer()
     root_layer.subLayerPaths = sublayers
     root_layer.defaultPrim = token
+    if has_skel:
+        # Crowd (A6, ADR 0022): assets with the same signature share a rig.
+        root_layer.customLayerData = {"flux": {
+            "skeleton_signature": skeleton_signature(asset.skeleton.joints),
+            "joint_count": len(asset.skeleton.joints)}}
     root_layer.Save()
     paths["root"] = root_p
 

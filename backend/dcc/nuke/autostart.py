@@ -59,41 +59,74 @@ def _block() -> str:
     )
 
 
+def _menu_block() -> str:
+    """The FLUX block for ~/.nuke/menu.py: register the FLUX menu (GUI only).
+
+    Nuke runs menu.py after init.py in GUI sessions, which is the correct place to
+    add menu entries. sys.path is re-ensured defensively in case init.py's block
+    was removed. flux_nuke_menu imports only `nuke` + stdlib, no backend packages.
+    """
+    flux_backend = str(Path(__file__).resolve().parent.parent.parent)
+    return (
+        f"{_BLOCK_BEGIN}\n"
+        f"try:\n"
+        f"    import sys as _s\n"
+        f"    if r'{flux_backend}' not in _s.path:\n"
+        f"        _s.path.insert(0, r'{flux_backend}')\n"
+        f"    from dcc.nuke import flux_nuke_menu as _fmenu\n"
+        f"    _fmenu.register()\n"
+        f"except Exception as _e:\n"
+        f"    print('[FLUX] Nuke menu error: %s' % _e)\n"
+        f"{_BLOCK_END}"
+    )
+
+
+def _write_block(target: Path, block: str) -> None:
+    """Insert or refresh a FLUX block in *target* (idempotent)."""
+    existing = target.read_text(encoding="utf-8") if target.exists() else ""
+    if _BLOCK_BEGIN in existing:
+        existing = re.sub(
+            rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
+            "", existing, flags=re.DOTALL,
+        )
+    new = (existing.rstrip() + "\n\n" + block + "\n") if existing.strip() else (block + "\n")
+    target.write_text(new, encoding="utf-8")
+
+
+def _strip_block(target: Path) -> None:
+    """Remove the FLUX block from *target* if present."""
+    if not target.exists():
+        return
+    content = target.read_text(encoding="utf-8")
+    if _BLOCK_BEGIN not in content:
+        return
+    cleaned = re.sub(
+        rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
+        "", content, flags=re.DOTALL,
+    )
+    target.write_text(cleaned, encoding="utf-8")
+
+
 def install(nuke_exe_path: str | None = None) -> dict:
-    """Write (or refresh) the FLUX block into ~/.nuke/init.py. Idempotent."""
+    """Write the FLUX blocks into ~/.nuke/init.py (server) and menu.py (menu). Idempotent."""
     home = _nuke_home()
-    f = home / "init.py"
-    block = _block()
     try:
         home.mkdir(parents=True, exist_ok=True)
-        existing = f.read_text(encoding="utf-8") if f.exists() else ""
-        if _BLOCK_BEGIN in existing:
-            existing = re.sub(
-                rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
-                "", existing, flags=re.DOTALL,
-            )
-        new = (existing.rstrip() + "\n\n" + block + "\n") if existing.strip() else (block + "\n")
-        f.write_text(new, encoding="utf-8")
+        _write_block(home / "init.py", _block())        # socket bridge
+        _write_block(home / "menu.py", _menu_block())    # FLUX menu (GUI)
     except OSError as exc:
         return {"success": False, "message": str(exc), "path": None}
-    log.info("Nuke autostart installed → %s", f)
+    f = home / "init.py"
+    log.info("Nuke autostart installed -> %s (+ menu.py)", f)
     return {"success": True, "message": f"installed → {f}", "path": str(f)}
 
 
 def uninstall(nuke_exe_path: str | None = None) -> dict:
-    """Remove the FLUX block from ~/.nuke/init.py."""
-    f = get_startup_file()
-    if f is None or not f.exists():
-        return {"success": True, "message": "not_installed"}
+    """Remove the FLUX blocks from ~/.nuke/init.py and menu.py."""
+    home = _nuke_home()
     try:
-        content = f.read_text(encoding="utf-8")
-        if _BLOCK_BEGIN not in content:
-            return {"success": True, "message": "not_installed"}
-        cleaned = re.sub(
-            rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
-            "", content, flags=re.DOTALL,
-        )
-        f.write_text(cleaned, encoding="utf-8")
+        _strip_block(home / "init.py")
+        _strip_block(home / "menu.py")
     except OSError as exc:
         return {"success": False, "message": str(exc)}
     return {"success": True, "message": "uninstalled"}

@@ -25,8 +25,23 @@ HOUDINI_HTTP_PORT = 48884
 class HoudiniClient:
     """Sync HTTP client for flux_houdini_server running inside Houdini."""
 
-    def __init__(self, host: str = "localhost", port: int = HOUDINI_HTTP_PORT) -> None:
-        self.base = f"http://{host}:{port}"
+    def __init__(self, host: str = "127.0.0.1", port: int | None = None) -> None:
+        # port None = follow the Houdini instance chosen in FLUX (several Houdini can
+        # run, each on its own port 48884..48891), else the base port.
+        self._host = host
+        self._port = port
+
+    @property
+    def port(self) -> int:
+        if self._port is not None:
+            return self._port
+        from core.dcc_instances import get_active_port
+
+        return get_active_port("Houdini") or HOUDINI_HTTP_PORT
+
+    @property
+    def base(self) -> str:
+        return f"http://{self._host}:{self.port}"
 
     # ------------------------------------------------------------------
     # Connection

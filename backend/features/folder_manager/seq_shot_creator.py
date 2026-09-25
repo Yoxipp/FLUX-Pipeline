@@ -93,6 +93,7 @@ def create_shot(
     # Token key uses "SEQ###/SHOT###" so shots are scoped under their sequence
     token_key = f"{seq_label}/{shot_label}"
     add_token(project_path, "SHOT", token_key, shot_rel)
+    ensure_shot_base(project_path, seq_label, shot_label)
     # Author the shot USD template: strong shot light over the weak sequence rig.
     create_shot_usd_template(shot_path, seq_label, shot_label)
     # Author the shot lighting .hip (refines/overrides the seq rig). Non-fatal.
@@ -100,8 +101,52 @@ def create_shot(
         create_shot_hip_scene(shot_path, seq_label, shot_label)
     except Exception as exc:  # noqa: BLE001
         log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
+    # Same as a shot born in Production: its stage exists from the start (ADR 0020).
+    _write_shot_stage(project_path, seq_label, shot_label)
     log.info("Shot created: %s", shot_path)
     return shot_path
+
+
+def shot_department_dirs(project_path: Path, seq_label: str, shot_label: str) -> list[Path]:
+    """Department folders every shot has (2026-09-19): one per TYPE_SHOT token whose
+    folder lives inside the shot (layout, anim, cfx, fx...). LIGHT and COMP have their
+    own roots (``lighting/{seq}``, ``comp/{seq}/{shot}``) and are left to their publishes."""
+    from core.constants import DEFAULT_SHOT_TYPE_TOKENS
+
+    shot_rel = f"shot/{seq_label}/{shot_label}"
+    departments = (load_tokens(project_path) or {}).get("TYPE_SHOT") or DEFAULT_SHOT_TYPE_TOKENS
+    out: list[Path] = []
+    for tpl in departments.values():
+        rel = str(tpl).replace("\\", "/").replace("{seq}", seq_label).replace("{shot}", shot_label).strip("/")
+        if "{" in rel or not rel.startswith(shot_rel + "/"):
+            continue
+        folder = project_path / rel
+        if folder not in out:
+            out.append(folder)
+    return out
+
+
+def ensure_shot_base(project_path: Path, seq_label: str, shot_label: str) -> list[Path]:
+    """The one folder base of a shot, from the Folder Manager and from Production alike:
+    the shot folder and its department folders. Create-only; returns what was created.
+    Sub-task folders (anim/block, anim/dingo...) come only from a declared sub-task or
+    a publish."""
+    created = []
+    shot_path = project_path / "shot" / seq_label / shot_label
+    for folder in [shot_path] + shot_department_dirs(project_path, seq_label, shot_label):
+        if not folder.exists():
+            ensure_dir(folder)
+            created.append(folder)
+    return created
+
+
+def _write_shot_stage(project_path: Path, seq_label: str, shot_label: str) -> None:
+    try:
+        from features.usd_assembler.shot_stage import write_stage
+
+        write_stage(project_path, seq_label, shot_label)
+    except Exception as exc:  # noqa: BLE001 - the folder stands even without a stage
+        log.warning("Shot stage not written for %s_%s: %s", seq_label, shot_label, exc)
 
 
 def update_sequence(
@@ -152,6 +197,8 @@ def update_sequence(
             except Exception as exc:  # noqa: BLE001
                 log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
             log.info("Shot created (via seq update): %s", shot_path)
+        # Same base as a shot made in the Folder Manager (create-only, old shots too).
+        ensure_shot_base(project_path, seq_label, shot_label)
 
         # Task + subtask folders inside the shot.
         for tsk in (shot.get("tasks", []) if isinstance(shot, dict) else []):
@@ -190,37 +237,6 @@ def _resolve_shot_task_dir(
     return project_path / "shot" / seq_label / shot_label / task_token.lower()
 
 
-def update_shot(
-    project_path: Path,
-    seq_number: int,
-    shot_number: int,
-    padding: int = DEFAULT_PADDING,
-) -> Path:
-    """Idempotent version of :func:`create_shot` — never errors if it exists."""
-    seq_label  = format_seq(seq_number, padding)
-    shot_label = format_shot(shot_number, padding)
-    shot_path  = project_path / "shot" / seq_label / shot_label
-    if shot_path.exists():
-        return shot_path
-    return create_shot(project_path, seq_number, shot_number, padding=padding)
-
-
-def sequence_exists(project_path: Path, seq_number: int, padding: int = DEFAULT_PADDING) -> bool:
-    seq_label = format_seq(seq_number, padding)
-    return (project_path / "shot" / seq_label).exists()
-
-
-def shot_exists(
-    project_path: Path,
-    seq_number: int,
-    shot_number: int,
-    padding: int = DEFAULT_PADDING,
-) -> bool:
-    seq_label  = format_seq(seq_number, padding)
-    shot_label = format_shot(shot_number, padding)
-    return (project_path / "shot" / seq_label / shot_label).exists()
-
-
 def list_sequences(project_path: Path) -> list[str]:
     """Return sorted SEQ token keys found in tokens.json."""
     tokens = load_tokens(project_path)
@@ -240,10 +256,8 @@ def list_shots(project_path: Path, seq_number: int | None = None, padding: int =
 # ── internals ─────────────────────────────────────────────────────────────────
 
 def _scaffold_shot(shot_path: Path) -> None:
-    # Minimal structure only: create the shot root. Task sub-folders (layout / fx /
-    # cfx / anim…) are NOT pre-invented — they are created on demand (by a publish,
-    # a materialize from Production, or the artist). The USD/hip lighting templates
-    # authored by the callers are a separate feature and still land here.
+    # The shot root. Its department folders come from ensure_shot_base (2026-09-19,
+    # replaces the 2026-09-09 "root only" rule); sub-task folders stay on demand.
     ensure_dir(shot_path)
     log.debug("Scaffolded shot at %s", shot_path)
 

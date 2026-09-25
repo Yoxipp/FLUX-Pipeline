@@ -40,7 +40,7 @@ class SettingsUpdate(BaseModel):
 @router.get("")
 async def get_settings() -> dict:
     """Return current settings + first-launch state."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     is_first = await loop.run_in_executor(None, config.is_first_launch)
     root = get_flux_root()
     user = config.get_current_user()
@@ -74,13 +74,16 @@ async def init_first_launch(req: InitRequest) -> dict:
         for d in FLUX_ROOT_DIRS:
             ensure_dir(root / d)
         (root / FLUX_MARKER_FILENAME).touch()
-        # Écrire workspace dans les deux emplacements :
-        # - config.json (next to exe, lu par get_flux_root())
-        # - prefs.json  (AppData, lu par config._load())
+        # Bootstrap keys go into config.json (next to exe / %APPDATA%/FluxPipeline/
+        # when frozen) because is_first_launch reads that file directly - it must NOT
+        # depend on the metadata repository, whose location depends on the workspace.
+        # When frozen, config.json and prefs.json are two different files, so writing
+        # only to prefs.json (via create_user) would leave the wizard looping forever.
         set_flux_root(root)
+        set_config_username(username)
         config.create_user(username, req.workspace)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         await loop.run_in_executor(None, _scaffold)
     except Exception as exc:
@@ -92,7 +95,7 @@ async def init_first_launch(req: InitRequest) -> dict:
 @router.put("")
 async def update_settings(req: SettingsUpdate) -> dict:
     """Update one or more settings fields."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     if req.theme_bg or req.theme_surface or req.theme_fg or req.theme_accent:
         current = await loop.run_in_executor(None, config.get_theme)
@@ -146,7 +149,7 @@ async def update_settings(req: SettingsUpdate) -> dict:
 async def list_users() -> dict:
     """Return existing usernames (for first-launch suggestions)."""
     from utils.user_utils import list_users as _list
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     users = await loop.run_in_executor(None, _list)
     return {"users": users}
 
@@ -159,7 +162,7 @@ class UserRenameRequest(BaseModel):
 @router.put("/users/rename")
 async def rename_user_endpoint(req: UserRenameRequest) -> dict:
     """Rename an artist (renames their USER folder; active user follows)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.rename_user(req.old, req.new))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -169,7 +172,7 @@ async def rename_user_endpoint(req: UserRenameRequest) -> dict:
 @router.delete("/users/{name}")
 async def delete_user_endpoint(name: str) -> dict:
     """Delete an artist and their data (refuses the active user)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.delete_user(name))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -184,7 +187,7 @@ async def get_user_data() -> dict:
     user = config.get_current_user()
     if not user:
         return {}
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: user_utils.read_user_data(user))
 
 
@@ -201,5 +204,101 @@ async def put_user_data(patch: dict) -> dict:
         user_utils.write_user_data(user, data)
         return data
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _merge)
+
+
+# ── Enabled DCCs per user (V8 U10) ────────────────────────────────────────────
+
+class EnabledDccsUpdate(BaseModel):
+    enabled: list[str] | None = None   # None = reset (all DCCs enabled)
+
+
+def _known_dcc_keys() -> set[str]:
+    from features.launcher.launcher_core import DCC_FRONTEND_KEYS
+    return set(DCC_FRONTEND_KEYS)
+
+
+@router.get("/enabled-dccs")
+async def get_enabled_dccs() -> dict:
+    """Return {known, enabled}; enabled is None when the user never chose (= all)."""
+    user = config.get_current_user()
+    known = sorted(_known_dcc_keys())
+    if not user:
+        return {"known": known, "enabled": None}
+    loop = asyncio.get_running_loop()
+    enabled = await loop.run_in_executor(None, lambda: user_utils.get_enabled_dccs(user))
+    return {"known": known, "enabled": enabled}
+
+
+@router.put("/enabled-dccs")
+async def put_enabled_dccs(req: EnabledDccsUpdate) -> dict:
+    """Persist the active user's enabled DCC keys in USER/<user>/ (User.json)."""
+    user = config.get_current_user()
+    if not user:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
+    known = _known_dcc_keys()
+    loop = asyncio.get_running_loop()
+    try:
+        enabled = await loop.run_in_executor(
+            None, lambda: user_utils.set_enabled_dccs(user, req.enabled, known)
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"known": sorted(known), "enabled": enabled}
+
+
+# ── Parametres avances (N8) ───────────────────────────────────────────────────
+
+class AdvancedProjectUpdate(BaseModel):
+    project: str
+    values: dict
+
+
+class AdvancedSwitchesUpdate(BaseModel):
+    values: dict        # {name: value, or null to go back to the default}
+
+
+@router.get("/advanced")
+async def get_advanced(project: str | None = None) -> dict:
+    """project.json settings of *project* (or the last project) + this machine's publish switches."""
+    from core.paths import get_project_path
+    from features.settings.advanced import read_project_settings, read_switches
+
+    loop = asyncio.get_running_loop()
+    name = project or config.get_last_project()
+    proj = None
+    if name and get_project_path(name).exists():
+        proj = await loop.run_in_executor(None, lambda: read_project_settings(get_project_path(name)))
+        proj["name"] = name
+    return {"project": proj, "switches": await loop.run_in_executor(None, read_switches)}
+
+
+@router.put("/advanced/project")
+async def put_advanced_project(req: AdvancedProjectUpdate) -> dict:
+    """Write the project.json settings (validated; nothing written on error)."""
+    from core.paths import get_project_path
+    from features.settings.advanced import write_project_settings
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    loop = asyncio.get_running_loop()
+    try:
+        res = await loop.run_in_executor(None, lambda: write_project_settings(project_path, req.values))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    res["name"] = req.project
+    return res
+
+
+@router.put("/advanced/switches")
+async def put_advanced_switches(req: AdvancedSwitchesUpdate) -> dict:
+    """Save and apply the publish switches of this machine (decision D1)."""
+    from features.settings.advanced import save_switches
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: save_switches(req.values))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

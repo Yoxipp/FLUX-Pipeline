@@ -15,6 +15,11 @@ import core.json_manager as jm
 from core.json_manager import append_jsonl, read_jsonl
 from features.activity import activity_reader as ar
 
+# These assert the on-disk JSONL behaviour of the feed store, so pin the JSON
+# backend: a dev config.json flipped to sqlite would otherwise route the store
+# through SQLite and fail the file-format assertions for an unrelated reason.
+from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+
 
 def _mp_append_worker(args: tuple[str, int, int]) -> None:
     """Top-level (picklable) worker: a separate process appending to the shared log.

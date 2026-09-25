@@ -70,7 +70,19 @@ class _Handler(BaseHTTPRequestHandler):
             _response_store.pop(req_id, None)
         return {"ok": False, "error": "timeout: main thread may be busy"}
 
+    def _from_browser(self) -> bool:
+        """True when the request comes from a web browser (security, S2).
+
+        Browsers always attach Origin and/or Sec-Fetch-Site; the FLUX backend client
+        (urllib) sends neither. Refusing browser requests stops any web page, even
+        through DNS rebinding, from reaching /run and executing code in Houdini.
+        """
+        return bool(self.headers.get("Origin") or self.headers.get("Sec-Fetch-Site"))
+
     def do_GET(self) -> None:
+        if self._from_browser():
+            self._send_json({"error": "forbidden"}, 403)
+            return
         if self.path == "/ping":
             self._send_json({"ok": True, "version": hou.applicationVersionString(), "flux": True})
         elif self.path == "/state":
@@ -81,9 +93,19 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
+        # Always consume the body first: answering before reading it makes Windows
+        # reset the connection and the client never sees the status.
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        if self._from_browser():
+            self._send_json({"error": "forbidden"}, 403)
+            return
         if self.path == "/run":
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length)
+            # A JSON content type cannot be sent cross-site without a CORS preflight,
+            # which this server never approves.
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                self._send_json({"error": "Content-Type must be application/json"}, 415)
+                return
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -231,7 +253,12 @@ def _register_queue_processor(attempt: int = 0) -> None:
         print("[FLUX] hdefereval unavailable; event-loop callback not registered yet.")
 
 
-def start(port: int = FLUX_PORT) -> None:
+# Several Houdini can run at once: each takes the first free port of FLUX's Houdini
+# range (core.constants.DCC_PORT_RANGES["Houdini"]), FLUX lists them as instances.
+FLUX_PORT_COUNT = 8
+
+
+def start(port: int | None = None) -> None:
     global _httpd
     if _httpd is not None:
         _safe_status(f"[FLUX] Serveur Houdini déjà actif sur le port {_httpd.server_address[1]}")
@@ -239,13 +266,19 @@ def start(port: int = FLUX_PORT) -> None:
 
     # 1. Critical path: bind the HTTP server. This alone makes FLUX see Houdini as
     #    connected (the backend probes port 48884). If it fails, we are not connected.
-    try:
-        _httpd = _ThreadedHTTPServer(("localhost", port), _Handler)
-        threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http").start()
-    except Exception as exc:
-        _httpd = None
-        _safe_status(f"[FLUX] Erreur démarrage serveur : {exc}", "Error")
+    candidates = [port] if port else list(range(FLUX_PORT, FLUX_PORT + FLUX_PORT_COUNT))
+    last_exc = None
+    for candidate in candidates:
+        try:
+            _httpd = _ThreadedHTTPServer(("127.0.0.1", candidate), _Handler)
+            port = candidate
+            break
+        except OSError as exc:      # port taken by another Houdini: try the next one
+            _httpd, last_exc = None, exc
+    if _httpd is None:
+        _safe_status(f"[FLUX] Erreur démarrage serveur : {last_exc}", "Error")
         return
+    threading.Thread(target=_httpd.serve_forever, daemon=True, name="flux-houdini-http").start()
 
     # 2. Best-effort: hook the main-thread queue drainer. A failure here must NOT
     #    tear down the already-bound server (that would drop the connection handle
