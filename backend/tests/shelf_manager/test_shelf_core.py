@@ -76,3 +76,76 @@ class HdaBackupPurge(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveHdaBuild(unittest.TestCase):
+    """2026-09-25: after a reinstall FLUX Lighting stayed empty and FLUX Import kept
+    its old + / -. One failed build used to drop EVERY HDA onto its old staged copy
+    and still report "installed"."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.otls = Path(self._tmp.name) / "houdini22.0" / "otls"
+        staging = mock.patch.object(shelf_core, "_HDA_STAGING_DIR", Path(self._tmp.name) / "staging")
+        staging.start()
+        self.addCleanup(staging.stop)
+        prefer = mock.patch.object(shelf_core, "_prefer_built_definitions", return_value=[])
+        self.prefer = prefer.start()
+        self.addCleanup(prefer.stop)
+
+    def _fake_import(self, failing: str = ""):
+        def builder_for(func_name: str, module: str):
+            def build(path: str) -> dict:
+                if module.endswith(failing) and failing:
+                    return {"ok": False, "error": "boom " + module}
+                Path(path).write_text(module + ":" + func_name)
+                return {"ok": True}
+            return build
+
+        class _Mod:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def __getattr__(self, func: str):
+                return builder_for(func, self.name)
+
+        return lambda name: _Mod(name)
+
+    def test_every_hda_is_built_and_preferred(self) -> None:
+        with mock.patch("importlib.import_module", side_effect=self._fake_import()):
+            ok, msg = shelf_core._build_hdas_live([self.otls])
+        self.assertTrue(ok, msg)
+        names = {p.name for p in self.otls.glob("*.hda")}
+        self.assertEqual(names, {f for _, f, _, _ in shelf_core._HDA_BUILDS})
+        # The exporter exists in the three contexts.
+        self.assertTrue({"flux_exporter.hda", "flux_exporter_lop.hda", "flux_exporter_obj.hda"} <= names)
+        expected = self.prefer.call_args[0][0]
+        self.assertEqual(len(expected), len(shelf_core._HDA_BUILDS))
+
+    def test_one_failure_is_reported_and_others_still_built(self) -> None:
+        with mock.patch("importlib.import_module", side_effect=self._fake_import("flux_lighting_hda")):
+            ok, msg = shelf_core._build_hdas_live([self.otls])
+        self.assertFalse(ok)
+        self.assertIn("flux_lighting", msg)
+        self.assertIn("boom", msg)
+        self.assertFalse((self.otls / "flux_lighting.hda").exists())
+        self.assertTrue((self.otls / "flux_crowd.hda").exists())
+
+    def test_failed_live_build_is_not_reported_as_installed(self) -> None:
+        with mock.patch.object(shelf_core, "get_dcc_otls_dirs", return_value=[self.otls]), \
+             mock.patch.object(shelf_core, "_build_hdas_live", return_value=(False, "ECHEC : flux_lighting")), \
+             mock.patch("dcc.houdini.client.houdini_client.is_connected", return_value=True):
+            ok, msg = shelf_core.install_hdas("22.0")
+        self.assertFalse(ok)
+        self.assertIn("flux_lighting", msg)
+
+    def test_old_definitions_are_named(self) -> None:
+        self.prefer.return_value = [
+            {"type": "Lop/flux_lighting", "ok": True, "others": ["C:/old/otls/flux_lighting.hda"]},
+            {"type": "Sop/flux_importer", "ok": False, "error": "definition FLUX non chargee", "others": []},
+        ]
+        with mock.patch("importlib.import_module", side_effect=self._fake_import()):
+            ok, msg = shelf_core._build_hdas_live([self.otls])
+        self.assertIn("C:/old/otls/flux_lighting.hda", msg)
+        self.assertIn("Sop/flux_importer : definition FLUX non chargee", msg)

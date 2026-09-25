@@ -1,4 +1,4 @@
-﻿# shelf_core.py — install/remove/update Flux shelves in DCC user directories.
+# shelf_core.py — install/remove/update Flux shelves in DCC user directories.
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ log = get_logger(__name__)
 # Persisted selection of Maya shelf tools (survives uninstall/reinstall)
 _SHELF_TOOLS_KEY = "maya_shelf_tools"
 
-# Staging dir — HDAs are copied here at first launch, then to houdiniX.Y/otls/ on shelf install.
+# Staging dir: copy of the last live-built HDAs, used by an install while Houdini is closed.
 _HDA_STAGING_DIR: Path = (
     Path(os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming"))
     / "FLUX" / "dcc" / "houdini"
@@ -429,80 +429,147 @@ def purge_hda_backups(dirs: list[Path]) -> int:
     return removed
 
 
+# (builder "module:function", output file, hou category expression, node type name) of
+# every FLUX HDA, in build order: the LOP importer reads the SOP definition built before it.
+_HDA_BUILDS: tuple[tuple[str, str, str, str], ...] = (
+    ("flux_importer_hda:build_hda",     "flux_importer.hda",     "hou.sopNodeTypeCategory()", "flux_importer"),
+    ("flux_importer_lop_hda:build_hda", "flux_importer_lop.hda", "hou.lopNodeTypeCategory()", "flux_importer"),
+    ("flux_exporter_hda:build_hda",     "flux_exporter.hda",     "hou.sopNodeTypeCategory()", "flux_exporter"),
+    ("flux_exporter_hda:build_hda_lop", "flux_exporter_lop.hda", "hou.lopNodeTypeCategory()", "flux_exporter"),
+    ("flux_exporter_hda:build_hda_obj", "flux_exporter_obj.hda", "hou.objNodeTypeCategory()", "flux_exporter"),
+    ("flux_anim_hda:build_hda",         "flux_anim.hda",         "hou.lopNodeTypeCategory()", "flux_anim"),
+    ("flux_lighting_hda:build_hda",     "flux_lighting.hda",     "hou.lopNodeTypeCategory()", "flux_lighting"),
+    ("flux_shot_switch_hda:build_hda",  "flux_shot.hda",         "hou.lopNodeTypeCategory()", "flux_shot"),
+    ("flux_crowd_hda:build_hda",        "flux_crowd.hda",        "hou.lopNodeTypeCategory()", "flux_crowd"),
+)
+
+# Runs inside Houdini after the build: makes the definition FLUX just wrote the one
+# Houdini uses. Without it, an older definition of the same node type (another otls
+# dir, a copy embedded in the .hip, a package path) can stay active, and the rebuilt
+# HDA "changes nothing" in the scene (2026-09-25: FLUX Lighting still empty,
+# FLUX Import still with its + / - after a reinstall).
+_PREFER_CODE = '''
+import os
+_report = []
+for _cat_expr, _name, _path in _FLUX_EXPECTED:
+    _cat = eval(_cat_expr)
+    _t = hou.nodeType(_cat, _name)
+    _row = {"type": _cat.name() + "/" + _name, "file": _path, "ok": False, "others": []}
+    if _t is None:
+        _row["error"] = "type absent"
+        _report.append(_row)
+        continue
+    _mine = None
+    for _d in _t.allInstalledDefinitions():
+        _lib = _d.libraryFilePath()
+        if os.path.normcase(os.path.abspath(_lib)) == os.path.normcase(os.path.abspath(_path)):
+            _mine = _d
+        else:
+            _row["others"].append(_lib)
+    if _mine is None:
+        _row["error"] = "definition FLUX non chargee"
+    else:
+        try:
+            _mine.setIsPreferred(True)
+        except Exception as _exc:
+            _row["error"] = "preferred: " + str(_exc)
+        _cur = _t.definition()
+        _row["ok"] = _cur is not None and _cur.libraryFilePath() == _mine.libraryFilePath()
+        _row["instances"] = len(_t.instances())
+    _report.append(_row)
+result = _report
+'''
+
+
+def _prefer_built_definitions(built: list[tuple[str, str, Path]]) -> list[dict]:
+    """Make the definitions just written the active ones in Houdini; one row per HDA."""
+    from dcc.houdini.client import houdini_client
+
+    expected = [(cat, name, str(path)) for cat, name, path in built]
+    resp = houdini_client.run(f"_FLUX_EXPECTED = {expected!r}\n" + _PREFER_CODE, timeout=60.0)
+    if not resp.get("ok"):
+        log.warning("HDA preferred-definition check failed: %s", resp.get("error"))
+        return []
+    return resp.get("result") or []
+
+
 def _build_hdas_live(otls_dirs: list[Path]) -> tuple[bool, str]:
     """Build the FLUX HDAs in the connected Houdini into otls_dirs[0], mirror the
     resulting .hda files into the other otls dirs AND refresh the staging copy.
 
     A live build regenerates the HDA from source, so any fix to the builders
-    (e.g. the importer format_switch expression) propagates here — unlike a plain
-    copy of a possibly-stale staged .hda. Requires Houdini connected.
+    propagates here, unlike a plain copy of a possibly-stale staged .hda. Each HDA is
+    built on its own: one failure no longer drops the others onto their old staged
+    copy, and the message names every failure. Requires Houdini connected.
     """
-    try:
-        from dcc.houdini.hda.flux_importer_hda import build_hda as build_importer
-        from dcc.houdini.hda.flux_importer_lop_hda import build_hda as build_importer_lop
-        from dcc.houdini.hda.flux_anim_hda import build_hda as build_anim
-        from dcc.houdini.hda.flux_exporter_hda import build_hda as build_exporter
-        from dcc.houdini.hda.flux_lighting_hda import build_hda as build_lighting
-        from dcc.houdini.hda.flux_shot_switch_hda import build_hda as build_shot
-        from dcc.houdini.hda.flux_crowd_hda import build_hda as build_crowd
-    except ImportError as exc:
-        return False, f"Cannot import HDA builders: {exc}"
+    import importlib
 
+    otls = otls_dirs[0]
     try:
-        otls = otls_dirs[0]
         otls.mkdir(parents=True, exist_ok=True)
-        r = build_importer(str(otls / "flux_importer.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (importer) failed: {r.get('error')}"
-        # /stage twin of the importer: reads the SOP definition built just above.
-        r = build_importer_lop(str(otls / "flux_importer_lop.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (importer LOP) failed: {r.get('error')}"
-        r = build_anim(str(otls / "flux_anim.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (anim) failed: {r.get('error')}"
-        r = build_exporter(str(otls / "flux_exporter.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (exporter) failed: {r.get('error')}"
-        r = build_lighting(str(otls / "flux_lighting.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (lighting) failed: {r.get('error')}"
-        r = build_shot(str(otls / "flux_shot.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (shot) failed: {r.get('error')}"
-        r = build_crowd(str(otls / "flux_crowd.hda"))
-        if not r.get("ok"):
-            return False, f"Live build (crowd) failed: {r.get('error')}"
+    except OSError as exc:
+        return False, f"Cannot create {otls}: {exc}"
 
-        built_names = ("flux_importer.hda", "flux_importer_lop.hda", "flux_anim.hda",
-                       "flux_exporter.hda", "flux_lighting.hda", "flux_shot.hda", "flux_crowd.hda")
-        # Mirror into the other otls roots so Houdini finds it wherever it reads.
-        for other in otls_dirs[1:]:
-            try:
-                other.mkdir(parents=True, exist_ok=True)
-                for built in built_names:
-                    shutil.copy2(otls / built, other / built)
-            except OSError as exc:
-                log.warning("Could not mirror live-built HDA to %s: %s", other, exc)
-        # Refresh the offline staging copy so later offline installs use the fix too.
+    built: list[tuple[str, str, Path]] = []
+    failed: list[str] = []
+    for target, filename, category, type_name in _HDA_BUILDS:
+        label = filename.removesuffix(".hda")
+        module, func = target.split(":")
         try:
-            _HDA_STAGING_DIR.mkdir(parents=True, exist_ok=True)
-            for built in built_names:
-                shutil.copy2(otls / built, _HDA_STAGING_DIR / built)
+            builder = getattr(importlib.import_module(f"dcc.houdini.hda.{module}"), func)
+            r = builder(str(otls / filename))
+        except Exception as exc:
+            r = {"ok": False, "error": str(exc)}
+        if r.get("ok"):
+            built.append((category, type_name, otls / filename))
+        else:
+            failed.append(f"{label} : {r.get('error') or 'erreur inconnue'}")
+            log.error("Live HDA build failed (%s): %s", label, r.get("error"))
+
+    built_files = sorted({p.name for _, _, p in built})
+    # Mirror into the other otls roots so Houdini finds it wherever it reads.
+    for other in otls_dirs[1:]:
+        try:
+            other.mkdir(parents=True, exist_ok=True)
+            for name in built_files:
+                shutil.copy2(otls / name, other / name)
         except OSError as exc:
-            log.warning("Could not refresh HDA staging copy: %s", exc)
-        purge_hda_backups([*otls_dirs, _HDA_STAGING_DIR])
-        return True, f"HDAs built live → {otls}"
+            log.warning("Could not mirror live-built HDA to %s: %s", other, exc)
+    # Refresh the offline staging copy so later offline installs use the fix too.
+    try:
+        _HDA_STAGING_DIR.mkdir(parents=True, exist_ok=True)
+        for name in built_files:
+            shutil.copy2(otls / name, _HDA_STAGING_DIR / name)
+    except OSError as exc:
+        log.warning("Could not refresh HDA staging copy: %s", exc)
+    purge_hda_backups([*otls_dirs, _HDA_STAGING_DIR])
+
+    notes: list[str] = []
+    try:
+        rows = _prefer_built_definitions(built)
     except Exception as exc:
-        return False, f"Live build error: {exc}"
+        rows = []
+        log.warning("HDA preferred-definition check errored: %s", exc)
+    for row in rows:
+        if not row.get("ok"):
+            notes.append(f"{row.get('type')} : {row.get('error') or 'ancienne definition active'}")
+        elif row.get("others"):
+            notes.append(f"{row.get('type')} : autre(s) copie(s) ignoree(s) {', '.join(row['others'])}")
+
+    msg = f"HDAs construits ({len(built_files)}) -> {otls}"
+    if failed:
+        msg += " | ECHEC : " + " ; ".join(failed)
+    if notes:
+        msg += " | " + " ; ".join(notes)
+    return not failed, msg
 
 
 def install_hdas(version: str) -> tuple[bool, str]:
     """Install the FLUX HDAs into EVERY houdiniX.Y/otls/ Houdini may read.
 
     When Houdini is connected, the HDAs are BUILT LIVE from source so builder fixes
-    propagate (idempotent — same filenames, no duplicates). When Houdini is offline,
-    fall back to copying the staged .hda from %APPDATA%/FLUX/dcc/houdini/.
+    propagate (idempotent, same filenames, no duplicates). When Houdini is offline,
+    fall back to copying the last live build staged in %APPDATA%/FLUX/dcc/houdini/.
     Returns (success, message).
     """
     otls_dirs = get_dcc_otls_dirs(version)
@@ -521,7 +588,10 @@ def install_hdas(version: str) -> tuple[bool, str]:
         ok, msg = _build_hdas_live(otls_dirs)
         if ok:
             return ok, msg
-        log.warning("Live HDA build failed, falling back to staged copy: %s", msg)
+        # A failed live build is reported as a failure: the staged copy of the HDA
+        # that failed is an OLD build, so "installed" would hide that nothing changed.
+        log.warning("Live HDA build failed: %s", msg)
+        return False, msg + " | les HDA en echec gardent leur ancienne version"
 
     # Offline path — copy the staged HDAs.
     hdas = list(_HDA_STAGING_DIR.glob("*.hda"))
@@ -544,33 +614,6 @@ def install_hdas(version: str) -> tuple[bool, str]:
     )
 
 
-def deploy_houdini_hdas() -> None:
-    """Stage bundled Houdini HDAs from resources/ to %APPDATA%/FLUX/dcc/houdini/.
-
-    Copy-if-newer: a file is (re)copied only when it is missing in the staging dir
-    or the bundled source is newer. Cheap and idempotent, so it runs on every backend
-    startup: a dev who pulls updated .hda gets them re-staged automatically, so the
-    offline shelf install picks up the fresh copy without a live Houdini rebuild.
-    """
-    src_dir = _RESOURCES_ROOT / "houdini"
-    hdas = list(src_dir.glob("*.hda"))
-    if not hdas:
-        log.warning("deploy_houdini_hdas: no .hda files found in %s, skipping", src_dir)
-        return
-
-    try:
-        _HDA_STAGING_DIR.mkdir(parents=True, exist_ok=True)
-        for hda in hdas:
-            dst = _HDA_STAGING_DIR / hda.name
-            # Skip when the staged copy is present and at least as new as the source.
-            if dst.is_file() and dst.stat().st_mtime >= hda.stat().st_mtime:
-                continue
-            shutil.copy2(hda, dst)
-            log.info("HDA staged: %s -> %s", hda.name, _HDA_STAGING_DIR)
-    except OSError as exc:
-        log.error("deploy_houdini_hdas failed: %s", exc)
-
-
 def reconcile_installed_dccs() -> dict:
     """Refresh already-installed FLUX shelves/HDAs when the bundled copy is newer.
 
@@ -581,10 +624,8 @@ def reconcile_installed_dccs() -> dict:
     Maya  : the Flux shelf is regenerated from the current tool catalogue; if its
             content drifted from the installed shelf_Flux.mel (e.g. FLUX now ships
             only ANIM + RIG), the shelf is rewritten so the next Maya launch is current.
-    Houdini: each FLUX .hda already present in a houdiniX.Y/otls/ is replaced by the
-            freshly-staged copy when the staged file is newer. This is what carries
-            the importer's format_switch fix onto machines that still have a stale
-            (crashing) flux_importer.hda from an older FLUX build.
+    Houdini: nothing. The HDAs are only built live from source; copying staged
+            files here used to put old builds back over fresh ones (2026-09-25).
 
     Idempotent and best-effort — a failure never blocks startup.
     Returns {"maya": [...], "houdini": [...]} describing what was updated.
@@ -621,29 +662,6 @@ def reconcile_installed_dccs() -> dict:
                 report["maya"].append({"autostart": result})
     except Exception as exc:  # never block startup
         log.warning("Auto-update Maya autostart failed (non-fatal): %s", exc)
-
-    # ── Houdini: replace stale HDAs already present in otls/ ───────────────────
-    staged = list(_HDA_STAGING_DIR.glob("*.hda"))
-    if staged:
-        for version in get_installed_versions("Houdini"):
-            updated: list[str] = []
-            for otls in get_dcc_otls_dirs(version):
-                for hda in staged:
-                    target = otls / hda.name
-                    # Only refresh HDAs the user already has installed here — do not
-                    # create new ones — and only when the staged copy is newer.
-                    if not target.is_file():
-                        continue
-                    if target.stat().st_mtime >= hda.stat().st_mtime:
-                        continue
-                    try:
-                        shutil.copy2(hda, target)
-                        updated.append(str(target))
-                        log.info("Auto-update Houdini HDA: %s → %s", hda.name, otls)
-                    except OSError as exc:
-                        log.warning("Auto-update HDA failed (non-fatal): %s", exc)
-            if updated:
-                report["houdini"].append({"version": version, "updated": updated})
 
     return report
 

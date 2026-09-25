@@ -64,17 +64,9 @@ async def lifespan(app: FastAPI):
             log.info("[FLUX] Advanced switches applied: %s", applied)
     except Exception as exc:  # never block startup on a prefs hiccup
         log.warning("[FLUX] Advanced switches skipped: %s", exc)
-    # Re-stage bundled Houdini HDAs (copy-if-newer). Keeps a dev who pulled updated
-    # .hda in sync so the offline shelf install works without a live rebuild.
-    try:
-        from features.shelf_manager.shelf_core import deploy_houdini_hdas
-        deploy_houdini_hdas()
-    except Exception as exc:  # never block startup on a staging hiccup
-        log.warning("[FLUX] HDA re-stage skipped: %s", exc)
-    # Auto-update already-installed DCC shelves/HDAs when FLUX now ships a newer
-    # copy (runs AFTER the re-stage above so it compares against fresh staging).
-    # This is what carries the importer format_switch fix onto machines with a
-    # stale flux_importer.hda, and keeps the Maya shelf in sync (ANIM + RIG only).
+    # Keep the Maya shelf / autostart in sync with this FLUX. Houdini HDAs are only
+    # ever (re)built live from source (Shelf Manager or Houdini autostart): FLUX no
+    # longer ships .hda files, whose old copies used to overwrite fresh builds.
     try:
         from features.shelf_manager.shelf_core import reconcile_installed_dccs
         updated = reconcile_installed_dccs()
