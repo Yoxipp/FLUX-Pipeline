@@ -141,6 +141,25 @@ class ImporterComponent(unittest.TestCase):
         self._toggle("geo", "hat", True)
         self.assertEqual((self.node.evalParm(f"look_ok{look}"), self._state()["skin"]), (1, "on"))
 
+    def test_a_variant_block_with_nothing_checked_composes_nothing(self) -> None:
+        # Live 2026-09-25 (OGRE): two animations = two variants of one block, both
+        # unchecked: the component's default variant still played.
+        files = [
+            {"id": "rig", "kind": "rig", "targets": [], "variant_set": "rig", "active": True},
+            {"id": "animA", "kind": "animation", "targets": ["rig"], "block": "anim", "variant": "A",
+             "variant_set": "anim", "active": False},
+            {"id": "animB", "kind": "animation", "targets": ["rig"], "block": "anim", "variant": "B",
+             "variant_set": "anim", "active": False},
+        ]
+        self.ns["_post"] = lambda path, payload: {"files": files, "warnings": [],
+                                                  "active": {f["id"]: payload["active"].get(f["id"], f["active"])
+                                                             for f in files}}
+        self.ns["_fill_component"](self.node)
+        self.assertEqual(self._state(), {"rig": "on", "anim": "off"})     # "off": no such variant
+        self._toggle("anim", "animB", True)
+        self.assertEqual(self._state()["anim"], "B")
+        self.assertEqual(self.node.evalParm("groom_files"), 0)          # no groom: section hidden
+
     def test_toggles_are_remembered_per_component_and_never_saved(self) -> None:
         self.ns["_fill_component"](self.node)
         self._toggle("geo", "hat", False)
@@ -189,9 +208,11 @@ class ImporterComponent(unittest.TestCase):
     def test_the_lop_build_script_has_the_component_folders(self) -> None:
         code = flux_importer_lop_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)
         compile(code, "build", "exec")
-        for needle in ('"comp_folder"', '"apply_component"', "on_component_toggle", "MultiparmBlock",
-                       "_full.setInput(0, _apply)"):
+        for needle in ('"comp_folder"', '"apply_component"', "on_component_toggle",
+                       "_full.setInput(0, _apply)", "folderType.Collapsible", "MAX_ROWS"):
             self.assertIn(needle, code)
+        # Fixed rows filled by FLUX: no + / - (no multiparm), empty sections hidden.
+        self.assertNotIn("MultiparmBlock", code)
         compile(flux_importer_lop_hda.APPLY_COMPONENT, "apply", "exec")
 
 

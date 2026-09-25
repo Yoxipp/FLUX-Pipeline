@@ -419,9 +419,21 @@ def _file_label(f):
         txt += "  (ancien component : a reenregistrer dans FLUX)"
     return txt
 
+_MAX_ROWS = 32   # fixed rows per section on the /stage node (no + / -)
+
+def _clear_rows(node, prefix, start):
+    """Empty the rows from *start* on: an empty id hides the row."""
+    for i in range(start, _MAX_ROWS + 1):
+        _set_parm(node, "%s_id%d" % (prefix, i), "")
+        _set_label(node, "%s_label%d" % (prefix, i), "")
+
+def _set_label(node, name, text):
+    _set_parm(node, name, text)
+
 def _clear_component(node):
-    for multi, _prefix, _kinds in _COMP_FOLDERS:
+    for multi, prefix, _kinds in _COMP_FOLDERS:
         _set_parm(node, multi, 0)
+        _clear_rows(node, prefix, 1)
     _set_parm(node, "comp_key", "")
     _set_parm(node, "comp_state", "{}")
     _set_parm(node, "comp_warnings", "")
@@ -449,8 +461,9 @@ def _fill_component(node):
     for f in r["files"]:
         groups.setdefault(_folder_of(f.get("kind")), []).append(f)
     for multi, prefix, _kinds in _COMP_FOLDERS:
-        rows = groups.get((multi, prefix), [])
+        rows = groups.get((multi, prefix), [])[:_MAX_ROWS]
         _set_parm(node, multi, len(rows))
+        _clear_rows(node, prefix, len(rows) + 1)
         for i, f in enumerate(rows, 1):
             # Proxies are on by default; anims (preview) off; the rest follows the component.
             if f.get("proxy") or f.get("proxy_of"):
@@ -460,7 +473,7 @@ def _fill_component(node):
             else:
                 default = bool(f.get("active"))
             _set_parm(node, "%s_id%d" % (prefix, i), f["id"])
-            _set_parm(node, "%s_label%d" % (prefix, i), _file_label(f))
+            _set_label(node, "%s_label%d" % (prefix, i), _file_label(f))
             _set_parm(node, "%s_on%d" % (prefix, i), 1 if mem.get(f["id"], default) else 0)
     _set_parm(node, "comp_key", key)
     memory[key] = _toggles(node)
@@ -509,6 +522,12 @@ def on_component_toggle(node):
                     state[sets[fid]] = choices[fid]
             else:
                 state[sets[fid]] = "on" if active.get(fid) and fid not in grey else "off"
+    # A block with variants and none of them checked: select a variant that does not
+    # exist, so the block composes nothing (else the component's default variant, e.g.
+    # the first animation, would still play).
+    for fid, vset in sets.items():
+        if vset and fid in choices and vset not in state:
+            state[vset] = "off"
     _set_parm(node, "comp_state", json.dumps(state, sort_keys=True))
     warns = r.get("warnings") or []
     _set_parm(node, "comp_warnings", "\\n".join(warns))

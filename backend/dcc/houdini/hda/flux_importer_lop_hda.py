@@ -34,7 +34,11 @@ log = get_logger(__name__)
 
 NODE_NAME = "flux_importer"
 
-# (multiparm, parm prefix, label) of the component content (ADR 0023).
+# Rows per section: fixed (no + / - : FLUX fills them from the component, an empty row
+# is hidden). A component never holds this many files of one kind.
+MAX_ROWS = 32
+
+# (count parm, parm prefix, label) of the component content (ADR 0023).
 COMPONENT_FOLDERS = (("geo_files", "geo", "GEO"), ("groom_files", "groom", "GROOM"),
                      ("look_files", "look", "LOOKDEV"), ("anim_files", "anim", "ANIM (preview)"),
                      ("other_files", "other", "AUTRES (rig, autres)"))
@@ -99,27 +103,36 @@ for _hidden in (hou.ToggleParmTemplate("comp_has_warn", "has warnings", default_
                 hou.StringParmTemplate("comp_groom_full", "groom full", 1, default_value=("[]",), is_hidden=True)):
     _comp.addParmTemplate(_hidden)
 for _multi, _prefix, _label in COMPONENT_FOLDERS:
-    _m = hou.FolderParmTemplate(_multi, _label, folder_type=hou.folderType.MultiparmBlock)
-    _on = hou.ToggleParmTemplate(_prefix + "_on#", "Actif", default_value=True,
-                                 script_callback="hou.phm().on_component_toggle(kwargs['node'])",
-                                 script_callback_language=_PY,
-                                 help="Greyed: none of its targets is active (its state is kept)")
-    _on.setConditional(hou.parmCondType.DisableWhen, "{ " + _prefix + "_ok# == 0 }")
-    _on.setJoinWithNext(True)
-    _lbl = hou.StringParmTemplate(_prefix + "_label#", "Fichier", 1, default_value=("",))
-    _m.addParmTemplate(_on)
-    if _prefix == "groom":
-        # ADR 0026: the thinned proxy in the viewport (on), or the complete groom.
-        _px = hou.ToggleParmTemplate("groom_proxy#", "Proxy", default_value=True,
+    # Hidden row count set by FLUX; the section is hidden when the component has none.
+    _comp.addParmTemplate(hou.IntParmTemplate(_multi, _multi, 1, default_value=(0,), is_hidden=True))
+    _m = hou.FolderParmTemplate(_multi + "_folder", _label, folder_type=hou.folderType.Collapsible)
+    _m.setConditional(hou.parmCondType.HideWhen, "{ " + _multi + " == 0 }")
+    for _i in range(1, MAX_ROWS + 1):
+        _n = str(_i)
+        _hide = '{ ' + _prefix + '_id' + _n + ' == "" }'
+        _on = hou.ToggleParmTemplate(_prefix + "_on" + _n, "Actif", default_value=True,
                                      script_callback="hou.phm().on_component_toggle(kwargs['node'])",
                                      script_callback_language=_PY,
-                                     help="On: light proxy (1 curve in 10) in the viewport, full groom at render. "
-                                          "Off: the full groom in the viewport too.")
-        _px.setJoinWithNext(True)
-        _m.addParmTemplate(_px)
-    _m.addParmTemplate(_lbl)
-    _m.addParmTemplate(hou.StringParmTemplate(_prefix + "_id#", "id", 1, default_value=("",), is_hidden=True))
-    _m.addParmTemplate(hou.ToggleParmTemplate(_prefix + "_ok#", "ok", default_value=True, is_hidden=True))
+                                     help="Greyed: none of its targets is active (its state is kept)")
+        _on.setConditional(hou.parmCondType.DisableWhen, "{ " + _prefix + "_ok" + _n + " == 0 }")
+        _on.setConditional(hou.parmCondType.HideWhen, _hide)
+        _on.setJoinWithNext(True)
+        _m.addParmTemplate(_on)
+        if _prefix == "groom":
+            # ADR 0026: the thinned proxy in the viewport (on), or the complete groom.
+            _px = hou.ToggleParmTemplate("groom_proxy" + _n, "Proxy", default_value=True,
+                                         script_callback="hou.phm().on_component_toggle(kwargs['node'])",
+                                         script_callback_language=_PY,
+                                         help="On: light proxy (1 curve in 10) in the viewport, full groom "
+                                              "at render. Off: the full groom in the viewport too.")
+            _px.setConditional(hou.parmCondType.HideWhen, _hide)
+            _px.setJoinWithNext(True)
+            _m.addParmTemplate(_px)
+        _lbl = hou.StringParmTemplate(_prefix + "_label" + _n, "Fichier", 1, default_value=("",))
+        _lbl.setConditional(hou.parmCondType.HideWhen, _hide)
+        _m.addParmTemplate(_lbl)
+        _m.addParmTemplate(hou.StringParmTemplate(_prefix + "_id" + _n, "id", 1, default_value=("",), is_hidden=True))
+        _m.addParmTemplate(hou.ToggleParmTemplate(_prefix + "_ok" + _n, "ok", default_value=True, is_hidden=True))
     _comp.addParmTemplate(_m)
 """
 LABEL = "FLUX Import"
