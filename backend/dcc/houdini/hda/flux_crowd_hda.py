@@ -81,12 +81,12 @@ def _flux_port():
     except Exception:
         return 8765
 
-def _get(path, **params):
+def _get(path, timeout=10, **params):
     url = f"http://127.0.0.1:{_flux_port()}" + path
     if params:
         url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v})
     try:
-        with urllib.request.urlopen(url, timeout=10) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
             return json.loads(r.read())
     except Exception as exc:
         # "_offline": FLUX not reachable: never cached.
@@ -113,17 +113,20 @@ _TTL = 120.0
 _cache = {}
 
 def _cached(key, fetch):
-    """fetch() -> (data, ok). Only good answers are cached: an error is retried."""
+    """fetch() -> (data, ok). Only good, non-empty answers are cached: an error or an
+    empty list (shots not created yet) is asked again at the next menu opening."""
     now = time.monotonic()
     if key in _cache and now < _cache[key][0]:
         return _cache[key][1]
     data, ok = fetch()
-    if ok:
+    if ok and data:
         _cache[key] = (now + _TTL, data)
     return data
 
 def _fetch(path, field, empty, **params):
     r = _get(path, **params)
+    if r.get("_offline") or r.get("ok") is False:
+        return empty, False
     if field is None:
         return (r if not r.get("_offline") else empty), not r.get("_offline")
     return r.get(field, empty), not r.get("_offline")
@@ -161,7 +164,9 @@ def _compat(node, fresh=False):
     key = "compat:" + project
     if fresh:
         _cache.pop(key, None)
-    return _cached(key, lambda: _fetch("/usd/crowd/compat", None, {"assets": {}, "clips": []}, project=project))
+    # Opens every asset and clip of the project: far longer than a menu call.
+    return _cached(key, lambda: _fetch("/usd/crowd/compat", None, {"assets": {}, "clips": []},
+                                       timeout=120, project=project))
 
 def _picked(node, name):
     return [v for v in _pval(node, name).split() if v]
@@ -171,7 +176,7 @@ def menu_project(node):
     return _flat(projects) if projects else ["", "FLUX injoignable ou aucun projet"]
 
 def menu_seq(node):
-    return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot dans ce projet"]
+    return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot (apercu sans shot)"]
 
 def menu_shot(node):
     seq = _pval(node, "seq")
@@ -269,6 +274,40 @@ def _input_assets(node):
             if name not in out:
                 out.append(str(name))
             it.PruneChildren()
+    return out
+
+def _input_sources(node):
+    """{asset: {"file", "prim"}}: the file each asset of input 1 comes from (reference or
+    payload on disk), so an asset without a FLUX component still shows as a static mesh."""
+    stage = _input_stage(node, 0)
+    if stage is None:
+        return {}
+    from pxr import Pcp, Usd
+    out = {}
+    it = iter(Usd.PrimRange(stage.GetPseudoRoot()))
+    for prim in it:
+        if prim.IsPseudoRoot():
+            continue
+        model = Usd.ModelAPI(prim)
+        name = (model.GetAssetInfo() or {}).get("name") or (prim.GetName() if model.GetKind() == "component" else "")
+        if not name:
+            continue
+        it.PruneChildren()
+        if name in out:
+            continue
+        try:
+            arcs = Usd.PrimCompositionQuery(prim).GetCompositionArcs()
+        except Exception:
+            arcs = []
+        for arc in arcs:
+            if arc.GetArcType() not in (Pcp.ArcTypeReference, Pcp.ArcTypePayload):
+                continue
+            layer = arc.GetTargetLayer()
+            path = layer.realPath if layer is not None else ""
+            if path and os.path.isfile(path):
+                out[str(name)] = {"file": path.replace(chr(92), "/"),
+                                  "prim": arc.GetTargetPrimPath().pathString}
+                break
     return out
 
 def _input_points(node):
@@ -409,8 +448,12 @@ def _reload(node):
 
 def _build(node, publish):
     project, seq, shot = _pval(node, "project"), _pval(node, "seq"), _pval(node, "shot")
-    if not (project and seq and shot):
-        _status(node, "Choisis projet / sequence / shot"); return
+    if not project:
+        _status(node, "Choisis un projet"); return
+    if not (seq and shot):
+        if publish:
+            _status(node, "Publier demande une sequence et un shot (l'apercu marche sans)"); return
+        seq = shot = ""
     assets, clips = read_inputs(node, quiet=True)
     if not assets:
         _status(node, "Aucun asset : branche des FLUX Import sur l'entree 1 (ou choisis-les dans les menus)"); return
@@ -422,7 +465,7 @@ def _build(node, publish):
     if not pts:
         _status(node, "Les points de l'entree 2 sont vides"); return
     payload = {"project": project, "seq": seq, "shot": shot, "group": _pval(node, "group") or "crowd",
-               "points": pts, "components": assets, "clips": clips,
+               "points": pts, "components": assets, "clips": clips, "sources": _input_sources(node),
                "component_weights": _weights(node, "asset"), "clip_weights": _weights(node, "clip"),
                "seed": int(node.evalParm("seed")),
                "offset": [node.evalParm("offsetx"), node.evalParm("offsety")],
@@ -455,9 +498,17 @@ def publish(node):
     _build(node, True)
 
 def reload(node):
-    _compat(node, fresh=True)
-    _reload(node)
-    _status(node, "Recharge")
+    """Fresh module from FLUX (a fix applies without restarting Houdini), fresh lists."""
+    r = _get("/dcc/houdini/crowd/module")
+    if r.get("code"):
+        exec(r["code"], globals())
+    globals()["_cache"].clear()
+    globals()["_reload"](node)
+    globals()["read_inputs"](node, quiet=True)
+    shots = globals()["_shots"](node)
+    compat = globals()["_compat"](node)
+    _status(node, "Recharge : %d shot(s), %d asset(s) avec squelette" % (
+        len(shots), len(compat.get("assets", {}))))
 
 def on_created(node):
     threading.Thread(target=lambda: (_shots(node), _compat(node)), daemon=True).start()
