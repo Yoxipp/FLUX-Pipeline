@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from dcc import texture_convert as tc
@@ -64,6 +65,19 @@ class Convert(unittest.TestCase):
         out, warns = tc.convert_maps(files, self.d / "conv", {"DISP": {"format": "exr", "bit_depth": "32f"}},
                                      "png", key_of=lambda f: f.name.split(".")[0])
         self.assertEqual(sorted(p.name for p in out), ["B_COL.1001.png", "DISP.1001.exr", "DISP.1002.exr"])
+        self.assertEqual(warns, [])
+
+    def test_a_map_already_in_its_format_is_kept_as_is(self) -> None:
+        """2026-09-26: Mari publish too slow - no re-encode when nothing changes."""
+        src = _image(self.d / "BCOL.1001.tif", fmt="uint8")
+        self.assertFalse(tc.needs_convert(src, "tif", None, None))
+        self.assertFalse(tc.needs_convert(src, "tif", "8", 64))
+        self.assertTrue(tc.needs_convert(src, "tif", "16", None))
+        self.assertTrue(tc.needs_convert(src, "tif", None, 32))
+        self.assertTrue(tc.needs_convert(src, "png", None, None))
+        with unittest.mock.patch.object(tc, "convert_map", side_effect=AssertionError("re-encoded")):
+            out, warns = tc.convert_maps([src], self.d / "conv", {}, "tif", key_of=lambda f: "BCOL")
+        self.assertEqual([p.name for p in out], ["BCOL.1001.tif"])
         self.assertEqual(warns, [])
 
 

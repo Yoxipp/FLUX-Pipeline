@@ -125,7 +125,8 @@ class PublishPainter(unittest.TestCase):
 
 class PublishMari(unittest.TestCase):
     def test_exports_then_ingests(self):
-        def _export(export_path, file_format, channels=None):
+        def _export(export_path, file_format, channels=None, formats=None):
+            self.assertEqual((formats or {}).get("*"), "tif")
             # Mari names each file after its channel only ($UDIM filled by Mari).
             import OpenImageIO as oiio
             for name in ("Diffuse.tif", "B_COL.tif"):
