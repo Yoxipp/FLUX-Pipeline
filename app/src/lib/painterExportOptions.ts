@@ -28,6 +28,25 @@ export const PAINTER_OPTIONS: ExportOption[] = [
       { value: '16', label: '16 bit' },
       { value: '32', label: '32 bit' },
     ] },
+  { key: 'size', label: 'Taille', type: 'enum', default: '', tier: 'common',
+    choices: [
+      { value: '',     label: 'Taille du texture set' },
+      { value: '512',  label: '512' },
+      { value: '1024', label: '1K (1024)' },
+      { value: '2048', label: '2K (2048)' },
+      { value: '4096', label: '4K (4096)' },
+      { value: '8192', label: '8K (8192)' },
+    ] },
+  { key: 'padding', label: 'Dilatation (padding)', type: 'enum', default: 'infinite', tier: 'advanced',
+    choices: [
+      { value: 'infinite',    label: 'Infinie' },
+      { value: 'passthrough', label: 'Aucune' },
+      { value: 'transparent', label: 'Transparente' },
+      { value: 'color',       label: 'Couleur' },
+      { value: 'diffusion',   label: 'Diffusion' },
+    ] },
+  { key: 'dilation', label: 'Distance de dilatation (px)', type: 'int', default: 16, tier: 'advanced',
+    hint: 'Pour Transparente, Couleur et Diffusion' },
   { key: 'conform_tx', label: 'Conform .tx (Karma)', type: 'bool', default: false, tier: 'common' },
 ]
 

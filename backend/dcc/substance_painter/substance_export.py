@@ -25,18 +25,28 @@ def build_export_config(
     file_format: str = "png",
     bit_depth: str = "8",
     texture_sets: list[str] | None = None,
+    size: int | None = None,
+    padding: str = "infinite",
+    dilation: int = 16,
 ) -> dict:
-    """Return a substance_painter.export config (pure, testable structure)."""
+    """Return a substance_painter.export config (pure, testable structure).
+
+    *size*: output width in pixels (power of two), None = each texture set's own size.
+    *padding*: Painter dilation algorithm (infinite, passthrough, transparent, color,
+    diffusion); *dilation* in pixels for the non-infinite ones."""
+    params: dict = {"fileFormat": file_format, "bitDepth": bit_depth,
+                    "paddingAlgorithm": padding or "infinite", "dithering": False}
+    if params["paddingAlgorithm"] not in ("infinite", "passthrough"):
+        params["dilationDistance"] = int(dilation)
+    if size:
+        params["sizeLog2"] = max(7, min(13, int(size).bit_length() - 1))
     cfg: dict = {
         "exportPath": str(export_path).replace("\\", "/"),
         "exportShaderParams": False,
         "defaultExportPreset": preset,
         # Painter refuses the export ("impossible de resoudre l'algorithme de
         # dilatation") when parameters are given without a padding algorithm.
-        "exportParameters": [
-            {"parameters": {"fileFormat": file_format, "bitDepth": bit_depth,
-                            "paddingAlgorithm": "infinite", "dithering": False}}
-        ],
+        "exportParameters": [{"parameters": params}],
     }
     if texture_sets:
         cfg["exportList"] = [{"rootPath": ts} for ts in texture_sets]
@@ -66,6 +76,10 @@ def publish_painter(
     conform_tx: bool = False,
     description: str = "",
     user: str = "unknown",
+    texture_sets: list[str] | None = None,
+    size: int | None = None,
+    padding: str = "infinite",
+    dilation: int = 16,
 ) -> dict:
     """Export Painter maps and ingest them into FLUX (one publish per map).
 
@@ -79,7 +93,8 @@ def publish_painter(
 
     log.info("Painter publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_painter_"))
-    config = build_export_config(export_dir, preset, file_format, bit_depth)
+    config = build_export_config(export_dir, preset, file_format, bit_depth,
+                                 texture_sets or None, size, padding, dilation)
     result = substance_client.export(config)
     if not result.get("ok"):
         log.warning("Painter export failed: %s", result.get("error"))

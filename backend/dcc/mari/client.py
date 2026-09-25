@@ -24,9 +24,15 @@ class MariClient:
     def ping(self) -> dict:
         return _send({"action": "ping"}, timeout=2.0)
 
-    def export(self, export_path: str, file_format: str = "tif") -> dict:
-        """Ask Mari to export the current geo's channels; returns {ok, files}."""
-        return _send({"action": "export", "export_path": export_path, "file_format": file_format})
+    def info(self) -> dict:
+        """Channels of Mari's current geo: {ok, geo, channels}."""
+        return _send({"action": "info"}, timeout=20.0)
+
+    def export(self, export_path: str, file_format: str = "tif",
+               channels: list[str] | None = None) -> dict:
+        """Ask Mari to export the current geo's channels (all, or *channels*); {ok, files}."""
+        return _send({"action": "export", "export_path": export_path, "file_format": file_format,
+                      "channels": channels or []})
 
 
 mari_client = MariClient()

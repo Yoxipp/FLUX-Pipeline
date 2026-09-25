@@ -716,6 +716,11 @@ export function Publisher() {
   // request fields, not a Write-knob dict; the format comes from the shared picker.
   const [painterOpts, setPainterOpts] = useState<Record<string, unknown>>(() => defaultPainterOptions())
   const [mariOpts, setMariOpts] = useState<Record<string, unknown>>(() => defaultMariOptions())
+  // Painter texture sets / Mari channels read from the app: the ticked ones export.
+  const [texItems, setTexItems]     = useState<{ name: string; detail: string }[]>([])
+  const [texChecked, setTexChecked] = useState<Set<string>>(new Set())
+  const [texSource, setTexSource]   = useState('')
+  const [texLoading, setTexLoading] = useState(false)
 
   // Generic connection status for socket-bridge DCCs (Nuke/Painter/Mari/Photoshop):
   // one polling effect pings the active DCC's key with retry, like Maya/ZBrush, so a
@@ -1349,14 +1354,22 @@ export function Publisher() {
           description:  description || undefined,
           user:         settings?.username ?? undefined,
         }
+        // Only the ticked texture sets / channels (all ticked = let the app export all).
+        const picked = texItems.length > 0 && texChecked.size < texItems.length
+          ? texItems.map(t => t.name).filter(n => texChecked.has(n)) : undefined
+        if (picked && picked.length === 0) { toast.error(dcc === 'Painter' ? 'Coche au moins un texture set' : 'Coche au moins un channel'); return }
         const res = dcc === 'Painter'
           ? await api.publishSubstance({
               ...tokens,
-              preset:     String(painterOpts.preset ?? 'PBR Metallic Roughness'),
-              bit_depth:  String(painterOpts.bit_depth ?? '8'),
-              conform_tx: !!painterOpts.conform_tx,
+              preset:       String(painterOpts.preset ?? 'PBR Metallic Roughness'),
+              bit_depth:    String(painterOpts.bit_depth ?? '8'),
+              conform_tx:   !!painterOpts.conform_tx,
+              texture_sets: picked,
+              size:         painterOpts.size ? Number(painterOpts.size) : undefined,
+              padding:      String(painterOpts.padding ?? 'infinite'),
+              dilation:     Number(painterOpts.dilation ?? 16),
             })
-          : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx })
+          : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked })
         const n = res.published?.length ?? 0
         toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
       } else if (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') {
@@ -1433,9 +1446,35 @@ export function Publisher() {
     exportExt, ropNodePath, isSequence, animRange, animCapable, seqCapable, frameStart, frameEnd, frameStep,
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
-    bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts,
+    bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts, texItems, texChecked,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
+
+  const loadTexItems = useCallback(async () => {
+    if (dcc !== 'Painter' && dcc !== 'Mari') return
+    setTexLoading(true)
+    try {
+      if (dcc === 'Painter') {
+        const r = await api.getSubstanceInfo()
+        setTexItems(r.texture_sets.map(t => ({
+          name: t.name, detail: [t.resolution ? `${t.resolution}px` : '', t.udim ? 'UDIM' : ''].filter(Boolean).join(' · '),
+        })))
+        setTexSource(r.project || 'Aucun projet ouvert')
+        setTexChecked(new Set(r.texture_sets.map(t => t.name)))
+      } else {
+        const r = await api.getMariInfo()
+        setTexItems(r.channels.map(c => ({ name: c.name, detail: c.size ? `${c.size}px` : '' })))
+        setTexSource(r.geo || 'Aucune geo')
+        setTexChecked(new Set(r.channels.map(c => c.name)))
+      }
+    } catch (e) {
+      setTexItems([])
+      setTexSource(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTexLoading(false)
+    }
+  }, [dcc])
+  useEffect(() => { void loadTexItems() }, [loadTexItems])
 
   // Several Maya / Houdini open: ask which one publishes before starting.
   const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; label: string; scene: string | null }[] } | null>(null)
@@ -2096,7 +2135,48 @@ export function Publisher() {
             </div>
           )}
 
-          {/* OPTIONS D'EXPORT — Painter (preset / bit depth / conform .tx). */}
+          {/* TEXTURE SETS (Painter) / CHANNELS (Mari): read from the app, ticked ones export. */}
+          {(dcc === 'Painter' || dcc === 'Mari') && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>{dcc === 'Painter' ? 'TEXTURE SETS' : 'CHANNELS'} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{texSource}</span></SecTitle>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: texItems.length ? 8 : 0 }}>
+                <Btn ghost disabled={texLoading} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={() => { void loadTexItems() }}>
+                  <RefreshCw size={11} strokeWidth={2} />
+                  {texLoading ? 'Lecture…' : 'Relire'}
+                </Btn>
+                {texItems.length > 0 && (
+                  <>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set(texItems.map(t => t.name)))}>Tout</Btn>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set())}>Aucun</Btn>
+                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{texChecked.size} / {texItems.length}</span>
+                  </>
+                )}
+              </div>
+              {texItems.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {texItems.map(t => {
+                    const on = texChecked.has(t.name)
+                    return (
+                      <div key={t.name} title={t.detail}
+                        onClick={() => setTexChecked(prev => { const n = new Set(prev); if (n.has(t.name)) n.delete(t.name); else n.add(t.name); return n })}
+                        style={{
+                          padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
+                          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
+                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
+                          color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                        {t.name}{t.detail ? <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> · {t.detail}</span> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Painter (preset / bit depth / size / padding / conform .tx). */}
           {dcc === 'Painter' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>

@@ -25,6 +25,16 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertEqual(cfg["exportParameters"][0]["parameters"]["bitDepth"], "16")
         self.assertEqual(cfg["exportParameters"][0]["parameters"]["paddingAlgorithm"], "infinite")
 
+    def test_build_export_config_size_padding_sets(self):
+        cfg = se.build_export_config("/tmp/out", "P", "exr", "16", ["Body"], 4096, "color", 8)
+        params = cfg["exportParameters"][0]["parameters"]
+        self.assertEqual((params["sizeLog2"], params["paddingAlgorithm"], params["dilationDistance"]),
+                         (12, "color", 8))
+        self.assertEqual(cfg["exportList"], [{"rootPath": "Body"}])
+        infinite = se.build_export_config("/tmp/out", "P")["exportParameters"][0]["parameters"]
+        self.assertNotIn("dilationDistance", infinite)
+        self.assertNotIn("sizeLog2", infinite)
+
     def test_map_token_from_filename(self):
         self.assertEqual(se.map_token_from_filename("HeroBody_BaseColor.png"), "BASECOLOR")
         self.assertEqual(se.map_token_from_filename("HeroBody_Roughness.1001.exr"), "ROUGHNESS")
@@ -62,7 +72,7 @@ class PublishPainter(unittest.TestCase):
 
 class PublishMari(unittest.TestCase):
     def test_exports_then_ingests(self):
-        def _export(export_path, file_format):
+        def _export(export_path, file_format, channels=None):
             # Mari names each file after its channel only ($UDIM filled by Mari).
             for name in ("Diffuse.tif", "B_COL.tif"):
                 (Path(export_path) / name).write_bytes(b"x")

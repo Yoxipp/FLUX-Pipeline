@@ -398,8 +398,20 @@ export const api = {
     conform_tx?:  boolean
     description?: string
     user?:        string
+    texture_sets?: string[]
+    size?:        number
+    padding?:     string
+    dilation?:    number
   }) =>
-    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null }>('POST', '/dcc/substance/publish', payload),
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/substance/publish', payload),
+
+  // What can be exported from the open Painter project / Mari geo (Publisher options).
+  getSubstanceInfo: () =>
+    apiCall<{ ok: boolean; project: string; texture_sets: { name: string; udim?: boolean; resolution?: number }[] }>(
+      'GET', '/dcc/substance/info', undefined, 25000),
+  getMariInfo: () =>
+    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number }[] }>(
+      'GET', '/dcc/mari/info', undefined, 25000),
 
   // Mari — export channels via the in-app bridge, ingest under FLUX tokens,
   // optionally conform to .tx.
@@ -413,6 +425,7 @@ export const api = {
     conform_tx?:  boolean
     description?: string
     user?:        string
+    channels?:    string[]
   }) =>
     apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null }>('POST', '/dcc/mari/publish', payload),
 

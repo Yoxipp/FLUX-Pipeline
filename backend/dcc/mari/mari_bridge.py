@@ -101,19 +101,47 @@ def _on_main_thread(fn, timeout: float = 600.0) -> dict:
     return box["result"]
 
 
-def _do_export(export_path: str, file_format: str) -> dict:
+def _do_info() -> dict:
+    """Channels of the current geo (Publisher: choose what to export)."""
+    if not _MARI_AVAILABLE:
+        return {"status": "error", "msg": "mari module not available"}
+    try:
+        geo = mari.geo.current()
+        if geo is None:
+            return {"status": "ok", "geo": "", "channels": []}
+        chans = []
+        for channel in geo.channelList():
+            item = {"name": channel.name()}
+            try:
+                item["size"] = int(channel.width())
+            except Exception:  # noqa: BLE001 - optional detail
+                item["size"] = 0
+            chans.append(item)
+        return {"status": "ok", "geo": geo.name(), "channels": chans}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "msg": str(exc)}
+
+
+def _do_export(export_path: str, file_format: str, channels: list | None = None) -> dict:
     if not _MARI_AVAILABLE:
         return {"status": "error", "msg": "mari module not available"}
     try:
         geo = mari.geo.current()
         files: list[str] = []
         os.makedirs(export_path, exist_ok=True)
+        wanted = set(channels or [])
         for channel in geo.channelList():
+            if wanted and channel.name() not in wanted:
+                continue
             # One file per channel named after the channel only (FLUX keeps the whole
             # name as the MAP token); Mari fills $UDIM with each tile number.
             out = os.path.join(export_path, f"{channel.name()}.$UDIM.{file_format}")
             try:
-                channel.exportImages(out)
+                # Flattened: every layer of the channel merged, as it shows in Mari.
+                if hasattr(channel, "exportImagesFlattened"):
+                    channel.exportImagesFlattened(out)
+                else:
+                    channel.exportImages(out)
                 files.append(out)
             except Exception as exc:  # noqa: BLE001 - one bad channel never aborts all
                 print(f"[FLUX] Mari channel export failed ({channel.name()}): {exc}")
@@ -129,9 +157,12 @@ def _dispatch(cmd: dict) -> dict:
         # mari.app.version() is an AppVersion object: show "7.1v2", not its repr.
         ver = ver.string() if hasattr(ver, "string") else ver
         return {"status": "ok", "version": f"Mari {ver}".strip()}
+    if action == "info":
+        return _on_main_thread(_do_info, timeout=20.0)
     if action == "export":
         path, fmt = cmd.get("export_path", ""), cmd.get("file_format", "tif")
-        return _on_main_thread(lambda: _do_export(path, fmt))
+        chans = cmd.get("channels") or None
+        return _on_main_thread(lambda: _do_export(path, fmt, chans))
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 

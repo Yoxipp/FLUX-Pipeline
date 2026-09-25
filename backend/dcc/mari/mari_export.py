@@ -26,6 +26,7 @@ def publish_mari(
     conform_tx: bool = False,
     description: str = "",
     user: str = "unknown",
+    channels: list[str] | None = None,
 ) -> dict:
     """Export Mari channels and ingest them into FLUX (one publish per channel)."""
     from core.paths import get_project_path
@@ -37,7 +38,7 @@ def publish_mari(
 
     log.info("Mari publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_mari_"))
-    result = mari_client.export(str(export_dir), file_format)
+    result = mari_client.export(str(export_dir), file_format, channels or None)
     if not result.get("ok"):
         log.warning("Mari export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Mari export failed")}

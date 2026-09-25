@@ -1928,6 +1928,10 @@ class SubstancePublishRequest(BaseModel):
     conform_tx:   bool = False
     description:  str | None = None
     user:         str | None = None
+    texture_sets: list[str] | None = None   # None / [] = every texture set
+    size:         int | None = None         # output width, None = the set's own size
+    padding:      str = "infinite"          # Painter dilation algorithm
+    dilation:     int = 16                  # pixels, for the non-infinite algorithms
 
 
 @router.post("/substance/publish")
@@ -1944,11 +1948,36 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
             req.project_name, req.class_token, req.task_token, req.name_token,
             req.instance, req.preset, req.file_format, req.bit_depth,
             req.conform_tx, req.description or "", user,
+            req.texture_sets, req.size, req.padding, req.dilation,
         ),
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Substance publish failed"))
     return result
+
+
+@router.get("/substance/info")
+async def substance_info() -> dict:
+    """Texture sets of the open Painter project (Publisher export options)."""
+    from dcc.substance_painter.client import substance_client
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, substance_client.info)
+    if not res.get("ok"):
+        raise HTTPException(status_code=503, detail=res.get("error", "Painter ne repond pas"))
+    return res
+
+
+@router.get("/mari/info")
+async def mari_info() -> dict:
+    """Channels of Mari's current geo (Publisher export options)."""
+    from dcc.mari.client import mari_client
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, mari_client.info)
+    if not res.get("ok"):
+        raise HTTPException(status_code=503, detail=res.get("error", "Mari ne repond pas"))
+    return res
 
 
 # ── Mari endpoints (V6 B7) ────────────────────────────────────────────────────
@@ -1964,6 +1993,7 @@ class MariPublishRequest(BaseModel):
     conform_tx:   bool = False
     description:  str | None = None
     user:         str | None = None
+    channels:     list[str] | None = None   # None / [] = every channel of the current geo
 
 
 @router.post("/mari/publish")
@@ -1979,6 +2009,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
         lambda: publish_mari(
             req.project_name, req.class_token, req.task_token, req.name_token,
             req.instance, req.file_format, req.conform_tx, req.description or "", user,
+            req.channels,
         ),
     )
     if not result.get("ok"):

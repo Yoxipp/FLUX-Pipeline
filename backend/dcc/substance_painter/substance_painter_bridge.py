@@ -159,8 +159,42 @@ def _do_export(config: dict) -> dict:
         return {"status": "error", "msg": str(exc)}
 
 
+def _do_info() -> dict:
+    """Texture sets of the open project (Publisher: choose what to export)."""
+    if not _SP_AVAILABLE:
+        return {"status": "error", "msg": "substance_painter module not available"}
+    try:
+        import substance_painter.project as _project
+        import substance_painter.textureset as _ts
+
+        if not _project.is_open():
+            return {"status": "ok", "project": "", "texture_sets": []}
+        sets = []
+        for ts in _ts.all_texture_sets():
+            item = {"name": ts.name()}
+            try:
+                item["udim"] = bool(ts.has_uv_tiles())
+            except Exception:  # noqa: BLE001 - older API
+                item["udim"] = False
+            try:
+                item["resolution"] = int(ts.get_resolution().width)
+            except Exception:  # noqa: BLE001
+                item["resolution"] = 0
+            sets.append(item)
+        name = ""
+        try:
+            name = os.path.basename(_project.file_path() or "")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"status": "ok", "project": name, "texture_sets": sets}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "msg": str(exc)}
+
+
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
+    if action == "info":
+        return _on_main_thread(_do_info, timeout=20.0)
     if action == "ping":
         ver = getattr(_sp, "__version__", "") if _sp else ""
         return {"status": "ok", "version": f"Substance Painter {ver}".strip()}

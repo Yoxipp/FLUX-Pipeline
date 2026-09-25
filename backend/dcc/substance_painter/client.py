@@ -24,6 +24,10 @@ class SubstancePainterClient:
     def ping(self) -> dict:
         return _send({"action": "ping"}, timeout=2.0)
 
+    def info(self) -> dict:
+        """Texture sets of the open Painter project: {ok, project, texture_sets}."""
+        return _send({"action": "info"}, timeout=20.0)
+
     def export(self, config: dict[str, Any]) -> dict:
         """Ask Painter to export project textures with *config*; returns {ok, files}."""
         return _send({"action": "export", "config": config})
