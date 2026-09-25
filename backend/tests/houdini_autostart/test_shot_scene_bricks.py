@@ -85,6 +85,10 @@ def _fake_hou():
     hou = types.SimpleNamespace(nodes={})
     hou.node = lambda path: hou.nodes.get(path)
     hou.exprLanguage = types.SimpleNamespace(Hscript="hscript")
+    # The ROP creation saves the scene first (ADR 0029): record it.
+    hou.saved = []
+    hou.hipFile = types.SimpleNamespace(hasUnsavedChanges=lambda: True, isNewFile=lambda: False,
+                                        save=lambda: hou.saved.append(True))
     return hou
 
 
@@ -118,6 +122,7 @@ class ShotSceneBricks(unittest.TestCase):
         self.ns["create_render_rop"](node)
         rop = self.hou.node(node.evalParm("render_rop"))
         self.assertEqual(rop.path(), "/out/RENDER_SEQ001_SH020")
+        self.assertEqual(self.hou.saved, [True])          # scene saved before creating the ROP
         self.assertEqual(rop.evalParm("loppath"), lights.path())
         self.assertEqual(rop.parm("f2").expr, 'ch("/stage/SH020/frame_rangey")')
         self.assertEqual(rop.parm("override_camera").expr, 'chs("/stage/SH020/camera")')

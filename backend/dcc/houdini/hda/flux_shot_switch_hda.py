@@ -93,7 +93,8 @@ def _get(path, **params):
         with urllib.request.urlopen(url, timeout=5) as r:
             return json.loads(r.read())
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        # "_offline": FLUX not reachable: never cached, never read as "no stage".
+        return {"ok": False, "error": str(exc), "_offline": True}
 
 def _post(path, payload):
     req = urllib.request.Request(f"http://127.0.0.1:{_flux_port()}" + path,
@@ -114,12 +115,18 @@ _TTL = 30.0
 _cache = {}
 
 def _cached(key, fetch):
+    """fetch() -> (data, ok). Only good answers are cached: an error is retried."""
     now = time.monotonic()
     if key in _cache and now < _cache[key][0]:
         return _cache[key][1]
-    data = fetch()
-    _cache[key] = (now + _TTL, data)
+    data, ok = fetch()
+    if ok:
+        _cache[key] = (now + _TTL, data)
     return data
+
+def _fetch_shots(project):
+    r = _get("/dcc/houdini/shot_switch/shots", project=project)
+    return r.get("shots", []), not r.get("_offline")
 
 def _pval(node, name):
     p = node.parm(name)
@@ -146,15 +153,18 @@ def _shots(node, fresh=False):
     key = "shots:" + project
     if fresh:
         _cache.pop(key, None)
-    return _cached(key, lambda: _get("/dcc/houdini/shot_switch/shots", project=project).get("shots", []))
+    return _cached(key, lambda: _fetch_shots(project))
 
 def _current(node):
     seq, shot = _pval(node, "seq"), _pval(node, "shot")
     return next((s for s in _shots(node) if s["seq"] == seq and s["shot"] == shot), None)
 
 def menu_project(node):
-    projects = _cached("projects", lambda: _get("/dcc/houdini/importer/tokens").get("projects", []))
-    return _flat(projects) if projects else ["", "aucun projet"]
+    def _fetch():
+        r = _get("/dcc/houdini/importer/tokens")
+        return r.get("projects", []), not r.get("_offline")
+    projects = _cached("projects", _fetch)
+    return _flat(projects) if projects else ["", "FLUX injoignable ou aucun projet"]
 
 def menu_seq(node):
     return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot genere"]
@@ -205,15 +215,24 @@ def apply_frame_range(node):
     hou.playbar.setPlaybackRange(start, end)
     hou.setFrame(start)
 
-def resolve_path(node):
+def resolve_path(node, opening=False):
+    """Load the shot stage. *opening* (scene load): no timeline / fps / camera change and
+    no forced cook: with several FLUX Shot the last one would silently win."""
     if not _pval(node, "project"):
         _status(node, "Choisis un projet"); return
-    _shots(node, fresh=True)
+    project = _pval(node, "project")
+    shots, ok = _fetch_shots(project)
+    if not ok:
+        _status(node, "FLUX injoignable : stage actuel garde. Demarre FLUX puis clique Resolve"); return
+    _cache["shots:" + project] = (time.monotonic() + _TTL, shots)
     item = _current(node)
     if item is None:
         _set(node, "resolved_path", "")
         _status(node, "Shot sans stage : genere-le depuis la page USD de FLUX"); return
     version = _pval(node, "version") or "LAST"
+    if version != "LAST" and version not in (item.get("files") or {}):
+        version = "LAST"                  # another shot picked: follow its LAST
+        _set(node, "version", "LAST")
     path = item["last"] if version == "LAST" else item.get("files", {}).get(version, "")
     if not path:
         _set(node, "resolved_path", "")
@@ -223,6 +242,8 @@ def resolve_path(node):
     node.parmTuple("frame_range").set((int(rng[0]), int(rng[1])))
     _set(node, "fps", float(item.get("fps") or 24))
     _reload(node)
+    if opening:
+        _status(node, "Charge : %s %s %s" % (item["seq"], item["shot"], version)); return
     try:
         node.cook(force=True)
     except Exception:
@@ -243,7 +264,7 @@ def resolve_path(node):
 def _branch_end(node):
     """Last node of this shot's branch: follows single outputs, stops before a node that
     mixes several inputs (another shot, a merge) or a ROP. Several shots side by side
-    each keep their own branch (ADR 0023)."""
+    each keep their own branch (ADR 0021, 0023, 0029)."""
     cur = node
     for _ in range(500):
         outs = [o for o in cur.outputs() if "rop" not in o.type().name().lower()]
@@ -272,6 +293,13 @@ def create_render_rop(node):
     src = _light_source(node)
     rop = hou.node(_pval(node, "render_rop")) if _pval(node, "render_rop") else None
     if rop is None:
+        # Creating a render ROP in a live session crashed Houdini once (ADR 0021, 0029):
+        # save first so nothing is lost.
+        try:
+            if hou.hipFile.hasUnsavedChanges() and not hou.hipFile.isNewFile():
+                hou.hipFile.save()
+        except Exception as exc:
+            _status(node, "Sauvegarde impossible avant le ROP : %s" % exc); return
         out = hou.node("/out") or hou.node("/").createNode("ropnet", "out")
         rop = out.createNode("usdrender", "RENDER_" + _shot_tag(node))
     me = node.path()
@@ -338,7 +366,8 @@ def publish_light(node):
     src = _light_source(node)
     if src is None or src.path() == node.path():
         _status(node, "Branche les lumieres apres ce node (ou remplis Light Node)"); return
-    out = os.path.join(tempfile.mkdtemp(prefix="flux_shot_light_"), "light.usda").replace(chr(92), "/")
+    tmp_dir = tempfile.mkdtemp(prefix="flux_shot_light_")
+    out = os.path.join(tmp_dir, "light.usda").replace(chr(92), "/")
     rop = node.parent().createNode("usd_rop", "__flux_light_export__")
     try:
         rop.parm("loppath").set(src.path())
@@ -353,17 +382,27 @@ def publish_light(node):
     if not os.path.isfile(out):
         _status(node, "Export des lumieres echoue"); return
     r = _post("/dcc/houdini/shot-light/publish", {"project": project, "seq": seq, "shot": shot, "file": out})
-    if r.get("ok"):
-        _status(node, "Light rig publie : %s %s (stage %s)" % (r.get("base", ""), r.get("version", ""),
-                                                               r.get("stage") or "inchange"))
-    else:
-        _status(node, "Publish echoue : %s" % r.get("error", "?"))
+    try:
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception:
+        pass
+    if not r.get("ok"):
+        _status(node, "Publish echoue : %s" % r.get("error", "?")); return
+    msg = "Light rig publie : %s %s (stage %s)" % (r.get("base", ""), r.get("version", ""),
+                                                  r.get("stage") or "inchange")
+    if r.get("stage"):
+        # The stage now sublayers the new light rig: reload it (version LAST).
+        _cache.pop("shots:" + project, None)
+        resolve_path(node, opening=True)
+    warns = r.get("warnings") or []
+    _status(node, msg + ("  |  " + " ; ".join(warns) if warns else ""))
 
 def on_created(node):
     threading.Thread(target=lambda: _shots(node), daemon=True).start()
 
 def on_loaded(node):
-    resolve_path(node)
+    resolve_path(node, opening=True)
 '''
 
 
@@ -467,17 +506,28 @@ _subl.setInput(0, _sub.indirectInputs()[0])
 _subl.parm("filepath1").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
 _full = _sub.createNode("configureprimitive", "show_render_geo")
 _full.setInput(0, _subl)
-_full.parm("primpattern").set("/assets/**/geo/render/** /sets/**/geo/render/**")
+_full.parm("primpattern").set("/assets/**/geo/render/** /sets/**/geo/render/** /crowd/**/geo/render/**")
 _full.parm("setpurpose").set(1)
 _full.parm("purpose").set("default")
 _hide = _sub.createNode("configureprimitive", "hide_proxy")
 _hide.setInput(0, _full)
-_hide.parm("primpattern").set("/assets/**/geo/proxy /sets/**/geo/proxy")
+_hide.parm("primpattern").set("/assets/**/geo/proxy /sets/**/geo/proxy /crowd/**/geo/proxy")
+# Grooms (ADR 0026): "Geo complete" shows the full curves, hides the thinned "*_proxy".
+_gfull = _sub.createNode("configureprimitive", "show_full_groom")
+_gfull.setInput(0, _hide)
+_gfull.parm("primpattern").set("/assets/**/groom/** ^/assets/**/groom/**/*_proxy")
+_gfull.parm("setpurpose").set(1)
+_gfull.parm("purpose").set("default")
+_ghide = _sub.createNode("configureprimitive", "hide_groom_proxy")
+_ghide.setInput(0, _gfull)
+_ghide.parm("primpattern").set("/assets/**/groom/**/*_proxy")
+_ghide.parm("setvisibility").set(1)
+_ghide.parm("visibility").set("invisible")
 _hide.parm("setvisibility").set(1)
 _hide.parm("visibility").set("invisible")
 _sw = _sub.createNode("switch", "geo_display")
 _sw.setInput(0, _subl)
-_sw.setInput(1, _hide)
+_sw.setInput(1, _ghide)
 _sw.parm("input").setExpression('ch("../geo_display")', hou.exprLanguage.Hscript)
 # Everything authored after this node is a new layer: the shot light rig publish.
 _lb = _sub.createNode("layerbreak", "layerbreak")
