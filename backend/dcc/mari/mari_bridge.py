@@ -101,6 +101,19 @@ def _on_main_thread(fn, timeout: float = 600.0) -> dict:
     return box["result"]
 
 
+def _channel_ids(channels) -> list:
+    """[(id, channel)]: a geo can hold two channels of one name (2026-09-26: two
+    "Ambient Occlusion"); the second one is "Ambient Occlusion (2)", in the Publisher
+    list and in its file name, so they never overwrite each other."""
+    seen: dict = {}
+    out = []
+    for ch in channels:
+        name = ch.name()
+        seen[name] = seen.get(name, 0) + 1
+        out.append((name if seen[name] == 1 else f"{name} ({seen[name]})", ch))
+    return out
+
+
 def _do_info() -> dict:
     """Channels of the current geo (Publisher: choose what to export)."""
     if not _MARI_AVAILABLE:
@@ -110,8 +123,8 @@ def _do_info() -> dict:
         if geo is None:
             return {"status": "ok", "geo": "", "channels": []}
         chans = []
-        for channel in geo.channelList():
-            item = {"name": channel.name()}
+        for cid, channel in _channel_ids(geo.channelList()):
+            item = {"name": cid, "depth": _depth(channel)}
             try:
                 item["size"] = int(channel.width())
             except Exception:  # noqa: BLE001 - optional detail
@@ -120,6 +133,22 @@ def _do_info() -> dict:
         return {"status": "ok", "geo": geo.name(), "channels": chans}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "msg": str(exc)}
+
+
+def _depth(channel) -> int:
+    """Bit depth of a channel: 8 (byte), 16 (half) or 32 (float)."""
+    try:
+        return int(channel.depth())
+    except Exception:  # noqa: BLE001
+        return 8
+
+
+def _container(channel, file_format: str) -> str:
+    """"auto": a lossless file that holds the channel's depth (FLUX converts it after to
+    the format / depth / size picked for the map): tif for 8 bits, exr for float."""
+    if file_format != "auto":
+        return file_format
+    return "tif" if _depth(channel) <= 8 else "exr"
 
 
 def _do_export(export_path: str, file_format: str, channels: list | None = None) -> dict:
@@ -135,13 +164,14 @@ def _do_export(export_path: str, file_format: str, channels: list | None = None)
         errors: list[str] = []
         os.makedirs(export_path, exist_ok=True)
         wanted = set(channels or [])
-        for channel in geo.channelList():
-            name = channel.name()
+        for name, channel in _channel_ids(geo.channelList()):
             if wanted and name not in wanted:
                 continue
             # One file per channel named after the channel only (FLUX turns the name into
             # the MAP token); Mari fills $UDIM with each tile number.
-            out = os.path.join(export_path, f"{name}.$UDIM.{file_format}")
+            fmt = _container(channel, file_format)
+            out = os.path.join(export_path, f"{name}.$UDIM.{fmt}")
+            t0 = _time.time()
             try:
                 # Flattened: every layer of the channel merged, as it shows in Mari.
                 if hasattr(channel, "exportImagesFlattened"):
@@ -152,12 +182,23 @@ def _do_export(export_path: str, file_format: str, channels: list | None = None)
                 errors.append(f"{name} : {exc}")
                 _diag(f"Mari channel export failed ({name}): {exc!r}")
                 continue
+            _diag(f"Mari channel {name}: {_time.time() - t0:.1f} s ({fmt}, {_depth(channel)} bits)")
             # What really reached the disk (a refused format may write nothing).
-            written = glob.glob(os.path.join(glob.escape(export_path), f"{glob.escape(name)}.*.{file_format}"))
+            written = sorted(glob.glob(os.path.join(glob.escape(export_path), f"{glob.escape(name)}.*.{fmt}")))
+            literal = [w for w in written if "$UDIM" in w]
+            if literal:
+                errors.append(f"{name} : Mari n'a pas remplace $UDIM (une seule tuile ecrite)")
             if written:
-                files.extend(sorted(written))
+                files.extend(written)
+                try:
+                    patches = len(geo.patchList())
+                    tiles = len(written) - len(literal)
+                    if not literal and tiles < patches:
+                        errors.append(f"{name} : {tiles} tuile(s) ecrite(s) pour {patches} patch(s)")
+                except Exception:  # noqa: BLE001 - informative only
+                    pass
             else:
-                errors.append(f"{name} : aucun fichier ecrit en .{file_format}")
+                errors.append(f"{name} : aucun fichier ecrit en .{fmt}")
         _diag(f"Mari export: {len(files)} file(s), errors={errors}")
         if not files:
             hint = " (un channel 16 / 32 bits flottant ne passe pas en .png / .jpg / .tga : essaie .exr ou .tif)" \
@@ -180,7 +221,8 @@ def _dispatch(cmd: dict) -> dict:
     if action == "export":
         path, fmt = cmd.get("export_path", ""), cmd.get("file_format", "tif")
         chans = cmd.get("channels") or None
-        return _on_main_thread(lambda: _do_export(path, fmt, chans))
+        # A big UDIM export takes long: never answer "busy" while Mari is still writing.
+        return _on_main_thread(lambda: _do_export(path, fmt, chans), timeout=4 * 3600.0)
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 

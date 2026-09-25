@@ -43,8 +43,9 @@ class ExportConfigAndTokens(unittest.TestCase):
             "$textureSet_Normal": {"bit_depth": "16"}})       # not ticked: ignored
         self.assertEqual(cfg["exportList"], [{"rootPath": "Body", "filter": {
             "outputMaps": ["$textureSet_BaseColor", "$textureSet_Height"]}}])
+        # png cannot hold 32 bits: the closest depth it holds
         self.assertEqual(cfg["exportParameters"][1], {"filter": {"outputMaps": ["$textureSet_Height"]},
-                                                      "parameters": {"bitDepth": "32", "sizeLog2": 11}})
+                                                      "parameters": {"bitDepth": "16", "sizeLog2": 11}})
         self.assertEqual(len(cfg["exportParameters"]), 2)
         # every set: the bridge applies the filter after listing them
         cfg = se.build_export_config("/tmp/out", "P", maps=["$textureSet_Height"])
@@ -121,8 +122,10 @@ class PublishMari(unittest.TestCase):
     def test_exports_then_ingests(self):
         def _export(export_path, file_format, channels=None):
             # Mari names each file after its channel only ($UDIM filled by Mari).
+            import OpenImageIO as oiio
             for name in ("Diffuse.tif", "B_COL.tif"):
-                (Path(export_path) / name).write_bytes(b"x")
+                buf = oiio.ImageBuf(oiio.ImageSpec(8, 8, 3, "uint8"))
+                buf.write(str(Path(export_path) / name))
             return {"ok": True, "files": [f"{export_path}/Diffuse.$UDIM.tif"]}
 
         with mock.patch("core.paths.get_project_path", return_value=Path(__file__).parent), \

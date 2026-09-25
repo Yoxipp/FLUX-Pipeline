@@ -421,7 +421,7 @@ export const api = {
     padding?:     string
     dilation?:    number
     maps?:        string[]                                              // output maps of the preset (fileName)
-    map_params?:  Record<string, { bit_depth?: string; size?: number }>  // per map overrides
+    map_params?:  Record<string, { format?: string; bit_depth?: string; size?: number }>  // per map overrides
     channels?:    PainterChannel[]                                      // "Canaux du shader" mode
   }) =>
     apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/substance/publish', payload),
@@ -431,8 +431,10 @@ export const api = {
     apiCall<{ ok: boolean; project: string; texture_sets: { name: string; udim?: boolean; resolution?: number }[];
               presets?: PainterPreset[]; channels?: PainterChannel[] }>(
       'GET', '/dcc/substance/info', undefined, 25000),
+  getTextureFormats: () =>
+    apiCall<{ formats: Record<string, string[]>; sizes: number[] }>('GET', '/dcc/texture/formats'),
   getMariInfo: () =>
-    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number }[] }>(
+    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number; depth?: number }[] }>(
       'GET', '/dcc/mari/info', undefined, 25000),
 
   // Mari — export channels via the in-app bridge, ingest under FLUX tokens,
@@ -448,8 +450,9 @@ export const api = {
     description?: string
     user?:        string
     channels?:    string[]
+    channel_params?: Record<string, { format?: string; bit_depth?: string; size?: number }>
   }) =>
-    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/mari/publish', payload),
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/mari/publish', payload, 3600000),
 
   // Level 1 file ingest (Substance Designer / Marvelous Designer): the artist
   // exports a file from the app; FLUX ingests it under FLUX naming. One method per

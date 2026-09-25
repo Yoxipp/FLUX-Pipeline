@@ -16,14 +16,12 @@ import { MARVELOUS_OPTIONS, defaultMarvelousOptions } from '../lib/marvelousExpo
 import { api } from '../api/client'
 import type { DesignerPackage, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
+import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
+import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
 import { toast } from 'sonner'
 
-// Painter per-map overrides: "Defaut" = the export options above (bit depth / taille).
-const MAP_DEFAULT = '__default__'
-const MAP_BIT_DEPTHS: [string, string][] = [[MAP_DEFAULT, 'Défaut'], ['8', '8 bit'], ['16', '16 bit'], ['16f', '16 bit float'], ['32f', '32 bit float']]
-const MAP_SIZES: [string, string][] = [[MAP_DEFAULT, 'Défaut'], ['512', '512'], ['1024', '1K'], ['2048', '2K'], ['4096', '4K'], ['8192', '8K']]
 
 // Publish endpoints return version_str already prefixed with "v" (format_version
 // -> "v001"), but the fallback path can return a bare "001". Normalise to exactly
@@ -739,7 +737,9 @@ export function Publisher() {
   // map by map like Mari, bit depth and size per map, only the ticked maps publish).
   const [painterPresets, setPainterPresets] = useState<PainterPreset[]>([])
   const [mapChecked, setMapChecked] = useState<Set<string>>(new Set())
-  const [mapOpts, setMapOpts] = useState<Record<string, { bit_depth: string; size: string }>>({})
+  const [mapOpts, setMapOpts] = useState<Record<string, MapOpts>>({})
+  // Mari: format / bit depth / size per channel (same table as Painter's maps).
+  const [chanOpts, setChanOpts] = useState<Record<string, MapOpts>>({})
   const curPreset = painterPresets.find(p => p.url === painterOpts.preset || p.name === painterOpts.preset)
   // "Canaux du shader": every channel of the stacks (coat, anisotropy, user...), not only
   // the preset's maps. Map id = the fileName the backend gives it ($textureSet_<Label>).
@@ -1406,12 +1406,8 @@ export function Publisher() {
           : presetMaps.length && mapChecked.size < presetMaps.length
             ? presetMaps.map(m => m.id).filter(id => mapChecked.has(id)) : undefined
         if (dcc === 'Painter' && pickedMaps && pickedMaps.length === 0) { toast.error('Coche au moins une map'); return }
-        const mapParams: Record<string, { bit_depth?: string; size?: number }> = {}
-        for (const m of presetMaps) {
-          const o = mapOpts[m.id]
-          if (!o || !mapChecked.has(m.id)) continue
-          if (o.bit_depth || o.size) mapParams[m.id] = { bit_depth: o.bit_depth || undefined, size: o.size ? Number(o.size) : undefined }
-        }
+        const mapParams = buildMapParams(presetMaps, mapChecked, mapOpts)
+        const chanParams = buildMapParams(texItems.map(t => ({ id: t.name, label: t.name })), texChecked, chanOpts)
         const res = dcc === 'Painter'
           ? await api.publishSubstance({
               ...tokens,
@@ -1426,7 +1422,8 @@ export function Publisher() {
               map_params:   Object.keys(mapParams).length ? mapParams : undefined,
               channels:     byChannels ? painterChannels.filter(c => mapChecked.has(channelMapId(c))) : undefined,
             })
-          : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked })
+          : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked,
+                                    channel_params: Object.keys(chanParams).length ? chanParams : undefined })
         const n = res.published?.length ?? 0
         toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
         res.warnings?.forEach(w => toast.warning(w))
@@ -1568,12 +1565,20 @@ export function Publisher() {
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
+  // The app a texture list belongs to: a slow answer (Mari busy exporting) that lands
+  // after switching to Painter must not fill Painter's list (2026-09-26).
+  const texDccRef = useRef(dcc)
   const loadTexItems = useCallback(async () => {
+    texDccRef.current = dcc
     if (dcc !== 'Painter' && dcc !== 'Mari') return
+    const asked = dcc
+    const stale = () => texDccRef.current !== asked
+    setTexItems([]); setTexChecked(new Set()); setTexSource('')
     setTexLoading(true)
     try {
       if (dcc === 'Painter') {
         const r = await api.getSubstanceInfo()
+        if (stale()) return
         setTexItems(r.texture_sets.map(t => ({
           name: t.name, detail: [t.resolution ? `${t.resolution}px` : '', t.udim ? 'UDIM' : ''].filter(Boolean).join(' · '),
         })))
@@ -1583,15 +1588,20 @@ export function Publisher() {
         setPainterChannels(r.channels ?? [])
       } else {
         const r = await api.getMariInfo()
-        setTexItems(r.channels.map(c => ({ name: c.name, detail: c.size ? `${c.size}px` : '' })))
+        if (stale()) return
+        setTexItems(r.channels.map(c => ({
+          name: c.name,
+          detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : ''].filter(Boolean).join(' '),
+        })))
         setTexSource(r.geo || 'Aucune geo')
         setTexChecked(new Set(r.channels.map(c => c.name)))
       }
     } catch (e) {
+      if (stale()) return
       setTexItems([])
       setTexSource(e instanceof Error ? e.message : String(e))
     } finally {
-      setTexLoading(false)
+      if (!stale()) setTexLoading(false)
     }
   }, [dcc])
   useEffect(() => { void loadTexItems() }, [loadTexItems])
@@ -2320,7 +2330,7 @@ export function Publisher() {
                   <RefreshCw size={11} strokeWidth={2} />
                   {texLoading ? 'Lecture…' : 'Relire'}
                 </Btn>
-                {texItems.length > 0 && (
+                {dcc === 'Painter' && texItems.length > 0 && (
                   <>
                     <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set(texItems.map(t => t.name)))}>Tout</Btn>
                     <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set())}>Aucun</Btn>
@@ -2328,7 +2338,18 @@ export function Publisher() {
                   </>
                 )}
               </div>
-              {texItems.length > 0 && (
+              {dcc === 'Mari' && texItems.length > 0 && (
+                <TextureMapTable
+                  rows={texItems.map(t => ({ id: t.name, label: t.name, detail: t.detail }))}
+                  checked={texChecked}
+                  setChecked={fn => setTexChecked(prev => fn(prev))}
+                  opts={chanOpts}
+                  setOpts={fn => setChanOpts(prev => fn(prev))}
+                  defaultFormat={exportExt.replace('.', '')}
+                  sizeDefaultLabel="Taille Mari"
+                />
+              )}
+              {dcc === 'Painter' && texItems.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {texItems.map(t => {
                     const on = texChecked.has(t.name)
@@ -2378,57 +2399,30 @@ export function Publisher() {
             </div>
           )}
 
-          {/* MAPS (Painter): the output maps of the preset, each with its own bit depth / size. */}
+          {/* MAPS (Painter): the preset's maps or every channel of the shader, each with its
+              own format / bit depth / size (same table as Mari's channels). */}
           {dcc === 'Painter' && ((curPreset?.maps.length ?? 0) > 0 || painterChannels.length > 0) && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>MAPS <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{mapSource === 'channels' ? 'canaux du shader' : curPreset?.name}</span></SecTitle>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                <Pill active={mapSource === 'preset'} onClick={() => setMapSource('preset')} style={{ cursor: 'pointer' }}>Maps du preset</Pill>
-                <Pill active={mapSource === 'channels'} disabled={painterChannels.length === 0}
-                  onClick={() => { if (painterChannels.length) setMapSource('channels') }} style={{ cursor: 'pointer' }}>
-                  Canaux du shader ({painterChannels.length})
-                </Pill>
-                <div style={{ width: 1, height: 14, background: 'var(--rule-2)' }} />
-                <Btn ghost style={{ height: 26 }} onClick={() => setMapChecked(new Set(mapRows.map(m => m.id)))}>Tout</Btn>
-                <Btn ghost style={{ height: 26 }} onClick={() => setMapChecked(new Set())}>Aucun</Btn>
-                <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{mapChecked.size} / {mapRows.length}</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {mapRows.map(m => {
-                  const on = mapChecked.has(m.id)
-                  const o = mapOpts[m.id] ?? { bit_depth: '', size: '' }
-                  const setO = (k: 'bit_depth' | 'size', v: string) =>
-                    setMapOpts(prev => ({ ...prev, [m.id]: { ...o, [k]: v === MAP_DEFAULT ? '' : v } }))
-                  return (
-                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div title={m.id}
-                        onClick={() => setMapChecked(prev => { const n = new Set(prev); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n })}
-                        style={{
-                          flex: 1, minWidth: 0, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                          background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
-                          color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }}>
-                        {m.label}
-                      </div>
-                      <Select value={o.bit_depth || MAP_DEFAULT} onValueChange={v => setO('bit_depth', v)} disabled={!on}>
-                        <SelectTrigger style={{ height: 24, width: 96, fontSize: 10 }} />
-                        <SelectContent>
-                          {MAP_BIT_DEPTHS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <Select value={o.size || MAP_DEFAULT} onValueChange={v => setO('size', v)} disabled={!on}>
-                        <SelectTrigger style={{ height: 24, width: 96, fontSize: 10 }} />
-                        <SelectContent>
-                          {MAP_SIZES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )
-                })}
-              </div>
+              <TextureMapTable
+                rows={mapRows}
+                checked={mapChecked}
+                setChecked={fn => setMapChecked(prev => fn(prev))}
+                opts={mapOpts}
+                setOpts={fn => setMapOpts(prev => fn(prev))}
+                defaultFormat={exportExt.replace('.', '')}
+                sizeDefaultLabel="Taille du set"
+                header={(
+                  <>
+                    <Pill active={mapSource === 'preset'} onClick={() => setMapSource('preset')} style={{ cursor: 'pointer' }}>Maps du preset</Pill>
+                    <Pill active={mapSource === 'channels'} disabled={painterChannels.length === 0}
+                      onClick={() => { if (painterChannels.length) setMapSource('channels') }} style={{ cursor: 'pointer' }}>
+                      Canaux du shader ({painterChannels.length})
+                    </Pill>
+                    <div style={{ width: 1, height: 14, background: 'var(--rule-2)' }} />
+                  </>
+                )}
+              />
             </div>
           )}
 

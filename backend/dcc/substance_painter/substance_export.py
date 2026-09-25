@@ -38,9 +38,12 @@ def build_export_config(
     *padding*: Painter dilation algorithm (infinite, passthrough, transparent, color,
     diffusion); *dilation* in pixels for the non-infinite ones.
     *maps*: output maps of the preset to export (their fileName), None = all of them.
-    *map_params*: {fileName: {"bit_depth", "size"}} overriding the defaults per map
-    (2026-09-25: bit depth and size chosen map by map)."""
-    params: dict = {"fileFormat": file_format, "bitDepth": bit_depth,
+    *map_params*: {fileName: {"format", "bit_depth", "size"}} overriding the defaults per
+    map (2026-09-25: format, bit depth and size chosen map by map)."""
+    from dcc.texture_convert import pick_depth
+
+    # A depth the format holds (no 32 bits in png, 2026-09-25).
+    params: dict = {"fileFormat": file_format, "bitDepth": pick_depth(file_format, str(bit_depth)),
                     "paddingAlgorithm": padding or "infinite", "dithering": False}
     if params["paddingAlgorithm"] not in ("infinite", "passthrough"):
         params["dilationDistance"] = int(dilation)
@@ -51,8 +54,11 @@ def build_export_config(
         if maps and fid not in maps:
             continue
         p: dict = {}
-        if over.get("bit_depth"):
-            p["bitDepth"] = str(over["bit_depth"])
+        fmt = str(over.get("format") or "").lower().lstrip(".")
+        if fmt and fmt != file_format:
+            p["fileFormat"] = fmt
+        if over.get("bit_depth") or (fmt and fmt != file_format):
+            p["bitDepth"] = pick_depth(fmt or file_format, str(over.get("bit_depth") or bit_depth))
         if over.get("size"):
             p["sizeLog2"] = _size_log2(over["size"])
         if p:
