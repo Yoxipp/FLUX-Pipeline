@@ -19,6 +19,8 @@ from dcc.nuke    import autostart as _nuke_autostart
 from dcc.zbrush  import autostart as _zbrush_autostart
 from dcc.substance_painter import autostart as _substance_autostart
 from dcc.mari    import autostart as _mari_autostart
+from dcc.substance_designer import autostart as _designer_autostart
+from dcc.marvelous import autostart as _marvelous_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 from dcc.maya.maya_export_client import ANIM_EXTS as MAYA_ANIM_EXTS
 
@@ -33,6 +35,8 @@ _AUTOSTART_MODULES: dict = {
     "zbrush":  _zbrush_autostart,
     "substance_painter": _substance_autostart,
     "mari":    _mari_autostart,
+    "substance_designer": _designer_autostart,
+    "marvelous": _marvelous_autostart,
 }
 
 log = get_logger(__name__)
@@ -353,6 +357,16 @@ def _ping_mari() -> dict:
     return mari_client.ping()
 
 
+def _ping_designer() -> dict:
+    from dcc.substance_designer.client import designer_client
+    return designer_client.ping()
+
+
+def _ping_marvelous() -> dict:
+    from dcc.marvelous.client import marvelous_client
+    return marvelous_client.ping()
+
+
 _PING_PROBES = {
     "houdini": _ping_houdini,
     "zbrush": _ping_zbrush,
@@ -361,6 +375,8 @@ _PING_PROBES = {
     "photoshop": _ping_photoshop,
     "substance_painter": _ping_painter,
     "mari": _ping_mari,
+    "substance_designer": _ping_designer,
+    "marvelous": _ping_marvelous,
 }
 
 # The Sidebar and the Publisher poll the same DCCs every few seconds: one probe per
@@ -2083,6 +2099,118 @@ async def marvelous_publish(req: FilePublishRequest) -> dict:
     result = await loop.run_in_executor(None, lambda: _ingest_file(req, "Marvelous"))
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Marvelous publish failed"))
+    return result
+
+
+# ── Substance Designer / Marvelous bridges (Level 2, like Painter) ───────────
+# The in-app bridge exports (Designer: graph maps / .sbsar / .sbs ; Marvelous: abc /
+# obj / fbx / usd / glb / .zprj) and FLUX ingests under FLUX naming. The Level 1 file
+# routes above stay for files exported by hand.
+
+
+def _bridge_error(error: str | None, default: str, autostart_mod, soft: str) -> str:
+    """The bridge's error, plus where it is and its log when the app does not answer."""
+    msg = error or default
+    low = msg.lower()
+    if any(k in low for k in ("refused", "timed out", "timeout", "10061", "111", "unreachable")):
+        msg = f"{soft} ne repond pas sur le port du bridge ({msg}). {autostart_mod.diagnose()}"
+    return msg
+
+
+class DesignerBridgePublishRequest(BaseModel):
+    project_name: str
+    class_token:  str
+    task_token:   str
+    name_token:   str
+    instance:     str = "null"
+    graphs:       list[dict] | None = None   # [{"package", "graph", "outputs"}], None = open graph
+    file_format:  str = "png"
+    size:         int | None = None          # $outputsize, None = the graph's own
+    bit_depth:    str | None = None          # 8 / 16 / 16f / 32f, None = the graph's own
+    maps:         bool = True
+    sbsar:        bool = False
+    sbs:          bool = False
+    conform_tx:   bool = False
+    description:  str | None = None
+    user:         str | None = None
+
+
+@router.get("/designer/info")
+async def designer_info() -> dict:
+    """Open packages / graphs / outputs of Designer (Publisher export options)."""
+    from dcc.substance_designer.client import designer_client
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, designer_client.info)
+    if not res.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            res.get("error"), "Designer ne repond pas", _designer_autostart, "Designer"))
+    return res
+
+
+@router.post("/designer/bridge/publish")
+async def designer_bridge_publish(req: DesignerBridgePublishRequest) -> dict:
+    """Export Designer graph maps / .sbsar / .sbs through the bridge and publish them."""
+    from core import config
+    from dcc.substance_designer.designer_export import publish_designer
+
+    user = req.user or config.get_current_user() or "unknown"
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_designer(
+            req.project_name, req.class_token, req.task_token, req.name_token,
+            req.instance, req.graphs, req.file_format, req.size, req.bit_depth,
+            req.maps, req.sbsar, req.sbs, req.conform_tx, req.description or "", user,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Designer publish failed", _designer_autostart, "Designer"))
+    return result
+
+
+class MarvelousBridgePublishRequest(BaseModel):
+    project_name: str
+    target_name:  str                        # composed FLUX name (asset or shot)
+    file_format:  str = "abc"
+    options:      dict | None = None         # garment / avatar / single_object / thick / unified_uv / scale
+    with_zprj:    bool = False               # also publish the .zprj source
+    description:  str | None = None
+    user:         str | None = None
+
+
+@router.get("/marvelous/info")
+async def marvelous_info() -> dict:
+    """Open Marvelous project + the formats it can export (Publisher options)."""
+    from dcc.marvelous.client import marvelous_client
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, marvelous_client.info)
+    if not res.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            res.get("error"), "Marvelous ne repond pas", _marvelous_autostart, "Marvelous"))
+    return res
+
+
+@router.post("/marvelous/bridge/publish")
+async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
+    """Export the open Marvelous project through the bridge and publish it."""
+    from core import config
+    from dcc.marvelous.marvelous_export import publish_marvelous
+
+    user = req.user or config.get_current_user() or "unknown"
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_marvelous(
+            req.project_name, req.target_name, req.file_format, req.options,
+            req.with_zprj, req.description or "", user,
+        ),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Marvelous publish failed", _marvelous_autostart, "Marvelous"))
     return result
 
 

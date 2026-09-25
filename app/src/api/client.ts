@@ -115,6 +115,9 @@ async function apiGetConditional<T>(endpoint: string, etag?: string): Promise<Co
 export interface PainterPreset { name: string; url: string; maps: { id: string; label: string }[] }
 // A channel of the texture sets' stacks (coat, anisotropy, user...): id = Painter export name.
 export interface PainterChannel { id: string; label: string; gray: boolean }
+// Substance Designer: the open packages, their graphs and each graph's outputs.
+export interface DesignerGraph { id: string; current?: boolean; outputs: { id: string; label: string }[] }
+export interface DesignerPackage { path: string; name: string; graphs: DesignerGraph[] }
 
 // One group of operations of the cleaning scan (backend features/folder_manager/asset_cleanup.py).
 export interface CleanupItem {
@@ -460,6 +463,49 @@ export const api = {
     project_name: string; source_path: string; target_name: string
     description?: string; user?: string
   }) => apiCall<{ ok: boolean; path: string }>('POST', '/dcc/marvelous/publish', payload),
+
+  // Substance Designer bridge (Level 2, like Painter): graph maps / .sbsar / .sbs
+  // exported by the in-app plugin, ingested under FLUX tokens.
+  getDesignerInfo: () =>
+    apiCall<{ ok: boolean; packages: DesignerPackage[]; current?: string }>(
+      'GET', '/dcc/designer/info', undefined, 25000),
+  publishDesignerBridge: (payload: {
+    project_name: string
+    class_token:  string
+    task_token:   string
+    name_token:   string
+    instance?:    string
+    graphs?:      { package: string; graph: string; outputs?: string[] | null }[]
+    file_format?: string
+    size?:        number
+    bit_depth?:   string
+    maps?:        boolean
+    sbsar?:       boolean
+    sbs?:         boolean
+    conform_tx?:  boolean
+    description?: string
+    user?:        string
+  }) =>
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>(
+      'POST', '/dcc/designer/bridge/publish', payload),
+
+  // Marvelous Designer bridge: the open project exported (abc / obj / fbx / usd / glb,
+  // + .zprj) by the bridge script, published under the composed FLUX name.
+  getMarvelousInfo: () =>
+    apiCall<{ ok: boolean; project: string; path?: string; formats: string[];
+              patterns?: number | null; avatars?: number | null }>(
+      'GET', '/dcc/marvelous/info', undefined, 25000),
+  publishMarvelousBridge: (payload: {
+    project_name: string
+    target_name:  string
+    file_format?: string
+    options?:     Record<string, unknown>
+    with_zprj?:   boolean
+    description?: string
+    user?:        string
+  }) =>
+    apiCall<{ ok: boolean; published?: string[]; warnings?: string[] }>(
+      'POST', '/dcc/marvelous/bridge/publish', payload),
 
   // Activity
   // Conditional variants used by the shared feed poller (FeedsProvider): send

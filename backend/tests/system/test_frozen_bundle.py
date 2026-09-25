@@ -40,6 +40,8 @@ class FrozenBundleData(unittest.TestCase):
         for rel in (
             "features/usd_assembler/recipe/schema.json",
             "dcc/houdini/flux_houdini_server.py",
+            "dcc/substance_designer/substance_designer_bridge.py",
+            "dcc/marvelous/marvelous_bridge.py",
         ):
             self.assertIn(str((_BACKEND / rel).resolve()), bundled, rel)
 

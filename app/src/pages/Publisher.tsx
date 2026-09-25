@@ -11,8 +11,10 @@ import { nukeSchemaForExt, defaultNukeOptions } from '../lib/nukeExportOptions'
 import { photoshopSchemaForExt, defaultPhotoshopOptions } from '../lib/photoshopExportOptions'
 import { PAINTER_OPTIONS, defaultPainterOptions } from '../lib/painterExportOptions'
 import { MARI_OPTIONS, defaultMariOptions } from '../lib/mariExportOptions'
+import { DESIGNER_OPTIONS, defaultDesignerOptions } from '../lib/designerExportOptions'
+import { MARVELOUS_OPTIONS, defaultMarvelousOptions } from '../lib/marvelousExportOptions'
 import { api } from '../api/client'
-import type { PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
+import type { DesignerPackage, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
@@ -204,8 +206,9 @@ const EXPORT_FORMATS_BY_DCC: Record<string, string[]> = {
   Painter:   ['.png', '.exr', '.tga', '.tif', '.jpg'],
   Mari:      ['.tif', '.exr', '.png', '.tga', '.jpg'],
   ZBrush:    ['.ztl', '.obj', '.fbx'],
-  Designer:  ['.sbsar', '.png', '.exr', '.tif', '.jpg', '.tga'],
-  Marvelous: ['.obj', '.fbx', '.abc', '.zprj'],
+  // Designer: the format of the graph output maps (.sbsar / .sbs are options).
+  Designer:  ['.png', '.exr', '.tif', '.tga', '.jpg'],
+  Marvelous: ['.abc', '.obj', '.fbx', '.usd', '.glb', '.zprj'],
   Photoshop: ['.psd', '.psb', '.png', '.jpg', '.tif', '.tga'],
 }
 
@@ -218,14 +221,19 @@ function formatsForDcc(dcc: string): string[] {
 
 // Socket-bridge DCCs (Level 2) whose connection FLUX polls by HTTP ping. The value
 // is the backend ping key (/dcc/<key>/ping). Maya/Houdini/ZBrush keep their own
-// bespoke polling; these share one generic effect (bridgeStatus below). Designer and
-// Marvelous are Level 1 (file ingest, no live connection) and are absent on purpose.
+// bespoke polling; these share one generic effect (bridgeStatus below).
 const DCC_PING_KEY: Record<string, string> = {
   Nuke:      'nuke',
   Painter:   'substance_painter',
   Mari:      'mari',
   Photoshop: 'photoshop',
+  Designer:  'substance_designer',
+  Marvelous: 'marvelous',
 }
+
+// Designer: one graph = "<package path>::<graph id>", one output = "<graph key>::<output id>".
+const graphKey = (pkg: string, graph: string) => `${pkg}::${graph}`
+const outputKey = (gk: string, out: string) => `${gk}::${out}`
 
 // ZBrush connection message: distinguish "installed but not answering" (ZBrush
 // closed or busy) from "plugin not installed", instead of always blaming install.
@@ -741,6 +749,17 @@ export function Publisher() {
   const mapRows: { id: string; label: string }[] = mapSource === 'channels'
     ? painterChannels.map(c => ({ id: channelMapId(c), label: c.label }))
     : (curPreset?.maps ?? [])
+
+  // Designer: the graphs of the open packages (ticked ones export) and their outputs.
+  const [designerOpts, setDesignerOpts] = useState<Record<string, unknown>>(() => defaultDesignerOptions())
+  const [designerPkgs, setDesignerPkgs] = useState<DesignerPackage[]>([])
+  const [graphChecked, setGraphChecked] = useState<Set<string>>(new Set())
+  const [outputChecked, setOutputChecked] = useState<Set<string>>(new Set())
+  // Marvelous: the open project and the formats this Marvelous can export.
+  const [marvelousOpts, setMarvelousOpts] = useState<Record<string, unknown>>(() => defaultMarvelousOptions())
+  const [marvelousFormats, setMarvelousFormats] = useState<string[]>([])
+  const [marvelousScript, setMarvelousScript] = useState<string | null>(null)
+  const designerGraphs = designerPkgs.flatMap(p => p.graphs.map(g => ({ key: graphKey(p.path, g.id), pkg: p, graph: g })))
 
   // Generic connection status for socket-bridge DCCs (Nuke/Painter/Mari/Photoshop):
   // one polling effect pings the active DCC's key with retry, like Maya/ZBrush, so a
@@ -1411,10 +1430,72 @@ export function Publisher() {
         const n = res.published?.length ?? 0
         toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
         res.warnings?.forEach(w => toast.warning(w))
-      } else if (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') {
-        // File ingest (Level 1): local files, Substance Designer (.sbsar/maps) and
-        // Marvelous (.abc/.zprj/.obj). Same token-composed naming; the dedicated DCC
-        // endpoints route through the same publish_file.
+      } else if (dcc === 'Designer') {
+        // Like Painter: the bridge exports the ticked graphs (their ticked outputs, the
+        // .sbsar / .sbs), FLUX publishes each under the asset tokens.
+        if (!bridgeStatus.connected && designerGraphs.length === 0) {
+          toast.error('Designer non connecté : ouvre Designer avec le bridge FLUX actif')
+          return
+        }
+        if (mode !== 'asset') {
+          toast.error('Designer se publie en mode Asset (Catégorie / Task / Name)')
+          return
+        }
+        const picked = designerGraphs.filter(g => graphChecked.has(g.key))
+        if (designerGraphs.length > 0 && picked.length === 0) { toast.error('Coche au moins un graph'); return }
+        if (!designerOpts.maps && !designerOpts.sbsar && !designerOpts.sbs) {
+          toast.error('Coche les maps, le .sbsar ou le .sbs'); return
+        }
+        const graphs = picked.map(g => {
+          const outs = g.graph.outputs.map(o => o.id).filter(id => outputChecked.has(outputKey(g.key, id)))
+          return { package: g.pkg.path, graph: g.graph.id,
+                   outputs: outs.length < g.graph.outputs.length ? outs : null }
+        })
+        if (designerOpts.maps && graphs.some(g => g.outputs && g.outputs.length === 0) && !designerOpts.sbsar && !designerOpts.sbs) {
+          toast.error('Coche au moins un output par graph'); return
+        }
+        const res = await api.publishDesignerBridge({
+          project_name: project,
+          class_token:  CATEGORY_TO_CLASS[sel.category] ?? formatToken(sel.category),
+          task_token:   sel.task,
+          name_token:   formatToken(sel.name),
+          instance:     formatToken(sel.instance) || 'null',
+          graphs:       graphs.length ? graphs : undefined,
+          file_format:  exportExt.replace('.', ''),
+          size:         designerOpts.size ? Number(designerOpts.size) : undefined,
+          bit_depth:    designerOpts.bit_depth ? String(designerOpts.bit_depth) : undefined,
+          maps:         !!designerOpts.maps,
+          sbsar:        !!designerOpts.sbsar,
+          sbs:          !!designerOpts.sbs,
+          conform_tx:   !!designerOpts.conform_tx,
+          description:  description || undefined,
+          user:         settings?.username ?? undefined,
+        })
+        const n = res.published?.length ?? 0
+        toast.success(`${n} fichier${n > 1 ? 's' : ''} publié${n > 1 ? 's' : ''} → Designer${res.tx?.length ? ' · .tx' : ''}`)
+        res.warnings?.forEach(w => toast.warning(w))
+      } else if (dcc === 'Marvelous') {
+        // The bridge exports the open project in the picked format (+ .zprj), FLUX
+        // publishes it under the composed name (asset or shot).
+        if (!bridgeStatus.connected && marvelousFormats.length === 0) {
+          toast.error('Marvelous non connecté : lance le script bridge FLUX dans Marvelous')
+          return
+        }
+        const { with_zprj, ...options } = marvelousOpts
+        const res = await api.publishMarvelousBridge({
+          project_name: project,
+          target_name:  (nameOverride && nameOverride.trim()) || buildFilename(),
+          file_format:  exportExt.replace('.', ''),
+          options,
+          with_zprj:    !!with_zprj,
+          description:  description || undefined,
+          user:         settings?.username ?? undefined,
+        })
+        const n = res.published?.length ?? 0
+        toast.success(`${n} fichier${n > 1 ? 's' : ''} publié${n > 1 ? 's' : ''} → Marvelous`)
+        res.warnings?.forEach(w => toast.warning(w))
+      } else if (dcc === 'Fichier local') {
+        // File ingest (Level 1): local files of any type, under the token-composed name.
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
           toast.error('Indique le(s) fichier(s) source')
@@ -1439,12 +1520,8 @@ export function Publisher() {
           }
           return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
         }
-        // Route to the soft's endpoint; ok + what the publish also wrote (.tx, USD proxy).
+        // Publish one file; ok + what the publish also wrote (.tx, USD proxy).
         const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean }> => {
-          const base = { project_name: project, source_path: f, target_name: target,
-                         description: description || undefined, user: settings?.username ?? undefined }
-          if (dcc === 'Designer')  return { ok: (await api.publishDesigner(base)).ok, tx: 0, proxy: false }
-          if (dcc === 'Marvelous') return { ok: (await api.publishMarvelous(base)).ok, tx: 0, proxy: false }
           const r = await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
                    target_name: target })
@@ -1486,6 +1563,8 @@ export function Publisher() {
     description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
     zbrushConnected, zbrushExportOpts,
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts, texItems, texChecked,
+    designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
+    mapRows, mapChecked, mapOpts, mapSource, painterChannels,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
@@ -1516,6 +1595,43 @@ export function Publisher() {
     }
   }, [dcc])
   useEffect(() => { void loadTexItems() }, [loadTexItems])
+
+  // Designer graphs / Marvelous project read from the app (Relire re-reads them).
+  const [bridgeInfoSource, setBridgeInfoSource] = useState('')
+  const loadBridgeInfo = useCallback(async () => {
+    if (dcc !== 'Designer' && dcc !== 'Marvelous') return
+    setTexLoading(true)
+    try {
+      if (dcc === 'Designer') {
+        const r = await api.getDesignerInfo()
+        setDesignerPkgs(r.packages)
+        const all = r.packages.flatMap(p => p.graphs.map(g => ({ key: graphKey(p.path, g.id), g })))
+        // The graph open in Designer is ticked; none open -> every graph.
+        const current = all.filter(x => x.g.current)
+        setGraphChecked(new Set((current.length ? current : all).map(x => x.key)))
+        setOutputChecked(new Set(all.flatMap(x => x.g.outputs.map(o => outputKey(x.key, o.id)))))
+        setBridgeInfoSource(r.packages.length ? r.packages.map(p => p.name).join(', ') : 'Aucun package ouvert')
+      } else {
+        const r = await api.getMarvelousInfo()
+        setMarvelousFormats(r.formats)
+        setBridgeInfoSource([r.project || 'Projet sans nom',
+          r.patterns != null ? `${r.patterns} patterns` : '', r.avatars != null ? `${r.avatars} avatar(s)` : '',
+        ].filter(Boolean).join(' · '))
+      }
+    } catch (e) {
+      if (dcc === 'Designer') setDesignerPkgs([])
+      else setMarvelousFormats([])
+      setBridgeInfoSource(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTexLoading(false)
+    }
+  }, [dcc])
+  useEffect(() => { void loadBridgeInfo() }, [loadBridgeInfo])
+  // Marvelous has no startup folder: show where the bridge script is, to run it by hand.
+  useEffect(() => {
+    if (dcc !== 'Marvelous') return
+    api.getDccAutostart('marvelous').then(r => setMarvelousScript(r.installed ? r.startup_file : null)).catch(() => setMarvelousScript(null))
+  }, [dcc])
 
   // Presets read from Painter: keep the chosen one if Painter has it, else PBR Metallic
   // Roughness (or the first). A new preset ticks all of its maps.
@@ -1762,12 +1878,10 @@ export function Publisher() {
                   </div>
                 )}
               </div>
-            ) : (dcc === 'Fichier local' || dcc === 'Designer' || dcc === 'Marvelous') ? (
+            ) : dcc === 'Fichier local' ? (
               <div>
                 <div className="cap" style={{ marginBottom: 6 }}>
-                  {dcc === 'Designer' ? 'FICHIER DESIGNER (.sbsar / maps)'
-                    : dcc === 'Marvelous' ? 'FICHIER MARVELOUS (.abc / .zprj / .obj)'
-                    : 'FICHIER SOURCE'}
+                  FICHIER SOURCE
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
@@ -1908,9 +2022,18 @@ export function Publisher() {
                       ? `Connecté${bridgeStatus.version ? ` · ${bridgeStatus.version}` : ''}`
                       : bridgeStatus.checking
                         ? 'Vérification...'
-                        : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
+                        : dcc === 'Marvelous'
+                          ? 'Marvelous ne répond pas : lance le script bridge FLUX dans Marvelous (Script > Python Script, ouvrir, Run)'
+                          : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
                   </div>
                 </div>
+                {dcc === 'Marvelous' && !bridgeStatus.connected && !bridgeStatus.checking && (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {marvelousScript
+                      ? <CopyBlock text={marvelousScript} />
+                      : <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>Script absent : bouton Plug de Marvelous dans la sidebar pour l'écrire.</span>}
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
@@ -2318,6 +2441,124 @@ export function Publisher() {
                 values={mariOpts}
                 onChange={(k, v) => setMariOpts(prev => ({ ...prev, [k]: v }))}
               />
+            </div>
+          )}
+
+          {/* GRAPHS (Designer) / PROJET (Marvelous): read from the app through the bridge. */}
+          {(dcc === 'Designer' || dcc === 'Marvelous') && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>{dcc === 'Designer' ? 'GRAPHS' : 'PROJET'} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{bridgeInfoSource}</span></SecTitle>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                <Btn ghost disabled={texLoading} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={() => { void loadBridgeInfo() }}>
+                  <RefreshCw size={11} strokeWidth={2} />
+                  {texLoading ? 'Lecture…' : 'Relire'}
+                </Btn>
+                {dcc === 'Designer' && designerGraphs.length > 0 && (
+                  <>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set(designerGraphs.map(g => g.key)))}>Tout</Btn>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set())}>Aucun</Btn>
+                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{graphChecked.size} / {designerGraphs.length}</span>
+                  </>
+                )}
+                {dcc === 'Marvelous' && marvelousFormats.length > 0 && (
+                  <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+                    exports : {marvelousFormats.map(f => `.${f}`).join(' ')}
+                  </span>
+                )}
+              </div>
+              {dcc === 'Marvelous' && marvelousFormats.length > 0 && !marvelousFormats.includes(exportExt.replace('.', '').replace(/^usd[ac]$/, 'usd')) && (
+                <div style={{ fontSize: 10, color: 'var(--warn, #e8912a)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
+                  {exportExt} absent de ce Marvelous : choisis un autre format
+                </div>
+              )}
+              {dcc === 'Designer' && designerGraphs.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {designerGraphs.map(g => {
+                    const on = graphChecked.has(g.key)
+                    return (
+                      <div key={g.key} title={g.pkg.path}
+                        onClick={() => setGraphChecked(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n })}
+                        style={{
+                          padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
+                          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
+                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
+                          color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                        {g.graph.id}
+                        <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> · {g.pkg.name} · {g.graph.outputs.length} out{g.graph.current ? ' · ouvert' : ''}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* OUTPUTS (Designer): the output nodes of each ticked graph, the ticked ones export. */}
+          {dcc === 'Designer' && !!designerOpts.maps && designerGraphs.some(g => graphChecked.has(g.key) && g.graph.outputs.length > 0) && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OUTPUTS</SecTitle>
+              {designerGraphs.filter(g => graphChecked.has(g.key)).map(g => {
+                const keys = g.graph.outputs.map(o => outputKey(g.key, o.id))
+                const nOn = keys.filter(k => outputChecked.has(k)).length
+                return (
+                  <div key={g.key} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                      <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>{g.graph.id}</span>
+                      <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev, ...keys]))}>Tout</Btn>
+                      <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev].filter(k => !keys.includes(k))))}>Aucun</Btn>
+                      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{nOn} / {keys.length}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {g.graph.outputs.map(o => {
+                        const k = outputKey(g.key, o.id)
+                        const on = outputChecked.has(k)
+                        return (
+                          <div key={k} title={o.id}
+                            onClick={() => setOutputChecked(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })}
+                            style={{
+                              padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
+                              border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                              background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
+                              color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
+                            }}>
+                            {o.label}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Designer (maps / .sbsar / .sbs, taille, bit depth, .tx). */}
+          {dcc === 'Designer' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
+              <ExportOptions
+                schema={DESIGNER_OPTIONS}
+                values={designerOpts}
+                onChange={(k, v) => setDesignerOpts(prev => ({ ...prev, [k]: v }))}
+              />
+            </div>
+          )}
+
+          {/* OPTIONS D'EXPORT — Marvelous (contenu, epaisseur, UV, echelle, .zprj). */}
+          {dcc === 'Marvelous' && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              {exportExt === '.zprj'
+                ? <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>Le projet Marvelous est publié tel quel (aucune option).</div>
+                : <ExportOptions
+                    schema={MARVELOUS_OPTIONS}
+                    values={marvelousOpts}
+                    onChange={(k, v) => setMarvelousOpts(prev => ({ ...prev, [k]: v }))}
+                  />}
             </div>
           )}
 

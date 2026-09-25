@@ -46,6 +46,9 @@ app_datas = [
     (str(ROOT / "backend/dcc/substance_painter/substance_painter_bridge.py"),
      "dcc/substance_painter"),
     (str(ROOT / "backend/dcc/zbrush/zbrush_bridge_plugin.py"), "dcc/zbrush"),
+    (str(ROOT / "backend/dcc/substance_designer/substance_designer_bridge.py"),
+     "dcc/substance_designer"),
+    (str(ROOT / "backend/dcc/marvelous/marvelous_bridge.py"), "dcc/marvelous"),
 ]
 
 a = Analysis(

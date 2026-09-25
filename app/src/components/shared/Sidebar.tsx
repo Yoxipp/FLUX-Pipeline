@@ -134,6 +134,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [nukeServerOk,    setNukeServerOk]          = useState<boolean | null>(null)
   const [painterServerOk, setPainterServerOk]       = useState<boolean | null>(null)
   const [mariServerOk,    setMariServerOk]          = useState<boolean | null>(null)
+  const [designerServerOk, setDesignerServerOk]     = useState<boolean | null>(null)
+  const [marvelousServerOk, setMarvelousServerOk]   = useState<boolean | null>(null)
   // Photoshop (COM, no plugin): reason drives the row control state.
   const [psReason, setPsReason]                     = useState<'ok' | 'lib_missing' | 'not_running' | null>(null)
   const [psBusy,   setPsBusy]                        = useState(false)
@@ -224,6 +226,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('mari').then(p => setMariServerOk(p.connected)).catch(() => setMariServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('substance_designer').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, substance_designer: r.installed }))
+      if (r.installed) {
+        api.pingDcc('substance_designer').then(p => setDesignerServerOk(p.connected)).catch(() => setDesignerServerOk(false))
+      }
+    }).catch(() => {})
+    api.getDccAutostart('marvelous').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, marvelous: r.installed }))
+      if (r.installed) {
+        api.pingDcc('marvelous').then(p => setMarvelousServerOk(p.connected)).catch(() => setMarvelousServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -270,6 +284,24 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.mari])
+
+  // Poll Designer bridge every 5 s when the plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.substance_designer) { setDesignerServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('substance_designer').then(p => setDesignerServerOk(p.connected)).catch(() => setDesignerServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.substance_designer])
+
+  // Poll Marvelous bridge every 5 s when the script is written
+  useEffect(() => {
+    if (!autostartInstalled.marvelous) { setMarvelousServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('marvelous').then(p => setMarvelousServerOk(p.connected)).catch(() => setMarvelousServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.marvelous])
 
   // Poll Photoshop COM state every 5 s (no plugin; state = lib/running/ok).
   useEffect(() => {
@@ -398,9 +430,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     if (key === 'nuke')    setNukeServerOk(value)
     if (key === 'substance_painter') setPainterServerOk(value)
     if (key === 'mari')    setMariServerOk(value)
+    if (key === 'substance_designer') setDesignerServerOk(value)
+    if (key === 'marvelous') setMarvelousServerOk(value)
   }
 
-  const PLUG_KEYS = ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari']
+  const PLUG_KEYS = ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous']
 
   const handleToggleAutostart = async (key: string) => {
     if (!PLUG_KEYS.includes(key)) return
@@ -574,15 +608,16 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const isNuke         = s.key === 'nuke'
           const isPainter      = s.key === 'substance_painter'
           const isMari         = s.key === 'mari'
+          const isDesigner     = s.key === 'substance_designer'
+          const isMarvelous    = s.key === 'marvelous'
           const isPhotoshop    = s.key === 'photoshop'
-          // Plug slot has three kinds: a 'toggle' installs/removes an in-app bridge
-          // (Houdini/Maya/Nuke/ZBrush/Painter/Mari); Photoshop has no plugin (external
-          // COM) so it shows a one-line hint instead; Designer/Marvelous are Level-1
-          // file ingest with no bridge → no control at all (no dead button).
-          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke || isPainter || isMari
+          // Plug slot has two kinds: a 'toggle' installs/removes an in-app bridge
+          // (Houdini/Maya/Nuke/ZBrush/Painter/Mari/Designer/Marvelous); Photoshop has no
+          // plugin (external COM) so it shows a one-line hint instead.
+          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke || isPainter || isMari || isDesigner || isMarvelous
           const autoInstalled  = !!autostartInstalled[s.key]
           const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : isPainter ? painterServerOk : isMari ? mariServerOk : null
+          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : isPainter ? painterServerOk : isMari ? mariServerOk : isDesigner ? designerServerOk : isMarvelous ? marvelousServerOk : null
           // AutoStart state colors: ORANGE = autostart installed but the software isn't
           // launched/connected yet · GREEN = launched + connected. No red state anymore.
           const plugConnected  = hasPlug && autoInstalled && serverOk === true
@@ -649,7 +684,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 </TooltipContent>
               </Tooltip>
 
-              {/* port local — bridge toggle (Houdini/Maya/Nuke/ZBrush/Painter/Mari) */}
+              {/* port local — bridge toggle (Houdini/Maya/Nuke/ZBrush/Painter/Mari/Designer/Marvelous) */}
               {hasPlug && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -695,6 +730,14 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                      ? (autoInstalled
                          ? (serverOk === true ? 'Connecté · bridge Mari' : 'Bridge installé · clic pour désinstaller')
                          : 'Installer le bridge Mari (dossier Scripts)')
+                   : isDesigner
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Designer' : 'Bridge installé · clic pour désinstaller')
+                         : 'Installer le bridge Designer (sduserplugins)')
+                   : isMarvelous
+                     ? (autoInstalled
+                         ? (serverOk === true ? 'Connecté · bridge Marvelous' : 'Script écrit · à lancer dans Marvelous (Script > Python Script) · clic pour retirer')
+                         : 'Écrire le script bridge Marvelous (Documents/FLUX/marvelous)')
                      : (autoInstalled
                          ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}
