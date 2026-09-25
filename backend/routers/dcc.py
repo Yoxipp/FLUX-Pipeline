@@ -2449,8 +2449,8 @@ async def houdini_crowd_module() -> dict:
 
 class CrowdBuildRequest(BaseModel):
     project: str
-    seq: str
-    shot: str
+    seq: str = ""                   # empty: preview without a shot (publish needs one)
+    shot: str = ""
     group: str = "crowd"
     points: list[dict]              # [{"p": [x, y, z], "ry": deg, "scale": s}] from the SOP
     components: list[str]
@@ -2462,6 +2462,7 @@ class CrowdBuildRequest(BaseModel):
     user: str | None = None
     component_weights: dict[str, float] | None = None   # "more of this asset"
     clip_weights: dict[str, float] | None = None        # "more of this animation"
+    sources: dict[str, dict] | None = None              # {asset: {"file", "prim"}} of input 1
 
 
 @router.get("/houdini/crowd/shots")
@@ -2510,7 +2511,8 @@ async def houdini_crowd_build(req: CrowdBuildRequest) -> dict:
         res = await loop.run_in_executor(None, lambda: build_crowd(
             project_path, req.seq, req.shot, req.group, req.points, components=req.components,
             clips=req.clips, seed=req.seed, offset=offset, speed=speed, publish=req.publish, user=user,
-            component_weights=req.component_weights, clip_weights=req.clip_weights))
+            component_weights=req.component_weights, clip_weights=req.clip_weights,
+            sources=req.sources))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     path = str(res["path"])

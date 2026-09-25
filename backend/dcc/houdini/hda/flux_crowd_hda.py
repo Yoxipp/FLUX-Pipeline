@@ -176,7 +176,7 @@ def menu_project(node):
     return _flat(projects) if projects else ["", "FLUX injoignable ou aucun projet"]
 
 def menu_seq(node):
-    return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot dans ce projet"]
+    return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot (apercu sans shot)"]
 
 def menu_shot(node):
     seq = _pval(node, "seq")
@@ -274,6 +274,40 @@ def _input_assets(node):
             if name not in out:
                 out.append(str(name))
             it.PruneChildren()
+    return out
+
+def _input_sources(node):
+    """{asset: {"file", "prim"}}: the file each asset of input 1 comes from (reference or
+    payload on disk), so an asset without a FLUX component still shows as a static mesh."""
+    stage = _input_stage(node, 0)
+    if stage is None:
+        return {}
+    from pxr import Pcp, Usd
+    out = {}
+    it = iter(Usd.PrimRange(stage.GetPseudoRoot()))
+    for prim in it:
+        if prim.IsPseudoRoot():
+            continue
+        model = Usd.ModelAPI(prim)
+        name = (model.GetAssetInfo() or {}).get("name") or (prim.GetName() if model.GetKind() == "component" else "")
+        if not name:
+            continue
+        it.PruneChildren()
+        if name in out:
+            continue
+        try:
+            arcs = Usd.PrimCompositionQuery(prim).GetCompositionArcs()
+        except Exception:
+            arcs = []
+        for arc in arcs:
+            if arc.GetArcType() not in (Pcp.ArcTypeReference, Pcp.ArcTypePayload):
+                continue
+            layer = arc.GetTargetLayer()
+            path = layer.realPath if layer is not None else ""
+            if path and os.path.isfile(path):
+                out[str(name)] = {"file": path.replace(chr(92), "/"),
+                                  "prim": arc.GetTargetPrimPath().pathString}
+                break
     return out
 
 def _input_points(node):
@@ -414,8 +448,12 @@ def _reload(node):
 
 def _build(node, publish):
     project, seq, shot = _pval(node, "project"), _pval(node, "seq"), _pval(node, "shot")
-    if not (project and seq and shot):
-        _status(node, "Choisis projet / sequence / shot"); return
+    if not project:
+        _status(node, "Choisis un projet"); return
+    if not (seq and shot):
+        if publish:
+            _status(node, "Publier demande une sequence et un shot (l'apercu marche sans)"); return
+        seq = shot = ""
     assets, clips = read_inputs(node, quiet=True)
     if not assets:
         _status(node, "Aucun asset : branche des FLUX Import sur l'entree 1 (ou choisis-les dans les menus)"); return
@@ -427,7 +465,7 @@ def _build(node, publish):
     if not pts:
         _status(node, "Les points de l'entree 2 sont vides"); return
     payload = {"project": project, "seq": seq, "shot": shot, "group": _pval(node, "group") or "crowd",
-               "points": pts, "components": assets, "clips": clips,
+               "points": pts, "components": assets, "clips": clips, "sources": _input_sources(node),
                "component_weights": _weights(node, "asset"), "clip_weights": _weights(node, "clip"),
                "seed": int(node.evalParm("seed")),
                "offset": [node.evalParm("offsetx"), node.evalParm("offsety")],
