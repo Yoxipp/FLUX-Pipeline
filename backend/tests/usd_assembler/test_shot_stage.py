@@ -232,6 +232,34 @@ class ShotStage(unittest.TestCase):
                                          / "SEQ001_SHOT010_v002" / "SEQ001_SHOT010.usda"))
         self.assertIn("SEQ001_SHOT010_LIGHT_LAST.usda", entry.subLayerPaths[0])   # lighting = strongest
 
+    def test_a_light_export_of_edits_only_is_refused(self) -> None:
+        from features.usd_assembler.shot_light import publish_shot_light
+
+        src = Path(self._tmp.name) / "edits.usda"
+        layer = Sdf.Layer.CreateNew(str(src))
+        spec = Sdf.CreatePrimInLayer(layer, "/lights/key")      # "over" only: edits a published light
+        spec.specifier = Sdf.SpecifierOver
+        layer.GetPrimAtPath("/lights").specifier = Sdf.SpecifierOver
+        layer.Save()
+        with self.assertRaises(ValueError):
+            publish_shot_light(src, self.project, "SEQ001", "SHOT010")
+
+    def test_sublayers_are_dropped_from_the_published_light_rig(self) -> None:
+        from features.usd_assembler.shot_light import publish_shot_light
+
+        prod = _production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}], frame_range=(1001, 1010))
+        (self.project / "production.json").write_text(json.dumps(prod), encoding="utf-8")
+        self._write(prod)
+        src = Path(self._tmp.name) / "light.usda"
+        layer = Sdf.Layer.CreateNew(str(src))
+        layer.subLayerPaths = ["./SEQ001_SHOT010_LAST.usda"]
+        Sdf.CreatePrimInLayer(layer, "/lights/key").specifier = Sdf.SpecifierDef
+        layer.Save()
+        res = publish_shot_light(src, self.project, "SEQ001", "SHOT010", user="adam")
+        self.assertEqual(len(res["warnings"]), 1)
+        published = Sdf.Layer.FindOrOpen(str(res["root"]))
+        self.assertEqual(list(published.subLayerPaths), [])
+
     def test_an_empty_light_export_is_refused(self) -> None:
         from features.usd_assembler.shot_light import publish_shot_light
 

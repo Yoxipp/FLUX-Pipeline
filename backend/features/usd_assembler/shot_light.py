@@ -23,12 +23,32 @@ def light_base(seq: str, shot: str) -> str:
     return f"{seq.upper()}_{shot.upper()}_{LIGHT_TYPE}"
 
 
+def _defines_prims(layer) -> bool:
+    """True when the layer defines at least one prim (a light rig). A layer of "over"
+    only edits lights published before: published alone, the new version would replace
+    the old one and those lights would vanish from the shot."""
+    from pxr import Sdf
+
+    found = []
+
+    def _visit(path):
+        if not found and path.IsPrimPath():
+            spec = layer.GetPrimAtPath(path)
+            if spec is not None and spec.specifier == Sdf.SpecifierDef:
+                found.append(path)
+
+    layer.Traverse(Sdf.Path.absoluteRootPath, _visit)
+    return bool(found)
+
+
 def publish_shot_light(source: str | Path, project_path: str | Path, seq: str, shot: str, *,
                        user: str = "") -> dict:
     """Publish *source* (an exported light layer) as the shot's LIGHT department.
 
-    Returns {"base", "version", "folder", "root", "last", "stage"}. ValueError when the
-    file is missing or the tokens cannot place the publish.
+    Returns {"base", "version", "folder", "root", "last", "stage", "warnings"}. ValueError
+    when the file is missing, holds only edits ("over") of existing lights, or the tokens
+    cannot place the publish. Sublayers of the export (the shot stage above the Layer
+    Break) are dropped from the published copy: they would loop the stage into itself.
     """
     from pxr import Sdf
 
@@ -47,6 +67,11 @@ def publish_shot_light(source: str | Path, project_path: str | Path, seq: str, s
         raise ValueError(f"USD illisible : {src.name}")
     if not layer.rootPrims:
         raise ValueError("aucune lumiere a publier : ajoute les lumieres apres le node FLUX Shot")
+    if not _defines_prims(layer):
+        raise ValueError("le light rig ne contient que des modifications (over) de lumieres deja "
+                         "publiees : publie-le, il remplacerait l'ancien et ces lumieres disparaitraient. "
+                         "Cree ou duplique les lumieres apres le node FLUX Shot")
+    warnings: list[str] = []
 
     project = Path(project_path)
     base = light_base(seq, shot)
@@ -63,6 +88,12 @@ def publish_shot_light(source: str | Path, project_path: str | Path, seq: str, s
         # Export (not copy) so a crate or an anonymous-layer file lands as clean usda.
         if not layer.Export(str(root)):
             shutil.copy2(src, root)
+        published = Sdf.Layer.FindOrOpen(str(root))
+        if published is not None and published.subLayerPaths:
+            warnings.append(f"{len(published.subLayerPaths)} sublayer(s) retire(s) du light rig "
+                            "(le stage du shot au-dessus du Layer Break)")
+            published.subLayerPaths = []
+            published.Save()
     except Exception:
         discard_rendered_version(parent, base, ext, ver, is_sequence=True)
         raise
@@ -79,7 +110,8 @@ def publish_shot_light(source: str | Path, project_path: str | Path, seq: str, s
     hooked = after_usd_publish(parent, base, ext, root, user=user)
     stage = (hooked.get("shot") or {}).get("version")
     log.info("Shot light %s %s -> %s (stage %s)", base, version, folder, stage or "unchanged")
-    return {"base": base, "version": version, "folder": folder, "root": root, "last": last, "stage": stage}
+    return {"base": base, "version": version, "folder": folder, "root": root, "last": last,
+            "stage": stage, "warnings": warnings}
 
 
 def list_stage_shots(project_path: str | Path) -> list[dict]:

@@ -2447,4 +2447,4 @@ async def houdini_shot_light_publish(req: ShotLightPublishRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "base": res["base"], "version": res["version"], "last": str(res["last"] or ""),
-            "stage": res["stage"]}
+            "stage": res["stage"], "warnings": res.get("warnings", [])}
