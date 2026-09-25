@@ -53,10 +53,11 @@ def publish_mari(
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
                                        variante, description, user, whole_name=True)
+    warnings = [f"non exporte : {e}" for e in result.get("errors") or []] + warnings
     for w in warnings:
         log.warning("Mari publish: %s", w)
     tx_paths = _conform_published(published, "Mari") if (conform_tx and published) else []
 
     if not published:
         return {"ok": False, "error": "No Mari channel could be published"}
-    return {"ok": True, "published": published, "tx": tx_paths or None}
+    return {"ok": True, "published": published, "tx": tx_paths or None, "warnings": warnings}

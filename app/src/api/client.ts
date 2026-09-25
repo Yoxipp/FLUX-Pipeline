@@ -433,7 +433,7 @@ export const api = {
     user?:        string
     channels?:    string[]
   }) =>
-    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null }>('POST', '/dcc/mari/publish', payload),
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/mari/publish', payload),
 
   // Level 1 file ingest (Substance Designer / Marvelous Designer): the artist
   // exports a file from the app; FLUX ingests it under FLUX naming. One method per

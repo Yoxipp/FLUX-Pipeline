@@ -126,27 +126,46 @@ def _do_export(export_path: str, file_format: str, channels: list | None = None)
     if not _MARI_AVAILABLE:
         return {"status": "error", "msg": "mari module not available"}
     try:
+        import glob
+
         geo = mari.geo.current()
+        if geo is None:
+            return {"status": "error", "msg": "Aucune geo courante dans Mari"}
         files: list[str] = []
+        errors: list[str] = []
         os.makedirs(export_path, exist_ok=True)
         wanted = set(channels or [])
         for channel in geo.channelList():
-            if wanted and channel.name() not in wanted:
+            name = channel.name()
+            if wanted and name not in wanted:
                 continue
-            # One file per channel named after the channel only (FLUX keeps the whole
-            # name as the MAP token); Mari fills $UDIM with each tile number.
-            out = os.path.join(export_path, f"{channel.name()}.$UDIM.{file_format}")
+            # One file per channel named after the channel only (FLUX turns the name into
+            # the MAP token); Mari fills $UDIM with each tile number.
+            out = os.path.join(export_path, f"{name}.$UDIM.{file_format}")
             try:
                 # Flattened: every layer of the channel merged, as it shows in Mari.
                 if hasattr(channel, "exportImagesFlattened"):
                     channel.exportImagesFlattened(out)
                 else:
                     channel.exportImages(out)
-                files.append(out)
             except Exception as exc:  # noqa: BLE001 - one bad channel never aborts all
-                print(f"[FLUX] Mari channel export failed ({channel.name()}): {exc}")
-        return {"status": "ok", "files": files}
+                errors.append(f"{name} : {exc}")
+                _diag(f"Mari channel export failed ({name}): {exc!r}")
+                continue
+            # What really reached the disk (a refused format may write nothing).
+            written = glob.glob(os.path.join(glob.escape(export_path), f"{glob.escape(name)}.*.{file_format}"))
+            if written:
+                files.extend(sorted(written))
+            else:
+                errors.append(f"{name} : aucun fichier ecrit en .{file_format}")
+        _diag(f"Mari export: {len(files)} file(s), errors={errors}")
+        if not files:
+            hint = " (un channel 16 / 32 bits flottant ne passe pas en .png / .jpg / .tga : essaie .exr ou .tif)" \
+                if file_format.lower() in ("png", "jpg", "jpeg", "tga") else ""
+            return {"status": "error", "msg": "Mari n'a ecrit aucun fichier : " + " ; ".join(errors[:4]) + hint}
+        return {"status": "ok", "files": files, "errors": errors}
     except Exception as exc:  # noqa: BLE001
+        _diag(f"Mari export failed: {exc!r}")
         return {"status": "error", "msg": str(exc)}
 
 
