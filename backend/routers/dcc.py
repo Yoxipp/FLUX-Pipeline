@@ -2452,6 +2452,23 @@ class CrowdBuildRequest(BaseModel):
     clip_weights: dict[str, float] | None = None        # "more of this animation"
 
 
+@router.get("/houdini/crowd/shots")
+async def houdini_crowd_shots(project: str) -> dict:
+    """Every shot of the project (SHOT tokens), for the FLUX Crowd menus.
+
+    Unlike FLUX Shot, a crowd does not need a generated stage: its publish creates it
+    (2026-09-25: TEST_EN_DUR_V3 had shots but the menu said "aucun shot")."""
+    from core.paths import get_project_path
+    from features.importer.library_import import _stage_shots
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+    loop = asyncio.get_running_loop()
+    pairs = await loop.run_in_executor(None, lambda: _stage_shots(project_path))
+    return {"shots": [{"seq": seq, "shot": shot} for seq, shot in pairs]}
+
+
 @router.post("/houdini/crowd/build")
 async def houdini_crowd_build(req: CrowdBuildRequest) -> dict:
     """Preview (work layer in the shot) or publish (SEQ_SHOT_CROWD[_GROUP]) a crowd."""

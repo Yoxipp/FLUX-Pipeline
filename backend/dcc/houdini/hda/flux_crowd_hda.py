@@ -150,8 +150,9 @@ def _shots(node):
     project = _pval(node, "project")
     if not project:
         return []
+    # Every shot of the project: the crowd publish creates the shot stage if needed.
     return _cached("shots:" + project,
-                   lambda: _fetch("/dcc/houdini/shot_switch/shots", "shots", [], project=project))
+                   lambda: _fetch("/dcc/houdini/crowd/shots", "shots", [], project=project))
 
 def _compat(node, fresh=False):
     project = _pval(node, "project")
@@ -170,7 +171,7 @@ def menu_project(node):
     return _flat(projects) if projects else ["", "FLUX injoignable ou aucun projet"]
 
 def menu_seq(node):
-    return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot"]
+    return _flat(sorted({s["seq"] for s in _shots(node)})) or ["", "aucun shot dans ce projet"]
 
 def menu_shot(node):
     seq = _pval(node, "seq")

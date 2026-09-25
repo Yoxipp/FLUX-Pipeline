@@ -708,6 +708,73 @@ def on_loaded(node):
 '''
 
 
+# Inner apply_component Python LOP of the /stage importer (ADR 0023 / 0026 / 0032). Part
+# of the served module (hou.phm().apply_component) and copied into the HDA as a fallback.
+APPLY_FUNC: str = '''
+def apply_component(node):
+    """Body of the inner apply_component Python LOP (*node*): variant selections from
+    comp_state, rig off = no skeleton, grooms without proxy. Served by FLUX so a fix
+    needs no HDA rebuild; the HDA keeps a copy for FLUX offline."""
+    import json
+    hda = node.parent()
+    stage = node.editableStage()
+    try:
+        state = json.loads(hda.evalParm("comp_state") or "{}")
+    except Exception:
+        state = {}
+    no_rig = bool(state.pop("__no_rig__", False))
+    prim = stage.GetPrimAtPath(hda.evalParm("prim_path")) if state or no_rig else None
+    # A department composed as a sublayer (ADR 0032) keeps its own root /<NAME>.
+    roots = [p for p in (prim, stage.GetPrimAtPath("/" + hda.evalParm("prim_path").rstrip("/").rsplit("/", 1)[-1]))
+             if p is not None and p.IsValid()]
+    for root in roots:
+        if not root.IsDefined():
+            # Department layers only hold "over /<NAME>": sublayered alone, nothing under
+            # the root would be defined (the component's payload is what defines it).
+            stage.DefinePrim(root.GetPath())
+        sets = root.GetVariantSets()
+        for name, selection in sorted(state.items()):
+            if sets.HasVariantSet(name):
+                sets.GetVariantSet(name).SetVariantSelection(selection)
+    # Every rig file unchecked: the skeleton a skinned GEO publish carries (skel/Skeleton,
+    # needed by its skin weights) is deactivated too, so no bone is left in the viewport
+    # or the scene graph (2026-09-25, OGRE).
+    if no_rig:
+        from pxr import Usd, UsdSkel
+        for root in roots:
+            for p in list(Usd.PrimRange(root)):
+                if p.IsA(UsdSkel.Skeleton) or p.IsA(UsdSkel.Animation):
+                    p.SetActive(False)
+    # Grooms with their "Proxy" box off: complete curves in the viewport, proxy hidden
+    # (ADR 0026 thinned "<curves>_proxy" siblings, purpose=proxy).
+    try:
+        groom_full = json.loads(hda.evalParm("comp_groom_full") or "[]")
+    except Exception:
+        groom_full = []
+    if prim is not None and prim.IsValid() and groom_full:
+        from pxr import Usd, UsdGeom
+        for gid in groom_full:
+            root = stage.GetPrimAtPath(prim.GetPath().AppendPath("groom/" + gid))
+            if not root:
+                continue
+            for p in Usd.PrimRange(root):
+                if not p.IsA(UsdGeom.BasisCurves):
+                    continue
+                img = UsdGeom.Imageable(p)
+                if img.GetPurposeAttr().Get() == UsdGeom.Tokens.proxy:
+                    img.CreateVisibilityAttr().Set(UsdGeom.Tokens.invisible)
+                else:
+                    img.CreatePurposeAttr().Set(UsdGeom.Tokens.default_)
+    warnings = hda.evalParm("comp_warnings")
+    if warnings:
+        try:
+            node.addWarning(warnings)
+        except Exception:
+            pass
+'''
+_MODULE_FUNCTIONS += APPLY_FUNC
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HDA build script  (string executed inside Houdini via houdini_client.run())
 # ─────────────────────────────────────────────────────────────────────────────

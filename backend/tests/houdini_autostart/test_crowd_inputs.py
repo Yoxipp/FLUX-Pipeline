@@ -140,3 +140,25 @@ class CrowdInputs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrowdShots(unittest.TestCase):
+    def test_every_shot_is_listed_even_without_a_stage(self) -> None:
+        # 2026-09-25: TEST_EN_DUR_V3 has shots, the menu said "aucun shot" (it only
+        # listed shots whose stage was already generated).
+        import asyncio
+        from unittest import mock
+
+        from features.folder_manager import tokens as tok
+        from routers import dcc as dcc_router
+
+        with tempfile.TemporaryDirectory() as d:
+            project = Path(d) / "P"
+            project.mkdir()
+            tokens = tok.build_default_tokens()
+            tokens["SHOT"] = {"SEQ001/SHOT010": "seq/SEQ001/SHOT010", "SEQ002/SHOT020": "seq/SEQ002/SHOT020"}
+            tok.save_tokens(project, tokens)
+            with mock.patch("core.paths.get_project_path", return_value=project):
+                res = asyncio.run(dcc_router.houdini_crowd_shots("P"))
+        self.assertEqual(res["shots"], [{"seq": "SEQ001", "shot": "SHOT010"}, {"seq": "SEQ002", "shot": "SHOT020"}])
+        self.assertIn("/dcc/houdini/crowd/shots", flux_crowd_hda.MODULE_FUNCTIONS)
