@@ -2469,15 +2469,26 @@ async def houdini_crowd_shots(project: str) -> dict:
     """Every shot of the project (SHOT tokens), for the FLUX Crowd menus.
 
     Unlike FLUX Shot, a crowd does not need a generated stage: its publish creates it
-    (2026-09-25: TEST_EN_DUR_V3 had shots but the menu said "aucun shot")."""
+    (2026-09-25: TEST_EN_DUR_V3 had shots but the menu said "aucun shot").
+    Shot folders made by hand have no SHOT token: they are healed from disk first,
+    as the Folder Manager does when it opens a project."""
     from core.paths import get_project_path
+    from features.folder_manager.asset_creator import heal_tokens_from_disk
     from features.importer.library_import import _stage_shots
 
     project_path = get_project_path(project)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
+
+    def _shots() -> list[tuple[str, str]]:
+        try:
+            heal_tokens_from_disk(project_path)
+        except Exception:       # noqa: BLE001 - the tokens already there still list
+            log.exception("crowd shots: token heal failed")
+        return _stage_shots(project_path)
+
     loop = asyncio.get_running_loop()
-    pairs = await loop.run_in_executor(None, lambda: _stage_shots(project_path))
+    pairs = await loop.run_in_executor(None, _shots)
     return {"shots": [{"seq": seq, "shot": shot} for seq, shot in pairs]}
 
 

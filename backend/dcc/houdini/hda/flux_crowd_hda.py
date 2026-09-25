@@ -81,12 +81,12 @@ def _flux_port():
     except Exception:
         return 8765
 
-def _get(path, **params):
+def _get(path, timeout=10, **params):
     url = f"http://127.0.0.1:{_flux_port()}" + path
     if params:
         url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v})
     try:
-        with urllib.request.urlopen(url, timeout=10) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
             return json.loads(r.read())
     except Exception as exc:
         # "_offline": FLUX not reachable: never cached.
@@ -113,17 +113,20 @@ _TTL = 120.0
 _cache = {}
 
 def _cached(key, fetch):
-    """fetch() -> (data, ok). Only good answers are cached: an error is retried."""
+    """fetch() -> (data, ok). Only good, non-empty answers are cached: an error or an
+    empty list (shots not created yet) is asked again at the next menu opening."""
     now = time.monotonic()
     if key in _cache and now < _cache[key][0]:
         return _cache[key][1]
     data, ok = fetch()
-    if ok:
+    if ok and data:
         _cache[key] = (now + _TTL, data)
     return data
 
 def _fetch(path, field, empty, **params):
     r = _get(path, **params)
+    if r.get("_offline") or r.get("ok") is False:
+        return empty, False
     if field is None:
         return (r if not r.get("_offline") else empty), not r.get("_offline")
     return r.get(field, empty), not r.get("_offline")
@@ -161,7 +164,9 @@ def _compat(node, fresh=False):
     key = "compat:" + project
     if fresh:
         _cache.pop(key, None)
-    return _cached(key, lambda: _fetch("/usd/crowd/compat", None, {"assets": {}, "clips": []}, project=project))
+    # Opens every asset and clip of the project: far longer than a menu call.
+    return _cached(key, lambda: _fetch("/usd/crowd/compat", None, {"assets": {}, "clips": []},
+                                       timeout=120, project=project))
 
 def _picked(node, name):
     return [v for v in _pval(node, name).split() if v]
@@ -455,9 +460,17 @@ def publish(node):
     _build(node, True)
 
 def reload(node):
-    _compat(node, fresh=True)
-    _reload(node)
-    _status(node, "Recharge")
+    """Fresh module from FLUX (a fix applies without restarting Houdini), fresh lists."""
+    r = _get("/dcc/houdini/crowd/module")
+    if r.get("code"):
+        exec(r["code"], globals())
+    globals()["_cache"].clear()
+    globals()["_reload"](node)
+    globals()["read_inputs"](node, quiet=True)
+    shots = globals()["_shots"](node)
+    compat = globals()["_compat"](node)
+    _status(node, "Recharge : %d shot(s), %d asset(s) avec squelette" % (
+        len(shots), len(compat.get("assets", {}))))
 
 def on_created(node):
     threading.Thread(target=lambda: (_shots(node), _compat(node)), daemon=True).start()
