@@ -320,7 +320,7 @@ def _menu(name, label, default, fn, help_txt, toggle=False):
     return t
 
 _ptg = hou.ParmTemplateGroup()
-_ptg.append(_menu("project", "Project", "", "menu_project", "FLUX project"))
+_ptg.append(_menu("project", "Projet", "", "menu_project", "FLUX project"))
 _ptg.append(_menu("seq", "Sequence", "", "menu_seq", "Sequence of the shot"))
 _ptg.append(_menu("shot", "Shot", "", "menu_shot", "Shot that receives the crowd layer"))
 _ptg.append(hou.StringParmTemplate("group", "Groupe", 1, default_value=("crowd",),
@@ -333,7 +333,7 @@ _ptg.append(_menu("assets", "Assets", "", "menu_assets",
                   "Assets drawn per agent (same rig = same skeleton signature)", toggle=True))
 _ptg.append(_menu("clips", "Clips", "", "menu_clips",
                   "Animation clips that fit every picked asset (empty = rest pose)", toggle=True))
-_ptg.append(hou.IntParmTemplate("seed", "Seed", 1, default_value=(0,)))
+_ptg.append(hou.IntParmTemplate("seed", "Graine (seed)", 1, default_value=(0,)))
 _ptg.append(hou.FloatParmTemplate("offset", "Decalage min / max", 2, default_value=(0.0, 0.0),
                                   help="Time offset of each agent's clip, in frames"))
 _ptg.append(hou.FloatParmTemplate("speed", "Vitesse min / max", 2, default_value=(1.0, 1.0),
@@ -351,12 +351,12 @@ _ptg.append(hou.ButtonParmTemplate("btn_publish", "Publier la foule",
                                    script_callback_language=_PY,
                                    help="Publishes SEQ_SHOT_CROWD[_GROUPE] and regenerates the shot stage"))
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
-_ptg.append(hou.StringParmTemplate("resolved_path", "Resolved Path", 1, default_value=("",)))
-_ptg.append(hou.ButtonParmTemplate("btn_reload", "Reload",
+_ptg.append(hou.StringParmTemplate("resolved_path", "Fichier charge", 1, default_value=("",)))
+_ptg.append(hou.ButtonParmTemplate("btn_reload", "Recharger",
                                    script_callback="hou.phm().reload(kwargs['node'])",
                                    script_callback_language=_PY,
                                    help="Re-read the crowd layer and the asset / clip lists"))
-_ptg.append(hou.StringParmTemplate("status_msg", "Status", 1, default_value=("",)))
+_ptg.append(hou.StringParmTemplate("status_msg", "Statut", 1, default_value=("",)))
 
 _stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
 _old = _stage.node("__flux_crowd_build__")

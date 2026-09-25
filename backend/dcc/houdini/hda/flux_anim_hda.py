@@ -368,10 +368,10 @@ def _menu(name, label, default, fn, help_txt):
     return t
 
 _ptg = hou.ParmTemplateGroup()
-_ptg.append(_menu("project", "Project", "", "menu_project", "FLUX project"))
+_ptg.append(_menu("project", "Projet", "", "menu_project", "FLUX project"))
 _ptg.append(_menu("seq", "Sequence", "", "menu_seq", "SEQ token"))
 _ptg.append(_menu("shot", "Shot", "", "menu_shot", "SHOT token"))
-_ptg.append(_menu("task", "Task", "ANIM", "menu_task", "Shot department (TYPE)"))
+_ptg.append(_menu("task", "Departement", "ANIM", "menu_task", "Shot department (TYPE)"))
 _ptg.append(_menu("character", "Perso", "", "menu_character", "Animated character (SEQ_SHOT_ANIM_<NAME>)"))
 _ptg.append(_menu("version", "Version", "LAST", "menu_version", "LAST follows new publishes, vNNN is frozen"))
 _ptg.append(hou.SeparatorParmTemplate("sep_target"))
@@ -381,19 +381,19 @@ _auto.setJoinWithNext(True)
 _auto.setScriptCallback(_CB)
 _auto.setScriptCallbackLanguage(_PY)
 _ptg.append(_auto)
-_tgt = _menu("target_prim", "Target Prim", "/assets/asset", "menu_target", "Prim that receives the animation")
+_tgt = _menu("target_prim", "Prim cible", "/assets/asset", "menu_target", "Prim that receives the animation")
 _tgt.setConditional(hou.parmCondType.DisableWhen, "{{ target_auto == 1 }}")
 _ptg.append(_tgt)
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
-_ptg.append(hou.StringParmTemplate("resolved_path", "Resolved Path", 1, default_value=("",)))
-_ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Reload", script_callback=_CB,
+_ptg.append(hou.StringParmTemplate("resolved_path", "Fichier charge", 1, default_value=("",)))
+_ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Recharger", script_callback=_CB,
                                    script_callback_language=_PY,
                                    help="Re-read the published animation from disk"))
 _ptg.append(hou.ButtonParmTemplate("btn_frame_range", "Appliquer la plage",
                                    script_callback="hou.phm().apply_frame_range(kwargs['node'])",
                                    script_callback_language=_PY,
                                    help="Timeline and fps of the scene = those of the animation"))
-_ptg.append(hou.StringParmTemplate("status_msg", "Status", 1, default_value=("",)))
+_ptg.append(hou.StringParmTemplate("status_msg", "Statut", 1, default_value=("",)))
 
 _stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
 _old = _stage.node("__flux_anim_build__")

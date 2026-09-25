@@ -434,7 +434,7 @@ def _menu(name, label, default, fn, help_txt, cb=_CB):
     return t
 
 _ptg = hou.ParmTemplateGroup()
-_ptg.append(_menu("project", "Project", "", "menu_project", "FLUX project"))
+_ptg.append(_menu("project", "Projet", "", "menu_project", "FLUX project"))
 _ptg.append(_menu("seq", "Sequence", "", "menu_seq", "Sequence of the scene"))
 _ptg.append(_menu("shot", "Shot", "", "menu_shot", "Shot loaded in the scene"))
 _ptg.append(_menu("version", "Version", "LAST", "menu_version", "LAST follows new publishes, vNNN is frozen"))
@@ -445,9 +445,15 @@ _ptg.append(hou.SeparatorParmTemplate("sep_time"))
 _follow = hou.ToggleParmTemplate("follow_range", "Suivre la plage du shot", default_value=True,
                                  help="Changing the shot sets the timeline and fps of the scene")
 _ptg.append(_follow)
-_ptg.append(hou.IntParmTemplate("frame_range", "Plage", 2, default_value=(1, 0),
-                                help="Frame range of the shot (Production), read from its stage"))
-_ptg.append(hou.FloatParmTemplate("fps", "FPS", 1, default_value=(24.0,)))
+# Read-only: filled by Resolve from the shot stage (Production), an edit would be lost.
+_ptg.append(hou.ToggleParmTemplate("range_locked", "locked", default_value=True, is_hidden=True))
+_rng = hou.IntParmTemplate("frame_range", "Plage", 2, default_value=(1, 0),
+                           help="Plage du shot (Production), lue dans son stage")
+_rng.setConditional(hou.parmCondType.DisableWhen, "{{ range_locked == 1 }}")
+_ptg.append(_rng)
+_fps = hou.FloatParmTemplate("fps", "FPS", 1, default_value=(24.0,), help="FPS du shot, lu dans son stage")
+_fps.setConditional(hou.parmCondType.DisableWhen, "{{ range_locked == 1 }}")
+_ptg.append(_fps)
 _ptg.append(hou.ButtonParmTemplate("btn_frame_range", "Appliquer la plage",
                                    script_callback="hou.phm().apply_frame_range(kwargs['node'])",
                                    script_callback_language=_PY))
@@ -485,11 +491,11 @@ _ptg.append(hou.ButtonParmTemplate("btn_render_seq", "Rendre la sequence",
                                    script_callback_language=_PY,
                                    help="Every FLUX Shot of this sequence in the scene, one after the other"))
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
-_ptg.append(hou.StringParmTemplate("resolved_path", "Resolved Path", 1, default_value=("",)))
-_ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Reload", script_callback=_CB,
+_ptg.append(hou.StringParmTemplate("resolved_path", "Fichier charge", 1, default_value=("",)))
+_ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Recharger", script_callback=_CB,
                                    script_callback_language=_PY,
                                    help="Re-read the shot stage from disk"))
-_ptg.append(hou.StringParmTemplate("status_msg", "Status", 1, default_value=("",)))
+_ptg.append(hou.StringParmTemplate("status_msg", "Statut", 1, default_value=("",)))
 
 _stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
 _old = _stage.node("__flux_shot_build__")
