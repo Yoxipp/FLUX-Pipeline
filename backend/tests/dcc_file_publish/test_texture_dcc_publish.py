@@ -53,13 +53,13 @@ class ExportConfigAndTokens(unittest.TestCase):
         self.assertNotIn("exportList", cfg)
 
     def test_shader_channels_are_added_on_top_of_the_preset(self):
-        # 2026-09-26: the project preset (LR_INSECT_BEAUTY_MAPS) + channels it lacks.
+        # 2026-09-26: the project preset (FLUX_BEAUTY_MAPS) + channels it lacks.
         chans = [{"id": "coatRoughness", "label": "Coat Roughness", "gray": True},
                  {"id": "baseColor", "label": "Base Color", "gray": False}]
-        cfg = se.build_export_config("/tmp/out", "LR_INSECT_BEAUTY_MAPS", "exr", "16", ["Body"],
+        cfg = se.build_export_config("/tmp/out", "FLUX_BEAUTY_MAPS", "exr", "16", ["Body"],
                                      maps=["DIFFUSE"], channels=chans,
                                      map_params={"$textureSet_CoatRoughness": {"bit_depth": "32f"}})
-        self.assertEqual(cfg["defaultExportPreset"], "LR_INSECT_BEAUTY_MAPS")
+        self.assertEqual(cfg["defaultExportPreset"], "FLUX_BEAUTY_MAPS")
         self.assertEqual(cfg["exportList"], [
             {"rootPath": "Body", "filter": {"outputMaps": ["DIFFUSE"]}},
             {"rootPath": "Body", "exportPreset": se.CHANNEL_PRESET,

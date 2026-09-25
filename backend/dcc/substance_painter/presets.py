@@ -1,6 +1,6 @@
 # presets.py - Painter export presets shipped with FLUX (2026-09-26).
 #
-# The studio presets (resources/painter/export-presets/*.spexp, e.g. LR_INSECT_BEAUTY_MAPS)
+# The studio presets (resources/painter/export-presets/*.spexp, e.g. FLUX_BEAUTY_MAPS)
 # are copied into Painter's user export presets when the Painter bridge is installed, so
 # they show up in Painter's own export dialog too. A project names the ones it uses
 # (project.json "texturing.painter_presets", picked at project creation): the Publisher
@@ -19,6 +19,8 @@ log = get_logger(__name__)
 
 _BUNDLED_DIR = Path(__file__).resolve().parents[2] / "resources" / "painter" / "export-presets"
 _PAINTER_PRESETS = ("Adobe", "Adobe Substance 3D Painter", "assets", "export-presets")
+# Names the presets shipped under before (2026-09-26: "FLUX_*, pas LR_INSECT_*").
+_RENAMED = {"LR_INSECT_BEAUTY_MAPS": "FLUX_BEAUTY_MAPS", "LR_INSECT_UTIL_MAPS": "FLUX_UTIL_MAPS"}
 
 
 def bundled_presets() -> list[str]:
@@ -48,6 +50,15 @@ def install_presets() -> list[str]:
             installed.append(str(dest))
         except OSError as exc:
             log.warning("Painter preset %s not installed: %s", src.name, exc)
+    # Drop the copies FLUX installed under the old names (only when identical to ours,
+    # so a preset the user edited is never touched).
+    for old, new in _RENAMED.items():
+        stale, src = dest_dir / f"{old}.spexp", _BUNDLED_DIR / f"{new}.spexp"
+        try:
+            if stale.is_file() and src.is_file() and stale.read_bytes() == src.read_bytes():
+                stale.unlink()
+        except OSError as exc:
+            log.warning("Old Painter preset %s not removed: %s", stale.name, exc)
     if installed:
         log.info("Painter export presets installed -> %s", dest_dir)
     return installed
@@ -59,4 +70,9 @@ def project_presets(project_path: str | Path) -> list[str]:
 
     cfg = read_project_config(Path(project_path)) or {}
     names = (cfg.get("texturing") or {}).get("painter_presets") or []
-    return [str(n) for n in names if str(n).strip()]
+    out: list[str] = []
+    for n in (str(n).strip() for n in names):
+        n = _RENAMED.get(n, n)
+        if n and n not in out:
+            out.append(n)
+    return out
