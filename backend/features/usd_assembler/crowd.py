@@ -622,8 +622,51 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     if noise_layer is not None:
         noise_layer.Save()
     layer.Save()
+    first = next((f"/crowd/{grp}/{a['name']}" for a in agents if targets.get(a["component"])), "")
+    if first:
+        try:
+            info += diagnose_agent(dest, first)
+        except Exception as exc:        # noqa: BLE001 - diagnostics never fail a build
+            log.warning("crowd diagnose failed: %s", exc)
     return {"path": dest, "agents": written, "warnings": warnings, "noised": noised, "info": info,
             "variations": len(protos)}
+
+
+def diagnose_agent(layer_path: str | Path, agent_path: str) -> list[str]:
+    """What really drives one agent of the written crowd layer, for the FLUX Crowd status
+    (2026-09-26: noise 1000 did nothing): per skeleton, how many meshes it skins and
+    which animation it plays; meshes whose points are animated without the skeleton."""
+    from pxr import Usd, UsdGeom, UsdSkel
+
+    out: list[str] = []
+    stage = Usd.Stage.Open(str(layer_path))
+    agent = stage.GetPrimAtPath(agent_path) if stage else None
+    if not agent:
+        return out
+    name = agent.GetName()
+    pred = Usd.TraverseInstanceProxies()
+    roots = [p for p in Usd.PrimRange(agent, pred) if p.IsA(UsdSkel.Root)]
+    if not roots:
+        return [f"{name} : pas de SkelRoot, aucun mesh n'est skinne (la geo ne suit pas les bones)"]
+    cache = UsdSkel.Cache()
+    for root in roots[:1]:
+        skel_root = UsdSkel.Root(root)
+        cache.Populate(skel_root, pred)
+        bindings = cache.ComputeSkelBindings(skel_root, pred)
+        if not bindings:
+            out.append(f"{name} : aucun mesh lie a un squelette (skel:skeleton absent), la geo ne suit pas les bones")
+        for b in bindings:
+            skel = b.GetSkeleton()
+            query = cache.GetSkelQuery(skel)
+            anim = query.GetAnimQuery() if query else None
+            anim_name = anim.GetPrim().GetName() if anim else "aucune"
+            out.append(f"{name} : {skel.GetPrim().GetName()} skinne {len(b.GetSkinningTargets())} mesh, "
+                       f"anim {anim_name}")
+    baked = sum(1 for p in Usd.PrimRange(agent, pred)
+                if p.IsA(UsdGeom.Mesh) and UsdGeom.Mesh(p).GetPointsAttr().GetNumTimeSamples() > 1)
+    if baked:
+        out.append(f"{name} : {baked} mesh avec les points animes (anim cuite : le noise ne peut pas la changer)")
+    return out
 
 
 def _anim_start(path: str | Path, prim: str) -> float:

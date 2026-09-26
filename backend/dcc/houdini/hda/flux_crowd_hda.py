@@ -553,7 +553,7 @@ def _build(node, publish):
         _reload(node)
         msg = "Apercu : " + msg
     if r.get("info"):
-        msg += "  |  " + " ; ".join(r["info"][:3])
+        msg += "  |  " + " ; ".join(r["info"][:5])
     if r.get("warnings"):
         msg += "  |  " + " ; ".join(r["warnings"][:3])
     _status(node, msg)

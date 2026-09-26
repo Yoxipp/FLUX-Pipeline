@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pxr import Gf, Sdf, Usd, UsdSkel, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
 
 from features.folder_manager import tokens as tok
 from features.usd_assembler import crowd
@@ -388,6 +388,51 @@ class Crowd(unittest.TestCase):
                          Gf.Vec3d(0, 0, 0))
         self.assertEqual(stage.GetPrimAtPath("/crowd/crowd/agent_0002").GetAttribute("xformOp:translate").Get(),
                          Gf.Vec3d(1, 0, 0))
+
+    def test_status_tells_whether_the_bones_move_the_mesh(self) -> None:
+        # 2026-09-26: "not sure the bones are real": the status says what skins what.
+        tokens = tok.load_tokens(self.project)
+        tokens["NAME"]["SKIN"] = "assets/chara/SKIN"
+        tok.save_tokens(self.project, tokens)
+        skinned = _asset()
+        skinned.meshes[0].joint_indices = [2, 2, 2]
+        skinned.meshes[0].joint_weights = [1.0, 1.0, 1.0]
+        skinned.meshes[0].influences_per_point = 1
+        self._geo("SKIN", skinned)
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                components=["SKIN"], clips=["CHAR_ANIM_BOB_walk"])
+        self.assertIn("agent_0001 : Skeleton skinne 1 mesh, anim crowd_anim", res["info"])
+        # Not skinned (TIM): said too.
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                components=["TIM"], clips=["CHAR_ANIM_BOB_walk"])
+        self.assertTrue(any("la geo ne suit pas les bones" in i for i in res["info"]))
+
+    def test_noise_moves_the_skinned_points(self) -> None:
+        tokens = tok.load_tokens(self.project)
+        tokens["NAME"]["SKIN"] = "assets/chara/SKIN"
+        tok.save_tokens(self.project, tokens)
+        skinned = _asset(points=((0, 0, 0), (1, 0, 0), (1, 1, 0)))
+        skinned.meshes[0].joint_indices = [2, 2, 2]
+        skinned.meshes[0].joint_weights = [1.0, 1.0, 1.0]
+        skinned.meshes[0].influences_per_point = 1
+        self._geo("SKIN", skinned)
+
+        def points(noise):
+            res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                    components=["SKIN"], clips=["CHAR_ANIM_BOB_walk"], rot_noise=noise)
+            stage = Usd.Stage.Open(str(res["path"]))
+            root = UsdSkel.Root(stage.GetPrimAtPath("/crowd/crowd/agent_0001"))
+            cache = UsdSkel.Cache()
+            cache.Populate(root, Usd.PrimDefaultPredicate)
+            binding = cache.ComputeSkelBindings(root, Usd.PrimDefaultPredicate)[0]
+            skel_q = cache.GetSkelQuery(binding.GetSkeleton())
+            xforms = skel_q.ComputeSkinningTransforms(2.0)
+            target = binding.GetSkinningTargets()[0]
+            pts = UsdGeom.Mesh(target.GetPrim()).GetPointsAttr().Get()
+            target.ComputeSkinnedPoints(xforms, pts, 2.0)
+            return list(pts)
+
+        self.assertNotEqual(points(0.0), points(30.0))
 
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
