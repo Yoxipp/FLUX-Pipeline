@@ -287,6 +287,52 @@ class AssignVariants(unittest.TestCase):
             stage.GetPrimAtPath("/UTAH").GetVariantSet("assign").SetVariantSelection("Victim")
             self.assertEqual(_bound(stage, "/UTAH/geo/render/utah_SBD3"), "/UTAH/mtl/blue")
 
+    def _utah_exports(self, root: Path, targets: list[str]) -> dict:
+        files = {}
+        for v, mat in (("Hunter", "red"), ("Victim", "blue")):
+            stage = Usd.Stage.CreateInMemory()
+            for name in ("red", "blue"):
+                UsdShade.Material.Define(stage, f"/materials/{name}")
+                UsdShade.Shader.Define(stage, f"/materials/{name}/surface").CreateIdAttr("UsdPreviewSurface")
+            for path in targets:
+                over = stage.OverridePrim(path)
+                UsdShade.MaterialBindingAPI.Apply(over)
+                UsdShade.MaterialBindingAPI(over).Bind(UsdShade.Material(stage.GetPrimAtPath(f"/materials/{mat}")))
+            out = root / f"export__{v}.usda"
+            stage.GetRootLayer().Export(str(out))
+            files[v] = out
+        return files
+
+    def test_asset_root_paths_are_kept_grooms_included(self) -> None:
+        """Lookdev on the asset loaded by FLUX Import: /Utah/... (any case) keeps its
+        path, grooms too (UTAH v024: /UTAH/groom/groom_procedural_WINGS/...)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = self._utah_exports(root, ["/Utah/geo/render/transform1",
+                                              "/Utah/groom/groom_procedural_WINGS"])
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter",
+                                    asset_prims=["geo/render/transform1", "groom/groom_procedural_WINGS"])
+            stage = Usd.Stage.Open(str(res["root"]))
+            UsdGeom.Mesh.Define(stage, "/UTAH/geo/render/transform1")
+            UsdGeom.BasisCurves.Define(stage, "/UTAH/groom/groom_procedural_WINGS/curves")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/transform1"), "/UTAH/mtl/red")
+            self.assertEqual(_bound(stage, "/UTAH/groom/groom_procedural_WINGS/curves"), "/UTAH/mtl/red")
+
+    def test_other_hierarchy_matches_the_published_prim_by_name(self) -> None:
+        """A SOP Import scene (/geo/skin/...) is matched to the asset by prim name; a
+        name the asset does not have is reported, never published as a dead binding."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = self._utah_exports(root, ["/geo/skin/transform1", "/geo/skin/utah_SBD3"])
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter",
+                                    asset_prims=["geo/render/transform1", "geo/proxy/transform1"])
+            assign = Sdf.Layer.FindOrOpen(str(res["assign"]))
+            self.assertIsNotNone(assign.GetPrimAtPath("/UTAH{assign=Hunter}geo/render/transform1"))
+            self.assertIsNone(assign.GetPrimAtPath("/UTAH{assign=Hunter}geo/render/utah_SBD3"))
+            self.assertTrue(any("utah_SBD3" in w and "transform1" in w for w in res["warnings"]))
+
     def test_referenced_variant_sets_are_not_assignments(self) -> None:
         """A component brought by FLUX Import carries its own variant sets: never read
         as the look's assignments (the classic single look layer is written)."""

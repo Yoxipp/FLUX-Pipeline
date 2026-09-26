@@ -160,16 +160,22 @@ def _direct_material(prim: Usd.Prim) -> Sdf.Path | None:
     return None
 
 
-def _binding_map(stage: Usd.Stage) -> dict[str, Sdf.Path]:
+def _binding_map(stage: Usd.Stage, token: str | None = None,
+                 asset_prims: list[str] | None = None,
+                 notes: list[str] | None = None) -> dict[str, Sdf.Path]:
     """{prim path relative to /<NAME>: bound material} of an export.
 
     * Every prim that binds a material itself counts, typeless "over" prims included:
       a Solaris look exported after a Layer Break holds no geometry, only the Assign
-      Material opinions on the paths of the imported asset (2026-09-26, UTAH:
-      the feathers stay out of the export).
-    * A path under a "geo" prim keeps its tail (/UTAH/geo/render/body -> geo/render/body,
-      a group like geo/render/feathers stays a group); a geometry elsewhere lands
-      under geo/render by the model layer's naming rule (contract.mesh_prim_names).
+      Material opinions on the paths of the scene (2026-09-26, UTAH feathers).
+    * Where it lands under /<NAME>:
+      1. a root named like the asset (/UTAH, /Utah: FLUX Import) keeps the rest of its
+         path (geo/render/transform1, groom/..., a group stays a group);
+      2. a path under /<root>/geo keeps its tail from "geo";
+      3. else, when the published asset is known (*asset_prims*, paths below its root),
+         the asset prim of the same name (longest common tail when several); none =
+         no binding, a note says so (a dead binding would never shade anything);
+      4. else geo/render/<leaf> by the model layer naming rule (contract.mesh_prim_names).
     * A geometry that only inherits its binding (native DCC scene) is bound itself.
     """
     pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
@@ -188,24 +194,82 @@ def _binding_map(stage: Usd.Stage) -> dict[str, Sdf.Path]:
                 mat = bound.GetPath() if bound is not None else None
         if mat is not None:
             found[prim.GetPath()] = mat
+
+    def _asset_root(path: Sdf.Path) -> bool:
+        parts = path.pathString.split("/")[1:]
+        return bool(token) and parts[0].lower() == str(token).lower()
+
     def _asset_geo(path: Sdf.Path) -> bool:
-        # /<NAME>/geo/...: the FLUX asset layout (FLUX Import). A root "/geo" is not:
-        # it is where a Houdini SOP Import puts geometry (/geo/skin/utah_SBD3).
+        # /<root>/geo/...: the FLUX asset layout. A root "/geo" is not: it is where a
+        # Houdini SOP Import puts geometry (/geo/skin/utah_SBD3).
         return "geo" in path.pathString.split("/")[2:]
 
-    loose = [p for p in found if not _asset_geo(p)]
+    def _by_name(path: Sdf.Path) -> str | None:
+        parts = path.pathString.split("/")[1:]
+        same = [a for a in asset_prims or [] if a.split("/")[-1] == parts[-1]]
+        if not same:
+            return None
+
+        def _tail(a: str) -> int:
+            n = 0
+            for x, y in zip(reversed(a.split("/")), reversed(parts)):
+                if x != y:
+                    break
+                n += 1
+            return n
+        # Render geometry before its proxy twin (geo/proxy/body), then the shortest.
+        return max(same, key=lambda a: (_tail(a), "proxy" not in a.split("/"), -len(a)))
+
+    loose = [p for p in found if not _asset_root(p) and not _asset_geo(p)]
     names = dict(zip(loose, mesh_prim_names([(p.name, p.pathString) for p in loose], sanitize_token)))
     out: dict[str, Sdf.Path] = {}
+    missing: list[str] = []
     for path, mat in found.items():
         parts = path.pathString.split("/")[1:]
-        if _asset_geo(path):
+        if _asset_root(path):
+            rel = "/".join(parts[1:])
+        elif _asset_geo(path):
             rel = "/".join(parts[parts.index("geo", 1):])
+        elif asset_prims is not None:
+            rel = _by_name(path)
+            if rel is None:
+                missing.append(path.pathString)
+                continue
         elif len(parts) == 1 and path not in gprims:
             rel = ""                                   # bound on the asset root itself
         else:
             rel = f"{GEO_RENDER_SCOPE}/{names[path]}"
         out[rel] = mat
+    if missing and notes is not None:
+        meshes = [a for a in asset_prims or [] if a.startswith(f"{GEO_RENDER_SCOPE}/")][:6]
+        notes.append(f"{len(missing)} liaison(s) sans prim du meme nom dans l'asset publie, ignoree(s) : "
+                     + ", ".join(missing[:5])
+                     + (f" (meshes de l'asset : {', '.join(meshes)})" if meshes else "")
+                     + ". Faire le lookdev sur l'asset charge par FLUX Import pour garder ses chemins")
     return out
+
+
+def asset_prim_paths(project_path: str | Path, name: str) -> list[str] | None:
+    """Prim paths below the root of the asset's published USD (component LAST), or None
+    when the asset has no component yet (then the look keeps the naming rule)."""
+    try:
+        from features.usd_assembler.component_auto import COMPONENT_EXT, component_dir
+
+        parent = component_dir(project_path, name)
+        last = parent / f"{name}_LAST{COMPONENT_EXT}" if parent is not None else None
+        if last is None or not last.is_file():
+            return None
+        stage = Usd.Stage.Open(str(last).replace("\\", "/"), Usd.Stage.LoadAll)
+        root = stage.GetDefaultPrim() if stage else None
+        if not root:
+            return None
+        base = root.GetPath()
+        pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
+        return [str(p.GetPath().MakeRelativePath(base)) for p in Usd.PrimRange(root, pred)
+                if p.GetPath() != base]
+    except Exception as exc:                          # never block a look publish on this
+        log.warning("asset %s illisible pour les chemins du look: %s", name, exc)
+        return None
 
 
 def _binding_report(stage: Usd.Stage) -> str:
@@ -317,7 +381,8 @@ def _variants_of_files(files: dict[str, str | Path]) -> list:
 
 def _author_assign_look(flats: list, selection: str, dest: Path, base: str, token: str,
                         fmt: str, prefer_tx: bool, source_dir: Path,
-                        warnings: list[str] | None = None) -> dict:
+                        warnings: list[str] | None = None,
+                        asset_prims: list[str] | None = None) -> dict:
     root_path = f"/{token}"
     mtl_root = f"{root_path}/{MTL_SCOPE}"
     warnings = list(warnings or [])
@@ -326,8 +391,10 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
 
     # 1. every variant: its bindings, and the materials it shows.
     stages = [Usd.Stage.Open(flat) for _, flat in flats]
+    notes: list[str] = []
     per_variant: dict[str, dict[str, Sdf.Path]] = {
-        v: _binding_map(st) for v, st in zip(variant_names, stages)}
+        v: _binding_map(st, token, asset_prims, notes) for v, st in zip(variant_names, stages)}
+    warnings += sorted(set(notes))
     flats = [flat for _, flat in flats]
 
     # 2. shaders layer: all the materials of all the variants, never a binding.
@@ -459,7 +526,8 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
                       root_name: str | None = None, fmt: str = "usda",
                       prefer_tx: bool = True,
                       variant_sources: dict[str, str | Path] | None = None,
-                      variant_default: str | None = None) -> dict:
+                      variant_default: str | None = None,
+                      asset_prims: list[str] | None = None) -> dict:
     """Rewrite the DCC export *source* into the look layer of *base* inside *dest_dir*.
 
     Writes ``<base>_look.<fmt>`` (materials + bindings, no geometry) and the root
@@ -483,13 +551,14 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     if variant_sources:
         # ADR 0035, Houdini: one flattened export per assign variant.
         return _author_assign_look(_variants_of_files(variant_sources), variant_default or "",
-                                   dest, base, token, fmt, prefer_tx, _source_dir(src_stage))
+                                   dest, base, token, fmt, prefer_tx, _source_dir(src_stage),
+                                   asset_prims=asset_prims)
     found = _find_assign_sets(src_stage)
     if found:
         # ADR 0035: variant block of Assign Material kept in the export -> shaders + assign.
         flats, selection, warns = _variants_of_stage(src_stage, found)
         return _author_assign_look(flats, selection, dest, base, token, fmt, prefer_tx,
-                                   _source_dir(src_stage), warns)
+                                   _source_dir(src_stage), warns, asset_prims)
     flat = src_stage.Flatten()
     flat_stage = Usd.Stage.Open(flat)
     source_dir = _source_dir(src_stage)
@@ -531,7 +600,10 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     # 2. bindings: one "over" per bound mesh, at the FLUX prim path of the model layer.
     look_stage = Usd.Stage.Open(look_layer)
     bindings = 0
-    for rel, mat in sorted(_binding_map(flat_stage).items()):
+    notes: list[str] = []
+    mapped = _binding_map(flat_stage, token, asset_prims, notes)
+    warnings += notes
+    for rel, mat in sorted(mapped.items()):
         if mat not in moved:
             warnings.append(f"liaison vers un materiau non publie ignoree : {mat}")
             continue
@@ -639,7 +711,9 @@ def publish_look_asset(source: str | Path, project_path: str | Path, *,
                                      root_name=contrib["name"] or None,
                                      fmt=fmt.lstrip("."), prefer_tx=prefer_tx,
                                      variant_sources=variant_sources,
-                                     variant_default=variant_default)
+                                     variant_default=variant_default,
+                                     asset_prims=asset_prim_paths(project_path, contrib["name"])
+                                     if contrib["name"] else None)
     except Exception:
         discard_rendered_version(parent, base_name, ext, ver, is_sequence=True)
         raise
