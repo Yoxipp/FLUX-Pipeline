@@ -28,6 +28,7 @@
 import builtins
 import json
 import os
+import re
 import sys
 import time as _time
 
@@ -56,6 +57,9 @@ def _temp_dir():
 
 
 MAILBOX = os.path.join(_temp_dir(), 'flux_marvelous_bridge')
+# _ctypes (+ libffi) of the official Python 3.7 Windows build, put there by FLUX's
+# Plug button: Marvelous 2024 ships without it, and without ctypes no message pump.
+PYLIB = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'FLUX', 'marvelous_pylib')
 _LOG_PATH = os.path.join(_temp_dir(), 'flux_marvelous_bridge.log')
 
 
@@ -100,6 +104,8 @@ def _make_pump():
     No-op outside Windows.'''
     if os.name != 'nt':
         return lambda: True
+    if os.path.isdir(PYLIB) and PYLIB not in sys.path:
+        sys.path.insert(0, PYLIB)
     try:
         import ctypes
         from ctypes import wintypes
@@ -180,66 +186,181 @@ def _module(name):
 
 
 def _export_functions(fmt):
-    # export_api functions that write *fmt*, plain names first (ExportOBJ before ExportOBJW).
-    if _export_api is None:
-        return []
+    # Functions that write *fmt*: export_api ones named after the format (ExportOBJ,
+    # ExportAlembicW...), plus for .zprj the utility_api project savers.
     words = _FORMAT_WORDS.get(fmt, (fmt,))
-    names = [n for n in dir(_export_api)
-             if n.lower().startswith('export') and any(w in n.lower() for w in words)]
-    # 'zprj' must not pick ExportZPac, 'obj' must not pick a '...Object...' helper.
-    names = [n for n in names if not (fmt == 'obj' and 'object' in n.lower())]
-    names.sort(key=lambda n: (len(n), n))
-    return [getattr(_export_api, n) for n in names if callable(getattr(_export_api, n))]
+    found = []
+    mods = [_export_api] + ([_module('utility_api')] if fmt == 'zprj' else [])
+    for mod in mods:
+        if mod is None:
+            continue
+        for n in sorted(dir(mod)):
+            low = n.lower()
+            if not callable(getattr(mod, n, None)):
+                continue
+            if mod is _export_api and low.startswith('export') and any(w in low for w in words):
+                if fmt == 'obj' and 'object' in low:
+                    continue            # a ...Object... helper, not the OBJ writer
+                found.append(getattr(mod, n))
+            elif mod is not _export_api and 'save' in low and ('zprj' in low or 'project' in low):
+                found.append(getattr(mod, n))
+    return found
 
 
 def _formats():
     return [f for f in _FORMAT_WORDS if _export_functions(f)]
 
 
-def _make_options(opts):
-    # An ImportExportOption filled with the FLUX options (only the fields this
-    # Marvelous knows). None when the type is not exposed.
-    api_types = _module('ApiTypes')
-    cls = getattr(api_types, 'ImportExportOption', None) if api_types else None
-    if cls is None:
-        return None
-    o = cls()
+# -- signatures ------------------------------------------------------------------
+# Marvelous' API is pybind11: each function describes itself in its __doc__, e.g.
+#   ExportUSDW(arg0: str, arg1: Marvelous::ImportExportOption, arg2: Marvelous::ExportUSDOption) -> List[str]
+# (several numbered lines for an overloaded function). FLUX reads them and builds the
+# arguments instead of guessing: the path, option objects, plain defaults.
+
+_SIG_RE = re.compile('([A-Za-z_][A-Za-z0-9_]*)[(]([^()]*)[)] *->')
+_ARG_SPLIT = re.compile(', *(?=[A-Za-z_][A-Za-z0-9_]*: )')
+
+
+def _signatures(fn):
+    # [[type, ...], ...]: one list of argument types per overload.
+    doc = getattr(fn, '__doc__', None) or ''
+    name = getattr(fn, '__name__', '')
+    sigs = []
+    for m in _SIG_RE.finditer(doc):
+        if name and m.group(1) != name:
+            continue
+        body = m.group(2).strip()
+        if body.startswith('*'):
+            continue                    # the (*args, **kwargs) header of an overload list
+        types = []
+        for arg in _ARG_SPLIT.split(body) if body else []:
+            typ = arg.split(':', 1)[1] if ':' in arg else arg
+            types.append(typ.split('=')[0].strip())
+        sigs.append(types)
+    return sigs
+
+
+def _find_class(short):
+    # The class *short* (ImportExportOption, ExportUSDOption...) in whichever module
+    # Marvelous registered it.
+    names = ['ApiTypes', 'export_api', 'import_api', 'utility_api', 'fabric_api', 'pattern_api']
+    mods = [_module(n) for n in names] + list(sys.modules.values())
+    for mod in mods:
+        cls = getattr(mod, short, None) if mod is not None else None
+        if isinstance(cls, type):
+            return cls
+    return None
+
+
+def _fill_option(obj, opts):
+    # Set the FLUX options on an ImportExportOption (only the fields it has).
     for key, fields in _OPTION_FIELDS.items():
         if key not in opts or opts[key] is None:
             continue
         for field in fields:
-            if hasattr(o, field):
+            if hasattr(obj, field):
                 try:
-                    setattr(o, field, float(opts[key]) if key == 'scale' else bool(opts[key]))
+                    setattr(obj, field, float(opts[key]) if key == 'scale' else bool(opts[key]))
                 except Exception:  # noqa: BLE001
                     pass
                 break
-    return o
+    return obj
+
+
+def _build_args(types, path, opts):
+    # Arguments for one signature, or None when a type is unknown.
+    args = []
+    for typ in types:
+        short = typ.split('::')[-1].strip()
+        low = short.lower()
+        if low == 'str':
+            args.append(path)
+        elif short.endswith('Option') or short.endswith('Options'):
+            cls = _find_class(short)
+            if cls is None:
+                return None
+            try:
+                obj = cls()
+            except Exception:  # noqa: BLE001
+                return None
+            args.append(_fill_option(obj, opts) if short == 'ImportExportOption' else obj)
+        elif low == 'bool':
+            args.append(False)
+        elif low == 'int':
+            args.append(0)
+        elif low == 'float':
+            args.append(1.0)
+        else:
+            return None
+    return args
+
+
+def _candidates(fmt, path, opts):
+    # [(label, fn, args)] best first: calls that pass option objects first (the
+    # path-only variants may open Marvelous' own export dialog), then the rest.
+    out = []
+    for fn in _export_functions(fmt):
+        name = getattr(fn, '__name__', str(fn))
+        sigs = _signatures(fn) or [['str']]
+        for types in sigs:
+            args = _build_args(types, path, opts)
+            if args is None:
+                continue
+            n_opt = sum(1 for t in types if t.split('::')[-1].strip().endswith(('Option', 'Options')))
+            out.append((-n_opt, -len(args), name, fn, args))
+    out.sort(key=lambda c: (c[0], c[1], c[2]))
+    return [(c[2], c[3], c[4]) for c in out]
+
+
+def _written(path, out_dir, ext, before):
+    # Files of *ext* that appeared in *out_dir* (or *path* itself).
+    if os.path.isfile(path):
+        return [path]
+    try:
+        now = set(os.listdir(out_dir))
+    except OSError:
+        return []
+    return sorted(os.path.join(out_dir, n).replace(chr(92), '/') for n in now - before
+                  if n.lower().endswith('.' + ext))
 
 
 def _call_export(fmt, path, opts):
-    # Call the first export_api function of *fmt* that accepts our arguments.
-    fns = _export_functions(fmt)
-    if not fns:
-        raise RuntimeError(f'export {fmt} absent de cette version de Marvelous')
-    option = _make_options(opts) if fmt != 'zprj' else None
-    attempts = []
-    if option is not None:
-        attempts.append((path, option))
-    attempts.append((path,))
-    if fmt == 'zprj':
-        attempts.insert(0, (path, False))  # ExportZPrj(path, bSaveThumbnail)
-    last = None
-    for fn in fns:
-        for args in attempts:
-            try:
-                res = fn(*args)
-            except TypeError as exc:     # wrong signature for this version: next one
-                last = exc
-                continue
-            out = [str(p) for p in res] if isinstance(res, (list, tuple)) else []
-            return out or [path]
-    raise RuntimeError(f'export {fmt} refuse par Marvelous : {last}')
+    # Call the candidates of *fmt* until one really writes a file.
+    cands = _candidates(fmt, path, opts)
+    if not cands:
+        raise RuntimeError('export %s absent de cette version de Marvelous' % fmt)
+    out_dir = os.path.dirname(path)
+    errors = []
+    for name, fn, args in cands:
+        try:
+            before = set(os.listdir(out_dir))
+        except OSError:
+            before = set()
+        try:
+            res = fn(*args)
+        except Exception as exc:  # noqa: BLE001 - wrong signature for this version: next one
+            errors.append('%s: %s' % (name, exc))
+            continue
+        files = _written(path, out_dir, fmt, before)
+        _diag('%s(%d args) -> %r, written %r' % (name, len(args), res, files))
+        if files:
+            return files
+        errors.append('%s: rien ecrit' % name)
+    raise RuntimeError('export %s refuse par Marvelous : %s' % (fmt, ' | '.join(errors)))
+
+
+def _inventory():
+    # Every export function with its signatures, for the log.
+    rows = []
+    for mod_name in ('export_api', 'utility_api'):
+        mod = _module(mod_name)
+        for n in sorted(dir(mod)) if mod else []:
+            low = n.lower()
+            if low.startswith('export') or ('save' in low and 'proj' in low):
+                sig = _signatures(getattr(mod, n))
+                rows.append('%s.%s%s' % (mod_name, n, sig or ''))
+    return rows
+
 
 
 def _project():
@@ -397,6 +518,10 @@ def serve(pump=None):
     mode = 'one-shot' if one_shot else 'live'
     st.update(running=True, stop=False)
     _diag('Marvelous bridge ready, mailbox %s, mode %s (%s)' % (MAILBOX, mode, _environment()))
+    try:
+        _diag('export functions: ' + ' ; '.join(_inventory()))
+    except Exception as exc:  # noqa: BLE001 - the log line is a help, never a failure
+        _diag('inventory failed: %r' % (exc,))
     last_beat = 0.0
     started = _time.time()
     try:

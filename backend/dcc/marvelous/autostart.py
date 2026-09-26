@@ -11,13 +11,23 @@
 # pluginSettings.json lives in the PUBLIC Documents folder on Windows
 # (C:/Users/Public/Documents/MarvelousDesigner/Plugins), ~/Documents elsewhere.
 # Marvelous may rewrite it on exit: register while Marvelous is closed.
+#
+# Marvelous 2024 embeds the official python.org Python 3.7 build WITHOUT _ctypes, so
+# the bridge cannot pump Marvelous' window messages (one-shot mode: Marvelous busy
+# until the first export). install() also fetches the matching official embeddable
+# Python 3.7.9 (python.org, PSF license) and keeps only _ctypes.pyd + libffi-7.dll in
+# %LOCALAPPDATA%/FLUX/marvelous_pylib, where the bridge looks for them. No network:
+# the bridge still works, one-shot.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
 import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from core.logger import get_logger
@@ -31,6 +41,54 @@ _PLUGIN_TITLE = "FLUX Bridge"
 _MENU = "Plugins / Plug-in"
 _SETTINGS_NAME = "pluginSettings.json"
 _BRIDGE_LOG = Path(tempfile.gettempdir()) / "flux_marvelous_bridge.log"
+# Same CPython 3.7 ABI as Marvelous 2024 (its log says "python 3.7.9").
+_PYLIB_URL = "https://www.python.org/ftp/python/3.7.9/python-3.7.9-embed-amd64.zip"
+_PYLIB_FILES = ("_ctypes.pyd", "libffi-7.dll")
+
+
+def pylib_dir() -> Path:
+    """Where the bridge finds _ctypes (same rule as marvelous_bridge.PYLIB)."""
+    root = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(root) / "FLUX" / "marvelous_pylib"
+
+
+def has_pylib() -> bool:
+    return all((pylib_dir() / f).is_file() for f in _PYLIB_FILES)
+
+
+def ensure_pylib(url: str | None = None, timeout: float = 60.0) -> str:
+    """Fetch _ctypes for Marvelous' Python once; returns what happened, in words."""
+    if has_pylib():
+        return "ctypes deja present"
+    url = url or os.environ.get("FLUX_MD_PYLIB_URL") or _PYLIB_URL
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = resp.read()
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = {Path(n).name: n for n in zf.namelist()}
+            missing = [f for f in _PYLIB_FILES if f not in names]
+            if missing:
+                return f"ctypes non installe ({', '.join(missing)} absent de {url})"
+            dest = pylib_dir()
+            dest.mkdir(parents=True, exist_ok=True)
+            for f in _PYLIB_FILES:
+                (dest / f).write_bytes(zf.read(names[f]))
+            # The ctypes package (compiled for this exact Python) from the zip's
+            # stdlib, in case Marvelous dropped it along with _ctypes.
+            stdlib = next((n for n in zf.namelist() if Path(n).name.startswith("python3")
+                           and n.endswith(".zip")), None)
+            if stdlib:
+                with zipfile.ZipFile(io.BytesIO(zf.read(stdlib))) as lib:
+                    for n in lib.namelist():
+                        if n.startswith("ctypes/") and not n.startswith("ctypes/test/") and not n.endswith("/"):
+                            target = dest / n
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            target.write_bytes(lib.read(n))
+    except (OSError, zipfile.BadZipFile, ValueError) as exc:
+        log.warning("Marvelous ctypes download failed: %s", exc)
+        return f"ctypes non telecharge ({exc}) : Marvelous restera occupe jusqu'au premier export"
+    log.info("Marvelous ctypes installed -> %s", pylib_dir())
+    return "ctypes installe"
 
 
 def _scripts_dir() -> Path:
@@ -128,6 +186,7 @@ def install(exe_path: str | None = None) -> dict:
     except OSError as exc:
         return {"success": False, "message": str(exc), "path": None}
     log.info("Marvelous bridge script installed -> %s", dest)
+    pylib = ensure_pylib() if os.name == "nt" or os.environ.get("FLUX_MD_PYLIB_URL") else "ctypes: Windows seulement"
     try:
         settings = register_plugin(dest)
         log.info("Marvelous bridge registered in %s", settings)
@@ -138,7 +197,7 @@ def install(exe_path: str | None = None) -> dict:
         log.warning("Marvelous plug-in registration failed: %s", exc)
         msg = (f"installed -> {dest}. Menu Plug-in non ecrit ({exc}) : "
                f"Plugins > Plug-in Manager > +ADD, choisis ce fichier")
-    return {"success": True, "message": msg, "path": str(dest)}
+    return {"success": True, "message": f"{msg}. {pylib}", "path": str(dest)}
 
 
 def uninstall(exe_path: str | None = None) -> dict:
@@ -167,13 +226,16 @@ def diagnose(max_lines: int = 4) -> str:
     f = get_startup_file()
     if not f.exists():
         parts = ["Bridge absent (bouton Plug de Marvelous dans la barre de gauche)"]
-    elif is_registered():
-        parts = [f"Dans Marvelous : Plugins > Plug-in > {_PLUGIN_TITLE} (une fois par session)"]
     else:
-        parts = [f"Dans Marvelous : Script > Python (Plugins > Python Editor en 2024.1+), "
-                 f"colle {python_editor_line()} puis Run"]
+        # Marvelous 2024 has no Plug-in menu (2024.1+): both ways, the 2024 one first.
+        parts = [f"Dans Marvelous 2024 : Script > Python, colle {python_editor_line()} puis Run"
+                 + (f" ; 2024.1+ : Plugins > Plug-in > {_PLUGIN_TITLE}" if is_registered() else "")
+                 + " (une fois par session)"]
+        if os.name == "nt" and not has_pylib():
+            parts.append("ctypes absent : Marvelous occupe jusqu'au premier export (rebranche le Plug avec internet)")
     try:
-        lines = _BRIDGE_LOG.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+        lines = [ln for ln in _BRIDGE_LOG.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+                 if "export functions:" not in ln]        # the inventory line is long
     except OSError:
         lines = []
     if lines:
