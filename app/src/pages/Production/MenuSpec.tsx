@@ -305,17 +305,14 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     const next: Tab = subtask
       ? { key: subKey(entityId, taskId, subtask), kind: 'subtask', entityId, taskId, subtask }
       : { key: taskKey(entityId, taskId), kind: 'task', entityId, taskId }
+    // A pinned tab of the task is never repurposed (2026-09-26): the same subtask
+    // just goes to it, another one opens a second tab of the task.
+    const pinned = new Set(project ? readPinned(project).map(refToKey) : [])
     setTabs(prev => {
-      const i = prev.findIndex(x => (x.kind === 'task' || x.kind === 'subtask') && x.entityId === entityId && x.taskId === taskId)
+      if (prev.some(x => x.key === next.key)) return prev
+      const i = prev.findIndex(x => (x.kind === 'task' || x.kind === 'subtask')
+        && x.entityId === entityId && x.taskId === taskId && !pinned.has(x.key))
       if (i < 0) return [...prev, next]
-      const old = prev[i]
-      if (old.key !== next.key && project) {
-        const pins = readPinned(project)
-        if (pins.some(p => refToKey(p) === old.key)) {
-          writePinned(project, pins.map(p => refToKey(p) !== old.key ? p
-            : { kind: next.kind as 'task' | 'subtask', entityId, taskId, ...(subtask ? { subtask } : {}) }))
-        }
-      }
       const out = prev.slice()
       out[i] = next
       return out
