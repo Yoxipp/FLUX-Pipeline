@@ -263,8 +263,28 @@ function toRecipe(comp: UsdComponentInfo): UsdComponentRecipe {
   return {
     blocks: comp.blocks.map(b => ({ ...b })),
     departments: [],   // derived from the links by the backend
-    files: comp.files.map(({ resolved_version: _r, composed_version: _c, found: _f, ...f }) => ({ ...f })),
+    // A proxy of its whole block goes back with no proxy_of (the backend fills it), so a
+    // link added to the block later is covered too; a single pick stays explicit.
+    files: comp.files.map(({ resolved_version: _r, composed_version: _c, found: _f, ...f }) =>
+      ({ ...f, proxy_of: f.proxy && f.proxy_of.length > 1 ? [] : f.proxy_of })),
   }
+}
+
+// Same rule as component_recipe.default_targets: the geometries / grooms whose name
+// (publish instance, else label without its task prefix) matches, else all of them.
+function nameKey(f: { source?: string; instance?: string; variante?: string; label?: string; department?: string }): string {
+  if (f.source === 'publish' && f.instance) return `${f.instance}${f.variante ? `_${f.variante}` : ''}`.toLowerCase()
+  let key = f.label ?? ''
+  for (const p of [f.department ?? '', 'GEO', 'GROOM', 'SHADING', 'RIG', 'ANIM', 'LOOKDEV', 'LOOK', 'SHADER']) {
+    if (p && key.toUpperCase().startsWith(`${p.toUpperCase()}_`)) { key = key.slice(p.length + 1); break }
+  }
+  return key.toLowerCase()
+}
+
+function defaultTargets(files: UsdComponentFile[], key: string): string[] {
+  const surfaces = files.filter(f => f.kind === 'geometry' || f.kind === 'groom')
+  const same = surfaces.filter(f => key && nameKey(f) === key).map(f => f.id)
+  return same.length ? same : surfaces.map(f => f.id)
 }
 
 function fmtOf(path: string): string {
@@ -397,6 +417,8 @@ function LinkRow({ project, comp, link, files, rules, busy, onPatch, onRemove, o
   const showVariant = variantOn || !!link.variant
   const canProxy = Object.keys(rules.proxy).includes(link.kind)
   const needsTarget = link.kind === 'shader' || link.kind === 'animation'
+  // Files this link may be the proxy of: any geometry / groom of the component (2026-09-26).
+  const proxyOf = files.filter(o => o.id !== link.id && !o.proxy && (rules.proxy[link.kind] ?? []).includes(o.kind))
   const targets = files.filter(o => o.id !== link.id && (rules.targets[link.kind] ?? []).includes(o.kind))
   const nonUsd = !['usd', 'usda', 'usdc', 'usdz'].includes(link.format)
   return (
@@ -442,7 +464,17 @@ function LinkRow({ project, comp, link, files, rules, busy, onPatch, onRemove, o
         )}
         <Check2 label="Proxy" checked={!!link.proxy} disabled={busy || sublayer || !canProxy}
           title={canProxy ? tr('usd.comp.proxyHint') : tr('usd.comp.proxyKinds')}
-          onChange={on => onPatch({ proxy: on })} />
+          onChange={on => onPatch({ proxy: on, proxy_of: [] })} />
+        {link.proxy && proxyOf.length > 0 && (
+          // Which file of the component this link is the proxy of (default: its block).
+          <select value={link.proxy_of.length === 1 ? link.proxy_of[0] : ''} disabled={busy}
+            title={tr('usd.comp.proxyOfHint')}
+            onChange={e => onPatch({ proxy_of: e.target.value ? [e.target.value] : [] })}
+            style={{ ...selectStyle, width: 150 }}>
+            <option value="">{tr('usd.comp.proxyOfBlock')}</option>
+            {proxyOf.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+        )}
         {needsTarget && targets.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
             <span className="cap">{tr('usd.comp.targets')}</span>
@@ -580,8 +612,11 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
   function addLink(block: string, dept: string, what: UsdProposedFile | string) {
     const taken = new Set([...draft.files.map(f => f.id), ...draft.blocks.map(b => b.name)])
     const kind = typeof what === 'string' ? (rules.default_kind[dept] ?? 'other') : what.kind
-    // A shader targets the geometries already there (editable), like "add all" did.
-    const targets = kind === 'shader' ? draft.files.filter(f => f.kind === 'geometry' || f.kind === 'groom').map(f => f.id) : []
+    // A shader targets the geometry of its name, else all of them (editable), like "add all".
+    const key = typeof what === 'string'
+      ? nameKey({ label: what.replace(/\\/g, '/').split('/').pop()?.replace(/\.[^.]+$/, '') ?? '', department: dept })
+      : nameKey({ source: 'publish', instance: what.instance, variante: what.variante })
+    const targets = kind === 'shader' ? defaultTargets(draft.files, key) : []
     const common = {
       block, department: dept, kind, arc: 'reference' as UsdLinkArc, variant: '', proxy: false,
       targets, proxy_of: [], depends: [], active: !rules.preview.includes(kind),

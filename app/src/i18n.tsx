@@ -273,6 +273,8 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'usd.comp.defaultVariant': { fr: 'Variante par défaut',       en: 'Default variant' },
   'usd.comp.variantName':    { fr: 'nom',                       en: 'name' },
   'usd.comp.proxyHint':      { fr: 'Remplace le proxy des autres links du block', en: 'Stands in as proxy for the other links of the block' },
+  'usd.comp.proxyOfBlock':   { fr: 'Tout le block',              en: 'Whole block' },
+  'usd.comp.proxyOfHint':    { fr: 'Fichier du component dont ce link est le proxy', en: 'File of the component this link is the proxy of' },
   'usd.comp.proxyKinds':     { fr: 'Proxy : géométrie ou groom seulement', en: 'Proxy: geometry or groom only' },
   'usd.comp.pickFile':       { fr: 'Fichier',                   en: 'File' },
   'usd.comp.noPublish':      { fr: 'Aucun publish',             en: 'No publish' },

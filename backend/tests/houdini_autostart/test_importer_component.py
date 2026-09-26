@@ -116,8 +116,11 @@ class ImporterComponent(unittest.TestCase):
         # The rig has its own section (2026-09-26), no longer under AUTRES.
         self.assertEqual((n.evalParm("geo_files"), n.evalParm("look_files"), n.evalParm("anim_files"),
                           n.evalParm("rig_files"), n.evalParm("other_files"), n.evalParm("groom_files")),
-                         (3, 1, 2, 1, 0, 0))
-        self.assertEqual(n.evalParm(f"geo_on{n.row('geo', 'low')}"), 1)       # proxy: on by default
+                         (2, 1, 2, 1, 0, 0))
+        # Proxies in their own section on top (2026-09-26), on by default.
+        self.assertEqual(n.evalParm("proxy_files"), 1)
+        self.assertEqual(n.evalParm(f"proxy_on{n.row('proxy', 'low')}"), 1)
+        self.assertIn("proxy de body", n.evalParm(f"proxy_label{n.row('proxy', 'low')}"))
         self.assertEqual(n.evalParm(f"anim_on{n.row('anim', 'walk')}"), 0)    # preview: off by default
         self.assertEqual(self._state(), {"body": "on", "hat": "on", "low": "on", "skin": "on",
                                          "rig": "on", "walk": "off", "run": "off"})
@@ -286,7 +289,7 @@ class ImporterComponent(unittest.TestCase):
         code = flux_importer_lop_hda._build_code("x.hda", flux_importer_hda.PYTHON_MODULE)
         compile(code, "build", "exec")
         for needle in ('"comp_folder"', '"apply_component"', "on_component_toggle", '"dept_folder"',
-                       '"dept_references"', '"dept_sublayers"', '"compose_mode"', "on_dept_change",
+                       '"dept_references"', "'proxy_files'", "GEOMETRIE PROXY", '"dept_sublayers"', '"compose_mode"', "on_dept_change",
                        "_full.setInput(0, _apply)", "folderType.Collapsible", "MAX_ROWS"):
             self.assertIn(needle, code)
         # Fixed rows filled by FLUX: no + / - (no multiparm), empty sections hidden.

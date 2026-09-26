@@ -16,7 +16,7 @@ The parameter interface is taken from the SOP importer definition (built just be
 by the same installer), minus the SOP-only parms, plus the prim parms.
 
 Component content (ADR 0023): for a component of the USD library, one toggle per file,
-grouped GEO / GROOM / LOOKDEV / RIG / ANIM (preview) / AUTRES. The toggles only live on the
+grouped GEOMETRIE PROXY (every proxy, on top) / GEO / GROOM / LOOKDEV / RIG / ANIM (preview) / AUTRES. The toggles only live on the
 node; the inner Python LOP ``apply_component`` sets the matching variant selections
 (one variant set per file, "on" / "off") on ``prim_path``. A file without an active
 target is greyed (its toggle is kept); warnings show as text and as a node warning.
@@ -43,7 +43,7 @@ DEPT_ARCS = ("reference", "payload", "sublayer", "off")
 DEPT_ARC_LABELS = ("Reference", "Payload", "Sublayer", "Off")
 
 # (count parm, parm prefix, label) of the component content (ADR 0023).
-COMPONENT_FOLDERS = (("geo_files", "geo", "GEO"), ("groom_files", "groom", "GROOM"),
+COMPONENT_FOLDERS = (("proxy_files", "proxy", "GEOMETRIE PROXY"), ("geo_files", "geo", "GEO"), ("groom_files", "groom", "GROOM"),
                      ("look_files", "look", "LOOKDEV"), ("rig_files", "rig", "RIG"),
                      ("anim_files", "anim", "ANIM (preview)"), ("other_files", "other", "AUTRES"))
 

@@ -336,10 +336,12 @@ def _reload_lop(node):
 
 # ── component content (ADR 0023, /stage importer) ──────────────────────────────
 # One toggle per file of the component, grouped by kind (GEO, GROOM, LOOKDEV, ANIM,
-# other). The toggles live on this node only (comp_memory keeps them per component,
-# so going back to an element restores them): the component itself never changes.
+# other); the proxies of the component (whatever their kind) in their own section on
+# top (2026-09-26). The toggles live on this node only (comp_memory keeps them per
+# component, so going back to an element restores them): the component never changes.
 # comp_state = {variant set: "on" / "off"} applied by the inner apply_component LOP.
-_COMP_FOLDERS = (("geo_files", "geo", ("geometry",)), ("groom_files", "groom", ("groom",)),
+_COMP_FOLDERS = (("proxy_files", "proxy", ()),
+                 ("geo_files", "geo", ("geometry",)), ("groom_files", "groom", ("groom",)),
                  ("look_files", "look", ("shader",)), ("rig_files", "rig", ("rig",)),
                  ("anim_files", "anim", ("animation",)), ("other_files", "other", ("other",)))
 
@@ -352,6 +354,15 @@ def _folder_of(kind):
         if kind in kinds:
             return multi, prefix
     return "other_files", "other"
+
+def _is_proxy(f):
+    return bool(f.get("proxy") or f.get("proxy_of"))
+
+def _folder_of_file(node, f):
+    """Section of a file: the proxy section when the HDA has it, else its kind's."""
+    if _is_proxy(f) and node.parm("proxy_files") is not None:
+        return "proxy_files", "proxy"
+    return _folder_of(f.get("kind"))
 
 def _json_parm(node, name, default):
     try:
@@ -416,10 +427,11 @@ def _groom_full(node):
             out.append(fid)
     return out
 
-def _file_label(f):
+def _file_label(f, labels=None):
     txt = "%s  .%s" % (f.get("label", f["id"]), f.get("format", ""))
-    if f.get("proxy") or f.get("proxy_of"):
-        txt += "  (proxy)"
+    if _is_proxy(f):
+        names = [(labels or {}).get(t, t) for t in f.get("proxy_of") or []]
+        txt += "  (proxy de %s)" % ", ".join(names) if names else "  (proxy)"
     if f.get("variant"):
         txt += "  [%s = %s]" % (f.get("block", ""), f["variant"])
     if f.get("arc") == "sublayer":
@@ -518,22 +530,23 @@ def _fill_component(node):
         _set_status(node, "Component illisible : " + str(r.get("error") or r.get("detail") or "?"))
         return
     groups = {}
+    labels = dict((f["id"], f.get("label", f["id"])) for f in r["files"])
     for f in r["files"]:
-        groups.setdefault(_folder_of(f.get("kind")), []).append(f)
+        groups.setdefault(_folder_of_file(node, f), []).append(f)
     for multi, prefix, _kinds in _COMP_FOLDERS:
         rows = groups.get((multi, prefix), [])[:_MAX_ROWS]
         _set_parm(node, multi, len(rows))
         _clear_rows(node, prefix, len(rows) + 1)
         for i, f in enumerate(rows, 1):
             # Proxies are on by default; anims (preview) off; the rest follows the component.
-            if f.get("proxy") or f.get("proxy_of"):
+            if _is_proxy(f):
                 default = True
             elif f.get("kind") == "animation":
                 default = False
             else:
                 default = bool(f.get("active"))
             _set_parm(node, "%s_id%d" % (prefix, i), f["id"])
-            _set_label(node, "%s_label%d" % (prefix, i), _file_label(f))
+            _set_label(node, "%s_label%d" % (prefix, i), _file_label(f, labels))
             _set_parm(node, "%s_on%d" % (prefix, i), 1 if mem.get(f["id"], default) else 0)
     _set_parm(node, "comp_key", key)
     memory[key] = _toggles(node)

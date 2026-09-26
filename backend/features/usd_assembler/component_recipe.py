@@ -222,13 +222,15 @@ def normalize(recipe: dict, available: list[str]) -> dict:
         if f["arc"] != "sublayer":
             f["arc"] = "payload" if f["block"] in deferred else "reference"
 
-    # Proxy checkbox (ADR 0024): the link stands in for the other links of its block.
+    # Proxy checkbox (ADR 0024): the link stands in for the other links of its block,
+    # unless the artist picked the file it is the proxy of (menu beside the checkbox,
+    # 2026-09-26: any geometry / groom of the component, whatever its block).
     for f, raw in zip(files, recipe.get("files") or []):
-        if f["proxy"] and "proxy" in raw:
+        if not f["proxy"]:
+            f["proxy_of"] = []
+        elif "proxy" in raw and not f["proxy_of"]:
             f["proxy_of"] = [o["id"] for o in files if o["block"] == f["block"] and o["id"] != f["id"]
                              and not o["proxy"] and o["kind"] in PROXY_KINDS[f["kind"]]]
-        elif not f["proxy"]:
-            f["proxy_of"] = []
     # Exclusive variants: one variantSet per block (named after it), one choice active.
     for b in blocks:
         names = variant_names(files, b["name"])
@@ -286,6 +288,47 @@ def active_map(recipe: dict, active: dict[str, bool] | None = None) -> dict[str,
     return out
 
 
+SURFACE_KINDS = frozenset({"geometry", "groom"})
+
+
+def name_key(f: dict) -> str:
+    """Name a file shares with its geometry: the publish instance (+ variante), else the
+    label without its task prefix ("GEO_body" / "shading_body" -> "body")."""
+    if f.get("source") == "publish" and f.get("instance"):
+        key = f["instance"] + (f"_{f['variante']}" if f.get("variante") else "")
+    else:
+        key = str(f.get("label") or f.get("id") or "")
+        dept = str(f.get("department") or "")
+        for prefix in {dept, *DEFAULT_KIND, "LOOKDEV", "LOOK", "SHADER"}:
+            if prefix and key.upper().startswith(prefix.upper() + "_"):
+                key = key[len(prefix) + 1:]
+                break
+    return key.lower()
+
+
+def default_targets(f: dict, files: list[dict]) -> list[str]:
+    """Targets of a new shader: the geometries / grooms of the same name, else all of them."""
+    surfaces = [o for o in files if o["kind"] in SURFACE_KINDS and o["id"] != f.get("id")]
+    key = name_key(f)
+    same = [o["id"] for o in surfaces if key and name_key(o) == key]
+    return same or [o["id"] for o in surfaces]
+
+
+def claims(f: dict, files: list[dict]) -> list[str]:
+    """Geometries a shader really holds in the importer ("one lookdev per geo").
+
+    A shader targeting every geometry of a component that has several is the "add"
+    default, not a choice (2026-09-26: several lookdevs must live together, one per
+    geo): it holds the geometry of its own name, or none. Explicit targets hold as is."""
+    if f["kind"] != "shader":
+        return list(f.get("targets") or [])
+    surfaces = [o for o in files if o["kind"] in SURFACE_KINDS]
+    if len(surfaces) < 2 or set(f.get("targets") or []) != {o["id"] for o in surfaces}:
+        return list(f.get("targets") or [])
+    key = name_key(f)
+    return [o["id"] for o in surfaces if key and name_key(o) == key]
+
+
 def exclusive_by_target(recipe: dict, active: dict[str, bool] | None = None,
                         previous: dict[str, bool] | None = None) -> dict[str, bool]:
     """One shader per geometry, one animation per rig (importer, 2026-09-25).
@@ -294,23 +337,25 @@ def exclusive_by_target(recipe: dict, active: dict[str, bool] | None = None,
     for an animation) is claimed by one active file only. The file just switched on
     (on in *active*, off in *previous*) wins, then the recipe order. Files sharing a
     claimed target are switched off; files on other targets are untouched
-    (checking the body shader leaves the beak's own shader alone). Returns the toggles.
+    (checking the body shader leaves the beak's own shader alone). A shader left on
+    "every geometry" claims only the one of its name (see claims()). Returns the toggles.
     """
     state = active_map(recipe, active)
     before = active_map(recipe, previous) if previous is not None else state
     files = recipe.get("files") or []
     for kind in sorted(TARGET_BOUND_KINDS):
-        group = [f for f in files if f["kind"] == kind and f.get("targets")]
+        held = {f["id"]: claims(f, files) for f in files if f["kind"] == kind}
+        group = [f for f in files if f["kind"] == kind and held[f["id"]]]
         fresh = [f for f in group if state.get(f["id"]) and not before.get(f["id"])]
         order = fresh + [f for f in group if f not in fresh]
         claimed: set[str] = set()
         for f in order:
             if not state.get(f["id"]):
                 continue
-            if claimed.intersection(f["targets"]):
+            if claimed.intersection(held[f["id"]]):
                 state[f["id"]] = False
                 continue
-            claimed.update(f["targets"])
+            claimed.update(held[f["id"]])
     return state
 
 
@@ -365,6 +410,12 @@ def warnings(recipe: dict, active: dict[str, bool] | None = None) -> list[str]:
         if len(anims) > 1:
             out.append(f"ATTENTION : plusieurs animations ciblent le meme rig "
                        f"({by_id[rig]['label']}) : {', '.join(anims)}. La plus forte l'emporte.")
+
+    loose = [f["label"] for f in files if f["kind"] == "shader" and state.get(f["id"])
+             and f["id"] not in grey and f["targets"] and not claims(f, files)]
+    if len(loose) > 1:
+        out.append(f"ATTENTION : plusieurs lookdevs actifs ciblent toutes les geos ({', '.join(loose)}) : "
+                   "choisir leurs Cibles dans l'assembleur USD pour savoir lequel va sur quelle geo.")
 
     active_rigs = [f["label"] for f in files if f["kind"] == "rig" and state.get(f["id"])]
     if len(active_rigs) > 1:

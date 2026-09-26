@@ -739,12 +739,12 @@ def add_proposed(project_path: str | Path, name: str, departments: list[str] | N
                                 "kind": p["kind"], "source": "publish", "base": p["base"],
                                 "instance": p["instance"], "variante": p["variante"],
                                 "format": p["format"], "version": "latest"})
-    # A shader added this way targets the component's geometries (editable afterwards):
-    # without a target it would stay greyed. Animations never get a target by themselves.
-    surfaces = [f["id"] for f in recipe["files"] if f["kind"] in ("geometry", "groom")]
+    # A shader added this way targets the geometry of its name, else all of them
+    # (editable afterwards): without a target it would stay greyed. Animations never get
+    # a target by themselves.
     for f in recipe["files"]:
         if f["id"] in added and f["kind"] == "shader" and not f.get("targets"):
-            f["targets"] = surfaces
+            f["targets"] = cr.default_targets(f, recipe["files"])
     return save_component(project_path, name, recipe, user=user)
 
 

@@ -407,6 +407,22 @@ class ManualComponent(unittest.TestCase):
         proxy = stage.GetPrimAtPath("/UTAH/geo/proxy/geo_low")
         self.assertEqual(UsdGeom.Imageable(proxy).ComputePurpose(), "proxy")
 
+    def test_proxy_menu_names_the_file_it_stands_in_for(self) -> None:
+        # 2026-09-26: the menu beside "Proxy" picks one file of the component, any
+        # block (a groom's proxy geometry sits in model, the groom in hair).
+        from features.usd_assembler import component_recipe as cr
+
+        link = {"source": "manual", "path": "a/x.usda"}
+        r = cr.normalize({"blocks": [{"name": "model"}, {"name": "hair"}], "files": [
+            dict(link, id="body", block="model", department="GEO"),
+            dict(link, id="fur_low", block="model", department="GEO", proxy=True, proxy_of=["fur"]),
+            dict(link, id="fur", block="hair", department="GROOM"),
+            dict(link, id="body_low", block="model", department="GEO", proxy=True),
+        ]}, ["GEO", "GROOM"])
+        by_id = {f["id"]: f for f in r["files"]}
+        self.assertEqual(by_id["fur_low"]["proxy_of"], ["fur"])
+        self.assertEqual(by_id["body_low"]["proxy_of"], ["body"])      # no pick: its block
+
     def test_block_and_link_rules(self) -> None:
         from features.usd_assembler import component_recipe as cr
 
