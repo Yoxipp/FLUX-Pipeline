@@ -565,6 +565,22 @@ class LookPublish(unittest.TestCase):
         self.assertIn("mtl/skin", prims)
         self.assertNotIn("geo/render/Mesh", prims)
 
+    def test_latest_follows_the_newest_pointer_when_the_format_changed(self) -> None:
+        """Live UTAH 2026-09-26: skin look v010 in .usd, v011 in .usda left two LAST
+        pointers; the component kept v010 because _LAST.usd was read first."""
+        from features.usd_assembler.resolve.flux_resolver import FluxResolver
+
+        self._publish_geo()
+        dest = self.project / self._REL / "shading" / "null"
+        for i, fmt in enumerate(("usd", "usda")):
+            publish_look_asset(_source_export(Path(self._tmp.name) / f"src{i}"), self.project,
+                               fmt=fmt, dest_dir=dest, base_name="CHAR_SHADING_DAVID_null")
+        self.assertTrue((dest / "CHAR_SHADING_DAVID_null_LAST.usd").is_file())
+        hit = FluxResolver(self.project).resolve_root("DAVID", "SHADING", "latest",
+                                                      base_name="CHAR_SHADING_DAVID_null")
+        self.assertEqual(hit.version, "v002")
+        self.assertEqual(hit.path.suffix, ".usda")
+
     def test_a_non_look_base_is_refused(self) -> None:
         src = _source_export(Path(self._tmp.name) / "src2")
         with self.assertRaises(ValueError):

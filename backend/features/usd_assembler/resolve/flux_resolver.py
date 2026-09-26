@@ -66,6 +66,22 @@ def _default_prim(path: Path) -> str:
         return ""
 
 
+def _pointer_target(folder: Path, base: str, versions: dict) -> str | None:
+    """Version the <base>_LAST pointer layer targets, None when no pointer is readable.
+
+    A publish that changed format leaves one pointer per extension (UTAH skin look:
+    _LAST.usd -> v010, _LAST.usda -> v011, 2026-09-26): the highest version wins, never
+    the first extension found."""
+    from features.publisher import last_pointer as lp
+
+    hits = []
+    for ext in lp.LAYER_EXTS:
+        last = lp.read_last(folder, base, ext)
+        if last and last.get("version") in versions:
+            hits.append(last["version"])
+    return max(hits, key=lambda v: int(v[1:])) if hits else None
+
+
 class FluxResolver:
     """Resolve pipeline identities to published USD files inside *project_path*.
 
@@ -156,20 +172,11 @@ class FluxResolver:
         """ADR 0017: LAST is no longer a folder but a <base>_LAST.<usd ext> pointer layer
         beside the vNNN/ folders. Map "LAST" to the version it points at (highest vNNN
         when the pointer is missing or unreadable), with that concrete "version"."""
-        from features.publisher import last_pointer as lp
-
         versions = {v: info for v, info in found.items() if v.startswith("v") and v[1:].isdigit()}
         if not versions:
             return
-        target = None
-        for info in versions.values():
-            for ext in lp.LAYER_EXTS:
-                last = lp.read_last(info["folder"].parent, info["base"], ext)
-                if last and last.get("version") in versions:
-                    target = last["version"]
-                    break
-            if target:
-                break
+        info = next(iter(versions.values()))
+        target = _pointer_target(info["folder"].parent, info["base"], versions)
         target = target or max(versions, key=lambda v: int(v[1:]))
         found[_ACTIVE] = {**versions[target], "version": target}
 
@@ -451,12 +458,7 @@ class FluxResolver:
                     found[m.group("ver")] = {"base": m.group("base"), "path": file}
             if not found:
                 continue
-            target = None
-            for ext in lp.LAYER_EXTS:
-                last = lp.read_last(inst, next(iter(found.values()))["base"], ext)
-                if last and last.get("version") in found:
-                    target = last["version"]
-                    break
+            target = _pointer_target(inst, next(iter(found.values()))["base"], found)
             target = target or max(found, key=lambda v: int(v[1:]))
             found[_ACTIVE] = {**found[target], "version": target}
         return found
