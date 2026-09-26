@@ -391,6 +391,11 @@ def _author_on(on, token: str, f: dict, res: dict, folder: Path, resolved: dict,
                 Sdf.RelationshipSpec(spec, "skel:animationSource", False)
             rel_spec.targetPathList.explicitItems = [Sdf.Path(f"/{token}/anims/{f['id']}")]
         return
+    if f["kind"] == "shader" and f["format"] in IMAGE_FORMATS:
+        # A texture in the look block: FLUX makes the material itself (2026-09-26,
+        # UTAH feathers): one UsdPreviewSurface reading it, bound on the file's targets.
+        _author_texture_material(on, token, f, rel, resolved, by_id)
+        return
     if res["prim"] and res["prim"] != token:
         # A file whose root is not the asset (a manual file): it lands in its own child,
         # never over /<NAME> (that would retype the asset root).
@@ -402,6 +407,99 @@ def _author_on(on, token: str, f: dict, res: dict, folder: Path, resolved: dict,
         _add_arc(spec, f, rel, root_prim)
         return
     _add_arc(on, f, rel, root_prim)
+
+
+IMAGE_FORMATS = frozenset({"tx", "png", "jpg", "jpeg", "exr", "tif", "tiff", "tga", "hdr", "rat"})
+
+# FLUX map token -> (UsdPreviewSurface input, texture output, input type, raw data?)
+_MAP_INPUTS: dict[str, tuple[str, str, str, bool]] = {
+    "BCOL": ("diffuseColor", "rgb", "color3f", False),
+    "ROUGH": ("roughness", "r", "float", True),
+    "METAL": ("metallic", "r", "float", True),
+    "SPEC": ("specularColor", "rgb", "color3f", False),
+    "NORM": ("normal", "rgb", "normal3f", True),
+    "OPACITY": ("opacity", "r", "float", True),
+    "EMISS": ("emissiveColor", "rgb", "color3f", False),
+    "DISP": ("displacement", "r", "float", True),
+    "AO": ("occlusion", "r", "float", True),
+}
+
+
+def texture_map_input(file_name: str) -> tuple[str, str, str, bool]:
+    """Preview surface input a texture feeds, from its FLUX map token (BCOL when unknown:
+    a lone texture is its color)."""
+    import re as _re
+
+    from dcc.texture_publish import canonical_map_token
+
+    stem = _re.sub(r"_(LAST|v\d+)(?=\.)", "", Path(file_name).name)
+    return _MAP_INPUTS.get(canonical_map_token(stem) or "", _MAP_INPUTS["BCOL"])
+
+
+def _target_path(token: str, target_id: str, resolved: dict, by_id: dict) -> str:
+    """Where a linked file lands under /<token> (see _author_on)."""
+    tf = by_id.get(target_id) or {}
+    tres = resolved.get(target_id) or {}
+    kind = tf.get("kind", "")
+    if tres.get("prim") and tres["prim"] != token:
+        return "/".join([f"/{token}", *_CHILD_OF_KIND.get(kind, ()), target_id])
+    return {"geometry": f"/{token}/geo", "groom": f"/{token}/groom"}.get(kind, f"/{token}")
+
+
+def _author_texture_material(on, token: str, f: dict, rel: str, resolved: dict, by_id: dict) -> None:
+    import re as _re
+
+    from pxr import Sdf
+
+    tex_path = _re.sub(r"\.1\d{3}\.", ".<UDIM>.", rel)          # UDIM tiles
+    inp, out, typ, raw = texture_map_input(rel)
+    mat_path = f"/{token}/mtl/{f['id']}"
+    mat = _def(_def(on, "mtl"), f["id"])
+    mat.typeName = "Material"
+
+    def shader(name: str, shader_id: str):
+        spec = _def(mat, name)
+        spec.typeName = "Shader"
+        a = Sdf.AttributeSpec(spec, "info:id", Sdf.ValueTypeNames.Token, Sdf.VariabilityUniform)
+        a.default = shader_id
+        return spec
+
+    def attr(spec, name: str, vtype, value=None, connect: str = ""):
+        a = Sdf.AttributeSpec(spec, name, vtype)
+        if value is not None:
+            a.default = value
+        if connect:
+            a.connectionPathList.explicitItems = [Sdf.Path(connect)]
+        return a
+
+    st = shader("st", "UsdPrimvarReader_float2")
+    attr(st, "inputs:varname", Sdf.ValueTypeNames.String, "st")
+    attr(st, "outputs:result", Sdf.ValueTypeNames.Float2)
+    tex = shader("tex", "UsdUVTexture")
+    attr(tex, "inputs:file", Sdf.ValueTypeNames.Asset, Sdf.AssetPath(tex_path))
+    attr(tex, "inputs:sourceColorSpace", Sdf.ValueTypeNames.Token, "raw" if raw else "sRGB")
+    attr(tex, "inputs:st", Sdf.ValueTypeNames.Float2, connect=f"{mat_path}/st.outputs:result")
+    out_type = Sdf.ValueTypeNames.Float3 if out == "rgb" else Sdf.ValueTypeNames.Float
+    attr(tex, f"outputs:{out}", out_type)
+    if inp == "normal":
+        attr(tex, "inputs:scale", Sdf.ValueTypeNames.Float4, (2.0, 2.0, 2.0, 1.0))
+        attr(tex, "inputs:bias", Sdf.ValueTypeNames.Float4, (-1.0, -1.0, -1.0, 0.0))
+    surf = shader("surface", "UsdPreviewSurface")
+    vtype = {"color3f": Sdf.ValueTypeNames.Color3f, "normal3f": Sdf.ValueTypeNames.Normal3f}.get(
+        typ, Sdf.ValueTypeNames.Float)
+    attr(surf, f"inputs:{inp}", vtype, connect=f"{mat_path}/tex.outputs:{out}")
+    attr(surf, "outputs:surface", Sdf.ValueTypeNames.Token)
+    attr(mat, "outputs:surface", Sdf.ValueTypeNames.Token, connect=f"{mat_path}/surface.outputs:surface")
+
+    # Bound on each target (a binding on a parent prim reaches the curves / meshes a
+    # groom procedural or a geometry file brings below it).
+    for target in f.get("targets") or []:
+        path = _target_path(token, target, resolved, by_id)
+        spec = _over_path(on, "/".join(path.split("/")[2:])) if path.count("/") > 1 else on
+        spec.SetInfo("apiSchemas", Sdf.TokenListOp.Create(prependedItems=["MaterialBindingAPI"]))
+        rel_spec = spec.relationships.get("material:binding") or \
+            Sdf.RelationshipSpec(spec, "material:binding", False)
+        rel_spec.targetPathList.explicitItems = [Sdf.Path(mat_path)]
 
 
 # Where a file with its own root prim lands under /<NAME> (Solaris component layout).

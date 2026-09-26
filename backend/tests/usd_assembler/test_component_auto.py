@@ -190,6 +190,38 @@ class ManualComponent(unittest.TestCase):
         from features.usd_assembler.resolve.flux_resolver import _default_prim
         self.assertEqual(_default_prim(path), "groom_procedural_TAIL")
 
+    def test_texture_in_look_becomes_a_material_bound_on_its_targets(self) -> None:
+        """2026-09-26: a .tx linked in the look block with the grooms as targets."""
+        groom_rel = f"{_NAME_REL}/groom/procedural/WINGS_v001.usda"
+        gp = self.project / groom_rel
+        gp.parent.mkdir(parents=True, exist_ok=True)
+        st = Usd.Stage.CreateNew(str(gp))
+        UsdGeom.BasisCurves.Define(st, "/Utah/groom/wings")
+        st.GetRootLayer().Save()
+        tex_rel = f"{_NAME_REL}/shading/tex/CHAR_SHADING_UTAH_TEX_FEATHERS_LAST.tx"
+        tp = self.project / tex_rel
+        tp.parent.mkdir(parents=True, exist_ok=True)
+        tp.write_bytes(b"tx")
+        ca.create_component(self.project, _NAME, ["GROOM", "SHADING"])
+        recipe = ca.current_recipe(self.project, _NAME)
+        recipe["files"] += [
+            {"id": "wings", "department": "GROOM", "source": "manual", "path": groom_rel},
+            {"id": "feathers", "department": "SHADING", "source": "manual", "path": tex_rel,
+             "kind": "shader", "targets": ["wings"]},
+        ]
+        ca.save_component(self.project, _NAME, recipe)
+        stage = self._stage()
+        from pxr import UsdShade
+        mat = UsdShade.Material(stage.GetPrimAtPath("/UTAH/mtl/feathers"))
+        self.assertTrue(mat)
+        tex = UsdShade.Shader(stage.GetPrimAtPath("/UTAH/mtl/feathers/tex"))
+        self.assertTrue(tex.GetInput("file").Get().path.endswith("CHAR_SHADING_UTAH_TEX_FEATHERS_LAST.tx"))
+        self.assertTrue(tex.GetInput("file").Get().resolvedPath)
+        surf = mat.ComputeSurfaceSource()[0]
+        self.assertEqual(surf.GetIdAttr().Get(), "UsdPreviewSurface")
+        bound = UsdShade.MaterialBindingAPI(stage.GetPrimAtPath("/UTAH/groom/wings/groom/wings")).ComputeBoundMaterial()[0]
+        self.assertEqual(str(bound.GetPath()), "/UTAH/mtl/feathers")
+
     def test_manual_files_of_any_format(self) -> None:
         ca.create_component(self.project, _NAME, ["GEO"])
         recipe = ca.current_recipe(self.project, _NAME)

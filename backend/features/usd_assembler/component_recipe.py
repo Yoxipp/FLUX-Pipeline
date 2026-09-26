@@ -329,6 +329,9 @@ def effective(recipe: dict, active: dict[str, bool] | None = None) -> dict[str, 
     return {fid: on and fid not in grey for fid, on in state.items()}
 
 
+_IMAGE_FORMATS = frozenset({"tx", "png", "jpg", "jpeg", "exr", "tif", "tiff", "tga", "hdr", "rat"})
+
+
 def format_warning(fmt: str) -> str | None:
     if fmt in PORTABLE_FORMATS:
         return None
@@ -392,6 +395,10 @@ def warnings(recipe: dict, active: dict[str, bool] | None = None) -> list[str]:
         if f["kind"] in ("shader", "animation") and f["targets"] and f["id"] in grey and state.get(f["id"]):
             out.append(f"{f['label']} est grise : aucune de ses cibles n'est active.")
         msg = format_warning(f["format"]) if state.get(f["id"]) else None
+        if msg and f["kind"] == "shader" and f["format"] in _IMAGE_FORMATS:
+            # component_auto makes a simple preview material from it (2026-09-26).
+            msg = ("texture seule dans look : FLUX en fait un materiau simple (UsdPreviewSurface). "
+                   "Pour le vrai shader, publie le look (SHADING en USD) et lie-le ici")
         if msg:
             out.append(f"{f['label']} : {msg}.")
     return out
