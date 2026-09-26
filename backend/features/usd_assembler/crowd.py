@@ -244,7 +244,8 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
     """What one agent of an asset brings, with the FLUX Import choices applied.
 
     {"skeletons": [path relative to the agent], "anim": {"file", "prim"} | None (the
-    animation the asset itself plays), "baked": points animated without a SkelAnimation}."""
+    animation the asset itself plays), "anims": every animation checked in FLUX Import
+    (the bound one first), "baked": points animated without a SkelAnimation}."""
     from pxr import Sdf, Usd, UsdGeom, UsdSkel
 
     stage = Usd.Stage.CreateInMemory()
@@ -259,8 +260,13 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
     for rel in inactive or []:
         if Sdf.Path.IsValidPathString(rel):
             stage.OverridePrim(agent.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
-    out = {"skeletons": [], "anim": None, "baked": False, "rest": None}
+    out = {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None}
+    others = []
     for prim in Usd.PrimRange(agent):
+        if prim.IsA(UsdSkel.Animation):
+            src = _anim_source(prim)
+            if src and src not in others:
+                others.append(src)
         if prim.IsA(UsdSkel.Skeleton):
             out["skeletons"].append(prim.GetPath().MakeRelativePath(agent.GetPath()).pathString)
             if out["rest"] is None:
@@ -271,6 +277,9 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
                     out["anim"] = _anim_source(anim)
         elif prim.IsA(UsdGeom.PointBased) and not out["baked"]:
             out["baked"] = UsdGeom.PointBased(prim).GetPointsAttr().GetNumTimeSamples() > 1
+    # Two animations checked: USD binds only one on the skeleton, the crowd shares the
+    # agents between all of them (2026-09-26: only one of OGRE's two anims played).
+    out["anims"] = ([out["anim"]] if out["anim"] else []) + [o for o in others if o != out["anim"]]
     return out
 
 
@@ -399,14 +408,14 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                                                look.get("variants"), look.get("inactive"))
                 except Exception as exc:      # noqa: BLE001 - the agent still shows
                     log.warning("crowd probe of %s failed: %s", comp, exc)
-                    probes[comp] = {"skeletons": [], "anim": None, "baked": False, "rest": None}
+                    probes[comp] = {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None}
                 pr = probes[comp]
                 if pr["baked"] and pr["anim"] is None:
                     warnings.append(f"{comp} : anim cuite dans les points (pas de squelette anime), "
                                     "decalage / vitesse / noise sans effet")
         if not targets[comp]:
             continue
-        probe = probes.get(comp) or {"skeletons": [], "anim": None, "baked": False, "rest": None}
+        probe = probes.get(comp) or {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None}
         path = f"/crowd/{grp}/{a['name']}"
         prim = stage.DefinePrim(path)          # typeless: the component's SkelRoot comes through
         if comp in target_prims:
@@ -437,8 +446,9 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
             else:
                 src_file = _frozen(src) if freeze else src
                 src_prim = f"/{_clip_root(src_file)}/skel/Anim"
-        if src_file is None and probe["anim"]:
-            src_file, src_prim = Path(probe["anim"]["file"]), probe["anim"]["prim"]
+        if src_file is None and probe.get("anims"):
+            pick = random.Random(f"{seed}:{a['name']}:anim").choice(probe["anims"])
+            src_file, src_prim = Path(pick["file"]), pick["prim"]
         if src_file is not None:
             anim_path = f"{path}/crowd_anim"
             anim = stage.DefinePrim(anim_path)

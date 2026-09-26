@@ -168,7 +168,7 @@ class Crowd(unittest.TestCase):
         crowd_stage = Usd.Stage.Open(str(res["path"]))
         self.assertTrue(crowd_stage.GetPrimAtPath("/crowd/crowd/agent_0001/body").IsValid())
 
-    def _ogre(self) -> Path:
+    def _ogre(self, run: bool = False) -> Path:
         """A component like OGRE: skinned skeleton, its walk in an "on" variant bound on the
         skeleton itself (what component_auto writes for an ANIM file with a rig target)."""
         tokens = tok.load_tokens(self.project)
@@ -196,7 +196,29 @@ class Crowd(unittest.TestCase):
         over.SetInfo("apiSchemas", Sdf.TokenListOp.Create(prependedItems=["SkelBindingAPI"]))
         Sdf.RelationshipSpec(over, "skel:animationSource", False).targetPathList.explicitItems = [
             Sdf.Path("/OGRE/anims/walk")]
-        ogre.variantSetNameList.prependedItems = ["anim_walk"]
+        names = ["anim_walk"]
+        if run:
+            # A second clip, starting at 11: same skeleton binding (the stronger one wins in USD).
+            anim_run = AnimData(joints=["Root/Hip"], times=[11.0, 12.0], translations=[[(0, 0, 0)]] * 2,
+                                rotations=[[(0, 0, 0, 1)]] * 2, scales=[[(1, 1, 1)]] * 2, fps=24.0)
+            publish_light_asset(_asset(anim=anim_run), self.project, fmt="usda",
+                                dest_dir=self.project / "assets/chara/BOB/anim/run",
+                                base_name="CHAR_ANIM_BOB_run", user="adam")
+            run_file = next((self.project / "assets/chara/BOB/anim/run").glob("*_LAST.usd*"))
+            vset = Sdf.VariantSetSpec(ogre, "anim_run")
+            Sdf.VariantSpec(vset, "off")
+            on = Sdf.VariantSpec(vset, "on").primSpec
+            item = Sdf.PrimSpec(Sdf.PrimSpec(on, "anims", Sdf.SpecifierDef), "run", Sdf.SpecifierDef)
+            item.referenceList.prependedItems = [Sdf.Reference(
+                os.path.relpath(run_file, last.parent).replace(os.sep, "/"),
+                Sdf.Path(f"/{crowd._clip_root(run_file)}/skel/Anim"))]
+            over = Sdf.PrimSpec(Sdf.PrimSpec(on, "skel", Sdf.SpecifierOver), "Skeleton", Sdf.SpecifierOver)
+            over.SetInfo("apiSchemas", Sdf.TokenListOp.Create(prependedItems=["SkelBindingAPI"]))
+            Sdf.RelationshipSpec(over, "skel:animationSource", False).targetPathList.explicitItems = [
+                Sdf.Path("/OGRE/anims/run")]
+            ogre.variantSelections["anim_run"] = "on"
+            names.append("anim_run")
+        ogre.variantSetNameList.prependedItems = names
         ogre.variantSelections["anim_walk"] = "on"
         layer.defaultPrim = "OGRE"
         layer.Save()
@@ -279,6 +301,20 @@ class Crowd(unittest.TestCase):
         self.assertEqual(noise[0], Gf.Quatf(1.0))
         self.assertNotEqual(noise[1], Gf.Quatf(1.0))
         self.assertNotEqual(noise[2], Gf.Quatf(1.0))
+
+    def test_two_checked_animations_are_shared_between_agents(self) -> None:
+        # 2026-09-26: both OGRE anims checked in FLUX Import, the crowd played one only.
+        self._ogre(run=True)
+        pts = [{"p": [i, 0, 0]} for i in range(12)]
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                looks={"OGRE": {"variants": {"anim_walk": "on", "anim_run": "on"}, "inactive": []}})
+        starts = {self._skel_anim_times(res["path"], f"agent_{i + 1:04d}")[0] for i in range(12)}
+        self.assertEqual(starts, {1.0, 11.0})
+        # Only one checked: every agent plays it.
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                looks={"OGRE": {"variants": {"anim_walk": "off", "anim_run": "on"}, "inactive": []}})
+        starts = {self._skel_anim_times(res["path"], f"agent_{i + 1:04d}")[0] for i in range(12)}
+        self.assertEqual(starts, {11.0})
 
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
