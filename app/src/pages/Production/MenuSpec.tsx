@@ -18,7 +18,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { readSession, writeSession } from '../../hooks/useSessionState'
-import { Pin, X } from 'lucide-react'
+import { Pin, X, Layers, RefreshCw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { api } from '../../api/client'
+import type { UsdAssetInfo } from '../../api/client'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import type {
@@ -770,9 +773,137 @@ function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtas
             inherited={false}
           />
         ))}
+        {/* The assembled USD of the asset (component / assembly), 2026-09-26. */}
+        {res.kind === 'asset' && <UsdAssembledNode name={res.entity.name} />}
       </div>
     </div>
   )
+}
+
+// ── "USD assemblé" task: the component or the assembly of the asset ─────────────
+function UsdAssembledNode({ name }: { name: string }) {
+  const { project } = useProject()
+  const navigate = useNavigate()
+  const [info, setInfo] = useState<UsdAssetInfo | null>(null)
+  const [err, setErr] = useState('')
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = useMemo(() => async () => {
+    if (!project || !name) return
+    setBusy(true)
+    try {
+      setInfo(await api.getUsdAsset(project, name))
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [project, name])
+  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const h = () => { void load() }
+    window.addEventListener('flux:refresh', h)
+    return () => window.removeEventListener('flux:refresh', h)
+  }, [load])
+
+  const comp = info?.component ?? null
+  const asm = info?.assembly ?? null
+  const version = comp?.version ?? asm?.version ?? null
+  const stateLabel = comp
+    ? (comp.state === 'stale' ? 'à régénérer' : comp.state === 'empty' ? 'vide' : 'à jour')
+    : asm ? (asm.broken ? `${asm.broken} lien(s) cassé(s)` : 'à jour') : 'non créé'
+  const color = 'var(--accent)'
+  const line: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', lineHeight: '18px',
+  }
+  const dim: React.CSSProperties = { color: 'var(--ink-4)', flexShrink: 0 }
+  const cut: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }
+
+  return (
+    <div style={{
+      minWidth: open ? 300 : 160, maxWidth: 420, borderRadius: 8,
+      border: `1px solid ${open ? color : 'var(--rule-2)'}`,
+      background: 'var(--paper-2)', boxShadow: 'var(--shadow-xs)', fontFamily: 'var(--sans)',
+      transition: 'min-width 0.22s ease',
+    }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        title="Component / assembly USD de l'asset"
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', cursor: 'pointer' }}
+      >
+        <Layers size={12} strokeWidth={2} style={{ color, flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>USD assemblé</span>
+        <span style={{ flex: 1 }} />
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+          background: version ? 'var(--accent-soft)' : 'var(--paper)', color: version ? 'var(--accent-hi)' : 'var(--ink-4)',
+        }}>{version ?? '—'}</span>
+      </div>
+      {open && (
+        <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {err && <div style={{ fontSize: 10, color: 'var(--err)' }}>{err}</div>}
+          {!err && info && !comp && !asm && (
+            <div style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+              Pas encore de component pour {name} : il se crée dans la page USD (Bibliothèque).
+            </div>
+          )}
+          {comp && (
+            <div>
+              <div style={{ ...line, color: 'var(--ink-3)' }}>
+                <span style={{ fontWeight: 600 }}>Component</span>
+                <span style={dim}>{comp.version} · {comp.versions.length} version(s) · {stateLabel}</span>
+              </div>
+              {comp.files.length === 0 && <div style={{ ...line, ...dim }}>aucun département lié</div>}
+              {comp.files.map(f => (
+                <div key={f.id} style={{ ...line, paddingLeft: 10 }} title={f.base}>
+                  <span style={{ width: 52, flexShrink: 0, color: 'var(--accent-hi)' }}>{f.department}</span>
+                  <span style={cut}>{f.label || f.base}</span>
+                  <span style={{ ...dim, color: f.found ? 'var(--ink-4)' : 'var(--err)' }}>
+                    {!f.found ? 'introuvable'
+                      : f.composed_version && f.composed_version !== f.resolved_version
+                        ? `${f.composed_version} → ${f.resolved_version}` : (f.resolved_version ?? '')}
+                  </span>
+                </div>
+              ))}
+              {comp.proposed.length > 0 && (
+                <div style={{ ...line, paddingLeft: 10, color: 'var(--warn, var(--ink-3))' }}>
+                  <span style={cut}>{comp.proposed.length} publish(s) pas encore dans le component : {comp.proposed.map(p => p.department).join(', ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {asm && (
+            <div>
+              <div style={{ ...line, color: 'var(--ink-3)' }}>
+                <span style={{ fontWeight: 600 }}>Assembly</span>
+                <span style={dim}>{asm.version} · {asm.versions.length} version(s) · {asm.instances.length} instance(s) · {stateLabel}</span>
+              </div>
+            </div>
+          )}
+          {info && info.used_by.length > 0 && (
+            <div style={line}>
+              <span style={{ fontWeight: 600, color: 'var(--ink-3)', flexShrink: 0 }}>Utilisé dans</span>
+              <span style={cut}>{info.used_by.join(', ')}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => navigate('/usd')} style={_miniBtn}>Ouvrir la page USD</button>
+            <button onClick={() => { void load() }} disabled={busy} style={{ ..._miniBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <RefreshCw size={10} strokeWidth={2} />{busy ? 'Lecture…' : 'Relire'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const _miniBtn: React.CSSProperties = {
+  padding: '4px 10px', borderRadius: 6, border: '1px solid var(--rule-2)', background: 'var(--paper)',
+  color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 10, cursor: 'pointer',
 }
 
 // ── one task node ────────────────────────────────────────────────────────────

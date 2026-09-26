@@ -257,6 +257,31 @@ def build_library(project_path: str | Path, assembly_subdir: str = DEFAULT_ASSEM
                       "preview": sorted(cr.PREVIEW_KINDS)}}
 
 
+def asset_usd(project_path: str | Path, name: str,
+              assembly_subdir: str = DEFAULT_ASSEMBLY_SUBDIR) -> dict:
+    """The assembled USD of ONE asset, for its "USD" task in the Production tab
+    (2026-09-26): its component (departments, versions, state), or its assembly
+    when it is a decor, and the assemblies it is used in."""
+    from features.folder_manager.tokens import load_tokens
+
+    from .assembly_v2 import current_entry as _assembly_entry
+
+    project = Path(project_path)
+    tokens = load_tokens(project)
+    component = None
+    parent = component_dir(project, name)
+    if parent is not None:
+        versions = _component_versions(parent, name)
+        if versions and not _is_assembly_entry(_assembly_entry(project, name)):
+            component = _component_info(project, tokens, name, parent, versions)
+    assemblies = list_assemblies(project, assembly_subdir, [component] if component else [])
+    own = next((a for a in assemblies if a["name"] == name), None)
+    used_by = [a["name"] for a in assemblies
+               if a["name"] != name and any(i.get("component") == name for i in a["instances"])]
+    return {"name": name, "class": _class_of(tokens, name), "component": component,
+            "assembly": own, "used_by": used_by}
+
+
 def relink_instance(project_path: str | Path, file: str | Path, prim: str, component: str,
                     version: str = "LAST", assembly_subdir: str = DEFAULT_ASSEMBLY_SUBDIR) -> dict:
     """Point one assembly instance at *component* (its LAST or a frozen vNNN entry).

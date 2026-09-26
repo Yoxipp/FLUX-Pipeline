@@ -841,6 +841,10 @@ export const api = {
   editUsdAssembly: (project: string, name: string, ops: UsdAssemblyOp[]) =>
     apiCall<UsdAssemblyEditResult>('POST', '/usd/assembly/edit', { project, name, ops }),
   // The department table (ADR 0019): which task writes which USD department.
+  // Assembled USD of one asset (component or decor assembly), Production "USD" task.
+  getUsdAsset: (project: string, name: string) =>
+    apiCall<UsdAssetInfo>('GET', `/usd/asset?${new URLSearchParams({ project, name })}`),
+
   getUsdDepartments: () =>
     apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number>
               shot_tasks?: Record<string, UsdTaskContribution> }>(
@@ -1072,6 +1076,23 @@ export interface LoadTargets {
   legacy: boolean
   message: string
   targets: { label: string; rel_path: string; primary: boolean; what: string }[]
+}
+export interface UsdAssetFile {
+  id: string; department: string; base: string; label?: string; instance?: string
+  resolved_version: string | null; composed_version: string | null; found: boolean; active?: boolean
+}
+export interface UsdAssetInfo {
+  project: string; name: string; class: string | null
+  component: null | {
+    version: string; versions: string[]; state: 'ok' | 'stale' | 'empty'; legacy: boolean
+    departments: string[]; files: UsdAssetFile[]; proposed: { department: string; base: string }[]
+    warnings: string[]; last: string | null
+  }
+  assembly: null | {
+    version: string; versions: string[]; file: string; broken: number
+    instances: { prim: string; component: string | null; broken: boolean }[]
+  }
+  used_by: string[]
 }
 export interface MayaUsdTreeNode { name: string; path: string; type: 'group' | 'joint'; children: MayaUsdTreeNode[] }
 export interface MayaUsdPreview {

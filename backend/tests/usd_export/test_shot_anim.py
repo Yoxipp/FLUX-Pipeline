@@ -153,6 +153,18 @@ class ShotAnimPublish(unittest.TestCase):
         layer = Sdf.Layer.FindOrOpen(str(res["layers"]["skel"]))
         self.assertIsNotNone(layer.GetPrimAtPath("/MARIE/geo/proxy/body"))
 
+    def test_the_production_usd_task_lists_the_component(self) -> None:
+        # 2026-09-26: the asset's "USD assemble" task in the Production tab.
+        from features.usd_assembler.library import asset_usd
+
+        info = asset_usd(self.project, "DINGO")
+        comp = info["component"]
+        self.assertEqual(info["class"], "CHAR")
+        self.assertEqual(sorted({f["department"] for f in comp["files"]}), ["GEO", "RIG"])
+        self.assertEqual(comp["version"], comp["versions"][-1])
+        self.assertIsNone(info["assembly"])
+        self.assertIsNone(asset_usd(self.project, "NOBODY")["component"])
+
     def test_an_asset_clip_checks_the_rig_without_a_component(self) -> None:
         # Live 2026-09-26: CHAR_ANIM_MARIE_SMOOTH warned "squelette non verifie" while the
         # RIG was published: the check read the component only.

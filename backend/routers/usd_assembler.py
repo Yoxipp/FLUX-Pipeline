@@ -289,6 +289,22 @@ async def get_usd_library(project: str | None = None) -> dict:
     return {"project": name, **lib}
 
 
+@router.get("/asset")
+async def get_usd_asset(name: str, project: str | None = None) -> dict:
+    """Component / assembly of one asset (its "USD" task in the Production tab)."""
+    project_name, project_path = _resolve_project(project)
+    sub = (config.get("usd_assembler", {}) or {}).get("output_subdir", _DEFAULT_OUTPUT_SUBDIR)
+    loop = asyncio.get_running_loop()
+    try:
+        from features.usd_assembler.library import asset_usd
+
+        res = await loop.run_in_executor(None, lambda: asset_usd(project_path, name, sub))
+    except Exception as exc:
+        log.exception("USD asset %s failed", name)
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"project": project_name, **res}
+
+
 def _component_result(res: dict | None) -> dict:
     if res is None:
         return {"ok": True, "changed": False, "version": None, "warnings": []}
