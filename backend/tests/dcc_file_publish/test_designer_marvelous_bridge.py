@@ -196,6 +196,35 @@ class Autostart(unittest.TestCase):
             self.assertNotIn('"', line)
             self.assertNotIn("\\", line)
 
+    def test_marvelous_ctypes_comes_from_the_official_python_zip(self):
+        # Marvelous 2024 ships Python 3.7 without _ctypes: the Plug button fetches it.
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "python-3.7.9-embed-amd64.zip"
+            import io as _io
+            stdlib = _io.BytesIO()
+            with zipfile.ZipFile(stdlib, "w") as inner:
+                inner.writestr("ctypes/__init__.pyc", b"pyc")
+                inner.writestr("ctypes/wintypes.pyc", b"pyc")
+                inner.writestr("ctypes/test/test_x.pyc", b"no")
+                inner.writestr("socket.pyc", b"no")
+            with zipfile.ZipFile(src, "w") as zf:
+                zf.writestr("_ctypes.pyd", b"pyd")
+                zf.writestr("libffi-7.dll", b"dll")
+                zf.writestr("_socket.pyd", b"not wanted")
+                zf.writestr("python37.zip", stdlib.getvalue())
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": d}):
+                self.assertEqual(md_autostart.ensure_pylib(src.as_uri()), "ctypes installe")
+                lib = md_autostart.pylib_dir()
+                got = sorted(str(p.relative_to(lib)).replace(os.sep, "/") for p in lib.rglob("*") if p.is_file())
+                self.assertEqual(got, ["_ctypes.pyd", "ctypes/__init__.pyc", "ctypes/wintypes.pyc", "libffi-7.dll"])
+                self.assertEqual(md_autostart.ensure_pylib("file:///nowhere.zip"), "ctypes deja present")
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"LOCALAPPDATA": d}):
+            msg = md_autostart.ensure_pylib((Path(d) / "missing.zip").as_uri())
+            self.assertIn("non telecharge", msg)                  # no network: never fatal
+            self.assertFalse(md_autostart.has_pylib())
+
     def test_marvelous_script_survives_the_2024_editor(self):
         # ASCII (Marvelous may not read UTF-8), no " nor backslash (its 2024 editor
         # mangles them), no __future__ import (the editor may prepend a line) and
@@ -213,32 +242,67 @@ class MarvelousBridgeScript(unittest.TestCase):
     """The in-app script, with a fake export_api / ApiTypes (no server started)."""
 
     def setUp(self):
+        # Fakes shaped like Marvelous 2024 as seen live: pybind11 functions that
+        # describe their signatures in __doc__, option classes registered in a module
+        # FLUX has to find, a path-only Alembic export that opens a dialog and writes
+        # nothing, ExportUSDW refusing a call without its two option objects.
         calls: list = []
 
-        class Option:
-            bExportGarment = True
-            bExportAvatar = True
-            scale = 1.0
+        class ImportExportOption:
+            def __init__(self):
+                self.bExportGarment = True
+                self.bExportAvatar = True
+                self.scale = 1.0
 
-        def export_obj(path, option=None):
-            calls.append(("obj", path, option))
+        class ExportUSDOption:
+            pass
+
+        def _write(path):
+            Path(path).write_text("x")
             return [path]
 
-        def export_zprj(path, thumb):
-            calls.append(("zprj", path, thumb))
-            return path
+        def ExportOBJ(path, option=None):
+            calls.append(("obj", path, option))
+            return _write(path)
+        ExportOBJ.__doc__ = ("ExportOBJ(*args, **kwargs)\nOverloaded function.\n\n"
+                             "1. ExportOBJ(arg0: str) -> List[str]\n\n"
+                             "2. ExportOBJ(arg0: str, arg1: Marvelous::ImportExportOption) -> List[str]\n")
+
+        def ExportAlembic(path):
+            calls.append(("abc-dialog", path, None))       # Marvelous opens its own dialog
+            return []
+        ExportAlembic.__doc__ = "ExportAlembic(arg0: str) -> List[str]\n"
+
+        def ExportAlembicW(path, option):
+            calls.append(("abc", path, option))
+            return _write(path)
+        ExportAlembicW.__doc__ = "ExportAlembicW(arg0: str, arg1: Marvelous::ImportExportOption) -> List[str]\n"
+
+        def ExportUSDW(path, option, usd_option):
+            if not isinstance(option, ImportExportOption) or not isinstance(usd_option, ExportUSDOption):
+                raise TypeError("ExportUSDW(): incompatible function arguments")
+            calls.append(("usd", path, option))
+            return _write(path)
+        ExportUSDW.__doc__ = ("ExportUSDW(arg0: str, arg1: Marvelous::ImportExportOption, "
+                              "arg2: Marvelous::ExportUSDOption) -> List[str]\n")
+
+        def ExportZPrj(path, thumbnail):
+            calls.append(("zprj", path, thumbnail))
+            return _write(path)
+        ExportZPrj.__doc__ = "ExportZPrj(arg0: str, arg1: bool) -> str\n"
 
         api = types.ModuleType("export_api")
-        api.ExportOBJ = export_obj
-        api.ExportZPrj = export_zprj
+        for fn in (ExportOBJ, ExportAlembic, ExportAlembicW, ExportUSDW, ExportZPrj):
+            setattr(api, fn.__name__, fn)
         api.ExportZPac = lambda path: None
-        types_mod = types.ModuleType("ApiTypes")
-        types_mod.ImportExportOption = Option
+        md_types = types.ModuleType("MarvelousTypes")          # not ApiTypes: found by sweep
+        md_types.ImportExportOption = ImportExportOption
+        md_types.ExportUSDOption = ExportUSDOption
         self.calls = calls
-        self._mods = mock.patch.dict(sys.modules, {"export_api": api, "ApiTypes": types_mod})
+        self._mods = mock.patch.dict(sys.modules, {"export_api": api, "MarvelousTypes": md_types})
         self._mods.start()
-        # The script starts its server on import when the API is there: a state that
-        # says "already listening" keeps the test from binding the real port.
+        # The script serves on import when the API is there: a state that says
+        # "already running" keeps the import from blocking.
         import builtins
         self._state = mock.patch.object(builtins, "_flux_marvelous_bridge",
                                         {"running": True, "stop": False}, create=True)
@@ -254,25 +318,55 @@ class MarvelousBridgeScript(unittest.TestCase):
         self._state.stop()
         self._mods.stop()
 
-    def test_formats_and_export(self):
-        self.assertEqual(self.br._formats(), ["obj", "zprj"])
+    def _export(self, fmt, **extra):
         with mock.patch.object(self.br, "_MD_AVAILABLE", True), tempfile.TemporaryDirectory() as d:
-            res = self.br._do_export({"exportPath": d, "name": "X", "format": "obj",
-                                      "options": {"avatar": False, "scale": 0.1, "thick": True},
-                                      "zprj": True})
+            return self.br._do_export({"exportPath": d, "name": "X", "format": fmt, **extra})
+
+    def test_formats_and_signatures(self):
+        self.assertEqual(self.br._formats(), ["abc", "obj", "zprj", "usd"])
+        self.assertEqual(self.br._signatures(sys.modules["export_api"].ExportOBJ),
+                         [["str"], ["str", "Marvelous::ImportExportOption"]])
+
+    def test_obj_with_options_and_zprj(self):
+        res = self._export("obj", options={"avatar": False, "scale": 0.1, "thick": True}, zprj=True)
         self.assertEqual(res["status"], "ok", res)
         kind, _, option = self.calls[0]
         self.assertEqual(kind, "obj")
+        self.assertIsNotNone(option)                   # the "with options" overload first
         self.assertFalse(option.bExportAvatar)
         self.assertEqual(option.scale, 0.1)
         self.assertEqual(self.calls[1][0], "zprj")      # ExportZPrj, not ExportZPac
         self.assertEqual(len(res["files"]), 2)
 
+    def test_abc_never_takes_the_dialog_variant(self):
+        # 2026-09-26: exporting .abc opened Marvelous' dialog, in the wrong place.
+        res = self._export("abc")
+        self.assertEqual(res["status"], "ok", res)
+        self.assertEqual([c[0] for c in self.calls], ["abc"])
+
+    def test_usd_gets_both_option_objects(self):
+        # 2026-09-26: "ExportUSDW(): incompatible function arguments ... invoked with path".
+        res = self._export("usd")
+        self.assertEqual(res["status"], "ok", res)
+        self.assertEqual(self.calls[0][0], "usd")
+
+    def test_a_call_that_writes_nothing_is_an_error(self):
+        # 2026-09-26: ".zprj" alone published nothing, Marvelous said it saved.
+        def ExportZPrj(path, thumbnail):
+            return path
+        ExportZPrj.__doc__ = "ExportZPrj(arg0: str, arg1: bool) -> str"
+        with mock.patch.object(sys.modules["export_api"], "ExportZPrj", ExportZPrj):
+            res = self._export("zprj")
+        self.assertEqual(res["status"], "error")
+        self.assertIn("rien ecrit", res["msg"])
+
     def test_missing_format_is_an_error(self):
-        with mock.patch.object(self.br, "_MD_AVAILABLE", True), tempfile.TemporaryDirectory() as d:
-            res = self.br._do_export({"exportPath": d, "name": "X", "format": "abc"})
+        res = self._export("fbx")
         self.assertEqual(res["status"], "error")
 
+    def test_inventory_lists_the_signatures(self):
+        rows = self.br._inventory()
+        self.assertTrue(any(r.startswith("export_api.ExportUSDW[[") for r in rows), rows)
 
     def _serve_in_thread(self, box, pump):
         # The thread plays Marvelous: the loop runs on its caller's thread (Marvelous
@@ -308,7 +402,7 @@ class MarvelousBridgeScript(unittest.TestCase):
             self.assertEqual(ping["mode"], "live")
             info = md_client.marvelous_client.info()
             self.assertTrue(info["ok"], info)
-            self.assertEqual(info["formats"], ["obj", "zprj"])
+            self.assertEqual(info["formats"], ["abc", "obj", "zprj", "usd"])
             self.assertTrue(md_client.call({"action": "shutdown"}, 5.0)["ok"])
             t.join(5.0)
             self.assertFalse(t.is_alive())
