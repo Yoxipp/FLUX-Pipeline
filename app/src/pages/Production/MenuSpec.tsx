@@ -940,6 +940,10 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
 }) {
   const [expanded, setExpanded] = useState(false)
   const [hoveredSub, setHoveredSub] = useState<string | null>(null)
+  // Collapsed footprint kept in the row while the card is open: the open card floats
+  // over its neighbours instead of growing in the flow (2026-09-26: the last card
+  // of a full row wrapped to the next line, lost the hover, closed, came back: jitter).
+  const [slot, setSlot] = useState<{ w: number; h: number; alignRight: boolean } | null>(null)
   const color = taskColorFromName(task.name)
   const hasSubs = task.known_subtasks.length > 0
 
@@ -948,13 +952,27 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
     if (!hasSubs) { e.stopPropagation(); onOpenHeader() }
   }
 
+  function open(e: React.MouseEvent<HTMLDivElement>) {
+    const r = e.currentTarget.getBoundingClientRect()
+    const box = e.currentTarget.parentElement?.getBoundingClientRect()
+    // Open towards the left when the widest open card would leave the row on the right.
+    setSlot({ w: r.width, h: r.height, alignRight: !!box && r.left + 360 > box.right })
+    setExpanded(true)
+  }
+  function close() { setExpanded(false); setSlot(null) }
+
   return (
     <div
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
+      onMouseEnter={open}
+      onMouseLeave={close}
+      style={{ position: 'relative', flexShrink: 0,
+               ...(expanded && slot ? { width: slot.w, height: slot.h, zIndex: 20 } : {}) }}
+    >
+    <div
       onClick={onClickBody}
       style={{
-        minWidth: expanded ? 220 : 160,
+        ...(expanded && slot ? { position: 'absolute', top: 0, ...(slot.alignRight ? { right: 0 } : { left: 0 }) } : {}),
+        minWidth: expanded ? Math.max(220, slot?.w ?? 0) : 160,
         maxWidth: 360,
         padding: expanded ? '10px 12px 12px' : '9px 14px',
         borderRadius: 8,
@@ -962,8 +980,8 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         // Solid fill but visibly duller than the subtask chips below.
         background: `color-mix(in oklch, ${color} 58%, var(--paper-2) 42%)`,
         color: 'var(--paper)',
-        opacity: inherited ? 0.85 : 1,
-        boxShadow: 'var(--shadow-xs)',
+        opacity: inherited && !expanded ? 0.85 : 1,
+        boxShadow: expanded ? 'var(--shadow-md)' : 'var(--shadow-xs)',
         cursor: inherited ? 'default' : (hasSubs ? 'default' : 'pointer'),
         transition: 'min-width 0.22s ease, padding 0.22s ease',
         fontFamily: 'var(--sans)',
@@ -1057,6 +1075,7 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
           })}
         </div>
       )}
+    </div>
     </div>
   )
 }
