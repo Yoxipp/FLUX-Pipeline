@@ -1,35 +1,34 @@
 # FLUX Marvelous Designer bridge script (SKELETON - verify live).
 #
-# Marvelous only runs Python while a script is executing: the moment a script returns,
-# every Python thread freezes (so a background socket thread never answers). This
-# script therefore never returns: it serves FLUX from Marvelous' main thread, pumping
-# Marvelous' Windows message queue between requests so the interface stays usable,
-# and runs each export right there (the API is only safe on that thread).
+# Constraints found live on Marvelous 2024 (embedded Python 3.7):
+# - no _socket module: no network at all, so FLUX and this script talk through
+#   files in a mailbox folder (%TEMP%/flux_marvelous_bridge);
+# - Python only runs while a script executes (threads freeze once it returns):
+#   this script never returns while it serves, and pumps Marvelous' Windows
+#   messages between two looks at the mailbox so the interface stays usable
+#   (needs ctypes; without it, one-shot mode: Marvelous is busy until the first
+#   export, then the script hands control back);
+# - its Python editor mangles double quotes and backslashes: none in this file,
+#   no future import, Python 3.7 syntax, ASCII only.
 #
-# Started from Marvelous: Plugins > Plug-in > FLUX Bridge (registered by the Plug
-# button of FLUX), or pasted in Plugins > Python Editor. Stop: close Marvelous, or
-# {'action': 'shutdown'}. A second start while one runs does nothing.
+# Started from Marvelous: Script > Python (2024), Plugins > Plug-in > FLUX Bridge
+# (2024.1+, registered by the Plug button of FLUX), or pasted in the Python editor.
+# Stop: close Marvelous, or FLUX sends shutdown. A second start while one runs
+# does nothing.
 #
-# Protocol (one JSON object per line, one request per connection):
-#   {'action': 'ping'}                    -> {'status': 'ok', 'version': '...'}
-#   {'action': 'info'}                    -> {'status': 'ok', 'project': ..., 'formats': [...]}
-#   {'action': 'export', 'config': {...}} -> {'status': 'ok', 'files': [...]}
-#   {'action': 'shutdown'}                -> {'status': 'ok'}
-#
-# config:
-#   {'exportPath': dir, 'name': file stem, 'format': 'abc' | 'obj' | 'fbx' | 'zprj' |
-#    'usd' | 'glb', 'options': {'garment': bool, 'avatar': bool, 'single_object': bool,
-#    'thick': bool, 'unified_uv': bool, 'scale': float}, 'zprj': bool}
+# Mailbox (all JSON):
+#   alive.json          rewritten every second: {pid, version, time, mode}
+#   <id>.req            written by FLUX: {action, config}
+#   <id>.resp           written here:    {status: ok | error, ...}
+# Actions: ping, info, export {exportPath, name, format, options, zprj}, shutdown.
 #
 # NOTE: export_api function names and ImportExportOption fields changed across
 # Marvelous versions; they are looked up defensively and must be verified live.
-# Keep this file ASCII: Marvelous may not read it as UTF-8.
 
 import builtins
 import json
 import os
-import socket
-import tempfile as _tempfile
+import sys
 import time as _time
 
 try:
@@ -39,22 +38,25 @@ except Exception:  # noqa: BLE001 - importable from the backend for a syntax che
     _export_api = None
     _MD_AVAILABLE = False
 
-HOST = '127.0.0.1'
-# Base of Marvelous' assigned range (DCC_PORT_RANGES['Marvelous']); env override
-# for multi-instance. Must match the backend client / status scan port.
-PORT = int(os.environ.get('FLUX_MARVELOUS_PORT', '7050'))
-
-POLL_S = 0.02            # idle wait between two looks at the socket / message queue
-REQUEST_TIMEOUT_S = 10.0  # a client that sends nothing is dropped
+POLL_S = 0.05            # idle wait between two looks at the mailbox / message queue
+ALIVE_EVERY_S = 1.0      # heartbeat period (FLUX reads a heartbeat older than 3 s as gone)
+ONE_SHOT_IDLE_S = 600.0  # one-shot mode: give Marvelous back after 10 min without export
 
 # Survives a second Run of the script (Marvelous re-executes it in fresh globals).
 _STATE_KEY = '_flux_marvelous_bridge'
-# No quote character nor backslash anywhere in this file: the Marvelous 2024 Python
-# editor mangles them (SyntaxError: unexpected character after line continuation
-# character), and the file must run once opened or pasted there.
 _NL = chr(10)
-_NL_B = _NL.encode('ascii')
-_LOG_PATH = os.path.join(_tempfile.gettempdir(), 'flux_marvelous_bridge.log')
+
+
+def _temp_dir():
+    for key in ('FLUX_MD_MAILBOX_ROOT', 'TEMP', 'TMP'):
+        val = os.environ.get(key)
+        if val:
+            return val
+    return os.path.expanduser('~')
+
+
+MAILBOX = os.path.join(_temp_dir(), 'flux_marvelous_bridge')
+_LOG_PATH = os.path.join(_temp_dir(), 'flux_marvelous_bridge.log')
 
 
 def _state():
@@ -67,25 +69,44 @@ def _state():
 
 def _diag(msg):
     try:
-        with open(_LOG_PATH, 'a', encoding='utf-8') as fh:
+        with open(_LOG_PATH, 'a') as fh:
             fh.write(_time.strftime('%Y-%m-%d %H:%M:%S ') + msg + _NL)
     except OSError:
         pass
     print('[FLUX] ' + msg)
 
 
+def _has(module):
+    try:
+        __import__(module)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _environment():
+    '''What this Marvelous Python offers, for the log (the next surprise is read there).'''
+    mods = ' '.join('%s=%s' % (m, 'y' if _has(m) else 'n')
+                    for m in ('ctypes', '_socket', 'select', 'threading', '_json'))
+    return 'python %s, %s, api=%s' % (sys.version.split()[0], mods, _MD_AVAILABLE)
+
+
 # -- Windows message pump: keeps Marvelous' interface alive while we serve --------
 
 
 def _make_pump():
-    # A function that dispatches Marvelous' pending window messages; returns False
-#     when Marvelous is closing (WM_QUIT). No-op outside Windows.
+    '''A function that dispatches Marvelous' pending window messages and returns False
+    when Marvelous is closing (WM_QUIT); None when ctypes is missing (one-shot mode).
+    No-op outside Windows.'''
     if os.name != 'nt':
         return lambda: True
-    import ctypes
-    from ctypes import wintypes
-
-    user32 = ctypes.windll.user32
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+    except Exception as exc:  # noqa: BLE001
+        _diag('ctypes unavailable (%r): one-shot mode' % (exc,))
+        return None
     msg = wintypes.MSG()
     pm_remove, wm_quit = 0x0001, 0x0012
 
@@ -99,6 +120,33 @@ def _make_pump():
         return True
 
     return pump
+
+
+# -- mailbox ---------------------------------------------------------------------
+
+
+def _write_json(path, data):
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as fh:
+        json.dump(data, fh)
+    os.replace(tmp, path)
+
+
+def _heartbeat(mode):
+    try:
+        _write_json(os.path.join(MAILBOX, 'alive.json'),
+                    {'pid': os.getpid(), 'version': _version() if _MD_AVAILABLE else 'Marvelous Designer',
+                     'time': _time.time(), 'mode': mode})
+    except OSError as exc:
+        _diag('heartbeat failed: %r' % (exc,))
+
+
+def _pending():
+    try:
+        names = sorted(n for n in os.listdir(MAILBOX) if n.endswith('.req'))
+    except OSError:
+        return []
+    return [os.path.join(MAILBOX, n) for n in names]
 
 
 # -- Marvelous API helpers -----------------------------------------------------
@@ -150,7 +198,7 @@ def _formats():
 
 def _make_options(opts):
     # An ImportExportOption filled with the FLUX options (only the fields this
-#     Marvelous knows). None when the type is not exposed.
+    # Marvelous knows). None when the type is not exposed.
     api_types = _module('ApiTypes')
     cls = getattr(api_types, 'ImportExportOption', None) if api_types else None
     if cls is None:
@@ -297,88 +345,88 @@ def _dispatch(cmd):
     if action == 'shutdown':
         _state()['stop'] = True
         return {'status': 'ok'}
-    return {'status': 'error', 'msg': f'unknown action: {action}'}
+    return {'status': 'error', 'msg': 'unknown action: %s' % action}
 
 
-def _read_line(conn, pump):
-    # One request line, pumping Marvelous while the client is slow.
-    conn.setblocking(False)
-    buf = b''
-    deadline = _time.time() + REQUEST_TIMEOUT_S
-    while _NL_B not in buf:
-        try:
-            chunk = conn.recv(65536)
-        except (BlockingIOError, InterruptedError):
-            if _time.time() > deadline:
-                return None
-            pump()
-            _time.sleep(POLL_S)
-            continue
-        if not chunk:
-            return None
-        buf += chunk
-    return buf.split(_NL_B)[0]
-
-
-def _serve_one(conn, pump):
+def _serve_request(req_path):
+    '''Answer one request file; returns its action.'''
+    work = req_path[:-4] + '.work'
     try:
-        line = _read_line(conn, pump)
-        if line is None:
-            return
-        try:
-            resp = _dispatch(json.loads(line.decode('utf-8')))
-        except Exception as exc:  # noqa: BLE001 - reported to the backend
-            _diag(f'request failed: {exc!r}')
-            resp = {'status': 'error', 'msg': str(exc)}
-        conn.setblocking(True)
-        conn.sendall((json.dumps(resp) + _NL).encode('utf-8'))
+        os.replace(req_path, work)          # claimed: never served twice
+        with open(work) as fh:
+            cmd = json.load(fh)
+    except (OSError, ValueError) as exc:
+        _diag('unreadable request %s: %r' % (req_path, exc))
+        return ''
+    try:
+        resp = _dispatch(cmd)
+    except Exception as exc:  # noqa: BLE001 - reported to FLUX
+        _diag('request failed: %r' % (exc,))
+        resp = {'status': 'error', 'msg': str(exc)}
+    try:
+        _write_json(req_path[:-4] + '.resp', resp)
     except OSError as exc:
-        _diag(f'connection dropped: {exc!r}')
-    finally:
-        try:
-            conn.close()
-        except OSError:
-            pass
+        _diag('answer not written: %r' % (exc,))
+    try:
+        os.remove(work)
+    except OSError:
+        pass
+    return str(cmd.get('action', ''))
 
 
 def serve(pump=None):
-    # Serve FLUX until Marvelous closes or FLUX sends shutdown (never returns before).
+    '''Serve FLUX until Marvelous closes or FLUX sends shutdown (never returns before).
+
+    *pump*: the message pump (tests); default = Marvelous' Windows queue, or one-shot
+    mode when ctypes is missing.'''
     st = _state()
     if st['running']:
-        _diag(f'Marvelous bridge already running on {HOST}:{PORT}')
+        _diag('Marvelous bridge already running (%s)' % MAILBOX)
         return
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((HOST, PORT))
-        sock.listen(5)
-        sock.setblocking(False)
+        os.makedirs(MAILBOX, exist_ok=True)
+        for name in os.listdir(MAILBOX):     # requests left by a previous session
+            if name.endswith(('.req', '.work', '.resp', '.tmp')):
+                os.remove(os.path.join(MAILBOX, name))
     except OSError as exc:
-        _diag(f'Marvelous bridge bind failed on {HOST}:{PORT}: {exc}')
+        _diag('mailbox unusable %s: %r' % (MAILBOX, exc))
         return
-    pump = pump or _make_pump()
+    if pump is None:
+        pump = _make_pump()
+    one_shot = pump is None
+    mode = 'one-shot' if one_shot else 'live'
     st.update(running=True, stop=False)
-    _diag(f'Marvelous bridge listening on {HOST}:{PORT} (api={_MD_AVAILABLE})')
+    _diag('Marvelous bridge ready, mailbox %s, mode %s (%s)' % (MAILBOX, mode, _environment()))
+    last_beat = 0.0
+    started = _time.time()
     try:
         while not st['stop']:
-            if not pump():
+            if not one_shot and not pump():
                 break
-            try:
-                conn, _ = sock.accept()
-            except (BlockingIOError, InterruptedError):
+            now = _time.time()
+            if now - last_beat >= ALIVE_EVERY_S:
+                _heartbeat(mode)
+                last_beat = now
+            reqs = _pending()
+            for req in reqs:
+                action = _serve_request(req)
+                if one_shot and action == 'export':
+                    st['stop'] = True        # give Marvelous back after the export
+            if not reqs:
+                if one_shot and now - started > ONE_SHOT_IDLE_S:
+                    _diag('one-shot mode: no export for %d s, stopping' % ONE_SHOT_IDLE_S)
+                    break
                 _time.sleep(POLL_S)
-                continue
-            _serve_one(conn, pump)
     finally:
         st['running'] = False
         try:
-            sock.close()
+            os.remove(os.path.join(MAILBOX, 'alive.json'))
         except OSError:
             pass
         _diag('Marvelous bridge stopped')
 
 
-# Run from Marvelous (Plug-in menu or Python Editor): serve at once. The API only
-# imports inside Marvelous, so importing this file from the backend starts nothing.
+# Run from Marvelous: serve at once. The API only imports inside Marvelous, so
+# importing this file from the backend starts nothing.
 if _MD_AVAILABLE:
     serve()

@@ -2152,8 +2152,9 @@ def _bridge_error(error: str | None, default: str, autostart_mod, soft: str) -> 
     """The bridge's error, plus where it is and its log when the app does not answer."""
     msg = error or default
     low = msg.lower()
-    if any(k in low for k in ("refused", "timed out", "timeout", "10061", "111", "unreachable")):
-        msg = f"{soft} ne repond pas sur le port du bridge ({msg}). {autostart_mod.diagnose()}"
+    # "non lance": the Marvelous mailbox bridge has no heartbeat (no port there).
+    if any(k in low for k in ("refused", "timed out", "timeout", "10061", "111", "unreachable", "non lance")):
+        msg = f"{soft} ne repond pas au bridge FLUX ({msg}). {autostart_mod.diagnose()}"
     return msg
 
 

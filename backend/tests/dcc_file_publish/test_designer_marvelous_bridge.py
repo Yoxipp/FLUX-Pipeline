@@ -274,32 +274,77 @@ class MarvelousBridgeScript(unittest.TestCase):
         self.assertEqual(res["status"], "error")
 
 
-    def test_serves_on_the_calling_thread_until_shutdown(self):
-        # Marvelous freezes background threads: the loop runs on the caller's thread,
-        # pumping the host between requests, and returns on shutdown.
-        import socket as _socket
+    def _serve_in_thread(self, box, pump):
+        # The thread plays Marvelous: the loop runs on its caller's thread (Marvelous
+        # freezes background threads) and talks to FLUX through the mailbox files
+        # (Marvelous 2024 has no _socket).
         import threading
-        from dcc.json_bridge import send_json_line
 
-        with _socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        pumps = []
         state = {"running": False, "stop": False}
-        with mock.patch.object(self.br, "PORT", port), mock.patch.object(self.br, "_state", return_value=state):
-            t = threading.Thread(target=self.br.serve, kwargs={"pump": lambda: pumps.append(1) or True})
-            t.start()
-            for _ in range(100):
-                if state["running"]:
-                    break
-                _time.sleep(0.02)
-            ping = send_json_line("127.0.0.1", port, {"action": "ping"}, 5.0)
+        patches = [mock.patch.object(self.br, "MAILBOX", str(box)),
+                   mock.patch.object(self.br, "_state", return_value=state),
+                   mock.patch.dict(os.environ, {"FLUX_MD_MAILBOX_ROOT": str(box.parent)})]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        t = threading.Thread(target=self.br.serve, kwargs={"pump": pump}, daemon=True)
+        t.start()
+        for _ in range(200):
+            if (box / "alive.json").exists():
+                break
+            _time.sleep(0.02)
+        return t, state
+
+    def test_serves_through_the_mailbox_until_shutdown(self):
+        with tempfile.TemporaryDirectory() as d:
+            box = Path(d) / "flux_marvelous_bridge"
+            (box).mkdir()
+            (box / "old.req").write_text("{}")         # left by a previous session: dropped
+            pumps = []
+            t, state = self._serve_in_thread(box, lambda: pumps.append(1) or True)
+            self.assertFalse((box / "old.req").exists())
+            ping = md_client.marvelous_client.ping()
             self.assertTrue(ping["ok"], ping)
-            self.assertTrue(send_json_line("127.0.0.1", port, {"action": "shutdown"}, 5.0)["ok"])
+            self.assertEqual(ping["mode"], "live")
+            info = md_client.marvelous_client.info()
+            self.assertTrue(info["ok"], info)
+            self.assertEqual(info["formats"], ["obj", "zprj"])
+            self.assertTrue(md_client.call({"action": "shutdown"}, 5.0)["ok"])
             t.join(5.0)
-        self.assertFalse(t.is_alive())
-        self.assertFalse(state["running"])
-        self.assertTrue(pumps)
+            self.assertFalse(t.is_alive())
+            self.assertFalse(state["running"])
+            self.assertTrue(pumps)
+            self.assertFalse((box / "alive.json").exists())
+            self.assertFalse(md_client.marvelous_client.ping()["ok"])     # gone = not connected
+
+    def test_one_shot_mode_gives_marvelous_back_after_the_export(self):
+        # No ctypes (no message pump): Marvelous is busy while the script runs, so it
+        # stops by itself once the export is done.
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            box = Path(d) / "flux_marvelous_bridge"
+            with mock.patch.object(self.br, "_make_pump", return_value=None):
+                t, state = self._serve_in_thread(box, None)
+                self.assertEqual(md_client.marvelous_client.ping()["mode"], "one-shot")
+                self.assertTrue(md_client.marvelous_client.info()["ok"])      # info does not stop it
+                self.assertTrue(state["running"])
+                res = md_client.marvelous_client.export({"exportPath": out, "name": "X", "format": "obj"})
+                self.assertTrue(res["ok"], res)
+                t.join(5.0)
+            self.assertFalse(t.is_alive())
+
+    def test_no_heartbeat_means_not_running(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"FLUX_MD_MAILBOX_ROOT": d}):
+            res = md_client.marvelous_client.info()
+        self.assertFalse(res["ok"])
+        self.assertIn(md_client.NOT_RUNNING, res["error"])
+
+    def test_an_export_in_progress_reads_as_busy(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"FLUX_MD_MAILBOX_ROOT": d}):
+            box = Path(d) / "flux_marvelous_bridge"
+            box.mkdir()
+            (box / "x.work").write_text("{}")
+            ping = md_client.marvelous_client.ping()
+        self.assertEqual((ping["ok"], ping.get("busy")), (True, True))
 
 
 class DesignerBridgeScript(unittest.TestCase):
