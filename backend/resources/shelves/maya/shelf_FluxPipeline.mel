@@ -1,5 +1,5 @@
 // shelf_FluxPipeline.mel — FLUX pipeline buttons, always added to the Flux shelf
-// (MAJ, base Camera Rig, base Light Rig: ADR 0023). CAM = green F, LIGHT = yellow F.
+// (MAJ). The Camera / Light Rigs are checkable tools (shelf_FluxCamRig / LightRig.mel).
 // Installed by the Flux Shelf Manager (merged into shelf_Flux.mel).
 
 global proc shelf_FluxPipeline() {
@@ -10,19 +10,5 @@ global proc shelf_FluxPipeline() {
         -imageOverlayLabel "MAJ"
         -sourceType   "python"
         -command      "from dcc.maya import maya_update; maya_update.update_imports()"
-    ;
-    shelfButton
-        -label        "CAM"
-        -annotation   "FLUX : Camera Rig de base (Root > Pan > Tilt > Cam, 35 mm, 36 x 24)"
-        -image1       "flux_cam.png"
-        -sourceType   "python"
-        -command      "from dcc.maya import maya_rigs; maya_rigs.create_camera_rig()"
-    ;
-    shelfButton
-        -label        "LIGHT"
-        -annotation   "FLUX : Light Rig de base (key, fill, rim + dome)"
-        -image1       "flux_light.png"
-        -sourceType   "python"
-        -command      "from dcc.maya import maya_rigs; maya_rigs.create_light_rig()"
     ;
 }

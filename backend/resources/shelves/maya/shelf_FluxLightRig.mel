@@ -1,0 +1,12 @@
+// shelf_FluxLightRig.mel — base Light Rig tool of the Flux shelf (ADR 0023), yellow F.
+// Checkable in the Flux Shelf Manager, merged into shelf_Flux.mel.
+
+global proc shelf_FluxLightRig() {
+    shelfButton
+        -label        "LIGHT"
+        -annotation   "FLUX : Light Rig de base (key, fill, rim + dome)"
+        -image1       "flux_light.png"
+        -sourceType   "python"
+        -command      "from dcc.maya import maya_rigs; maya_rigs.create_light_rig()"
+    ;
+}

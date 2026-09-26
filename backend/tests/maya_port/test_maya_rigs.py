@@ -132,14 +132,34 @@ class MayaRigs(unittest.TestCase):
         self.assertEqual(res["dome_kind"], "aiSkyDomeLight")
         self.assertEqual(cmds.types[cmds.shapes[res["dome"]]], "aiSkyDomeLight")
 
-    def test_the_flux_shelf_always_has_both_rigs(self) -> None:
-        from features.shelf_manager.shelf_core import build_flux_shelf_mel
+    def test_both_rigs_are_checkable_tools_of_the_flux_shelf(self) -> None:
+        from features.shelf_manager.shelf_core import build_flux_shelf_mel, list_tools
 
-        mel = build_flux_shelf_mel([])
+        labels = {t["id"]: t["label"] for t in list_tools()}
+        self.assertEqual((labels["cam_rig"], labels["light_rig"]), ("CAM", "LIGHT"))
+        mel = build_flux_shelf_mel(["cam_rig", "light_rig"])
         self.assertIn("maya_rigs.create_camera_rig()", mel)
         self.assertIn("maya_rigs.create_light_rig()", mel)
+        self.assertIn('"flux_cam.png"', mel)
+        self.assertIn('"flux_light.png"', mel)
+        bare = build_flux_shelf_mel([])
+        self.assertNotIn("maya_rigs.create_camera_rig()", bare)
+        self.assertNotIn("maya_rigs.create_light_rig()", bare)
         src = Path(maya_rigs.__file__).read_text(encoding="utf-8")
         self.assertIn("def create_camera_rig", src)
+
+    def test_a_selection_saved_before_the_rigs_existed_gets_them_checked(self) -> None:
+        from features.shelf_manager import shelf_core
+
+        store: dict = {"maya_shelf_tools": ["flux_anim"]}
+        fake = mock.Mock(get=store.get, set=store.__setitem__)
+        with mock.patch.object(shelf_core, "config", fake):
+            self.assertEqual(shelf_core.get_shelf_tool_selection(),
+                             ["flux_anim", "cam_rig", "light_rig"])
+            shelf_core.set_shelf_tool_selection(["adam_rig"])
+            self.assertEqual(shelf_core.get_shelf_tool_selection(), ["adam_rig"])
+            store["maya_shelf_tools"] = []
+            self.assertEqual(shelf_core.get_shelf_tool_selection(), [])
 
 
 if __name__ == "__main__":

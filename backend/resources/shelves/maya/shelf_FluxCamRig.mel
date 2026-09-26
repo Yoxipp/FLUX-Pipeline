@@ -1,0 +1,12 @@
+// shelf_FluxCamRig.mel — base Camera Rig tool of the Flux shelf (ADR 0023), green F.
+// Checkable in the Flux Shelf Manager, merged into shelf_Flux.mel.
+
+global proc shelf_FluxCamRig() {
+    shelfButton
+        -label        "CAM"
+        -annotation   "FLUX : Camera Rig de base (Root > Pan > Tilt > Cam, 35 mm, 36 x 24)"
+        -image1       "flux_cam.png"
+        -sourceType   "python"
+        -command      "from dcc.maya import maya_rigs; maya_rigs.create_camera_rig()"
+    ;
+}

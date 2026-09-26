@@ -199,14 +199,20 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
 # ── Maya tools → single Flux shelf ────────────────────────────────────────────
 # ONE Flux shelf (shelf_Flux.mel) is generated from the SELECTED tools' buttons:
 # each tool source .mel contributes the shelfButtons inside its `global proc`.
-# Only two user-facing tools ship on the Flux shelf: ANIM (animation) and RIG
-# (rigging toolbox). Order matches the shelf layout [ ANIM ] [ RIG ]. The old
-# "flux" pipeline button is not a shelf tool; the Houdini importer HDA is a
-# technical dependency installed with the Houdini shelf and the autostart.
+# User-facing tools: ANIM (animation), RIG (rigging toolbox), CAM (base Camera Rig)
+# and LIGHT (base Light Rig). Order matches the shelf layout. The MAJ pipeline button
+# is not a tool (always on the shelf); the Houdini importer HDA is a technical
+# dependency installed with the Houdini shelf and the autostart.
 MAYA_TOOLS: list[dict] = [
-    {"id": "flux_anim", "label": "ANIM", "filename": "shelf_FluxAnimTool.mel"},
-    {"id": "adam_rig",   "label": "RIG",  "filename": "shelf_AntRigToolbox.mel"},
+    {"id": "flux_anim", "label": "ANIM",  "filename": "shelf_FluxAnimTool.mel"},
+    {"id": "adam_rig",   "label": "RIG",   "filename": "shelf_AntRigToolbox.mel"},
+    {"id": "cam_rig",   "label": "CAM",   "filename": "shelf_FluxCamRig.mel"},
+    {"id": "light_rig", "label": "LIGHT", "filename": "shelf_FluxLightRig.mel"},
 ]
+# Catalogue ids the saved selection already knew about: a tool added later starts
+# checked instead of vanishing from a shelf saved before it existed.
+_SHELF_TOOLS_KNOWN_KEY = "maya_shelf_tools_known"
+_LEGACY_KNOWN_TOOLS = ("flux_anim", "adam_rig")
 
 
 def _tool(tool_id: str) -> dict | None:
@@ -221,13 +227,18 @@ def list_tools() -> list[dict]:
 def get_shelf_tool_selection() -> list[str]:
     """Return the persisted tool selection (defaults to all tools)."""
     sel = config.get(_SHELF_TOOLS_KEY)
-    if isinstance(sel, list):
-        return [s for s in sel if _tool(s)]   # may be empty if all unchecked
-    return [t["id"] for t in MAYA_TOOLS]
+    if not isinstance(sel, list):
+        return [t["id"] for t in MAYA_TOOLS]
+    known = config.get(_SHELF_TOOLS_KNOWN_KEY)
+    if not isinstance(known, list):
+        known = list(_LEGACY_KNOWN_TOOLS)
+    # may be empty if all unchecked; tools newer than the saved choice start checked
+    return [t["id"] for t in MAYA_TOOLS if t["id"] in sel or t["id"] not in known]
 
 
 def set_shelf_tool_selection(ids: list[str]) -> None:
     config.set(_SHELF_TOOLS_KEY, [i for i in ids if _tool(i)])
+    config.set(_SHELF_TOOLS_KNOWN_KEY, [t["id"] for t in MAYA_TOOLS])
 
 
 def _extract_shelf_body(mel_text: str) -> str:
