@@ -57,17 +57,37 @@ def _diag(msg: str) -> None:
     print("[FLUX] " + msg)
 
 
+_draining = False
+
+
 def _drain() -> None:
-    while True:
-        try:
-            fn, box, done = _jobs.get_nowait()
-        except _queue.Empty:
-            return
-        try:
-            box["result"] = fn()
-        except Exception as exc:  # noqa: BLE001 - reported to the backend
-            box["result"] = {"status": "error", "msg": str(exc)}
-        done.set()
+    # Mari pumps Qt events while it flattens / writes a channel, so this timer fires
+    # again in the middle of an export: never start another Mari call inside one (a
+    # nested info / export during a flatten can crash Mari, 2026-09-26).
+    global _draining
+    if _draining:
+        return
+    _draining = True
+    try:
+        while True:
+            try:
+                fn, box, done = _jobs.get_nowait()
+            except _queue.Empty:
+                return
+            if box.get("abandoned"):
+                # Its caller gave up waiting (Mari was busy): nobody reads the answer.
+                done.set()
+                continue
+            name = getattr(fn, "__name__", "job")
+            _diag(f"main thread: {name} start")
+            try:
+                box["result"] = fn()
+            except Exception as exc:  # noqa: BLE001 - reported to the backend
+                box["result"] = {"status": "error", "msg": str(exc)}
+            _diag(f"main thread: {name} done")
+            done.set()
+    finally:
+        _draining = False
 
 
 def _start_main_thread_pump() -> None:
@@ -97,6 +117,7 @@ def _on_main_thread(fn, timeout: float = 600.0) -> dict:
     done = threading.Event()
     _jobs.put((fn, box, done))
     if not done.wait(timeout):
+        box["abandoned"] = True
         return {"status": "error", "msg": "DCC busy: no answer from the main thread"}
     return box["result"]
 
@@ -260,7 +281,9 @@ def _dispatch(cmd: dict) -> dict:
         chans = cmd.get("channels") or None
         fmts = cmd.get("formats") or None
         # A big UDIM export takes long: never answer "busy" while Mari is still writing.
-        return _on_main_thread(lambda: _do_export(path, fmt, chans, fmts), timeout=4 * 3600.0)
+        def export():
+            return _do_export(path, fmt, chans, fmts)
+        return _on_main_thread(export, timeout=4 * 3600.0)
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 

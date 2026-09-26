@@ -136,6 +136,30 @@ class MariBusy(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 4)
         self.assertIsNone(client.busy_since())
 
+    def test_no_mari_call_starts_inside_another(self):
+        """2026-09-26: Mari crashed during exports. Mari pumps Qt events while it
+        writes, so the bridge timer fires inside an export: the next job must wait."""
+        import threading
+
+        from dcc.mari import mari_bridge as b
+        order = []
+
+        def export():
+            order.append("export start")
+            b._drain()          # the timer firing while Mari writes
+            order.append("export end")
+            return {}
+
+        def info():
+            order.append("info")
+            return {}
+
+        abandoned = {"abandoned": True}
+        for fn, box in ((export, {}), (info, {}), (info, abandoned)):
+            b._jobs.put((fn, box, threading.Event()))
+        b._drain()
+        self.assertEqual(order, ["export start", "export end", "info"])
+
     def test_same_named_channels_get_their_own_id(self):
         from types import SimpleNamespace
 
