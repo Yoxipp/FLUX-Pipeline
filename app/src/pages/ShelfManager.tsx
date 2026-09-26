@@ -1,13 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, Pill } from '../components/shared/ui'
+import { Btn, SecTitle, Pill, Check } from '../components/shared/ui'
 import { FluxLogo } from '../components/shared/Logo'
 import { api } from '../api/client'
+import { useProject } from '../ProjectContext'
 
 // Shelf tool tints — ANIM (orange) / RIG (blue), matching the Maya shelf icons.
 const ANIM_COLOR = 'oklch(70% 0.15 52)'
 const RIG_COLOR  = 'oklch(60% 0.18 250)'
+// Painter shelf = the project's export presets, green F (2026-09-26).
+const PAINTER_COLOR = 'oklch(72% 0.17 150)'
+
+// "FLUX_BEAUTY_MAPS" -> "BEAUTY" for the shelf button label.
+function presetLabel(name: string): string {
+  return name.replace(/^FLUX_/i, '').replace(/_MAPS$/i, '') || name
+}
 
 const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: string; primary?: boolean }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
@@ -60,6 +68,34 @@ export function ShelfManager() {
   const [toolVersion, setToolVersion] = useState('')
   const [toolsInstalled, setToolsInstalled] = useState<Record<string, boolean>>({})
   const [checked, setChecked] = useState<Record<string, boolean>>({})
+
+  // Painter: the export presets of the current project (project.json texturing.painter_presets).
+  const { project } = useProject()
+  const [painterBundled, setPainterBundled] = useState<string[]>([])
+  const [painterPicked, setPainterPicked] = useState<string[]>([])
+  const loadPainterPresets = useCallback(async () => {
+    try {
+      const r = await api.getPainterPresets(project || undefined)
+      setPainterBundled(r.bundled)
+      setPainterPicked(r.project)
+    } catch { /* backend indispo : on ignore */ }
+  }, [project])
+  useEffect(() => { if (dcc === 'Painter') void loadPainterPresets() }, [dcc, loadPainterPresets])
+  async function togglePainterPreset(name: string) {
+    if (!project) return
+    const next = painterPicked.includes(name) ? painterPicked.filter(n => n !== name) : [...painterPicked, name]
+    setPainterPicked(next)
+    try {
+      await api.putPainterPresets(project, next)
+      addLog('ok', `Presets Painter de ${project} : ${next.length ? next.join(', ') : 'tous'}`)
+    } catch (e: any) {
+      addLog('err', String(e?.message ?? e))
+      void loadPainterPresets()
+    }
+  }
+  const isPainter = dcc === 'Painter'
+  // What the Publisher will offer: the project's presets, all of them when none is picked.
+  const painterShelf = painterPicked.length ? painterPicked : painterBundled
 
   const currentData: ShelfData = shelfData[dcc] ?? { versions: [], installed: {}, hdas_installed: {} }
   const versions = currentData.versions
@@ -168,7 +204,7 @@ export function ShelfManager() {
         <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
 
           {/* version */}
-          <div>
+          {!isPainter && <div>
             <SecTitle>Version cible</SecTitle>
             {versions.length === 0 ? (
               <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
@@ -183,10 +219,10 @@ export function ShelfManager() {
                 ))}
               </div>
             )}
-          </div>
+          </div>}
 
           {/* status badges */}
-          {version && (
+          {version && !isPainter && (
             <div>
               <SecTitle>État</SecTitle>
               <div style={{ display: 'flex', gap: 16 }}>
@@ -202,7 +238,11 @@ export function ShelfManager() {
           <div>
             <SecTitle>Aperçu du shelf</SecTitle>
             <div className="card" style={{ padding: '14px 20px', display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', minHeight: 62 }}>
-              {dcc === 'Maya' ? (
+              {isPainter ? (
+                painterShelf.length ? painterShelf.map(p => (
+                  <ShelfBtn key={p} icon={<FluxLogo size={20} color={PAINTER_COLOR} />} label={presetLabel(p)} />
+                )) : <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>Aucun preset FLUX livré</div>
+              ) : dcc === 'Maya' ? (
                 <>
                   <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="ANIM" />
                   <ShelfBtn icon={<FluxLogo size={20} color={RIG_COLOR} />} label="RIG" />
@@ -218,9 +258,38 @@ export function ShelfManager() {
             </div>
           </div>
 
+          {/* PAINTER: export presets of the project (moved from the Folder Manager). */}
+          {isPainter && (
+            <div>
+              <SecTitle>Presets d'export Painter{project ? ` · ${project}` : ''}</SecTitle>
+              {!project ? (
+                <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>Choisis un projet pour régler ses presets.</div>
+              ) : (
+                <div className="card" style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {painterBundled.map(p => {
+                    const on = painterPicked.includes(p)
+                    return (
+                      <div key={p} onClick={() => { void togglePainterPreset(p) }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: 'pointer',
+                                 fontFamily: 'var(--mono)', fontSize: 11, color: on ? 'var(--ink)' : 'var(--ink-3)' }}>
+                        <Check on={on} />
+                        <FluxLogo size={13} color={PAINTER_COLOR} />
+                        {p}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
+                Le Publisher ne propose que les presets cochés pour ce projet ; aucun coché : tous.
+                Les presets FLUX sont copiés dans Painter à l'installation du bridge (Autostart).
+              </div>
+            </div>
+          )}
+
           {/* actions. Houdini: installing the shelf also installs (or rebuilds, when
               Houdini is connected) the FLUX HDAs; removing it keeps them (Autostart). */}
-          <div>
+          {!isPainter && <div>
             <SecTitle>Actions</SecTitle>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
@@ -242,7 +311,7 @@ export function ShelfManager() {
                 Retirer enlève la shelf seulement : l'Autostart garde les HDAs.
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Catalogue de tools Maya (rig toolbox / anim tool / flux) — Maya only.
               Rigging/Anim toolboxes are Maya-specific; Houdini has no equivalent. */}
