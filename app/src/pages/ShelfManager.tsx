@@ -11,6 +11,9 @@ const ANIM_COLOR = 'oklch(70% 0.15 52)'
 const RIG_COLOR  = 'oklch(60% 0.18 250)'
 // Painter shelf = the project's export presets, green F (2026-09-26).
 const PAINTER_COLOR = 'oklch(72% 0.17 150)'
+// Maya base rigs of the Flux shelf: Camera Rig green, Light Rig yellow (2026-09-26).
+const CAM_COLOR   = 'oklch(72% 0.17 150)'
+const LIGHT_COLOR = 'oklch(84% 0.16 92)'
 
 // "FLUX_BEAUTY_MAPS" -> "BEAUTY" for the shelf button label.
 function presetLabel(name: string): string {
@@ -246,6 +249,8 @@ export function ShelfManager() {
                 <>
                   <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="ANIM" />
                   <ShelfBtn icon={<FluxLogo size={20} color={RIG_COLOR} />} label="RIG" />
+                  <ShelfBtn icon={<FluxLogo size={20} color={CAM_COLOR} />} label="CAM" />
+                  <ShelfBtn icon={<FluxLogo size={20} color={LIGHT_COLOR} />} label="LIGHT" />
                 </>
               ) : (
                 <>
