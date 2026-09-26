@@ -190,12 +190,23 @@ class Autostart(unittest.TestCase):
             self.assertTrue(res["success"])                         # the script is there
             self.assertIn("+ADD", res["message"])
             self.assertEqual(settings.read_text(encoding="utf-8"), "{not json")
-            # the Python Editor line is a raw string: a bare Windows path is a SyntaxError
-            self.assertTrue(md_autostart.python_editor_line().startswith('exec(open(r"'))
+            # Marvelous 2024 mangles " and backslashes pasted in its editor (SyntaxError)
+            line = md_autostart.python_editor_line()
+            self.assertTrue(line.startswith("exec(open('"), line)
+            self.assertNotIn('"', line)
+            self.assertNotIn("\\", line)
 
-    def test_marvelous_script_is_ascii(self):
-        # Marvelous may not read the script as UTF-8.
-        (Path(md_autostart._PLUGIN_SRC)).read_bytes().decode("ascii")
+    def test_marvelous_script_survives_the_2024_editor(self):
+        # ASCII (Marvelous may not read UTF-8), no " nor backslash (its 2024 editor
+        # mangles them), no __future__ import (the editor may prepend a line) and
+        # Python 3.7 syntax (older embedded Python).
+        import ast
+
+        text = Path(md_autostart._PLUGIN_SRC).read_bytes().decode("ascii")
+        self.assertNotIn('"', text)
+        self.assertNotIn("\\", text)
+        self.assertNotIn("__future__", text)
+        ast.parse(text, feature_version=(3, 7))
 
 
 class MarvelousBridgeScript(unittest.TestCase):

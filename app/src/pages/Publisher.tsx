@@ -2058,7 +2058,7 @@ export function Publisher() {
                       : bridgeStatus.checking
                         ? 'Vérification...'
                         : dcc === 'Marvelous'
-                          ? 'Marvelous ne répond pas : dans Marvelous, Plugins > Plug-in > FLUX Bridge (une fois par session)'
+                          ? 'Marvelous ne répond pas : dans Marvelous 2024.1+, Plugins > Plug-in > FLUX Bridge ; en 2024, la ligne ci-dessous (une fois par session)'
                           : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
                   </div>
                 </div>
@@ -2067,9 +2067,10 @@ export function Publisher() {
                     {marvelousScript
                       ? <>
                           <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-                            Pas de FLUX Bridge dans le menu (Marvelous était ouvert pendant l'installation ?) : colle cette ligne dans Plugins &gt; Python Editor puis Run.
+                            Pas de menu Plugins &gt; Plug-in (Marvelous 2024) ou pas de FLUX Bridge dedans : colle cette ligne dans Script &gt; Python (Plugins &gt; Python Editor en 2024.1+) puis Run.
                           </span>
-                          <CopyBlock text={`exec(open(r"${marvelousScript}", encoding="utf-8").read())`} />
+                          {/* No " and no \ : the Marvelous 2024 editor mangles them (SyntaxError). */}
+                          <CopyBlock text={`exec(open('${marvelousScript.replace(/\\/g, '/')}').read())`} />
                         </>
                       : <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>Script absent : bouton Plug de Marvelous dans la sidebar pour l'écrire.</span>}
                   </div>

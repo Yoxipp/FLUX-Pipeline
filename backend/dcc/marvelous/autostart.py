@@ -153,9 +153,13 @@ def uninstall(exe_path: str | None = None) -> dict:
 
 
 def python_editor_line() -> str:
-    """One line to paste in Plugins > Python Editor to start the bridge by hand (a raw
-    string: a bare Windows path pasted there is a SyntaxError)."""
-    return f'exec(open(r"{get_startup_file()}", encoding="utf-8").read())'
+    """One line to paste in Marvelous' Python editor to start the bridge by hand.
+
+    No double quote and no backslash: the Marvelous 2024 editor mangles them (a bare
+    Windows path or a r"..." string gave "unexpected character after line
+    continuation character"). Forward slashes work on Windows."""
+    path = str(get_startup_file()).replace("\\", "/")
+    return f"exec(open('{path}').read())"
 
 
 def diagnose(max_lines: int = 4) -> str:
@@ -166,7 +170,8 @@ def diagnose(max_lines: int = 4) -> str:
     elif is_registered():
         parts = [f"Dans Marvelous : Plugins > Plug-in > {_PLUGIN_TITLE} (une fois par session)"]
     else:
-        parts = [f"Dans Marvelous : Plugins > Python Editor, colle {python_editor_line()} puis Run"]
+        parts = [f"Dans Marvelous : Script > Python (Plugins > Python Editor en 2024.1+), "
+                 f"colle {python_editor_line()} puis Run"]
     try:
         lines = _BRIDGE_LOG.read_text(encoding="utf-8", errors="replace").strip().splitlines()
     except OSError:
