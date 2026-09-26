@@ -377,6 +377,9 @@ export const api = {
     user?:        string
   }) =>
     apiCall<LookExportResult>('POST', '/dcc/houdini/export-usd-look', payload),
+  createSequenceRenderScene: (project: string, seq: string) =>
+    apiCall<{ ok: boolean; created: boolean; path: string; shots?: string[]; without_stage?: string[] }>(
+      'POST', '/dcc/houdini/sequence-render-scene', { project, seq }),
 
   // ZBrush
   publishZBrush: (payload: ZBrushPublishPayload) =>

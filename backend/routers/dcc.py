@@ -2715,6 +2715,28 @@ async def houdini_shot_switch_shots(project: str) -> dict:
     return {"shots": shots}
 
 
+class SequenceRenderSceneRequest(BaseModel):
+    project: str
+    seq: str
+
+
+@router.post("/houdini/sequence-render-scene")
+async def houdini_sequence_render_scene(req: SequenceRenderSceneRequest) -> dict:
+    """Default render scene of a sequence (<SEQ>_render.hip): one FLUX Shot branch + one
+    Karma ROP per shot, built by an isolated hython, never overwritten (ADR 0036)."""
+    from core.paths import get_project_path
+    from features.folder_manager.houdini_render_scene import create_sequence_render_scene
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: create_sequence_render_scene(project_path, req.seq))
+    if not res.get("ok"):
+        raise HTTPException(status_code=500, detail=f"Scene de rendu non creee : {res.get('error')}")
+    return res
+
+
 # ── FLUX Crowd node (A7, ADR 0022) ───────────────────────────────────────────
 
 @router.get("/houdini/crowd/module")

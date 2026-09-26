@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Copy, FolderPlus, Plus, Trash2, X } from 'lucide-react'
+import { Check, Clapperboard, Copy, FolderPlus, Plus, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
 import type {
@@ -642,6 +642,23 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     }
     patchSeq({ name: newName })
   }
+  // Default Houdini render scene of the sequence (ADR 0036), built offline by hython.
+  const [renderBusy, setRenderBusy] = useState(false)
+  const makeRenderScene = async () => {
+    setRenderBusy(true)
+    try {
+      const r = await api.createSequenceRenderScene(project, seq.name)
+      if (!r.created) toast.info(`La scène de rendu existe déjà : ${r.path}`)
+      else {
+        const missing = r.without_stage?.length ? ` · sans stage : ${r.without_stage.join(', ')}` : ''
+        toast.success(`Scène de rendu créée (${r.shots?.length ?? 0} shots)${missing}`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRenderBusy(false)
+    }
+  }
   const archiveDel = useArchiveDelete(project)
   const remove = () => {
     archiveDel.request(
@@ -748,6 +765,16 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
         <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
           <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
         </ProdBtn>
+      </div>
+
+      <div style={_pad}>
+        <div style={_lbl}>RENDU</div>
+        <ProdBtn full onClick={() => { void makeRenderScene() }} disabled={renderBusy}>
+          <Clapperboard size={12} strokeWidth={1.75} /> {renderBusy ? 'Création en cours…' : 'Scène de rendu Houdini'}
+        </ProdBtn>
+        <div style={{ ..._lbl, marginTop: 6, textTransform: 'none', letterSpacing: 0 }}>
+          Un FLUX Shot et un ROP Karma par shot, dans {seq.name}_render.hip. Une scène existante n'est jamais écrasée.
+        </div>
       </div>
 
       <AssetsPicker

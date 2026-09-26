@@ -290,7 +290,9 @@ def create_render_rop(node):
     import hou
     if not (_pval(node, "seq") and _pval(node, "shot")):
         _status(node, "Choisis la sequence et le shot d'abord"); return
-    src = _light_source(node)
+    # The whole branch (lights + render settings), not light_node: that one stops at the
+    # lights so the light publish never carries the render settings.
+    src = _branch_end(node)
     rop = hou.node(_pval(node, "render_rop")) if _pval(node, "render_rop") else None
     if rop is None:
         # Creating a render ROP in a live session crashed Houdini once (ADR 0021, 0029):
