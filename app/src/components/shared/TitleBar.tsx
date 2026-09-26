@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight, SlidersHorizontal } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight, SlidersHorizontal, Pin } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
@@ -434,6 +434,8 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const [settingsHov,  setSettingsHov]  = useState(false)
   const [bellHov,      setBellHov]      = useState(false)
   const [refreshing,   setRefreshing]   = useState(false)
+  const [pinned,       setPinned]       = useState(false)
+  const [pinHov,       setPinHov]       = useState(false)
   const [refreshDone,  setRefreshDone]  = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const navigate = useNavigate()
@@ -509,6 +511,30 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       >
         <RefreshCw size={14} strokeWidth={1.75} style={refreshing ? { animation: 'spin 0.6s linear infinite' } : undefined} />
       </div>
+
+      {/* pin: keep FLUX above other apps (grey off, accent on) */}
+      {window.electronAPI?.windowTogglePin && (
+        <div
+          className="no-drag"
+          title={t(pinned ? 'titlebar.unpin' : 'titlebar.pin')}
+          onClick={async () => {
+            const next = await window.electronAPI?.windowTogglePin?.()
+            if (typeof next === 'boolean') setPinned(next)
+          }}
+          onMouseEnter={() => setPinHov(true)}
+          onMouseLeave={() => setPinHov(false)}
+          style={{
+            width: 28, height: 28, borderRadius: 7,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: pinned ? 'var(--accent)' : (pinHov ? 'var(--ink)' : 'var(--ink-3)'),
+            background: pinHov ? 'var(--paper-2)' : 'transparent',
+            cursor: 'pointer',
+            transition: 'background 0.1s, color 0.1s',
+          }}
+        >
+          <Pin size={14} strokeWidth={1.75} fill={pinned ? 'currentColor' : 'none'} style={{ transform: 'rotate(45deg)' }} />
+        </div>
+      )}
 
       {/* console (left of the bell) */}
       <Console />

@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   windowMinimize: (): void => ipcRenderer.send('window:minimize'),
   windowMaximize: (): void => ipcRenderer.send('window:maximize'),
   windowClose:    (): void => ipcRenderer.send('window:close'),
+  // Toggle always-on-top for this window, resolves to the new pinned state.
+  windowTogglePin: (): Promise<boolean> => ipcRenderer.invoke('window:togglePin'),
   // Open a page in its own window at the cursor (U4, sidebar drag out).
   detachPage:     (route: string): void => ipcRenderer.send('window:detach', route),
 

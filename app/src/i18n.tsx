@@ -23,6 +23,8 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   // titlebar
   'titlebar.tagline':        { fr: 'Pipeline Tool',            en: 'Pipeline Tool' },
   'titlebar.refresh':        { fr: 'Rafraîchir les données',   en: 'Refresh data' },
+  'titlebar.pin':            { fr: 'Garder FLUX au premier plan', en: 'Keep FLUX on top' },
+  'titlebar.unpin':          { fr: 'Ne plus garder au premier plan', en: 'Stop keeping on top' },
   'titlebar.refreshDone':    { fr: 'Refresh effectué',         en: 'Refresh done' },
   'titlebar.notifications':  { fr: 'Activité & notifications', en: 'Activity & notifications' },
   'titlebar.settings':       { fr: 'Paramètres',               en: 'Settings' },

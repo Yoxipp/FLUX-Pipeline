@@ -298,6 +298,14 @@ ipcMain.on('window:maximize', (e) => {
   if (w) (w.isMaximized() ? w.unmaximize() : w.maximize())
 })
 ipcMain.on('window:close',    (e) => senderWindow(e)?.close())
+// Pin: keep the window above every other app until toggled off.
+ipcMain.handle('window:togglePin', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender)
+  if (!w) return false
+  const pinned = !w.isAlwaysOnTop()
+  w.setAlwaysOnTop(pinned, 'floating')
+  return pinned
+})
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 

@@ -14,6 +14,7 @@ declare global {
       windowMinimize: () => void
       windowMaximize: () => void
       windowClose: () => void
+      windowTogglePin?: () => Promise<boolean>
       detachPage?: (route: string) => void
       getBackendStatus?: () => Promise<string>
       restartBackend?: () => Promise<string>
