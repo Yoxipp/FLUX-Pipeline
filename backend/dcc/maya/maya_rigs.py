@@ -1,9 +1,9 @@
 # maya_rigs.py — base Camera Rig and Light Rig of the Flux shelf (ADR 0023 points 12, 13).
 #
-# Camera Rig (2026-09-24): CAM_RIG_root > CAM_RIG_pan > CAM_RIG_tilt > CAM_RIG_cam.
-#   root = placement (translate / rotate), pan = rotate Y, tilt = rotate X (+ roll Z),
-#   camera: focal 35 mm, film back 36 x 24 mm, clip 0.1 / 10000. The camera itself is
-#   locked: the controls carry the animation.
+# Camera Rig (2026-09-26): the maintainer's rig, imported from resources/rigs/maya/flux_cam_rig.ma
+#   (Flux_Cam_Rig > Cam + Ctrl_Cam controls + DO_NOT_TOUCH guides, settings on
+#   Ctrl_Setting_Cam). The file holds the rig only: no default cameras, no scene globals
+#   (render / colour settings), no machine path. A second rig goes into its own namespace.
 # Light Rig (2026-09-24): Maya native 3 points + dome, under LIGHT_RIG:
 #   key / fill / rim directional lights (scale independent) + a dome: aiSkyDomeLight when
 #   Arnold (mtoa) is loaded, else an ambient light.
@@ -11,6 +11,8 @@
 # tags of maya_update.py). Runs inside Maya, called by the Flux shelf buttons.
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from core.logger import get_logger
 
@@ -23,9 +25,9 @@ except ImportError:
     cmds = None
     _IN_MAYA = False
 
-INCH = 25.4
-CAMERA = {"focalLength": 35.0, "horizontalFilmAperture": 36.0 / INCH,
-          "verticalFilmAperture": 24.0 / INCH, "nearClipPlane": 0.1, "farClipPlane": 10000.0}
+CAM_RIG_FILE = Path(__file__).resolve().parents[2] / "resources" / "rigs" / "maya" / "flux_cam_rig.ma"
+CAM_RIG_ROOT = "Flux_Cam_Rig"
+CAM_RIG_NAMESPACE = "CAM"
 # name, rotation (x, y, z), intensity: key high front-left, fill low opposite, rim behind.
 THREE_POINTS = (("key", (-40.0, 35.0, 0.0), 1.0),
                 ("fill", (-15.0, -60.0, 0.0), 0.35),
@@ -37,19 +39,6 @@ def _tag(node: str, kind: str) -> None:
     if not cmds.attributeQuery("flux_rig", node=node, exists=True):
         cmds.addAttr(node, longName="flux_rig", dataType="string")
     cmds.setAttr(f"{node}.flux_rig", kind, type="string")
-
-
-def _lock(node: str, attrs: list[str]) -> None:
-    for attr in attrs:
-        cmds.setAttr(f"{node}.{attr}", lock=True, keyable=False, channelBox=False)
-
-
-def _control(name: str, radius: float, parent: str | None = None) -> str:
-    """NURBS circle control (lying flat), parented under *parent*."""
-    ctrl = cmds.circle(name=name, normal=(0, 1, 0), radius=radius, constructionHistory=False)[0]
-    if parent:
-        ctrl = cmds.parent(ctrl, parent)[0]
-    return ctrl
 
 
 def _chunk(func):
@@ -68,24 +57,25 @@ def _chunk(func):
 
 
 @_chunk
-def create_camera_rig(name: str = "CAM_RIG") -> dict:
-    """Root > Pan > Tilt > Cam. Returns the created node names."""
-    root = _control(f"{name}_root", 3.0)
-    pan = _control(f"{name}_pan", 2.0, root)
-    tilt = _control(f"{name}_tilt", 1.2, pan)
-    cam, shape = cmds.camera(name=f"{name}_cam")
-    cam = cmds.parent(cam, tilt)[0]
-    shape = (cmds.listRelatives(cam, shapes=True, fullPath=False) or [shape])[0]
-    for attr, value in CAMERA.items():
-        cmds.setAttr(f"{shape}.{attr}", value)
-    _lock(pan, ["tx", "ty", "tz", "rx", "rz", "sx", "sy", "sz"])          # pan: rotate Y only
-    _lock(tilt, ["tx", "ty", "tz", "ry", "sx", "sy", "sz"])               # tilt: rotate X, roll Z
-    _lock(cam, ["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz"])    # animate the controls
-    _lock(root, ["sx", "sy", "sz"])
+def create_camera_rig() -> dict:
+    """Import the FLUX Camera Rig file. Returns the root, the camera and the namespace."""
+    if not CAM_RIG_FILE.is_file():
+        raise RuntimeError(f"Camera Rig introuvable : {CAM_RIG_FILE}")
+    # First rig keeps the clean names; the next ones get CAM:, CAM1: ... so nothing is renamed.
+    namespace = CAM_RIG_NAMESPACE if cmds.objExists(CAM_RIG_ROOT) else ""
+    kwargs = {"namespace": namespace, "mergeNamespacesOnClash": False} if namespace else {}
+    new_nodes = cmds.file(str(CAM_RIG_FILE).replace("\\", "/"), i=True, type="mayaAscii",
+                          ignoreVersion=True, returnNewNodes=True, **kwargs) or []
+    roots = [n for n in new_nodes if n.split("|")[-1].split(":")[-1] == CAM_RIG_ROOT]
+    if not roots:
+        raise RuntimeError("Camera Rig importe sans son groupe Flux_Cam_Rig")
+    root = roots[0]
+    shapes = cmds.ls(new_nodes, type="camera", long=True) or []
+    camera = (cmds.listRelatives(shapes[0], parent=True, fullPath=True) or [""])[0] if shapes else ""
     _tag(root, "camera")
     cmds.select(root, replace=True)
-    log.info("Camera rig created: %s", root)
-    return {"root": root, "pan": pan, "tilt": tilt, "camera": cam, "shape": shape}
+    log.info("Camera rig imported: %s", root)
+    return {"root": root, "camera": camera, "namespace": namespace}
 
 
 def _arnold_loaded() -> bool:

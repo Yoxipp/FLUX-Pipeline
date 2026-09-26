@@ -4,7 +4,7 @@
 global proc shelf_FluxCamRig() {
     shelfButton
         -label        "CAM"
-        -annotation   "FLUX : Camera Rig de base (Root > Pan > Tilt > Cam, 35 mm, 36 x 24)"
+        -annotation   "FLUX : Camera Rig (aim, up, reglages camera sur Ctrl_Setting_Cam)"
         -image1       "flux_cam.png"
         -sourceType   "python"
         -command      "from dcc.maya import maya_rigs; maya_rigs.create_camera_rig()"

@@ -106,20 +106,46 @@ class MayaRigs(unittest.TestCase):
         with mock.patch.object(maya_rigs, "cmds", fake):
             return func(), fake
 
-    def test_camera_rig_root_pan_tilt_cam(self) -> None:
-        res, cmds = self._run(maya_rigs.create_camera_rig)
-        self.assertEqual(cmds.parent_of[res["pan"]], res["root"])
-        self.assertEqual(cmds.parent_of[res["tilt"]], res["pan"])
-        self.assertEqual(cmds.parent_of[res["camera"]], res["tilt"])
-        self.assertEqual(cmds.attrs[f"{res['shape']}.focalLength"], 35.0)
-        self.assertAlmostEqual(cmds.attrs[f"{res['shape']}.horizontalFilmAperture"] * 25.4, 36.0)
-        self.assertAlmostEqual(cmds.attrs[f"{res['shape']}.verticalFilmAperture"] * 25.4, 24.0)
-        self.assertIn(f"{res['camera']}.tx", cmds.locked)        # the controls carry the animation
-        self.assertNotIn(f"{res['pan']}.ry", cmds.locked)
-        self.assertNotIn(f"{res['tilt']}.rx", cmds.locked)
-        self.assertEqual(cmds.attrs[f"{res['root']}.flux_rig"], "camera")
-        self.assertEqual(cmds.undo, ["open", "close"])
-        self.assertEqual(cmds.selected, [res["root"]])
+    def test_camera_rig_imports_the_flux_file_then_namespaces_the_next_one(self) -> None:
+        fake = _FakeCmds()
+        imports: list[dict] = []
+
+        def file(path, **kw):
+            imports.append({"path": path, **kw})
+            ns = kw.get("namespace", "")
+            pre = f"{ns}:" if ns else ""
+            root = f"|{pre}Flux_Cam_Rig"
+            for n in (root, f"{root}|{pre}Cam", f"{root}|{pre}Cam|{pre}CamShape"):
+                fake.parent_of[n] = None
+            fake.types[f"{root}|{pre}Cam|{pre}CamShape"] = "camera"
+            return list(fake.parent_of)[-3:]
+
+        fake.file = file
+        fake.objExists = lambda n: any(k.split("|")[-1] == n for k in fake.parent_of)
+        fake.ls = lambda nodes, type, long: [n for n in nodes if fake.types.get(n) == type]
+        fake.listRelatives = lambda n, parent=False, **_kw: [n.rsplit("|", 1)[0]] if parent else None
+        with mock.patch.object(maya_rigs, "cmds", fake):
+            first = maya_rigs.create_camera_rig()
+            second = maya_rigs.create_camera_rig()
+        self.assertEqual(imports[0]["path"], str(maya_rigs.CAM_RIG_FILE).replace("\\", "/"))
+        self.assertTrue(imports[0]["i"])
+        self.assertNotIn("namespace", imports[0])
+        self.assertEqual((first["root"], first["camera"], first["namespace"]),
+                         ("|Flux_Cam_Rig", "|Flux_Cam_Rig|Cam", ""))
+        self.assertEqual(imports[1]["namespace"], "CAM")
+        self.assertEqual(second["root"], "|CAM:Flux_Cam_Rig")
+        self.assertEqual(fake.attrs["|Flux_Cam_Rig.flux_rig"], "camera")
+        self.assertEqual(fake.undo, ["open", "close", "open", "close"])
+
+    def test_the_shipped_camera_rig_holds_the_rig_only(self) -> None:
+        text = maya_rigs.CAM_RIG_FILE.read_text(encoding="cp1252")
+        self.assertIn('createNode transform -n "Flux_Cam_Rig";', text)
+        self.assertIn('createNode camera -n "CamShape" -p "Cam";', text)
+        self.assertIn('setAttr ".flux_rig" -type "string" "camera";', text)
+        self.assertIn('requires maya "2024";', text)             # opens in Maya 2024 and 2025
+        for banned in ("select -ne :", '"persp', "C:/", "stereoCamera", "createNode script",
+                       "AutoRig_", "Flux_Cam_Rig:"):
+            self.assertNotIn(banned, text, banned)
 
     def test_light_rig_three_points_and_dome(self) -> None:
         res, cmds = self._run(maya_rigs.create_light_rig)
