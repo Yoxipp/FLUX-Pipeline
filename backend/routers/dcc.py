@@ -1265,6 +1265,26 @@ async def maya_anim_range(scope: str = "scene", port: int | None = None) -> dict
     return res
 
 
+@router.get("/maya/usd-preview")
+async def maya_usd_preview(preset: str, scope: str = "scene", start: int | None = None,
+                           end: int | None = None, port: int | None = None) -> dict:
+    """What a USD preset would export from Maya (2026-09-26): meshes (model),
+    skeleton tree + skinned meshes (rig), moving joints (anim) or materials (look)."""
+    if preset not in ("model", "rig", "anim", "look"):
+        raise HTTPException(status_code=400, detail=f"preset inconnu : {preset}")
+    target = await _maya_target(port)
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, lambda: _maya_call_json(
+        target, "run_preview", preset, "selection" if scope == "selection" else "scene",
+        "" if start is None else str(start), "" if end is None else str(end),
+        timeout=60.0, module="maya_usd_preview"))
+    if res is None:
+        raise HTTPException(status_code=503, detail="Maya ne repond pas (commandPort).")
+    if not res.get("ok"):
+        raise HTTPException(status_code=500, detail=str(res.get("error") or "liste impossible"))
+    return res
+
+
 @router.get("/maya/character-instances")
 async def maya_character_instances(name: str, port: int | None = None) -> dict:
     """Instances of one character in the Maya scene (U2): top nodes / namespaces named
@@ -1311,6 +1331,9 @@ class MayaLightExportRequest(BaseModel):
     include_anim:    bool = True
     include_weights: bool = True   # UsdSkel skin binding (bone capture)
     include_uv:      bool = True
+    # Publisher preset options (ADR 0034): {"preset": "model"|"rig"|"anim", ...}.
+    # With a preset, Maya runs the preset sweep instead of the include flags.
+    options:         dict | None = None
     port:            int | None = None  # target Maya instance (None → base commandPort)
 
 
@@ -1345,6 +1368,11 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
             return str(v)
         return "r'" + str(v).replace("'", "") + "'"
 
+    # base64(JSON): quote-safe inside the single-line commandPort command.
+    import base64 as _b64
+    opts_b64 = (_b64.b64encode(_json.dumps(req.options).encode("utf-8")).decode("ascii")
+                if req.options else "")
+
     cmd = (
         f"import sys; sys.path.insert(0, r'{_backend_root}'); "
         f"sys.modules.pop('dcc.maya.maya_usd_light_export', None); "
@@ -1354,7 +1382,8 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)}, "
         f"include_geo={_arg(req.include_geo)}, include_skel={_arg(req.include_skel)}, "
         f"include_anim={_arg(req.include_anim)}, include_weights={_arg(req.include_weights)}, "
-        f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)}, root={_arg(req.root)})"
+        f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)}, root={_arg(req.root)}, "
+        f"options_b64='{opts_b64}')"
     )
 
     target_port = await _maya_target(req.port)

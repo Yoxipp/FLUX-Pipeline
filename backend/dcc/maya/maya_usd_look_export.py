@@ -38,6 +38,14 @@ def export_look(out_path: str, *, scope: str = "scene") -> str | None:
     if selection and not cmds.ls(selection=True):
         log.error("look export: rien de selectionne dans Maya (scene : %s)", scene)
         return None
+    if selection:
+        picked_meshes = cmds.listRelatives(cmds.ls(selection=True, long=True, objectsOnly=True),
+                                           allDescendents=True, type="mesh", fullPath=True) or []
+        picked_meshes += cmds.ls(selection=True, type="mesh", long=True) or []
+        if not picked_meshes:
+            log.error("look export: aucune geometrie dans la selection, ses materiaux ne peuvent "
+                      "pas etre trouves (selectionne les meshes ou leur groupe)")
+            return None
     if not cmds.ls(type="mesh"):
         log.error("look export: aucun mesh dans la scene Maya %s", scene)
         return None

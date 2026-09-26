@@ -14,6 +14,7 @@ _BACKEND = Path(__file__).resolve().parents[2]
 _MAYA_SIDE = (
     "dcc.maya.maya_import", "dcc.maya.maya_update", "dcc.maya.maya_export",
     "dcc.maya.maya_usd_light_export", "dcc.maya.maya_usd_look_export", "dcc.maya.maya_layout",
+    "dcc.maya.maya_usd_presets", "dcc.maya.maya_usd_preview", "dcc.maya.maya_keys",
     "dcc.maya.maya_connection", "features.usd_export", "features.usd_export.contract",
     "features.usd_assembler.structure.naming", "core.constants",
 )

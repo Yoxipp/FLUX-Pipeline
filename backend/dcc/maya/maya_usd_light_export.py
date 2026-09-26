@@ -514,12 +514,17 @@ def run_light_export(
     include_light: bool = False,
     scope: str = "selection",
     root: str | None = None,
+    options_b64: str = "",
 ) -> None:
     """Extract a light asset from Maya and write a JSON envelope to *result_path*.
 
     Writes ``{ok, asset:<LightAsset dict|null>, logs:[{level,msg}]}``. USD authoring
     is NOT done here (Maya has no reliable pxr): the Flux backend reads this envelope,
     rebuilds the LightAsset and publishes it. Called via commandPort by the hub.
+
+    *options_b64* is base64(JSON) of the Publisher preset options; with a "preset"
+    key ("model" | "rig" | "anim", ADR 0034) the preset sweep of maya_usd_presets runs
+    instead of the include flags.
     """
     import dataclasses
     import json
@@ -540,10 +545,30 @@ def run_light_export(
     flux_root = logging.getLogger("flux")
     flux_root.addHandler(collector)
 
+    options: dict = {}
+    if options_b64:
+        try:
+            import base64
+            options = json.loads(base64.b64decode(options_b64).decode("utf-8")) or {}
+        except Exception as exc:    # noqa: BLE001 - reported, the export goes on
+            records.append({"level": "WARNING", "msg": f"options d'export illisibles : {exc!r}"})
+
     data = None
     try:
         if not _IN_MAYA:
             log.error("run_light_export: not running inside Maya")
+        elif options.get("preset"):
+            import importlib
+            import sys
+
+            sys.modules.pop("dcc.maya.maya_usd_presets", None)   # pick up a new backend
+            presets = importlib.import_module("dcc.maya.maya_usd_presets")
+            try:
+                light = presets.build(str(options["preset"]), asset, scope, options,
+                                      frame_start, frame_end, root=root)
+                data = dataclasses.asdict(light)
+            except presets.PresetError as exc:
+                log.error("%s", exc)
         else:
             light = _build_light_asset(
                 asset, mesh, root_joint, frame_start, frame_end,

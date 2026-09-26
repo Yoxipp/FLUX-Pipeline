@@ -319,10 +319,19 @@ _USD_BOOL_FLAGS: frozenset[str] = frozenset({
     "exportDisplayColor", "exportComponentTags", "exportVisibility", "exportInstances",
     "mergeTransformAndShape", "stripNamespaces", "eulerFilter", "staticSingleSample",
     "worldspace", "preserveUVSetNames", "normalizeNurbs",
+    # Custom preset (2026-09-26): every other mayaUSDExport on|off flag.
+    "exportAssignedMaterials", "exportMaterialCollections", "exportCollectionBasedBindings",
+    "exportRefsAsInstanceable", "includeEmptyTransforms", "exportDistanceUnit", "writeDefaults",
 })
 _USD_STR_FLAGS: frozenset[str] = frozenset({
     "exportSkels", "exportSkin", "defaultMeshScheme", "geomSidedness", "upAxis", "kind",
+    "shadingMode", "animationType", "materialsScopeName", "rootPrim", "rootPrimType",
+    "defaultPrim", "renderLayerMode", "exportRelativeTextures",
 })
+# Multi-use string flags: one value from the UI, passed as a list.
+_USD_LIST_FLAGS: frozenset[str] = frozenset({"convertMaterialsTo"})
+# Flags without value: set only when on.
+_USD_SWITCH_FLAGS: frozenset[str] = frozenset({"renderableOnly", "defaultCameras"})
 
 
 def _export_usd(
@@ -357,18 +366,38 @@ def _export_usd(
             sval = str(val).strip()
             if sval:
                 kwargs[key] = sval
+        elif key in _USD_LIST_FLAGS:
+            sval = str(val).strip()
+            if sval and sval != "none":
+                kwargs[key] = [sval]
+        elif key in _USD_SWITCH_FLAGS and bool(val):
+            kwargs[key] = True
 
     # Preserve Flux defaults when the UI did not provide them.
     kwargs.setdefault("exportUVs", 1)
     kwargs.setdefault("exportSkels", "none")
     kwargs.setdefault("defaultMeshScheme", "none")
 
-    try:
-        cmds.mayaUSDExport(**kwargs)  # type: ignore[union-attr]
-        return True
-    except Exception as exc:
-        log.error("USD export failed: %s", exc)
-        return False
+    # An older mayaUsd refuses a flag it does not know ("Invalid flag 'x'"): drop that
+    # flag and try again rather than failing the whole export.
+    import re as _re
+    for _ in range(8):
+        try:
+            cmds.mayaUSDExport(**kwargs)  # type: ignore[union-attr]
+            return True
+        except TypeError as exc:
+            m = _re.search(r"[Ii]nvalid flag '?(\w+)'?", str(exc))
+            flag = m.group(1) if m else None
+            if not flag or flag not in kwargs or flag in ("file", "selection"):
+                log.error("USD export failed: %s", exc)
+                return False
+            log.warning("USD export: option %s inconnue de ce mayaUsd, ignoree", flag)
+            kwargs.pop(flag)
+        except Exception as exc:
+            log.error("USD export failed: %s", exc)
+            return False
+    log.error("USD export failed: too many unknown options")
+    return False
 
 
 # ── shared export core ────────────────────────────────────────────────────────
