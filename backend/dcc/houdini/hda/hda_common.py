@@ -17,19 +17,19 @@ ICON_PATH = str(Path(__file__).parents[3] / "resources" / "shelves" / "houdini" 
 FINALIZE = '''
 _def = _asset.type().definition()
 for _sec, _code in (("PythonModule", _PM_CODE),
-                    ("OnCreated", "hou.phm().on_created(kwargs['node'])"),
-                    ("OnLoaded", "hou.phm().on_loaded(kwargs['node'])")):
+                    # kwargs['type'], not hou.phm(): while a scene loads, hou.pwd() is not
+                    # the node, so hou.phm() is another module ("no attribute on_loaded").
+                    ("OnCreated", "kwargs['type'].hdaModule().on_created(kwargs['node'])"),
+                    ("OnLoaded", "kwargs['type'].hdaModule().on_loaded(kwargs['node'])")):
     if _sec in _def.sections():
         _def.sections()[_sec].setContents(_code)
     else:
         _def.addSection(_sec, _code)
-try:
-    _extra = dict(_def.extraFileOptions())
-    for _sec in ("PythonModule", "OnCreated", "OnLoaded"):
-        _extra[_sec + ".IsPython"] = True
-    _def.setExtraFileOptions(_extra)
-except AttributeError:
-    pass
+# Without "<section>/IsPython" Houdini runs OnCreated / OnLoaded as HScript ("Unknown
+# command: hou.phm"): the node never resolved itself at creation or scene open.
+for _sec in ("PythonModule", "OnCreated", "OnLoaded"):
+    _def.setExtraFileOption(_sec + "/IsPython", True)
+    _def.setExtraFileOption(_sec + "/IsScript", True)
 _def.setParmTemplateGroup(_ptg)
 try:
     import os as _os

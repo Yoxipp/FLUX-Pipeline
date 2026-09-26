@@ -1075,26 +1075,21 @@ if "PythonModule" in _hda_def.sections():
 else:
     _hda_def.addSection("PythonModule", _pm_code)
 
-# Set OnCreated / OnLoaded events
-# setExtraFileOptions marks sections as Python for the editor; best-effort only
-try:
-    _extra = dict(_hda_def.extraFileOptions())
-    _extra["PythonModule.IsPython"] = True
-    _extra["OnCreated.IsPython"] = True
-    _extra["OnLoaded.IsPython"] = True
-    _hda_def.setExtraFileOptions(_extra)
-except AttributeError:
-    pass  # PythonModule / OnCreated / OnLoaded are always executed as Python
+# Set OnCreated / OnLoaded events. Without "<section>/IsPython" Houdini runs them as
+# HScript ("Unknown command: hou.phm") and the node never resolves itself.
+for _sec in ("PythonModule", "OnCreated", "OnLoaded"):
+    _hda_def.setExtraFileOption(_sec + "/IsPython", True)
+    _hda_def.setExtraFileOption(_sec + "/IsScript", True)
 
 if "OnCreated" in _hda_def.sections():
-    _hda_def.sections()["OnCreated"].setContents("hou.phm().on_created(kwargs[\\'node\\'])")
+    _hda_def.sections()["OnCreated"].setContents("kwargs[\\'type\\'].hdaModule().on_created(kwargs[\\'node\\'])")
 else:
-    _hda_def.addSection("OnCreated", "hou.phm().on_created(kwargs[\\'node\\'])")
+    _hda_def.addSection("OnCreated", "kwargs[\\'type\\'].hdaModule().on_created(kwargs[\\'node\\'])")
 
 if "OnLoaded" in _hda_def.sections():
-    _hda_def.sections()["OnLoaded"].setContents("hou.phm().on_loaded(kwargs[\\'node\\'])")
+    _hda_def.sections()["OnLoaded"].setContents("kwargs[\\'type\\'].hdaModule().on_loaded(kwargs[\\'node\\'])")
 else:
-    _hda_def.addSection("OnLoaded", "hou.phm().on_loaded(kwargs[\\'node\\'])")
+    _hda_def.addSection("OnLoaded", "kwargs[\\'type\\'].hdaModule().on_loaded(kwargs[\\'node\\'])")
 
 # Persist the parameter interface into the definition. createDigitalAsset does
 # NOT reliably capture the subnet's spare parms in every Houdini build — it can
@@ -1189,13 +1184,11 @@ if "PythonModule" in _hda_def.sections():
 else:
     _hda_def.addSection("PythonModule", _PM_CODE)
 
-# Mark the section as Python so hou.phm() works (best-effort — PythonModule is implicitly Python)
-try:
-    _extra = dict(_hda_def.extraFileOptions())
-    _extra["PythonModule.IsPython"] = True
-    _hda_def.setExtraFileOptions(_extra)
-except AttributeError:
-    pass  # Older Houdini: PythonModule is always executed as Python by hou.phm()
+# Mark the sections as Python (OnCreated / OnLoaded run as HScript otherwise)
+for _sec in ("PythonModule", "OnCreated", "OnLoaded"):
+    if _sec in _hda_def.sections():
+        _hda_def.setExtraFileOption(_sec + "/IsPython", True)
+        _hda_def.setExtraFileOption(_sec + "/IsScript", True)
 
 # Reload all scene instances so they pick up the new code immediately
 _instances = _node_type.instances() if _node_type else []

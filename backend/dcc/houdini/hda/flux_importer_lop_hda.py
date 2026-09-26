@@ -192,6 +192,7 @@ _loadgeo = hou.ToggleParmTemplate("load_geo", "Charger la geo", default_value=Tr
 # Set by resolve: 1 = a shot stage (sublayered, ADR 0020), 0 = an asset / decor (referenced).
 _as_sub = hou.ToggleParmTemplate("as_sublayer", "Shot (sublayer)", default_value=False, is_hidden=True)
 COMPONENT_FOLDERS = {COMPONENT_FOLDERS!r}
+MAX_ROWS = {MAX_ROWS!r}
 MAX_DEPTS = {MAX_DEPTS!r}
 DEPT_ARCS = {DEPT_ARCS!r}
 DEPT_ARC_LABELS = {DEPT_ARC_LABELS!r}
