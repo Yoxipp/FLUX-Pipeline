@@ -67,8 +67,11 @@ _EXPORT_CODE = textwrap.dedent(r'''
             _set("lopoutput", _OUT)
             # Absolute paths in a throwaway file: the backend rewrites them anyway.
             _set("enableoutputprocessor_simplerelativepaths", 0)
-            # One self-contained file: the backend reads it once and throws it away.
-            _set("savestyle", "flattenstage")
+            # One file for the layer stack, variant sets kept: "flattenstage" bakes the
+            # selected variant only and the assign variants were lost (ADR 0035).
+            # References to files on disk (the model brought by FLUX Import) stay
+            # references: the backend composes them and never copies a geometry.
+            _set("savestyle", "flattenalllayers")
             rop.setInput(0, node)
             try:
                 rop.render()
@@ -121,7 +124,8 @@ def run_look_export(project_path: str, *, lop_node: str | None = None, fmt: str 
         log.info("Houdini look published: %s (%s)", base_name, pub["version"])
         return {"ok": True, "asset": base_name, "version": pub["version"],
                 "root": str(pub["root"]), "materials": pub["materials"],
-                "bindings": pub["bindings"], "warnings": pub["warnings"]}
+                "bindings": pub["bindings"], "assign_variants": pub.get("assign_variants", []),
+                "warnings": pub["warnings"]}
     except Exception as exc:
         log.error("Houdini look export failed: %s", exc)
         return {"ok": False, "error": str(exc)}

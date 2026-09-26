@@ -635,6 +635,12 @@ def _author(folder: Path, name: str, token: str, version: str, recipe: dict,
         variant_sets[block] = [v for v in cr.variant_names(recipe["files"], block)
                                if any(f["id"] in resolved and f.get("variant") == v
                                       for f in recipe["files"] if f["block"] == block)]
+    # Look publishes with assign variants (ADR 0035): their variantSet "assign" composes
+    # on /<NAME> once the file is on; listed so the Library / decors / FLUX Import can
+    # pick one without loading the payload.
+    assign = _assign_of_files(recipe, resolved)
+    if assign:
+        variant_sets[ASSIGN_SET] = sorted({v for info in assign.values() for v in info["variants"]})
     entry_path = folder / f"{name}{COMPONENT_EXT}"
     entry = Sdf.Layer.CreateNew(str(entry_path))
     root = Sdf.PrimSpec(entry, token, Sdf.SpecifierDef)
@@ -655,9 +661,62 @@ def _author(folder: Path, name: str, token: str, version: str, recipe: dict,
         "recipe": json.dumps(recipe, sort_keys=True),
         "signature": json.dumps(signature, sort_keys=True),
         "variant_sets": json.dumps(variant_sets, sort_keys=True),
+        "assign": json.dumps(assign, sort_keys=True),
     }}
     entry.Save()
     return entry_path, variant_sets
+
+
+ASSIGN_SET = "assign"      # features.usd_export.look_export.ASSIGN_SET (ADR 0035)
+
+
+def _assign_of_files(recipe: dict, resolved: dict) -> dict[str, dict]:
+    """{file id: {"variants", "default"}} of the look publishes with assign variants."""
+    out: dict[str, dict] = {}
+    for f in recipe["files"]:
+        res = resolved.get(f["id"])
+        if not res or f["kind"] != "shader" or f["format"] not in cr.USD_FORMATS:
+            continue
+        from features.usd_export.look_export import assign_info
+
+        info = assign_info(res["path"])
+        if info.get("variants"):
+            out[f["id"]] = info
+    return out
+
+
+def assign_rows(files: list[dict], assign: dict[str, dict], active: dict[str, bool] | None,
+                previous: dict[str, bool] | None) -> tuple[list[dict], dict[str, bool]]:
+    """FLUX Import rows of the assign variants (ADR 0035): one per variant, in the look
+    section, a variant choice of the "assign" set (the importer selects the checked one).
+
+    One variant checked at a time: the one just checked wins (*previous* = toggles
+    before the click), none checked = the look's default. Returns (rows, toggles)."""
+    active = dict(active or {})
+    previous = previous or {}
+    by_id = {f["id"]: f for f in files}
+    rows: list[dict] = []
+    for fid, info in sorted(assign.items()):
+        look = by_id.get(fid)
+        if look is None:
+            continue
+        ids = [f"{fid}@{ASSIGN_SET}:{v}" for v in info["variants"]]
+        on = [i for i in ids if active.get(i)]
+        if len(on) > 1:
+            fresh = [i for i in on if not previous.get(i)]
+            keep = fresh[-1] if fresh else on[0]
+            on = [keep]
+        if not on and not any(i in active for i in ids):
+            default = f"{fid}@{ASSIGN_SET}:{info.get('default')}"
+            on = [default if default in ids else ids[0]]
+        for rid, v in zip(ids, info["variants"]):
+            active[rid] = rid in on
+            rows.append({"id": rid, "label": look.get("label", fid),
+                         "kind": "shader", "assign_of": fid, "department": look["department"],
+                         "block": ASSIGN_SET, "variant": v, "variant_set": ASSIGN_SET,
+                         "format": look.get("format", ""), "targets": [], "proxy_of": [],
+                         "active": rid in on, "greyed": False})
+    return rows, active
 
 
 def _compose(project_path: str | Path, name: str, recipe: dict, *, user: str = "",
@@ -898,13 +957,18 @@ def component_files(project_path: str | Path, name: str, version: str = "LAST",
     else:
         recipe = _legacy_recipe(project_path, name, flux, available_departments(project_path))
     sets = entry_variant_sets(entry)
+    rows, toggles = assign_rows(recipe["files"], _json_field(flux, "assign"), active, previous)
     active = cr.exclusive_by_target(recipe, active, previous)
     grey = cr.greyed(recipe, active)
+    # A look that is off (or greyed) brings no assign variantSet: its rows are greyed too.
+    for row in rows:
+        row["greyed"] = row["assign_of"] in grey or not (active or {}).get(row["assign_of"], True)
+    active = {**active, **{k: v for k, v in toggles.items() if "@" + ASSIGN_SET + ":" in k}}
     return {
         "name": name, "version": entry.parent.name.rsplit("_", 1)[-1],
         "legacy": not flux.get("recipe"),
         "files": [{**f, "variant_set": _set_of(f, sets), "greyed": f["id"] in grey}
-                  for f in recipe["files"]],
+                  for f in recipe["files"]] + rows,
         "active": active,
         "warnings": cr.warnings(recipe, active),
         "layers": department_layers(entry),

@@ -16,10 +16,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
-from pxr import Sdf, Usd, UsdGeom, UsdShade
+from pxr import Sdf, Usd, UsdGeom, UsdShade, UsdUtils
 
 from core.logger import get_logger
 
@@ -27,12 +28,14 @@ from ..usd_assembler.structure.naming import sanitize_token
 from .contract import mesh_prim_names
 from .skel_export import GEO_RENDER_SCOPE
 
-__all__ = ["MTL_SCOPE", "author_look_layer", "publish_look_asset"]
+__all__ = ["ASSIGN_SET", "MTL_SCOPE", "assign_info", "author_look_layer", "publish_look_asset"]
 
 log = get_logger("usd_export.look")
 
 MTL_SCOPE = "mtl"
 _TX_EXT = ".tx"
+# ADR 0035: the variantSet of the material assignments, same name on every asset.
+ASSIGN_SET = "assign"
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -135,6 +138,231 @@ def _retarget_textures(layer: Sdf.Layer, source_dir: Path, dest_dir: Path,
     return rewritten, warnings
 
 
+# ── assign variants (ADR 0035) ──────────────────────────────────────────────────
+# One Solaris export holds every material plus a variantSet whose variants only change
+# the material assignments (variant block of Assign Material LOPs). FLUX splits it in
+# the same publish: <base>_mtl (all the materials, no binding) and <base>_assign
+# (over /<NAME> + variantSet "assign", one variant per assignment, bindings only).
+
+def _bindings(stage: Usd.Stage, gprims: list[Sdf.Path]) -> dict[Sdf.Path, Sdf.Path]:
+    """{gprim: bound material} on the stage as currently composed."""
+    out: dict[Sdf.Path, Sdf.Path] = {}
+    for path in gprims:
+        prim = stage.GetPrimAtPath(path)
+        mat = _bound_material(prim) if prim else None
+        if mat is not None:
+            out[path] = mat.GetPath()
+    return out
+
+
+def _gprims(stage: Usd.Stage) -> list[Sdf.Path]:
+    return [p.GetPath() for p in stage.Traverse() if p.IsA(UsdGeom.Gprim)]
+
+
+def _find_assign_sets(stage: Usd.Stage) -> list[tuple[Sdf.Path, str, list[str], str]]:
+    """Variant sets authored in the export itself whose variants change material
+    bindings: [(prim path, set name, variants, selection)].
+
+    Only the export's own layer stack counts: the variant sets a referenced component
+    brings (FLUX Import toggles, look block variants) are never an assignment."""
+    local = UsdUtils.FlattenLayerStack(stage)
+    candidates: list[tuple[Sdf.Path, str, list[str]]] = []
+
+    def _walk(spec: Sdf.PrimSpec) -> None:
+        for name, vset in spec.variantSets.items():
+            names = [v.name for v in vset.variantList]
+            if len(names) > 1:
+                candidates.append((spec.path, name, names))
+        for child in spec.nameChildren:
+            _walk(child)
+
+    for root in local.rootPrims:
+        _walk(root)
+    if not candidates:
+        return []
+    gprims = _gprims(stage)
+    found = []
+    session = stage.GetSessionLayer()
+    with Usd.EditContext(stage, session):
+        for path, name, names in candidates:
+            vset = stage.GetPrimAtPath(path).GetVariantSet(name)
+            selection = vset.GetVariantSelection() or names[0]
+            seen = set()
+            for v in names:
+                vset.SetVariantSelection(v)
+                seen.add(tuple(sorted(_bindings(stage, gprims).items())))
+            vset.SetVariantSelection(selection)
+            if len(seen) > 1:
+                found.append((path, name, names, selection))
+    session.Clear()
+    return found
+
+
+def _over_chain(parent: Sdf.PrimSpec, rel_path: str) -> Sdf.PrimSpec:
+    """Over specs for each part of *rel_path* below *parent* (existing ones reused)."""
+    spec = parent
+    for part in [p for p in rel_path.split("/") if p]:
+        spec = spec.nameChildren.get(part) or Sdf.PrimSpec(spec, part, Sdf.SpecifierOver)
+    return spec
+
+
+def _bind_spec(spec: Sdf.PrimSpec, material: str) -> None:
+    spec.SetInfo("apiSchemas", Sdf.TokenListOp.Create(prependedItems=["MaterialBindingAPI"]))
+    rel = spec.relationships.get("material:binding") or \
+        Sdf.RelationshipSpec(spec, "material:binding", False)
+    rel.targetPathList.explicitItems = [Sdf.Path(material)]
+
+
+def _author_assign_look(src_stage: Usd.Stage, found: list, dest: Path, base: str,
+                        token: str, fmt: str, prefer_tx: bool) -> dict:
+    root_path = f"/{token}"
+    mtl_root = f"{root_path}/{MTL_SCOPE}"
+    source_dir = _source_dir(src_stage)
+    warnings: list[str] = []
+    path, set_name, names, selection = found[0]
+    for other in found[1:]:
+        warnings.append(f"variantSet {other[1]} ({other[0]}) ignore : un seul jeu d'assign par look, "
+                        f"{set_name} garde")
+    variant_names = [sanitize_token(v) for v in names]
+    default = sanitize_token(selection)
+
+    # 1. every variant composed once: its bindings, and the materials it shows.
+    gprims = _gprims(src_stage)
+    per_variant: dict[str, dict[Sdf.Path, Sdf.Path]] = {}
+    flats: list[Sdf.Layer] = []
+    session = src_stage.GetSessionLayer()
+    with Usd.EditContext(src_stage, session):
+        vset = src_stage.GetPrimAtPath(path).GetVariantSet(set_name)
+        for raw, clean in zip(names, variant_names):
+            vset.SetVariantSelection(raw)
+            per_variant[clean] = _bindings(src_stage, gprims)
+            flats.append(src_stage.Flatten())
+    session.Clear()
+
+    # 2. shaders layer: all the materials of all the variants, never a binding.
+    mtl_p = dest / f"{base}_mtl.{fmt}"
+    mtl_layer = _new_layer(mtl_p, fmt)
+    mtl_stage = Usd.Stage.Open(mtl_layer)
+    _define_scopes(mtl_stage, mtl_root)
+    mtl_layer.GetPrimAtPath(root_path).specifier = Sdf.SpecifierOver
+    moved: dict[Sdf.Path, Sdf.Path] = {}
+    for flat in flats:
+        flat_stage = Usd.Stage.Open(flat)          # kept alive while its prims are read
+        for mat in _materials(flat_stage):
+            if mat.GetPath() in moved:
+                continue
+            leaf = sanitize_token(mat.GetName())
+            target = Sdf.Path(f"{mtl_root}/{leaf}")
+            if mtl_layer.GetPrimAtPath(target):
+                warnings.append(f"materiau en double ignore : {mat.GetPath()}")
+                continue
+            if not mat.GetChildren():
+                warnings.append(f"materiau vide (aucun shader) : {mat.GetName()}")
+            if not Sdf.CopySpec(flat, mat.GetPath(), mtl_layer, target):
+                warnings.append(f"materiau non copie : {mat.GetPath()}")
+                continue
+            moved[mat.GetPath()] = target
+    if not moved:
+        raise ValueError("aucun materiau dans l'export : rien a publier dans le departement look")
+    for old, new in moved.items():
+        _relink_connections(mtl_layer, old, new)
+    # A material may carry a binding of its own (rare): the assign layer owns them all.
+    mtl_stage = Usd.Stage.Open(mtl_layer)
+    mtl_stage.SetDefaultPrim(mtl_stage.GetPrimAtPath(root_path))
+    textures, tex_warnings = _retarget_textures(mtl_layer, source_dir, dest, prefer_tx=prefer_tx)
+    warnings += tex_warnings
+    mtl_layer.Save()
+    _assert_no_geometry(mtl_layer)
+
+    # 3. assign layer: a binding the same in every variant stays outside the variantSet
+    # (a local opinion would beat a variant one), the others go in their variant.
+    prim_names = dict(zip(gprims, mesh_prim_names(
+        [(p.name, str(p)) for p in gprims], sanitize_token)))
+    assign_p = dest / f"{base}_assign.{fmt}"
+    assign_layer = _new_layer(assign_p, fmt)
+    root = Sdf.PrimSpec(assign_layer, token, Sdf.SpecifierOver)
+    vset_spec = Sdf.VariantSetSpec(root, ASSIGN_SET)
+    bound = sorted({g for b in per_variant.values() for g in b})
+    common = {g for g in bound
+              if all(per_variant[v].get(g) == per_variant[variant_names[0]].get(g)
+                     for v in variant_names)}
+    bindings = 0
+    skipped: set[Sdf.Path] = set()
+
+    def _bind(parent: Sdf.PrimSpec, gprim: Sdf.Path, material: Sdf.Path) -> bool:
+        if material not in moved:
+            skipped.add(material)
+            return False
+        spec = _over_chain(parent, f"{GEO_RENDER_SCOPE}/{prim_names[gprim]}")
+        _bind_spec(spec, str(moved[material]))
+        return True
+
+    for g in sorted(common):
+        bindings += _bind(root, g, per_variant[variant_names[0]][g])
+    empty = []
+    for v in variant_names:
+        var = Sdf.VariantSpec(vset_spec, v)
+        own = [g for g in sorted(per_variant[v]) if g not in common]
+        bindings += sum(_bind(var.primSpec, g, per_variant[v][g]) for g in own)
+        if not own and not common:
+            empty.append(v)
+    for mat in sorted(skipped):
+        warnings.append(f"liaison vers un materiau non publie ignoree : {mat}")
+    if empty:
+        warnings.append("variante(s) d'assign sans aucune liaison : " + ", ".join(empty))
+    if not bindings:
+        raise ValueError("aucune geometrie liee dans les variantes d'assign : rien a publier")
+    root.variantSetNameList.prependedItems = [ASSIGN_SET]
+    root.variantSelections[ASSIGN_SET] = default if default in variant_names else variant_names[0]
+    assign_layer.defaultPrim = token
+    assign_layer.Save()
+    _assert_no_geometry(assign_layer)
+
+    # 4. root file: assign over the shaders; the variants are listed for FLUX (component,
+    # importer, Library) without composing the stage.
+    info = {"variants": variant_names, "default": root.variantSelections[ASSIGN_SET]}
+    root_p = dest / f"{base}.{fmt}"
+    root_layer = _new_layer(root_p, fmt)
+    root_layer.subLayerPaths = [assign_p.name, mtl_p.name]
+    root_layer.defaultPrim = token
+    # JSON string: USD dictionaries reject untyped lists (same as the component entry).
+    root_layer.customLayerData = {"flux": {"assign": json.dumps(info, sort_keys=True)}}
+    root_layer.Save()
+
+    log.info("Authored look %s: %d materiaux, variantes d'assign %s (%d liaisons)",
+             base, len(moved), ", ".join(variant_names), bindings)
+    return {"look": mtl_p, "root": root_p, "mtl": mtl_p, "assign": assign_p,
+            "assign_variants": variant_names, "assign_default": info["default"],
+            "materials": len(moved), "bindings": bindings, "textures": textures,
+            "warnings": warnings}
+
+
+def assign_info(path: str | Path, _depth: int = 0) -> dict:
+    """{"variants": [...], "default": v} of a look publish with assign variants (its root
+    layer, or a LAST pointer / layer that sublayers it); {} otherwise."""
+    try:
+        layer = Sdf.Layer.FindOrOpen(str(path).replace("\\", "/"))
+    except Exception:                                  # unreadable file: no variants
+        return {}
+    if layer is None:
+        return {}
+    info = dict(layer.customLayerData).get("flux", {}).get("assign")
+    if isinstance(info, str):
+        try:
+            info = json.loads(info)
+        except ValueError:
+            info = None
+    if isinstance(info, dict) and info:
+        return {"variants": list(info.get("variants") or []), "default": str(info.get("default") or "")}
+    if _depth >= 3:
+        return {}
+    for sub in layer.subLayerPaths:
+        found = assign_info(layer.ComputeAbsolutePath(sub), _depth + 1)
+        if found:
+            return found
+    return {}
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
@@ -160,6 +388,10 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     src_stage = Usd.Stage.Open(str(src).replace("\\", "/"))
     if src_stage is None:
         raise ValueError(f"USD illisible : {src}")
+    found = _find_assign_sets(src_stage)
+    if found:
+        # ADR 0035: Solaris variant blocks of Assign Material -> shaders + assign layers.
+        return _author_assign_look(src_stage, found, dest, base, token, fmt, prefer_tx)
     flat = src_stage.Flatten()
     flat_stage = Usd.Stage.Open(flat)
     source_dir = _source_dir(src_stage)
@@ -331,7 +563,9 @@ def publish_look_asset(source: str | Path, project_path: str | Path, *,
     for w in authored["warnings"]:
         log.warning("Look %s: %s", base_name, w)
     return {"root": last or root, "version": version_str, "folder": folder,
-            "version_root": root, "layers": {"look": authored["look"], "root": root},
+            "version_root": root,
+            "layers": {k: authored[k] for k in ("look", "mtl", "assign") if k in authored} | {"root": root},
+            "assign_variants": authored.get("assign_variants", []),
             "materials": authored["materials"], "bindings": authored["bindings"],
             "textures": authored["textures"],
             "component": component["version"] if component else None,

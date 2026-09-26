@@ -13,7 +13,7 @@ from pxr import Sdf, Usd, UsdGeom, UsdShade
 from features.usd_assembler.component_auto import add_proposed
 from features.folder_manager import tokens as tok
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
-from features.usd_export.look_export import author_look_layer, publish_look_asset
+from features.usd_export.look_export import assign_info, author_look_layer, publish_look_asset
 
 
 def _source_export(folder: Path, *, with_tx: bool = True) -> Path:
@@ -119,6 +119,110 @@ class LookLayer(unittest.TestCase):
                 author_look_layer(src, root / "v001", "CHAR_SHADING_DAVID_null", root_name="DAVID")
 
 
+def _variant_export(folder: Path) -> Path:
+    """Solaris-like export (ADR 0035): Material Library with three materials, the beak
+    assigned before the variant block, the body assigned per variant (red / blue)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    src = folder / "export.usda"
+    stage = Usd.Stage.CreateNew(str(src))
+    UsdGeom.Xform.Define(stage, "/Root")
+    for name in ("body", "beak"):
+        mesh = UsdGeom.Mesh.Define(stage, f"/Root/{name}")
+        mesh.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (0, 1, 0)])
+        mesh.CreateFaceVertexCountsAttr([3])
+        mesh.CreateFaceVertexIndicesAttr([0, 1, 2])
+    mats = {}
+    for name in ("red", "blue", "horn"):
+        mats[name] = UsdShade.Material.Define(stage, f"/materials/{name}")
+        shader = UsdShade.Shader.Define(stage, f"/materials/{name}/surface")
+        shader.CreateIdAttr("UsdPreviewSurface")
+        mats[name].CreateSurfaceOutput().ConnectToSource(
+            shader.CreateOutput("surface", Sdf.ValueTypeNames.Token))
+    beak = stage.GetPrimAtPath("/Root/beak")
+    UsdShade.MaterialBindingAPI.Apply(beak)
+    UsdShade.MaterialBindingAPI(beak).Bind(mats["horn"])
+    # A variant set that changes no binding is not an assignment.
+    lod = stage.GetPrimAtPath("/Root").GetVariantSets().AddVariantSet("lod")
+    for v in ("hi", "lo"):
+        lod.AddVariant(v)
+    lod.SetVariantSelection("hi")
+    vset = stage.GetPrimAtPath("/Root").GetVariantSets().AddVariantSet("material_variants")
+    for v in ("red", "blue"):
+        vset.AddVariant(v)
+        vset.SetVariantSelection(v)
+        with vset.GetVariantEditContext():
+            body = stage.GetPrimAtPath("/Root/body")
+            UsdShade.MaterialBindingAPI.Apply(body)
+            UsdShade.MaterialBindingAPI(body).Bind(mats[v])
+    vset.SetVariantSelection("blue")
+    stage.GetRootLayer().Save()
+    return src
+
+
+def _bound(stage: Usd.Stage, path: str) -> str:
+    mat, _ = UsdShade.MaterialBindingAPI(stage.GetPrimAtPath(path)).ComputeBoundMaterial()
+    return str(mat.GetPath()) if mat else ""
+
+
+class AssignVariants(unittest.TestCase):
+    """ADR 0035: one Solaris export -> shaders layer + assign layer with a variantSet."""
+
+    def test_export_is_split_into_shaders_and_assign_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            res = author_look_layer(_variant_export(root / "src"), root / "v001",
+                                    "CHAR_SHADING_DAVID_null", root_name="DAVID")
+            self.assertEqual((res["assign_variants"], res["assign_default"]), (["blue", "red"], "blue"))
+            self.assertEqual(res["materials"], 3)
+
+            # Shaders layer: every material, no binding, no variant.
+            mtl = Sdf.Layer.FindOrOpen(str(res["mtl"]))
+            self.assertEqual(sorted(mtl.GetPrimAtPath("/DAVID/mtl").nameChildren.keys()),
+                             ["blue", "horn", "red"])
+            self.assertIsNone(mtl.GetPrimAtPath("/DAVID/geo"))
+            # Assign layer: only the assign variantSet, the beak outside it.
+            assign = Sdf.Layer.FindOrOpen(str(res["assign"]))
+            self.assertEqual(list(assign.GetPrimAtPath("/DAVID").variantSets.keys()), ["assign"])
+            self.assertIsNotNone(assign.GetPrimAtPath("/DAVID/geo/render/beak"))
+            self.assertIsNone(assign.GetPrimAtPath("/DAVID/geo/render/body"))
+
+            stage = Usd.Stage.Open(str(res["root"]))
+            UsdGeom.Mesh.Define(stage, "/DAVID/geo/render/body")      # the model layer's job
+            UsdGeom.Mesh.Define(stage, "/DAVID/geo/render/beak")
+            self.assertEqual(_bound(stage, "/DAVID/geo/render/body"), "/DAVID/mtl/blue")
+            stage.GetPrimAtPath("/DAVID").GetVariantSet("assign").SetVariantSelection("red")
+            self.assertEqual(_bound(stage, "/DAVID/geo/render/body"), "/DAVID/mtl/red")
+            self.assertEqual(_bound(stage, "/DAVID/geo/render/beak"), "/DAVID/mtl/horn")
+            self.assertEqual(assign_info(res["root"]), {"variants": ["blue", "red"], "default": "blue"})
+
+    def test_referenced_variant_sets_are_not_assignments(self) -> None:
+        """A component brought by FLUX Import carries its own variant sets: never read
+        as the look's assignments (the classic single look layer is written)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            comp = root / "comp.usda"
+            cst = Usd.Stage.CreateNew(str(comp))
+            UsdGeom.Mesh.Define(cst, "/C/body")
+            vset = cst.DefinePrim("/C").GetVariantSets().AddVariantSet("look")
+            for v in ("a", "b"):
+                mat = UsdShade.Material.Define(cst, f"/C/mtl/{v}")
+                vset.AddVariant(v)
+                vset.SetVariantSelection(v)
+                with vset.GetVariantEditContext():
+                    body = cst.GetPrimAtPath("/C/body")
+                    UsdShade.MaterialBindingAPI.Apply(body)
+                    UsdShade.MaterialBindingAPI(body).Bind(mat)
+            cst.GetRootLayer().Save()
+            src = root / "src" / "export.usda"
+            src.parent.mkdir()
+            stage = Usd.Stage.CreateNew(str(src))
+            stage.DefinePrim("/Root").GetReferences().AddReference(str(comp), "/C")
+            stage.GetRootLayer().Save()
+            res = author_look_layer(src, root / "v001", "CHAR_SHADING_DAVID_null", root_name="DAVID")
+            self.assertNotIn("assign_variants", res)
+            self.assertEqual(assign_info(res["root"]), {})
+
+
 class LookPublish(unittest.TestCase):
     """The look publish lands in the token tree and feeds the asset (component)."""
 
@@ -176,6 +280,37 @@ class LookPublish(unittest.TestCase):
         self.assertTrue(mesh.IsValid())
         bound, _ = UsdShade.MaterialBindingAPI(mesh).ComputeBoundMaterial()
         self.assertEqual(bound.GetPath(), Sdf.Path("/DAVID/mtl/skin"))
+
+    def test_assign_variants_reach_the_component_and_the_importer(self) -> None:
+        """ADR 0035: one publish, variantSet "assign" selectable on the asset, one
+        FLUX Import row per variant (the one just checked wins)."""
+        from features.usd_assembler import component_auto as ca
+
+        self._publish_geo()
+        dest = self.project / self._REL / "shading" / "null"
+        res = publish_look_asset(_variant_export(Path(self._tmp.name) / "src"), self.project,
+                                 fmt="usda", dest_dir=dest, base_name="CHAR_SHADING_DAVID_null")
+        self.assertEqual(res["assign_variants"], ["blue", "red"])
+        version = add_proposed(self.project, "DAVID")["version"]
+        entry = self.project / self._REL / "usd" / f"DAVID_{version}" / "DAVID.usda"
+        self.assertEqual(ca.entry_variant_sets(entry)["assign"], ["blue", "red"])
+
+        stage = Usd.Stage.Open(str(self.project / self._REL / "usd" / "DAVID_LAST.usda"))
+        self.assertEqual(_bound(stage, "/DAVID/geo/render/body"), "/DAVID/mtl/blue")
+        stage.GetPrimAtPath("/DAVID").GetVariantSet("assign").SetVariantSelection("red")
+        self.assertEqual(_bound(stage, "/DAVID/geo/render/body"), "/DAVID/mtl/red")
+
+        got = ca.component_files(self.project, "DAVID")
+        rows = {f["id"]: f for f in got["files"] if f.get("assign_of")}
+        look = next(iter(rows.values()))["assign_of"]
+        blue, red = f"{look}@assign:blue", f"{look}@assign:red"
+        self.assertEqual(sorted(rows), [blue, red])
+        self.assertEqual((got["active"][blue], got["active"][red]), (True, False))   # default
+        self.assertEqual({rows[blue]["variant_set"], rows[red]["variant"]}, {"assign", "red"})
+        before = dict(got["active"])
+        got = ca.component_files(self.project, "DAVID", active={**before, red: True},
+                                 previous=before)
+        self.assertEqual((got["active"][blue], got["active"][red]), (False, True))
 
     def test_a_non_look_base_is_refused(self) -> None:
         src = _source_export(Path(self._tmp.name) / "src2")
