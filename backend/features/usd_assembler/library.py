@@ -49,7 +49,10 @@ def _is_assembly_entry(entry: Path | None) -> bool:
         return False
     from pxr import Sdf
 
-    layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    try:
+        layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    except Exception:                  # unreadable entry (half-written, OneDrive not synced)
+        layer = None
     if layer is None or not layer.defaultPrim:
         return False
     spec = layer.GetPrimAtPath(Sdf.Path(f"/{layer.defaultPrim}"))
@@ -67,6 +70,16 @@ def _component_info(project: Path, tokens: dict, name: str, parent: Path, versio
     last = last_version_label(parent, name, COMPONENT_EXT) if last_file.is_file() else None
     current = last or versions[-1]
     entry = parent / f"{name}_{current}" / f"{name}{COMPONENT_EXT}"
+    broken = ca.unreadable_versions(parent, name)
+    if current in broken:
+        # LAST points at an unreadable version: show the last one that reads.
+        fallback = ca._latest_entry(parent, name)
+        if fallback is not None:
+            entry, current = fallback, fallback.parent.name[len(name) + 1:]
+    notes: list[str] = []
+    if broken:
+        notes.append(f"version(s) illisible(s) ignoree(s) : {', '.join(broken)} (ecriture "
+                     f"interrompue ou fichier OneDrive pas encore synchronise), {current} utilisee")
     composed = ca.entry_signature(entry)
     warnings: list[str] = []
     try:
@@ -97,7 +110,7 @@ def _component_info(project: Path, tokens: dict, name: str, parent: Path, versio
         "blocks": recipe.get("blocks") or [],
         "departments": recipe["departments"], "files": files, "proposed": proposed,
         "variant_sets": ca.entry_variant_sets(entry),
-        "warnings": warnings + cr.warnings(recipe),
+        "warnings": notes + warnings + cr.warnings(recipe),
         "dir": str(parent), "last": str(last_file) if last_file.is_file() else None,
         "used_by": [],
     }

@@ -88,22 +88,50 @@ def available_departments(project_path: str | Path) -> list[str]:
 
 # ── current version / recipe ─────────────────────────────────────────────────
 
-def _latest_entry(parent: Path, name: str) -> Path | None:
+def _open_entry(entry: Path):
+    """The entry layer, or None when pxr cannot read it (empty or half-written file,
+    OneDrive placeholder not downloaded yet, file locked by the sync)."""
+    from pxr import Sdf
+
+    try:
+        return Sdf.Layer.OpenAsAnonymous(str(entry))
+    except Exception as exc:                      # pxr raises Tf.ErrorException
+        log.warning("Component entry unreadable %s: %s", entry, str(exc).strip()[:300])
+        return None
+
+
+def unreadable_versions(parent: Path, name: str) -> list[str]:
+    """Versions whose entry file exists but cannot be read (skipped by _latest_entry)."""
+    from features.folder_manager.naming_validator import format_version
     from features.publisher.publish_layout import highest_sequence_version, sequence_folder
 
-    ver = highest_sequence_version(parent, name, COMPONENT_EXT)
-    if ver <= 0:
-        return None
-    entry = sequence_folder(parent, name, ver) / f"{name}{COMPONENT_EXT}"
-    return entry if entry.is_file() else None
+    out = []
+    for ver in range(highest_sequence_version(parent, name, COMPONENT_EXT), 0, -1):
+        entry = sequence_folder(parent, name, ver) / f"{name}{COMPONENT_EXT}"
+        if entry.is_file() and _open_entry(entry) is None:
+            out.append(format_version(ver))
+    return out
+
+
+def _latest_entry(parent: Path, name: str) -> Path | None:
+    """Entry of the highest component version that can be read.
+
+    A version whose entry is unreadable (write cut short, OneDrive file not synced)
+    is skipped with a warning instead of breaking the component: the previous one wins.
+    """
+    from features.publisher.publish_layout import highest_sequence_version, sequence_folder
+
+    for ver in range(highest_sequence_version(parent, name, COMPONENT_EXT), 0, -1):
+        entry = sequence_folder(parent, name, ver) / f"{name}{COMPONENT_EXT}"
+        if entry.is_file() and _open_entry(entry) is not None:
+            return entry
+    return None
 
 
 def _entry_flux(entry: Path | None) -> dict:
     if entry is None:
         return {}
-    from pxr import Sdf
-
-    layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    layer = _open_entry(entry)
     flux = dict(layer.customLayerData).get("flux", {}) if layer is not None else {}
     return _plain(flux) if flux else {}
 

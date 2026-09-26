@@ -58,7 +58,10 @@ def _kind_of(entry: Path | None) -> str:
         return ""
     from pxr import Sdf
 
-    layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    try:
+        layer = Sdf.Layer.OpenAsAnonymous(str(entry))
+    except Exception:                  # unreadable entry (half-written, OneDrive not synced)
+        layer = None
     if layer is None or not layer.defaultPrim:
         return ""
     spec = layer.GetPrimAtPath(Sdf.Path(f"/{layer.defaultPrim}"))

@@ -117,6 +117,27 @@ class ManualComponent(unittest.TestCase):
         # A publish of a department the component does not use changes nothing.
         self.assertIsNone(self._publish("RIG", "rig", ["Root"])["component"])
 
+    def test_unreadable_latest_version_is_skipped(self) -> None:
+        """2026-09-26: UTAH_v017/UTAH.usda unreadable (OneDrive), LAST on v016:
+        the component page showed the pxr error and no link at all."""
+        from features.usd_assembler.library import list_components
+
+        self._publish("GEO", "model", ["Root"])
+        ca.create_component(self.project, _NAME, ["GEO"])
+        recipe = self._add_publishes(ca.current_recipe(self.project, _NAME))
+        ca.save_component(self.project, _NAME, recipe)                    # v002, LAST
+        broken = self.usd_dir / "UTAH_v003"
+        broken.mkdir()
+        (broken / "UTAH.usda").write_text("#usda 1.0\n(\n  customLayerData = {")
+        self.assertEqual(ca.unreadable_versions(self.usd_dir, _NAME), ["v003"])
+        got = ca.current_recipe(self.project, _NAME)
+        self.assertEqual([f["id"] for f in got["files"]], ["geo_null"])
+        info = next(c for c in list_components(self.project) if c["name"] == _NAME)
+        self.assertEqual((info["version"], [f["id"] for f in info["files"]]), ("v002", ["geo_null"]))
+        self.assertTrue(any("v003" in w and "illisible" in w for w in info["warnings"]))
+        # Next write goes past the broken folder, never over it.
+        self.assertEqual(self._publish("GEO", "model", ["Root"])["component"], "v004")
+
     def test_non_usd_publishes_are_proposed_as_files(self) -> None:
         """2026-09-26: GEO published in .abc only, the model block offered nothing."""
         import json
