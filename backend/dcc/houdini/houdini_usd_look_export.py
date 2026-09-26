@@ -136,6 +136,41 @@ _EXPORT_CODE = textwrap.dedent(r'''
                     break
         return out
 
+    def _branch_bindings(node, variants):
+        # The bindings of each variant read at the end of its branch, before the
+        # variant block wraps them: a variant on /Utah drops every opinion outside /Utah
+        # (USD rule), so Assign Material nodes aimed at /UTAH/... or /geo/... would be
+        # lost. The block's end node is the variant node above *node* with one input per
+        # variant; its parms name the variant of each input.
+        import re
+        for n in [node] + list(node.inputAncestors()):
+            if "variant" not in n.type().name().lower():
+                continue
+            inputs = [i for i in n.inputs() if i is not None]
+            if len(inputs) < len(variants):
+                continue
+            if len(inputs) == len(variants) + 1:
+                inputs = inputs[1:]          # Add Variant: input 1 is the stage itself
+            named = []
+            for parm in n.parms():
+                try:
+                    val = parm.evalAsString()
+                except Exception:
+                    continue
+                m = re.search(r"(\d+)$", parm.name())
+                if val in variants and m:
+                    named.append((int(m.group(1)), val))
+            order = [v for _, v in sorted(set(named))]
+            if sorted(order) != sorted(variants) or len(order) != len(inputs):
+                _log("WARNING", "%s : noms des variantes non lus, ordre des entrees utilise" % n.path())
+                order = list(variants)[:len(inputs)]
+            out = {{}}
+            for branch, v in zip(inputs, order):
+                out[v] = _stage_bindings(branch)
+                _log("INFO", "branche %s -> variante %s : %d liaison(s)" % (branch.path(), v, len(out[v])))
+            return out
+        return None
+
     def _log_assign_nodes(node):
         # What the Assign Material nodes above the export ask for, and whether their
         # prims exist on the stage: says why a variant ends up without binding.
@@ -198,6 +233,15 @@ _EXPORT_CODE = textwrap.dedent(r'''
                         sel.destroy()
                     files[v] = out
                     _log("INFO", "variante %s : %d liaison(s) dans Houdini" % (v, len(bindings[v])))
+                # Bindings read at the end of each branch win when they bring more than
+                # what survived the variant block.
+                try:
+                    branches = _branch_bindings(node, variants)
+                except Exception as exc:
+                    branches = None
+                    _log("WARNING", "lecture des branches du variant block impossible : %s" % exc)
+                if branches and sum(len(b) for b in branches.values()) > sum(len(b) for b in bindings.values()):
+                    bindings = dict(bindings, **branches)
                 result = {{"usd": files[variants[0]], "node": node.path(), "variants": files,
                           "bindings": bindings, "variant_prim": path,
                           "default": selection or variants[0], "__logs__": _logs}}
