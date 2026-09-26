@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import bisect
+import math
+from dataclasses import dataclass, field, replace
 
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]   # (x, y, z, w)
@@ -32,6 +34,20 @@ class MeshData:
     # Full DCC path of the mesh ("|grp|body" in Maya), used only to tell apart two
     # meshes with the same leaf name (see mesh_prim_names). "" = unknown.
     path: str = ""
+    # Name of the UV primvar ("st" = USD convention, read by UsdPreviewSurface; "uv"
+    # for a Houdini-only pipe). Attribute renamer of the Publisher (2026-09-26).
+    uv_name: str = "st"
+    # faceVarying normals, one per face-vertex (hard edges survive). Empty = none.
+    normals: list[Vec3] = field(default_factory=list)
+    # UsdGeom subdivisionScheme: "" = not authored (legacy, USD default catmullClark),
+    # "none" = polygons as modelled (hard edges and normals honoured).
+    subdivision_scheme: str = ""
+    # Extra primvars (Maya color sets...): {"name", "type": "color3f"|"float3"|"float",
+    # "interpolation": "faceVarying"|"vertex"|..., "values": [...]}.
+    primvars: list[dict] = field(default_factory=list)
+    # RIG department (ADR 0034): only the skin binding is authored, as an "over" on the
+    # mesh the model department defines. points / topology stay for matching only.
+    skin_only: bool = False
 
 
 @dataclass
@@ -56,6 +72,12 @@ class AnimData:
     rotations: list[list[Quat]]       # [time][joint]
     scales: list[list[Vec3]]          # [time][joint]
     fps: float | None = None          # scene frame rate (layer timeCodesPerSecond)
+    # A static channel is authored as a default value (no time samples): the rows
+    # list then holds ONE row. Rotations are always sampled (ANIM, 2026-09-26).
+    translations_static: bool = False
+    scales_static: bool = False
+    # "smooth" (the DCC curves, baked) or "held" (step: each key holds until the next).
+    interpolation: str = "smooth"
 
 
 @dataclass
@@ -132,6 +154,11 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             uvs=[tuple(uv) for uv in m.get("uvs", [])],
             uv_indices=list(m.get("uv_indices", [])),
             path=str(m.get("path") or ""),
+            uv_name=str(m.get("uv_name") or "st"),
+            normals=[tuple(n) for n in m.get("normals", [])],
+            subdivision_scheme=str(m.get("subdivision_scheme") or ""),
+            primvars=[dict(pv) for pv in m.get("primvars", [])],
+            skin_only=bool(m.get("skin_only", False)),
         )
         for m in d.get("meshes", [])
     ]
@@ -145,6 +172,9 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             rotations=[[tuple(q) for q in row] for row in a["rotations"]],
             scales=[[tuple(v) for v in row] for row in a["scales"]],
             fps=(float(a["fps"]) if a.get("fps") else None),
+            translations_static=bool(a.get("translations_static", False)),
+            scales_static=bool(a.get("scales_static", False)),
+            interpolation=str(a.get("interpolation") or "smooth"),
         )
     cameras = [
         CameraData(
@@ -249,3 +279,186 @@ def mesh_prim_names(items: list[tuple[str, str]], sanitize) -> list[str]:
             taken.add(name)
             out[i] = name
     return out
+
+
+# ── ANIM department helpers (2026-09-26). Pure python: Maya runs them. ────────
+
+def _quat_dot(a: Quat, b: Quat) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+
+
+def quat_angle(a: Quat, b: Quat) -> float:
+    """Angle (radians) of the rotation between two unit quaternions (q and -q equal)."""
+    d = min(1.0, abs(_quat_dot(a, b)))
+    return 2.0 * math.acos(d)
+
+
+def quat_slerp(a: Quat, b: Quat, t: float) -> Quat:
+    """Spherical interpolation, shortest path: what a USD consumer does between two
+    quaternion time samples (Gf.Slerp)."""
+    d = _quat_dot(a, b)
+    if d < 0.0:
+        b = (-b[0], -b[1], -b[2], -b[3])
+        d = -d
+    if d > 0.9995:                       # nearly equal: lerp + normalise
+        out = tuple(a[i] + (b[i] - a[i]) * t for i in range(4))
+    else:
+        theta = math.acos(d)
+        s = math.sin(theta)
+        wa, wb = math.sin((1.0 - t) * theta) / s, math.sin(t * theta) / s
+        out = tuple(a[i] * wa + b[i] * wb for i in range(4))
+    n = math.sqrt(sum(c * c for c in out)) or 1.0
+    return tuple(c / n for c in out)     # type: ignore[return-value]
+
+
+def _lerp3(a: Vec3, b: Vec3, t: float) -> Vec3:
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+
+
+def _close3(a: Vec3, b: Vec3, eps: float) -> bool:
+    return abs(a[0] - b[0]) <= eps and abs(a[1] - b[1]) <= eps and abs(a[2] - b[2]) <= eps
+
+
+def rotation_moves(rows: list[Quat], eps: float = 1e-5) -> bool:
+    """True when one joint's rotation changes over the samples."""
+    return any(quat_angle(rows[0], q) > eps for q in rows[1:])
+
+
+def vector_moves(rows: list[Vec3], eps: float = 1e-5) -> bool:
+    return any(not _close3(rows[0], v, eps) for v in rows[1:])
+
+
+def translation_roots(tokens: list[str], moving: list[str]) -> list[str]:
+    """The joints whose translation carries the character (root motion), whatever the
+    rig calls them (Root, COG, Sk_Cog...): among the joints whose translation moves,
+    the ones highest in the hierarchy (smallest depth). [] when nothing translates."""
+    moving_set = set(moving)
+    depths = {t: t.count("/") for t in tokens if t in moving_set}
+    if not depths:
+        return []
+    top = min(depths.values())
+    return [t for t in tokens if depths.get(t) == top]
+
+
+def hold_keys(anim: "AnimData", key_times: list[float]) -> "AnimData":
+    """Step ("held") version of *anim*: every sample takes the pose of the last key at
+    or before it, so the pose holds until the next key (blocking)."""
+    keys = sorted({float(k) for k in key_times})
+    if not keys or not anim.times:
+        return replace(anim, interpolation="held")
+    order = sorted(range(len(anim.times)), key=lambda i: anim.times[i])
+    sorted_times = [anim.times[i] for i in order]
+
+    def _held(i: int) -> int:
+        t = anim.times[i]
+        k = bisect.bisect_right(keys, t + 1e-6) - 1           # last key at or before t
+        if k < 0:
+            return i
+        # Nearest sampled time at or before that key (keys may sit on sub-frames).
+        s = bisect.bisect_right(sorted_times, keys[k] + 1e-6) - 1
+        return order[s] if s >= 0 else i
+
+    pick = [_held(i) for i in range(len(anim.times))]
+    trans = anim.translations if anim.translations_static else [anim.translations[j] for j in pick]
+    scales = anim.scales if anim.scales_static else [anim.scales[j] for j in pick]
+    return replace(anim, rotations=[anim.rotations[j] for j in pick], translations=trans,
+                   scales=scales, interpolation="held")
+
+
+def reduce_samples(anim: "AnimData", *, eps_angle: float = 1e-4, eps_lin: float = 1e-5) -> "AnimData":
+    """Drop the time samples a consumer rebuilds EXACTLY by interpolating the kept
+    neighbours (linear for vectors, slerp for quaternions), never the others: the
+    motion at every source frame is unchanged, a hold stays a hold (its last frame is
+    kept) and a smooth curve keeps every sample that is not on a straight line.
+    Every joint of a sample is checked together (one USD array per time)."""
+    n = len(anim.times)
+    if n <= 2:
+        return anim
+    t_rows = None if anim.translations_static else anim.translations
+    s_rows = None if anim.scales_static else anim.scales
+
+    def _ok(a: int, b: int, m: int) -> bool:
+        """Sample m rebuilt from a and b."""
+        ta, tb, tm = anim.times[a], anim.times[b], anim.times[m]
+        u = (tm - ta) / (tb - ta) if tb != ta else 0.0
+        for qa, qb, qm in zip(anim.rotations[a], anim.rotations[b], anim.rotations[m]):
+            if quat_angle(quat_slerp(qa, qb, u), qm) > eps_angle:
+                return False
+        for rows in (t_rows, s_rows):
+            if rows is None:
+                continue
+            for va, vb, vm in zip(rows[a], rows[b], rows[m]):
+                if not _close3(_lerp3(va, vb, u), vm, eps_lin):
+                    return False
+        return True
+
+    keep = [0]
+    a = 0
+    while a < n - 1:
+        b = a + 1
+        # Extend the segment as long as every sample inside it is rebuilt exactly.
+        while b + 1 < n and all(_ok(a, b + 1, m) for m in range(a + 1, b + 1)):
+            b += 1
+        keep.append(b)
+        a = b
+    if len(keep) == n:
+        return anim
+    pick = keep
+    return replace(
+        anim,
+        times=[anim.times[i] for i in pick],
+        rotations=[anim.rotations[i] for i in pick],
+        translations=anim.translations if anim.translations_static else [anim.translations[i] for i in pick],
+        scales=anim.scales if anim.scales_static else [anim.scales[i] for i in pick],
+    )
+
+
+# ── RIG department helper: compact skin weights (ADR 0034). Pure python. ──────────
+
+def compact_weights(
+    influence_joints: list[int],
+    weights_flat: list[float],
+    num_points: int,
+    *,
+    max_influences: int = 0,
+    threshold: float = 1e-4,
+) -> tuple[list[int], list[float], int]:
+    """Dense DCC weights (one value per influence per point, vertex-major) ->
+    UsdSkel arrays keeping only the influences that matter.
+
+    *influence_joints* maps each DCC influence to its skeleton joint index (-1 = not in
+    the skeleton, its weight is dropped). Per point,
+    weights under *threshold* are dropped, the strongest *max_influences* kept (0 = all
+    non-zero) and the rest renormalised to sum 1. Every point gets the same element
+    size (UsdSkel constant elementSize), padded with joint 0 / weight 0.
+    Returns (joint_indices, joint_weights, element_size).
+    """
+    n_inf = len(influence_joints)
+    if n_inf == 0 or num_points == 0:
+        return [], [], 0
+    rows: list[list[tuple[int, float]]] = []
+    size = 1
+    for p in range(num_points):
+        base = p * n_inf
+        pairs = [(influence_joints[i], float(weights_flat[base + i]))
+                 for i in range(n_inf)
+                 if influence_joints[i] >= 0 and float(weights_flat[base + i]) > threshold]
+        # Two DCC influences on one joint (duplicate mapping): merge them.
+        merged: dict[int, float] = {}
+        for j, w in pairs:
+            merged[j] = merged.get(j, 0.0) + w
+        pairs = sorted(merged.items(), key=lambda jw: -jw[1])
+        if max_influences > 0:
+            pairs = pairs[:max_influences]
+        total = sum(w for _, w in pairs)
+        if total > 0:
+            pairs = [(j, w / total) for j, w in pairs]
+        rows.append(pairs)
+        size = max(size, len(pairs))
+    indices: list[int] = []
+    weights: list[float] = []
+    for pairs in rows:
+        pad = size - len(pairs)
+        indices.extend([j for j, _ in pairs] + [0] * pad)
+        weights.extend([w for _, w in pairs] + [0.0] * pad)
+    return indices, weights, size

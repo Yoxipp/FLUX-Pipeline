@@ -19,6 +19,12 @@ class DepartmentTable(unittest.TestCase):
             self.assertIn(info["writer"], ("light", "look"))
         # A clip is not an asset department; every asset department has an order.
         self.assertEqual(table["ANIM"]["department"], "clip")
+        # The Publisher shows the presets model / rig / anim / look (2026-09-26).
+        self.assertEqual({t: i["label"] for t, i in table.items()},
+                         {"GEO": "model", "RIG": "rig", "ANIM": "anim", "SHADING": "look"})
+        # ADR 0034: GEO is geometry only, RIG carries the skeleton and the weights.
+        self.assertFalse(table["GEO"]["include"]["skel"] or table["GEO"]["include"]["weights"])
+        self.assertTrue(table["RIG"]["include"]["skel"] and table["RIG"]["include"]["weights"])
         for dept in dp.ASSET_DEPARTMENTS.values():
             self.assertIn(dept, dp.DEPARTMENT_ORDER)
 

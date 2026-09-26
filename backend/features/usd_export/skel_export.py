@@ -57,13 +57,57 @@ def _define_scopes(stage: Usd.Stage, path: str) -> None:
             UsdGeom.Scope.Define(stage, sub)
 
 
+_PRIMVAR_TYPES = {
+    "color3f": Sdf.ValueTypeNames.Color3fArray,
+    "float3": Sdf.ValueTypeNames.Float3Array,
+    "float2": Sdf.ValueTypeNames.Float2Array,
+    "float": Sdf.ValueTypeNames.FloatArray,
+}
+
+
+def _author_extra_primvars(prim: Usd.Prim, mesh: MeshData) -> None:
+    """Color sets and other extra primvars, under the name the artist chose."""
+    api = UsdGeom.PrimvarsAPI(prim)
+    for pv in mesh.primvars:
+        name = str(pv.get("name") or "").strip()
+        vtype = _PRIMVAR_TYPES.get(str(pv.get("type") or "color3f"))
+        values = pv.get("values") or []
+        if not name or vtype is None or not values:
+            continue
+        primvar = api.CreatePrimvar(sanitize_token(name), vtype,
+                                    str(pv.get("interpolation") or UsdGeom.Tokens.faceVarying))
+        if vtype == Sdf.ValueTypeNames.FloatArray:
+            primvar.Set(Vt.FloatArray([float(v) for v in values]))
+        elif vtype == Sdf.ValueTypeNames.Float2Array:
+            primvar.Set(Vt.Vec2fArray([Gf.Vec2f(*v) for v in values]))
+        else:
+            primvar.Set(Vt.Vec3fArray([Gf.Vec3f(*v) for v in values]))
+
+
+def _author_binding(prim: Usd.Prim, mesh: MeshData, skel_path: str) -> None:
+    """UsdSkel skin of one mesh. Houdini rebuilds boneCapture from exactly these
+    primvars (USD Skin Import / UsdSkel Character Import SOP): never rename them."""
+    binding = UsdSkel.BindingAPI.Apply(prim)
+    n = mesh.influences_per_point
+    binding.CreateJointIndicesPrimvar(False, n).Set(Vt.IntArray(mesh.joint_indices))
+    binding.CreateJointWeightsPrimvar(False, n).Set(Vt.FloatArray(mesh.joint_weights))
+    binding.CreateGeomBindTransformAttr(_mat(mesh.geom_bind_transform))
+    binding.CreateSkeletonRel().SetTargets([Sdf.Path(skel_path)])
+
+
 def _author_model_layer(
     path: Path, root_path: str, skel_path: str, asset: str,
     meshes: list[MeshData], fmt: str,
 ) -> None:
-    """Model layer: the SkelRoot + skinned meshes under geo/render (the heavy geometry)."""
+    """Model layer: the meshes under geo/render (the heavy geometry).
+
+    The root is a SkelRoot only when a mesh carries a skin (legacy GEO publishes,
+    Houdini); a pure model (ADR 0034) is an Xform and the RIG department turns it into
+    the SkelRoot with its skeleton and weights."""
     stage = _new_stage(path, fmt)
-    root = UsdSkel.Root.Define(stage, root_path)
+    skinned = any(m.influences_per_point > 0 for m in meshes)
+    root = (UsdSkel.Root.Define(stage, root_path) if skinned
+            else UsdGeom.Xform.Define(stage, root_path))
     stage.SetDefaultPrim(root.GetPrim())
     render_path = f"{root_path}/{GEO_RENDER_SCOPE}"
     _define_scopes(stage, f"{render_path}/x")
@@ -80,41 +124,99 @@ def _author_model_layer(
             gmesh.CreateExtentAttr(extent)
         gmesh.CreateFaceVertexCountsAttr(Vt.IntArray(mesh.face_vertex_counts))
         gmesh.CreateFaceVertexIndicesAttr(Vt.IntArray(mesh.face_vertex_indices))
+        if mesh.subdivision_scheme:
+            gmesh.CreateSubdivisionSchemeAttr(mesh.subdivision_scheme)
+        if mesh.normals and len(mesh.normals) == len(mesh.face_vertex_indices):
+            gmesh.CreateNormalsAttr(Vt.Vec3fArray([Gf.Vec3f(*n) for n in mesh.normals]))
+            gmesh.SetNormalsInterpolation(UsdGeom.Tokens.faceVarying)
 
         if mesh.uvs:
             st = UsdGeom.PrimvarsAPI(gmesh.GetPrim()).CreatePrimvar(
-                "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.faceVarying
+                sanitize_token(mesh.uv_name or "st"), Sdf.ValueTypeNames.TexCoord2fArray,
+                UsdGeom.Tokens.faceVarying,
             )
             st.Set(Vt.Vec2fArray([Gf.Vec2f(u, v) for (u, v) in mesh.uvs]))
             if mesh.uv_indices:
                 st.SetIndices(Vt.IntArray(mesh.uv_indices))
+        _author_extra_primvars(gmesh.GetPrim(), mesh)
 
         if mesh.influences_per_point > 0:
-            binding = UsdSkel.BindingAPI.Apply(gmesh.GetPrim())
-            n = mesh.influences_per_point
-            ji = binding.CreateJointIndicesPrimvar(False, n)
-            ji.Set(Vt.IntArray(mesh.joint_indices))
-            jw = binding.CreateJointWeightsPrimvar(False, n)
-            jw.Set(Vt.FloatArray(mesh.joint_weights))
-            binding.CreateGeomBindTransformAttr(_mat(mesh.geom_bind_transform))
-            binding.CreateSkeletonRel().SetTargets([Sdf.Path(skel_path)])
+            _author_binding(gmesh.GetPrim(), mesh, skel_path)
 
     stage.GetRootLayer().Save()
 
 
+def _author_skin_overs(
+    stage: Usd.Stage, root_path: str, skel_path: str, meshes: list[MeshData],
+    targets: list[str] | None, proxy_skins: list[dict] | None,
+) -> None:
+    """RIG department (ADR 0034): the skin as an "over" on the meshes the model
+    department defines (/<NAME>/geo/render/<mesh>) and on their proxies, so the
+    composed asset carries the weights on its geometry."""
+    names = mesh_prim_names([(m.name, m.path) for m in meshes], sanitize_token)
+    for i, mesh in enumerate(meshes):
+        if mesh.influences_per_point <= 0:
+            continue
+        rel = (targets[i] if targets and i < len(targets) and targets[i]
+               else f"{GEO_RENDER_SCOPE}/{names[i]}")
+        prim = stage.OverridePrim(f"{root_path}/{rel}")
+        _author_binding(prim, mesh, skel_path)
+    for px in proxy_skins or []:
+        prim = stage.OverridePrim(f"{root_path}/{px['path']}")
+        binding = UsdSkel.BindingAPI.Apply(prim)
+        n = int(px["size"])
+        binding.CreateJointIndicesPrimvar(False, n).Set(Vt.IntArray(px["indices"]))
+        binding.CreateJointWeightsPrimvar(False, n).Set(Vt.FloatArray(px["weights"]))
+        binding.CreateGeomBindTransformAttr(_mat(px.get("bind")))
+        binding.CreateSkeletonRel().SetTargets([Sdf.Path(skel_path)])
+
+
 def _author_skel_layer(
     path: Path, root_path: str, skel_path: str, skeleton: SkeletonData, fmt: str,
+    skin_meshes: list[MeshData] | None = None, skin_targets: list[str] | None = None,
+    proxy_skins: list[dict] | None = None,
 ) -> None:
-    """Skel layer: the Skeleton prim (topology + bind/rest pose)."""
+    """Skel layer: the SkelRoot + Skeleton prim (topology + bind/rest pose) and, for a
+    RIG publish, the skin weights as overrides on the model's meshes."""
     stage = _new_stage(path, fmt)
-    stage.OverridePrim(root_path)   # SkelRoot type comes from the model layer
+    UsdSkel.Root.Define(stage, root_path)    # the model may be a plain Xform (ADR 0034)
     _define_scopes(stage, skel_path)
     skel = UsdSkel.Skeleton.Define(stage, skel_path)
     skel.CreateJointsAttr(Vt.TokenArray(skeleton.joints))
     skel.CreateBindTransformsAttr(Vt.Matrix4dArray([_mat(m) for m in skeleton.bind_transforms]))
     skel.CreateRestTransformsAttr(Vt.Matrix4dArray([_mat(m) for m in skeleton.rest_transforms]))
+    if skin_meshes or proxy_skins:
+        _author_skin_overs(stage, root_path, skel_path, skin_meshes or [], skin_targets, proxy_skins)
     stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
     stage.GetRootLayer().Save()
+
+
+def _write_anim_samples(uanim: UsdSkel.Animation, anim: AnimData) -> None:
+    """Translations / rotations / scales of the animated joints. A static channel is a
+    default value (no samples); rotations are always sampled. The interpolation the
+    artist chose is noted on the prim (held = step keys, already baked in the samples)."""
+    t_attr = uanim.CreateTranslationsAttr()
+    r_attr = uanim.CreateRotationsAttr()
+    s_attr = uanim.CreateScalesAttr()
+
+    def _t(row):
+        return Vt.Vec3fArray([Gf.Vec3f(*v) for v in row])
+
+    def _s(row):
+        return Vt.Vec3hArray([Gf.Vec3h(*v) for v in row])
+
+    if anim.translations_static and anim.translations:
+        t_attr.Set(_t(anim.translations[0]))
+    if anim.scales_static and anim.scales:
+        s_attr.Set(_s(anim.scales[0]))
+    for i, t in enumerate(anim.times):
+        if not anim.translations_static:
+            t_attr.Set(_t(anim.translations[i]), t)
+        # Gf.Quatf(real, i, j, k); contract stores (x, y, z, w)
+        r_attr.Set(Vt.QuatfArray([Gf.Quatf(q[3], q[0], q[1], q[2]) for q in anim.rotations[i]]), t)
+        if not anim.scales_static:
+            s_attr.Set(_s(anim.scales[i]), t)
+    uanim.GetPrim().SetCustomDataByKey("flux:interpolation", anim.interpolation or "smooth")
 
 
 def _author_anim_layer(
@@ -127,17 +229,7 @@ def _author_anim_layer(
     _define_scopes(stage, anim_path)
     uanim = UsdSkel.Animation.Define(stage, anim_path)
     uanim.CreateJointsAttr(Vt.TokenArray(anim.joints))
-
-    t_attr = uanim.CreateTranslationsAttr()
-    r_attr = uanim.CreateRotationsAttr()
-    s_attr = uanim.CreateScalesAttr()
-    for i, t in enumerate(anim.times):
-        t_attr.Set(Vt.Vec3fArray([Gf.Vec3f(*v) for v in anim.translations[i]]), t)
-        # Gf.Quatf(real, i, j, k); contract stores (x, y, z, w)
-        r_attr.Set(
-            Vt.QuatfArray([Gf.Quatf(q[3], q[0], q[1], q[2]) for q in anim.rotations[i]]), t
-        )
-        s_attr.Set(Vt.Vec3hArray([Gf.Vec3h(*v) for v in anim.scales[i]]), t)
+    _write_anim_samples(uanim, anim)
 
     # Bind skeleton + animation source on the SkelRoot so a consumer resolves skinning.
     root_binding = UsdSkel.BindingAPI.Apply(stage.GetPrimAtPath(root_path))
@@ -249,14 +341,7 @@ def author_motion_only(asset: LightAsset, dest_dir: str | Path, *, fmt: str = "u
     _define_scopes(stage, anim_path)
     uanim = UsdSkel.Animation.Define(stage, anim_path)
     uanim.CreateJointsAttr(Vt.TokenArray(asset.anim.joints))
-    t_attr = uanim.CreateTranslationsAttr()
-    r_attr = uanim.CreateRotationsAttr()
-    s_attr = uanim.CreateScalesAttr()
-    for i, t in enumerate(asset.anim.times):
-        t_attr.Set(Vt.Vec3fArray([Gf.Vec3f(*v) for v in asset.anim.translations[i]]), t)
-        r_attr.Set(Vt.QuatfArray([Gf.Quatf(q[3], q[0], q[1], q[2])
-                                  for q in asset.anim.rotations[i]]), t)
-        s_attr.Set(Vt.Vec3hArray([Gf.Vec3h(*v) for v in asset.anim.scales[i]]), t)
+    _write_anim_samples(uanim, asset.anim)
     binding = UsdSkel.BindingAPI.Apply(stage.GetPrimAtPath(root_path))
     binding.CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
     # Defining skel/Anim also defined its ancestors: the root stays an "over", the
@@ -294,8 +379,16 @@ def author_light_asset(
     fmt: str = "usda",
     version_label: str | None = None,
     root_name: str | None = None,
+    skin_targets: list[str] | None = None,
+    proxy_skins: list[dict] | None = None,
 ) -> dict[str, Path]:
     """Author the light layered asset into *dest_dir*.
+
+    Meshes flagged ``skin_only`` (RIG department, ADR 0034) are not geometry: their
+    skin is authored in the skel layer as overrides on ``geo/render/<mesh>`` (or on
+    *skin_targets*, root-relative prim paths parallel to them) plus *proxy_skins*
+    ({"path", "indices", "weights", "size", "bind"}) on the model's proxies. A publish
+    without geometry writes no model layer.
 
     Writes ``{asset}_model``, ``{asset}_skel``, optional ``{asset}_anim`` and a root
     ``{asset}`` that sublayers them strong->weak (anim, skel, model). The prim root
@@ -321,14 +414,19 @@ def author_light_asset(
     paths: dict[str, Path] = {}
     has_skel = bool(asset.skeleton and asset.skeleton.joints)
 
-    model_p = dest / _fname("model")
-    _author_model_layer(model_p, root_path, skel_path, token, asset.meshes, fmt)
-    paths["model"] = model_p
-
-    sublayers = [model_p.name]               # strong -> weak (model is weakest)
+    geo_meshes = [m for m in asset.meshes if not m.skin_only]
+    skin_meshes = [m for m in asset.meshes if m.skin_only]
+    sublayers: list[str] = []                # strong -> weak (model is weakest)
+    if geo_meshes or not (has_skel or asset.cameras or asset.lights):
+        model_p = dest / _fname("model")
+        _author_model_layer(model_p, root_path, skel_path, token, geo_meshes, fmt)
+        paths["model"] = model_p
+        sublayers.append(model_p.name)
     if has_skel:
         skel_p = dest / _fname("skel")
-        _author_skel_layer(skel_p, root_path, skel_path, asset.skeleton, fmt)
+        _author_skel_layer(skel_p, root_path, skel_path, asset.skeleton, fmt,
+                           skin_meshes=skin_meshes, skin_targets=skin_targets,
+                           proxy_skins=proxy_skins)
         paths["skel"] = skel_p
         sublayers.insert(0, skel_p.name)     # skel above model
 

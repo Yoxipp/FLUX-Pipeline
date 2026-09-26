@@ -115,6 +115,15 @@ class GenerateProxyTests(unittest.TestCase):
             purposes = _mesh_purposes(Usd.Stage.Open(str(r.dst)))
             self.assertEqual(purposes["/Asset/geo/proxy/body"][0], UsdGeom.Tokens.proxy)
             self.assertNotIn("/Asset/geo/render/body_proxy", purposes)
+            # ADR 0034: each proxy point names the render point it stands for (the RIG
+            # gives it that point's weights), and the proxy is never subdivided.
+            stage = Usd.Stage.Open(str(r.dst))
+            proxy = UsdGeom.Mesh(stage.GetPrimAtPath("/Asset/geo/proxy/body"))
+            src = UsdGeom.PrimvarsAPI(proxy.GetPrim()).GetPrimvar(UP.PROXY_SOURCE_PRIMVAR).Get()
+            render_pts = UsdGeom.Mesh(stage.GetPrimAtPath("/Asset/geo/render/body")).GetPointsAttr().Get()
+            self.assertEqual(len(src), len(proxy.GetPointsAttr().Get()))
+            self.assertLess(max(src), len(render_pts))
+            self.assertEqual(proxy.GetSubdivisionSchemeAttr().Get(), UsdGeom.Tokens.none)
 
     def test_skip_and_force(self):
         with tempfile.TemporaryDirectory() as d:

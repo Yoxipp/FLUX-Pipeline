@@ -1,8 +1,9 @@
 # usd_export — light layered USD authoring for the DCC exporters (Maya/Houdini).
 #
-# Produces an ultra-light asset split into layers:
-#   model layer : mesh geo + skin binding (heavy geo)
-#   skel  layer : UsdSkel Skeleton (topology + bind/rest transforms)
+# Produces an ultra-light asset split into layers (one department per publish, ADR 0034):
+#   model layer : mesh geo only (GEO)
+#   skel  layer : UsdSkel Skeleton (topology + bind/rest transforms) + the skin weights
+#                 as overrides on the model's meshes (RIG)
 #   anim  layer : UsdSkelAnimation with ONLY the animated joints
 # plus a root file (defaultPrim == asset) that sublayers them strong->weak.
 #

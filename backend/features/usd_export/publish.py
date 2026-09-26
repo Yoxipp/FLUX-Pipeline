@@ -151,6 +151,16 @@ def publish_light_asset(
     folder = sequence_folder(parent, base, ver)
     version_str = format_version(ver)
 
+    # RIG (ADR 0034): the skin lands on the meshes (and proxies) of the published model.
+    skin_kw: dict = {}
+    skin_meshes = [m for m in asset.meshes if m.skin_only]
+    if skin_meshes and not motion_only:
+        from .rig_skin import skin_targets
+
+        targets, proxy_skins, skin_warnings = skin_targets(project_path, root_name, skin_meshes)
+        warnings += skin_warnings
+        skin_kw = {"skin_targets": targets, "proxy_skins": proxy_skins}
+
     # Author straight into the reserved version folder (no rename, ADR 0017 U3b rule).
     light = replace(asset, asset=base)
     try:
@@ -158,7 +168,7 @@ def publish_light_asset(
             authored = author_motion_only(light, folder, fmt=fmt.lstrip("."), root_name=root_name)
         else:
             authored = author_light_asset(light, folder, fmt=fmt.lstrip("."), version_label=None,
-                                          root_name=root_name)
+                                          root_name=root_name, **skin_kw)
     except Exception:
         discard_rendered_version(parent, base, ext, ver, is_sequence=True)
         raise

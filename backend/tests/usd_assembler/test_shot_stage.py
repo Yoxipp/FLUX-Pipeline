@@ -68,7 +68,12 @@ class ShotStage(unittest.TestCase):
         publish_light_asset(_rig(), self.project, fmt="usda",
                             dest_dir=self.project / _REL / "model" / "null",
                             base_name="CHAR_GEO_DINGO_null", user="adam")
-        add_proposed(self.project, "DINGO", ["GEO"])     # components are created by hand (ADR 0023)
+        add_proposed(self.project, "DINGO", ["GEO", "RIG"])  # components are created by hand (ADR 0023)
+        # ADR 0034: the skeleton comes from the RIG publish.
+        publish_light_asset(_rig(), self.project, fmt="usda",
+                            dest_dir=self.project / _REL / "rig" / "null",
+                            base_name="CHAR_RIG_DINGO_null", user="adam")
+        add_proposed(self.project, "DINGO")
 
     def _publish_anim(self, character="DINGO", times=(1001.0, 1002.0, 1003.0)) -> dict:
         return publish_light_asset(

@@ -60,10 +60,15 @@ class Crowd(unittest.TestCase):
                             base_name="CHAR_ANIM_BOB_walk", user="adam")
 
     def _geo(self, name: str, asset: LightAsset) -> None:
+        # ADR 0034: the geometry is the GEO publish, the skeleton the RIG publish.
         publish_light_asset(asset, self.project, fmt="usda",
                             dest_dir=self.project / f"assets/chara/{name}/model/null",
                             base_name=f"CHAR_GEO_{name}_null", user="adam")
-        add_proposed(self.project, name, ["GEO"])      # components are created by hand (ADR 0023)
+        add_proposed(self.project, name, ["GEO", "RIG"])  # components are created by hand (ADR 0023)
+        publish_light_asset(asset, self.project, fmt="usda",
+                            dest_dir=self.project / f"assets/chara/{name}/rig/null",
+                            base_name=f"CHAR_RIG_{name}_null", user="adam")
+        add_proposed(self.project, name)
 
     def test_same_joints_same_signature(self) -> None:
         self.assertEqual(crowd.skeleton_signature(_BIPED), crowd.skeleton_signature(list(_BIPED)))
@@ -82,7 +87,7 @@ class Crowd(unittest.TestCase):
         self.assertEqual((clip["asset"], clip["clip"], clip["range"]), ("BOB", "walk", [1, 3]))
 
     def test_the_publish_writes_the_signature(self) -> None:
-        root = self.project / "assets/chara/BOB/model/null/CHAR_GEO_BOB_null_v001/CHAR_GEO_BOB_null.usda"
+        root = self.project / "assets/chara/BOB/rig/null/CHAR_RIG_BOB_null_v001/CHAR_RIG_BOB_null.usda"
         flux = dict(Sdf.Layer.FindOrOpen(str(root)).customLayerData)["flux"]
         self.assertEqual(flux["skeleton_signature"], crowd.skeleton_signature(_BIPED))
         self.assertEqual(flux["joint_count"], 3)

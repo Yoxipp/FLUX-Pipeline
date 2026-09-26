@@ -39,7 +39,8 @@ class PublishLightAsset(unittest.TestCase):
             self.assertEqual(res["folder"], folder)
             self.assertTrue((folder / f"{base}.usd").exists())
             self.assertTrue((folder / f"{base}_model.usd").exists())
-            self.assertTrue((folder / f"{base}_skel.usd").exists())
+            # ADR 0034: a GEO publish is geometry only, the skeleton is the rig's.
+            self.assertFalse((folder / f"{base}_skel.usd").exists())
             last = dest / f"{base}_LAST.usd"
             self.assertEqual(res["root"], last)
             self.assertFalse((dest / f"{base}_LAST").exists())
@@ -50,7 +51,9 @@ class PublishLightAsset(unittest.TestCase):
             # LAST repeats the root defaultPrim (NAME token, ADR 0019) and composes the version
             self.assertEqual(stage.GetDefaultPrim().GetName(), "DAVID")
             self.assertTrue(stage.GetPrimAtPath("/DAVID/geo/render/body").IsValid())
-            self.assertTrue(stage.GetPrimAtPath("/DAVID/skel/Skeleton").IsValid())
+            self.assertFalse(stage.GetPrimAtPath("/DAVID/skel/Skeleton").IsValid())
+            self.assertEqual(stage.GetPrimAtPath("/DAVID").GetTypeName(), "Xform")
+            self.assertTrue(any("squelette" in w for w in res["warnings"]))
 
     def test_second_publish_keeps_versions_and_moves_last(self):
         with tempfile.TemporaryDirectory() as proj:

@@ -100,3 +100,57 @@ class AuthorLightAsset(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelAndAnimOptions(unittest.TestCase):
+    """Publisher presets (2026-09-26, ADR 0034): model attributes, static channels."""
+
+    def test_model_layer_writes_normals_scheme_and_renamed_attributes(self):
+        from pxr import UsdGeom
+
+        mesh = MeshData(
+            name="body", points=[(0, 0, 0), (1, 0, 0), (1, 1, 0)],
+            face_vertex_counts=[3], face_vertex_indices=[0, 1, 2],
+            uvs=[(0, 0), (1, 0), (1, 1)], uv_indices=[0, 1, 2], uv_name="uv",
+            normals=[(0, 0, 1)] * 3, subdivision_scheme="none",
+            primvars=[{"name": "Cd", "type": "color3f", "interpolation": "faceVarying",
+                       "values": [(1, 0, 0)] * 3}],
+        )
+        asset = LightAsset(asset="PROP_box", skeleton=SkeletonData([], [], []), meshes=[mesh])
+        with tempfile.TemporaryDirectory() as d:
+            paths = author_light_asset(asset, d, fmt="usda", root_name="BOX")
+            stage = Usd.Stage.Open(str(paths["root"]))
+            self.assertEqual(stage.GetPrimAtPath("/BOX").GetTypeName(), "Xform")
+            gmesh = UsdGeom.Mesh(stage.GetPrimAtPath("/BOX/geo/render/body"))
+            self.assertEqual(gmesh.GetSubdivisionSchemeAttr().Get(), "none")
+            self.assertEqual(gmesh.GetNormalsInterpolation(), UsdGeom.Tokens.faceVarying)
+            api = UsdGeom.PrimvarsAPI(gmesh.GetPrim())
+            self.assertTrue(api.HasPrimvar("uv"))
+            self.assertFalse(api.HasPrimvar("st"))
+            self.assertEqual(len(api.GetPrimvar("Cd").Get()), 3)
+            self.assertNotIn("skel", paths)
+
+    def test_static_translations_are_a_default_value(self):
+        anim = AnimData(joints=["Root/Hip"], times=[1.0, 5.0],
+                        translations=[[(0, 2, 0)]], rotations=[[(0, 0, 0, 1)], [(0, 1, 0, 0)]],
+                        scales=[[(1, 1, 1)]], translations_static=True, scales_static=True,
+                        interpolation="held")
+        asset = _sample_asset(with_anim=False)
+        asset.anim = anim
+        with tempfile.TemporaryDirectory() as d:
+            paths = author_light_asset(asset, d, fmt="usda")
+            stage = Usd.Stage.Open(str(paths["anim"]))
+            uanim = UsdSkel.Animation(stage.GetPrimAtPath("/CHAR_hero/skel/Anim"))
+            self.assertEqual(uanim.GetTranslationsAttr().GetNumTimeSamples(), 0)
+            self.assertEqual(tuple(uanim.GetTranslationsAttr().Get()[0]), (0, 2, 0))
+            self.assertEqual(uanim.GetRotationsAttr().GetTimeSamples(), [1.0, 5.0])
+            self.assertEqual(uanim.GetPrim().GetCustomDataByKey("flux:interpolation"), "held")
+            # The composed skeleton still resolves the motion (UsdSkel needs all 3 channels).
+            root_stage = Usd.Stage.Open(str(paths["root"]))
+            cache = UsdSkel.Cache()
+            cache.Populate(UsdSkel.Root(root_stage.GetPrimAtPath("/CHAR_hero")), Usd.PrimDefaultPredicate)
+            skel = UsdSkel.Skeleton(root_stage.GetPrimAtPath("/CHAR_hero/skel/Skeleton"))
+            query = cache.GetSkelQuery(skel)
+            xforms = query.GetAnimQuery().ComputeJointLocalTransforms(5.0)
+            self.assertEqual(len(xforms), 1)
+            self.assertEqual(tuple(xforms[0].ExtractTranslation()), (0, 2, 0))

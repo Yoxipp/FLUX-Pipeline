@@ -47,8 +47,11 @@ DEFAULT_REDUCTION = 0.9
 _HASH_KEY = "flux_proxy_src_sha1"
 _TOOL_KEY = "flux_proxy_tool"
 # Bumped when the proxy content changes, so older proxies are rebuilt even if their
-# source did not change (2: the skin binding follows the proxy, 2026-09-18).
-_TOOL_TAG = "flux-usd-proxy/2"
+# source did not change (2: the skin binding follows the proxy, 2026-09-18;
+# 3: flux:srcPoint for the RIG department's weights, ADR 0034).
+_TOOL_TAG = "flux-usd-proxy/3"
+# Per proxy point, the index of the render point it stands for (read by rig_skin).
+PROXY_SOURCE_PRIMVAR = "flux:srcPoint"
 
 
 # USD containers pxr can open for proxy generation.
@@ -141,6 +144,15 @@ def decimate_with_mapping(
             np.asarray(mapping, dtype=np.int64))
 
 
+def source_representatives(mapping: np.ndarray, n_proxy_points: int) -> np.ndarray:
+    """Per proxy point, the first source point that collapsed into it (mapping is
+    source -> proxy, -1 = dropped)."""
+    rep = np.zeros(n_proxy_points, dtype=np.int64)
+    order = np.nonzero(mapping >= 0)[0][::-1]
+    rep[mapping[order]] = order
+    return rep
+
+
 def _copy_skin_binding(src: UsdGeom.Gprim, proxy: UsdGeom.Gprim, mapping: np.ndarray,
                        n_proxy_points: int) -> bool:
     """Give the proxy the skin of its source mesh: same skeleton, same bind transform,
@@ -163,10 +175,7 @@ def _copy_skin_binding(src: UsdGeom.Gprim, proxy: UsdGeom.Gprim, mapping: np.nda
         d.CreateJointIndicesPrimvar(True, size).Set(Vt.IntArray.FromNumpy(indices))
         d.CreateJointWeightsPrimvar(True, size).Set(Vt.FloatArray.FromNumpy(weights))
     else:
-        # First source point of each proxy point (mapping is source -> proxy).
-        rep = np.zeros(n_proxy_points, dtype=np.int64)
-        order = np.nonzero(mapping >= 0)[0][::-1]
-        rep[mapping[order]] = order
+        rep = source_representatives(mapping, n_proxy_points)
         per_point_i = indices.reshape(-1, size)[rep].reshape(-1)
         per_point_w = weights.reshape(-1, size)[rep].reshape(-1)
         d.CreateJointIndicesPrimvar(False, size).Set(Vt.IntArray.FromNumpy(per_point_i))
@@ -385,6 +394,8 @@ def generate_proxy(
                 proxy_path = parent.AppendChild(src_path.name + "_proxy")
             proxy = UsdGeom.Mesh.Define(dst_stage, proxy_path)
             proxy.CreatePurposeAttr(UsdGeom.Tokens.proxy)
+            # Triangles as decimated, never subdivided (USD's default is catmullClark).
+            proxy.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
             proxy.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(proxy_points))
             proxy.CreateFaceVertexCountsAttr(
                 Vt.IntArray.FromNumpy(np.full(proxy_faces.shape[0], 3, dtype=np.int32))
@@ -393,6 +404,12 @@ def generate_proxy(
                 Vt.IntArray.FromNumpy(proxy_faces.astype(np.int32).reshape(-1))
             )
             proxy.CreateExtentAttr(_extent_of(proxy_points))
+            # Which render point each proxy point stands for: a RIG published later
+            # gives the proxy the exact weights of those points (ADR 0034).
+            UsdGeom.PrimvarsAPI(proxy.GetPrim()).CreatePrimvar(
+                PROXY_SOURCE_PRIMVAR, Sdf.ValueTypeNames.IntArray, UsdGeom.Tokens.vertex,
+            ).Set(Vt.IntArray.FromNumpy(
+                source_representatives(mapping, proxy_points.shape[0]).astype(np.int32)))
             _copy_skin_binding(mesh, proxy, mapping, proxy_points.shape[0])
 
         keep_every = curve_keep_every(target_reduction)

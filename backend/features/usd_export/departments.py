@@ -1,8 +1,9 @@
-# departments.py — which department a USD publish contributes to (ADR 0019).
+# departments.py — which department a USD publish contributes to (ADR 0019, 0034).
 #
 # One USD publish = one department. The TYPE token of an asset publish names it;
-# the light export only carries what that department owns (GEO: geometry + skin
-# weights + the skeleton they bind to, RIG: skeleton, ANIM: skeleton animation clip).
+# the light export only carries what that department owns (GEO: geometry only,
+# RIG: skeleton in rest pose + skin weights as overrides on the model's meshes,
+# ANIM: skeleton animation clip).
 # Pure python, no pxr.
 
 from __future__ import annotations
@@ -29,16 +30,21 @@ LOOK_EXPORT_TYPES = frozenset({"SHADING"})
 # What FLUX extracts from the scene when it writes the USD of that TYPE itself, and
 # how to say it in the Publisher. ONE table for backend and UI (GET /usd/departments).
 # "writer" says which exporter runs: "light" (skinned mesh / skeleton) or "look".
+# ADR 0034 (2026-09-26): GEO = geometry only; RIG = skeleton in rest pose + the
+# skin weights, authored as overrides on the model's meshes (-> boneCapture in Houdini).
 LIGHT_EXPORT_CONTENT: dict[str, dict] = {
-    "GEO":  {"what": "geometrie, UV et poids de skin", "writer": "light",
-             "include": {"geo": True, "skel": True, "anim": False, "weights": True, "uv": True}},
-    "RIG":  {"what": "squelette", "writer": "light",
-             "include": {"geo": False, "skel": True, "anim": False, "weights": False, "uv": False}},
-    "ANIM": {"what": "animation du squelette", "writer": "light",
+    "GEO":  {"what": "geometrie seule (points, faces, normales, UV)", "writer": "light",
+             "include": {"geo": True, "skel": False, "anim": False, "weights": False, "uv": True}},
+    "RIG":  {"what": "squelette en rest pose + poids de skin (boneCapture)", "writer": "light",
+             "include": {"geo": True, "skel": True, "anim": False, "weights": True, "uv": False}},
+    "ANIM": {"what": "rotations des joints animes", "writer": "light",
              "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
     "SHADING": {"what": "materiaux et assignations (sans geometrie)", "writer": "look",
                 "include": {"geo": False, "skel": False, "anim": False, "weights": False, "uv": False}},
 }
+
+# Name of each preset in the Publisher (the ANIM clip is shown "anim", 2026-09-26).
+PRESET_LABELS: dict[str, str] = {"GEO": "model", "RIG": "rig", "ANIM": "anim", "SHADING": "look"}
 
 
 # Shot tasks FLUX writes itself (2026-09-18): the motion of ONE character.
@@ -50,13 +56,15 @@ SHOT_EXPORT_CONTENT: dict[str, dict] = {
 
 
 def publisher_table() -> dict[str, dict]:
-    """{TYPE: {"department", "what", "writer", "include"}} for the tasks FLUX exports in USD."""
+    """{TYPE: {"department", "label", "what", "writer", "include"}} for the tasks FLUX
+    exports in USD. "label" is the preset name shown in the Publisher."""
     out: dict[str, dict] = {}
     for task in sorted(LIGHT_EXPORT_TYPES | LOOK_EXPORT_TYPES):
         content = LIGHT_EXPORT_CONTENT.get(task)
         if content is None:
             continue
-        out[task] = {"department": ASSET_DEPARTMENTS.get(task, "clip"), **content}
+        out[task] = {"department": ASSET_DEPARTMENTS.get(task, "clip"),
+                     "label": PRESET_LABELS.get(task, task.lower()), **content}
     return out
 
 
@@ -128,22 +136,37 @@ def restrict_light_asset(asset: LightAsset, contrib: dict) -> tuple[LightAsset, 
     if task not in LIGHT_EXPORT_TYPES:
         raise ValueError(
             f"TYPE {task} non publiable en USD leger : un publish = un departement "
-            "(GEO = geometrie + poids, RIG = skeleton, ANIM = clip d'anim ; le look passe par l'export Look)")
+            "(GEO = geometrie, RIG = skeleton + poids, ANIM = clip d'anim ; le look passe par l'export Look)")
     warnings: list[str] = []
     changes: dict = {}
     if asset.cameras or asset.lights:
         warnings.append("cameras et lumieres ignorees : elles appartiennent au shot")
         changes.update(cameras=[], lights=[])
-    if task == "GEO" and asset.anim is not None:
-        warnings.append("anim ignoree pour un publish GEO : l'anim se publie en ANIM ou dans le shot")
-        changes["anim"] = None
+    if task == "GEO":
+        # A model is geometry only (ADR 0034): the skeleton and the weights are the rig's.
+        if asset.anim is not None:
+            warnings.append("anim ignoree pour un publish GEO : l'anim se publie en ANIM ou dans le shot")
+            changes["anim"] = None
+        if asset.skeleton.joints:
+            warnings.append("squelette ignore pour un publish GEO : il se publie en RIG")
+            changes["skeleton"] = replace(asset.skeleton, joints=[], bind_transforms=[], rest_transforms=[])
+        if any(m.influences_per_point > 0 for m in asset.meshes):
+            warnings.append("poids de skin ignores pour un publish GEO : ils se publient en RIG")
+            changes["meshes"] = [replace(m, joint_indices=[], joint_weights=[], influences_per_point=0,
+                                         geom_bind_transform=None) for m in asset.meshes]
     elif task == "RIG":
-        if asset.meshes:
-            warnings.append("geometrie ignoree pour un publish RIG : la geometrie et les poids se publient en GEO")
-            changes["meshes"] = []
+        if not asset.skeleton.joints:
+            raise ValueError("publish RIG sans squelette : selectionne le rig (joints) dans le DCC")
         if asset.anim is not None:
             warnings.append("anim ignoree pour un publish RIG : l'anim se publie en ANIM ou dans le shot")
             changes["anim"] = None
+        # The rig carries the skin, not the geometry: weights only, as overrides.
+        skinned = [replace(m, uvs=[], uv_indices=[], normals=[], primvars=[], skin_only=True)
+                   for m in asset.meshes if m.influences_per_point > 0]
+        if len(skinned) != len(asset.meshes):
+            warnings.append(f"{len(asset.meshes) - len(skinned)} mesh(es) sans skin ignore(s) : "
+                            "la geometrie se publie en GEO")
+        changes["meshes"] = skinned
     elif task in CLIP_TYPES and asset.meshes:
         warnings.append("geometrie ignoree pour un clip d'anim")
         changes["meshes"] = []
