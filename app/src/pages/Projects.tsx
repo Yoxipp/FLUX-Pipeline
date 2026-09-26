@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
 import { toast } from 'sonner'
 import { useLocation } from 'react-router-dom'
 import {
@@ -915,6 +915,18 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [openInHovered, setOpenInHovered] = useState(false)
+  // "Open in" submenu: opens on the left / moves up when the window has no room
+  // (2026-09-26: half of it was off screen, right of the Folder Manager).
+  const subRef = useRef<HTMLDivElement>(null)
+  const [subFlip, setSubFlip] = useState<{ left: boolean; dy: number }>({ left: false, dy: 0 })
+  useLayoutEffect(() => {
+    if (!openInHovered || !subRef.current) { setSubFlip({ left: false, dy: 0 }); return }
+    const r = subRef.current.getBoundingClientRect()
+    const parent = subRef.current.parentElement?.getBoundingClientRect()
+    const left = r.right > window.innerWidth - 4 && !!parent && parent.left - r.width >= 4
+    const dy = r.bottom > window.innerHeight - 4 ? Math.min(0, window.innerHeight - 4 - r.bottom) : 0
+    if (left || dy) setSubFlip({ left, dy })
+  }, [openInHovered])
 
   // Ajuste la position pour rester dans la fenêtre
   const [pos, setPos] = useState({ x, y })
@@ -1002,19 +1014,22 @@ function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete
               <ChevronRight size={11} strokeWidth={2} />
             </div>
             {openInHovered && (
-              <div style={{
-                position: 'absolute', top: 0, left: '100%',
+              <div ref={subRef} style={{
+                position: 'absolute', top: subFlip.dy,
+                ...(subFlip.left ? { right: '100%' } : { left: '100%' }),
                 background: 'var(--paper)', border: '1px solid var(--rule-2)',
-                borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 140,
+                borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 140, maxWidth: 380,
                 overflow: 'hidden', paddingBlock: 4, zIndex: 1001,
               }}>
                 {openInTargets.map(target => (
                   <div
                     key={target.dcc}
                     onClick={() => { target.onClick(); onClose() }}
+                    title={target.dcc}
                     style={{
                       padding: '6px 12px', fontSize: 11, cursor: 'pointer',
-                      color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 7,
+                      color: 'var(--ink-2)', display: 'block',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                       transition: 'background 0.06s',
                     }}
                     onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)' }}
