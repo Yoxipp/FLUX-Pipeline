@@ -478,7 +478,21 @@ def read_inputs(node, quiet=False):
         _status(node, "%d asset(s), %d anim(s)" % (len(assets), len(clips)))
     return assets, clips
 
+def _refresh_crowd_layers():
+    """Houdini keeps every layer it opened: the crowd layer and its _noise sublayer are
+    rewritten by FLUX, so they are read again (else the old noise stays on screen)."""
+    try:
+        from pxr import Sdf
+        for layer in Sdf.Layer.GetLoadedLayers():
+            ident = (layer.realPath or layer.identifier or "").replace(chr(92), "/")
+            if "/crowd_work/" in ident or "_CROWD" in os.path.basename(ident) or \
+                    os.path.basename(ident).startswith("CROWD"):
+                layer.Reload(True)
+    except Exception:
+        pass
+
 def _reload(node):
+    _refresh_crowd_layers()
     n = node.node("sublayer")
     btn = n.parm("reload") if n is not None else None
     if btn is not None:
@@ -519,6 +533,8 @@ def _build(node, publish):
     if not r.get("ok"):
         _status(node, "Echec : %s" % r.get("error", "?")); return
     msg = "%d agent(s)" % r.get("agents", 0)
+    if _fval(node, "rot_noise", 0.0) > 0:
+        msg += ", noise sur %d" % r.get("noised", 0)
     if publish:
         # The shot stage now sublayers the published crowd (LAST): the preview is dropped
         # so the agents are never there twice (FLUX Shot > Resolve shows the publish).
@@ -638,9 +654,9 @@ _ptg.append(hou.FloatParmTemplate("offset", "Decalage min / max", 2, default_val
                                   help="Time offset of each agent's clip, in frames"))
 _ptg.append(hou.FloatParmTemplate("speed", "Vitesse min / max", 2, default_value=(1.0, 1.0),
                                   help="Playback speed of each agent's clip (2 = twice as fast)"))
-_ptg.append(hou.FloatParmTemplate("rot_noise", "Noise rotation joints", 1, default_value=(0.0,), min=0.0, max=20.0,
-                                  help="Degres : petite rotation par joint et par agent (pas la racine). "
-                                       "Seulement sur les agents animes par un squelette."))
+_ptg.append(hou.FloatParmTemplate("rot_noise", "Noise rotation joints", 1, default_value=(0.0,), min=0.0, max=45.0,
+                                  help="Degres : rotation aleatoire par joint et par agent (pas la racine), "
+                                       "sur l'anim ou, sans anim, sur la pose de repos. Il faut un squelette."))
 _ptg.append(hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                                  menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                                  help="Proxy: purpose=proxy meshes in the viewport. Geo complete: render meshes."))

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pxr import Sdf, Usd, UsdSkel
+from pxr import Gf, Sdf, Usd, UsdSkel, Vt
 
 from features.folder_manager import tokens as tok
 from features.usd_assembler import crowd
@@ -184,6 +184,8 @@ class Crowd(unittest.TestCase):
                             Sdf.SpecifierDef, "Skeleton")
         joints = Sdf.AttributeSpec(skel, "joints", Sdf.ValueTypeNames.TokenArray, Sdf.VariabilityUniform)
         joints.default = _BIPED
+        rest = Sdf.AttributeSpec(skel, "restTransforms", Sdf.ValueTypeNames.Matrix4dArray, Sdf.VariabilityUniform)
+        rest.default = Vt.Matrix4dArray([Gf.Matrix4d(1)] * len(_BIPED))
         vset = Sdf.VariantSetSpec(ogre, "anim_walk")
         Sdf.VariantSpec(vset, "off")
         on = Sdf.VariantSpec(vset, "on").primSpec
@@ -250,6 +252,33 @@ class Crowd(unittest.TestCase):
                                   rot_noise=5.0, looks={"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}})
         stage = Usd.Stage.Open(str(again["path"]))
         self.assertEqual(stage.GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim").GetAttribute("rotations").Get(2), r1)
+
+    def test_rotation_noise_poses_still_agents(self) -> None:
+        # 2026-09-26: OGRE anims unchecked, the noise did nothing (animated agents only).
+        self._ogre()
+        pts = [{"p": [0, 0, 0]}, {"p": [2, 0, 0]}]
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                rot_noise=10.0, looks={"OGRE": {"variants": {"anim_walk": "off"}, "inactive": []}})
+        self.assertEqual(res["noised"], 2)
+        stage = Usd.Stage.Open(str(res["path"]))
+        cache = UsdSkel.Cache()
+        poses = []
+        for name in ("agent_0001", "agent_0002"):
+            cache.Populate(UsdSkel.Root(stage.GetPrimAtPath(f"/crowd/crowd/{name}")), Usd.PrimDefaultPredicate)
+            skel = UsdSkel.Skeleton(stage.GetPrimAtPath(f"/crowd/crowd/{name}/skel/Skeleton"))
+            anim = cache.GetSkelQuery(skel).GetAnimQuery()
+            self.assertTrue(anim)
+            rot = UsdSkel.Animation(anim.GetPrim()).GetRotationsAttr().Get()
+            self.assertEqual(rot[0], Gf.Quatf(1.0))                  # root untouched
+            self.assertNotEqual(rot[1], Gf.Quatf(1.0))
+            poses.append(rot[1])
+        self.assertNotEqual(poses[0], poses[1])
+
+    def test_noise_with_joint_names_without_path(self) -> None:
+        noise = crowd._joint_noise(["hips", "spine", "head"], 10.0, "k")
+        self.assertEqual(noise[0], Gf.Quatf(1.0))
+        self.assertNotEqual(noise[1], Gf.Quatf(1.0))
+        self.assertNotEqual(noise[2], Gf.Quatf(1.0))
 
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]

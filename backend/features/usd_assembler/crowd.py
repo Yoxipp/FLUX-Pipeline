@@ -259,10 +259,12 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
     for rel in inactive or []:
         if Sdf.Path.IsValidPathString(rel):
             stage.OverridePrim(agent.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
-    out = {"skeletons": [], "anim": None, "baked": False}
+    out = {"skeletons": [], "anim": None, "baked": False, "rest": None}
     for prim in Usd.PrimRange(agent):
         if prim.IsA(UsdSkel.Skeleton):
             out["skeletons"].append(prim.GetPath().MakeRelativePath(agent.GetPath()).pathString)
+            if out["rest"] is None:
+                out["rest"] = _rest_pose(UsdSkel.Skeleton(prim))
             if out["anim"] is None:
                 anim = _bound_anim(prim, agent)
                 if anim is not None:
@@ -272,15 +274,29 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
     return out
 
 
+def _rest_pose(skel) -> dict | None:
+    """{"joints", "translations", "rotations", "scales"} of a Skeleton's rest pose."""
+    from pxr import UsdSkel
+
+    joints = skel.GetJointsAttr().Get() or []
+    rest = skel.GetRestTransformsAttr().Get() or skel.GetBindTransformsAttr().Get()
+    if not joints or not rest or len(rest) != len(joints):
+        return None
+    t, r, s = UsdSkel.DecomposeTransforms(rest)
+    return {"joints": [str(j) for j in joints], "translations": t, "rotations": r, "scales": s}
+
+
 def _joint_noise(joints: list[str], amplitude: float, key: str) -> list:
-    """One small rotation per joint (degrees, deterministic per *key*); roots stay put
-    (a root rotation turns the whole body)."""
+    """One small rotation per joint (degrees, deterministic per *key*); the root stays put
+    (a root rotation turns the whole body). Joints named without their path (flat
+    list, some exports): only the first one is taken as the root."""
     from pxr import Gf
 
     rng = random.Random(key)
+    pathed = any("/" in str(j) for j in joints)
     out = []
-    for j in joints:
-        if "/" not in str(j):
+    for i, j in enumerate(joints):
+        if ("/" not in str(j)) if pathed else i == 0:
             out.append(Gf.Quatf(1.0))
             continue
         axis = Gf.Vec3d(rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))
@@ -352,7 +368,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     starts: dict[str, float] = {}
     rotations: dict[str, dict | None] = {}
     noise_skipped: set[str] = set()
-    written = 0
+    written = noised = 0
     for a in agents:
         comp = a["component"]
         look = (looks or {}).get(comp) or {}
@@ -383,14 +399,14 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                                                look.get("variants"), look.get("inactive"))
                 except Exception as exc:      # noqa: BLE001 - the agent still shows
                     log.warning("crowd probe of %s failed: %s", comp, exc)
-                    probes[comp] = {"skeletons": [], "anim": None, "baked": False}
+                    probes[comp] = {"skeletons": [], "anim": None, "baked": False, "rest": None}
                 pr = probes[comp]
                 if pr["baked"] and pr["anim"] is None:
                     warnings.append(f"{comp} : anim cuite dans les points (pas de squelette anime), "
                                     "decalage / vitesse / noise sans effet")
         if not targets[comp]:
             continue
-        probe = probes.get(comp) or {"skeletons": [], "anim": None, "baked": False}
+        probe = probes.get(comp) or {"skeletons": [], "anim": None, "baked": False, "rest": None}
         path = f"/crowd/{grp}/{a['name']}"
         prim = stage.DefinePrim(path)          # typeless: the component's SkelRoot comes through
         if comp in target_prims:
@@ -458,9 +474,32 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                             attr.default = noisy
                         else:
                             noise_layer.SetTimeSample(attr.path, shift + scale * t, noisy)
+                    noised += 1
                 elif comp not in noise_skipped:
                     noise_skipped.add(comp)
                     warnings.append(f"{comp} : pas de rotation de joint lisible, pas de noise")
+        elif noise_layer is not None and probe["skeletons"]:
+            # No animation (unchecked in FLUX Import): the noise poses the rest pose, so a
+            # still crowd is not a copy of one statue (2026-09-26: the noise did nothing).
+            rest = probe.get("rest")
+            if rest:
+                anim_path = f"{path}/crowd_anim"
+                anim = UsdSkel.Animation.Define(stage, anim_path)
+                noise = _joint_noise(rest["joints"], rot_noise, f"{seed}:{a['name']}")
+                anim.CreateJointsAttr(Vt.TokenArray(rest["joints"]))
+                anim.CreateTranslationsAttr(rest["translations"])
+                anim.CreateRotationsAttr(Vt.QuatfArray([v * n for v, n in zip(rest["rotations"], noise)]))
+                anim.CreateScalesAttr(rest["scales"])
+                for where in [path] + [f"{path}/{s}" for s in probe["skeletons"]]:
+                    over = stage.OverridePrim(where)
+                    UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+                noised += 1
+            elif comp not in noise_skipped:
+                noise_skipped.add(comp)
+                warnings.append(f"{comp} : squelette sans pose de repos, pas de noise")
+        elif noise_layer is not None and comp not in noise_skipped:
+            noise_skipped.add(comp)
+            warnings.append(f"{comp} : pas de squelette, pas de noise")
         written += 1
     # FLUX layer contract (ADR 0011): default prim, meters, Y up.
     stage.SetDefaultPrim(stage.GetPrimAtPath("/crowd"))
@@ -470,7 +509,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     if noise_layer is not None:
         noise_layer.Save()
     layer.Save()
-    return {"path": dest, "agents": written, "warnings": warnings}
+    return {"path": dest, "agents": written, "warnings": warnings, "noised": noised}
 
 
 def _anim_start(path: str | Path, prim: str) -> float:

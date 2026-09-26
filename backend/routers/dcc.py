@@ -2683,6 +2683,7 @@ async def houdini_crowd_build(req: CrowdBuildRequest) -> dict:
         from core.paths import to_flux_token
         path = to_flux_token(path)
     return {"ok": True, "path": path, "agents": res["agents"], "warnings": res["warnings"],
+            "noised": res.get("noised", 0),
             "base": res.get("base", ""), "version": res.get("version", ""), "stage": res.get("stage")}
 
 
