@@ -9,6 +9,16 @@ import {
   getBackendStatus, onBackendStatus, type BackendStatus,
 } from './python_bridge'
 
+// The terminal that launched FLUX can go away (window closed, concurrently stopped)
+// while FLUX keeps running: every console.log (backend output forwarded by
+// python_bridge) then fails with EPIPE, an uncaught error popup on each backend line.
+// A dead console is not an error: drop the write, keep FLUX running.
+for (const stream of [process.stdout, process.stderr]) {
+  stream?.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'EPIPE' && err.code !== 'ERR_STREAM_DESTROYED') throw err
+  })
+}
+
 let win: BrowserWindow | null = null
 let splash: BrowserWindow | null = null
 
