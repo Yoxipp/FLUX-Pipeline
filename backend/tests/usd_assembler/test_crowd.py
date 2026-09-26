@@ -168,6 +168,89 @@ class Crowd(unittest.TestCase):
         crowd_stage = Usd.Stage.Open(str(res["path"]))
         self.assertTrue(crowd_stage.GetPrimAtPath("/crowd/crowd/agent_0001/body").IsValid())
 
+    def _ogre(self) -> Path:
+        """A component like OGRE: skinned skeleton, its walk in an "on" variant bound on the
+        skeleton itself (what component_auto writes for an ANIM file with a rig target)."""
+        tokens = tok.load_tokens(self.project)
+        tokens["NAME"]["OGRE"] = "assets/chara/OGRE"
+        tok.save_tokens(self.project, tokens)
+        walk = next((self.project / "assets/chara/BOB/anim/walk").glob("*_LAST.usd*"))
+        root = crowd._clip_root(walk)
+        last = self.project / "assets/chara/OGRE/usd/OGRE_LAST.usda"
+        last.parent.mkdir(parents=True)
+        layer = Sdf.Layer.CreateNew(str(last))
+        ogre = Sdf.PrimSpec(layer, "OGRE", Sdf.SpecifierDef, "SkelRoot")
+        skel = Sdf.PrimSpec(Sdf.PrimSpec(ogre, "skel", Sdf.SpecifierDef, "Scope"), "Skeleton",
+                            Sdf.SpecifierDef, "Skeleton")
+        joints = Sdf.AttributeSpec(skel, "joints", Sdf.ValueTypeNames.TokenArray, Sdf.VariabilityUniform)
+        joints.default = _BIPED
+        vset = Sdf.VariantSetSpec(ogre, "anim_walk")
+        Sdf.VariantSpec(vset, "off")
+        on = Sdf.VariantSpec(vset, "on").primSpec
+        anim = Sdf.PrimSpec(Sdf.PrimSpec(on, "anims", Sdf.SpecifierDef), "walk", Sdf.SpecifierDef)
+        anim.referenceList.prependedItems = [Sdf.Reference(os.path.relpath(walk, last.parent).replace(os.sep, "/"),
+                                                           Sdf.Path(f"/{root}/skel/Anim"))]
+        over = Sdf.PrimSpec(Sdf.PrimSpec(on, "skel", Sdf.SpecifierOver), "Skeleton", Sdf.SpecifierOver)
+        over.SetInfo("apiSchemas", Sdf.TokenListOp.Create(prependedItems=["SkelBindingAPI"]))
+        Sdf.RelationshipSpec(over, "skel:animationSource", False).targetPathList.explicitItems = [
+            Sdf.Path("/OGRE/anims/walk")]
+        ogre.variantSetNameList.prependedItems = ["anim_walk"]
+        ogre.variantSelections["anim_walk"] = "on"
+        layer.defaultPrim = "OGRE"
+        layer.Save()
+        return last
+
+    def _skel_anim_times(self, path: Path, agent: str):
+        stage = Usd.Stage.Open(str(path))
+        skel = UsdSkel.Skeleton(stage.GetPrimAtPath(f"/crowd/crowd/{agent}/skel/Skeleton"))
+        query = UsdSkel.Cache().GetSkelQuery(skel)
+        cache = UsdSkel.Cache()
+        cache.Populate(UsdSkel.Root(stage.GetPrimAtPath(f"/crowd/crowd/{agent}")), Usd.PrimDefaultPredicate)
+        anim = cache.GetSkelQuery(skel).GetAnimQuery()
+        return anim.GetJointTransformTimeSamples() if anim else None
+
+    def test_animation_unchecked_in_flux_import_does_not_play(self) -> None:
+        # 2026-09-26: both anims of OGRE unchecked in FLUX Import, the crowd played one.
+        self._ogre()
+        pts = [{"p": [0, 0, 0]}]
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                looks={"OGRE": {"variants": {"anim_walk": "off"}, "inactive": []}})
+        self.assertIsNone(self._skel_anim_times(res["path"], "agent_0001"))
+        self.assertFalse(Usd.Stage.Open(str(res["path"])).GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim"))
+
+    def test_asset_animation_gets_offset_and_speed(self) -> None:
+        # The asset's own animation (checked in FLUX Import) follows Decalage / Vitesse.
+        self._ogre()
+        pts = [{"p": [0, 0, 0]}]
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                offset=(4, 4), speed=(2, 2),
+                                looks={"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}})
+        self.assertEqual(self._skel_anim_times(res["path"], "agent_0001"), [5.0, 5.5, 6.0])
+
+    def test_crowd_clip_beats_the_asset_animation(self) -> None:
+        self._ogre()
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                components=["OGRE"], clips=["CHAR_ANIM_BOB_walk"], offset=(10, 10))
+        self.assertEqual(self._skel_anim_times(res["path"], "agent_0001"), [11.0, 12.0, 13.0])
+
+    def test_rotation_noise_varies_agents_but_not_the_root(self) -> None:
+        self._ogre()
+        pts = [{"p": [0, 0, 0]}, {"p": [2, 0, 0]}]
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                rot_noise=5.0, looks={"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}})
+        noise = Path(res["path"]).with_name(Path(res["path"]).stem + "_noise.usdc")
+        self.assertTrue(noise.is_file())
+        stage = Usd.Stage.Open(str(res["path"]))
+        r1 = stage.GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim").GetAttribute("rotations").Get(2)
+        r2 = stage.GetPrimAtPath("/crowd/crowd/agent_0002/crowd_anim").GetAttribute("rotations").Get(2)
+        self.assertEqual(len(r1), 1)                         # the walk animates Root/Hip only
+        self.assertNotEqual(r1[0], r2[0])
+        # Same seed, same crowd.
+        again = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                  rot_noise=5.0, looks={"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}})
+        stage = Usd.Stage.Open(str(again["path"]))
+        self.assertEqual(stage.GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim").GetAttribute("rotations").Get(2), r1)
+
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
         res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["BOB", "TIM"],
