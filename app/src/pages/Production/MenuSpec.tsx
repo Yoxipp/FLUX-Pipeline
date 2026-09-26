@@ -18,7 +18,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { readSession, writeSession } from '../../hooks/useSessionState'
-import { Pin, X, Layers, RefreshCw } from 'lucide-react'
+import { Pin, X, Layers, RefreshCw, Heart } from 'lucide-react'
+import { useFavoriteBinding } from '../../hooks/useFavorites'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { UsdAssetInfo } from '../../api/client'
@@ -298,16 +299,31 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   }, [initialOpen, selectedRes?.entity.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tab management helpers
-  const openTaskTab = (entityId: string, taskId: string) => {
-    const key = taskKey(entityId, taskId)
-    setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'task', entityId, taskId }]))
-    setActiveKey(key)
+  // One tab per task (2026-09-26): opening a subtask, or the whole task, reuses the
+  // tab of that task when one is open (same place, pin kept) and switches what it shows.
+  const showTaskTab = (entityId: string, taskId: string, subtask: string | null) => {
+    const next: Tab = subtask
+      ? { key: subKey(entityId, taskId, subtask), kind: 'subtask', entityId, taskId, subtask }
+      : { key: taskKey(entityId, taskId), kind: 'task', entityId, taskId }
+    setTabs(prev => {
+      const i = prev.findIndex(x => (x.kind === 'task' || x.kind === 'subtask') && x.entityId === entityId && x.taskId === taskId)
+      if (i < 0) return [...prev, next]
+      const old = prev[i]
+      if (old.key !== next.key && project) {
+        const pins = readPinned(project)
+        if (pins.some(p => refToKey(p) === old.key)) {
+          writePinned(project, pins.map(p => refToKey(p) !== old.key ? p
+            : { kind: next.kind as 'task' | 'subtask', entityId, taskId, ...(subtask ? { subtask } : {}) }))
+        }
+      }
+      const out = prev.slice()
+      out[i] = next
+      return out
+    })
+    setActiveKey(next.key)
   }
-  const openSubtaskTab = (entityId: string, taskId: string, subtask: string) => {
-    const key = subKey(entityId, taskId, subtask)
-    setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'subtask', entityId, taskId, subtask }]))
-    setActiveKey(key)
-  }
+  const openTaskTab = (entityId: string, taskId: string) => showTaskTab(entityId, taskId, null)
+  const openSubtaskTab = (entityId: string, taskId: string, subtask: string) => showTaskTab(entityId, taskId, subtask)
   const openEntityRootTab = (entityId: string) => {
     const key = entityRootKey(entityId)
     setTabs(prev => (prev.some(x => x.key === key) ? prev : [...prev, { key, kind: 'entityRoot', entityId }]))
@@ -431,8 +447,29 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         if (!task) return <div style={_hint}>Tâche introuvable</div>
         const shim = toAssetShim(res)
         const bucket = publishesByTask[`${res.entity.id}|${task.id}`] || []
+        // The task box, always open on top of its tab: switch subtask / whole task here.
+        const box = (
+          <div style={{ padding: '10px 18px 0', flexShrink: 0 }}>
+            <TaskNode
+              task={task} asset={shim} pinnedOpen
+              activeSub={active.kind === 'subtask' ? active.subtask : null}
+              publishCount={bucket.length}
+              onOpenHeader={() => openTaskTab(res.entity.id, task.id)}
+              onOpenSubtask={sub => openSubtaskTab(res.entity.id, task.id, sub)}
+              completion={shim.task_details?.[task.name]?.completion ?? 0}
+              subtaskCompletions={Object.fromEntries(
+                task.known_subtasks.map(sb => [sb, shim.task_details?.[`${task.name}|${sb}`]?.completion ?? 0]))}
+            />
+          </div>
+        )
+        const withBox = (detail: React.ReactNode) => (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {box}
+            {detail}
+          </div>
+        )
         if (active.kind === 'task') {
-          return (
+          return withBox(
             <TaskDetail
               asset={shim} task={task}
               entityKind={res.kind}
@@ -450,7 +487,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
             />
           )
         }
-        return (
+        return withBox(
           <TaskDetail
             asset={shim} task={task}
             entityKind={res.kind}
@@ -771,6 +808,7 @@ function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtas
           <TaskNode
             key={task.id}
             task={task}
+            asset={shim}
             publishCount={(publishesByTask[`${res.entity.id}|${task.id}`] || []).length}
             onOpenHeader={() => onOpenTask(task.id)}
             onOpenSubtask={(sub) => onOpenSubtask(task.id, sub)}
@@ -929,8 +967,12 @@ const _miniBtn: React.CSSProperties = {
 }
 
 // ── one task node ────────────────────────────────────────────────────────────
-function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion, subtaskCompletions, inherited }: {
+function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, completion, subtaskCompletions, inherited,
+                    pinnedOpen = false, activeSub = null }: {
   task:               ProductionTask
+  asset:              Asset
+  pinnedOpen?:        boolean          // task tab: always open, in the flow
+  activeSub?:         string | null    // subtask shown by the tab (highlighted)
   publishCount:       number
   onOpenHeader:       () => void
   onOpenSubtask:      (sub: string) => void
@@ -944,8 +986,27 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
   // over its neighbours instead of growing in the flow (2026-09-26: the last card
   // of a full row wrapped to the next line, lost the hover, closed, came back: jitter).
   const [slot, setSlot] = useState<{ w: number; h: number; alignRight: boolean } | null>(null)
+  // Right click: whole-task favorite (notifications), 2026-09-26.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const fav = useFavoriteBinding(asset, task, null)
   const color = taskColorFromName(task.name)
   const hasSubs = task.known_subtasks.length > 0
+  const floating = expanded && !!slot && !pinnedOpen
+  const isOpen = expanded || pinnedOpen
+
+  useEffect(() => {
+    if (!menu) return
+    const off = () => setMenu(null)
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    window.addEventListener('click', off)
+    window.addEventListener('keydown', key)
+    window.addEventListener('scroll', off, true)
+    return () => {
+      window.removeEventListener('click', off)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('scroll', off, true)
+    }
+  }, [menu])
 
   const onClickBody: React.MouseEventHandler = (e) => {
     if (inherited) return
@@ -953,6 +1014,7 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
   }
 
   function open(e: React.MouseEvent<HTMLDivElement>) {
+    if (pinnedOpen) return
     const r = e.currentTarget.getBoundingClientRect()
     const box = e.currentTarget.parentElement?.getBoundingClientRect()
     // Open towards the left when the widest open card would leave the row on the right.
@@ -965,36 +1027,59 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
     <div
       onMouseEnter={open}
       onMouseLeave={close}
+      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }) }}
       style={{ position: 'relative', flexShrink: 0,
-               ...(expanded && slot ? { width: slot.w, height: slot.h, zIndex: 20 } : {}) }}
+               ...(floating && slot ? { width: slot.w, height: slot.h, zIndex: 20 } : {}),
+               ...(menu ? { zIndex: 30 } : {}) }}
     >
+    {menu && (
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: 'fixed', left: menu.x, top: menu.y, zIndex: 1000, minWidth: 220,
+          padding: 4, borderRadius: 8, border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
+          boxShadow: 'var(--shadow-md)', fontFamily: 'var(--sans)',
+        }}>
+        <button style={_menuItem} onClick={() => { void fav.toggle(); setMenu(null) }}>
+          <Heart size={12} strokeWidth={1.75} color={fav.isFavorite ? 'var(--accent-hi)' : 'var(--ink-3)'}
+                 fill={fav.isFavorite ? 'var(--accent)' : 'none'} />
+          {fav.isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris (notifications)'}
+        </button>
+        {!inherited && (
+          <button style={_menuItem} onClick={() => { setMenu(null); onOpenHeader() }}>
+            <Layers size={12} strokeWidth={1.75} color="var(--ink-3)" />
+            Ouvrir la tâche
+          </button>
+        )}
+      </div>
+    )}
     <div
       onClick={onClickBody}
       style={{
-        ...(expanded && slot ? { position: 'absolute', top: 0, ...(slot.alignRight ? { right: 0 } : { left: 0 }) } : {}),
-        minWidth: expanded ? Math.max(220, slot?.w ?? 0) : 160,
-        maxWidth: 360,
-        padding: expanded ? '10px 12px 12px' : '9px 14px',
+        ...(floating && slot ? { position: 'absolute', top: 0, ...(slot.alignRight ? { right: 0 } : { left: 0 }) } : {}),
+        minWidth: isOpen ? Math.max(220, slot?.w ?? 0) : 160,
+        maxWidth: pinnedOpen ? 520 : 360,
+        padding: isOpen ? '10px 12px 12px' : '9px 14px',
         borderRadius: 8,
         border: `1px solid color-mix(in oklch, ${color} 70%, black 20%)`,
         // Solid fill but visibly duller than the subtask chips below.
         background: `color-mix(in oklch, ${color} 58%, var(--paper-2) 42%)`,
         color: 'var(--paper)',
-        opacity: inherited && !expanded ? 0.85 : 1,
-        boxShadow: expanded ? 'var(--shadow-md)' : 'var(--shadow-xs)',
+        opacity: inherited && !isOpen ? 0.85 : 1,
+        boxShadow: floating ? 'var(--shadow-md)' : 'var(--shadow-xs)',
         cursor: inherited ? 'default' : (hasSubs ? 'default' : 'pointer'),
         transition: 'min-width 0.22s ease, padding 0.22s ease',
         fontFamily: 'var(--sans)',
       }}
     >
       <div
-        onClick={(e) => { if (inherited || hasSubs) return; e.stopPropagation(); onOpenHeader() }}
+        onClick={(e) => { if (inherited) return; e.stopPropagation(); onOpenHeader() }}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          cursor: (inherited || hasSubs) ? 'default' : 'pointer',
-          paddingBottom: expanded ? 6 : 0,
+          cursor: inherited ? 'default' : 'pointer',
+          paddingBottom: isOpen ? 6 : 0,
         }}
-        title={inherited ? 'Hérité de la séquence' : (hasSubs ? 'Survoler pour ouvrir un subtask' : 'Ouvrir la tâche')}
+        title={inherited ? 'Hérité de la séquence' : 'Ouvrir la tâche (tous les subtasks). Clic droit : favoris'}
       >
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--paper)', flexShrink: 0, opacity: 0.9 }} />
         <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--paper)' }}>{task.name}</span>
@@ -1006,6 +1091,9 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
           }}>hérité</span>
         )}
         <span style={{ flex: 1 }} />
+        {fav.isFavorite && (
+          <Heart size={11} strokeWidth={1.75} color="var(--paper)" fill="var(--paper)" style={{ flexShrink: 0 }} />
+        )}
         {publishCount > 0 && (
           <span style={{
             fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600,
@@ -1016,7 +1104,7 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
       </div>
 
       <div style={{
-        height: expanded ? 5 : 3, marginTop: expanded ? 8 : 6, borderRadius: 3,
+        height: isOpen ? 5 : 3, marginTop: isOpen ? 8 : 6, borderRadius: 3,
         background: 'rgba(0,0,0,0.28)',
         overflow: 'hidden', transition: 'height 0.2s',
       }}>
@@ -1026,7 +1114,7 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
         }} />
       </div>
 
-      {expanded && hasSubs && (
+      {isOpen && hasSubs && (
         <div style={{
           marginTop: 10,
           display: 'grid',
@@ -1048,7 +1136,7 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                     padding: '5px 10px', borderRadius: 6,
-                    border: `1px solid color-mix(in oklch, ${color} 75%, black 25%)`,
+                    border: sub === activeSub ? '2px solid var(--paper)' : `1px solid color-mix(in oklch, ${color} 75%, black 25%)`,
                     background: color, color: 'var(--paper)',
                     fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
                     cursor: inherited ? 'default' : 'pointer',
@@ -1078,6 +1166,12 @@ function TaskNode({ task, publishCount, onOpenHeader, onOpenSubtask, completion,
     </div>
     </div>
   )
+}
+
+const _menuItem: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px',
+  border: 'none', borderRadius: 5, background: 'transparent', color: 'var(--ink)',
+  fontFamily: 'var(--sans)', fontSize: 11, textAlign: 'left', cursor: 'pointer',
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
