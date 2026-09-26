@@ -27,6 +27,41 @@ def _shot_roots(project: Path) -> list[Path]:
     return sorted(r for r in roots if r.is_dir())
 
 
+def _scan(roots: list[Path], project: Path, accept) -> list[dict]:
+    """Published motion-only animations under *roots*: one item per base, with its
+    LAST pointer and its versions. *accept(base, contrib)* -> the item fields, or None."""
+    found: dict[str, dict] = {}
+    for root in roots:
+        for path in root.rglob("*"):
+            if path.suffix.lower() not in _USD_EXTS or ".proxy." in path.name:
+                continue
+            stem = path.stem
+            if stem.endswith("_LAST"):
+                base, version = stem[:-5], None
+            else:
+                m = _VERSION_DIR.match(path.parent.name)
+                if not m or stem != m.group("base"):
+                    continue
+                base, version = m.group("base"), m.group("ver")
+            if base not in found:
+                fields = accept(base)
+                if fields is None:
+                    found[base] = {}
+                    continue
+                found[base] = {**fields, "base": base, "last": "", "versions": {}}
+            item = found[base]
+            if not item:
+                continue
+            if version is None:
+                item["last"] = str(path)
+            else:
+                item["versions"][version] = str(path)
+    items = [i for i in found.values() if i]
+    for item in items:
+        item["versions"] = dict(sorted(item["versions"].items()))
+    return items
+
+
 def list_shot_anims(project_path: str | Path) -> list[dict]:
     """Every published shot animation of the project.
 
@@ -39,33 +74,39 @@ def list_shot_anims(project_path: str | Path) -> list[dict]:
     from features.usd_export.departments import character_name, contribution, is_motion_only
 
     project = Path(project_path)
-    found: dict[str, dict] = {}
-    for root in _shot_roots(project):
-        for path in root.rglob("*"):
-            if path.suffix.lower() not in _USD_EXTS or ".proxy." in path.name:
-                continue
-            stem = path.stem
-            if stem.endswith("_LAST"):
-                base, version = stem[:-5], None
-            else:
-                m = _VERSION_DIR.match(path.parent.name)
-                if not m or stem != m.group("base"):
-                    continue
-                base, version = m.group("base"), m.group("ver")
-            contrib = contribution(base)
-            if not is_motion_only(contrib) or contrib["kind"] != "shot" or not contrib["name"]:
-                continue
-            parsed = parse_filename(f"{base}.usd") or {}
-            item = found.setdefault(base, {
-                "seq": parsed.get("SEQ", ""), "shot": parsed.get("SHOT", ""),
+
+    def _accept(base: str):
+        contrib = contribution(base)
+        if not is_motion_only(contrib) or contrib["kind"] != "shot" or not contrib["name"]:
+            return None
+        parsed = parse_filename(f"{base}.usd") or {}
+        return {"kind": "shot", "seq": parsed.get("SEQ", ""), "shot": parsed.get("SHOT", ""),
                 "task": contrib["type"], "character": contrib["name"] or "",
-                "name": character_name(contrib, project), "base": base,
-                "last": "", "versions": {}})
-            if version is None:
-                item["last"] = str(path)
-            else:
-                item["versions"][version] = str(path)
-    items = sorted(found.values(), key=lambda i: (i["seq"], i["shot"], i["character"]))
-    for item in items:
-        item["versions"] = dict(sorted(item["versions"].items()))
-    return items
+                "name": character_name(contrib, project)}
+
+    items = _scan(_shot_roots(project), project, _accept)
+    return sorted(items, key=lambda i: (i["seq"], i["shot"], i["character"]))
+
+
+def list_asset_clips(project_path: str | Path) -> list[dict]:
+    """Every published asset animation clip (CLASS_ANIM_NAME_CLIP, ADR 0019 A6).
+
+    Returns [{"kind": "clip", "class", "name", "character", "clip", "base", "last",
+    "versions"}], sorted by name / clip. ``character`` = ``name`` (the asset).
+    """
+    from features.folder_manager.tokens import load_tokens
+    from features.usd_export.departments import contribution
+
+    project = Path(project_path)
+    tokens = load_tokens(project) or {}
+    roots = sorted({project / Path(str(rel).replace("\\", "/")) for rel in (tokens.get("NAME") or {}).values()})
+
+    def _accept(base: str):
+        contrib = contribution(base)
+        if not contrib or contrib["kind"] != "clip" or not contrib.get("name"):
+            return None
+        return {"kind": "clip", "class": base.split("_", 1)[0], "name": contrib["name"],
+                "character": contrib["name"], "clip": contrib.get("instance") or "null"}
+
+    items = _scan([r for r in roots if r.is_dir()], project, _accept)
+    return sorted(items, key=lambda i: (i["name"], i["clip"]))

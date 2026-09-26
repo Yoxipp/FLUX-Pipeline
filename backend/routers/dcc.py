@@ -2564,16 +2564,59 @@ async def houdini_anim_module() -> dict:
 
 @router.get("/houdini/anim/publishes")
 async def houdini_anim_publishes(project: str) -> dict:
-    """Shot animations (SEQ_SHOT_ANIM_<NAME>) the FLUX Anim HDA can apply."""
+    """Animations the FLUX Anim HDA can apply: shot animations (SEQ_SHOT_ANIM_<NAME>)
+    and asset clips (CLASS_ANIM_<NAME>_<CLIP>), each with a key and a menu label."""
     from core.paths import get_project_path
-    from features.importer.shot_anim import list_shot_anims
+    from features.importer.anim_apply import list_anims
 
     project_path = get_project_path(project)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project}")
     loop = asyncio.get_running_loop()
-    items = await loop.run_in_executor(None, lambda: list_shot_anims(project_path))
+    items = await loop.run_in_executor(None, lambda: list_anims(project_path))
     return {"ok": True, "items": items}
+
+
+class AnimBuildRow(BaseModel):
+    key:     str                 # base name of the animation (list item key)
+    version: str = "LAST"
+    target:  str                 # prim of the character on the Houdini stage
+
+
+class AnimBuildRequest(BaseModel):
+    project: str
+    out:     str                 # layer file to write (HDA: $HIP/flux_anim/...)
+    rows:    list[AnimBuildRow]
+    noise:   dict | None = None  # {"amplitude" (deg), "frequency" (Hz), "seed"}
+
+
+@router.post("/houdini/anim/build")
+async def houdini_anim_build(req: AnimBuildRequest) -> dict:
+    """FLUX Anim (2026-09-26): one layer applying every chosen animation on its
+    character's prim, with the optional rotation noise, frame range and fps."""
+    from core.paths import get_project_path
+    from features.importer.anim_apply import anim_file, build_anim_layer, list_anims
+
+    project_path = get_project_path(req.project)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    loop = asyncio.get_running_loop()
+
+    def _run() -> dict:
+        items = {i["key"]: i for i in list_anims(project_path)}
+        rows = []
+        for r in req.rows:
+            item = items.get(r.key)
+            rows.append({"label": (item or {}).get("label", r.key), "target": r.target,
+                         "file": anim_file(item, r.version) if item else ""})
+        return build_anim_layer(req.out, rows, noise=req.noise)
+
+    try:
+        res = await loop.run_in_executor(None, _run)
+    except Exception as exc:
+        log.exception("FLUX Anim build failed")
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, **res}
 
 
 @router.get("/houdini/importer/open_hub")
