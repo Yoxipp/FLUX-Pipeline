@@ -133,6 +133,12 @@ Stop-Process -Name FLUX -Force -ErrorAction SilentlyContinue
 **Cause :** le whitelist `files` excluait `scripts/`, or `main.ts` lit l'icone runtime dans `scripts/icon.*`.
 **Corrige :** `scripts/icon.ico` et `scripts/icon.png` sont dans `files`.
 
+**Suite (2026-09-26) :** `FLUX.exe` lui-meme gardait l'icone Electron (raccourci bureau, barre des taches,
+Explorateur) : `win.signAndEditExecutable: false` desactive rcedit (il vient du telechargement winCodeSign, en
+echec sans certificat). Hook `afterPack: scripts/set_exe_icon.cjs` : remplace le groupe d'icones de l'exe par
+`scripts/icon.ico` avec `resedit` (MIT, JS pur, deja dependance d'electron-builder). Log de build :
+`[FLUX] exe icon set`. Windows peut garder l'ancienne icone en cache sur un raccourci existant : le recreer.
+
 ### Au demarrage, le backend ne se lance pas tant que l'antivirus (Avast) n'a pas valide
 
 **Cause :** `flux_backend.exe` non signe, quarantaine breve au premier lancement. **Corrige cote logiciel :**

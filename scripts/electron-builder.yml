@@ -18,6 +18,10 @@ win:
   signAndEditExecutable: false          # Désactiver pour builds sans cert (re-activer pour release finale)
   icon: scripts/icon.ico
 
+# signAndEditExecutable off = the exe keeps Electron's icon: this hook puts the FLUX
+# logo into FLUX.exe itself (shortcut, taskbar, Explorer), see scripts/set_exe_icon.cjs.
+afterPack: scripts/set_exe_icon.cjs
+
 # Installeur assisté NSIS — détecte une version antérieure et propose la MAJ,
 # sinon installation neuve. Voir scripts/installer.nsh (macro customInit).
 nsis:
