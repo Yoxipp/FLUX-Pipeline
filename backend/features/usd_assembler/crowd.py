@@ -390,8 +390,13 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                        clip_files: dict[str, Path], *, freeze: bool = False,
                        sources: dict[str, dict] | None = None,
                        looks: dict[str, dict] | None = None, rot_noise: float = 0.0,
-                       seed: int = 0, noise_freq: float = 1.0) -> dict:
+                       seed: int = 0, noise_freq: float = 1.0, variations: int = 0) -> dict:
     """Write the crowd layer *dest*: /crowd/<GROUP>/agent_NNNN (relative references only).
+
+    *variations* > 0 (2026-09-26: unique agents lag): per asset and clip, that many
+    prototypes (/crowd_protos/<GROUP>/<ASSET>_NNN, class prims: never drawn) each with its
+    own animation, offset, speed and noise; every agent is an instance of one of them, so
+    agents share geometry and skinning. 0 = every agent unique (heavy, one noise each).
 
     *sources* ({asset: {"file", "prim"}}, from FLUX Crowd input 1): used for an asset
     without a FLUX component, so it still shows (static mesh, 2026-09-26).
@@ -427,6 +432,9 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     for scope in ("/crowd", f"/crowd/{grp}"):
         # group kind: the agents (components) stay a valid model hierarchy.
         Usd.ModelAPI(UsdGeom.Scope.Define(stage, scope).GetPrim()).SetKind("group")
+    if variations > 0:
+        stage.CreateClassPrim("/crowd_protos")
+        stage.CreateClassPrim(f"/crowd_protos/{grp}")
     targets: dict[str, str] = {}
     target_prims: dict[str, Sdf.Path] = {}
     probes: dict[str, dict] = {}
@@ -435,6 +443,111 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     noise_skipped: set[str] = set()
     info: list[str] = []
     written = noised = 0
+    protos: dict[tuple, str] = {}
+    proto_noised: dict[tuple, bool] = {}
+
+    def _body(prim, comp: str, look: dict, probe: dict, a: dict, name: str) -> bool:
+        """The asset, the FLUX Import choices, the animation and the noise on *prim* (an
+        agent, or a prototype its instances share). True when the noise was applied."""
+        path = prim.GetPath().pathString
+        did_noise = False
+        if comp in target_prims:
+            prim.GetReferences().AddReference(targets[comp], target_prims[comp])
+        else:
+            prim.GetReferences().AddReference(targets[comp])
+        Usd.ModelAPI(prim).SetKind("component")
+        # Never an instance: an instanceable asset made every agent one, and USD ignores
+        # whatever is authored under an instance (clip, offset, speed, noise did nothing).
+        prim.SetInstanceable(False)
+        for rel in probe.get("instances") or []:
+            if rel != ".":
+                stage.OverridePrim(prim.GetPath().AppendPath(Sdf.Path(rel))).SetInstanceable(False)
+        # The FLUX Import choices of input 1 (animations unchecked, rig off...).
+        sets = prim.GetVariantSets()
+        for vset_name, sel in sorted((look.get("variants") or {}).items()):
+            sets.SetSelection(vset_name, sel)
+        for rel in look.get("inactive") or []:
+            if Sdf.Path.IsValidPathString(rel):
+                stage.OverridePrim(prim.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
+        # The animation: the crowd clip, else the one the asset plays (checked in FLUX Import).
+        src_file, src_prim = None, ""
+        clip = a.get("clip")
+        if clip:
+            src = clip_files.get(clip)
+            if src is None:
+                warnings.append(f"clip {clip} introuvable")
+            else:
+                src_file = _frozen(src) if freeze else src
+                src_prim = f"/{_clip_root(src_file)}/skel/Anim"
+        if src_file is None and probe.get("anims"):
+            pick = random.Random(f"{seed}:{name}:anim").choice(probe["anims"])
+            src_file, src_prim = Path(pick["file"]), pick["prim"]
+        if src_file is not None:
+            anim_path = f"{path}/crowd_anim"
+            anim = stage.DefinePrim(anim_path)
+            # Speed 2 = the clip plays twice as fast, around its FIRST frame (not frame 0,
+            # which pushed a 1001 clip to frame ~500: agents frozen during the shot):
+            # stage time = start + offset + (clip time - start) / speed.
+            key = f"{src_file}|{src_prim}"
+            start = starts.setdefault(key, _anim_start(src_file, src_prim))
+            scale = 1.0 / a["speed"]
+            shift = a["offset"] + start * (1.0 - scale)
+            anim.GetReferences().AddReference(_rel(src_file, dest.parent), Sdf.Path(src_prim),
+                                              Sdf.LayerOffset(shift, scale))
+            # On the agent AND on each skeleton: a binding on the skeleton (the component's
+            # own animation) beats one on an ancestor.
+            for where in [path] + [f"{path}/{s}" for s in probe["skeletons"]]:
+                over = stage.OverridePrim(where)
+                UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+            if noise_layer is not None:
+                if key not in rotations:
+                    try:
+                        rotations[key] = _read_rotations(src_file, src_prim)
+                    except Exception as exc:     # noqa: BLE001 - no noise on that clip
+                        log.warning("crowd noise: %s unreadable: %s", src_file, exc)
+                        rotations[key] = None
+                rot = rotations[key]
+                if rot and rot["joints"]:
+                    # Its own noise per agent (and per clip), moving along the shot time.
+                    curves = _noise_curves(rot["joints"], rot_noise, f"{seed}:{name}:{key}")
+                    spec = Sdf.CreatePrimInLayer(noise_layer, anim_path)
+                    attr = Sdf.AttributeSpec(spec, "rotations", Sdf.ValueTypeNames.QuatfArray)
+                    for t, values in rot["samples"]:
+                        at = shift + scale * t if t is not None else 0.0
+                        noise = _noise_at(curves, rot_noise, noise_freq, at / rot["fps"])
+                        noisy = Vt.QuatfArray([v * n for v, n in zip(values, noise)])
+                        if t is None:
+                            attr.default = noisy
+                        else:
+                            noise_layer.SetTimeSample(attr.path, at, noisy)
+                    did_noise = True
+                elif comp not in noise_skipped:
+                    noise_skipped.add(comp)
+                    warnings.append(f"{comp} : pas de rotation de joint lisible, pas de noise")
+        elif noise_layer is not None and probe["skeletons"]:
+            # No animation (unchecked in FLUX Import): the noise poses the rest pose, so a
+            # still crowd is not a copy of one statue (2026-09-26: the noise did nothing).
+            rest = probe.get("rest")
+            if rest:
+                anim_path = f"{path}/crowd_anim"
+                anim = UsdSkel.Animation.Define(stage, anim_path)
+                noise = _joint_noise(rest["joints"], rot_noise, f"{seed}:{name}")
+                anim.CreateJointsAttr(Vt.TokenArray(rest["joints"]))
+                anim.CreateTranslationsAttr(rest["translations"])
+                anim.CreateRotationsAttr(Vt.QuatfArray([v * n for v, n in zip(rest["rotations"], noise)]))
+                anim.CreateScalesAttr(rest["scales"])
+                for where in [path] + [f"{path}/{s}" for s in probe["skeletons"]]:
+                    over = stage.OverridePrim(where)
+                    UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+                did_noise = True
+            elif comp not in noise_skipped:
+                noise_skipped.add(comp)
+                warnings.append(f"{comp} : squelette sans pose de repos, pas de noise")
+        elif noise_layer is not None and comp not in noise_skipped:
+            noise_skipped.add(comp)
+            warnings.append(f"{comp} : pas de squelette, pas de noise")
+        return did_noise
+
     for a in agents:
         comp = a["component"]
         look = (looks or {}).get(comp) or {}
@@ -477,118 +590,40 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
             continue
         probe = probes.get(comp) or {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None}
         path = f"/crowd/{grp}/{a['name']}"
-        prim = stage.DefinePrim(path)          # typeless: the component's SkelRoot comes through
-        if comp in target_prims:
-            prim.GetReferences().AddReference(targets[comp], target_prims[comp])
+        if variations > 0:
+            var = random.Random(f"{seed}:{a['name']}:variation").randrange(variations)
+            pkey = (comp, a.get("clip") or "", var)
+            if pkey not in protos:
+                protos[pkey] = f"/crowd_protos/{grp}/{sanitize_token(comp) or 'asset'}_{len(protos) + 1:03d}"
+                proto_noised[pkey] = _body(stage.DefinePrim(protos[pkey]), comp, look, probe, a,
+                                           protos[pkey].rsplit("/", 1)[-1])
+            prim = stage.DefinePrim(path)
+            prim.GetReferences().AddInternalReference(protos[pkey])
+            Usd.ModelAPI(prim).SetKind("component")
+            prim.SetInstanceable(True)
+            noised += int(proto_noised[pkey])
         else:
-            prim.GetReferences().AddReference(targets[comp])
-        Usd.ModelAPI(prim).SetKind("component")
-        # Never an instance: an instanceable asset made every agent one, and USD ignores
-        # whatever is authored under an instance (clip, offset, speed, noise did nothing).
-        prim.SetInstanceable(False)
-        for rel in probe.get("instances") or []:
-            if rel != ".":
-                stage.OverridePrim(prim.GetPath().AppendPath(Sdf.Path(rel))).SetInstanceable(False)
-        # The FLUX Import choices of input 1 (animations unchecked, rig off...).
-        sets = prim.GetVariantSets()
-        for name, sel in sorted((look.get("variants") or {}).items()):
-            sets.SetSelection(name, sel)
-        for rel in look.get("inactive") or []:
-            if Sdf.Path.IsValidPathString(rel):
-                stage.OverridePrim(prim.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
+            prim = stage.DefinePrim(path)
+            noised += int(_body(prim, comp, look, probe, a, a["name"]))
         xf = UsdGeom.Xformable(prim)
         xf.AddTranslateOp().Set(Gf.Vec3d(*a["p"]))
         if a.get("ry"):
             xf.AddRotateYOp().Set(float(a["ry"]))
         if a.get("scale", 1.0) != 1.0:
             xf.AddScaleOp().Set(Gf.Vec3f(a["scale"]))
-        # The animation: the crowd clip, else the one the asset plays (checked in FLUX Import).
-        src_file, src_prim = None, ""
-        clip = a.get("clip")
-        if clip:
-            src = clip_files.get(clip)
-            if src is None:
-                warnings.append(f"clip {clip} introuvable")
-            else:
-                src_file = _frozen(src) if freeze else src
-                src_prim = f"/{_clip_root(src_file)}/skel/Anim"
-        if src_file is None and probe.get("anims"):
-            pick = random.Random(f"{seed}:{a['name']}:anim").choice(probe["anims"])
-            src_file, src_prim = Path(pick["file"]), pick["prim"]
-        if src_file is not None:
-            anim_path = f"{path}/crowd_anim"
-            anim = stage.DefinePrim(anim_path)
-            # Speed 2 = the clip plays twice as fast, around its FIRST frame (not frame 0,
-            # which pushed a 1001 clip to frame ~500: agents frozen during the shot):
-            # stage time = start + offset + (clip time - start) / speed.
-            key = f"{src_file}|{src_prim}"
-            start = starts.setdefault(key, _anim_start(src_file, src_prim))
-            scale = 1.0 / a["speed"]
-            shift = a["offset"] + start * (1.0 - scale)
-            anim.GetReferences().AddReference(_rel(src_file, dest.parent), Sdf.Path(src_prim),
-                                              Sdf.LayerOffset(shift, scale))
-            # On the agent AND on each skeleton: a binding on the skeleton (the component's
-            # own animation) beats one on an ancestor.
-            for where in [path] + [f"{path}/{s}" for s in probe["skeletons"]]:
-                over = stage.OverridePrim(where)
-                UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
-            if noise_layer is not None:
-                if key not in rotations:
-                    try:
-                        rotations[key] = _read_rotations(src_file, src_prim)
-                    except Exception as exc:     # noqa: BLE001 - no noise on that clip
-                        log.warning("crowd noise: %s unreadable: %s", src_file, exc)
-                        rotations[key] = None
-                rot = rotations[key]
-                if rot and rot["joints"]:
-                    # Its own noise per agent (and per clip), moving along the shot time.
-                    curves = _noise_curves(rot["joints"], rot_noise, f"{seed}:{a['name']}:{key}")
-                    spec = Sdf.CreatePrimInLayer(noise_layer, anim_path)
-                    attr = Sdf.AttributeSpec(spec, "rotations", Sdf.ValueTypeNames.QuatfArray)
-                    for t, values in rot["samples"]:
-                        at = shift + scale * t if t is not None else 0.0
-                        noise = _noise_at(curves, rot_noise, noise_freq, at / rot["fps"])
-                        noisy = Vt.QuatfArray([v * n for v, n in zip(values, noise)])
-                        if t is None:
-                            attr.default = noisy
-                        else:
-                            noise_layer.SetTimeSample(attr.path, at, noisy)
-                    noised += 1
-                elif comp not in noise_skipped:
-                    noise_skipped.add(comp)
-                    warnings.append(f"{comp} : pas de rotation de joint lisible, pas de noise")
-        elif noise_layer is not None and probe["skeletons"]:
-            # No animation (unchecked in FLUX Import): the noise poses the rest pose, so a
-            # still crowd is not a copy of one statue (2026-09-26: the noise did nothing).
-            rest = probe.get("rest")
-            if rest:
-                anim_path = f"{path}/crowd_anim"
-                anim = UsdSkel.Animation.Define(stage, anim_path)
-                noise = _joint_noise(rest["joints"], rot_noise, f"{seed}:{a['name']}")
-                anim.CreateJointsAttr(Vt.TokenArray(rest["joints"]))
-                anim.CreateTranslationsAttr(rest["translations"])
-                anim.CreateRotationsAttr(Vt.QuatfArray([v * n for v, n in zip(rest["rotations"], noise)]))
-                anim.CreateScalesAttr(rest["scales"])
-                for where in [path] + [f"{path}/{s}" for s in probe["skeletons"]]:
-                    over = stage.OverridePrim(where)
-                    UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
-                noised += 1
-            elif comp not in noise_skipped:
-                noise_skipped.add(comp)
-                warnings.append(f"{comp} : squelette sans pose de repos, pas de noise")
-        elif noise_layer is not None and comp not in noise_skipped:
-            noise_skipped.add(comp)
-            warnings.append(f"{comp} : pas de squelette, pas de noise")
         written += 1
+
     # FLUX layer contract (ADR 0011): default prim, meters, Y up.
     stage.SetDefaultPrim(stage.GetPrimAtPath("/crowd"))
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
-    layer.customLayerData = {"flux": {"role": "crowd", "group": grp, "agents": str(written)}}
+    layer.customLayerData = {"flux": {"role": "crowd", "group": grp, "agents": str(written),
+                                      "variations": str(len(protos))}}
     if noise_layer is not None:
         noise_layer.Save()
     layer.Save()
-    return {"path": dest, "agents": written, "warnings": warnings, "noised": noised, "info": info}
+    return {"path": dest, "agents": written, "warnings": warnings, "noised": noised, "info": info,
+            "variations": len(protos)}
 
 
 def _anim_start(path: str | Path, prim: str) -> float:
@@ -639,7 +674,7 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
                 component_weights: dict[str, float] | None = None,
                 clip_weights: dict[str, float] | None = None,
                 sources: dict[str, dict] | None = None, looks: dict[str, dict] | None = None,
-                rot_noise: float = 0.0, noise_freq: float = 1.0) -> dict:
+                rot_noise: float = 0.0, noise_freq: float = 1.0, variations: int = 0) -> dict:
     """Preview (work file in the shot) or publish (SEQ_SHOT_CROWD[_GROUP], vNNN + LAST) a crowd.
 
     A preview needs no shot (2026-09-26: a project without shots must still show
@@ -671,7 +706,7 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
         dest = work / "crowd_work" / f"{base}.usda"
         res = author_crowd_layer(dest, project, grp, agents, by_base, sources=sources, looks=looks,
                                  rot_noise=rot_noise, seed=seed,
-                                 noise_freq=noise_freq)
+                                 noise_freq=noise_freq, variations=variations)
         res["warnings"] = ([f"clip inconnu : {c}" for c in unknown]
                            + [f"aucune anim ne va sur le rig de {c} : pose de repos" for c in no_clip]
                            + res["warnings"])
@@ -693,7 +728,7 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     try:
         res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base, freeze=True,
                                  sources=sources, looks=looks, rot_noise=rot_noise, seed=seed,
-                                 noise_freq=noise_freq)
+                                 noise_freq=noise_freq, variations=variations)
     except Exception:
         discard_rendered_version(parent, base, ".usda", ver, is_sequence=True)
         raise

@@ -2626,6 +2626,7 @@ class CrowdBuildRequest(BaseModel):
     looks: dict[str, dict] | None = None                # {asset: {"variants", "inactive"}} of input 1
     rot_noise: float = 0.0                              # degrees per joint and per agent
     noise_freq: float = 1.0                             # cycles per second, 0 = still offset
+    variations: int = 0                                 # prototypes per asset / clip, 0 = unique agents
 
 
 @router.get("/houdini/crowd/shots")
@@ -2676,7 +2677,7 @@ async def houdini_crowd_build(req: CrowdBuildRequest) -> dict:
             clips=req.clips, seed=req.seed, offset=offset, speed=speed, publish=req.publish, user=user,
             component_weights=req.component_weights, clip_weights=req.clip_weights,
             sources=req.sources, looks=req.looks, rot_noise=max(0.0, req.rot_noise),
-            noise_freq=max(0.0, req.noise_freq)))
+            noise_freq=max(0.0, req.noise_freq), variations=max(0, req.variations)))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     path = str(res["path"])
@@ -2686,6 +2687,7 @@ async def houdini_crowd_build(req: CrowdBuildRequest) -> dict:
         path = to_flux_token(path)
     return {"ok": True, "path": path, "agents": res["agents"], "warnings": res["warnings"],
             "noised": res.get("noised", 0), "info": res.get("info", []),
+            "variations": res.get("variations", 0),
             "base": res.get("base", ""), "version": res.get("version", ""), "stage": res.get("stage")}
 
 
