@@ -111,6 +111,31 @@ _EXPORT_CODE = textwrap.dedent(r'''
         "if prim:\n"
         "    prim.GetVariantSet(%r).SetVariantSelection(%r)\n")
 
+    def _stage_bindings(lop):
+        # Who is assigned to what on the stage Houdini composes at *lop* (Assign
+        # Material opinions, any purpose), read live: the export may lose some.
+        from pxr import Usd, UsdShade
+        out = {{}}
+        try:
+            stage = lop.stage()
+        except Exception as exc:
+            _log("WARNING", "stage illisible sur %s: %s" % (lop.path(), exc))
+            return out
+        if stage is None:
+            return out
+        purposes = (UsdShade.Tokens.allPurpose, UsdShade.Tokens.full, UsdShade.Tokens.preview)
+        pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
+        for prim in stage.Traverse(pred):
+            if prim.IsA(UsdShade.Material) or prim.IsA(UsdShade.Shader):
+                continue
+            api = UsdShade.MaterialBindingAPI(prim)
+            for purpose in purposes:
+                mat = api.GetDirectBinding(materialPurpose=purpose).GetMaterial()
+                if mat:
+                    out[str(prim.GetPath())] = str(mat.GetPath())
+                    break
+        return out
+
     result = None
     try:
         node, err = _pick_lop()
@@ -126,17 +151,21 @@ _EXPORT_CODE = textwrap.dedent(r'''
                 path, name, variants, selection = found
                 _log("INFO", "variantes d'assign %s sur %s : %s" % (name, path, ", ".join(variants)))
                 files = {{}}
+                bindings = {{}}
                 for i, v in enumerate(variants):
                     out = _OUT[:-5] + "__%d.usda" % i
                     sel = node.parent().createNode("pythonscript", "flux_look_variant")
                     try:
                         sel.setInput(0, node)
                         sel.parm("python").set(_SELECT % (path, name, v))
+                        bindings[v] = _stage_bindings(sel)
                         _render(sel, out)
                     finally:
                         sel.destroy()
                     files[v] = out
+                    _log("INFO", "variante %s : %d liaison(s) dans Houdini" % (v, len(bindings[v])))
                 result = {{"usd": files[variants[0]], "node": node.path(), "variants": files,
+                          "bindings": bindings, "variant_prim": path,
                           "default": selection or variants[0], "__logs__": _logs}}
     except Exception as exc:
         result = {{"__error__": "export look: %s" % exc, "__logs__": _logs}}
@@ -184,7 +213,9 @@ def run_look_export(project_path: str, *, lop_node: str | None = None, fmt: str 
         try:
             pub = publish_look_asset(written, Path(project_path), fmt=fmt, dest_dir=dest_dir,
                                      base_name=base_name, user=user, variant_sources=variants,
-                                     variant_default=payload.get("default"))
+                                     variant_default=payload.get("default"),
+                                     variant_bindings=payload.get("bindings") or None,
+                                     variant_prim=payload.get("variant_prim"))
         except ValueError as exc:
             # Say which node was exported: the usual mistake is a node above the
             # Material Library / Assign Material.

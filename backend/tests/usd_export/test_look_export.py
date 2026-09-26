@@ -333,6 +333,36 @@ class AssignVariants(unittest.TestCase):
             self.assertIsNone(assign.GetPrimAtPath("/UTAH{assign=Hunter}geo/render/utah_SBD3"))
             self.assertTrue(any("utah_SBD3" in w and "transform1" in w for w in res["warnings"]))
 
+    def test_bindings_listed_by_houdini_win_over_the_export(self) -> None:
+        """Houdini lists each variant's bindings on its live stage: used even when the
+        flattened exports lost them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = self._utah_exports(root, [])            # materials only, no binding
+            listed = {"Hunter": {"/Utah/geo/render/transform1": "/materials/red"},
+                      "Victim": {"/Utah/geo/render/transform1": "/materials/blue"}}
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter",
+                                    variant_bindings=listed, variant_prim="/Utah")
+            stage = Usd.Stage.Open(str(res["root"]))
+            UsdGeom.Mesh.Define(stage, "/UTAH/geo/render/transform1")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/transform1"), "/UTAH/mtl/red")
+            stage.GetPrimAtPath("/UTAH").GetVariantSet("assign").SetVariantSelection("Victim")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/transform1"), "/UTAH/mtl/blue")
+
+    def test_variant_block_outside_the_assigned_prims_is_explained(self) -> None:
+        """2026-09-26: variantSet on /Utah, the only binding on /geo/skin/utah_SBD3
+        (outside /Utah) and the same in both variants: the error says why."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = self._utah_exports(root, [])
+            same = {"/geo/skin/utah_SBD3": "/materials/red"}
+            with self.assertRaisesRegex(ValueError, "variantSet est sur /Utah.*regle USD.*/geo/skin/utah_SBD3"):
+                author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                  root_name="UTAH", variant_sources=files, variant_default="Hunter",
+                                  variant_bindings={"Hunter": same, "Victim": same}, variant_prim="/Utah",
+                                  asset_prims=["geo/render/transform1"])
+
     def test_referenced_variant_sets_are_not_assignments(self) -> None:
         """A component brought by FLUX Import carries its own variant sets: never read
         as the look's assignments (the classic single look layer is written)."""

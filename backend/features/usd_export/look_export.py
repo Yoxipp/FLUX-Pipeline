@@ -178,6 +178,12 @@ def _binding_map(stage: Usd.Stage, token: str | None = None,
       4. else geo/render/<leaf> by the model layer naming rule (contract.mesh_prim_names).
     * A geometry that only inherits its binding (native DCC scene) is bound itself.
     """
+    found, gprims = _collect_bindings(stage)
+    return _place_bindings(found, gprims, token, asset_prims, notes)
+
+
+def _collect_bindings(stage: Usd.Stage) -> tuple[dict[Sdf.Path, Sdf.Path], set[Sdf.Path]]:
+    """({prim: material} it binds, gprims) of a stage (see _binding_map)."""
     pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
     found: dict[Sdf.Path, Sdf.Path] = {}
     gprims: set[Sdf.Path] = set()
@@ -194,6 +200,13 @@ def _binding_map(stage: Usd.Stage, token: str | None = None,
                 mat = bound.GetPath() if bound is not None else None
         if mat is not None:
             found[prim.GetPath()] = mat
+    return found, gprims
+
+
+def _place_bindings(found: dict[Sdf.Path, Sdf.Path], gprims: set[Sdf.Path],
+                    token: str | None, asset_prims: list[str] | None,
+                    notes: list[str] | None) -> dict[str, Sdf.Path]:
+    """{path under /<NAME>: material} for the bindings *found* (rules: _binding_map)."""
 
     def _asset_root(path: Sdf.Path) -> bool:
         parts = path.pathString.split("/")[1:]
@@ -270,6 +283,23 @@ def asset_prim_paths(project_path: str | Path, name: str) -> list[str] | None:
     except Exception as exc:                          # never block a look publish on this
         log.warning("asset %s illisible pour les chemins du look: %s", name, exc)
         return None
+
+
+def _scope_hint(raw: list[dict[str, str]], variant_prim: str | None) -> str:
+    """Why a variant block may hold no assignment: a variant only keeps the opinions of
+    the prims below the prim it lives on (USD rule)."""
+    if not variant_prim:
+        return ""
+    counts = ", ".join(str(len(b)) for b in raw) if raw else ""
+    outside = sorted({p for b in raw for p in b if not (p + "/").startswith(variant_prim.rstrip("/") + "/")})
+    hint = (f". Le variantSet est sur {variant_prim} : une variante ne garde que les liaisons des prims "
+            f"sous {variant_prim} (regle USD). Mettre le variant block sur la racine de l'asset "
+            f"(celle de FLUX Import, ex. /UTAH, majuscules comprises) et la Material Library dessous (/UTAH/mtl)")
+    if counts:
+        hint += f". Liaisons vues par Houdini par variante : {counts}"
+    if outside:
+        hint += f" ; hors de {variant_prim} : {', '.join(outside[:4])}"
+    return hint
 
 
 def _binding_report(stage: Usd.Stage) -> str:
@@ -382,7 +412,9 @@ def _variants_of_files(files: dict[str, str | Path]) -> list:
 def _author_assign_look(flats: list, selection: str, dest: Path, base: str, token: str,
                         fmt: str, prefer_tx: bool, source_dir: Path,
                         warnings: list[str] | None = None,
-                        asset_prims: list[str] | None = None) -> dict:
+                        asset_prims: list[str] | None = None,
+                        variant_bindings: dict[str, dict[str, str]] | None = None,
+                        variant_prim: str | None = None) -> dict:
     root_path = f"/{token}"
     mtl_root = f"{root_path}/{MTL_SCOPE}"
     warnings = list(warnings or [])
@@ -392,8 +424,17 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
     # 1. every variant: its bindings, and the materials it shows.
     stages = [Usd.Stage.Open(flat) for _, flat in flats]
     notes: list[str] = []
-    per_variant: dict[str, dict[str, Sdf.Path]] = {
-        v: _binding_map(st, token, asset_prims, notes) for v, st in zip(variant_names, stages)}
+    if variant_bindings:
+        # Listed by the DCC on its live stage (Houdini): what the Assign Material nodes
+        # bind in each variant, even when the flattened export lost some of it.
+        raw = [variant_bindings.get(v) or {} for v, _ in flats]
+        per_variant = {v: _place_bindings({Sdf.Path(k): Sdf.Path(m) for k, m in b.items()}, set(),
+                                          token, asset_prims, notes)
+                       for v, b in zip(variant_names, raw)}
+    else:
+        raw = []
+        per_variant = {v: _binding_map(st, token, asset_prims, notes)
+                       for v, st in zip(variant_names, stages)}
     warnings += sorted(set(notes))
     flats = [flat for _, flat in flats]
 
@@ -462,13 +503,17 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
         bindings += sum(_bind(var.primSpec, g, per_variant[v][g]) for g in own)
         if not own and not common:
             empty.append(v)
-    for mat in sorted(skipped):
-        warnings.append(f"liaison vers un materiau non publie ignoree : {mat}")
+    if skipped:
+        # e.g. the looks the imported asset already carries (/UTAH/mtl/...), not re-published
+        warnings.append(f"{len(skipped)} materiau(x) lie(s) mais absent(s) de l'export, liaisons ignorees : "
+                        + ", ".join(str(m) for m in sorted(skipped)[:6]))
     if empty:
         warnings.append("variante(s) d'assign sans aucune liaison : " + ", ".join(empty))
     if not bindings:
         raise ValueError("aucune geometrie liee dans les variantes d'assign : rien a publier ("
-                         + _binding_report(stages[0]) + ")")
+                         + _binding_report(stages[0]) + ")" + _scope_hint(raw, variant_prim))
+    if not any(g not in common for v in variant_names for g in per_variant[v]):
+        warnings.append("les variantes d'assign ont toutes les memes liaisons" + _scope_hint(raw, variant_prim))
     root.variantSetNameList.prependedItems = [ASSIGN_SET]
     root.variantSelections[ASSIGN_SET] = default if default in variant_names else variant_names[0]
     assign_layer.defaultPrim = token
@@ -527,7 +572,9 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
                       prefer_tx: bool = True,
                       variant_sources: dict[str, str | Path] | None = None,
                       variant_default: str | None = None,
-                      asset_prims: list[str] | None = None) -> dict:
+                      asset_prims: list[str] | None = None,
+                      variant_bindings: dict[str, dict[str, str]] | None = None,
+                      variant_prim: str | None = None) -> dict:
     """Rewrite the DCC export *source* into the look layer of *base* inside *dest_dir*.
 
     Writes ``<base>_look.<fmt>`` (materials + bindings, no geometry) and the root
@@ -552,7 +599,8 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
         # ADR 0035, Houdini: one flattened export per assign variant.
         return _author_assign_look(_variants_of_files(variant_sources), variant_default or "",
                                    dest, base, token, fmt, prefer_tx, _source_dir(src_stage),
-                                   asset_prims=asset_prims)
+                                   asset_prims=asset_prims, variant_bindings=variant_bindings,
+                                   variant_prim=variant_prim)
     found = _find_assign_sets(src_stage)
     if found:
         # ADR 0035: variant block of Assign Material kept in the export -> shaders + assign.
@@ -679,7 +727,9 @@ def publish_look_asset(source: str | Path, project_path: str | Path, *,
                        fmt: str = "usda", dest_dir: str | Path, base_name: str,
                        user: str = "", prefer_tx: bool = True,
                        variant_sources: dict[str, str | Path] | None = None,
-                       variant_default: str | None = None) -> dict:
+                       variant_default: str | None = None,
+                       variant_bindings: dict[str, dict[str, str]] | None = None,
+                       variant_prim: str | None = None) -> dict:
     """Publish the look department of an asset from a DCC export (ADR 0019 A1b).
 
     Same layout as ``publish_light_asset``: an immutable ``<base>_vNNN/`` folder holding
@@ -712,6 +762,8 @@ def publish_look_asset(source: str | Path, project_path: str | Path, *,
                                      fmt=fmt.lstrip("."), prefer_tx=prefer_tx,
                                      variant_sources=variant_sources,
                                      variant_default=variant_default,
+                                     variant_bindings=variant_bindings,
+                                     variant_prim=variant_prim,
                                      asset_prims=asset_prim_paths(project_path, contrib["name"])
                                      if contrib["name"] else None)
     except Exception:
