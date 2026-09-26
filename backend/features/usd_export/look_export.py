@@ -144,6 +144,9 @@ def _retarget_textures(layer: Sdf.Layer, source_dir: Path, dest_dir: Path,
 # the same publish: <base>_mtl (all the materials, no binding) and <base>_assign
 # (over /<NAME> + variantSet "assign", one variant per assignment, bindings only).
 
+# Children of a FLUX asset root (ADR 0019 layout): a path under one keeps its tail.
+_ASSET_SCOPES = frozenset({"geo", "groom", "skel", "anims", "mtl"})
+
 _PURPOSES = (UsdShade.Tokens.allPurpose, UsdShade.Tokens.full, UsdShade.Tokens.preview)
 
 
@@ -169,8 +172,9 @@ def _binding_map(stage: Usd.Stage, token: str | None = None,
       a Solaris look exported after a Layer Break holds no geometry, only the Assign
       Material opinions on the paths of the scene (2026-09-26, UTAH feathers).
     * Where it lands under /<NAME>:
-      1. a root named like the asset (/UTAH, /Utah: FLUX Import) keeps the rest of its
-         path (geo/render/transform1, groom/..., a group stays a group);
+      1. an asset root, whatever its name (named like the asset, or holding geo / groom /
+         mtl like FLUX Import puts it), keeps the rest of its path (geo/render/transform1,
+         groom/..., a group stays a group);
       2. a path under /<root>/geo keeps its tail from "geo";
       3. else, when the published asset is known (*asset_prims*, paths below its root),
          the asset prim of the same name (longest common tail when several); none =
@@ -209,8 +213,12 @@ def _place_bindings(found: dict[Sdf.Path, Sdf.Path], gprims: set[Sdf.Path],
     """{path under /<NAME>: material} for the bindings *found* (rules: _binding_map)."""
 
     def _asset_root(path: Sdf.Path) -> bool:
+        # The asset root under any name: named like the asset (/UTAH, /Utah), or laid out
+        # like a FLUX asset (/<anything>/geo, /groom, /mtl...: FLUX Import).
         parts = path.pathString.split("/")[1:]
-        return bool(token) and parts[0].lower() == str(token).lower()
+        if token and parts[0].lower() == str(token).lower():
+            return True
+        return len(parts) > 1 and parts[1] in _ASSET_SCOPES
 
     def _asset_geo(path: Sdf.Path) -> bool:
         # /<root>/geo/...: the FLUX asset layout. A root "/geo" is not: it is where a

@@ -319,6 +319,19 @@ class AssignVariants(unittest.TestCase):
             self.assertEqual(_bound(stage, "/UTAH/geo/render/transform1"), "/UTAH/mtl/red")
             self.assertEqual(_bound(stage, "/UTAH/groom/groom_procedural_WINGS/curves"), "/UTAH/mtl/red")
 
+    def test_asset_root_under_any_name(self) -> None:
+        """2026-09-26: must work whatever the root is called (not only /Utah): a root
+        laid out like a FLUX asset (geo / groom below it) keeps its path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = self._utah_exports(root, ["/Hero_asset/geo/render/transform1",
+                                              "/Hero_asset/groom/groom_procedural_TAIL"])
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter")
+            assign = Sdf.Layer.FindOrOpen(str(res["assign"]))
+            self.assertIsNotNone(assign.GetPrimAtPath("/UTAH{assign=Hunter}geo/render/transform1"))
+            self.assertIsNotNone(assign.GetPrimAtPath("/UTAH{assign=Hunter}groom/groom_procedural_TAIL"))
+
     def test_other_hierarchy_matches_the_published_prim_by_name(self) -> None:
         """A SOP Import scene (/geo/skin/...) is matched to the asset by prim name; a
         name the asset does not have is reported, never published as a dead binding."""

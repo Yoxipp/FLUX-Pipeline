@@ -136,6 +136,36 @@ _EXPORT_CODE = textwrap.dedent(r'''
                     break
         return out
 
+    def _log_assign_nodes(node):
+        # What the Assign Material nodes above the export ask for, and whether their
+        # prims exist on the stage: says why a variant ends up without binding.
+        import re
+        try:
+            stage = node.stage()
+        except Exception:
+            stage = None
+        seen = 0
+        for n in [node] + list(node.inputAncestors()):
+            if "assignmaterial" not in n.type().name().lower():
+                continue
+            seen += 1
+            pairs = {{}}
+            for parm in n.parms():
+                m = re.match(r"(primpattern|matspecpath)(\d+)$", parm.name())
+                if m:
+                    pairs.setdefault(m.group(2), {{}})[m.group(1)] = parm.evalAsString()
+            for idx in sorted(pairs):
+                pat = pairs[idx].get("primpattern", "")
+                mat = pairs[idx].get("matspecpath", "")
+                exists = ""
+                if stage is not None and pat.startswith("/") and "*" not in pat and " " not in pat:
+                    exists = " (prim %s)" % ("present" if stage.GetPrimAtPath(pat) else "ABSENT")
+                    if mat.startswith("/"):
+                        exists += " (materiau %s)" % ("present" if stage.GetPrimAtPath(mat) else "ABSENT")
+                _log("INFO", "%s #%s : %s -> %s%s" % (n.path(), idx, pat or "?", mat or "?", exists))
+        if not seen:
+            _log("WARNING", "aucun Assign Material au-dessus de %s" % node.path())
+
     result = None
     try:
         node, err = _pick_lop()
@@ -143,6 +173,10 @@ _EXPORT_CODE = textwrap.dedent(r'''
             result = {{"__error__": err, "__logs__": _logs}}
         else:
             _log("INFO", "node exporte : %s" % node.path())
+            try:
+                _log_assign_nodes(node)
+            except Exception as exc:
+                _log("WARNING", "lecture des Assign Material impossible : %s" % exc)
             found = _assign_set(node)
             if not found:
                 _render(node, _OUT)
