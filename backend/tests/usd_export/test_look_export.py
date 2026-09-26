@@ -392,15 +392,17 @@ class AssignVariants(unittest.TestCase):
                 out = root / f"export__{v}.usda"
                 stage.GetRootLayer().Export(str(out))
                 files[v] = out
+            # Victim's Assign names KMA_FTH_Body0 (digit suffix, live v006): bare name used.
             listed = {"Hunter": {"/Utah/groom/feathersGroom/body/bodyGroom_procedural":
                                  "/Utah/mtl/KMA_FTH_Body_Hunter"},
                       "Victim": {"/Utah/groom/feathersGroom/body/bodyGroom_procedural":
-                                 "/Utah/mtl/KMA_FTH_Body"}}
+                                 "/Utah/mtl/KMA_FTH_Body0"}}
             groom = "groom/groom_procedural_BODY/groom/feathersGroom/body/bodyGroom_procedural"
             res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_FEATHERS_MATERIAL",
                                     root_name="UTAH", variant_sources=files, variant_default="Victim",
                                     variant_bindings=listed, variant_prim="/Utah",
                                     asset_prims=["geo/render/transform1", groom])
+            self.assertTrue(any("KMA_FTH_Body0 -> KMA_FTH_Body" in w for w in res["warnings"]))
             stage = Usd.Stage.Open(str(res["root"]))
             UsdGeom.BasisCurves.Define(stage, f"/UTAH/{groom}")
             self.assertEqual(_bound(stage, f"/UTAH/{groom}"), "/UTAH/mtl/KMA_FTH_Body")

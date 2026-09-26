@@ -502,10 +502,19 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
     for src in moved:
         by_leaf.setdefault(src.name, []).append(src)
 
+    renamed: set[str] = set()
+
     def _bind(parent: Sdf.PrimSpec, rel: str, material: Sdf.Path) -> bool:
         if material not in moved and len(by_leaf.get(material.name, [])) == 1:
             # The Assign Material names /Utah/mtl/X, the export holds /materials/X.
             material = by_leaf[material.name][0]
+        if material not in moved:
+            # A name with a digit suffix Houdini added on a duplicate (KMA_FTH_tail0,
+            # KMA_Hair_down2, live UTAH): the material of the bare name when unique.
+            bare = material.name.rstrip("0123456789")
+            if bare != material.name and len(by_leaf.get(bare, [])) == 1:
+                renamed.add(f"{material.name} -> {bare}")
+                material = by_leaf[bare][0]
         if material not in moved:
             skipped.add(material)
             return False
@@ -522,6 +531,9 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
         bindings += sum(_bind(var.primSpec, g, per_variant[v][g]) for g in own)
         if not own and not common:
             empty.append(v)
+    if renamed:
+        warnings.append("materiau(x) de l'Assign Material introuvable(s), pris sans le chiffre final : "
+                        + ", ".join(sorted(renamed)) + " (corriger le chemin dans l'Assign Material)")
     if skipped:
         # e.g. the looks the imported asset already carries (/UTAH/mtl/...), not re-published
         warnings.append(f"{len(skipped)} materiau(x) lie(s) mais absent(s) de l'export, liaisons ignorees : "
