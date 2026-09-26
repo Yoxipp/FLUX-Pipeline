@@ -173,6 +173,9 @@ _EXPORT_CODE = textwrap.dedent(r'''
             shared = set(chains[0]).intersection(*chains[1:]) if chains else set()
             out = {{}}
             for branch, v, chain in zip(inputs, order, chains):
+                own = [c for c in reversed(chain) if c not in shared]
+                _log("INFO", "branche %s (%s) : %s" % (v, branch.path(), ", ".join(
+                    "%s [%s]" % (c.name(), c.type().name()) for c in own) or "aucun node propre"))
                 assigns = [a for a in reversed(chain) if _is_assign(a)]
                 listed = _assign_bindings(assigns, branch)
                 live = _stage_bindings(branch)
@@ -195,7 +198,11 @@ _EXPORT_CODE = textwrap.dedent(r'''
                 for i in sorted(pairs) if pairs[i].get("primpattern") and pairs[i].get("matspecpath")]
 
     def _is_assign(n):
-        return "assignmaterial" in n.type().name().lower()
+        # Assign Material under any version / name, or any node with its pattern ->
+        # material parms (a Material Library assigning its materials itself).
+        if "assignmaterial" in n.type().name().lower():
+            return True
+        return n.parm("matspecpath1") is not None and n.parm("primpattern1") is not None
 
     def _expand(pattern, lop):
         # Literal paths as absolute ones ("Utah/groom" -> "/Utah/groom"); wildcards
@@ -228,7 +235,7 @@ _EXPORT_CODE = textwrap.dedent(r'''
             stage = None
         seen = 0
         for n in [node] + list(node.inputAncestors()):
-            if "assignmaterial" not in n.type().name().lower():
+            if not _is_assign(n):
                 continue
             seen += 1
             pairs = {{}}
