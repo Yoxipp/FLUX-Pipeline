@@ -221,7 +221,13 @@ _EXTRACT_CODE = textwrap.dedent(r'''
         if _INC_SKEL and skel_node is None:
             result = {{"__error__": "no KineFX skeleton found (pass skel_node or select it)", "__logs__": _logs}}
         elif _INC_GEO and mesh_node is None:
-            result = {{"__error__": "no mesh found (pass mesh_node or select it)", "__logs__": _logs}}
+            # A LOP selected (Solaris lookdev chain): its FBX mesh is triangulated, the
+            # model is published from the SOP geometry (quads, name attribute).
+            lops = [n.path() for n in hou.selectedNodes() if isinstance(n, hou.LopNode)]
+            msg = ("aucun mesh SOP selectionne : %s est un node LOP. L'export GEO lit un SOP "
+                   "(la geo dans /obj, ex. le File qui importe le FBX), le preset look lit le LOP"
+                   % lops[0]) if lops else "no mesh found (pass mesh_node or select it)"
+            result = {{"__error__": msg, "__logs__": _logs}}
         else:
             joints, bind, rest = [], [], []
             if _INC_SKEL and skel_node is not None:
