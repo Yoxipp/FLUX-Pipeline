@@ -287,6 +287,17 @@ class GroomProxyTests(unittest.TestCase):
             # The guide curves are never proxied.
             self.assertFalse(stage.GetPrimAtPath("/Asset/groom/guides_proxy"))
 
+    def test_houdini_procedural_curves_are_left_alone(self):
+        """2026-09-26: a feather procedural (BasisCurves + HoudiniProceduralAPI)
+        builds its curves at render; thinning / retagging it breaks Preview Procedurals."""
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "UTAH_GROOM_v001.usda"
+            stage = Usd.Stage.CreateNew(str(src))
+            curves = UsdGeom.BasisCurves.Define(stage, "/Utah/groom/wingsGroom_procedural")
+            curves.GetPrim().AddAppliedSchema("HoudiniProceduralAPI:houdinifeatherprocedural2")
+            stage.GetRootLayer().Save()
+            self.assertEqual(list(UP._iter_render_curves(Usd.Stage.Open(str(src)))), [])
+
     def test_skinned_groom_proxy_keeps_its_skin(self):
         from pxr import UsdSkel
 

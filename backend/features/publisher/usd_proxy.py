@@ -211,7 +211,23 @@ def _iter_render_curves(stage: Usd.Stage):
         purpose = UsdGeom.Imageable(prim).GetPurposeAttr().Get()
         if purpose in (UsdGeom.Tokens.proxy, UsdGeom.Tokens.guide):
             continue
+        # A Houdini hair / feather procedural is a BasisCurves that generates its curves
+        # at render (Preview Procedurals in the viewport): never thin it nor retag it.
+        if _is_houdini_procedural(prim):
+            continue
         yield UsdGeom.BasisCurves(prim)
+
+
+def _is_houdini_procedural(prim) -> bool:
+    """HoudiniProceduralAPI applied (read from the raw apiSchemas list: usd-core does not
+    know Houdini's schema) or houdiniProcedural:* properties."""
+    names = list(prim.GetAppliedSchemas())
+    listop = prim.GetMetadata("apiSchemas")
+    if listop is not None:
+        names += list(listop.GetAddedOrExplicitItems())
+    if any("procedural" in str(n).lower() for n in names):
+        return True
+    return any(n.startswith("houdiniProcedural:") for n in prim.GetPropertyNames())
 
 
 def curve_keep_every(target_reduction: float) -> int:
