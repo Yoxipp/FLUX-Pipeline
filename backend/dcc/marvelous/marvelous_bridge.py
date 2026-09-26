@@ -148,11 +148,19 @@ def _heartbeat(mode):
 
 
 def _pending():
+    # Oldest first: request names are random ids, their order says nothing.
     try:
-        names = sorted(n for n in os.listdir(MAILBOX) if n.endswith('.req'))
+        paths = [os.path.join(MAILBOX, n) for n in os.listdir(MAILBOX) if n.endswith('.req')]
     except OSError:
         return []
-    return [os.path.join(MAILBOX, n) for n in names]
+
+    def age(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    return sorted(paths, key=age)
 
 
 # -- Marvelous API helpers -----------------------------------------------------

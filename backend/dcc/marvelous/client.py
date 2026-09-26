@@ -18,10 +18,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-ALIVE_MAX_AGE_S = 3.0   # the bridge beats every second; older = Marvelous or the script gone
+ALIVE_MAX_AGE_S = 3.0   # the bridge beats every second; older = blocked or gone
+# A stale heartbeat whose Marvelous process is still alive: the bridge loop is stuck in
+# a modal window / a simulation (it only beats between two Windows messages), not gone.
+# The bridge deletes alive.json when it stops, so a stale file = blocked or crashed.
+BUSY_MAX_AGE_S = 2 * 3600.0
 CLAIM_TIMEOUT_S = 10.0  # a request nobody picks up in that time: the bridge is not serving
 POLL_S = 0.05
 NOT_RUNNING = "bridge Marvelous non lance"
+BLOCKED = ("Marvelous est occupe (une fenetre ouverte ou une simulation bloque le bridge) : "
+           "ferme-la, le bridge reprend tout seul")
 
 
 def mailbox_dir() -> Path:
@@ -29,15 +35,62 @@ def mailbox_dir() -> Path:
     return Path(os.environ.get("FLUX_MD_MAILBOX_ROOT") or tempfile.gettempdir()) / "flux_marvelous_bridge"
 
 
-def heartbeat() -> dict | None:
-    """The bridge's last heartbeat when it is fresh, else None."""
+def _read_alive() -> dict | None:
     try:
         data = json.loads((mailbox_dir() / "alive.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or time.time() - float(data.get("time", 0)) > ALIVE_MAX_AGE_S:
+    return data if isinstance(data, dict) else None
+
+
+def heartbeat() -> dict | None:
+    """The bridge's last heartbeat when it is fresh, else None."""
+    data = _read_alive()
+    if data is None or time.time() - float(data.get("time", 0)) > ALIVE_MAX_AGE_S:
         return None
     return data
+
+
+def pid_alive(pid: int) -> bool:
+    """True when process *pid* runs (never signals it: os.kill on Windows terminates)."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == 259                         # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def blocked() -> bool:
+    """The bridge stopped beating but its Marvelous still runs: busy, not gone."""
+    data = _read_alive()
+    if data is None:
+        return False
+    age = time.time() - float(data.get("time", 0))
+    if age <= ALIVE_MAX_AGE_S or age > BUSY_MAX_AGE_S:
+        return False
+    try:
+        return pid_alive(int(data.get("pid") or 0))
+    except (TypeError, ValueError):
+        return False
 
 
 def _answer(resp: Any) -> dict:
@@ -52,6 +105,8 @@ def _answer(resp: Any) -> dict:
 def call(payload: dict, timeout: float) -> dict:
     """Send one request through the mailbox and wait for the answer."""
     if heartbeat() is None:
+        if blocked():
+            return {"ok": False, "error": BLOCKED}
         return {"ok": False, "error": f"{NOT_RUNNING} (aucun battement dans {mailbox_dir()})"}
     box = mailbox_dir()
     rid = uuid.uuid4().hex
@@ -96,7 +151,9 @@ class MarvelousClient:
             # An export holds the bridge's loop, so it stops beating: a request being
             # served (.work) means busy, not gone.
             if any(mailbox_dir().glob("*.work")):
-                return {"ok": True, "busy": True, "version": "Marvelous Designer"}
+                return {"ok": True, "busy": True, "version": "Marvelous Designer (export en cours)"}
+            if blocked():
+                return {"ok": True, "busy": True, "version": "Marvelous Designer (occupe)"}
             return {"ok": False, "error": NOT_RUNNING}
         return {"ok": True, "version": beat.get("version"), "mode": beat.get("mode")}
 
