@@ -137,6 +137,37 @@ class ShotAnimPublish(unittest.TestCase):
         self.assertEqual(layer.GetPrimAtPath("/DINGO/geo/render/body").specifier, Sdf.SpecifierOver)
         self.assertNotIn("model", self.rig_res["layers"])
 
+    def test_the_rig_finds_the_geo_without_a_component(self) -> None:
+        # Live 2026-09-26 (MARIE): GEO published, no component created yet (ADR 0023):
+        # the RIG reads the GEO LAST itself, no warning, the proxy gets its weights.
+        tokens = tok.load_tokens(self.project)
+        tokens["NAME"]["MARIE"] = "assets/chara/MARIE"
+        tok.save_tokens(self.project, tokens)
+        publish_light_asset(_rig(), self.project, fmt="usda",
+                            dest_dir=self.project / "assets/chara/MARIE/model/null",
+                            base_name="CHAR_GEO_MARIE_null", user="adam")
+        res = publish_light_asset(_skinned_rig(), self.project, fmt="usda",
+                                  dest_dir=self.project / "assets/chara/MARIE/rig/null",
+                                  base_name="CHAR_RIG_MARIE_null", user="adam")
+        self.assertFalse([w for w in res["warnings"] if "GEO" in w], res["warnings"])
+        layer = Sdf.Layer.FindOrOpen(str(res["layers"]["skel"]))
+        self.assertIsNotNone(layer.GetPrimAtPath("/MARIE/geo/proxy/body"))
+
+    def test_an_asset_clip_checks_the_rig_without_a_component(self) -> None:
+        # Live 2026-09-26: CHAR_ANIM_MARIE_SMOOTH warned "squelette non verifie" while the
+        # RIG was published: the check read the component only.
+        tokens = tok.load_tokens(self.project)
+        tokens["NAME"]["MARIE"] = "assets/chara/MARIE"
+        tok.save_tokens(self.project, tokens)
+        publish_light_asset(_skinned_rig(), self.project, fmt="usda",
+                            dest_dir=self.project / "assets/chara/MARIE/rig/null",
+                            base_name="CHAR_RIG_MARIE_null", user="adam")
+        res = publish_light_asset(_rig(_anim(joints=("Root/Tail",))), self.project, fmt="usda",
+                                  dest_dir=self.project / "assets/chara/MARIE/anim/smooth",
+                                  base_name="CHAR_ANIM_MARIE_SMOOTH", user="adam")
+        self.assertFalse([w for w in res["warnings"] if "non verifie" in w], res["warnings"])
+        self.assertTrue(any("Root/Tail" in w for w in res["warnings"]), res["warnings"])
+
     def test_joints_missing_from_the_rig_are_reported(self) -> None:
         res = self._publish(_anim(joints=("Root/Tail",)))
         self.assertTrue(any("absent" in w and "Root/Tail" in w for w in res["warnings"]), res["warnings"])

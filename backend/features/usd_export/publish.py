@@ -50,12 +50,13 @@ def _archive_legacy_last_folder(parent: Path, base: str, ext: str) -> str | None
     return format_version(ver)
 
 
-def _match_rig(project_path, name: str | None, joints: list[str]) -> tuple[list[str], list[str]]:
+def _match_rig(project_path, name: str | None, joints: list[str],
+               base: str | None = None) -> tuple[list[str], list[str]]:
     """(joints, warnings): the animated joints checked against the rig of asset *name*
     (motion only: the skeleton comes from the asset). A rig imported in Maya from the
     asset USD gets an extra root joint named after the Skeleton prim ("Skeleton/joint1"):
     that prefix is dropped when it makes every joint match. Never raises."""
-    rig, warnings = _rig_joints(project_path, name)
+    rig, warnings = _rig_joints(project_path, name, base)
     if rig is None:
         return joints, warnings
     if any(j not in rig for j in joints):
@@ -70,24 +71,56 @@ def _match_rig(project_path, name: str | None, joints: list[str]) -> tuple[list[
     return joints, [f"{len(missing)} joint(s) anime(s) absent(s) du rig de {name} : {shown}"]
 
 
-def _rig_joints(project_path, name: str | None) -> tuple[set[str] | None, list[str]]:
+def _rig_candidates(project_path, name: str, base: str | None) -> list[Path]:
+    """Layers that may hold the skeleton of asset *name*, best first: its component
+    (when created, ADR 0023), then the LAST of its RIG publish (same CLASS as an asset
+    clip, every asset CLASS for a shot anim; the clip's INSTANCE, then "null")."""
+    from features.folder_manager.tokens import load_tokens
+    from features.publisher import last_pointer as lp
+    from features.publisher.publish_core import resolve_publish_path
+    from features.usd_assembler.component_auto import component_dir
+
+    out: list[Path] = []
+    folder = component_dir(project_path, name)
+    if folder is not None:
+        out.append(folder / f"{name}_LAST.usda")
+    parts = (base or "").split("_")
+    asset_classes = [c for c, rel in ((load_tokens(Path(project_path)) or {}).get("CLASS") or {}).items()
+                     if str(rel).startswith("assets/")]
+    instances = ["null"]
+    if len(parts) >= 4 and parts[0] in asset_classes:       # asset clip CLASS_ANIM_NAME_INST
+        classes = [parts[0]]
+        if parts[3] != "null":
+            instances.insert(0, "_".join(parts[3:]))
+    else:                                                    # shot anim: CLASS unknown
+        classes = asset_classes
+    for cls in classes:
+        for inst in instances:
+            rig_base = f"{cls}_RIG_{name}_{inst}"
+            for ext in (".usd", ".usda", ".usdc"):
+                dest = resolve_publish_path(Path(project_path), f"{rig_base}{ext}")
+                if dest is not None:
+                    out.append(lp.last_path(Path(dest), rig_base, ext))
+    return out
+
+
+def _rig_joints(project_path, name: str | None,
+                base: str | None = None) -> tuple[set[str] | None, list[str]]:
     """Joints of the skeleton published for asset *name*, or (None, [warning])."""
     if not name:
         return None, ["anim sans perso reconnu : impossible de verifier le squelette"]
     try:
         from pxr import Usd, UsdSkel
 
-        from features.usd_assembler.component_auto import component_dir
-
-        folder = component_dir(project_path, name)
-        entry = folder / f"{name}_LAST.usda" if folder is not None else None
-        if entry is None or not entry.is_file():
-            return None, [f"asset {name} sans USD publie : squelette non verifie"]
-        stage = Usd.Stage.Open(str(entry))
-        skel = next((UsdSkel.Skeleton(p) for p in stage.Traverse() if p.IsA(UsdSkel.Skeleton)), None)
-        if skel is None:
-            return None, [f"l'asset {name} n'a pas de squelette publie (GEO avec skin ou RIG)"]
-        return set(skel.GetJointsAttr().Get() or []), []
+        entries = [p for p in _rig_candidates(project_path, name, base) if p.is_file()]
+        if not entries:
+            return None, [f"asset {name} : ni component ni RIG USD publie, squelette non verifie"]
+        for entry in entries:
+            stage = Usd.Stage.Open(str(entry))
+            skel = next((UsdSkel.Skeleton(p) for p in stage.Traverse() if p.IsA(UsdSkel.Skeleton)), None)
+            if skel is not None:
+                return set(skel.GetJointsAttr().Get() or []), []
+        return None, [f"l'asset {name} n'a pas de squelette publie (publie son RIG)"]
     except Exception as exc:        # noqa: BLE001 - a check never blocks a publish
         return None, [f"squelette de {name} non verifie : {exc}"]
 
@@ -134,7 +167,7 @@ def publish_light_asset(
         if asset.anim is None or not asset.anim.joints:
             raise ValueError("aucune anim a publier : rien ne bouge sur la plage demandee "
                              "(active la plage d'animation et selectionne le rig)")
-        joints, rig_warnings = _match_rig(project_path, root_name, asset.anim.joints)
+        joints, rig_warnings = _match_rig(project_path, root_name, asset.anim.joints, base)
         warnings += rig_warnings
         if joints != asset.anim.joints:
             asset = replace(asset, anim=replace(asset.anim, joints=joints))
@@ -157,7 +190,8 @@ def publish_light_asset(
     if skin_meshes and not motion_only:
         from .rig_skin import skin_targets
 
-        targets, proxy_skins, skin_warnings = skin_targets(project_path, root_name, skin_meshes)
+        targets, proxy_skins, skin_warnings = skin_targets(
+            project_path, root_name, skin_meshes, rig_base=base if base_name else None)
         warnings += skin_warnings
         skin_kw = {"skin_targets": targets, "proxy_skins": proxy_skins}
 

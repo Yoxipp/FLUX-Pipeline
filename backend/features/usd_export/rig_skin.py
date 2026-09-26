@@ -83,12 +83,63 @@ def _match(render: dict, want: str, leaf: str, n_points: int) -> str | None:
     return cands[0] if len(cands) == 1 else None
 
 
-def skin_targets(project_path, name: str | None,
-                 meshes: list[MeshData]) -> tuple[list[str], list[dict], list[str]]:
+def geo_bases(rig_base: str) -> list[str]:
+    """GEO publish bases matching a RIG base: same CLASS / NAME / INSTANCE[_VARIANTE],
+    then the "null" instance (CHAR_RIG_MARIE_A -> CHAR_GEO_MARIE_A, CHAR_GEO_MARIE_null)."""
+    parts = rig_base.split("_")
+    if len(parts) < 4:
+        return []
+    out = ["_".join([parts[0], "GEO", *parts[2:]])]
+    null = "_".join([parts[0], "GEO", parts[2], "null"])
+    if null not in out:
+        out.append(null)
+    return out
+
+
+def _geo_last_entry(project_path, rig_base: str | None) -> Path | None:
+    """The layer to read the published model from: the proxy layer of the version the
+    GEO LAST points at (it sublayers that version, so render meshes AND proxies),
+    else the LAST itself. None when the GEO was never published."""
+    if not rig_base:
+        return None
+    from features.publisher import last_pointer as lp
+    from features.publisher.publish_core import resolve_publish_path
+    from features.publisher.usd_publish_hooks import usable_proxy
+
+    for base in geo_bases(rig_base):
+        for ext in (".usd", ".usda", ".usdc"):
+            dest = resolve_publish_path(Path(project_path), f"{base}{ext}")
+            if dest is None:
+                continue
+            last = lp.last_path(Path(dest), base, ext)
+            if not last.is_file():
+                continue
+            target = (lp.read_layer_flux(last) or {}).get("target")
+            version_root = Path(dest) / target if target else None
+            if version_root is not None and version_root.is_file():
+                return usable_proxy(version_root) or last
+            return last
+    return None
+
+
+def _component_entry(project_path, name: str | None) -> Path | None:
+    """The asset's component (all departments), when it was created (ADR 0023)."""
+    if not name:
+        return None
+    from features.usd_assembler.component_auto import component_dir
+
+    folder = component_dir(project_path, name)
+    cand = folder / f"{name}_LAST.usda" if folder is not None else None
+    return cand if cand is not None and cand.is_file() else None
+
+
+def skin_targets(project_path, name: str | None, meshes: list[MeshData],
+                 rig_base: str | None = None) -> tuple[list[str], list[dict], list[str]]:
     """(targets, proxy_skins, warnings) for the skin-only meshes of a RIG publish.
 
-    *targets* are root-relative prim paths parallel to *meshes* ("" = default
-    geo/render/<mesh>); *proxy_skins* feed skel_export's proxy overrides.
+    The model is read from the GEO publish of the same asset (its LAST, *rig_base*
+    with GEO as TYPE), else from the asset's component. *targets* are root-relative
+    prim paths parallel to *meshes*; *proxy_skins* feed skel_export's proxy overrides.
     """
     warnings: list[str] = []
     names = mesh_prim_names([(m.name, m.path) for m in meshes], sanitize_token)
@@ -96,17 +147,18 @@ def skin_targets(project_path, name: str | None,
     if not meshes:
         return targets, [], warnings
     entry = None
-    try:
-        from features.usd_assembler.component_auto import component_dir
-
-        folder = component_dir(project_path, name) if name else None
-        cand = folder / f"{name}_LAST.usda" if folder is not None else None
-        entry = cand if cand is not None and cand.is_file() else None
-    except Exception as exc:        # noqa: BLE001 - a check never blocks a publish
-        log.debug("rig skin: no component for %s: %s", name, exc)
+    for finder in (lambda: _geo_last_entry(project_path, rig_base),
+                   lambda: _component_entry(project_path, name)):
+        try:
+            entry = finder()
+        except Exception as exc:    # noqa: BLE001 - a check never blocks a publish
+            log.debug("rig skin: model lookup failed for %s: %s", name, exc)
+        if entry is not None:
+            break
     if entry is None:
-        warnings.append(f"asset {name or '?'} sans GEO publie : les poids visent "
-                        "geo/render/<mesh> sans verification (publie le GEO avant le RIG)")
+        tried = ", ".join(geo_bases(rig_base or "")) or "GEO"
+        warnings.append(f"asset {name or '?'} : aucun GEO USD publie trouve ({tried}), "
+                        "les poids visent geo/render/<mesh> sans verification")
         return targets, [], warnings
     try:
         render, proxies = _asset_geometry(entry, name or "")
