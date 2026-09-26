@@ -1,16 +1,21 @@
 """
-FLUX Marvelous Designer bridge script (SKELETON — verify live).
+FLUX Marvelous Designer bridge script (SKELETON - verify live).
 
-Marvelous has no startup-plugin folder FLUX can rely on: autostart.py copies this
-script to a fixed place and the artist runs it once per session from Marvelous
-(Script > Python Script: open the file, Run). It starts a small local TCP server
-(newline-JSON) so the FLUX backend can ping Marvelous and trigger an export through
-the Marvelous Python API (export_api). Running it twice keeps the first server.
+Marvelous only runs Python while a script is executing: the moment a script returns,
+every Python thread freezes (so a background socket thread never answers). This
+script therefore never returns: it serves FLUX from Marvelous' main thread, pumping
+Marvelous' Windows message queue between requests so the interface stays usable,
+and runs each export right there (the API is only safe on that thread).
 
-Protocol:
+Started from Marvelous: Plugins > Plug-in > FLUX Bridge (registered by the Plug
+button of FLUX), or pasted in Plugins > Python Editor. Stop: close Marvelous, or
+{"action": "shutdown"}. A second start while one runs does nothing.
+
+Protocol (one JSON object per line, one request per connection):
   {"action": "ping"}                    -> {"status": "ok", "version": "..."}
   {"action": "info"}                    -> {"status": "ok", "project": ..., "formats": [...]}
   {"action": "export", "config": {...}} -> {"status": "ok", "files": [...]}
+  {"action": "shutdown"}                -> {"status": "ok"}
 
 config:
   {"exportPath": dir, "name": file stem, "format": "abc" | "obj" | "fbx" | "zprj" |
@@ -19,6 +24,7 @@ config:
 
 NOTE: export_api function names and ImportExportOption fields changed across
 Marvelous versions; they are looked up defensively and must be verified live.
+Keep this file ASCII: Marvelous may not read it as UTF-8.
 """
 
 from __future__ import annotations
@@ -27,7 +33,8 @@ import builtins
 import json
 import os
 import socket
-import threading
+import tempfile as _tempfile
+import time as _time
 
 try:
     import export_api as _export_api
@@ -41,22 +48,18 @@ HOST = "127.0.0.1"
 # for multi-instance. Must match the backend client / status scan port.
 PORT = int(os.environ.get("FLUX_MARVELOUS_PORT", "7050"))
 
+POLL_S = 0.02            # idle wait between two looks at the socket / message queue
+REQUEST_TIMEOUT_S = 10.0  # a client that sends nothing is dropped
+
 # Survives a second Run of the script (Marvelous re-executes it in fresh globals).
 _STATE_KEY = "_flux_marvelous_bridge"
-
-
-# ── main-thread execution + diagnostic log (same as the Painter bridge) ──────
-import queue as _queue
-import tempfile as _tempfile
-import time as _time
-
 _LOG_PATH = os.path.join(_tempfile.gettempdir(), "flux_marvelous_bridge.log")
 
 
 def _state() -> dict:
     st = getattr(builtins, _STATE_KEY, None)
     if st is None:
-        st = {"sock": None, "timer": None, "jobs": _queue.Queue()}
+        st = {"running": False, "stop": False}
         setattr(builtins, _STATE_KEY, st)
     return st
 
@@ -70,54 +73,34 @@ def _diag(msg: str) -> None:
     print("[FLUX] " + msg)
 
 
-def _drain() -> None:
-    jobs = _state()["jobs"]
-    while True:
-        try:
-            fn, box, done = jobs.get_nowait()
-        except _queue.Empty:
-            return
-        try:
-            box["result"] = fn()
-        except Exception as exc:  # noqa: BLE001 - reported to the backend
-            box["result"] = {"status": "error", "msg": str(exc)}
-        done.set()
+# -- Windows message pump: keeps Marvelous' interface alive while we serve --------
 
 
-def _start_main_thread_pump() -> None:
-    st = _state()
-    if st["timer"] is not None:
-        return
-    QtCore = None
-    for mod in ("PySide6", "PySide2"):
-        try:
-            QtCore = __import__(mod + ".QtCore", fromlist=["QtCore"])
-            break
-        except Exception:  # noqa: BLE001
-            continue
-    if QtCore is None or QtCore.QCoreApplication.instance() is None:
-        _diag("Qt not found: Marvelous calls run in the socket thread")
-        return
-    timer = QtCore.QTimer()
-    timer.timeout.connect(_drain)
-    timer.start(50)
-    st["timer"] = timer
+def _make_pump():
+    """A function that dispatches Marvelous' pending window messages; returns False
+    when Marvelous is closing (WM_QUIT). No-op outside Windows."""
+    if os.name != "nt":
+        return lambda: True
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    msg = wintypes.MSG()
+    pm_remove, wm_quit = 0x0001, 0x0012
+
+    def pump() -> bool:
+        while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, pm_remove):
+            if msg.message == wm_quit:
+                user32.PostQuitMessage(int(msg.wParam))
+                return False
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+        return True
+
+    return pump
 
 
-def _on_main_thread(fn, timeout: float = 900.0) -> dict:
-    """Run fn() on the Marvelous main thread when a Qt loop exists, else inline."""
-    st = _state()
-    if st["timer"] is None:
-        return fn()
-    box: dict = {}
-    done = threading.Event()
-    st["jobs"].put((fn, box, done))
-    if not done.wait(timeout):
-        return {"status": "error", "msg": "Marvelous occupe : pas de reponse du thread principal"}
-    return box["result"]
-
-
-# ── Marvelous API helpers ─────────────────────────────────────────────────────
+# -- Marvelous API helpers -----------------------------------------------------
 
 # Words that name each format in export_api function names (ExportAlembic, ExportOBJ...).
 _FORMAT_WORDS = {
@@ -258,7 +241,7 @@ def _version() -> str:
     return "Marvelous Designer"
 
 
-# ── actions ──────────────────────────────────────────────────────────────────
+# -- actions ------------------------------------------------------------------
 
 
 def _do_info() -> dict:
@@ -307,26 +290,49 @@ def _dispatch(cmd: dict) -> dict:
     if action == "ping":
         return {"status": "ok", "version": _version() if _MD_AVAILABLE else "Marvelous Designer"}
     if action == "info":
-        return _on_main_thread(_do_info, timeout=20.0)
+        return _do_info()
     if action == "export":
-        config = cmd.get("config", {})
-        return _on_main_thread(lambda: _do_export(config))
+        return _do_export(cmd.get("config", {}))
+    if action == "shutdown":
+        _state()["stop"] = True
+        return {"status": "ok"}
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 
-def _handle(conn: socket.socket) -> None:
+def _read_line(conn: socket.socket, pump) -> bytes | None:
+    """One request line, pumping Marvelous while the client is slow."""
+    conn.setblocking(False)
+    buf = b""
+    deadline = _time.time() + REQUEST_TIMEOUT_S
+    while b"\n" not in buf:
+        try:
+            chunk = conn.recv(65536)
+        except (BlockingIOError, InterruptedError):
+            if _time.time() > deadline:
+                return None
+            pump()
+            _time.sleep(POLL_S)
+            continue
+        if not chunk:
+            return None
+        buf += chunk
+    return buf.split(b"\n")[0]
+
+
+def _serve_one(conn: socket.socket, pump) -> None:
     try:
-        buf = b""
-        while b"\n" not in buf:
-            chunk = conn.recv(4096)
-            if not chunk:
-                return
-            buf += chunk
-        cmd = json.loads(buf.split(b"\n")[0].decode("utf-8"))
-        resp = _dispatch(cmd)
+        line = _read_line(conn, pump)
+        if line is None:
+            return
+        try:
+            resp = _dispatch(json.loads(line.decode("utf-8")))
+        except Exception as exc:  # noqa: BLE001 - reported to the backend
+            _diag(f"request failed: {exc!r}")
+            resp = {"status": "error", "msg": str(exc)}
+        conn.setblocking(True)
         conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
-    except Exception:  # noqa: BLE001
-        pass
+    except OSError as exc:
+        _diag(f"connection dropped: {exc!r}")
     finally:
         try:
             conn.close()
@@ -334,47 +340,44 @@ def _handle(conn: socket.socket) -> None:
             pass
 
 
-def _serve(sock: socket.socket) -> None:
-    while True:
-        try:
-            conn, _ = sock.accept()
-        except OSError:
-            break
-        threading.Thread(target=_handle, args=(conn,), daemon=True).start()
-
-
-def start_bridge() -> None:
+def serve(pump=None) -> None:
+    """Serve FLUX until Marvelous closes or FLUX sends shutdown (never returns before)."""
     st = _state()
-    if st["sock"] is not None:
-        _diag(f"Marvelous bridge already listening on {HOST}:{PORT}")
+    if st["running"]:
+        _diag(f"Marvelous bridge already running on {HOST}:{PORT}")
         return
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((HOST, PORT))
         sock.listen(5)
-        st["sock"] = sock
-        threading.Thread(target=_serve, args=(sock,), daemon=True).start()
-        _start_main_thread_pump()
-        _diag(f"Marvelous bridge listening on {HOST}:{PORT} (api={_MD_AVAILABLE})")
+        sock.setblocking(False)
     except OSError as exc:
         _diag(f"Marvelous bridge bind failed on {HOST}:{PORT}: {exc}")
-
-
-def stop_bridge() -> None:
-    st = _state()
-    if st["timer"] is not None:
-        st["timer"].stop()
-        st["timer"] = None
-    if st["sock"] is not None:
+        return
+    pump = pump or _make_pump()
+    st.update(running=True, stop=False)
+    _diag(f"Marvelous bridge listening on {HOST}:{PORT} (api={_MD_AVAILABLE})")
+    try:
+        while not st["stop"]:
+            if not pump():
+                break
+            try:
+                conn, _ = sock.accept()
+            except (BlockingIOError, InterruptedError):
+                _time.sleep(POLL_S)
+                continue
+            _serve_one(conn, pump)
+    finally:
+        st["running"] = False
         try:
-            st["sock"].close()
+            sock.close()
         except OSError:
             pass
-        st["sock"] = None
+        _diag("Marvelous bridge stopped")
 
 
-# Run from Marvelous' Python Script editor: start at once (the API only imports there,
-# so importing this file from the backend starts nothing).
+# Run from Marvelous (Plug-in menu or Python Editor): serve at once. The API only
+# imports inside Marvelous, so importing this file from the backend starts nothing.
 if _MD_AVAILABLE:
-    start_bridge()
+    serve()
