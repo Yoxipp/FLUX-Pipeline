@@ -113,8 +113,10 @@ class ImporterComponent(unittest.TestCase):
     def test_files_are_grouped_by_kind_with_proxies_on_and_anims_off(self) -> None:
         self.ns["_fill_component"](self.node)
         n = self.node
+        # The rig has its own section (2026-09-26), no longer under AUTRES.
         self.assertEqual((n.evalParm("geo_files"), n.evalParm("look_files"), n.evalParm("anim_files"),
-                          n.evalParm("other_files"), n.evalParm("groom_files")), (3, 1, 2, 1, 0))
+                          n.evalParm("rig_files"), n.evalParm("other_files"), n.evalParm("groom_files")),
+                         (3, 1, 2, 1, 0, 0))
         self.assertEqual(n.evalParm(f"geo_on{n.row('geo', 'low')}"), 1)       # proxy: on by default
         self.assertEqual(n.evalParm(f"anim_on{n.row('anim', 'walk')}"), 0)    # preview: off by default
         self.assertEqual(self._state(), {"body": "on", "hat": "on", "low": "on", "skin": "on",
@@ -228,7 +230,7 @@ class ImporterComponent(unittest.TestCase):
         from pxr import UsdSkel
         self.ns["_fill_component"](self.node)
         self.assertNotIn("__no_rig__", self._state())
-        self._toggle("other", "rig", False)
+        self._toggle("rig", "rig", False)
         self.assertTrue(self._state()["__no_rig__"])
         stage = Usd.Stage.CreateInMemory()
         stage.DefinePrim("/assets/UTAH").GetReferences().AddReference(
@@ -238,7 +240,7 @@ class ImporterComponent(unittest.TestCase):
         self._apply(stage)
         self.assertFalse(stage.GetPrimAtPath("/assets/UTAH/skel/Skeleton").IsActive())
         self.assertTrue(stage.GetPrimAtPath("/assets/UTAH/geo/render/body").IsValid())
-        self._toggle("other", "rig", True)
+        self._toggle("rig", "rig", True)
         self.assertNotIn("__no_rig__", self._state())
 
     def test_each_department_gets_its_own_arc(self) -> None:

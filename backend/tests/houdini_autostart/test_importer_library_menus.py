@@ -65,9 +65,11 @@ def _node(**over) -> _Node:
 class LibraryMenus(unittest.TestCase):
     def test_elements_are_filtered_by_type_and_class(self) -> None:
         ns = _module()
-        self.assertEqual(ns["menu_lib_item"](_node()), ["component:BOX", "BOX", "component:DINGO", "DINGO"])
-        self.assertEqual(ns["menu_lib_item"](_node(lib_class="CHAR")), ["component:DINGO", "DINGO"])
-        self.assertEqual(ns["menu_lib_item"](_node(lib_kind="decor")), ["assembly:PARK", "PARK"])
+        # Nothing picked by default (2026-09-26): an empty choice comes first.
+        pick = ["", "(choisir un element)"]
+        self.assertEqual(ns["menu_lib_item"](_node()), pick + ["component:BOX", "BOX", "component:DINGO", "DINGO"])
+        self.assertEqual(ns["menu_lib_item"](_node(lib_class="CHAR")), pick + ["component:DINGO", "DINGO"])
+        self.assertEqual(ns["menu_lib_item"](_node(lib_kind="decor")), pick + ["assembly:PARK", "PARK"])
         self.assertEqual(ns["menu_lib_class"](_node()), ["", "Toutes", "CHAR", "CHAR", "PROPS", "PROPS"])
 
     def test_shots_are_filtered_by_sequence(self) -> None:
@@ -75,13 +77,14 @@ class LibraryMenus(unittest.TestCase):
         self.assertEqual(ns["menu_lib_seq"](_node(lib_kind="shot")), ["", "Toutes", "SEQ001", "SEQ001",
                                                                        "SEQ002", "SEQ002"])
         self.assertEqual(ns["menu_lib_item"](_node(lib_kind="shot", lib_seq="SEQ002")),
-                         ["shot:SEQ002/SHOT010", "SHOT010"])
+                         ["", "(choisir un element)", "shot:SEQ002/SHOT010", "SHOT010"])
 
-    def test_changing_the_type_picks_a_matching_element(self) -> None:
+    def test_changing_the_type_never_picks_an_element(self) -> None:
+        # 2026-09-26: the element no longer matching is cleared, nothing is chosen.
         ns = _module()
         node = _node(lib_kind="shot", lib_item="component:DINGO")
         ns["on_lib_filter"](node)
-        self.assertEqual(node.value("lib_item"), "shot:SEQ001/SHOT010")
+        self.assertEqual(node.value("lib_item"), "")
         node = _node(lib_class="CHAR", lib_item="component:DINGO")
         ns["on_lib_filter"](node)
         self.assertEqual(node.value("lib_item"), "component:DINGO")

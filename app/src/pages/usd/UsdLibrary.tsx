@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Box, Boxes, RefreshCw, Copy, AlertTriangle, Search, Pencil, Check, X, Trash2, Pin as PinIcon, FolderOpen, ClipboardList, Plus, CopyPlus, Upload } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Btn, SecTitle, Pill } from '../../components/shared/ui'
 import { api } from '../../api/client'
@@ -66,6 +66,25 @@ export function UsdLibrary({ project, projects, onProject }: {
   const selAssembly = sel?.tab === 'assemblies' ? lib?.assemblies.find(a => a.name === sel.name) : undefined
 
   useEffect(() => { setSel(null) }, [project])
+
+  // Deep link (Production "USD assemble" task -> Ouvrir la page USD): select that
+  // asset's component, or its assembly for a decor, once the library is loaded.
+  const location = useLocation()
+  const [pendingOpen, setPendingOpen] = useState<string | null>(null)
+  useEffect(() => {
+    const name = (location.state as { openUsd?: string } | null)?.openUsd
+    if (name) {
+      setPendingOpen(name)
+      window.history.replaceState({}, '')
+    }
+  }, [location.state])
+  useEffect(() => {
+    if (!pendingOpen || !lib) return
+    if (lib.components.some(c => c.name === pendingOpen)) goTo('components', pendingOpen)
+    else if (lib.assemblies.some(a => a.name === pendingOpen)) goTo('assemblies', pendingOpen)
+    else toast.info(`${pendingOpen} : pas encore de component, crée-le dans la liste`)
+    setPendingOpen(null)
+  }, [pendingOpen, lib])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Changing section drops the previous selection: the right panel waits for a new pick.
   function switchTab(tabName: Tab) {
@@ -577,7 +596,8 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
         </Btn>
         {comp.class && (
           <Btn sm ghost onClick={() => navigate('/production', {
-            state: { openFavorite: { project, class: comp.class, name: comp.name, task: comp.departments[0] ?? 'GEO' } },
+            // The asset's "USD assemble" task (2026-09-26), not its first department.
+            state: { openFavorite: { project, class: comp.class, name: comp.name, task: 'USD' } },
           })}>
             <ClipboardList size={11} strokeWidth={2} /> {tr('usd.lib.openProduction')}
           </Btn>

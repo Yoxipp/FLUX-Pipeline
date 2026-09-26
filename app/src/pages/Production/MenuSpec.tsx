@@ -271,6 +271,13 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   // Consume external deep-link (fav row click) — asset-only for now.
   useEffect(() => {
     if (!initialOpen || !selectedRes) return
+    // "USD": the asset's tasks landing with its "USD assemble" task open (USD page link).
+    if (initialOpen.task.toUpperCase() === 'USD') {
+      try { sessionStorage.setItem(USD_OPEN_KEY, selectedRes.entity.name) } catch { /* blocked */ }
+      setActiveKey('root')
+      onInitialOpenApplied?.()
+      return
+    }
     const target = selectedRes.entity.tasks.find(x => x.name.toUpperCase() === initialOpen.task.toUpperCase())
     if (!target) return
     const entityId = selectedRes.entity.id
@@ -782,12 +789,23 @@ function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtas
 }
 
 // ── "USD assemblé" task: the component or the assembly of the asset ─────────────
+const USD_OPEN_KEY = 'flux.production.openUsd'
+
 function UsdAssembledNode({ name }: { name: string }) {
   const { project } = useProject()
   const navigate = useNavigate()
   const [info, setInfo] = useState<UsdAssetInfo | null>(null)
   const [err, setErr] = useState('')
-  const [open, setOpen] = useState(false)
+  // Opened unfolded when the USD page sent us here for this asset.
+  const [open, setOpen] = useState(() => {
+    try {
+      if (sessionStorage.getItem(USD_OPEN_KEY) === name) {
+        sessionStorage.removeItem(USD_OPEN_KEY)
+        return true
+      }
+    } catch { /* blocked */ }
+    return false
+  })
   const [busy, setBusy] = useState(false)
 
   const load = useMemo(() => async () => {
@@ -894,7 +912,7 @@ function UsdAssembledNode({ name }: { name: string }) {
             {project && (comp?.last || asm?.file) && (
               <OpenInMenu project={project} relPath={projectRelPath(project, (comp?.last || asm?.file) as string)} />
             )}
-            <button onClick={() => navigate('/usd')} style={_miniBtn}>Ouvrir la page USD</button>
+            <button onClick={() => navigate('/usd', { state: { openUsd: name } })} style={_miniBtn}>Ouvrir la page USD</button>
             <button onClick={() => { void load() }} disabled={busy} style={{ ..._miniBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <RefreshCw size={10} strokeWidth={2} />{busy ? 'Lecture…' : 'Relire'}
             </button>

@@ -340,8 +340,8 @@ def _reload_lop(node):
 # so going back to an element restores them): the component itself never changes.
 # comp_state = {variant set: "on" / "off"} applied by the inner apply_component LOP.
 _COMP_FOLDERS = (("geo_files", "geo", ("geometry",)), ("groom_files", "groom", ("groom",)),
-                 ("look_files", "look", ("shader",)), ("anim_files", "anim", ("animation",)),
-                 ("other_files", "other", ("rig", "other")))
+                 ("look_files", "look", ("shader",)), ("rig_files", "rig", ("rig",)),
+                 ("anim_files", "anim", ("animation",)), ("other_files", "other", ("other",)))
 
 def _sval(node, name):
     p = node.parm(name)
@@ -660,8 +660,7 @@ def resolve_path(node):
         if not _pval(node, "lib_item"):
             p = node.parm("resolved_path")
             if p: p.set("")
-            if _is_lop(node):
-                _clear_component(node)
+            _clear_component(node)          # no-op on the /obj importer
             _set_status(node, "Choisis un element de la bibliotheque")
             return
         _sync_lib_filters(node)
