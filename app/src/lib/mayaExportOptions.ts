@@ -144,6 +144,29 @@ const USD: ExportOption[] = [
     choices: [{ value: 'derived', label: 'Derived' }, { value: 'single', label: 'Single' }, { value: 'double', label: 'Double' }] },
   { key: 'upAxis', label: 'Up axis', type: 'enum', default: 'y', tier: 'advanced',
     choices: [{ value: 'y', label: 'Y' }, { value: 'z', label: 'Z' }] },
+  // Custom preset (2026-09-26): the rest of mayaUSDExport, all passed through.
+  { key: 'shadingMode', label: 'Shading mode', type: 'enum', default: 'useRegistry', tier: 'advanced',
+    choices: [{ value: 'useRegistry', label: 'Use registry' }, { value: 'none', label: 'None' }] },
+  { key: 'convertMaterialsTo', label: 'Materials to', type: 'enum', default: 'UsdPreviewSurface', tier: 'advanced',
+    choices: [
+      { value: 'UsdPreviewSurface', label: 'UsdPreviewSurface' }, { value: 'MaterialX', label: 'MaterialX' },
+      { value: 'none', label: 'Aucune conversion' },
+    ] },
+  { key: 'exportAssignedMaterials', label: 'Assigned materials only', type: 'bool', default: true, tier: 'advanced' },
+  { key: 'materialsScopeName', label: 'Materials scope', type: 'string', default: 'mtl', tier: 'advanced' },
+  { key: 'animationType', label: 'Animation type', type: 'enum', default: 'timesamples', tier: 'advanced',
+    choices: [
+      { value: 'timesamples', label: 'Time samples' }, { value: 'curves', label: 'Curves' },
+      { value: 'both', label: 'Both' },
+    ] },
+  { key: 'renderableOnly',        label: 'Renderable only',      type: 'bool', default: false, tier: 'advanced' },
+  { key: 'defaultCameras',        label: 'Default cameras',      type: 'bool', default: false, tier: 'advanced' },
+  { key: 'includeEmptyTransforms', label: 'Empty transforms',    type: 'bool', default: true,  tier: 'advanced' },
+  { key: 'exportRefsAsInstanceable', label: 'References as instanceable', type: 'bool', default: false, tier: 'advanced' },
+  { key: 'exportDistanceUnit',    label: 'Distance unit (metersPerUnit)', type: 'bool', default: true, tier: 'advanced' },
+  { key: 'writeDefaults',         label: 'Write defaults',       type: 'bool', default: false, tier: 'advanced' },
+  { key: 'rootPrim',              label: 'Root prim',            type: 'string', default: '', tier: 'advanced' },
+  { key: 'defaultPrim',           label: 'Default prim',         type: 'string', default: '', tier: 'advanced' },
 ]
 
 // Map an extension to its schema (usd variants share one schema).

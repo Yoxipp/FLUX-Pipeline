@@ -322,10 +322,22 @@ export const api = {
     include_anim?:    boolean
     include_weights?: boolean
     include_uv?:      boolean
+    // Publisher preset options (ADR 0034): { preset: 'model' | 'rig' | 'anim', ... }.
+    options?:         Record<string, unknown>
     port?:            number
   }) =>
     apiCall<{ ok: boolean; asset: string; version: string; root: string; warnings?: string[] }>(
       'POST', '/dcc/maya/export-usd', payload),
+
+  // What a USD preset would export from Maya (listing before the publish).
+  getMayaUsdPreview: (preset: 'model' | 'rig' | 'anim' | 'look', scope: 'scene' | 'selection',
+                      start?: number, end?: number, port?: number) => {
+    const qs = new URLSearchParams({ preset, scope })
+    if (start !== undefined) qs.set('start', String(start))
+    if (end !== undefined) qs.set('end', String(end))
+    if (port) qs.set('port', String(port))
+    return apiCall<MayaUsdPreview>('GET', `/dcc/maya/usd-preview?${qs}`)
+  },
 
   exportHoudiniLightUsd: (payload: {
     project_name: string
@@ -1061,8 +1073,21 @@ export interface LoadTargets {
   message: string
   targets: { label: string; rel_path: string; primary: boolean; what: string }[]
 }
+export interface MayaUsdTreeNode { name: string; path: string; type: 'group' | 'joint'; children: MayaUsdTreeNode[] }
+export interface MayaUsdPreview {
+  ok: boolean; preset: string; scope: string
+  // model: meshes; anim: moving joints; look: materials
+  items?: { name: string; path?: string; points?: number; faces?: number; uv?: boolean
+            color_sets?: string[]; skinned?: boolean; token?: string; channels?: string[]
+            type?: string; meshes?: number }[]
+  // rig
+  tree?: MayaUsdTreeNode[]; joints?: number; roots?: string[]
+  skinned?: { name: string; joints: number }[]; controllers?: number
+  sampled?: number; geometry?: number
+}
 export interface UsdTaskContribution {
   department: string
+  label?: string          // preset name in the Publisher (model / rig / anim / look)
   what: string
   // Which exporter writes this department: the skinned-mesh/skeleton one, or the look one.
   writer: 'light' | 'look'

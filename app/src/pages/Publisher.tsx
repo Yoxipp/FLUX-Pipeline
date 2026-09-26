@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen, X, RefreshCw } from 'lucide-react'
+import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
+import { USD_PRESET_SCHEMAS, defaultPresetOptions, presetForTask, exportedAttrs } from '../lib/usdPresetOptions'
+import type { UsdPreset } from '../lib/usdPresetOptions'
 import { zbrushSchemaForExt, defaultZbrushOptions } from '../lib/zbrushExportOptions'
 import { nukeSchemaForExt, defaultNukeOptions } from '../lib/nukeExportOptions'
 import { photoshopSchemaForExt, defaultPhotoshopOptions } from '../lib/photoshopExportOptions'
@@ -14,7 +16,7 @@ import { MARI_OPTIONS, defaultMariOptions } from '../lib/mariExportOptions'
 import { DESIGNER_OPTIONS, defaultDesignerOptions } from '../lib/designerExportOptions'
 import { MARVELOUS_OPTIONS, defaultMarvelousOptions } from '../lib/marvelousExportOptions'
 import { api } from '../api/client'
-import type { DesignerPackage, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
+import type { DesignerPackage, MayaUsdPreview, MayaUsdTreeNode, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
 import type { MapOpts } from './publisher/TextureMapTable'
@@ -331,13 +333,13 @@ const ASSET_TASKS: { value: string; label: string }[] = [
 // ADR 0019): one table, no copy to drift. This is only the fallback used while the
 // request is in flight or when the backend is unreachable.
 const USD_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
-  GEO:  { department: 'model', what: 'géométrie, UV et poids de skin', writer: 'light',
-          include: { geo: true,  skel: true,  anim: false, weights: true,  uv: true } },
-  RIG:  { department: 'rig',   what: 'squelette', writer: 'light',
-          include: { geo: false, skel: true,  anim: false, weights: false, uv: false } },
-  ANIM: { department: 'clip',  what: 'animation du squelette', writer: 'light',
+  GEO:  { department: 'model', label: 'model', what: 'géométrie seule (points, faces, normales, UV)', writer: 'light',
+          include: { geo: true,  skel: false, anim: false, weights: false, uv: true } },
+  RIG:  { department: 'rig',   label: 'rig', what: 'squelette en rest pose + poids de skin (boneCapture)', writer: 'light',
+          include: { geo: true,  skel: true,  anim: false, weights: true,  uv: false } },
+  ANIM: { department: 'clip',  label: 'anim', what: 'rotations des joints animés', writer: 'light',
           include: { geo: false, skel: true,  anim: true,  weights: false, uv: false } },
-  SHADING: { department: 'look', what: 'matériaux et assignations (sans géométrie)', writer: 'look',
+  SHADING: { department: 'look', label: 'look', what: 'matériaux et assignations (sans géométrie)', writer: 'look',
              include: { geo: false, skel: false, anim: false, weights: false, uv: false } },
 }
 // Shot tasks FLUX writes itself (2026-09-18): SEQ_SHOT_ANIM_<NAME> = the motion of
@@ -826,6 +828,14 @@ export function Publisher() {
   const usdLook = usdLayers && usdContribution?.writer === 'look'
   const usdInclude = usdContribution?.include
     ?? { geo: true, skel: true, anim: true, weights: true, uv: true }
+  // USD preset FLUX writes for this task (ADR 0034): its own options, its own listing.
+  // null = no FLUX department, or the DCC writes the file ("custom").
+  const usdPreset: UsdPreset | null = usdLayers
+    ? presetForTask(mode === 'asset' ? sel.task : formatToken(sel.name), mode === 'shot') : null
+  const [usdPresetOpts, setUsdPresetOpts] = useState(defaultPresetOptions)
+  const [usdPreview, setUsdPreview] = useState<MayaUsdPreview | null>(null)
+  const [usdPreviewBusy, setUsdPreviewBusy] = useState(false)
+  const [usdPreviewErr, setUsdPreviewErr] = useState('')
   const [mayaConnectCmd, setMayaConnectCmd]         = useState<string | null>(null)
   const [mayaAutostartInstalled, setMayaAutostartInstalled] = useState<boolean | null>(null)
   const [mayaStartupFile, setMayaStartupFile]       = useState<string | null>(null)
@@ -1144,7 +1154,9 @@ export function Publisher() {
   }, [])
 
   const ANIM_EXTS = ['.abc', '.usd', '.usda', '.usdc']
+  // model / rig / look presets are a rest state: no frame range (2026-09-26).
   const animCapable = (dcc === 'Maya' || dcc === 'Houdini') && ANIM_EXTS.includes(exportExt)
+    && !(usdPreset && usdPreset !== 'anim')
   const seqCapable = (dcc === 'Houdini' && !animCapable && !['.hip', '.hiplc', '.hipnc'].includes(exportExt))
     || (dcc === 'Nuke' && exportExt !== '.nk')
 
@@ -1181,7 +1193,8 @@ export function Publisher() {
     if (dcc !== 'Maya' && dcc !== 'Houdini') return
     try {
       const r = await api.getAnimRange(dcc, mayaScope, dcc === 'Maya' ? (readActiveInstancePort('Maya') ?? undefined) : undefined)
-      setFrameStart(r.start)
+      // ANIM preset: Start stays 1001 (or the artist's pre-roll), End = the last key.
+      if (usdPreset !== 'anim') setFrameStart(r.start)
       setFrameEnd(r.end)
       setRangeInfo(r.source === 'keys'
         ? `Clés ${r.start}-${r.end} (${r.curves} courbe${r.curves > 1 ? 's' : ''})`
@@ -1189,11 +1202,43 @@ export function Publisher() {
     } catch {
       setRangeInfo(`${dcc} ne répond pas : plage à saisir`)
     }
-  }, [dcc, mayaScope])
+  }, [dcc, mayaScope, usdPreset])
 
   useEffect(() => {
     if (animCapable && animRange) void fetchAnimRange()
   }, [animCapable, animRange, fetchAnimRange])
+
+  // ANIM preset (2026-09-26): animation on by default, Start 1001 (a pre-roll such
+  // as 995 stays editable), End from the last key of the scene (fetch above).
+  useEffect(() => {
+    if (usdPreset !== 'anim') return
+    setAnimRange(true)
+    setFrameStart(1001)
+  }, [usdPreset])
+
+  // What the preset will export (listing), read from Maya when the preset or the scope changes.
+  const fetchUsdPreview = useCallback(async () => {
+    if (dcc !== 'Maya' || !usdPreset) { setUsdPreview(null); return }
+    setUsdPreviewBusy(true)
+    setUsdPreviewErr('')
+    try {
+      const r = await api.getMayaUsdPreview(usdPreset, mayaScope,
+        usdPreset === 'anim' ? frameStart : undefined, usdPreset === 'anim' ? frameEnd : undefined,
+        readActiveInstancePort('Maya') ?? undefined)
+      setUsdPreview(r)
+    } catch (e) {
+      setUsdPreview(null)
+      setUsdPreviewErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUsdPreviewBusy(false)
+    }
+  }, [dcc, usdPreset, mayaScope, frameStart, frameEnd])
+  const previewRef = useRef(fetchUsdPreview)
+  previewRef.current = fetchUsdPreview
+  useEffect(() => {
+    if (dcc === 'Maya' && usdPreset && mayaConnected) void previewRef.current()
+    else setUsdPreview(null)
+  }, [dcc, usdPreset, mayaScope, mayaConnected])
 
   const handlePublish = useCallback(async () => {
     if (!project) { toast.error('Sélectionne un projet'); return }
@@ -1237,6 +1282,9 @@ export function Publisher() {
         if (usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = shotCharacter ?? (formatToken(sel.name) || parts[2])
           if (!assetName) { toast.error('Choisis le perso animé (4e case)'); return }
+          // Preset options (ADR 0034): Maya runs the preset sweep (model / rig / anim).
+          const presetOptions = usdPreset && usdPreset !== 'look'
+            ? { preset: usdPreset, ...usdPresetOpts[usdPreset] } : undefined
           const picked = mode === 'shot' ? charInstances.filter(i => charChecked.has(i.node)) : []
           if (picked.length > 0) {
             // One shot animation per ticked instance, from the meshes under its node.
@@ -1251,6 +1299,7 @@ export function Publisher() {
                   frame_start: animOn ? frameStart : undefined, frame_end: animOn ? frameEnd : undefined,
                   include_geo: usdInclude.geo, include_skel: usdInclude.skel, include_anim: usdInclude.anim,
                   include_weights: usdInclude.weights, include_uv: usdInclude.uv,
+                  options: presetOptions,
                   port: readActiveInstancePort('Maya') ?? undefined,
                 })
                 toast.success(`${fn} ${r.version}`)
@@ -1274,9 +1323,10 @@ export function Publisher() {
             include_anim:    usdInclude.anim,
             include_weights: usdInclude.weights,
             include_uv:      usdInclude.uv,
+            options:         presetOptions,
             port:            readActiveInstancePort('Maya') ?? undefined,
           })
-          toast.success(`USD léger ${res.version} → ${res.asset}`)
+          toast.success(`USD ${usdPreset ?? 'léger'} ${res.version} → ${res.asset}`)
           res.warnings?.forEach(w => toast.warning(w))
           return
         }
@@ -1586,7 +1636,7 @@ export function Publisher() {
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts, texItems, texChecked,
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
     mapRows, mapChecked, mapOpts, painterChannels, channelRows,
-    mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
+    mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, usdPreset, usdPresetOpts, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
   // The app a texture list belongs to: a slow answer (Mari busy exporting) that lands
@@ -2130,14 +2180,21 @@ export function Publisher() {
               <SecTitle>PRESETS USD</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {Object.entries(usdDepartments).map(([task, info]) => (
-                  <Pill key={task} active={sel.task === task && ['.usd', '.usda', '.usdc'].includes(exportExt)}
+                  <Pill key={task} active={usdLayers && sel.task === task && ['.usd', '.usda', '.usdc'].includes(exportExt)}
                     style={{ cursor: 'pointer' }}>
                     <span title={info.what}
                       onClick={() => { handleSelect('task', task); setExportExt('.usd'); setFluxWriter(null) }}>
-                      {info.department}
+                      {info.label ?? info.department}
                     </span>
                   </Pill>
                 ))}
+                {/* custom: the DCC writes the file with every one of its USD options. */}
+                <Pill active={!usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)} style={{ cursor: 'pointer' }}>
+                  <span title={`${dcc} écrit le fichier avec toutes ses options d'export USD (animation comprise)`}
+                    onClick={() => { setExportExt('.usd'); setFluxWriter(false) }}>
+                    custom
+                  </span>
+                </Pill>
               </div>
             </div>
           )}
@@ -2292,8 +2349,34 @@ export function Publisher() {
             </div>
           )}
 
-          {/* OPTIONS D'EXPORT — Maya, per-format (coexists with USD Layers). */}
-          {dcc === 'Maya' && schemaForExt(exportExt).length > 0 && (
+          {/* OPTIONS du preset USD — Maya, FLUX writes: only what makes sense for it (ADR 0034). */}
+          {dcc === 'Maya' && usdPreset && USD_PRESET_SCHEMAS[usdPreset].length > 0 && (
+            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+              <SecTitle>OPTIONS {usdPreset.toUpperCase()}</SecTitle>
+              <ExportOptions
+                schema={USD_PRESET_SCHEMAS[usdPreset]}
+                values={usdPresetOpts[usdPreset]}
+                onChange={(k, v) => setUsdPresetOpts(prev => ({ ...prev, [usdPreset]: { ...prev[usdPreset], [k]: v } }))}
+              />
+            </div>
+          )}
+
+          {/* À EXPORTER + ATTRIBUTS — Maya, FLUX writes: listing and attribute renamer. */}
+          {dcc === 'Maya' && usdPreset && (
+            <UsdPresetPanel
+              preset={usdPreset}
+              preview={usdPreview}
+              busy={usdPreviewBusy}
+              error={usdPreviewErr}
+              connected={mayaConnected}
+              opts={usdPresetOpts[usdPreset]}
+              onRefresh={() => { void fetchUsdPreview() }}
+              onRenames={renames => setUsdPresetOpts(prev => ({ ...prev, [usdPreset]: { ...prev[usdPreset], renames } }))}
+            />
+          )}
+
+          {/* OPTIONS D'EXPORT — Maya, per-format (the DCC writes the file: custom). */}
+          {dcc === 'Maya' && !usdPreset && schemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
@@ -2693,7 +2776,13 @@ export function Publisher() {
                     {on
                       ? (contribution.writer === 'look'
                         ? ` FLUX lit les matériaux de ${dcc === 'Houdini' ? 'Solaris (LOP affiché ou chemin du node)' : 'la scène'} et écrit /NAME/mtl + les assignations sur /NAME/geo/render (textures .tx si converties).`
-                        : " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe).")
+                        : usdPreset === 'model'
+                          ? ' FLUX écrit la géo seule sous /NAME/geo/render (+ proxy auto) ; skeleton et poids viennent du rig.'
+                          : usdPreset === 'rig'
+                            ? ' FLUX écrit /NAME/skel/Skeleton en rest pose et pose les poids de skin sur /NAME/geo/render du GEO publié (boneCapture dans Houdini).'
+                            : usdPreset === 'anim'
+                              ? ' FLUX écrit /NAME/skel/Anim : les rotations des joints qui bougent, sans altérer la courbe.'
+                              : " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe).")
                       : ` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`}
                   </>) : (
                     mode === 'shot'
@@ -2791,4 +2880,195 @@ export function Publisher() {
       )}
     </div>
   )
+}
+
+// ── USD preset: what will be exported + attribute renamer (2026-09-26) ────────
+
+function countJoints(node: MayaUsdTreeNode): number {
+  return (node.type === 'joint' ? 1 : 0) + node.children.reduce((n, c) => n + countJoints(c), 0)
+}
+
+// One row of the rig tree, outliner-like: groups open, joints fold.
+function PresetTreeNode({ node, depth }: { node: MayaUsdTreeNode; depth: number }) {
+  const [open, setOpen] = useState(node.type === 'group')
+  const has = node.children.length > 0
+  return (
+    <div>
+      <div
+        title={node.path}
+        onClick={() => { if (has) setOpen(o => !o) }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4, paddingLeft: depth * 12, minWidth: 0,
+          cursor: has ? 'pointer' : 'default', lineHeight: '18px',
+          fontFamily: 'var(--mono)', fontSize: 10,
+          color: node.type === 'joint' ? 'var(--ink-2)' : 'var(--ink-3)',
+        }}
+      >
+        {has
+          ? (open ? <ChevronDown size={11} strokeWidth={2} /> : <ChevronRight size={11} strokeWidth={2} />)
+          : <span style={{ width: 11, flexShrink: 0 }} />}
+        <span style={{
+          fontSize: 8, padding: '0 4px', borderRadius: 3, flexShrink: 0,
+          background: node.type === 'joint' ? 'var(--accent-soft)' : 'var(--paper-2)',
+          color: node.type === 'joint' ? 'var(--accent-hi)' : 'var(--ink-4)',
+        }}>{node.type === 'joint' ? 'jnt' : 'grp'}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+        {has && !open && <span style={{ color: 'var(--ink-4)', flexShrink: 0 }}>({countJoints(node)})</span>}
+      </div>
+      {open && node.children.map(c => <PresetTreeNode key={c.path} node={c} depth={depth + 1} />)}
+    </div>
+  )
+}
+
+function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefresh, onRenames }: {
+  preset: UsdPreset
+  preview: MayaUsdPreview | null
+  busy: boolean
+  error: string
+  connected: boolean
+  opts: Record<string, unknown>
+  onRefresh: () => void
+  onRenames: (renames: Record<string, string>) => void
+}) {
+  const renames = (opts.renames as Record<string, string> | undefined) ?? {}
+  const items = preview?.items ?? []
+  const colorSets = preset === 'model'
+    ? Array.from(new Set(items.flatMap(i => i.color_sets ?? []))) : []
+  const attrs = exportedAttrs(preset, opts, colorSets)
+  const renamable = attrs.filter(a => a.rename)
+
+  let summary = connected ? '' : 'Maya non connecté'
+  if (preview) {
+    if (preset === 'model') summary = items.length ? `${items.length} géo(s)` : "aucune géo : l'export échouera"
+    else if (preset === 'rig') {
+      summary = preview.joints
+        ? `${preview.joints} joints · ${preview.roots?.length ?? 0} squelette(s) · ${preview.skinned?.length ?? 0} mesh(es) skinné(s)`
+        : "aucun joint : l'export échouera"
+    } else if (preset === 'anim') {
+      summary = items.length
+        ? `${items.length} joint(s) animé(s) sur ${preview.joints ?? 0}`
+        : 'aucun joint ne bouge sur la plage'
+    } else summary = items.length ? `${items.length} matériau(x)` : 'aucun matériau sur la géo'
+  }
+
+  const row: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, lineHeight: '18px',
+    fontFamily: 'var(--mono)', fontSize: 10,
+  }
+  const dim: React.CSSProperties = { color: 'var(--ink-4)', flexShrink: 0 }
+  const name: React.CSSProperties = {
+    color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
+  }
+
+  return (<>
+    <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+      <SecTitle>À EXPORTER</SecTitle>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, minWidth: 0 }}>
+        <Btn ghost disabled={busy || !connected} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={onRefresh}>
+          <RefreshCw size={11} strokeWidth={2} />
+          {busy ? 'Lecture…' : 'Relire la scène'}
+        </Btn>
+        <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
+      </div>
+      {error && <div style={{ fontSize: 10, color: 'var(--err)', marginBottom: 6 }}>{error}</div>}
+      {preview && (items.length > 0 || (preview.tree?.length ?? 0) > 0) && (
+        <div className="subcard" style={{ padding: '6px 10px', maxHeight: 240, overflowY: 'auto' }}>
+          {preset === 'model' && items.map(i => (
+            <div key={i.path ?? i.name} style={row} title={i.path}>
+              <span style={name}>{i.name}</span>
+              <span style={dim}>{i.points} pts · {i.faces} f</span>
+              <span style={{ ...dim, color: i.uv ? 'var(--ink-4)' : 'var(--warn, var(--err))' }}>{i.uv ? 'UV' : 'sans UV'}</span>
+              {i.skinned && <span style={dim} title="Les poids de skin se publient avec le preset rig">skin → rig</span>}
+            </div>
+          ))}
+          {preset === 'anim' && items.map(i => (
+            <div key={i.token ?? i.name} style={row} title={i.token}>
+              <span style={name}>{i.name}</span>
+              <span style={dim}>{(i.channels ?? []).join(' + ')}</span>
+            </div>
+          ))}
+          {preset === 'look' && items.map(i => (
+            <div key={i.name} style={row}>
+              <span style={name}>{i.name}</span>
+              <span style={dim}>{i.type}</span>
+              <span style={dim}>{i.meshes} géo(s)</span>
+            </div>
+          ))}
+          {preset === 'rig' && (<>
+            {(preview.tree ?? []).map(n => <PresetTreeNode key={n.path} node={n} depth={0} />)}
+            {(preview.skinned?.length ?? 0) > 0 && (
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--rule)' }}>
+                {preview.skinned!.map(m => (
+                  <div key={m.name} style={row}>
+                    <span style={name}>{m.name}</span>
+                    <span style={dim}>skin · {m.joints} influences</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>)}
+        </div>
+      )}
+      {preset === 'anim' && preview && (
+        <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 4 }}>
+          Aperçu sur {preview.sampled ?? 0} images ; l'export lit chaque image.
+        </div>
+      )}
+    </div>
+
+    <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
+      <SecTitle>ATTRIBUTS EXPORTÉS</SecTitle>
+      {renamable.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <Btn ghost sm onClick={() => {
+            const next = { ...renames }
+            renamable.forEach(a => { if (a.houdiniName) next[a.key ?? a.usd] = a.houdiniName })
+            onRenames(next)
+          }}>Nomenclature Houdini</Btn>
+          <Btn ghost sm onClick={() => onRenames({})}>Noms USD</Btn>
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: '4px 8px', alignItems: 'center' }}>
+        <span className="cap" style={{ fontSize: 9 }}>USD</span>
+        <span className="cap" style={{ fontSize: 9 }}>Nom exporté</span>
+        <span className="cap" style={{ fontSize: 9 }}>Dans Houdini</span>
+        {attrs.map(a => {
+          const key = a.key ?? a.usd
+          const value = renames[key] ?? ''
+          return (
+            <div key={a.usd} style={{ display: 'contents' }}>
+              <span title={a.what} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+                                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.usd}</span>
+              {a.rename ? (
+                <input
+                  value={value}
+                  placeholder={key}
+                  onChange={e => onRenames({ ...renames, [key]: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })}
+                  style={{
+                    height: 22, minWidth: 0, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                    borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 10,
+                    color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
+                  }}
+                />
+              ) : (
+                <span style={{ fontSize: 9, color: 'var(--ink-4)' }} title={a.what}>fixe</span>
+              )}
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)',
+                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {a.rename && value ? value : a.houdini}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+        {preset === 'rig'
+          ? "Houdini reconstruit boneCapture à partir de skel:jointIndices / jointWeights et du Skeleton (USD Skin Import, UsdSkel Character Import) : ces noms restent fixes. Les poids se posent sur la géo du GEO publié (et sur son proxy)."
+          : preset === 'model'
+            ? "UV : st est le nom lu par les matériaux USD (UsdPreviewSurface) ; ne renomme en uv que pour un pipe 100 % Houdini. Un color set renommé Cd devient la couleur de point dans Houdini."
+            : 'Attributs du schéma USD : noms fixes.'}
+      </div>
+    </div>
+  </>)
 }
