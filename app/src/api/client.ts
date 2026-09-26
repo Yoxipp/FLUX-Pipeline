@@ -434,7 +434,7 @@ export const api = {
   getTextureFormats: () =>
     apiCall<{ formats: Record<string, string[]>; sizes: number[] }>('GET', '/dcc/texture/formats'),
   getMariInfo: () =>
-    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number; depth?: number }[] }>(
+    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number; depth?: number; layers?: number }[] }>(
       'GET', '/dcc/mari/info', undefined, 25000),
 
   // Mari — export channels via the in-app bridge, ingest under FLUX tokens,
@@ -452,7 +452,7 @@ export const api = {
     channels?:    string[]
     channel_params?: Record<string, { format?: string; bit_depth?: string; size?: number }>
   }) =>
-    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[] }>('POST', '/dcc/mari/publish', payload, 3600000),
+    apiCall<{ ok: boolean; published?: string[]; tx?: string[] | null; warnings?: string[]; timings?: string }>('POST', '/dcc/mari/publish', payload, 3600000),
 
   // Level 1 file ingest (Substance Designer / Marvelous Designer): the artist
   // exports a file from the app; FLUX ingests it under FLUX naming. One method per
@@ -589,8 +589,13 @@ export const api = {
   setCurrentProject: (project: string) =>
     apiCall<{ project: string }>('PUT', '/project/current', { project }),
 
-  createProject: (name: string) =>
-    apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name }),
+  createProject: (name: string, painter_presets?: string[]) =>
+    apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name, painter_presets: painter_presets ?? null }),
+  // Painter export presets: shipped with FLUX (bundled) and those of a project.
+  getPainterPresets: (project?: string) =>
+    apiCall<{ bundled: string[]; project: string[] }>('GET', `/dcc/substance/presets${project ? `?project=${encodeURIComponent(project)}` : ''}`),
+  putPainterPresets: (project: string, presets: string[]) =>
+    apiCall<{ project: string[] }>('PUT', '/dcc/substance/presets', { project, presets }),
 
   // Hard-delete a whole project folder. Destructive: only call after the typed
   // confirmation in the Archives view.

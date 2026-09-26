@@ -41,7 +41,8 @@ _SEED_HOUDINI_DIR = Path(__file__).parent.parent.parent / "resources" / "scenes"
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-def create_project(project_name: str, projects_root: Path | None = None) -> Path:
+def create_project(project_name: str, projects_root: Path | None = None, *,
+                   painter_presets: list[str] | None = None) -> Path:
     """Create a new project under *projects_root* (defaults to DOSSIER_PROJETS).
 
     *project_name* is formatted automatically (uppercase, underscores, no accents).
@@ -65,6 +66,8 @@ def create_project(project_name: str, projects_root: Path | None = None) -> Path
     _seed_template_dir(project_path)
     _write_initial_tokens(project_path)
     ensure_project_config(project_path)
+    if painter_presets:
+        set_painter_presets(project_path, painter_presets)
 
     log.info("Project created: %s", project_path)
     return project_path
@@ -129,3 +132,13 @@ def _write_initial_tokens(project_path: Path) -> None:
     if not save_tokens(project_path, tokens):
         log.error("Could not write tokens.json for new project at %s", project_path)
 
+
+def set_painter_presets(project_path: Path, names: list[str]) -> None:
+    """Record the Painter export presets the project uses (project.json "texturing")."""
+    import json
+
+    from features.folder_manager.project_config import project_config_path, read_project_config
+
+    cfg = read_project_config(project_path) or {}
+    cfg.setdefault("texturing", {})["painter_presets"] = [str(n) for n in names if str(n).strip()]
+    project_config_path(project_path).write_text(json.dumps(cfg, indent=2), encoding="utf-8")

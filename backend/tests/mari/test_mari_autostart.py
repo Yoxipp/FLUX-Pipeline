@@ -107,6 +107,35 @@ class MariBusy(unittest.TestCase):
         self.assertFalse(seen["info"]["ok"])
         self.assertIsNone(client.busy_since())
 
+    def test_a_stuck_export_is_given_up_with_where_it_stopped(self):
+        """2026-09-26: "Mari charge a l'infini" - FLUX stops waiting when Mari makes no progress."""
+        import tempfile
+        import threading
+        import time
+        from pathlib import Path
+
+        from dcc.mari import client
+
+        release = threading.Event()
+
+        def stuck_send(payload, timeout=120.0):
+            release.wait(5)
+            return {"ok": True, "files": []}
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(client, "_send", side_effect=stuck_send), \
+                mock.patch.object(client, "STALL_S", 0.3), mock.patch.object(client, "_POLL_S", 0.05), \
+                mock.patch.object(client, "_log_path", return_value=Path(d) / "bridge.log"):
+            (Path(d) / "bridge.log").write_text(
+                time.strftime("%Y-%m-%d %H:%M:%S ") + "Mari channel start BCOL (tif, 8 bits, 12 tuiles)\n")
+            t0 = time.monotonic()
+            res = client.mari_client.export(d, "auto", ["BCOL"])
+            release.set()
+        self.assertFalse(res["ok"])
+        self.assertIn("BCOL", res["error"])
+        self.assertLess(time.monotonic() - t0, 4)
+        self.assertIsNone(client.busy_since())
+
     def test_same_named_channels_get_their_own_id(self):
         from types import SimpleNamespace
 

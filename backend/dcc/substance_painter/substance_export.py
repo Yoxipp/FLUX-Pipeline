@@ -37,7 +37,9 @@ def build_export_config(
     *size*: output width in pixels (power of two), None = each texture set's own size.
     *padding*: Painter dilation algorithm (infinite, passthrough, transparent, color,
     diffusion); *dilation* in pixels for the non-infinite ones.
-    *maps*: output maps of the preset to export (their fileName), None = all of them.
+    *maps*: output maps of the preset to export (their fileName), None = all of them,
+    [] = none (only *channels*).
+    *channels*: shader channels exported on top of the preset ([{"id", "label", "gray"}]).
     *map_params*: {fileName: {"format", "bit_depth", "size"}} overriding the defaults per
     map (2026-09-25: format, bit depth and size chosen map by map)."""
     from dcc.texture_convert import pick_depth
@@ -64,10 +66,6 @@ def build_export_config(
         if p:
             # Later entries win over the global one for the maps they filter.
             export_params.append({"filter": {"outputMaps": [fid]}, "parameters": p})
-    if channels:
-        # "Canaux du shader": one map per picked channel of the stack, whatever the preset
-        # knows (coat, anisotropy, user channels...). Map id = its fileName.
-        preset = CHANNEL_PRESET
     cfg: dict = {
         "exportPath": str(export_path).replace("\\", "/"),
         "exportShaderParams": False,
@@ -76,16 +74,33 @@ def build_export_config(
         # dilatation") when parameters are given without a padding algorithm.
         "exportParameters": export_params,
     }
+    # *channels*: shader channels exported ON TOP of the preset's maps (coat, anisotropy,
+    # user channels... that the preset does not write), through an inline preset.
+    # *maps* == [] with channels = the channels only.
+    skip_preset = maps is not None and len(maps) == 0
     if channels:
         cfg["exportPresets"] = [channel_preset(channels)]
+    extra_ids = [channel_map_id(c) for c in channels or []]
     if texture_sets:
-        cfg["exportList"] = [{"rootPath": ts} for ts in texture_sets]
+        entries = []
+        for ts in texture_sets:
+            if not skip_preset:
+                entry = {"rootPath": ts}
+                if maps:
+                    entry["filter"] = {"outputMaps": list(maps)}
+                entries.append(entry)
+            if extra_ids:
+                entries.append({"rootPath": ts, "exportPreset": CHANNEL_PRESET,
+                                "filter": {"outputMaps": extra_ids}})
+        cfg["exportList"] = entries
+    else:
+        # No set listed: the bridge lists every set, then applies these.
         if maps:
-            for entry in cfg["exportList"]:
-                entry["filter"] = {"outputMaps": list(maps)}
-    elif maps:
-        # No set listed: the bridge lists every set, then applies this filter.
-        cfg["fluxOutputMaps"] = list(maps)
+            cfg["fluxOutputMaps"] = list(maps)
+        if skip_preset:
+            cfg["fluxSkipPreset"] = True
+        if extra_ids:
+            cfg["fluxExtraMaps"] = extra_ids
     return cfg
 
 

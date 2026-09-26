@@ -740,15 +740,39 @@ export function Publisher() {
   const [mapOpts, setMapOpts] = useState<Record<string, MapOpts>>({})
   // Mari: format / bit depth / size per channel (same table as Painter's maps).
   const [chanOpts, setChanOpts] = useState<Record<string, MapOpts>>({})
-  const curPreset = painterPresets.find(p => p.url === painterOpts.preset || p.name === painterOpts.preset)
+  // The project's Painter export presets (project.json, picked at creation): only those
+  // are offered; none chosen = every preset of Painter (2026-09-26).
+  const [projectPresets, setProjectPresets] = useState<string[]>([])
+  const [bundledPresets, setBundledPresets] = useState<string[]>([])
+  useEffect(() => {
+    if (!project) { setProjectPresets([]); return }
+    api.getPainterPresets(project)
+      .then(r => { setProjectPresets(r.project); setBundledPresets(r.bundled) })
+      .catch(() => setProjectPresets([]))
+  }, [project])
+  const toggleProjectPreset = (name: string) => {
+    if (!project) return
+    const next = projectPresets.includes(name) ? projectPresets.filter(n => n !== name) : [...projectPresets, name]
+    api.putPainterPresets(project, next)
+      .then(r => { setProjectPresets(r.project); toast.success(`Presets du projet : ${r.project.join(', ') || 'tous'}`) })
+      .catch(e => toast.error(e instanceof Error ? e.message : String(e)))
+  }
+  const offeredPresets = projectPresets.length
+    ? painterPresets.filter(p => projectPresets.includes(p.name))
+    : painterPresets
+  const missingPresets = projectPresets.filter(n => !painterPresets.some(p => p.name === n))
+  const curPreset = offeredPresets.find(p => p.url === painterOpts.preset || p.name === painterOpts.preset)
   // "Canaux du shader": every channel of the stacks (coat, anisotropy, user...), not only
   // the preset's maps. Map id = the fileName the backend gives it ($textureSet_<Label>).
   const [painterChannels, setPainterChannels] = useState<PainterChannel[]>([])
-  const [mapSource, setMapSource] = useState<'preset' | 'channels'>('preset')
   const channelMapId = (c: PainterChannel) => `$textureSet_${(c.label || c.id).replace(/[^A-Za-z0-9]/g, '') || c.id}`
-  const mapRows: { id: string; label: string }[] = mapSource === 'channels'
-    ? painterChannels.map(c => ({ id: channelMapId(c), label: c.label }))
-    : (curPreset?.maps ?? [])
+  // One table: the preset's maps (ticked), then every shader channel that can be added on
+  // top of the preset (coat, anisotropy, user...), unticked until wanted.
+  const presetRows: { id: string; label: string; detail?: string }[] = curPreset?.maps ?? []
+  const channelRows: { id: string; label: string; detail?: string }[] = painterChannels
+    .map(c => ({ id: channelMapId(c), label: `+ ${c.label}`, detail: 'canal' }))
+    .filter(r => !presetRows.some(m => m.id === r.id))
+  const mapRows = [...presetRows, ...channelRows]
 
   // Designer: the graphs of the open packages (ticked ones export) and their outputs.
   const [designerOpts, setDesignerOpts] = useState<Record<string, unknown>>(() => defaultDesignerOptions())
@@ -1399,14 +1423,13 @@ export function Publisher() {
         const picked = texItems.length > 0 && texChecked.size < texItems.length
           ? texItems.map(t => t.name).filter(n => texChecked.has(n)) : undefined
         if (picked && picked.length === 0) { toast.error(dcc === 'Painter' ? 'Coche au moins un texture set' : 'Coche au moins un channel'); return }
-        const presetMaps = mapRows
-        const byChannels = dcc === 'Painter' && mapSource === 'channels' && painterChannels.length > 0
-        const pickedMaps = byChannels
-          ? presetMaps.map(m => m.id).filter(id => mapChecked.has(id))
-          : presetMaps.length && mapChecked.size < presetMaps.length
-            ? presetMaps.map(m => m.id).filter(id => mapChecked.has(id)) : undefined
-        if (dcc === 'Painter' && pickedMaps && pickedMaps.length === 0) { toast.error('Coche au moins une map'); return }
-        const mapParams = buildMapParams(presetMaps, mapChecked, mapOpts)
+        const presetIds = presetRows.map(m => m.id)
+        const tickedPreset = presetIds.filter(id => mapChecked.has(id))
+        const extraChannels = painterChannels.filter(c => channelRows.some(r => r.id === channelMapId(c)) && mapChecked.has(channelMapId(c)))
+        // every preset map = no filter; none = the added channels only
+        const pickedMaps = tickedPreset.length === presetIds.length ? undefined : tickedPreset
+        if (dcc === 'Painter' && tickedPreset.length === 0 && extraChannels.length === 0) { toast.error('Coche au moins une map'); return }
+        const mapParams = buildMapParams(mapRows, mapChecked, mapOpts)
         const chanParams = buildMapParams(texItems.map(t => ({ id: t.name, label: t.name })), texChecked, chanOpts)
         const res = dcc === 'Painter'
           ? await api.publishSubstance({
@@ -1420,12 +1443,13 @@ export function Publisher() {
               dilation:     Number(painterOpts.dilation ?? 16),
               maps:         pickedMaps,
               map_params:   Object.keys(mapParams).length ? mapParams : undefined,
-              channels:     byChannels ? painterChannels.filter(c => mapChecked.has(channelMapId(c))) : undefined,
+              channels:     extraChannels.length ? extraChannels : undefined,
             })
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked,
                                     channel_params: Object.keys(chanParams).length ? chanParams : undefined })
         const n = res.published?.length ?? 0
-        toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
+        const timings = 'timings' in res && res.timings ? ` (${res.timings})` : ''
+        toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}${timings}`)
         res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Designer') {
         // Like Painter: the bridge exports the ticked graphs (their ticked outputs, the
@@ -1561,7 +1585,7 @@ export function Publisher() {
     zbrushConnected, zbrushExportOpts,
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts, texItems, texChecked,
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
-    mapRows, mapChecked, mapOpts, mapSource, painterChannels,
+    mapRows, mapChecked, mapOpts, painterChannels, channelRows,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
   ])
 
@@ -1591,7 +1615,8 @@ export function Publisher() {
         if (stale()) return
         setTexItems(r.channels.map(c => ({
           name: c.name,
-          detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : ''].filter(Boolean).join(' '),
+          detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : '',
+                 c.layers != null ? `${c.layers} calque${c.layers > 1 ? 's' : ''}` : ''].filter(Boolean).join(' '),
         })))
         setTexSource(r.geo || 'Aucune geo')
         setTexChecked(new Set(r.channels.map(c => c.name)))
@@ -1646,14 +1671,14 @@ export function Publisher() {
   // Presets read from Painter: keep the chosen one if Painter has it, else PBR Metallic
   // Roughness (or the first). A new preset ticks all of its maps.
   useEffect(() => {
-    if (!painterPresets.length || curPreset) return
-    const pick = painterPresets.find(p => p.name === 'PBR Metallic Roughness') ?? painterPresets[0]
+    if (!offeredPresets.length || curPreset) return
+    const pick = offeredPresets.find(p => p.name === 'PBR Metallic Roughness') ?? offeredPresets[0]
     setPainterOpts(prev => ({ ...prev, preset: pick.url || pick.name }))
-  }, [painterPresets, curPreset])
+  }, [offeredPresets, curPreset])
   useEffect(() => {
-    setMapChecked(new Set(mapRows.map(m => m.id)))
+    setMapChecked(new Set(presetRows.map(m => m.id)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curPreset, mapSource, painterChannels])
+  }, [curPreset, painterChannels])
 
   // Several Maya / Houdini open: ask which one publishes before starting.
   const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; label: string; scene: string | null }[] } | null>(null)
@@ -2377,7 +2402,22 @@ export function Publisher() {
           {dcc === 'Painter' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
-              {painterPresets.length > 0 && (
+              {bundledPresets.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', marginRight: 4 }} title="Enregistré dans le projet (project.json)">Presets du projet</span>
+                  {bundledPresets.map(n => (
+                    <Pill key={n} active={projectPresets.includes(n)} onClick={() => toggleProjectPreset(n)} style={{ cursor: 'pointer' }}>{n}</Pill>
+                  ))}
+                  {projectPresets.length === 0 && <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>aucun : tous les presets de Painter</span>}
+                </div>
+              )}
+              {missingPresets.length > 0 && (
+                <div style={{ fontSize: 10, color: 'var(--warn)', marginBottom: 8 }}>
+                  Preset du projet absent de Painter : {missingPresets.join(', ')}. Réinstalle le bridge Painter
+                  (bouton Plug) puis relance Painter.
+                </div>
+              )}
+              {offeredPresets.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>Export preset</span>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
@@ -2385,25 +2425,25 @@ export function Publisher() {
                       onValueChange={v => setPainterOpts(prev => ({ ...prev, preset: v }))}>
                       <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 260, fontSize: 10 }} />
                       <SelectContent>
-                        {painterPresets.map(p => <SelectItem key={p.url || p.name} value={p.url || p.name}>{p.name}</SelectItem>)}
+                        {offeredPresets.map(p => <SelectItem key={p.url || p.name} value={p.url || p.name}>{p.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
               )}
               <ExportOptions
-                schema={painterPresets.length > 0 ? PAINTER_OPTIONS.filter(o => o.key !== 'preset') : PAINTER_OPTIONS}
+                schema={offeredPresets.length > 0 ? PAINTER_OPTIONS.filter(o => o.key !== 'preset') : PAINTER_OPTIONS}
                 values={painterOpts}
                 onChange={(k, v) => setPainterOpts(prev => ({ ...prev, [k]: v }))}
               />
             </div>
           )}
 
-          {/* MAPS (Painter): the preset's maps or every channel of the shader, each with its
-              own format / bit depth / size (same table as Mari's channels). */}
-          {dcc === 'Painter' && ((curPreset?.maps.length ?? 0) > 0 || painterChannels.length > 0) && (
+          {/* MAPS (Painter): the preset's maps, then the shader channels that can be added
+              on top of it, each with its own format / bit depth / size (same table as Mari). */}
+          {dcc === 'Painter' && mapRows.length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>MAPS <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{mapSource === 'channels' ? 'canaux du shader' : curPreset?.name}</span></SecTitle>
+              <SecTitle>MAPS <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{curPreset?.name}{channelRows.length ? ` + ${channelRows.length} canal(aux) ajoutable(s)` : ''}</span></SecTitle>
               <TextureMapTable
                 rows={mapRows}
                 checked={mapChecked}
@@ -2412,16 +2452,6 @@ export function Publisher() {
                 setOpts={fn => setMapOpts(prev => fn(prev))}
                 defaultFormat={exportExt.replace('.', '')}
                 sizeDefaultLabel="Taille du set"
-                header={(
-                  <>
-                    <Pill active={mapSource === 'preset'} onClick={() => setMapSource('preset')} style={{ cursor: 'pointer' }}>Maps du preset</Pill>
-                    <Pill active={mapSource === 'channels'} disabled={painterChannels.length === 0}
-                      onClick={() => { if (painterChannels.length) setMapSource('channels') }} style={{ cursor: 'pointer' }}>
-                      Canaux du shader ({painterChannels.length})
-                    </Pill>
-                    <div style={{ width: 1, height: 14, background: 'var(--rule-2)' }} />
-                  </>
-                )}
               />
             </div>
           )}

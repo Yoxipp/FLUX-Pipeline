@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from core.logger import get_logger
@@ -87,6 +88,27 @@ def convert_map(src: Path, dst: Path, *, depth: str | None = None, size: int | N
     return {"path": dst, "depth": out_depth, "size": buf.spec().width, "note": note}
 
 
+def needs_convert(src: Path, fmt: str, depth: str | None, size: int | None) -> bool:
+    """False when *src* already is *fmt* at *depth* / *size*: the file is kept as is
+    (2026-09-26: "Mari prend enormement de temps" - no re-encode of every tile)."""
+    if normalize_format(src.suffix) != normalize_format(fmt):
+        return True
+    if not depth and not size:
+        return False
+    try:
+        import OpenImageIO as oiio
+        inp = oiio.ImageInput.open(str(src))
+        if inp is None:
+            return True
+        spec = inp.spec()
+        inp.close()
+    except Exception:  # noqa: BLE001 - unreadable header: let convert_map report it
+        return True
+    if depth and pick_depth(fmt, depth, source_depth(spec)) != source_depth(spec):
+        return True
+    return bool(size) and int(size) != spec.width
+
+
 def convert_maps(files: list[Path], out_dir: Path, params: dict[str, dict], default_format: str,
                  key_of) -> tuple[list[Path], list[str]]:
     """Convert every exported file to the settings of its map.
@@ -103,9 +125,14 @@ def convert_maps(files: list[Path], out_dir: Path, params: dict[str, dict], defa
         fmt = normalize_format(p.get("format") or default_format)
         # keep the tile / frame part: "<name>.1001.exr" -> "<name>.1001.<fmt>"
         dst = out_dir / (f.name[: -len(f.suffix)] + "." + fmt)
+        size = int(p["size"]) if p.get("size") else None
+        if not needs_convert(f, fmt, p.get("bit_depth") or None, size):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(f), str(dst))
+            out.append(dst)
+            continue
         try:
-            res = convert_map(f, dst, depth=p.get("bit_depth") or None,
-                              size=int(p["size"]) if p.get("size") else None)
+            res = convert_map(f, dst, depth=p.get("bit_depth") or None, size=size)
         except Exception as exc:  # noqa: BLE001 - one map never aborts the others
             warnings.append(f"{key} : conversion impossible ({exc})")
             continue

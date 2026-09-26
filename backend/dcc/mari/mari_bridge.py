@@ -101,6 +101,18 @@ def _on_main_thread(fn, timeout: float = 600.0) -> dict:
     return box["result"]
 
 
+def _is_hidden(channel) -> bool:
+    """Channels Mari keeps for itself (not in the Channels palette) are not offered."""
+    for attr in ("isHidden", "hidden"):
+        fn = getattr(channel, attr, None)
+        if callable(fn):
+            try:
+                return bool(fn())
+            except Exception:  # noqa: BLE001 - API differs between versions
+                return False
+    return False
+
+
 def _channel_ids(channels) -> list:
     """[(id, channel)]: a geo can hold two channels of one name (2026-09-26: two
     "Ambient Occlusion"); the second one is "Ambient Occlusion (2)", in the Publisher
@@ -108,6 +120,8 @@ def _channel_ids(channels) -> list:
     seen: dict = {}
     out = []
     for ch in channels:
+        if _is_hidden(ch):
+            continue
         name = ch.name()
         seen[name] = seen.get(name, 0) + 1
         out.append((name if seen[name] == 1 else f"{name} ({seen[name]})", ch))
@@ -129,6 +143,10 @@ def _do_info() -> dict:
                 item["size"] = int(channel.width())
             except Exception:  # noqa: BLE001 - optional detail
                 item["size"] = 0
+            try:
+                item["layers"] = len(channel.layerList())
+            except Exception:  # noqa: BLE001 - optional detail
+                pass
             chans.append(item)
         return {"status": "ok", "geo": geo.name(), "channels": chans}
     except Exception as exc:  # noqa: BLE001
@@ -143,15 +161,33 @@ def _depth(channel) -> int:
         return 8
 
 
-def _container(channel, file_format: str) -> str:
-    """"auto": a lossless file that holds the channel's depth (FLUX converts it after to
-    the format / depth / size picked for the map): tif for 8 bits, exr for float."""
+def _describe(geo, channel) -> str:
+    """Tiles / size / layers of a channel, for the log (where a slow export spends time)."""
+    bits = []
+    for label, fn in (("tuiles", lambda: len(geo.patchList())), ("px", lambda: int(channel.width())),
+                      ("calques", lambda: len(channel.layerList()))):
+        try:
+            bits.append(f"{fn()} {label}")
+        except Exception:  # noqa: BLE001 - informative only
+            pass
+    return ", ".join(bits)
+
+
+def _container(channel, file_format: str, wanted: str = "") -> str:
+    """"auto": the map's own format (*wanted*) when it holds the channel's depth, so FLUX
+    keeps the file as is (2026-09-26: publish too slow); otherwise a lossless file
+    FLUX converts after: tif for 8 bits, exr for float."""
     if file_format != "auto":
         return file_format
-    return "tif" if _depth(channel) <= 8 else "exr"
+    wanted = (wanted or "").lower().lstrip(".")
+    wanted = {"tiff": "tif", "jpeg": "jpg"}.get(wanted, wanted)
+    if _depth(channel) <= 8:
+        return wanted if wanted in ("tif", "png", "tga", "jpg") else "tif"
+    return "exr"
 
 
-def _do_export(export_path: str, file_format: str, channels: list | None = None) -> dict:
+def _do_export(export_path: str, file_format: str, channels: list | None = None,
+               formats: dict | None = None) -> dict:
     if not _MARI_AVAILABLE:
         return {"status": "error", "msg": "mari module not available"}
     try:
@@ -169,9 +205,10 @@ def _do_export(export_path: str, file_format: str, channels: list | None = None)
                 continue
             # One file per channel named after the channel only (FLUX turns the name into
             # the MAP token); Mari fills $UDIM with each tile number.
-            fmt = _container(channel, file_format)
+            fmt = _container(channel, file_format, (formats or {}).get(name) or (formats or {}).get("*", ""))
             out = os.path.join(export_path, f"{name}.$UDIM.{fmt}")
             t0 = _time.time()
+            _diag(f"Mari channel start {name} ({fmt}, {_depth(channel)} bits, {_describe(geo, channel)})")
             try:
                 # Flattened: every layer of the channel merged, as it shows in Mari.
                 if hasattr(channel, "exportImagesFlattened"):
@@ -221,8 +258,9 @@ def _dispatch(cmd: dict) -> dict:
     if action == "export":
         path, fmt = cmd.get("export_path", ""), cmd.get("file_format", "tif")
         chans = cmd.get("channels") or None
+        fmts = cmd.get("formats") or None
         # A big UDIM export takes long: never answer "busy" while Mari is still writing.
-        return _on_main_thread(lambda: _do_export(path, fmt, chans), timeout=4 * 3600.0)
+        return _on_main_thread(lambda: _do_export(path, fmt, chans, fmts), timeout=4 * 3600.0)
     return {"status": "error", "msg": f"unknown action: {action}"}
 
 

@@ -74,7 +74,11 @@ def install(exe_path: str | None = None) -> dict:
         return {"success": False, "message": str(exc), "path": None}
     _remove_legacy()
     log.info("Substance Painter bridge installed -> %s", dest)
-    return {"success": True, "message": f"installed -> {dest}", "path": str(dest)}
+    # The studio export presets come with the bridge (2026-09-26).
+    from dcc.substance_painter.presets import install_presets
+    presets = install_presets()
+    msg = f"installed -> {dest}" + (f" | {len(presets)} preset(s) d'export" if presets else "")
+    return {"success": True, "message": msg, "path": str(dest)}
 
 
 def uninstall(exe_path: str | None = None) -> dict:
