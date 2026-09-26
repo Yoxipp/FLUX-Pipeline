@@ -22,6 +22,7 @@ import { Pin, X, Layers, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import type { UsdAssetInfo } from '../../api/client'
+import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import type {
@@ -889,7 +890,10 @@ function UsdAssembledNode({ name }: { name: string }) {
               <span style={cut}>{info.used_by.join(', ')}</span>
             </div>
           )}
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {project && (comp?.last || asm?.file) && (
+              <OpenInMenu project={project} relPath={projectRelPath(project, (comp?.last || asm?.file) as string)} />
+            )}
             <button onClick={() => navigate('/usd')} style={_miniBtn}>Ouvrir la page USD</button>
             <button onClick={() => { void load() }} disabled={busy} style={{ ..._miniBtn, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <RefreshCw size={10} strokeWidth={2} />{busy ? 'Lecture…' : 'Relire'}

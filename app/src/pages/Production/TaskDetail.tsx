@@ -22,6 +22,7 @@ import type {
   ProductionTask, ProductionTaskDetail,
 } from '../../types'
 import { expandFluxPath, taskColorFromName } from './util'
+import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
 
 interface Props {
   asset:         Asset
@@ -425,6 +426,9 @@ function PublishRow({ p, onOpen, onCopy, onExplorer }: {
   // clipped by the surrounding overflow:auto containers.
   const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
   const comment = (p.description || '').trim()
+  // "Ouvrir dans >" like the Folder Manager (2026-09-26): the published file.
+  const { project } = useProject()
+  const rel = p.dest_folder && project ? projectRelPath(project, `${p.dest_folder}/${p.file}`) : ''
   return (
     <div
       onClick={onOpen}
@@ -463,6 +467,7 @@ function PublishRow({ p, onOpen, onCopy, onExplorer }: {
           </div>
         )}
       </div>
+      {rel && <OpenInMenu project={project} relPath={rel} compact />}
       <button style={_miniIconBtn} title="Copier" onClick={e => { e.stopPropagation(); onCopy() }}>
         <Copy size={9} strokeWidth={1.75} />
       </button>
