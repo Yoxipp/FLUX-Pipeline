@@ -434,6 +434,40 @@ class Crowd(unittest.TestCase):
 
         self.assertNotEqual(points(0.0), points(30.0))
 
+    def test_noise_reads_an_animation_behind_a_payload(self) -> None:
+        # 2026-09-26, OGRE: "pas de rotation de joint lisible, pas de noise". A clip whose
+        # SkelAnimation sits behind a payload is read the way the agent composes it.
+        last = self._ogre()
+        folder = last.parent
+        data = Sdf.Layer.CreateNew(str(folder / "clip_data.usda"))
+        anim = Sdf.PrimSpec(Sdf.PrimSpec(Sdf.PrimSpec(data, "CLIP", Sdf.SpecifierDef), "skel",
+                                         Sdf.SpecifierDef), "Anim", Sdf.SpecifierDef, "SkelAnimation")
+        Sdf.AttributeSpec(anim, "joints", Sdf.ValueTypeNames.TokenArray, Sdf.VariabilityUniform).default = \
+            ["Root/Hip"]
+        rot = Sdf.AttributeSpec(anim, "rotations", Sdf.ValueTypeNames.QuatfArray)
+        for t in (1.0, 2.0, 3.0):
+            data.SetTimeSample(rot.path, t, Vt.QuatfArray([Gf.Quatf(1.0)]))
+        data.Save()
+        entry = Sdf.Layer.CreateNew(str(folder / "clip.usda"))
+        root = Sdf.PrimSpec(entry, "CLIP", Sdf.SpecifierDef)
+        root.payloadList.prependedItems = [Sdf.Payload("./clip_data.usda", Sdf.Path("/CLIP"))]
+        entry.Save()
+        layer = Sdf.Layer.FindOrOpen(str(last))
+        walk = layer.GetPrimAtPath("/OGRE{anim_walk=on}anims/walk")
+        walk.referenceList.prependedItems = [Sdf.Reference("./clip.usda", Sdf.Path("/CLIP/skel/Anim"))]
+        layer.Save()
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                components=["OGRE"], clips=[], rot_noise=20.0,
+                                looks={"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}})
+        self.assertEqual(res["noised"], 1, res["warnings"])
+        stage = Usd.Stage.Open(str(res["path"]))
+        rot = stage.GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim").GetAttribute("rotations").Get(2.0)
+        self.assertNotEqual(rot[0], Gf.Quatf(1.0))
+
+    def test_noise_warning_says_why(self) -> None:
+        bad = crowd._read_rotations(self.project / "nowhere.usda", "/X")
+        self.assertIn("error", bad)
+
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
         res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["BOB", "TIM"],

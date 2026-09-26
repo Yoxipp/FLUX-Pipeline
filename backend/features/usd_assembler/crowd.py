@@ -364,26 +364,46 @@ def _noise_at(curves: list, amplitude: float, frequency: float, seconds: float) 
 _MAX_NOISE_FRAMES = 20000
 
 
-def _read_rotations(file: str | Path, prim: str) -> dict | None:
+def _read_rotations(file: str | Path, prim: str) -> dict:
     """{"joints", "fps", "samples": [(time or None, [Quatf])]} of a SkelAnimation, one
     sample per frame between its first and last keys (a moving noise needs every frame,
-    rotations between two keys are interpolated by USD)."""
+    rotations between two keys are interpolated by USD), or {"error": why}.
+
+    Read the way an agent sees it: a reference to *prim* of *file*, payloads loaded
+    (2026-09-26, OGRE: opening the file without its payloads read nothing)."""
     import math
 
-    from pxr import Usd, UsdSkel
+    from pxr import Sdf, Usd, UsdSkel
 
-    stage = Usd.Stage.Open(str(file), Usd.Stage.LoadNone)
-    anim = UsdSkel.Animation(stage.GetPrimAtPath(prim)) if stage else None
-    if not anim:
-        return None
+    stage = Usd.Stage.CreateInMemory()
+    holder = stage.DefinePrim("/anim")
+    holder.GetReferences().AddReference(str(file), Sdf.Path(prim) if prim else Sdf.Path())
+    target = holder
+    if not target.IsA(UsdSkel.Animation):
+        # The reference may land on the clip root: its first SkelAnimation below.
+        target = next((p for p in Usd.PrimRange(holder, Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate))
+                       if p.IsA(UsdSkel.Animation)), None)
+    if target is None:
+        return {"error": f"{Path(file).name} {prim} n'est pas une SkelAnimation "
+                         f"(type {holder.GetTypeName() or 'aucun'})"}
+    anim = UsdSkel.Animation(target)
+    joints = [str(j) for j in (anim.GetJointsAttr().Get() or [])]
+    if not joints:
+        return {"error": f"{Path(file).name} : SkelAnimation sans joints"}
     attr = anim.GetRotationsAttr()
     times = list(attr.GetTimeSamples())
     if times and times[-1] - times[0] < _MAX_NOISE_FRAMES:
         frames = range(math.floor(times[0]), math.ceil(times[-1]) + 1)
         times = sorted(set(times) | {float(f) for f in frames if times[0] <= f <= times[-1]})
-    samples = [(t, list(attr.Get(t))) for t in times] if times else [(None, list(attr.Get() or []))]
-    return {"joints": [str(j) for j in (anim.GetJointsAttr().Get() or [])], "samples": samples,
-            "fps": float(stage.GetTimeCodesPerSecond() or 24.0)}
+    samples = [(t, list(attr.Get(t) or [])) for t in times] if times else [(None, list(attr.Get() or []))]
+    if not any(len(v) == len(joints) for _, v in samples):
+        return {"error": f"{Path(file).name} : rotations absentes ou pas une par joint "
+                         f"({len(samples[0][1])} pour {len(joints)} joints)"}
+    samples = [(t, v) for t, v in samples if len(v) == len(joints)]
+    layer = Sdf.Layer.FindOrOpen(str(file))
+    fps = (layer.timeCodesPerSecond if layer is not None and layer.HasTimeCodesPerSecond() else 0) or 24.0
+    return {"joints": joints, "samples": samples, "fps": float(fps),
+            "path": target.GetPath().MakeRelativePath(holder.GetPath()).pathString}
 
 
 def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, agents: list[dict],
@@ -483,12 +503,22 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
             pick = random.Random(f"{seed}:{name}:anim").choice(probe["anims"])
             src_file, src_prim = Path(pick["file"]), pick["prim"]
         if src_file is not None:
+            key = f"{src_file}|{src_prim}"
+            if key not in rotations:
+                try:
+                    rotations[key] = _read_rotations(src_file, src_prim)
+                except Exception as exc:     # noqa: BLE001 - no noise on that clip
+                    log.warning("crowd noise: %s unreadable: %s", src_file, exc)
+                    rotations[key] = {"error": f"{Path(src_file).name} illisible : {exc}"}
+            rot = rotations[key]
+            if src_prim and rot.get("path") not in (None, "", "."):
+                # The reference landed on the clip root: point at its SkelAnimation.
+                src_prim = f"{src_prim.rstrip('/')}/{rot['path']}"
             anim_path = f"{path}/crowd_anim"
             anim = stage.DefinePrim(anim_path)
             # Speed 2 = the clip plays twice as fast, around its FIRST frame (not frame 0,
             # which pushed a 1001 clip to frame ~500: agents frozen during the shot):
             # stage time = start + offset + (clip time - start) / speed.
-            key = f"{src_file}|{src_prim}"
             start = starts.setdefault(key, _anim_start(src_file, src_prim))
             scale = 1.0 / a["speed"]
             shift = a["offset"] + start * (1.0 - scale)
@@ -500,14 +530,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                 over = stage.OverridePrim(where)
                 UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
             if noise_layer is not None:
-                if key not in rotations:
-                    try:
-                        rotations[key] = _read_rotations(src_file, src_prim)
-                    except Exception as exc:     # noqa: BLE001 - no noise on that clip
-                        log.warning("crowd noise: %s unreadable: %s", src_file, exc)
-                        rotations[key] = None
-                rot = rotations[key]
-                if rot and rot["joints"]:
+                if rot.get("joints"):
                     # Its own noise per agent (and per clip), moving along the shot time.
                     curves = _noise_curves(rot["joints"], rot_noise, f"{seed}:{name}:{key}")
                     spec = Sdf.CreatePrimInLayer(noise_layer, anim_path)
@@ -523,7 +546,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                     did_noise = True
                 elif comp not in noise_skipped:
                     noise_skipped.add(comp)
-                    warnings.append(f"{comp} : pas de rotation de joint lisible, pas de noise")
+                    warnings.append(f"{comp} : pas de noise, {rot.get('error') or 'rotations illisibles'}")
         elif noise_layer is not None and probe["skeletons"]:
             # No animation (unchecked in FLUX Import): the noise poses the rest pose, so a
             # still crowd is not a copy of one statue (2026-09-26: the noise did nothing).
