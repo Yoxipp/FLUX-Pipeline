@@ -549,6 +549,8 @@ def _build(node, publish):
         _set(node, "resolved_path", str(r.get("path", "")).replace(chr(92), "/"))
         _reload(node)
         msg = "Apercu : " + msg
+    if r.get("info"):
+        msg += "  |  " + " ; ".join(r["info"][:3])
     if r.get("warnings"):
         msg += "  |  " + " ; ".join(r["warnings"][:3])
     _status(node, msg)

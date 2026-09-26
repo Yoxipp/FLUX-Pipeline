@@ -44,10 +44,18 @@ def _first_skeleton_joints(path: Path) -> list[str]:
     stage = Usd.Stage.Open(str(path), Usd.Stage.LoadAll)
     if stage is None:
         return []
-    for prim in stage.Traverse():
+    # Every active prim, "over" and instance proxies included: a skinned GEO export can
+    # hold its skeleton under an over or an instance (OGRE read "pas de squelette FLUX").
+    for prim in Usd.PrimRange.Stage(stage, _ALL_ACTIVE()):
         if prim.IsA(UsdSkel.Skeleton):
             return [str(j) for j in (UsdSkel.Skeleton(prim).GetJointsAttr().Get() or [])]
     return []
+
+
+def _ALL_ACTIVE():
+    from pxr import Usd
+
+    return Usd.TraverseInstanceProxies(Usd.PrimIsActive)
 
 
 def _clip_joints(path: Path) -> list[str]:
@@ -260,9 +268,12 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
     for rel in inactive or []:
         if Sdf.Path.IsValidPathString(rel):
             stage.OverridePrim(agent.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
-    out = {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None}
+    out = {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None,
+           "instanced": agent.IsInstance(), "instances": [], "joints": 0}
     others = []
-    for prim in Usd.PrimRange(agent):
+    for prim in Usd.PrimRange(agent, _ALL_ACTIVE()):
+        if prim.IsInstance():
+            out["instances"].append(prim.GetPath().MakeRelativePath(agent.GetPath()).pathString)
         if prim.IsA(UsdSkel.Animation):
             src = _anim_source(prim)
             if src and src not in others:
@@ -271,6 +282,7 @@ def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | 
             out["skeletons"].append(prim.GetPath().MakeRelativePath(agent.GetPath()).pathString)
             if out["rest"] is None:
                 out["rest"] = _rest_pose(UsdSkel.Skeleton(prim))
+                out["joints"] = len(UsdSkel.Skeleton(prim).GetJointsAttr().Get() or [])
             if out["anim"] is None:
                 anim = _bound_anim(prim, agent)
                 if anim is not None:
@@ -421,6 +433,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     starts: dict[str, float] = {}
     rotations: dict[str, dict | None] = {}
     noise_skipped: set[str] = set()
+    info: list[str] = []
     written = noised = 0
     for a in agents:
         comp = a["component"]
@@ -454,6 +467,9 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                     log.warning("crowd probe of %s failed: %s", comp, exc)
                     probes[comp] = {"skeletons": [], "anim": None, "anims": [], "baked": False, "rest": None}
                 pr = probes[comp]
+                info.append(f"{comp} : {len(pr['skeletons'])} squelette(s), {pr['joints']} joints, "
+                            f"{len(pr['anims'])} anim(s)" + (", instance retiree" if pr.get("instanced")
+                                                              or pr.get("instances") else ""))
                 if pr["baked"] and pr["anim"] is None:
                     warnings.append(f"{comp} : anim cuite dans les points (pas de squelette anime), "
                                     "decalage / vitesse / noise sans effet")
@@ -467,6 +483,12 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
         else:
             prim.GetReferences().AddReference(targets[comp])
         Usd.ModelAPI(prim).SetKind("component")
+        # Never an instance: an instanceable asset made every agent one, and USD ignores
+        # whatever is authored under an instance (clip, offset, speed, noise did nothing).
+        prim.SetInstanceable(False)
+        for rel in probe.get("instances") or []:
+            if rel != ".":
+                stage.OverridePrim(prim.GetPath().AppendPath(Sdf.Path(rel))).SetInstanceable(False)
         # The FLUX Import choices of input 1 (animations unchecked, rig off...).
         sets = prim.GetVariantSets()
         for name, sel in sorted((look.get("variants") or {}).items()):
@@ -566,7 +588,7 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     if noise_layer is not None:
         noise_layer.Save()
     layer.Save()
-    return {"path": dest, "agents": written, "warnings": warnings, "noised": noised}
+    return {"path": dest, "agents": written, "warnings": warnings, "noised": noised, "info": info}
 
 
 def _anim_start(path: str | Path, prim: str) -> float:

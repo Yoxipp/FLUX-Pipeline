@@ -341,6 +341,25 @@ class Crowd(unittest.TestCase):
         a, b = still["agent_0001"][0], still["agent_0001"][2]
         self.assertTrue(Gf.IsClose(a.GetImaginary(), b.GetImaginary(), 1e-4))
 
+    def test_instanceable_asset_still_gets_offset_and_noise(self) -> None:
+        # 2026-09-26: noise 1000 did nothing. An instanceable asset made every agent an
+        # instance: USD ignores what the crowd writes under it (anim, offset, noise).
+        last = self._ogre()
+        layer = Sdf.Layer.FindOrOpen(str(last))
+        layer.GetPrimAtPath("/OGRE").instanceable = True
+        layer.Save()
+        looks = {"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}}
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}],
+                                components=["OGRE"], clips=[], offset=(4, 4), speed=(2, 2),
+                                rot_noise=1000.0, looks=looks)
+        stage = Usd.Stage.Open(str(res["path"]))
+        self.assertFalse(stage.GetPrimAtPath("/crowd/crowd/agent_0001").IsInstance())
+        self.assertEqual(self._skel_anim_times(res["path"], "agent_0001"), [5.0, 5.5, 6.0])
+        rot = stage.GetPrimAtPath("/crowd/crowd/agent_0001/crowd_anim").GetAttribute("rotations").Get(5.5)
+        self.assertNotEqual(rot[0], Gf.Quatf(0.9238795, 0, 0.3826834, 0))
+        self.assertEqual(res["noised"], 1)
+        self.assertIn("OGRE : 1 squelette(s), 3 joints, 1 anim(s), instance retiree", res["info"])
+
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
         res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["BOB", "TIM"],
