@@ -195,6 +195,39 @@ class AssignVariants(unittest.TestCase):
             self.assertEqual(_bound(stage, "/DAVID/geo/render/beak"), "/DAVID/mtl/horn")
             self.assertEqual(assign_info(res["root"]), {"variants": ["blue", "red"], "default": "blue"})
 
+    def test_one_flattened_export_per_variant(self) -> None:
+        """Houdini writes each assign variant as its own flattened stage (the
+        references of the scene composed by Houdini): same shaders + assign result."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = _variant_export(root / "src")
+            files = {}
+            for v in ("red", "blue"):
+                stage = Usd.Stage.Open(str(src))
+                stage.GetPrimAtPath("/Root").GetVariantSet("material_variants").SetVariantSelection(v)
+                out = root / "src" / f"export__{v}.usda"
+                stage.Flatten().Export(str(out))
+                files[v] = out
+            res = author_look_layer(files["red"], root / "v001", "CHAR_SHADING_DAVID_null",
+                                    root_name="DAVID", variant_sources=files, variant_default="blue")
+            self.assertEqual((res["assign_variants"], res["assign_default"]), (["red", "blue"], "blue"))
+            stage = Usd.Stage.Open(str(res["root"]))
+            UsdGeom.Mesh.Define(stage, "/DAVID/geo/render/body")
+            UsdGeom.Mesh.Define(stage, "/DAVID/geo/render/beak")
+            self.assertEqual(_bound(stage, "/DAVID/geo/render/body"), "/DAVID/mtl/blue")
+            stage.GetPrimAtPath("/DAVID").GetVariantSet("assign").SetVariantSelection("red")
+            self.assertEqual(_bound(stage, "/DAVID/geo/render/body"), "/DAVID/mtl/red")
+            self.assertEqual(_bound(stage, "/DAVID/geo/render/beak"), "/DAVID/mtl/horn")
+
+    def test_no_material_error_says_what_the_export_holds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "empty.usda"
+            stage = Usd.Stage.CreateNew(str(src))
+            UsdGeom.Mesh.Define(stage, "/Root/body")
+            stage.GetRootLayer().Save()
+            with self.assertRaisesRegex(ValueError, "racines : Root.*Mesh"):
+                author_look_layer(src, Path(tmp) / "v001", "CHAR_SHADING_DAVID_null", root_name="DAVID")
+
     def test_referenced_variant_sets_are_not_assignments(self) -> None:
         """A component brought by FLUX Import carries its own variant sets: never read
         as the look's assignments (the classic single look layer is written)."""

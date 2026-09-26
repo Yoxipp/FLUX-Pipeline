@@ -46,39 +46,98 @@ _EXPORT_CODE = textwrap.dedent(r'''
             return None, "aucun node affiche dans /stage : selectionne le LOP a publier"
         return node, None
 
+    def _assign_set(node):
+        # ADR 0035: the variant set of the look's variant block, authored in this scene
+        # (Houdini's in-memory layers), never one a FLUX publish brings (component
+        # toggles on / off, look blocks of a sublayered department file).
+        try:
+            stage = node.stage()
+        except Exception:
+            return None
+        if stage is None:
+            return None
+        local = [l for l in stage.GetLayerStack(False) if l.anonymous]
+        found = []
+        for prim in stage.Traverse():
+            names = prim.GetVariantSets().GetNames()
+            if not names:
+                continue
+            specs = [l.GetPrimAtPath(prim.GetPath()) for l in local]
+            for name in names:
+                if not any(sp is not None and name in sp.variantSets for sp in specs):
+                    continue
+                vset = prim.GetVariantSet(name)
+                variants = list(vset.GetVariantNames())
+                if len(variants) < 2 or sorted(variants) == ["off", "on"]:
+                    continue
+                found.append((str(prim.GetPath()), name, variants, vset.GetVariantSelection()))
+        if not found:
+            return None
+        # Several sets: the one named like an assignment first.
+        words = ("assign", "mat", "look", "shad")
+        found.sort(key=lambda f: 0 if any(w in f[1].lower() for w in words) else 1)
+        if len(found) > 1:
+            _log("WARNING", "plusieurs variantSets locaux, %s garde pour l'assign" % found[0][1])
+        return found[0]
+
+    def _render(src, out):
+        parent = src.parent()
+        rop = parent.node("flux_look_export")
+        if rop is not None:
+            rop.destroy()                     # leftover of a crashed run
+        rop = parent.createNode("usd_rop", "flux_look_export")
+        def _set(name, value):
+            parm = rop.parm(name)
+            if parm is not None:
+                parm.set(value)
+            else:
+                _log("WARNING", "parametre %s absent du usd_rop" % name)
+        _set("lopoutput", out)
+        # Absolute paths in a throwaway file: the backend rewrites them anyway.
+        _set("enableoutputprocessor_simplerelativepaths", 0)
+        # One self-contained file, composed by Houdini (references, payloads, variant
+        # blocks): the backend never has to resolve a path of this scene.
+        _set("savestyle", "flattenstage")
+        rop.setInput(0, src)
+        try:
+            rop.render()
+        finally:
+            rop.destroy()                     # the artist's scene stays as it was
+
+    _SELECT = (
+        "import hou\n"
+        "stage = hou.pwd().editableStage()\n"
+        "prim = stage.GetPrimAtPath(%r)\n"
+        "if prim:\n"
+        "    prim.GetVariantSet(%r).SetVariantSelection(%r)\n")
+
     result = None
     try:
         node, err = _pick_lop()
         if err:
             result = {{"__error__": err, "__logs__": _logs}}
         else:
-            parent = node.parent()
-            rop = parent.node("flux_look_export")
-            if rop is not None:
-                rop.destroy()                     # leftover of a crashed run
-            rop = parent.createNode("usd_rop", "flux_look_export")
-            def _set(name, value):
-                parm = rop.parm(name)
-                if parm is not None:
-                    parm.set(value)
-                else:
-                    _log("WARNING", "parametre %s absent du usd_rop" % name)
-
-            _set("lopoutput", _OUT)
-            # Absolute paths in a throwaway file: the backend rewrites them anyway.
-            _set("enableoutputprocessor_simplerelativepaths", 0)
-            # One file for the layer stack, variant sets kept: "flattenstage" bakes the
-            # selected variant only and the assign variants were lost (ADR 0035).
-            # References to files on disk (the model brought by FLUX Import) stay
-            # references: the backend composes them and never copies a geometry.
-            _set("savestyle", "flattenalllayers")
-            rop.setInput(0, node)
-            try:
-                rop.render()
-            finally:
-                rop.destroy()                     # the artist's scene stays as it was
-            _log("INFO", "look ecrit depuis %s" % node.path())
-            result = {{"usd": _OUT, "__logs__": _logs}}
+            _log("INFO", "node exporte : %s" % node.path())
+            found = _assign_set(node)
+            if not found:
+                _render(node, _OUT)
+                result = {{"usd": _OUT, "node": node.path(), "__logs__": _logs}}
+            else:
+                path, name, variants, selection = found
+                _log("INFO", "variantes d'assign %s sur %s : %s" % (name, path, ", ".join(variants)))
+                files = {{}}
+                for i, v in enumerate(variants):
+                    out = _OUT[:-5] + "__%d.usda" % i
+                    sel = node.parent().createNode("pythonscript", "flux_look_variant")
+                    try:
+                        sel.setInput(0, node)
+                        sel.parm("python").set(_SELECT % (path, name, v))
+                        _render(sel, out)
+                    finally:
+                        sel.destroy()
+                    files[v] = out
+                result = {{"usd": files[variants[0]], "node": node.path(), "variants": files,
+                          "default": selection or variants[0], "__logs__": _logs}}
     except Exception as exc:
         result = {{"__error__": "export look: %s" % exc, "__logs__": _logs}}
 ''')
@@ -119,8 +178,17 @@ def run_look_export(project_path: str, *, lop_node: str | None = None, fmt: str 
 
         from features.usd_export.look_export import publish_look_asset
 
-        pub = publish_look_asset(written, Path(project_path), fmt=fmt, dest_dir=dest_dir,
-                                 base_name=base_name, user=user)
+        variants = payload.get("variants") or None
+        if variants and not all(Path(f).is_file() for f in variants.values()):
+            return {"ok": False, "error": "Houdini n'a pas ecrit toutes les variantes d'assign"}
+        try:
+            pub = publish_look_asset(written, Path(project_path), fmt=fmt, dest_dir=dest_dir,
+                                     base_name=base_name, user=user, variant_sources=variants,
+                                     variant_default=payload.get("default"))
+        except ValueError as exc:
+            # Say which node was exported: the usual mistake is a node above the
+            # Material Library / Assign Material.
+            return {"ok": False, "error": f"{exc} (node exporte : {payload.get('node', '?')})"}
         log.info("Houdini look published: %s (%s)", base_name, pub["version"])
         return {"ok": True, "asset": base_name, "version": pub["version"],
                 "root": str(pub["root"]), "materials": pub["materials"],

@@ -198,6 +198,17 @@ def _find_assign_sets(stage: Usd.Stage) -> list[tuple[Sdf.Path, str, list[str], 
     return found
 
 
+def _no_material(stage: Usd.Stage) -> str:
+    """Error of an export without UsdShade material, with what it does hold."""
+    roots = [p.GetName() for p in stage.GetPseudoRoot().GetChildren()][:8]
+    n = sum(1 for _ in stage.Traverse())
+    kinds = sorted({p.GetTypeName() for p in stage.Traverse() if p.GetTypeName()})[:8]
+    return ("aucun materiau dans l'export : rien a publier dans le departement look "
+            f"({n} prims, racines : {', '.join(roots) or 'aucune'} ; types : {', '.join(kinds) or 'aucun'}). "
+            "Verifier le node LOP exporte (node selectionne, sinon node affiche de /stage) : il doit "
+            "etre apres la Material Library")
+
+
 def _over_chain(parent: Sdf.PrimSpec, rel_path: str) -> Sdf.PrimSpec:
     """Over specs for each part of *rel_path* below *parent* (existing ones reused)."""
     spec = parent
@@ -213,31 +224,52 @@ def _bind_spec(spec: Sdf.PrimSpec, material: str) -> None:
     rel.targetPathList.explicitItems = [Sdf.Path(material)]
 
 
-def _author_assign_look(src_stage: Usd.Stage, found: list, dest: Path, base: str,
-                        token: str, fmt: str, prefer_tx: bool) -> dict:
-    root_path = f"/{token}"
-    mtl_root = f"{root_path}/{MTL_SCOPE}"
-    source_dir = _source_dir(src_stage)
+def _variants_of_stage(src_stage: Usd.Stage, found: list) -> tuple[list, str, list[str]]:
+    """[(variant, flattened layer)], default, warnings: each variant of the export's
+    assign set composed once (selection in the session layer, the file is untouched)."""
     warnings: list[str] = []
     path, set_name, names, selection = found[0]
     for other in found[1:]:
         warnings.append(f"variantSet {other[1]} ({other[0]}) ignore : un seul jeu d'assign par look, "
                         f"{set_name} garde")
-    variant_names = [sanitize_token(v) for v in names]
-    default = sanitize_token(selection)
-
-    # 1. every variant composed once: its bindings, and the materials it shows.
-    gprims = _gprims(src_stage)
-    per_variant: dict[str, dict[Sdf.Path, Sdf.Path]] = {}
-    flats: list[Sdf.Layer] = []
+    flats = []
     session = src_stage.GetSessionLayer()
     with Usd.EditContext(src_stage, session):
         vset = src_stage.GetPrimAtPath(path).GetVariantSet(set_name)
-        for raw, clean in zip(names, variant_names):
+        for raw in names:
             vset.SetVariantSelection(raw)
-            per_variant[clean] = _bindings(src_stage, gprims)
-            flats.append(src_stage.Flatten())
+            flats.append((raw, src_stage.Flatten()))
     session.Clear()
+    return flats, selection, warnings
+
+
+def _variants_of_files(files: dict[str, str | Path]) -> list:
+    """[(variant, flattened layer)] from one DCC export per variant (Houdini writes each
+    variant with its selection set, a flattened stage like the classic look export)."""
+    out = []
+    for name, path in files.items():
+        stage = Usd.Stage.Open(str(path).replace("\\", "/"))
+        if stage is None:
+            raise ValueError(f"USD illisible (variante {name}) : {path}")
+        out.append((name, stage.Flatten()))
+    return out
+
+
+def _author_assign_look(flats: list, selection: str, dest: Path, base: str, token: str,
+                        fmt: str, prefer_tx: bool, source_dir: Path,
+                        warnings: list[str] | None = None) -> dict:
+    root_path = f"/{token}"
+    mtl_root = f"{root_path}/{MTL_SCOPE}"
+    warnings = list(warnings or [])
+    variant_names = [sanitize_token(v) for v, _ in flats]
+    default = sanitize_token(selection) if selection else variant_names[0]
+
+    # 1. every variant: its bindings, and the materials it shows.
+    stages = [Usd.Stage.Open(flat) for _, flat in flats]
+    gprims = sorted({g for st in stages for g in _gprims(st)})
+    per_variant: dict[str, dict[Sdf.Path, Sdf.Path]] = {
+        v: _bindings(st, gprims) for v, st in zip(variant_names, stages)}
+    flats = [flat for _, flat in flats]
 
     # 2. shaders layer: all the materials of all the variants, never a binding.
     mtl_p = dest / f"{base}_mtl.{fmt}"
@@ -263,7 +295,7 @@ def _author_assign_look(src_stage: Usd.Stage, found: list, dest: Path, base: str
                 continue
             moved[mat.GetPath()] = target
     if not moved:
-        raise ValueError("aucun materiau dans l'export : rien a publier dans le departement look")
+        raise ValueError(_no_material(stages[0]))
     for old, new in moved.items():
         _relink_connections(mtl_layer, old, new)
     # A material may carry a binding of its own (rare): the assign layer owns them all.
@@ -367,7 +399,9 @@ def assign_info(path: str | Path, _depth: int = 0) -> dict:
 
 def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
                       root_name: str | None = None, fmt: str = "usda",
-                      prefer_tx: bool = True) -> dict:
+                      prefer_tx: bool = True,
+                      variant_sources: dict[str, str | Path] | None = None,
+                      variant_default: str | None = None) -> dict:
     """Rewrite the DCC export *source* into the look layer of *base* inside *dest_dir*.
 
     Writes ``<base>_look.<fmt>`` (materials + bindings, no geometry) and the root
@@ -388,17 +422,23 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     src_stage = Usd.Stage.Open(str(src).replace("\\", "/"))
     if src_stage is None:
         raise ValueError(f"USD illisible : {src}")
+    if variant_sources:
+        # ADR 0035, Houdini: one flattened export per assign variant.
+        return _author_assign_look(_variants_of_files(variant_sources), variant_default or "",
+                                   dest, base, token, fmt, prefer_tx, _source_dir(src_stage))
     found = _find_assign_sets(src_stage)
     if found:
-        # ADR 0035: Solaris variant blocks of Assign Material -> shaders + assign layers.
-        return _author_assign_look(src_stage, found, dest, base, token, fmt, prefer_tx)
+        # ADR 0035: variant block of Assign Material kept in the export -> shaders + assign.
+        flats, selection, warns = _variants_of_stage(src_stage, found)
+        return _author_assign_look(flats, selection, dest, base, token, fmt, prefer_tx,
+                                   _source_dir(src_stage), warns)
     flat = src_stage.Flatten()
     flat_stage = Usd.Stage.Open(flat)
     source_dir = _source_dir(src_stage)
 
     materials = _materials(flat_stage)
     if not materials:
-        raise ValueError("aucun materiau dans l'export : rien a publier dans le departement look")
+        raise ValueError(_no_material(flat_stage))
 
     warnings: list[str] = []
     for mat in materials:
@@ -514,7 +554,9 @@ def _assert_no_geometry(layer: Sdf.Layer) -> None:
 
 def publish_look_asset(source: str | Path, project_path: str | Path, *,
                        fmt: str = "usda", dest_dir: str | Path, base_name: str,
-                       user: str = "", prefer_tx: bool = True) -> dict:
+                       user: str = "", prefer_tx: bool = True,
+                       variant_sources: dict[str, str | Path] | None = None,
+                       variant_default: str | None = None) -> dict:
     """Publish the look department of an asset from a DCC export (ADR 0019 A1b).
 
     Same layout as ``publish_light_asset``: an immutable ``<base>_vNNN/`` folder holding
@@ -544,7 +586,9 @@ def publish_look_asset(source: str | Path, project_path: str | Path, *,
     try:
         authored = author_look_layer(source, folder, base_name,
                                      root_name=contrib["name"] or None,
-                                     fmt=fmt.lstrip("."), prefer_tx=prefer_tx)
+                                     fmt=fmt.lstrip("."), prefer_tx=prefer_tx,
+                                     variant_sources=variant_sources,
+                                     variant_default=variant_default)
     except Exception:
         discard_rendered_version(parent, base_name, ext, ver, is_sequence=True)
         raise
