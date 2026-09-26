@@ -346,6 +346,21 @@ class AssignVariants(unittest.TestCase):
             self.assertIsNone(assign.GetPrimAtPath("/UTAH{assign=Hunter}geo/render/utah_SBD3"))
             self.assertTrue(any("utah_SBD3" in w and "transform1" in w for w in res["warnings"]))
 
+    def test_shape_under_its_transform_finds_the_mesh_named_after_the_transform(self) -> None:
+        """Live UTAH 2026-09-26: FBX lookdev binds .../Utah_Skin_SB1_V3/Mesh, the model
+        publish names the mesh from the geo name attribute (Utah_Skin_SB1_V3)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = self._utah_exports(root, ["/Utah_Geo_Skin_SB1_V3/Utah_Skin_SB1_V3/Mesh"])
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter",
+                                    asset_prims=["geo/render/Utah_Skin_SB1_V3",
+                                                 "geo/proxy/Utah_Skin_SB1_V3"])
+            assign = Sdf.Layer.FindOrOpen(str(res["assign"]))
+            self.assertIsNotNone(
+                assign.GetPrimAtPath("/UTAH{assign=Victim}geo/render/Utah_Skin_SB1_V3"))
+            self.assertIsNone(assign.GetPrimAtPath("/UTAH{assign=Victim}geo/render/Mesh"))
+
     def test_bindings_listed_by_houdini_win_over_the_export(self) -> None:
         """Houdini lists each variant's bindings on its live stage: used even when the
         flattened exports lost them."""

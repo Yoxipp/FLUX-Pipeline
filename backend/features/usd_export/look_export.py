@@ -229,7 +229,17 @@ def _place_bindings(found: dict[Sdf.Path, Sdf.Path], gprims: set[Sdf.Path],
         parts = path.pathString.split("/")[1:]
         same = [a for a in asset_prims or [] if a.split("/")[-1] == parts[-1]]
         if not same:
-            return None
+            # A shape under its transform (FBX / Maya: .../Utah_Skin_SB1_V3/Mesh) while the
+            # model publish named the mesh after the transform: the deepest parent named
+            # like an asset mesh (geo/...) wins (live UTAH 2026-09-26).
+            for k in range(len(parts) - 2, -1, -1):
+                same = [a for a in asset_prims or []
+                        if a.startswith("geo/") and a.split("/")[-1] == parts[k]]
+                if same:
+                    parts = parts[:k + 1]
+                    break
+            else:
+                return None
 
         def _tail(a: str) -> int:
             n = 0
