@@ -319,6 +319,13 @@ function mapSuffix(path: string): string {
   return detectMapToken(path) || formatToken(fileStem(path))
 }
 
+// Presets row order (2026-09-26): model, rig, look, anim, then custom (drawn after).
+const PRESET_ORDER = ['GEO', 'RIG', 'SHADING', 'ANIM']
+function presetEntries(table: Record<string, UsdTaskContribution>): [string, UsdTaskContribution][] {
+  const rank = (t: string) => (PRESET_ORDER.indexOf(t) + 1 || PRESET_ORDER.length + 1)
+  return Object.entries(table).sort(([a], [b]) => rank(a) - rank(b))
+}
+
 // Shot tasks the Publisher offers (2026-09-26): anim, camera (LAYOUT carries the
 // shot camera, shot_stage), FX and light; COMP only from Nuke. No rig / model in a shot.
 function shotTasksFor(dcc: string): string[] {
@@ -2178,11 +2185,11 @@ export function Publisher() {
 
           {/* PRESETS — one click = the USD department to publish (task + format), asset
               and shot alike (2026-09-26: the shot anim uses the same anim preset). */}
-          {(dcc === 'Maya' || dcc === 'Houdini') && (
+          {(dcc === 'Maya' || dcc === 'Houdini') && ['.usd', '.usda', '.usdc'].includes(exportExt) && (
             <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
               <SecTitle>PRESETS USD</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {Object.entries(mode === 'asset' ? usdDepartments : usdShotDepartments).map(([task, info]) => (
+                {presetEntries(mode === 'asset' ? usdDepartments : usdShotDepartments).map(([task, info]) => (
                   <Pill key={task}
                     active={usdLayers && (mode === 'asset' ? sel.task : formatToken(sel.name)) === task
                       && ['.usd', '.usda', '.usdc'].includes(exportExt)}
