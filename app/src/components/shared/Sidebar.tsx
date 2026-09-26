@@ -178,7 +178,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     if (!activeProject) { setPresets([]); return }
     let alive = true
     const loadPresets = () => {
-      api.listPresets(activeProject)
+      api.listPresets(activeProject, true)
         .then(d => { if (alive) setPresets(d.presets) })
         .catch(() => { if (alive) setPresets([]) })
     }
@@ -552,6 +552,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const runNewScene = async (soft: string, preset: Preset | null) => {
     setNewScene(null)
     const name = SOFTWARE.find(s => s.key === soft)?.name ?? soft
+    // A FLUX render preset whose scene is not on disk yet is built first (about a minute).
+    const building = preset?.builtin && !preset.exists
+      ? toast.loading(`Création de la scène ${preset.name}…`) : undefined
     try {
       await guardMayaPort(soft, async () => {
         const res = preset
@@ -560,8 +563,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         if (res.launched) toast.success(`${name} lancé${preset ? ` · ${preset.name}` : ''}`, { duration: 4000 })
         else toast.error(`${name} · introuvable`, { duration: 6000 })
       })
-    } catch {
-      toast.error(`${name} · erreur de lancement`, { duration: 6000 })
+    } catch (e) {
+      toast.error(`${name} · ${e instanceof Error ? e.message : 'erreur de lancement'}`, { duration: 6000 })
+    } finally {
+      if (building !== undefined) toast.dismiss(building)
+      if (preset?.builtin) window.dispatchEvent(new Event('flux:refresh'))
     }
   }
 

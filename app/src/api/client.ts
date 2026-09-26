@@ -697,8 +697,9 @@ export const api = {
     }),
 
   // Presets (template library — RETAKES-3)
-  listPresets: (project: string) =>
-    apiCall<{ presets: Preset[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/presets`),
+  // builtin: also the read-only presets shipped by FLUX (Template Editor, New Scene).
+  listPresets: (project: string, builtin = false) =>
+    apiCall<{ presets: Preset[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/presets${builtin ? '?builtin=1' : ''}`),
 
   addPreset: (project: string, name?: string) =>
     apiCall<{ ok: boolean; preset: Preset; presets: Preset[] }>(

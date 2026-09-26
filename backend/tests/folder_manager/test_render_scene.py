@@ -77,6 +77,26 @@ class RenderScene(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse(res["ok"])
 
+    def test_one_builtin_preset_per_sequence_for_the_new_scene_menu(self) -> None:
+        base = hr.render_scene_base(self.project, "SEQ002")
+        base.parent.mkdir(parents=True)
+        base.with_suffix(".hip").write_text("x", encoding="utf-8")
+        presets = hr.builtin_presets(self.project)
+        self.assertEqual([p["id"] for p in presets],
+                         [hr.BUILTIN_PREFIX + "SEQ001", hr.BUILTIN_PREFIX + "SEQ002"])
+        for p in presets:
+            self.assertEqual((p["task"], p["soft"], p["builtin"]), ("SEQ", "houdini", True))
+            self.assertTrue(p["file"])                          # the launcher lists linked presets only
+        self.assertEqual([p["exists"] for p in presets], [False, True])
+        self.assertEqual(presets[1]["file"], "SEQ002_render.hip")
+
+    def test_opening_a_builtin_preset_builds_then_returns_the_real_scene(self) -> None:
+        done = {"ok": True, "path": "C:/p/SEQ001_render.hip", "shots": ["SHOT010"]}
+        with mock.patch.object(hr, "_run_offline", return_value=done):
+            res = hr.open_builtin_preset(self.project, hr.BUILTIN_PREFIX + "SEQ001")
+        self.assertEqual(res["path"], "C:/p/SEQ001_render.hip")
+        self.assertFalse(hr.open_builtin_preset(self.project, "preset_1")["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

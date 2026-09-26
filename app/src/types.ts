@@ -77,6 +77,8 @@ export interface Preset {
   file: string | null
   task: string | null   // TASK token (or 'DEFAULT') this preset is assigned to
   soft: string | null   // target software key (maya, houdini, nuke…)
+  builtin?: boolean     // shipped by FLUX, read-only (sequence render scene, ADR 0036)
+  exists?: boolean      // builtin only: its scene is already on disk
 }
 
 export interface Settings {

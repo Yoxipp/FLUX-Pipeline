@@ -603,10 +603,15 @@ def _preset_or_400(result: dict) -> dict:
 
 
 @router.get("/projects/{project_name}/presets")
-async def get_presets(project_name: str) -> dict:
+async def get_presets(project_name: str, builtin: bool = False) -> dict:
+    """The project's presets; builtin=1 adds the read-only presets shipped by FLUX
+    (Template Editor, New Scene menu), never the folder manager drop buttons."""
     project_path = _require_project(project_name)
     loop = asyncio.get_running_loop()
     presets = await loop.run_in_executor(None, lambda: preset_manager.list_presets(project_path))
+    if builtin:
+        from features.folder_manager.houdini_render_scene import builtin_presets
+        presets = presets + await loop.run_in_executor(None, lambda: builtin_presets(project_path))
     return {"presets": presets}
 
 
@@ -679,14 +684,20 @@ async def post_preset_launch(project_name: str, preset_id: str, req: PresetLaunc
     """Launch *req.dcc* on a throwaway copy of the preset's scene ("New Scene").
 
     The preset template is copied to a temp dir first so opening it is non-destructive
-    — saving over the New Scene can never corrupt the shared template.
+    — saving over the New Scene can never corrupt the shared template. A FLUX built-in
+    preset (sequence render, ADR 0036) opens the sequence's own scene instead.
     """
+    from features.folder_manager.houdini_render_scene import BUILTIN_PREFIX, open_builtin_preset
     from features.launcher.launcher_core import launch_dcc
     project_path = _require_project(project_name)
     loop = asyncio.get_running_loop()
-    prep = await loop.run_in_executor(
-        None, lambda: preset_manager.prepare_new_scene(project_path, preset_id)
-    )
+    if preset_id.startswith(BUILTIN_PREFIX):
+        # FLUX preset: the real sequence render scene (built when missing), not a copy.
+        prep = await loop.run_in_executor(None, lambda: open_builtin_preset(project_path, preset_id))
+    else:
+        prep = await loop.run_in_executor(
+            None, lambda: preset_manager.prepare_new_scene(project_path, preset_id)
+        )
     if not prep.get("ok"):
         raise HTTPException(status_code=400, detail=prep.get("error", "preset introuvable"))
     scene = prep["path"]

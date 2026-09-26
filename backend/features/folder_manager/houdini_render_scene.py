@@ -44,6 +44,33 @@ AOVS = ("beauty", "combineddiffuse", "combinedglossyreflection", "combinedemissi
 DEFAULT_RESOLUTION = (1920, 1080)
 
 
+# Built-in preset of the Template Editor / New Scene menu (never stored in presets.json).
+BUILTIN_PREFIX = "builtin:sequence_render:"
+
+
+def builtin_presets(project_path: Path) -> list[dict]:
+    """One read-only "Rendu de sequence" preset per sequence of the project (Houdini, SEQ).
+
+    Launching it builds <SEQ>_render.hip when missing and opens the real scene."""
+    from features.importer.library_import import _stage_shots
+
+    seqs = sorted({seq for seq, _ in _stage_shots(Path(project_path))})
+    out = []
+    for seq in seqs:
+        current = existing_hip(render_scene_base(project_path, seq))
+        out.append({"id": BUILTIN_PREFIX + seq, "name": f"Rendu {seq}",
+                    "file": current.name if current else f"{seq}_render.hip (a creer)",
+                    "task": "SEQ", "soft": "houdini", "builtin": True, "exists": current is not None})
+    return out
+
+
+def open_builtin_preset(project_path: Path, preset_id: str) -> dict:
+    """Scene to open for a built-in preset id: the sequence render scene, built if missing."""
+    if not preset_id.startswith(BUILTIN_PREFIX):
+        return {"ok": False, "error": f"Preset FLUX inconnu : {preset_id}"}
+    return create_sequence_render_scene(project_path, preset_id[len(BUILTIN_PREFIX):])
+
+
 def render_scene_base(project_path: Path, seq: str) -> Path:
     """<project>/shot/<SEQ>/usd/lighting/<SEQ>_render (no extension)."""
     seq = seq.upper()

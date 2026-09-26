@@ -147,12 +147,38 @@ function PresetRow({
   )
 }
 
+// ── one preset shipped by FLUX (read-only) ───────────────────────────────────────
+// Sequence render scene (ADR 0036): launched from the launcher's New Scene menu
+// (Houdini > SEQ), FLUX builds <SEQ>_render.hip when missing and opens it.
+function BuiltinRow({ preset }: { preset: Preset }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+      background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: 'var(--shadow-xs)',
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600 }}>{preset.name}</div>
+        <div style={{ fontSize: 12, marginTop: 2, color: preset.exists ? 'var(--accent-hi)' : 'var(--ink-4)' }}>
+          {preset.file}
+        </div>
+        <div style={{ fontSize: 11, marginTop: 6, color: 'var(--ink-3)' }}>
+          {preset.task} · Houdini · un FLUX Shot et un ROP Karma par shot. Launcher : Houdini, New Scene, {preset.task}.
+        </div>
+      </div>
+      <span style={{ fontSize: 10, color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 5, padding: '2px 6px' }}>
+        FLUX
+      </span>
+    </div>
+  )
+}
+
 // ── page ───────────────────────────────────────────────────────────────────────
 export function TemplateEditor() {
   const { t } = useI18n()
   const [projects, setProjects] = useState<string[]>([])
   const [project, setProject] = useState('')
   const [presets, setPresets] = useState<Preset[]>([])
+  const [builtins, setBuiltins] = useState<Preset[]>([])   // shipped by FLUX, read-only
   const [taskOptions, setTaskOptions] = useState<string[]>(TASK_EXTRAS)
   const [loading, setLoading] = useState(false)
 
@@ -167,11 +193,12 @@ export function TemplateEditor() {
   }, [])
 
   const load = useCallback(async (proj: string) => {
-    if (!proj) { setPresets([]); setTaskOptions(TASK_EXTRAS); return }
+    if (!proj) { setPresets([]); setBuiltins([]); setTaskOptions(TASK_EXTRAS); return }
     setLoading(true)
     try {
-      const [pr, tk] = await Promise.all([api.listPresets(proj), api.getTokens(proj).catch(() => null)])
-      setPresets(pr.presets)
+      const [pr, tk] = await Promise.all([api.listPresets(proj, true), api.getTokens(proj).catch(() => null)])
+      setPresets(pr.presets.filter((p) => !p.builtin))
+      setBuiltins(pr.presets.filter((p) => p.builtin))
       // TASK options = the fixed extras + the project's real TASK(=TYPE) token keys.
       const typeKeys = tk ? Object.keys(tk.tokens?.TYPE ?? {}) : []
       setTaskOptions([...TASK_EXTRAS, ...typeKeys.filter((k) => !TASK_EXTRAS.includes(k))])
@@ -221,6 +248,17 @@ export function TemplateEditor() {
           <PresetRow key={p.id} project={project} preset={p} taskOptions={taskOptions} onChange={applyPresets} />
         ))}
       </div>
+
+      {builtins.length > 0 && (
+        <>
+          <div style={{ margin: '22px 0 8px', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+            Livrés par FLUX
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {builtins.map((p) => <BuiltinRow key={p.id} preset={p} />)}
+          </div>
+        </>
+      )}
     </div>
   )
 }
