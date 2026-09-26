@@ -524,6 +524,7 @@ def _build(node, publish):
                "looks": _input_looks(node),
                "rot_noise": _fval(node, "rot_noise", 0.0),
                "noise_freq": _fval(node, "noise_freq", 1.0),
+               "variations": 0 if _pval(node, "crowd_mode") == "unique" else max(1, int(_fval(node, "variations", 8.0))),
                "component_weights": _weights(node, "asset"), "clip_weights": _weights(node, "clip"),
                "seed": int(node.evalParm("seed")),
                "offset": [node.evalParm("offsetx"), node.evalParm("offsety")],
@@ -534,6 +535,8 @@ def _build(node, publish):
     if not r.get("ok"):
         _status(node, "Echec : %s" % r.get("error", "?")); return
     msg = "%d agent(s)" % r.get("agents", 0)
+    if r.get("variations"):
+        msg += " (%d variation(s) instanciees)" % r["variations"]
     if node.parm("rot_noise") is None:
         msg += " (pas de noise : HDA FLUX Crowd a reconstruire)"
     elif _fval(node, "rot_noise", 0.0) > 0:
@@ -665,6 +668,17 @@ _ptg.append(hou.FloatParmTemplate("rot_noise", "Noise rotation joints", 1, defau
 _ptg.append(hou.FloatParmTemplate("noise_freq", "Vitesse du noise", 1, default_value=(1.0,), min=0.0, max=5.0,
                                   help="Oscillations par seconde du noise (propre a chaque agent). "
                                        "0 = decalage fixe. Agents sans anim : toujours fixe."))
+_ptg.append(hou.MenuParmTemplate("crowd_mode", "Mode", ("instanced", "unique"),
+                                 menu_labels=("Instancie (leger)", "Unique (lourd)"), default_value=0,
+                                 help="Instancie : quelques variations par asset et par anim, les agents en sont "
+                                      "des instances (geo et squelette partages). Unique : chaque agent a sa propre "
+                                      "anim, son decalage et son noise (plus lourd)."))
+_var = hou.IntParmTemplate("variations", "Variations", 1, default_value=(8,), min=1, max=64,
+                           help="Par asset et par anim : nombre de versions differentes (decalage, vitesse, "
+                                "noise) que les agents se partagent. La geo et son squelette sont instancies "
+                                "ensemble : un skin ne peut pas etre partage entre deux poses.")
+_var.setConditional(hou.parmCondType.HideWhen, '{{ crowd_mode == "unique" }}')
+_ptg.append(_var)
 _ptg.append(hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                                  menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                                  help="Proxy: purpose=proxy meshes in the viewport. Geo complete: render meshes."))
@@ -700,12 +714,12 @@ _subl = _sub.createNode("sublayer", "sublayer")
 _subl.parm("filepath1").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
 _full = _sub.createNode("configureprimitive", "show_render_geo")
 _full.setInput(0, _subl)
-_full.parm("primpattern").set("/crowd/**/geo/render/**")
+_full.parm("primpattern").set("/crowd/**/geo/render/** /crowd_protos/**/geo/render/**")
 _full.parm("setpurpose").set(1)
 _full.parm("purpose").set("default")
 _hide = _sub.createNode("configureprimitive", "hide_proxy")
 _hide.setInput(0, _full)
-_hide.parm("primpattern").set("/crowd/**/geo/proxy")
+_hide.parm("primpattern").set("/crowd/**/geo/proxy /crowd_protos/**/geo/proxy")
 _hide.parm("setvisibility").set(1)
 _hide.parm("visibility").set("invisible")
 _sw = _sub.createNode("switch", "geo_display")

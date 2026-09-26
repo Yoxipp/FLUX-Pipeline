@@ -360,6 +360,35 @@ class Crowd(unittest.TestCase):
         self.assertEqual(res["noised"], 1)
         self.assertIn("OGRE : 1 squelette(s), 3 joints, 1 anim(s), instance retiree", res["info"])
 
+    def test_instanced_mode_shares_a_few_variations(self) -> None:
+        # 2026-09-26: unique agents lag; instanced mode = N variations per asset / anim.
+        self._ogre()
+        pts = [{"p": [i, 0, 0]} for i in range(40)]
+        res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["OGRE"], clips=[],
+                                offset=(0, 20), rot_noise=10.0, variations=4,
+                                looks={"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}})
+        self.assertEqual(res["agents"], 40)
+        self.assertLessEqual(res["variations"], 4)
+        self.assertGreater(res["variations"], 1)
+        self.assertEqual(res["noised"], 40)
+        stage = Usd.Stage.Open(str(res["path"]))
+        agents = [stage.GetPrimAtPath(f"/crowd/crowd/agent_{i + 1:04d}") for i in range(40)]
+        self.assertTrue(all(a.IsInstance() for a in agents))
+        self.assertEqual(len({a.GetPrototype().GetPath() for a in agents}), res["variations"])
+        self.assertTrue(stage.GetPrimAtPath("/crowd_protos").IsAbstract())
+        # Each variation plays with its own offset, seen through the instances.
+        starts = set()
+        for a in agents:
+            skel = UsdSkel.Skeleton(stage.GetPrimAtPath(a.GetPath().AppendPath("skel/Skeleton")))
+            cache = UsdSkel.Cache()
+            cache.Populate(UsdSkel.Root(a), Usd.TraverseInstanceProxies())
+            starts.add(cache.GetSkelQuery(skel).GetAnimQuery().GetJointTransformTimeSamples()[0])
+        self.assertEqual(len(starts), res["variations"])
+        self.assertEqual(stage.GetPrimAtPath("/crowd/crowd/agent_0001").GetAttribute("xformOp:translate").Get(),
+                         Gf.Vec3d(0, 0, 0))
+        self.assertEqual(stage.GetPrimAtPath("/crowd/crowd/agent_0002").GetAttribute("xformOp:translate").Get(),
+                         Gf.Vec3d(1, 0, 0))
+
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
         res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["BOB", "TIM"],
