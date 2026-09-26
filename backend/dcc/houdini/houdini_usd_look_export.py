@@ -195,7 +195,8 @@ def run_look_export(project_path: str, *, lop_node: str | None = None, fmt: str 
                 "bindings": pub["bindings"], "assign_variants": pub.get("assign_variants", []),
                 "warnings": pub["warnings"]}
     except Exception as exc:
-        log.error("Houdini look export failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        # Traceback in the log: an unexpected error (KeyError...) is unreadable alone.
+        log.exception("Houdini look export failed: %s", exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -261,6 +261,32 @@ class AssignVariants(unittest.TestCase):
             self.assertEqual(_bound(stage, "/UTAH/geo/render/body"), "/UTAH/mtl/blue")
             self.assertEqual(_bound(stage, "/UTAH/geo/render/beak"), "/UTAH/mtl/horn")
 
+    def test_sop_import_paths_follow_the_model_naming(self) -> None:
+        """2026-09-26 (UTAH): geometry from a SOP Import lives at /geo/skin/utah_SBD3
+        (a root /geo, not /<NAME>/geo): it lands under geo/render by its leaf name, like
+        the model layer, instead of crashing on a missing name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {}
+            for v, mat in (("Hunter", "red"), ("Victim", "blue")):
+                stage = Usd.Stage.CreateInMemory()
+                for name in ("red", "blue"):
+                    UsdShade.Material.Define(stage, f"/materials/{name}")
+                    UsdShade.Shader.Define(stage, f"/materials/{name}/surface").CreateIdAttr("UsdPreviewSurface")
+                over = stage.OverridePrim("/geo/skin/utah_SBD3")
+                UsdShade.MaterialBindingAPI.Apply(over)
+                UsdShade.MaterialBindingAPI(over).Bind(UsdShade.Material(stage.GetPrimAtPath(f"/materials/{mat}")))
+                out = root / f"export__{v}.usda"
+                stage.GetRootLayer().Export(str(out))
+                files[v] = out
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter")
+            stage = Usd.Stage.Open(str(res["root"]))
+            UsdGeom.Mesh.Define(stage, "/UTAH/geo/render/utah_SBD3")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/utah_SBD3"), "/UTAH/mtl/red")
+            stage.GetPrimAtPath("/UTAH").GetVariantSet("assign").SetVariantSelection("Victim")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/utah_SBD3"), "/UTAH/mtl/blue")
+
     def test_referenced_variant_sets_are_not_assignments(self) -> None:
         """A component brought by FLUX Import carries its own variant sets: never read
         as the look's assignments (the classic single look layer is written)."""

@@ -188,12 +188,17 @@ def _binding_map(stage: Usd.Stage) -> dict[str, Sdf.Path]:
                 mat = bound.GetPath() if bound is not None else None
         if mat is not None:
             found[prim.GetPath()] = mat
-    loose = [p for p in found if "geo" not in p.pathString.split("/")[1:]]
+    def _asset_geo(path: Sdf.Path) -> bool:
+        # /<NAME>/geo/...: the FLUX asset layout (FLUX Import). A root "/geo" is not:
+        # it is where a Houdini SOP Import puts geometry (/geo/skin/utah_SBD3).
+        return "geo" in path.pathString.split("/")[2:]
+
+    loose = [p for p in found if not _asset_geo(p)]
     names = dict(zip(loose, mesh_prim_names([(p.name, p.pathString) for p in loose], sanitize_token)))
     out: dict[str, Sdf.Path] = {}
     for path, mat in found.items():
         parts = path.pathString.split("/")[1:]
-        if "geo" in parts[1:]:
+        if _asset_geo(path):
             rel = "/".join(parts[parts.index("geo", 1):])
         elif len(parts) == 1 and path not in gprims:
             rel = ""                                   # bound on the asset root itself
