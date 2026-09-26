@@ -19,6 +19,7 @@ import type {
   UsdPrimNode, UsdProposedFile,
 } from '../../api/client'
 import { useI18n } from '../../i18n'
+import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
 
 type Tab = 'components' | 'assemblies'
 type DetailTab = 'content' | 'versions' | 'composition' | 'deps'
@@ -615,6 +616,7 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
             <ClipboardList size={11} strokeWidth={2} /> {tr('usd.lib.openProduction')}
           </Btn>
         )}
+        {comp.last && <OpenInMenu project={project} relPath={projectRelPath(project, comp.last)} />}
         {comp.last && (
           <Btn sm ghost onClick={() => copy(comp.last as string, tr('usd.lib.copied'))} title={comp.last}>
             <Copy size={11} strokeWidth={2} />
@@ -874,6 +876,14 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
         <Btn sm ghost onClick={() => navigate('/projects', { state: { openPath: asm.file.replace(/[\\/][^\\/]+$/, '') } })}>
           <FolderOpen size={11} strokeWidth={2} /> {tr('usd.lib.openFolder')}
         </Btn>
+        {asm.class && (
+          <Btn sm ghost onClick={() => navigate('/production', {
+            state: { openFavorite: { project, class: asm.class, name: asm.name, task: 'USD' } },
+          })}>
+            <ClipboardList size={11} strokeWidth={2} /> {tr('usd.lib.openProduction')}
+          </Btn>
+        )}
+        <OpenInMenu project={project} relPath={projectRelPath(project, asm.file)} />
         <Btn sm ghost onClick={() => copy(asm.file, tr('usd.lib.copied'))} title={asm.file}>
           <Copy size={11} strokeWidth={2} />
         </Btn>
