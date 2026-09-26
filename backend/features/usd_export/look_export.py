@@ -144,19 +144,75 @@ def _retarget_textures(layer: Sdf.Layer, source_dir: Path, dest_dir: Path,
 # the same publish: <base>_mtl (all the materials, no binding) and <base>_assign
 # (over /<NAME> + variantSet "assign", one variant per assignment, bindings only).
 
-def _bindings(stage: Usd.Stage, gprims: list[Sdf.Path]) -> dict[Sdf.Path, Sdf.Path]:
-    """{gprim: bound material} on the stage as currently composed."""
-    out: dict[Sdf.Path, Sdf.Path] = {}
-    for path in gprims:
-        prim = stage.GetPrimAtPath(path)
-        mat = _bound_material(prim) if prim else None
+_PURPOSES = (UsdShade.Tokens.allPurpose, UsdShade.Tokens.full, UsdShade.Tokens.preview)
+
+
+def _direct_material(prim: Usd.Prim) -> Sdf.Path | None:
+    """Material a prim binds itself (any purpose), inherited bindings not included."""
+    api = UsdShade.MaterialBindingAPI(prim)
+    for purpose in _PURPOSES:
+        try:
+            mat = api.GetDirectBinding(materialPurpose=purpose).GetMaterial()
+        except Exception:                          # pragma: no cover - version guard
+            mat = None
+        if mat:
+            return mat.GetPath()
+    return None
+
+
+def _binding_map(stage: Usd.Stage) -> dict[str, Sdf.Path]:
+    """{prim path relative to /<NAME>: bound material} of an export.
+
+    * Every prim that binds a material itself counts, typeless "over" prims included:
+      a Solaris look exported after a Layer Break holds no geometry, only the Assign
+      Material opinions on the paths of the imported asset (2026-09-26, UTAH:
+      the feathers stay out of the export).
+    * A path under a "geo" prim keeps its tail (/UTAH/geo/render/body -> geo/render/body,
+      a group like geo/render/feathers stays a group); a geometry elsewhere lands
+      under geo/render by the model layer's naming rule (contract.mesh_prim_names).
+    * A geometry that only inherits its binding (native DCC scene) is bound itself.
+    """
+    pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
+    found: dict[Sdf.Path, Sdf.Path] = {}
+    gprims: set[Sdf.Path] = set()
+    it = iter(Usd.PrimRange.Stage(stage, pred))
+    for prim in it:
+        if prim.IsA(UsdShade.Material):
+            it.PruneChildren()                         # shaders never bind
+            continue
+        mat = _direct_material(prim)
+        if prim.IsA(UsdGeom.Gprim):
+            gprims.add(prim.GetPath())
+            if mat is None:
+                bound = _bound_material(prim)
+                mat = bound.GetPath() if bound is not None else None
         if mat is not None:
-            out[path] = mat.GetPath()
+            found[prim.GetPath()] = mat
+    loose = [p for p in found if "geo" not in p.pathString.split("/")[1:]]
+    names = dict(zip(loose, mesh_prim_names([(p.name, p.pathString) for p in loose], sanitize_token)))
+    out: dict[str, Sdf.Path] = {}
+    for path, mat in found.items():
+        parts = path.pathString.split("/")[1:]
+        if "geo" in parts[1:]:
+            rel = "/".join(parts[parts.index("geo", 1):])
+        elif len(parts) == 1 and path not in gprims:
+            rel = ""                                   # bound on the asset root itself
+        else:
+            rel = f"{GEO_RENDER_SCOPE}/{names[path]}"
+        out[rel] = mat
     return out
 
 
-def _gprims(stage: Usd.Stage) -> list[Sdf.Path]:
-    return [p.GetPath() for p in stage.Traverse() if p.IsA(UsdGeom.Gprim)]
+def _binding_report(stage: Usd.Stage) -> str:
+    """What an export holds about bindings, for an error without any binding."""
+    pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
+    prims = list(stage.Traverse(pred))
+    rels = [(p.GetPath(), r) for p in prims for r in p.GetRelationships()
+            if r.GetName().startswith("material:binding")]
+    geo = sum(1 for p in prims if p.IsA(UsdGeom.Gprim))
+    sample = ", ".join(f"{path} -> {[str(t) for t in r.GetTargets()]}" for path, r in rels[:3])
+    return (f"{len(prims)} prims, {geo} geometries, {len(rels)} relations material:binding"
+            + (f" ({sample})" if sample else ""))
 
 
 def _find_assign_sets(stage: Usd.Stage) -> list[tuple[Sdf.Path, str, list[str], str]]:
@@ -180,7 +236,6 @@ def _find_assign_sets(stage: Usd.Stage) -> list[tuple[Sdf.Path, str, list[str], 
         _walk(root)
     if not candidates:
         return []
-    gprims = _gprims(stage)
     found = []
     session = stage.GetSessionLayer()
     with Usd.EditContext(stage, session):
@@ -190,7 +245,7 @@ def _find_assign_sets(stage: Usd.Stage) -> list[tuple[Sdf.Path, str, list[str], 
             seen = set()
             for v in names:
                 vset.SetVariantSelection(v)
-                seen.add(tuple(sorted(_bindings(stage, gprims).items())))
+                seen.add(tuple(sorted(_binding_map(stage).items())))
             vset.SetVariantSelection(selection)
             if len(seen) > 1:
                 found.append((path, name, names, selection))
@@ -266,9 +321,8 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
 
     # 1. every variant: its bindings, and the materials it shows.
     stages = [Usd.Stage.Open(flat) for _, flat in flats]
-    gprims = sorted({g for st in stages for g in _gprims(st)})
-    per_variant: dict[str, dict[Sdf.Path, Sdf.Path]] = {
-        v: _bindings(st, gprims) for v, st in zip(variant_names, stages)}
+    per_variant: dict[str, dict[str, Sdf.Path]] = {
+        v: _binding_map(st) for v, st in zip(variant_names, stages)}
     flats = [flat for _, flat in flats]
 
     # 2. shaders layer: all the materials of all the variants, never a binding.
@@ -308,8 +362,6 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
 
     # 3. assign layer: a binding the same in every variant stays outside the variantSet
     # (a local opinion would beat a variant one), the others go in their variant.
-    prim_names = dict(zip(gprims, mesh_prim_names(
-        [(p.name, str(p)) for p in gprims], sanitize_token)))
     assign_p = dest / f"{base}_assign.{fmt}"
     assign_layer = _new_layer(assign_p, fmt)
     root = Sdf.PrimSpec(assign_layer, token, Sdf.SpecifierOver)
@@ -321,11 +373,11 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
     bindings = 0
     skipped: set[Sdf.Path] = set()
 
-    def _bind(parent: Sdf.PrimSpec, gprim: Sdf.Path, material: Sdf.Path) -> bool:
+    def _bind(parent: Sdf.PrimSpec, rel: str, material: Sdf.Path) -> bool:
         if material not in moved:
             skipped.add(material)
             return False
-        spec = _over_chain(parent, f"{GEO_RENDER_SCOPE}/{prim_names[gprim]}")
+        spec = _over_chain(parent, rel)
         _bind_spec(spec, str(moved[material]))
         return True
 
@@ -343,7 +395,8 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
     if empty:
         warnings.append("variante(s) d'assign sans aucune liaison : " + ", ".join(empty))
     if not bindings:
-        raise ValueError("aucune geometrie liee dans les variantes d'assign : rien a publier")
+        raise ValueError("aucune geometrie liee dans les variantes d'assign : rien a publier ("
+                         + _binding_report(stages[0]) + ")")
     root.variantSetNameList.prependedItems = [ASSIGN_SET]
     root.variantSelections[ASSIGN_SET] = default if default in variant_names else variant_names[0]
     assign_layer.defaultPrim = token
@@ -473,24 +526,17 @@ def author_look_layer(source: str | Path, dest_dir: str | Path, base: str, *,
     # 2. bindings: one "over" per bound mesh, at the FLUX prim path of the model layer.
     look_stage = Usd.Stage.Open(look_layer)
     bindings = 0
-    # Mesh names follow the model layer rule (contract.mesh_prim_names): a leaf name
-    # shared by two meshes becomes a path tail, so each keeps its own binding.
-    gprims = [p for p in flat_stage.Traverse() if p.IsA(UsdGeom.Gprim)]
-    prim_names = dict(zip(
-        (p.GetPath() for p in gprims),
-        mesh_prim_names([(p.GetName(), str(p.GetPath())) for p in gprims], sanitize_token)))
-    for prim in gprims:
-        mat_prim = _bound_material(prim)
-        if mat_prim is None or mat_prim.GetPath() not in moved:
+    for rel, mat in sorted(_binding_map(flat_stage).items()):
+        if mat not in moved:
+            warnings.append(f"liaison vers un materiau non publie ignoree : {mat}")
             continue
-        mesh_path = f"{root_path}/{GEO_RENDER_SCOPE}/{prim_names[prim.GetPath()]}"
-        over = look_stage.OverridePrim(mesh_path)
+        over = look_stage.OverridePrim(f"{root_path}/{rel}".rstrip("/"))
         UsdShade.MaterialBindingAPI.Apply(over)
-        UsdShade.MaterialBindingAPI(over).Bind(
-            UsdShade.Material(look_stage.GetPrimAtPath(moved[mat_prim.GetPath()])))
+        UsdShade.MaterialBindingAPI(over).Bind(UsdShade.Material(look_stage.GetPrimAtPath(moved[mat])))
         bindings += 1
     if not bindings:
-        warnings.append("aucune geometrie liee : le look publie ne contient que des materiaux")
+        warnings.append("aucune geometrie liee : le look publie ne contient que des materiaux ("
+                        + _binding_report(flat_stage) + ")")
 
     look_stage.SetDefaultPrim(look_stage.GetPrimAtPath(root_path))
     look_layer.Save()

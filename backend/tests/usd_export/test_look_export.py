@@ -228,6 +228,39 @@ class AssignVariants(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "racines : Root.*Mesh"):
                 author_look_layer(src, Path(tmp) / "v001", "CHAR_SHADING_DAVID_null", root_name="DAVID")
 
+    def test_layer_break_export_binds_the_asset_paths(self) -> None:
+        """2026-09-26 (UTAH): Layer Break before the look, so no geometry in the
+        export: only "over" prims at /Utah/geo/render/... with the Assign Material
+        bindings, per variant (mtl: Hunter / Victim)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {}
+            for v, mat in (("Hunter", "red"), ("Victim", "blue")):
+                stage = Usd.Stage.CreateInMemory()
+                for name in ("red", "blue", "horn"):
+                    m = UsdShade.Material.Define(stage, f"/materials/{name}")
+                    UsdShade.Shader.Define(stage, f"/materials/{name}/surface").CreateIdAttr("UsdPreviewSurface")
+                for rel, target in (("geo/render/body", mat), ("geo/render/beak", "horn"),
+                                    ("geo/render/feathers", mat)):
+                    over = stage.OverridePrim(f"/Utah/{rel}")
+                    UsdShade.MaterialBindingAPI.Apply(over)
+                    UsdShade.MaterialBindingAPI(over).Bind(
+                        UsdShade.Material(stage.GetPrimAtPath(f"/materials/{target}")))
+                out = root / f"export__{v}.usda"
+                stage.GetRootLayer().Export(str(out))
+                files[v] = out
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_null",
+                                    root_name="UTAH", variant_sources=files, variant_default="Hunter")
+            self.assertGreater(res["bindings"], 0)
+            stage = Usd.Stage.Open(str(res["root"]))
+            for rel in ("geo/render/body", "geo/render/beak", "geo/render/feathers"):
+                UsdGeom.Mesh.Define(stage, f"/UTAH/{rel}")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/body"), "/UTAH/mtl/red")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/feathers"), "/UTAH/mtl/red")
+            stage.GetPrimAtPath("/UTAH").GetVariantSet("assign").SetVariantSelection("Victim")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/body"), "/UTAH/mtl/blue")
+            self.assertEqual(_bound(stage, "/UTAH/geo/render/beak"), "/UTAH/mtl/horn")
+
     def test_referenced_variant_sets_are_not_assignments(self) -> None:
         """A component brought by FLUX Import carries its own variant sets: never read
         as the look's assignments (the classic single look layer is written)."""
