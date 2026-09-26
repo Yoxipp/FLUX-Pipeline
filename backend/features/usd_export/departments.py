@@ -49,7 +49,7 @@ PRESET_LABELS: dict[str, str] = {"GEO": "model", "RIG": "rig", "ANIM": "anim", "
 
 # Shot tasks FLUX writes itself (2026-09-18): the motion of ONE character.
 SHOT_EXPORT_CONTENT: dict[str, dict] = {
-    "ANIM": {"department": "animation", "writer": "light",
+    "ANIM": {"department": "animation", "label": "anim", "writer": "light",
              "what": "mouvement du squelette d'un perso (seulement les joints qui bougent)",
              "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
 }

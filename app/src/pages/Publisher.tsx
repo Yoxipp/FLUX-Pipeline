@@ -319,6 +319,13 @@ function mapSuffix(path: string): string {
   return detectMapToken(path) || formatToken(fileStem(path))
 }
 
+// Shot tasks the Publisher offers (2026-09-26): anim, camera (LAYOUT carries the
+// shot camera, shot_stage), FX and light; COMP only from Nuke. No rig / model in a shot.
+function shotTasksFor(dcc: string): string[] {
+  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT']
+  return dcc === 'Nuke' ? [...base, 'COMP'] : base
+}
+
 // Publisher category → pipeline CLASS token. "FX" is a display label for FXRIG.
 const CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 'PROPS', ENV: 'ENV', FX: 'FXRIG' }
 const ASSET_CATEGORIES = ['CHAR', 'PROPS', 'ENV', 'FX'] as const
@@ -345,7 +352,7 @@ const USD_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
 // Shot tasks FLUX writes itself (2026-09-18): SEQ_SHOT_ANIM_<NAME> = the motion of
 // one character, the 4th token is the character.
 const USD_SHOT_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
-  ANIM: { department: 'animation', what: "mouvement du squelette d'un perso (seulement les joints qui bougent)",
+  ANIM: { department: 'animation', label: 'anim', what: "mouvement du squelette d'un perso (seulement les joints qui bougent)",
           writer: 'light', include: { geo: false, skel: true, anim: true, weights: false, uv: false } },
 }
 
@@ -359,7 +366,7 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
   variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
   seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ###', example: 'SEQ001' },
   shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT###', example: 'SHOT010' },
-  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). Suggestions basées sur Sequence + Shot.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_null' },
+  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT (COMP depuis Nuke)', example: 'SEQ001_SHOT010_ANIM_DINGO' },
   shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ001_SHOT010_ANIM_DINGO' },
   shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_block_LAST' },
 }
@@ -508,12 +515,13 @@ interface ComposerProps {
   shots:   string[]
   mode:    PublishMode
   sel:     ComposerSel
+  dcc:     string
   onModeSwitch: () => void
   onSelect:     (key: string, value: string) => void
   onArchiveToken: (field: 'name' | 'instance' | 'seq' | 'shot', value: string) => void
 }
 
-function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch, onSelect, onArchiveToken }: ComposerProps) {
+function PublishComposer({ project, tokens, seqs, shots, mode, sel, dcc, onModeSwitch, onSelect, onArchiveToken }: ComposerProps) {
   // Asset names for the selected category (filtered by its CLASS path)
   const cls = CATEGORY_TO_CLASS[sel.category] ?? ''
   const classPath = (tokens.CLASS?.[cls] ?? '').replace(/\\/g, '/')
@@ -524,7 +532,6 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
   // Contextual suggestions, scanned from disk (never global)
   const [instanceSug, setInstanceSug] = useState<string[]>([])
   const [varianteSug, setVarianteSug] = useState<string[]>([])
-  const [shotNameSug, setShotNameSug] = useState<string[]>([])
 
   useEffect(() => {
     if (mode !== 'asset' || !project || !sel.category || !sel.name || !sel.task) { setInstanceSug([]); return }
@@ -547,14 +554,6 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
     }
     return () => { ok = false }
   }, [mode, project, cls, sel.category, sel.name, sel.task, sel.instance, sel.seq, sel.shot])
-
-  useEffect(() => {
-    if (mode !== 'shot' || !project || !sel.seq || !sel.shot) { setShotNameSug([]); return }
-    let ok = true
-    api.suggestTokens({ project, field: 'name', mode: 'shot', seq: sel.seq, shot: sel.shot })
-      .then(d => { if (ok) setShotNameSug(d.suggestions) }).catch(() => { if (ok) setShotNameSug([]) })
-    return () => { ok = false }
-  }, [mode, project, sel.seq, sel.shot])
 
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
@@ -597,7 +596,7 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, onModeSwitch
             placeholder="SHOT010" onChange={v => onSelect('shot', v)}
             onArchiveOption={sel.seq ? (v => onArchiveToken('shot', v)) : undefined}
           />
-          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} options={shotNameSug} placeholder="LAYOUT, ANIM, FX…" onChange={v => onSelect('name', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} fixed options={shotTasksFor(dcc)} placeholder="—" onChange={v => onSelect('name', v)} />
           {formatToken(sel.name) === 'ANIM' ? (
             <ModuleBox label="Perso" info={TOKEN_INFO.shotCharacter} value={sel.variante}
               options={Object.keys(tokens.NAME ?? {}).sort()} placeholder="DINGO"
@@ -1817,6 +1816,7 @@ export function Publisher() {
               shots={shots}
               mode={mode}
               sel={sel}
+              dcc={dcc}
               onModeSwitch={handleModeSwitch}
               onSelect={handleSelect}
               onArchiveToken={(field, value) => {
@@ -2176,16 +2176,22 @@ export function Publisher() {
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
         <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
 
-          {/* PRESETS — one click = the USD department to publish (task + format). */}
-          {(dcc === 'Maya' || dcc === 'Houdini') && mode === 'asset' && (
+          {/* PRESETS — one click = the USD department to publish (task + format), asset
+              and shot alike (2026-09-26: the shot anim uses the same anim preset). */}
+          {(dcc === 'Maya' || dcc === 'Houdini') && (
             <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
               <SecTitle>PRESETS USD</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {Object.entries(usdDepartments).map(([task, info]) => (
-                  <Pill key={task} active={usdLayers && sel.task === task && ['.usd', '.usda', '.usdc'].includes(exportExt)}
+                {Object.entries(mode === 'asset' ? usdDepartments : usdShotDepartments).map(([task, info]) => (
+                  <Pill key={task}
+                    active={usdLayers && (mode === 'asset' ? sel.task : formatToken(sel.name)) === task
+                      && ['.usd', '.usda', '.usdc'].includes(exportExt)}
                     style={{ cursor: 'pointer' }}>
                     <span title={info.what}
-                      onClick={() => { handleSelect('task', task); setExportExt('.usd'); setFluxWriter(null) }}>
+                      onClick={() => {
+                        handleSelect(mode === 'asset' ? 'task' : 'name', task)
+                        setExportExt('.usd'); setFluxWriter(null)
+                      }}>
                       {info.label ?? info.department}
                     </span>
                   </Pill>
