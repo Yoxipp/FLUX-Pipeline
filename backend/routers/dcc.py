@@ -186,6 +186,33 @@ async def set_active_instance(req: ActiveInstanceRequest) -> dict:
     return {"ok": True, "dcc": req.dcc, "port": req.port}
 
 
+_MAYA_CONTEXT_EXPR = ("'\\n'.join([__import__('maya.cmds', fromlist=['cmds']).file(q=True, sceneName=True) or '']"
+                      " + (__import__('maya.cmds', fromlist=['cmds']).ls(sl=True) or [])[:50])")
+
+
+def instance_context(dcc: str, port: int) -> dict:
+    """{"scene", "selection"} of one running instance (best effort, empty when unknown):
+    Maya selected objects, Houdini selected nodes (2026-09-26: with two Maya /
+    Houdini open, the Publisher shows what each one would publish)."""
+    try:
+        if dcc == "Maya":
+            from dcc.maya.maya_connection import send_command_direct
+
+            res = send_command_direct(_MAYA_CONTEXT_EXPR, timeout=2.0, port=port)
+            lines = [ln.strip() for ln in (res or "").strip("\x00").splitlines()]
+            scene = lines[0] if lines else ""
+            return {"scene": scene, "selection": [ln for ln in lines[1:] if ln]}
+        if dcc == "Houdini":
+            from dcc.houdini.client import HoudiniClient
+
+            state = HoudiniClient(port=port)._get("/state")
+            return {"scene": str(state.get("hip_file") or ""),
+                    "selection": [str(n) for n in (state.get("selected_nodes") or [])][:50]}
+    except Exception:                       # noqa: BLE001 - a label is best effort
+        pass
+    return {"scene": "", "selection": []}
+
+
 def _instance_scene(dcc: str, port: int) -> str:
     """Open scene of one running instance ('' when unknown)."""
     try:
@@ -212,9 +239,11 @@ async def list_dcc_instances(dcc: str) -> dict:
 
     loop = asyncio.get_running_loop()
     items = await loop.run_in_executor(None, lambda: scan_instances(dcc))
-    for item in items:
-        item["scene"] = await loop.run_in_executor(
-            None, lambda p=item["port"]: _instance_scene(dcc, p)) or None
+    contexts = await asyncio.gather(*[loop.run_in_executor(None, lambda p=item["port"]: instance_context(dcc, p))
+                                      for item in items])
+    for item, ctx in zip(items, contexts):
+        item["scene"] = ctx["scene"] or None
+        item["selection"] = ctx["selection"]
     return {"dcc": dcc, "active": get_active_port(dcc), "instances": items}
 
 

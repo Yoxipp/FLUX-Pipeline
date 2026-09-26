@@ -810,6 +810,11 @@ export function Publisher() {
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
   const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
+  // Several Maya / Houdini open (2026-09-26): each one's scene and selection, the
+  // artist picks which one publishes (and, in Houdini, which selected node).
+  const [openInstances, setOpenInstances] = useState<{ port: number; label: string; scene: string | null; selection?: string[] }[]>([])
+  const [activeInstPort, setActiveInstPort] = useState<number | null>(null)
+  const pickedNodeRef = useRef<string | null>(null)
   // Multi-instance shot anim (U2): character instances found in Maya, ticked ones publish.
   const [charInstances, setCharInstances] = useState<{ node: string; label: string; instance: number; meshes: number }[]>([])
   const [charChecked, setCharChecked]     = useState<Set<string>>(new Set())
@@ -1050,7 +1055,8 @@ export function Publisher() {
           const state = await api.getHoudiniState()
           if (cancelled) return
           if (state.selected_nodes?.length > 0) {
-            const nodePath = state.selected_nodes[0]
+            const picked = pickedNodeRef.current
+            const nodePath = picked && state.selected_nodes.includes(picked) ? picked : state.selected_nodes[0]
             setRopNodePath(nodePath)
 
             // Primary: type from state (updated server)
@@ -1741,6 +1747,79 @@ export function Publisher() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curPreset, painterChannels])
 
+  useEffect(() => {
+    if (dcc !== 'Maya' && dcc !== 'Houdini') { setOpenInstances([]); return }
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const r = await api.getDccInstances(dcc)
+        if (cancelled) return
+        setOpenInstances(r.instances)
+        setActiveInstPort(readActiveInstancePort(dcc) ?? r.active ?? r.instances[0]?.port ?? null)
+      } catch { if (!cancelled) setOpenInstances([]) }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 4000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dcc])
+  const chooseInstance = (port: number, node?: string, scope?: 'scene' | 'selection') => {
+    writeActiveInstancePort(dcc, port)
+    setActiveInstPort(port)
+    void api.setActiveInstance(dcc, port).catch(() => undefined)
+    if (dcc === 'Houdini') {
+      pickedNodeRef.current = node ?? null
+      autoExtForNodeRef.current = null
+      setRopNodePath(node ?? (openInstances.find(i => i.port === port)?.selection?.[0] ?? ''))
+    }
+    if (dcc === 'Maya' && scope) setMayaScope(scope)
+  }
+  const instanceChooser = openInstances.length > 1 && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+      <div className="cap">{openInstances.length} {dcc} ouverts : choisis celui qui publie</div>
+      {openInstances.map(it => {
+        const on = it.port === activeInstPort
+        const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : 'Scène sans nom'
+        const sel = it.selection ?? []
+        return (
+          <div key={it.port} onClick={() => chooseInstance(it.port, undefined, dcc === 'Maya' ? 'scene' : undefined)}
+            title={it.scene ?? ''}
+            style={{
+              padding: '7px 10px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
+              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
+              background: on ? 'var(--accent-soft)' : 'var(--paper)',
+              display: 'flex', flexDirection: 'column', gap: 5,
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--ink-4)' }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{scene}</span>
+              <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', flexShrink: 0 }}>:{it.port}</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {sel.length === 0 && (
+                <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>{dcc === 'Houdini' ? 'aucun node sélectionné' : 'rien de sélectionné'}</span>
+              )}
+              {sel.slice(0, 12).map(n => {
+                const picked = on && (dcc === 'Houdini' ? ropNodePath === n : mayaScope === 'selection')
+                return (
+                  <span key={n} title={n}
+                    onClick={e => { e.stopPropagation(); chooseInstance(it.port, dcc === 'Houdini' ? n : undefined, dcc === 'Maya' ? 'selection' : undefined) }}
+                    style={{
+                      fontSize: 10, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      border: '1px solid ' + (picked ? 'var(--accent)' : 'var(--rule-2)'),
+                      background: picked ? 'var(--accent-soft)' : 'var(--paper-2)',
+                      color: picked ? 'var(--accent-hi)' : 'var(--ink-2)',
+                    }}>{dcc === 'Houdini' ? n.split('/').filter(Boolean).slice(-2).join('/') : n.split('|').pop()}</span>
+                )
+              })}
+              {sel.length > 12 && <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>+{sel.length - 12}</span>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+
   // Several Maya / Houdini open: ask which one publishes before starting.
   const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; label: string; scene: string | null }[] } | null>(null)
   const requestPublish = useCallback(async () => {
@@ -1748,7 +1827,8 @@ export function Publisher() {
     if (dcc === 'Maya' || dcc === 'Houdini') {
       try {
         const r = await api.getDccInstances(dcc)
-        if (r.instances.length > 1) {
+        const chosen = readActiveInstancePort(dcc)
+        if (r.instances.length > 1 && !r.instances.some(i => i.port === chosen)) {
           setInstancePick({ dcc, items: r.instances })
           return
         }
@@ -1904,7 +1984,7 @@ export function Publisher() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
                     <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0, boxShadow: '0 0 6px var(--ok)' }} />
                     <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>Maya connecté</span>
-                    <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)' }}>· commandPort 7001</span>
+                    <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)' }}>· commandPort {activeInstPort ?? 7001}</span>
                   </div>
                 ) : mayaAutostartInstalled !== null && (
                   <div style={{ borderRadius: 10, border: '1px solid var(--accent)', background: 'var(--accent-soft)', overflow: 'hidden' }}>
@@ -1940,6 +2020,7 @@ export function Publisher() {
                     </div>
                   </div>
                 )}
+                {mayaConnected && instanceChooser}
               </div>
             ) : dcc === 'Houdini' ? (
               <div>
@@ -1955,6 +2036,7 @@ export function Publisher() {
                       : 'Houdini non connecté : lance le serveur FLUX dans Houdini'}
                   </div>
                 </div>
+                {houdiniConnected && instanceChooser && <div style={{ marginBottom: 8 }}>{instanceChooser}</div>}
                 <input
                   value={ropNodePath}
                   onChange={e => setRopNodePath(e.target.value)}

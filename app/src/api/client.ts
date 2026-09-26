@@ -204,7 +204,7 @@ export const api = {
   // Running instances of a DCC with their open scene (publish picker), and the
   // instance FLUX works with (backend clients without a port follow it: Houdini).
   getDccInstances: (dcc: string) =>
-    apiCall<{ dcc: string; active: number | null; instances: { id: string; port: number; label: string; scene: string | null }[] }>(
+    apiCall<{ dcc: string; active: number | null; instances: { id: string; port: number; label: string; scene: string | null; selection?: string[] }[] }>(
       'GET', `/dcc/instances/${encodeURIComponent(dcc)}`),
   setActiveInstance: (dcc: string, port: number | null) =>
     apiCall<{ ok: boolean }>('POST', '/dcc/active-instance', { dcc, port }),
