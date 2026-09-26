@@ -456,21 +456,34 @@ function LinkRow({ project, comp, link, files, rules, busy, onPatch, onRemove, o
   )
 }
 
-// "New link": pick a task, then one of its publishes or any file of the project.
-function NewLink({ comp, departments, taken, busy, onAdd }: {
+// Block a task's links go in (GEO -> model, SHADING -> look), same rule as the backend.
+function blockOfTask(rules: UsdComponentRules, dept: string): string {
+  return rules?.block_of_task?.[dept.toUpperCase()] ?? dept.toLowerCase()
+}
+
+// Task of a block (model -> GEO), "" when the block is not a task's own.
+function taskOfBlock(rules: UsdComponentRules, departments: string[], block: string): string {
+  const b = block.toLowerCase()
+  return departments.find(d => blockOfTask(rules, d).toLowerCase() === b || d.toLowerCase() === b) ?? ''
+}
+
+// "New link": pick a task (the block's own by default), then one of its publishes or
+// any file of the project.
+function NewLink({ comp, departments, taken, busy, onAdd, defaultDept = '' }: {
   comp: UsdComponentInfo; departments: string[]; taken: Set<string>; busy: boolean
   onAdd: (dept: string, what: UsdProposedFile | string) => void
+  defaultDept?: string
 }) {
   const { t: tr } = useI18n()
   const [open, setOpen] = useState(false)
-  const [dept, setDept] = useState('')
+  const [dept, setDept] = useState(defaultDept)
   const [pick, setPick] = useState('')
   const [path, setPath] = useState('')
   const publishes = comp.proposed.filter(p => p.department === dept && !taken.has(p.base))
   const manual = pick === '__manual__'
   const ok = !!dept && (manual ? !!fmtOf(path) : !!pick)
 
-  function reset() { setOpen(false); setDept(''); setPick(''); setPath('') }
+  function reset() { setOpen(false); setDept(defaultDept); setPick(''); setPath('') }
   function add() {
     if (!ok) return
     onAdd(dept, manual ? path.trim() : publishes.find(p => p.base === pick) as UsdProposedFile)
@@ -480,7 +493,7 @@ function NewLink({ comp, departments, taken, busy, onAdd }: {
   if (!open) {
     return (
       <div>
-        <Btn sm ghost disabled={busy} onClick={() => setOpen(true)}><Plus size={11} strokeWidth={2} /> New link</Btn>
+        <Btn sm ghost disabled={busy} onClick={() => { setDept(defaultDept); setOpen(true) }}><Plus size={11} strokeWidth={2} /> New link</Btn>
       </div>
     )
   }
@@ -647,6 +660,7 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
                   onToggleTarget={id => toggleTarget(f.id, id)} />
               ))}
               <NewLink comp={comp} departments={departments} taken={usedBases} busy={busy}
+                defaultDept={taskOfBlock(rules, departments, block.name)}
                 onAdd={(dept, what) => addLink(block.name, dept, what)} />
             </div>
           )
@@ -657,13 +671,26 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
             <Btn sm ghost disabled={busy} onClick={() => setNewBlock('')}><Plus size={11} strokeWidth={2} /> {tr('usd.comp.addBlock')}</Btn>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <input autoFocus value={newBlock} placeholder={tr('usd.comp.blockName')}
               onChange={e => setNewBlock(cleanId(e.target.value))}
               onKeyDown={e => { if (e.key === 'Enter') addBlock(); if (e.key === 'Escape') setNewBlock(null) }}
               style={{ ...selectStyle, width: 180, fontFamily: 'var(--mono)', cursor: 'text' }} />
             <Btn sm primary disabled={!blockOk} onClick={addBlock}><Check size={11} strokeWidth={2} /></Btn>
             <Btn sm ghost onClick={() => setNewBlock(null)}><X size={11} strokeWidth={2} /></Btn>
+            {/* The project's tasks that have no block yet: one click names the block. */}
+            {departments
+              .filter(d => !draft.blocks.some(b => b.name.toLowerCase() === blockOfTask(rules, d).toLowerCase()))
+              .map(d => (
+                <Pill key={d} style={{ cursor: 'pointer' }}>
+                  <span title={`Block ${blockOfTask(rules, d)} pour la task ${d}`}
+                    onClick={() => {
+                      const name = cleanId(blockOfTask(rules, d))
+                      setDraft(dr => ({ ...dr, blocks: [...dr.blocks, { name, variant: '' }] }))
+                      setNewBlock(null)
+                    }}>+ {d}</span>
+                </Pill>
+              ))}
           </div>
         )}
 

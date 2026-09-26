@@ -254,7 +254,10 @@ def build_library(project_path: str | Path, assembly_subdir: str = DEFAULT_ASSEM
                       "default_kind": dict(cr.DEFAULT_KIND),
                       "targets": {k: sorted(v) for k, v in cr.TARGET_KINDS.items()},
                       "proxy": {k: sorted(v) for k, v in cr.PROXY_KINDS.items()},
-                      "preview": sorted(cr.PREVIEW_KINDS)}}
+                      "preview": sorted(cr.PREVIEW_KINDS),
+                      # Block a task's links go in (GEO -> model): "New link" and
+                      # "New block" follow it (2026-09-26).
+                      "block_of_task": dict(cr.BLOCK_OF_TASK)}}
 
 
 def asset_usd(project_path: str | Path, name: str,

@@ -1070,6 +1070,7 @@ export interface UsdComponentRules {
   targets: Record<UsdFileKind, UsdFileKind[]>        // what a file of that kind may target
   proxy: Partial<Record<UsdFileKind, UsdFileKind[]>> // what it may stand in for as a proxy
   preview: UsdFileKind[]                             // never active in a component (ANIM)
+  block_of_task?: Record<string, string>              // TYPE -> block name (GEO -> model)
 }
 export interface LoadTargets {
   what: 'asset' | 'decor' | 'shot' | 'layer' | 'file'
