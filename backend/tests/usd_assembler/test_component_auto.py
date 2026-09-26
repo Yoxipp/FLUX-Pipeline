@@ -117,6 +117,25 @@ class ManualComponent(unittest.TestCase):
         # A publish of a department the component does not use changes nothing.
         self.assertIsNone(self._publish("RIG", "rig", ["Root"])["component"])
 
+    def test_non_usd_publishes_are_proposed_as_files(self) -> None:
+        """2026-09-26: GEO published in .abc only, the model block offered nothing."""
+        import json
+        folder = self.project / _NAME_REL / "model" / "null"
+        folder.mkdir(parents=True)
+        (folder / "CHAR_GEO_UTAH_null_v003.abc").write_bytes(b"abc")
+        (folder / "CHAR_GEO_UTAH_null_LAST.abc").write_bytes(b"abc")
+        (folder / "CHAR_GEO_UTAH_null_LAST.abc.flux.json").write_text(json.dumps({"version": "v003"}))
+        ca.create_component(self.project, _NAME, ["GEO"])
+        recipe = ca.current_recipe(self.project, _NAME)
+        got = ca.proposed_files(self.project, _NAME, recipe, ["GEO"])
+        self.assertEqual([(p["base"], p["format"], p["version"], p["path"]) for p in got],
+                         [("CHAR_GEO_UTAH_null", "abc", "v003", f"{_NAME_REL}/model/null/CHAR_GEO_UTAH_null_LAST.abc")])
+        # Linked as a file, it is not offered again; "Tout ajouter" leaves it to the artist.
+        recipe["files"].append({"id": "geo_null_abc", "department": "GEO", "source": "manual",
+                                "path": got[0]["path"], "format": "abc"})
+        self.assertEqual(ca.proposed_files(self.project, _NAME, recipe, ["GEO"]), [])
+        self.assertIsNone(ca.add_proposed(self.project, _NAME))
+
     def test_new_publish_is_proposed_not_added(self) -> None:
         self._publish("GEO", "model", ["Root"])
         ca.create_component(self.project, _NAME, ["GEO"])

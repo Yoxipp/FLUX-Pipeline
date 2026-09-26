@@ -286,6 +286,55 @@ class FluxResolver:
                 }
         return [out[k] for k in sorted(out)]
 
+    def list_file_publishes(self, asset: str, task: str) -> list[dict]:
+        """Non-USD publishes of *asset*/*task* (abc, fbx, bgeo...), one per base and format:
+        ``[{"base", "instance", "variante", "ext", "path", "version"}]``. *path* is what a
+        DCC loads: the ``<base>_LAST<ext>`` copy (follows new publishes), or the version a
+        ``.link`` LAST points at. A component links them as files (ADR 0023 point 3:
+        no format blocked)."""
+        from features.folder_manager.naming_validator import parse_filename
+        from features.publisher import last_pointer as lp
+
+        try:
+            parent = self._publish_parent(asset, task)
+        except ResolveError:
+            return []
+        if not parent.exists():
+            return []
+        leaves = [parent] + sorted(p for p in parent.iterdir() if p.is_dir() and not _VER_FOLDER_RE.match(p.name))
+        out: dict[tuple, dict] = {}
+        suffix = f"_{lp.ACTIVE_VERSION_LABEL}"
+        for leaf in leaves:
+            leaf_name = leaf.name if leaf != parent else ""
+            for entry in sorted(leaf.iterdir()):
+                if not entry.is_file():
+                    continue
+                stem, ext, role = lp.parse_published_name(entry.name)
+                if role == "meta" or not ext or ext.lower() in (".usd", ".usda", ".usdc", ".usdz"):
+                    continue
+                if not stem.endswith(suffix):
+                    continue
+                base = stem[: -len(suffix)]
+                if (leaf_name, base, ext.lower()) in out:
+                    continue
+                last = lp.read_last(leaf, base, ext)
+                if not last:
+                    continue
+                target = Path(last["target"]) if last.get("target") else Path(last["path"])
+                if not target.exists() or str(target).lower().endswith(lp.LINK_SUFFIX):
+                    continue
+                parsed = parse_filename(f"{base}.usd") or {}
+                try:
+                    rel = target.relative_to(self._project).as_posix()
+                except ValueError:
+                    rel = target.as_posix()
+                out[(leaf_name, base, ext.lower())] = {
+                    "base": base, "instance": leaf_name or str(parsed.get("INSTANCE") or ""),
+                    "variante": str(parsed.get("VARIANTE") or ""), "ext": ext.lower().lstrip("."),
+                    "path": rel, "version": last.get("version") or lp.ACTIVE_VERSION_LABEL,
+                }
+        return [out[k] for k in sorted(out)]
+
     def list_variantes(self, asset: str, task: str, instance: str = "") -> list[str]:
         """VARIANTE tokens published for *asset*/*task* (optionally one *instance*).
 

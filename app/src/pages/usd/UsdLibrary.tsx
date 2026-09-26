@@ -480,14 +480,16 @@ function NewLink({ comp, departments, taken, busy, onAdd, defaultDept = '' }: {
   const [dept, setDept] = useState(defaultDept)
   const [pick, setPick] = useState('')
   const [path, setPath] = useState('')
-  const publishes = comp.proposed.filter(p => p.department === dept && !taken.has(p.base))
+  // USD publishes by base, other formats (abc, fbx...) by the path of their LAST.
+  const publishes = comp.proposed.filter(p => p.department === dept && !taken.has(p.path ?? p.base))
+  const keyOf = (p: UsdProposedFile) => p.path ?? p.base
   const manual = pick === '__manual__'
   const ok = !!dept && (manual ? !!fmtOf(path) : !!pick)
 
   function reset() { setOpen(false); setDept(defaultDept); setPick(''); setPath('') }
   function add() {
     if (!ok) return
-    onAdd(dept, manual ? path.trim() : publishes.find(p => p.base === pick) as UsdProposedFile)
+    onAdd(dept, manual ? path.trim() : publishes.find(p => keyOf(p) === pick) as UsdProposedFile)
     reset()
   }
 
@@ -506,7 +508,7 @@ function NewLink({ comp, departments, taken, busy, onAdd, defaultDept = '' }: {
       </select>
       <select value={pick} disabled={!dept} onChange={e => setPick(e.target.value)} style={{ ...selectStyle, flex: 1, minWidth: 160, fontFamily: 'var(--mono)' }}>
         <option value="">{dept && publishes.length === 0 ? tr('usd.comp.noPublish') : tr('usd.comp.pickFile')}</option>
-        {publishes.map(p => <option key={p.base} value={p.base}>{p.base} {p.version} .{p.format}</option>)}
+        {publishes.map(p => <option key={keyOf(p)} value={keyOf(p)}>{p.base} {p.version} .{p.format}</option>)}
         <option value="__manual__">{tr('usd.comp.otherFile')}</option>
       </select>
       {manual && (
@@ -588,6 +590,12 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
       const stem = what.replace(/\\/g, '/').split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'file'
       setDraft(d => ({ ...d, files: [...d.files, {
         ...common, id: makeId(stem, taken), label: stem, format: fmtOf(what), source: 'manual', path: what }] }))
+    } else if (what.path) {
+      // A non-USD publish (abc, fbx...): linked as a file, its LAST follows new publishes.
+      const id = makeId(`${dept.toLowerCase()}_${what.instance}${what.variante ? `_${what.variante}` : ''}_${what.format}`, taken)
+      const filePath = what.path
+      setDraft(d => ({ ...d, files: [...d.files, {
+        ...common, id, label: what.base, format: what.format, source: 'manual', path: filePath }] }))
     } else {
       const id = makeId(`${dept.toLowerCase()}_${what.instance}${what.variante ? `_${what.variante}` : ''}`, taken)
       setDraft(d => ({ ...d, files: [...d.files, {
@@ -596,7 +604,7 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
     }
   }
 
-  const usedBases = new Set(draft.files.map(f => f.base ?? ''))
+  const usedBases = new Set(draft.files.flatMap(f => [f.base ?? '', f.path ?? '']).filter(Boolean))
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 900 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

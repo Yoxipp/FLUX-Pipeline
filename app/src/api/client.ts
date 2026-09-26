@@ -1017,6 +1017,7 @@ export interface UsdComponentRecipe { blocks: UsdComponentBlock[]; departments: 
 export interface UsdProposedFile {
   department: string; base: string; instance: string; variante: string; version: string
   format: string; kind: UsdFileKind
+  path?: string   // non-USD publish (abc, fbx...): its LAST, linked as a file
 }
 export interface UsdComponentInfo {
   name: string

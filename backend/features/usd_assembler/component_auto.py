@@ -276,9 +276,14 @@ def resolve_files(project_path: str | Path, name: str, recipe: dict) -> tuple[di
 
 def proposed_files(project_path: str | Path, name: str, recipe: dict,
                    departments: list[str] | None = None) -> list[dict]:
-    """Published bases of *departments* (default: the component's) not yet in its recipe."""
+    """Published bases of *departments* (default: the component's) not yet in its recipe.
+
+    USD publishes are linked as publishes (latest followed); other formats (abc, fbx...)
+    carry a "path" to their LAST and are linked as files (ADR 0023 point 3)."""
     resolver = FluxResolver(project_path)
     used = {(f["department"], f.get("base")) for f in recipe["files"] if f["source"] == "publish"}
+    used_paths = {str(f.get("path") or "").replace("\\", "/").lower() for f in recipe["files"]
+                  if f["source"] != "publish"}
     out = []
     for dept in recipe["departments"] if departments is None else departments:
         for pub in resolver.list_publish_bases(name, dept):
@@ -291,6 +296,12 @@ def proposed_files(project_path: str | Path, name: str, recipe: dict,
             out.append({"department": dept, "base": pub["base"], "instance": pub["instance"],
                         "variante": pub["variante"], "version": hit.version,
                         "format": cr.format_of(str(hit.path)), "kind": cr.default_kind(dept)})
+        for pub in resolver.list_file_publishes(name, dept):
+            if pub["path"].lower() in used_paths:
+                continue
+            out.append({"department": dept, "base": pub["base"], "instance": pub["instance"],
+                        "variante": pub["variante"], "version": pub["version"], "format": pub["ext"],
+                        "kind": cr.default_kind(dept), "path": pub["path"]})
     return out
 
 
@@ -616,6 +627,8 @@ def add_proposed(project_path: str | Path, name: str, departments: list[str] | N
     taken = {f["id"] for f in recipe["files"]}
     added: set[str] = set()
     for p in proposed_files(project_path, name, recipe):
+        if p.get("path"):
+            continue                # non-USD publish: linked by hand only (a file link)
         label = p["base"]
         fid = cr.make_id(f"{p['department'].lower()}_{p['instance']}{'_' + p['variante'] if p['variante'] else ''}",
                          taken)
