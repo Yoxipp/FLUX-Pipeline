@@ -296,9 +296,17 @@ def _rest_pose(skel) -> dict | None:
 
 
 def _joint_noise(joints: list[str], amplitude: float, key: str) -> list:
-    """One small rotation per joint (degrees, deterministic per *key*); the root stays put
+    """One still rotation per joint (degrees, deterministic per *key*); the root stays put
     (a root rotation turns the whole body). Joints named without their path (flat
     list, some exports): only the first one is taken as the root."""
+    return _noise_at(_noise_curves(joints, amplitude, key), amplitude, 0.0, 0.0)
+
+
+def _noise_curves(joints: list[str], amplitude: float, key: str) -> list:
+    """Per joint: None (root) or (axis, still part in [-1, 1], two (frequency factor,
+    phase) waves). Deterministic per *key*: each agent gets its own noise."""
+    import math
+
     from pxr import Gf
 
     rng = random.Random(key)
@@ -306,18 +314,50 @@ def _joint_noise(joints: list[str], amplitude: float, key: str) -> list:
     out = []
     for i, j in enumerate(joints):
         if ("/" not in str(j)) if pathed else i == 0:
-            out.append(Gf.Quatf(1.0))
+            out.append(None)
             continue
         axis = Gf.Vec3d(rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))
         if axis.GetLength() < 1e-9:
             axis = Gf.Vec3d(0, 1, 0)
-        q = Gf.Rotation(axis.GetNormalized(), rng.uniform(-amplitude, amplitude)).GetQuat()
-        out.append(Gf.Quatf(q))
+        out.append((axis.GetNormalized(), rng.uniform(-1.0, 1.0),
+                    ((rng.uniform(0.6, 1.4), rng.uniform(0, 2 * math.pi)),
+                     (rng.uniform(1.6, 2.6), rng.uniform(0, 2 * math.pi)))))
     return out
 
 
+def _noise_at(curves: list, amplitude: float, frequency: float, seconds: float) -> list:
+    """The rotation of each joint at *seconds*: a still offset plus two waves of
+    *frequency* (cycles per second); *frequency* 0 = the still offset alone."""
+    import math
+
+    from pxr import Gf
+
+    out = []
+    for c in curves:
+        if c is None:
+            out.append(Gf.Quatf(1.0))
+            continue
+        axis, still, waves = c
+        if frequency > 0:
+            (f1, p1), (f2, p2) = waves
+            wave = 0.6 * math.sin(2 * math.pi * frequency * f1 * seconds + p1) + \
+                0.4 * math.sin(2 * math.pi * frequency * f2 * seconds + p2)
+            value = 0.3 * still + 0.7 * wave
+        else:
+            value = still
+        out.append(Gf.Quatf(Gf.Rotation(axis, amplitude * value).GetQuat()))
+    return out
+
+
+_MAX_NOISE_FRAMES = 20000
+
+
 def _read_rotations(file: str | Path, prim: str) -> dict | None:
-    """{"joints", "samples": [(time or None, [Quatf])]} of a SkelAnimation."""
+    """{"joints", "fps", "samples": [(time or None, [Quatf])]} of a SkelAnimation, one
+    sample per frame between its first and last keys (a moving noise needs every frame,
+    rotations between two keys are interpolated by USD)."""
+    import math
+
     from pxr import Usd, UsdSkel
 
     stage = Usd.Stage.Open(str(file), Usd.Stage.LoadNone)
@@ -325,16 +365,20 @@ def _read_rotations(file: str | Path, prim: str) -> dict | None:
     if not anim:
         return None
     attr = anim.GetRotationsAttr()
-    times = attr.GetTimeSamples()
+    times = list(attr.GetTimeSamples())
+    if times and times[-1] - times[0] < _MAX_NOISE_FRAMES:
+        frames = range(math.floor(times[0]), math.ceil(times[-1]) + 1)
+        times = sorted(set(times) | {float(f) for f in frames if times[0] <= f <= times[-1]})
     samples = [(t, list(attr.Get(t))) for t in times] if times else [(None, list(attr.Get() or []))]
-    return {"joints": [str(j) for j in (anim.GetJointsAttr().Get() or [])], "samples": samples}
+    return {"joints": [str(j) for j in (anim.GetJointsAttr().Get() or [])], "samples": samples,
+            "fps": float(stage.GetTimeCodesPerSecond() or 24.0)}
 
 
 def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, agents: list[dict],
                        clip_files: dict[str, Path], *, freeze: bool = False,
                        sources: dict[str, dict] | None = None,
                        looks: dict[str, dict] | None = None, rot_noise: float = 0.0,
-                       seed: int = 0) -> dict:
+                       seed: int = 0, noise_freq: float = 1.0) -> dict:
     """Write the crowd layer *dest*: /crowd/<GROUP>/agent_NNNN (relative references only).
 
     *sources* ({asset: {"file", "prim"}}, from FLUX Crowd input 1): used for an asset
@@ -345,8 +389,8 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     Each agent plays its crowd clip, else the animation its asset plays, with its time
     offset and speed; the binding is set on the skeleton itself (a component binds its
     animation there, which beat the agent's binding: offset / speed did nothing).
-    *rot_noise* (degrees): a small rotation per joint and per agent, written in a
-    ``<dest>_noise.usdc`` sublayer.
+    *rot_noise* (degrees): a rotation per joint and per agent, moving at *noise_freq*
+    cycles per second (0 = still), written in a ``<dest>_noise.usdc`` sublayer.
 
     Returns {"path", "agents", "warnings"}."""
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
@@ -475,15 +519,18 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                         rotations[key] = None
                 rot = rotations[key]
                 if rot and rot["joints"]:
-                    noise = _joint_noise(rot["joints"], rot_noise, f"{seed}:{a['name']}")
+                    # Its own noise per agent (and per clip), moving along the shot time.
+                    curves = _noise_curves(rot["joints"], rot_noise, f"{seed}:{a['name']}:{key}")
                     spec = Sdf.CreatePrimInLayer(noise_layer, anim_path)
                     attr = Sdf.AttributeSpec(spec, "rotations", Sdf.ValueTypeNames.QuatfArray)
                     for t, values in rot["samples"]:
+                        at = shift + scale * t if t is not None else 0.0
+                        noise = _noise_at(curves, rot_noise, noise_freq, at / rot["fps"])
                         noisy = Vt.QuatfArray([v * n for v, n in zip(values, noise)])
                         if t is None:
                             attr.default = noisy
                         else:
-                            noise_layer.SetTimeSample(attr.path, shift + scale * t, noisy)
+                            noise_layer.SetTimeSample(attr.path, at, noisy)
                     noised += 1
                 elif comp not in noise_skipped:
                     noise_skipped.add(comp)
@@ -570,7 +617,7 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
                 component_weights: dict[str, float] | None = None,
                 clip_weights: dict[str, float] | None = None,
                 sources: dict[str, dict] | None = None, looks: dict[str, dict] | None = None,
-                rot_noise: float = 0.0) -> dict:
+                rot_noise: float = 0.0, noise_freq: float = 1.0) -> dict:
     """Preview (work file in the shot) or publish (SEQ_SHOT_CROWD[_GROUP], vNNN + LAST) a crowd.
 
     A preview needs no shot (2026-09-26: a project without shots must still show
@@ -601,7 +648,8 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
         work = ss.stage_dir(project, seq, shot) if has_shot else project / "shot"
         dest = work / "crowd_work" / f"{base}.usda"
         res = author_crowd_layer(dest, project, grp, agents, by_base, sources=sources, looks=looks,
-                                 rot_noise=rot_noise, seed=seed)
+                                 rot_noise=rot_noise, seed=seed,
+                                 noise_freq=noise_freq)
         res["warnings"] = ([f"clip inconnu : {c}" for c in unknown]
                            + [f"aucune anim ne va sur le rig de {c} : pose de repos" for c in no_clip]
                            + res["warnings"])
@@ -622,7 +670,8 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     folder = sequence_folder(parent, base, ver)
     try:
         res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base, freeze=True,
-                                 sources=sources, looks=looks, rot_noise=rot_noise, seed=seed)
+                                 sources=sources, looks=looks, rot_noise=rot_noise, seed=seed,
+                                 noise_freq=noise_freq)
     except Exception:
         discard_rendered_version(parent, base, ".usda", ver, is_sequence=True)
         raise

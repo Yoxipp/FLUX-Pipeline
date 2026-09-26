@@ -316,6 +316,31 @@ class Crowd(unittest.TestCase):
         starts = {self._skel_anim_times(res["path"], f"agent_{i + 1:04d}")[0] for i in range(12)}
         self.assertEqual(starts, {11.0})
 
+    def test_rotation_noise_moves_and_differs_per_agent(self) -> None:
+        # 2026-09-26: random along the animation, not the same noise on every agent.
+        self._ogre()
+        base = {1.0: _anim().rotations[0][0], 2.0: _anim().rotations[1][0], 3.0: _anim().rotations[2][0]}
+        looks = {"OGRE": {"variants": {"anim_walk": "on"}, "inactive": []}}
+
+        def noise(freq):
+            res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", [{"p": [0, 0, 0]}, {"p": [2, 0, 0]}],
+                                    components=["OGRE"], clips=[], rot_noise=10.0, noise_freq=freq, looks=looks)
+            stage = Usd.Stage.Open(str(res["path"]))
+            out = {}
+            for name in ("agent_0001", "agent_0002"):
+                attr = stage.GetPrimAtPath(f"/crowd/crowd/{name}/crowd_anim").GetAttribute("rotations")
+                out[name] = []
+                for t, (x, y, z, w) in base.items():
+                    out[name].append(Gf.Quatf(w, x, y, z).GetInverse() * attr.Get(t)[0])
+            return out
+
+        moving = noise(1.0)
+        self.assertNotEqual(moving["agent_0001"][0], moving["agent_0001"][2])     # moves in time
+        self.assertNotEqual(moving["agent_0001"], moving["agent_0002"])           # per agent
+        still = noise(0.0)
+        a, b = still["agent_0001"][0], still["agent_0001"][2]
+        self.assertTrue(Gf.IsClose(a.GetImaginary(), b.GetImaginary(), 1e-4))
+
     def test_publish_adds_the_crowd_layer_to_the_shot_stage(self) -> None:
         pts = [{"p": [0, 0, 0]}, {"p": [5, 0, 0]}]
         res = crowd.build_crowd(self.project, "SEQ001", "SHOT010", "crowd", pts, components=["BOB", "TIM"],

@@ -523,6 +523,7 @@ def _build(node, publish):
                "points": pts, "components": assets, "clips": clips, "sources": _input_sources(node),
                "looks": _input_looks(node),
                "rot_noise": _fval(node, "rot_noise", 0.0),
+               "noise_freq": _fval(node, "noise_freq", 1.0),
                "component_weights": _weights(node, "asset"), "clip_weights": _weights(node, "clip"),
                "seed": int(node.evalParm("seed")),
                "offset": [node.evalParm("offsetx"), node.evalParm("offsety")],
@@ -533,7 +534,9 @@ def _build(node, publish):
     if not r.get("ok"):
         _status(node, "Echec : %s" % r.get("error", "?")); return
     msg = "%d agent(s)" % r.get("agents", 0)
-    if _fval(node, "rot_noise", 0.0) > 0:
+    if node.parm("rot_noise") is None:
+        msg += " (pas de noise : HDA FLUX Crowd a reconstruire)"
+    elif _fval(node, "rot_noise", 0.0) > 0:
         msg += ", noise sur %d" % r.get("noised", 0)
     if publish:
         # The shot stage now sublayers the published crowd (LAST): the preview is dropped
@@ -657,6 +660,9 @@ _ptg.append(hou.FloatParmTemplate("speed", "Vitesse min / max", 2, default_value
 _ptg.append(hou.FloatParmTemplate("rot_noise", "Noise rotation joints", 1, default_value=(0.0,), min=0.0, max=45.0,
                                   help="Degres : rotation aleatoire par joint et par agent (pas la racine), "
                                        "sur l'anim ou, sans anim, sur la pose de repos. Il faut un squelette."))
+_ptg.append(hou.FloatParmTemplate("noise_freq", "Vitesse du noise", 1, default_value=(1.0,), min=0.0, max=5.0,
+                                  help="Oscillations par seconde du noise (propre a chaque agent). "
+                                       "0 = decalage fixe. Agents sans anim : toujours fixe."))
 _ptg.append(hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                                  menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                                  help="Proxy: purpose=proxy meshes in the viewport. Geo complete: render meshes."))
