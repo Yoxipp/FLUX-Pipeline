@@ -582,7 +582,11 @@ def create_native_import_in_context(file_path: str | Path) -> dict:
     return resp
 
 
-def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None) -> dict:
+NEED_HDA = "FLUX_NEED_HDA"
+
+
+def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None,
+                              allow_fallback: bool = False) -> dict:
     """Import a USD file according to the active network pane (2026-09-17).
 
     * LOP network (/stage, lopnet): the LOP ``flux_importer`` HDA (same parms as in
@@ -596,6 +600,10 @@ def create_usd_context_import(file_path: str, probe: dict, importer: dict | None
     *probe* comes from features.importer.usd_probe (backend pxr). *file_path* may be
     a portable ``$FLUX/...`` token: both node types expand variables.
     Returns {"ok", "result": {"node_path", "mode", "resolved_path"}} or {"ok": False, "error"}.
+    Without the FLUX Import HDA of the context and *allow_fallback* off, nothing is
+    created and the error starts with NEED_HDA + the Houdini version (2026-09-26:
+    the plain Reference LOP fallback replaced FLUX Import silently); the caller installs
+    the HDAs and calls again.
     """
     from features.importer.usd_probe import reference_prim_path
 
@@ -616,6 +624,13 @@ def create_usd_context_import(file_path: str, probe: dict, importer: dict | None
             _pwd = hou.node("/obj")
         _cat = _pwd.childTypeCategory()
         _name = {name!r}
+        if {bool(importer_parms)!r} and not {allow_fallback!r}:
+            _hda_cat = (hou.lopNodeTypeCategory() if _cat == hou.lopNodeTypeCategory()
+                        else hou.sopNodeTypeCategory() if _cat in (hou.objNodeTypeCategory(), hou.sopNodeTypeCategory())
+                        else None)
+            if _hda_cat is not None and _hda_cat.nodeType("flux_importer") is None:
+                _v = hou.applicationVersion()
+                raise RuntimeError({NEED_HDA!r} + " %d.%d" % (_v[0], _v[1]))
         if _cat == hou.lopNodeTypeCategory():
             _sel = [n for n in hou.selectedNodes() if n.parent() == _pwd]
             _prev = _sel[0] if _sel else _pwd.displayNode()

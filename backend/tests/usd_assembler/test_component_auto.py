@@ -158,6 +158,25 @@ class ManualComponent(unittest.TestCase):
         self.assertFalse(stage.GetPrimAtPath("/UTAH/geo/render/hat").IsValid())
         self.assertTrue(stage.GetPrimAtPath("/UTAH/geo/render/body").IsValid())
 
+    def test_groom_without_default_prim_is_referenced_at_its_root(self) -> None:
+        """2026-09-26: a Houdini groom file has no defaultPrim; the component
+        referenced a prim named after the file (unresolved, empty groom)."""
+        rel = f"{_NAME_REL}/groom/procedural/CHAR_GROOM_UTAH_PROCEDURAL_WINGS_v001.usda"
+        path = self.project / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stage = Usd.Stage.CreateNew(str(path))
+        UsdGeom.Xform.Define(stage, "/groom_procedural_WINGS")
+        UsdGeom.BasisCurves.Define(stage, "/groom_procedural_WINGS/guides")
+        stage.GetRootLayer().Save()
+        ca.create_component(self.project, _NAME, ["GROOM"])
+        recipe = ca.current_recipe(self.project, _NAME)
+        recipe["files"].append({"id": "wings", "department": "GROOM", "source": "manual", "path": rel})
+        ca.save_component(self.project, _NAME, recipe)
+        self.assertEqual(ca.current_recipe(self.project, _NAME)["files"][0].get("kind"), "groom")
+        comp = self._stage()
+        guides = [p for p in comp.Traverse() if p.IsA(UsdGeom.BasisCurves)]
+        self.assertEqual([str(p.GetPath()) for p in guides], ["/UTAH/groom/wings/guides"])
+
     def test_manual_files_of_any_format(self) -> None:
         ca.create_component(self.project, _NAME, ["GEO"])
         recipe = ca.current_recipe(self.project, _NAME)

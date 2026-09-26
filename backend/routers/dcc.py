@@ -687,7 +687,7 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
     # source matches the file: tokens for a task publish, USD library for a component /
     # assembly, free path otherwise).
     if selected_file and _PLib(req.rel_path).suffix.lower() in USD_EXTS:
-        from dcc.houdini.houdini_import import create_usd_context_import
+        from dcc.houdini.houdini_import import NEED_HDA, create_usd_context_import
         from features.importer.library_import import importer_source_for_file
         from features.importer.usd_probe import probe_usd
 
@@ -701,6 +701,19 @@ async def houdini_importer_create_node(req: HoudiniFluxImporterCreateRequest) ->
         importer["project"] = req.project
         resp = await loop.run_in_executor(
             None, lambda: create_usd_context_import(selected_file, probe, importer))
+        err = str(resp.get("error") or "")
+        if not resp.get("ok") and NEED_HDA in err:
+            # FLUX Import HDA missing in this Houdini: build / install the FLUX HDAs,
+            # then import again (a plain Reference only if the install failed).
+            from features.shelf_manager.shelf_core import install_hdas
+
+            version = err.split(NEED_HDA, 1)[1].split()[0] if err.split(NEED_HDA, 1)[1].split() else ""
+            ok, msg = await loop.run_in_executor(None, lambda: install_hdas(version))
+            log.info("Open in Houdini: FLUX HDAs missing, install for %s -> %s (%s)", version, ok, msg)
+            resp = await loop.run_in_executor(
+                None, lambda: create_usd_context_import(selected_file, probe, importer, allow_fallback=True))
+            if resp.get("ok") and not ok:
+                resp["warning"] = f"FLUX Import absent de Houdini et installation en echec : {msg}"
         if not resp.get("ok"):
             raise HTTPException(status_code=503, detail=resp.get("error", "Import USD echoue"))
         return resp

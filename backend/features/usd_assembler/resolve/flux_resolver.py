@@ -40,12 +40,25 @@ _VER_FOLDER_RE = re.compile(r"^(?P<base>.+)_(?P<ver>LAST|v\d+)$")
 
 
 def _default_prim(path: Path) -> str:
-    """defaultPrim of a published layer: the NAME token since ADR 0019, the publish base before."""
+    """defaultPrim of a published layer: the NAME token since ADR 0019, the publish base before.
+
+    A file without defaultPrim (a groom written by a Houdini ROP, 2026-09-26): its
+    first defined root prim, as Houdini's Reference LOP does. The callers' old fallback,
+    a name made from the file name, referenced a prim that does not exist (empty groom,
+    "Unresolved reference prim path")."""
     try:
         from pxr import Sdf
 
         layer = Sdf.Layer.OpenAsAnonymous(str(path))
-        return layer.defaultPrim if layer is not None else ""
+        if layer is None:
+            return ""
+        if layer.defaultPrim:
+            return layer.defaultPrim
+        roots = list(layer.rootPrims)
+        for spec in roots:
+            if spec.specifier == Sdf.SpecifierDef:
+                return spec.name
+        return roots[0].name if roots else ""
     except Exception:
         return ""
 
