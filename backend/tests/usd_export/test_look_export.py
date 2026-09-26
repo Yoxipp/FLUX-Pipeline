@@ -376,6 +376,37 @@ class AssignVariants(unittest.TestCase):
                                   variant_bindings={"Hunter": same, "Victim": same}, variant_prim="/Utah",
                                   asset_prims=["geo/render/transform1"])
 
+    def test_utah_assign_material_parms_land_on_the_published_grooms(self) -> None:
+        """Live 2026-09-26 (UTAH): assignmaterial2 in branch Hunter asks
+        Utah/groom/feathersGroom/body/bodyGroom_procedural -> /Utah/mtl/KMA_FTH_Body_Hunter,
+        the export holds /materials/KMA_FTH_Body_Hunter and the published groom is
+        groom/groom_procedural_BODY/groom/feathersGroom/body/bodyGroom_procedural."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {}
+            for v in ("Hunter", "Victim"):
+                stage = Usd.Stage.CreateInMemory()
+                for name in ("KMA_FTH_Body", "KMA_FTH_Body_Hunter"):
+                    UsdShade.Material.Define(stage, f"/materials/{name}")
+                    UsdShade.Shader.Define(stage, f"/materials/{name}/surface").CreateIdAttr("UsdPreviewSurface")
+                out = root / f"export__{v}.usda"
+                stage.GetRootLayer().Export(str(out))
+                files[v] = out
+            listed = {"Hunter": {"/Utah/groom/feathersGroom/body/bodyGroom_procedural":
+                                 "/Utah/mtl/KMA_FTH_Body_Hunter"},
+                      "Victim": {"/Utah/groom/feathersGroom/body/bodyGroom_procedural":
+                                 "/Utah/mtl/KMA_FTH_Body"}}
+            groom = "groom/groom_procedural_BODY/groom/feathersGroom/body/bodyGroom_procedural"
+            res = author_look_layer(files["Hunter"], root / "v001", "CHAR_SHADING_UTAH_FEATHERS_MATERIAL",
+                                    root_name="UTAH", variant_sources=files, variant_default="Victim",
+                                    variant_bindings=listed, variant_prim="/Utah",
+                                    asset_prims=["geo/render/transform1", groom])
+            stage = Usd.Stage.Open(str(res["root"]))
+            UsdGeom.BasisCurves.Define(stage, f"/UTAH/{groom}")
+            self.assertEqual(_bound(stage, f"/UTAH/{groom}"), "/UTAH/mtl/KMA_FTH_Body")
+            stage.GetPrimAtPath("/UTAH").GetVariantSet("assign").SetVariantSelection("Hunter")
+            self.assertEqual(_bound(stage, f"/UTAH/{groom}"), "/UTAH/mtl/KMA_FTH_Body_Hunter")
+
     def test_referenced_variant_sets_are_not_assignments(self) -> None:
         """A component brought by FLUX Import carries its own variant sets: never read
         as the look's assignments (the classic single look layer is written)."""

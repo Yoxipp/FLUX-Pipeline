@@ -245,12 +245,16 @@ def _place_bindings(found: dict[Sdf.Path, Sdf.Path], gprims: set[Sdf.Path],
     names = dict(zip(loose, mesh_prim_names([(p.name, p.pathString) for p in loose], sanitize_token)))
     out: dict[str, Sdf.Path] = {}
     missing: list[str] = []
+    known = set(asset_prims or [])
     for path, mat in found.items():
         parts = path.pathString.split("/")[1:]
-        if _asset_root(path):
-            rel = "/".join(parts[1:])
-        elif _asset_geo(path):
-            rel = "/".join(parts[parts.index("geo", 1):])
+        if _asset_root(path) or _asset_geo(path):
+            rel = "/".join(parts[1:]) if _asset_root(path) else "/".join(parts[parts.index("geo", 1):])
+            if known and rel and rel not in known:
+                # Same prim, other hierarchy (groom scene /Utah/groom/feathersGroom/... vs the
+                # asset's groom/groom_procedural_BODY/groom/feathersGroom/...): the asset
+                # prim sharing the longest path tail.
+                rel = _by_name(path) or rel
         elif asset_prims is not None:
             rel = _by_name(path)
             if rel is None:
@@ -494,7 +498,14 @@ def _author_assign_look(flats: list, selection: str, dest: Path, base: str, toke
     bindings = 0
     skipped: set[Sdf.Path] = set()
 
+    by_leaf: dict[str, list[Sdf.Path]] = {}
+    for src in moved:
+        by_leaf.setdefault(src.name, []).append(src)
+
     def _bind(parent: Sdf.PrimSpec, rel: str, material: Sdf.Path) -> bool:
+        if material not in moved and len(by_leaf.get(material.name, [])) == 1:
+            # The Assign Material names /Utah/mtl/X, the export holds /materials/X.
+            material = by_leaf[material.name][0]
         if material not in moved:
             skipped.add(material)
             return False

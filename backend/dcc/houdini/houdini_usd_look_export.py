@@ -162,14 +162,61 @@ _EXPORT_CODE = textwrap.dedent(r'''
                     named.append((int(m.group(1)), val))
             order = [v for _, v in sorted(set(named))]
             if sorted(order) != sorted(variants) or len(order) != len(inputs):
-                _log("WARNING", "%s : noms des variantes non lus, ordre des entrees utilise" % n.path())
-                order = list(variants)[:len(inputs)]
+                by_node = [b.name() for b in inputs]
+                if sorted(by_node) == sorted(variants):
+                    order = by_node              # branches named after their variant
+                else:
+                    _log("WARNING", "%s : noms des variantes non lus, ordre des entrees utilise" % n.path())
+                    order = list(variants)[:len(inputs)]
+            # Assign Material nodes of each branch (those every branch shares apply to all).
+            chains = [[b] + list(b.inputAncestors()) for b in inputs]
+            shared = set(chains[0]).intersection(*chains[1:]) if chains else set()
             out = {{}}
-            for branch, v in zip(inputs, order):
-                out[v] = _stage_bindings(branch)
-                _log("INFO", "branche %s -> variante %s : %d liaison(s)" % (branch.path(), v, len(out[v])))
+            for branch, v, chain in zip(inputs, order, chains):
+                assigns = [a for a in reversed(chain) if _is_assign(a)]
+                listed = _assign_bindings(assigns, branch)
+                live = _stage_bindings(branch)
+                out[v] = dict(listed, **live)     # what the stage really binds wins
+                _log("INFO", "branche %s -> variante %s : %d liaison(s) (%d dans les Assign Material %s, %d sur la scene)"
+                     % (branch.path(), v, len(out[v]), len(listed),
+                        ", ".join(a.name() for a in assigns if a not in shared) or "-", len(live)))
             return out
         return None
+
+    def _assign_pairs(n):
+        # [(prim pattern, material path)] an Assign Material node asks for.
+        import re
+        pairs = {{}}
+        for parm in n.parms():
+            m = re.match(r"(primpattern|matspecpath)(\d+)$", parm.name())
+            if m:
+                pairs.setdefault(int(m.group(2)), {{}})[m.group(1)] = parm.evalAsString().strip()
+        return [(pairs[i].get("primpattern", ""), pairs[i].get("matspecpath", ""))
+                for i in sorted(pairs) if pairs[i].get("primpattern") and pairs[i].get("matspecpath")]
+
+    def _is_assign(n):
+        return "assignmaterial" in n.type().name().lower()
+
+    def _expand(pattern, lop):
+        # Literal paths as absolute ones ("Utah/groom" -> "/Utah/groom"); wildcards
+        # expanded on the branch stage when Houdini can.
+        if any(c in pattern for c in "*?[{{%") or " " in pattern.strip():
+            try:
+                rule = hou.LopSelectionRule()
+                rule.setPathPattern(pattern)
+                return [str(p) for p in rule.expandedPaths(lop)]
+            except Exception as exc:
+                _log("WARNING", "motif %s non developpe : %s" % (pattern, exc))
+                return []
+        return ["/" + pattern.lstrip("/")]
+
+    def _assign_bindings(nodes, lop):
+        out = {{}}
+        for n in nodes:                       # upstream first: a later node wins
+            for pattern, mat in _assign_pairs(n):
+                for path in _expand(pattern, lop):
+                    out[path] = "/" + mat.lstrip("/")
+        return out
 
     def _log_assign_nodes(node):
         # What the Assign Material nodes above the export ask for, and whether their
