@@ -692,6 +692,24 @@ def _handle(conn: socket.socket) -> None:
             pass
 
 
+def _listen(host: str, port: int) -> socket.socket:
+    """Listening socket that owns its port alone. On Windows SO_REUSEADDR lets a second
+    app (another copy, a stale bridge) bind the SAME port without error and steal part
+    of the connections ("ne repond pas" at random): exclusive use there instead."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((host, port))
+        sock.listen(5)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
 def _serve(sock: socket.socket) -> None:
     while True:
         try:
@@ -730,17 +748,14 @@ def start() -> None:
         _VERSION = _read_version()
         _register_flux_node()
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((HOST, PORT))
-        sock.listen(5)
+        sock = _listen(HOST, PORT)
         _server_sock = sock
         builtins._flux_mari_bridge_started = True
         threading.Thread(target=_serve, args=(sock,), daemon=True).start()
         _start_main_thread_pump()
         _diag(f"Mari bridge listening on {HOST}:{PORT} (api={_MARI_AVAILABLE}, file={here})")
     except OSError as exc:
-        _diag(f"Mari bridge bind failed on {HOST}:{PORT}: {exc}")
+        _diag(f"Mari bridge bind failed on {HOST}:{PORT}: {exc} (port pris : un autre Mari ouvert ? netstat -ano | findstr {PORT})")
 
 
 # Mari imports every script of its Scripts folders at startup: start the server on

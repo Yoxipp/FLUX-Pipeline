@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from core.logger import get_logger
@@ -22,6 +23,7 @@ _PAINTER_PYTHON = ("Adobe", "Adobe Substance 3D Painter", "python")
 _PAINTER_PLUGINS = (*_PAINTER_PYTHON, "startup")
 # Before 2026-09-24 the bridge went to python/plugins (never started on its own).
 _OLD_SUBDIR = "plugins"
+_BRIDGE_LOG = Path(tempfile.gettempdir()) / "flux_painter_bridge.log"
 
 
 def _plugins_dir() -> Path:
@@ -90,3 +92,20 @@ def uninstall(exe_path: str | None = None) -> dict:
         return {"success": False, "message": str(exc)}
     _remove_legacy()
     return {"success": True, "message": "uninstalled"}
+
+
+def diagnose(max_lines: int = 4) -> str:
+    """Why Painter may not answer, in words: where the bridge is and its last log lines."""
+    f = get_startup_file()
+    parts = [f"Bridge installe dans : {f}" if f and f.exists()
+             else "Bridge non installe (bouton Plug de Painter dans la barre de gauche)"]
+    try:
+        lines = _BRIDGE_LOG.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+    except OSError:
+        lines = []
+    if lines:
+        parts.append("Log du bridge : " + " / ".join(lines[-max_lines:]))
+    elif f and f.exists():
+        parts.append("Painter n'a jamais lance le bridge (aucun log " + str(_BRIDGE_LOG)
+                     + ") : relance Painter, regarde le menu Python (flux_substance_bridge coche)")
+    return ". ".join(parts)

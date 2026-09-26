@@ -71,17 +71,36 @@ def _diag(msg: str) -> None:
     print("[FLUX] " + msg)
 
 
+_draining = False
+
+
 def _drain() -> None:
-    while True:
-        try:
-            fn, box, done = _jobs.get_nowait()
-        except _queue.Empty:
-            return
-        try:
-            box["result"] = fn()
-        except Exception as exc:  # noqa: BLE001 - reported to the backend
-            box["result"] = {"status": "error", "msg": str(exc)}
-        done.set()
+    # The app pumps Qt events while it exports, so this timer fires again in the
+    # middle of a job: never start another API call inside one (Mari crashed that
+    # way, 2026-09-26). A job whose caller gave up waiting is skipped.
+    global _draining
+    if _draining:
+        return
+    _draining = True
+    try:
+        while True:
+            try:
+                fn, box, done = _jobs.get_nowait()
+            except _queue.Empty:
+                return
+            if box.get("abandoned"):
+                done.set()
+                continue
+            name = getattr(fn, "__name__", "job")
+            _diag(f"main thread: {name} start")
+            try:
+                box["result"] = fn()
+            except Exception as exc:  # noqa: BLE001 - reported to the backend
+                box["result"] = {"status": "error", "msg": str(exc)}
+            _diag(f"main thread: {name} done")
+            done.set()
+    finally:
+        _draining = False
 
 
 def _start_main_thread_pump() -> None:
@@ -111,6 +130,7 @@ def _on_main_thread(fn, timeout: float = 600.0) -> dict:
     done = threading.Event()
     _jobs.put((fn, box, done))
     if not done.wait(timeout):
+        box["abandoned"] = True
         return {"status": "error", "msg": "DCC busy: no answer from the main thread"}
     return box["result"]
 
@@ -391,7 +411,16 @@ def _do_export(config: dict) -> dict:
     return {"status": "ok", "files": files, "warnings": errors}
 
 
+_VERSION = ""
+
+
 def _version() -> str:
+    """Read once at startup on the main thread: the ping runs on a socket thread and
+    must never call the sd API (Designer is not thread-safe)."""
+    return _VERSION or "Substance Designer"
+
+
+def _read_version() -> str:
     try:
         return f"Substance Designer {_app().getVersion()}"
     except Exception:  # noqa: BLE001
@@ -401,7 +430,7 @@ def _version() -> str:
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
     if action == "ping":
-        return {"status": "ok", "version": _version() if _SD_AVAILABLE else "Substance Designer"}
+        return {"status": "ok", "version": _version()}
     if action == "info":
         return _on_main_thread(_do_info, timeout=20.0)
     if action == "export":
@@ -430,6 +459,24 @@ def _handle(conn: socket.socket) -> None:
             pass
 
 
+def _listen(host: str, port: int) -> socket.socket:
+    """Listening socket that owns its port alone. On Windows SO_REUSEADDR lets a second
+    app (another copy, a stale bridge) bind the SAME port without error and steal part
+    of the connections ("ne repond pas" at random): exclusive use there instead."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((host, port))
+        sock.listen(5)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
 def _serve(sock: socket.socket) -> None:
     while True:
         try:
@@ -440,20 +487,19 @@ def _serve(sock: socket.socket) -> None:
 
 
 def initializeSDPlugin() -> None:  # noqa: N802 - Designer entry point
-    global _server_sock
+    global _server_sock, _VERSION
     if _server_sock is not None:
         return
+    if _SD_AVAILABLE:
+        _VERSION = _read_version()
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((HOST, PORT))
-        sock.listen(5)
+        sock = _listen(HOST, PORT)
         _server_sock = sock
         threading.Thread(target=_serve, args=(sock,), daemon=True).start()
         _start_main_thread_pump()
         _diag(f"Substance Designer bridge listening on {HOST}:{PORT} (api={_SD_AVAILABLE})")
     except OSError as exc:
-        _diag(f"Substance Designer bridge bind failed on {HOST}:{PORT}: {exc}")
+        _diag(f"Substance Designer bridge bind failed on {HOST}:{PORT}: {exc} (port pris : un autre Designer ouvert ? netstat -ano | findstr {PORT})")
 
 
 def uninitializeSDPlugin() -> None:  # noqa: N802 - Designer entry point

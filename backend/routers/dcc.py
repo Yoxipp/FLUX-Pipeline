@@ -2003,7 +2003,8 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
         ),
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=503, detail=result.get("error", "Substance publish failed"))
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Substance publish failed", _substance_autostart, "Painter"))
     return result
 
 
@@ -2052,7 +2053,8 @@ async def substance_info() -> dict:
     loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, substance_client.info)
     if not res.get("ok"):
-        raise HTTPException(status_code=503, detail=res.get("error", "Painter ne repond pas"))
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            res.get("error"), "Painter ne repond pas", _substance_autostart, "Painter"))
     return res
 
 
