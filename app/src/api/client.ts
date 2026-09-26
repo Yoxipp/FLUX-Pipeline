@@ -1041,7 +1041,7 @@ export interface UsdAssemblyInstance {
   variants: Record<string, string>   // variant set (one per component file) -> variant picked by this instance
 }
 export interface UsdAssemblyInfo {
-  name: string; file: string; instances: UsdAssemblyInstance[]; broken: number
+  name: string; class?: string; file: string; instances: UsdAssemblyInstance[]; broken: number
   version: string | null      // current vNNN (null = legacy flat file)
   versions: string[]
   legacy: boolean             // old builder file, converted on first edit
