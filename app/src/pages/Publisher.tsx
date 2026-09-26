@@ -830,7 +830,9 @@ export function Publisher() {
     ?? { geo: true, skel: true, anim: true, weights: true, uv: true }
   // USD preset FLUX writes for this task (ADR 0034): its own options, its own listing.
   // null = no FLUX department, or the DCC writes the file ("custom").
-  const usdPreset: UsdPreset | null = usdLayers
+  // Only for a USD format: a .ma / .mb / .fbx / .abc of the same task exports the scene
+  // (or the selection) as usual, with that format's own options.
+  const usdPreset: UsdPreset | null = usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)
     ? presetForTask(mode === 'asset' ? sel.task : formatToken(sel.name), mode === 'shot') : null
   const [usdPresetOpts, setUsdPresetOpts] = useState(defaultPresetOptions)
   const [usdPreview, setUsdPreview] = useState<MayaUsdPreview | null>(null)
