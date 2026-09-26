@@ -177,6 +177,19 @@ class ManualComponent(unittest.TestCase):
         guides = [p for p in comp.Traverse() if p.IsA(UsdGeom.BasisCurves)]
         self.assertEqual([str(p.GetPath()) for p in guides], ["/UTAH/groom/wings/guides"])
 
+    def test_a_default_prim_that_does_not_exist_is_not_referenced(self) -> None:
+        """A groom whose defaultPrim names a prim the file does not hold."""
+        rel = f"{_NAME_REL}/groom/procedural/CHAR_GROOM_UTAH_PROCEDURAL_TAIL_v001.usda"
+        path = self.project / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        layer = Sdf.Layer.CreateNew(str(path))
+        stage = Usd.Stage.Open(layer)
+        UsdGeom.BasisCurves.Define(stage, "/groom_procedural_TAIL/guides")
+        layer.defaultPrim = "CHAR_GROOM_UTAH_PROCEDURAL_TAIL"
+        layer.Save()
+        from features.usd_assembler.resolve.flux_resolver import _default_prim
+        self.assertEqual(_default_prim(path), "groom_procedural_TAIL")
+
     def test_manual_files_of_any_format(self) -> None:
         ca.create_component(self.project, _NAME, ["GEO"])
         recipe = ca.current_recipe(self.project, _NAME)

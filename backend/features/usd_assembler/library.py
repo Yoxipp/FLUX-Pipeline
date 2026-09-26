@@ -83,9 +83,13 @@ def _component_info(project: Path, tokens: dict, name: str, parent: Path, versio
         res = resolved.get(f["id"])
         files.append({**f, "resolved_version": res["version"] if res else None,
                       "composed_version": (composed.get(f["id"]) or {}).get("version"),
-                      "found": res is not None})
+                      "found": res is not None,
+                      # the prim it resolves to changed since (e.g. a wrong defaultPrim fixed)
+                      "prim_changed": bool(res and f["id"] in composed
+                                           and (composed[f["id"]].get("prim") or "") != res["prim"])})
     legacy = not ca._entry_flux(entry).get("recipe")
-    stale = legacy or any(f["found"] and f["resolved_version"] != f["composed_version"] for f in files)         or set(composed) - set(resolved)
+    stale = legacy or any(f["found"] and (f["resolved_version"] != f["composed_version"] or f["prim_changed"])
+                          for f in files)         or set(composed) - set(resolved)
     return {
         "name": name, "class": _class_of(tokens, name),
         "state": "stale" if stale else ("ok" if files else "empty"),

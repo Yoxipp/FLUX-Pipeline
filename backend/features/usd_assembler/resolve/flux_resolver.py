@@ -42,23 +42,26 @@ _VER_FOLDER_RE = re.compile(r"^(?P<base>.+)_(?P<ver>LAST|v\d+)$")
 def _default_prim(path: Path) -> str:
     """defaultPrim of a published layer: the NAME token since ADR 0019, the publish base before.
 
-    A file without defaultPrim (a groom written by a Houdini ROP, 2026-09-26): its
-    first defined root prim, as Houdini's Reference LOP does. The callers' old fallback,
-    a name made from the file name, referenced a prim that does not exist (empty groom,
-    "Unresolved reference prim path")."""
+    Only a prim that really exists in the file (its sublayers included). A groom written
+    by Houdini (2026-09-26) had no usable defaultPrim: the callers' fallback, a name
+    made from the file name, referenced a prim that does not exist (empty groom,
+    "Unresolved reference prim path"). Then the first defined root prim is taken, as
+    Houdini's Reference LOP does."""
     try:
-        from pxr import Sdf
+        from pxr import Sdf, Usd
 
-        layer = Sdf.Layer.OpenAsAnonymous(str(path))
+        layer = Sdf.Layer.FindOrOpen(str(path))
         if layer is None:
             return ""
-        if layer.defaultPrim:
+        layer.Reload()      # the backend lives long: read the file as it is on disk now
+        stage = Usd.Stage.Open(layer, Usd.Stage.LoadNone)
+        if layer.defaultPrim and stage.GetPrimAtPath("/" + layer.defaultPrim).IsValid():
             return layer.defaultPrim
-        roots = list(layer.rootPrims)
-        for spec in roots:
-            if spec.specifier == Sdf.SpecifierDef:
-                return spec.name
-        return roots[0].name if roots else ""
+        roots = list(stage.GetPseudoRoot().GetAllChildren())
+        for prim in roots:
+            if prim.IsDefined() and not prim.IsAbstract():
+                return prim.GetName()
+        return roots[0].GetName() if roots else ""
     except Exception:
         return ""
 
