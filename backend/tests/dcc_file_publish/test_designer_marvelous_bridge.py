@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import time as _time
 import tempfile
 import types
 import unittest
@@ -157,13 +159,43 @@ class Autostart(unittest.TestCase):
             self.assertTrue(sd_autostart.uninstall()["success"])
             self.assertFalse(pkg.exists())
 
-    def test_marvelous_script(self):
-        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d}):
+    def test_marvelous_script_goes_into_the_plugin_menu(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as plug, \
+                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}):
+            settings = Path(plug) / "pluginSettings.json"
+            # a plug-in the artist added by hand stays
+            settings.write_text(json.dumps({"plugins": [{"m_PlugInTitle": "Other", "m_SourcePath": "C:/x.py"}],
+                                            "version": 2}), encoding="utf-8")
             self.assertTrue(md_autostart.install()["success"])
-            self.assertTrue((Path(d) / "flux_marvelous_bridge.py").is_file())
-            self.assertIn("Python Script", md_autostart.diagnose())
+            self.assertTrue(md_autostart.install()["success"])        # twice: one entry
+            script = Path(d) / "flux_marvelous_bridge.py"
+            self.assertTrue(script.is_file())
+            plugins = json.loads(settings.read_text(encoding="utf-8"))["plugins"]
+            self.assertEqual([p["m_PlugInTitle"] for p in plugins], ["Other", "FLUX Bridge"])
+            flux = plugins[1]
+            self.assertEqual((flux["m_SourcePath"], flux["m_SourceType"], flux["m_BaseMenuTreeByObjectName"]),
+                             (str(script), "script", "Plugins / Plug-in"))
+            self.assertIn("Plugins > Plug-in > FLUX Bridge", md_autostart.diagnose())
             self.assertTrue(md_autostart.uninstall()["success"])
             self.assertFalse(md_autostart.is_installed())
+            plugins = json.loads(settings.read_text(encoding="utf-8"))["plugins"]
+            self.assertEqual([p["m_PlugInTitle"] for p in plugins], ["Other"])
+
+    def test_marvelous_unreadable_settings_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as plug, \
+                mock.patch.dict(os.environ, {"FLUX_MD_SCRIPTS_DIR": d, "FLUX_MD_PLUGINS_DIR": plug}):
+            settings = Path(plug) / "pluginSettings.json"
+            settings.write_text("{not json", encoding="utf-8")
+            res = md_autostart.install()
+            self.assertTrue(res["success"])                         # the script is there
+            self.assertIn("+ADD", res["message"])
+            self.assertEqual(settings.read_text(encoding="utf-8"), "{not json")
+            # the Python Editor line is a raw string: a bare Windows path is a SyntaxError
+            self.assertTrue(md_autostart.python_editor_line().startswith('exec(open(r"'))
+
+    def test_marvelous_script_is_ascii(self):
+        # Marvelous may not read the script as UTF-8.
+        (Path(md_autostart._PLUGIN_SRC)).read_bytes().decode("ascii")
 
 
 class MarvelousBridgeScript(unittest.TestCase):
@@ -198,7 +230,7 @@ class MarvelousBridgeScript(unittest.TestCase):
         # says "already listening" keeps the test from binding the real port.
         import builtins
         self._state = mock.patch.object(builtins, "_flux_marvelous_bridge",
-                                        {"sock": object(), "timer": None, "jobs": None}, create=True)
+                                        {"running": True, "stop": False}, create=True)
         self._state.start()
         sys.modules.pop("dcc.marvelous.marvelous_bridge", None)
         from dcc.marvelous import marvelous_bridge as br
@@ -229,6 +261,34 @@ class MarvelousBridgeScript(unittest.TestCase):
         with mock.patch.object(self.br, "_MD_AVAILABLE", True), tempfile.TemporaryDirectory() as d:
             res = self.br._do_export({"exportPath": d, "name": "X", "format": "abc"})
         self.assertEqual(res["status"], "error")
+
+
+    def test_serves_on_the_calling_thread_until_shutdown(self):
+        # Marvelous freezes background threads: the loop runs on the caller's thread,
+        # pumping the host between requests, and returns on shutdown.
+        import socket as _socket
+        import threading
+        from dcc.json_bridge import send_json_line
+
+        with _socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        pumps = []
+        state = {"running": False, "stop": False}
+        with mock.patch.object(self.br, "PORT", port), mock.patch.object(self.br, "_state", return_value=state):
+            t = threading.Thread(target=self.br.serve, kwargs={"pump": lambda: pumps.append(1) or True})
+            t.start()
+            for _ in range(100):
+                if state["running"]:
+                    break
+                _time.sleep(0.02)
+            ping = send_json_line("127.0.0.1", port, {"action": "ping"}, 5.0)
+            self.assertTrue(ping["ok"], ping)
+            self.assertTrue(send_json_line("127.0.0.1", port, {"action": "shutdown"}, 5.0)["ok"])
+            t.join(5.0)
+        self.assertFalse(t.is_alive())
+        self.assertFalse(state["running"])
+        self.assertTrue(pumps)
 
 
 class DesignerBridgeScript(unittest.TestCase):

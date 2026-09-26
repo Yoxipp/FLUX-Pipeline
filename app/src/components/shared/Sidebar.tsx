@@ -736,8 +736,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                          : 'Installer le bridge Designer (sduserplugins)')
                    : isMarvelous
                      ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · bridge Marvelous' : 'Script écrit · à lancer dans Marvelous (Script > Python Script) · clic pour retirer')
-                         : 'Écrire le script bridge Marvelous (Documents/FLUX/marvelous)')
+                         ? (serverOk === true ? 'Connecté · bridge Marvelous' : 'Bridge installé · dans Marvelous : Plugins > Plug-in > FLUX Bridge · clic pour désinstaller')
+                         : 'Installer le bridge Marvelous (menu Plugins > Plug-in, Marvelous fermé)')
                      : (autoInstalled
                          ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
                          : 'Installer le plugin ZBrush')}

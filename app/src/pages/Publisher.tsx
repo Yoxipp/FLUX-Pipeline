@@ -2058,14 +2058,19 @@ export function Publisher() {
                       : bridgeStatus.checking
                         ? 'Vérification...'
                         : dcc === 'Marvelous'
-                          ? 'Marvelous ne répond pas : lance le script bridge FLUX dans Marvelous (Script > Python Script, ouvrir, Run)'
+                          ? 'Marvelous ne répond pas : dans Marvelous, Plugins > Plug-in > FLUX Bridge (une fois par session)'
                           : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
                   </div>
                 </div>
                 {dcc === 'Marvelous' && !bridgeStatus.connected && !bridgeStatus.checking && (
                   <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
                     {marvelousScript
-                      ? <CopyBlock text={marvelousScript} />
+                      ? <>
+                          <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>
+                            Pas de FLUX Bridge dans le menu (Marvelous était ouvert pendant l'installation ?) : colle cette ligne dans Plugins &gt; Python Editor puis Run.
+                          </span>
+                          <CopyBlock text={`exec(open(r"${marvelousScript}", encoding="utf-8").read())`} />
+                        </>
                       : <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>Script absent : bouton Plug de Marvelous dans la sidebar pour l'écrire.</span>}
                   </div>
                 )}
