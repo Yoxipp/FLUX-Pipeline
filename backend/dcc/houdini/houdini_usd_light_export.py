@@ -138,6 +138,23 @@ _EXTRACT_CODE = textwrap.dedent(r'''
             out[path[n]] = (w * pw.inverted()) if pw is not None else w
         return out
 
+    def _mesh_name(node, geo):
+        # The mesh's own name, not the SOP's: a Transform SOP at the end of the chain
+        # named the published mesh "transform1" (live UTAH 2026-09-26). Prim attribute
+        # "path" (FBX / USD / Alembic import) then "name", when the geo holds one value;
+        # else the node name. Returns (leaf, full path or "").
+        for attr in ("path", "name"):
+            a = geo.findPrimAttrib(attr)
+            if a is None or a.dataType() != hou.attribData.String:
+                continue
+            vals = [v for v in a.strings() if v]
+            if len(vals) != 1:
+                continue
+            leaf = vals[0].replace("\\", "/").rstrip("/").split("/")[-1].split(":")[-1]
+            if leaf:
+                return leaf, (vals[0] if attr == "path" else "")
+        return node.name(), ""
+
     def _mesh_geo(geo):
         pts = [list(p.position()) for p in geo.points()]
         counts, indices, uvs = [], [], []
@@ -214,8 +231,10 @@ _EXTRACT_CODE = textwrap.dedent(r'''
             if _INC_GEO and mesh_node is not None:
                 mg = mesh_node.geometry()
                 pts, counts, indices, uvs = _mesh_geo(mg)
+                mesh_name, mesh_path = _mesh_name(mesh_node, mg)
                 mesh_dict = {{
-                    "name": mesh_node.name(),
+                    "name": mesh_name,
+                    "path": mesh_path,
                     "points": pts,
                     "face_vertex_counts": counts,
                     "face_vertex_indices": indices,
