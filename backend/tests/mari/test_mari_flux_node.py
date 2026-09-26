@@ -106,6 +106,32 @@ class FluxExportNode(unittest.TestCase):
         self.assertIn(("remove",), calls)
         self.assertIn("rien n'est branche", " ".join(res["errors"]))
 
+    def test_a_bake_that_writes_nothing_falls_back_to_the_export_manager(self):
+        """2026-09-26: exportBakedResult returned without writing anything."""
+        nodes, calls = self._nodes(), []
+        nodes[0].exportBakedResult = lambda *args: calls.append(("bake", args))
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(b, "mari", fake_mari(nodes, calls)), mock.patch.object(b, "_MARI_AVAILABLE", True), \
+                mock.patch.object(b, "_diag", lambda msg: None):
+            res = b._do_export(tmp, "auto", ["BCOL"], {"*": "exr"}, {})
+            names = os.listdir(tmp)
+        self.assertEqual(names, ["BCOL.1001.exr"])
+        self.assertEqual(calls[0][1][2], [0], "every tile of the geo is asked, never an empty list")
+        self.assertEqual([c[1] for c in calls if c[0] == "em"], ["BAKE_COL"])
+
+    def test_files_mari_names_its_own_way_are_claimed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "old.txt").write_text("x")
+            before = set(os.listdir(tmp))
+            Path(tmp, "BAKE_DISP_1001.exr").write_bytes(b"x")
+            Path(tmp, "BAKE_DISP_1002.exr").write_bytes(b"x")
+            got = b.claim_new_files(tmp, before, "DISP")
+            self.assertEqual(sorted(os.path.basename(g) for g in got), ["DISP.1001.exr", "DISP.1002.exr"])
+
+    def test_tile_indices_come_from_the_patches(self):
+        geo = SimpleNamespace(patchList=lambda: [SimpleNamespace(uvIndex=lambda: 0), SimpleNamespace(uvIndex=lambda: 11)])
+        self.assertEqual(b.tile_indices(geo), [0, 11])
+
     def test_no_flux_node_keeps_the_channel_export(self):
         with mock.patch.object(b, "mari", fake_mari([], [])), mock.patch.object(b, "_MARI_AVAILABLE", True):
             res = b._do_info()

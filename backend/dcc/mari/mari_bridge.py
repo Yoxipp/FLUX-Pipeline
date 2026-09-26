@@ -456,6 +456,9 @@ def _node_ids(nodes) -> list:
     """[(id, node, map)]: id = the map, "BCOL (2)" for a second node on the same map."""
     seen: dict = {}
     out = []
+    # Plugged nodes first: the one that exports keeps the plain map name ("BCOL"), a
+    # forgotten unplugged node becomes "BCOL (2)" (2026-09-26).
+    nodes = sorted(nodes, key=lambda n: _input_of(n) is None)
     for node in nodes:
         fmap = _ensure_map_meta(node)
         seen[fmap] = seen.get(fmap, 0) + 1
@@ -542,9 +545,25 @@ def _node_container(wanted: str) -> str:
     return "exr" if wanted == "exr" else "tif"
 
 
-def _export_baked(bake, out_template: str) -> None:
-    """exportBakedResult of a Bake Point into *out_template*; its own Export Path is
-    restored after."""
+def tile_indices(geo) -> list:
+    """UV indices (0 = 1001) of every patch of the geo. exportBakedResult writes only the
+    tiles it is given: an empty list wrote nothing (2026-09-26)."""
+    out = []
+    try:
+        patches = list(geo.patchList())
+    except Exception:  # noqa: BLE001
+        return out
+    for i, patch in enumerate(patches):
+        try:
+            out.append(int(patch.uvIndex()))
+        except Exception:  # noqa: BLE001 - older API: patches in UV order
+            out.append(i)
+    return out
+
+
+def _export_baked(bake, out_template: str, tiles: list) -> None:
+    """exportBakedResult of a Bake Point into *out_template* for *tiles*; its own Export
+    Path is restored after."""
     old = None
     try:
         old = bake.exportPath()
@@ -554,9 +573,11 @@ def _export_baked(bake, out_template: str) -> None:
         bake.setExportPath(out_template)
         errors = []
         opts = getattr(getattr(mari, "Image", None), "DEFAULT_OPTIONS", 0)
-        for args in ((False, opts, []), (False, opts, [], {}), (False,), ()):
+        for args in ((False, opts, tiles), (False, opts, tiles, {}), (False,), ()):
             try:
-                bake.exportBakedResult(*args)
+                ret = bake.exportBakedResult(*args)
+                _diag(f"exportBakedResult{(args[0],) + tuple(args[2:3])} -> {ret!r}, "
+                      f"export path {out_template}")
                 return
             except TypeError as exc:
                 errors.append(str(exc))
@@ -567,6 +588,35 @@ def _export_baked(bake, out_template: str) -> None:
                 bake.setExportPath(old)
             except Exception:  # noqa: BLE001
                 pass
+
+
+def claim_new_files(folder: str, before: set, stem: str) -> list:
+    """Files written in *folder* since *before*, renamed "<stem>.<tile>.<ext>" when Mari
+    named them its own way (FLUX finds the map by that stem)."""
+    import re
+    out = []
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(folder, name)
+        if name in before or not os.path.isfile(path) or "$UDIM" in name:
+            continue
+        if name.startswith(stem + "."):
+            out.append(path)
+            continue
+        ext = os.path.splitext(name)[1]
+        tile = re.search(r"(?<!\d)(1\d{3})(?!\d)", name)
+        dest = os.path.join(folder, f"{stem}.{tile.group(1)}{ext}" if tile else f"{stem}{ext}")
+        if os.path.exists(dest):
+            continue
+        try:
+            os.replace(path, dest)
+            out.append(dest)
+        except OSError:
+            out.append(path)
+    return out
 
 
 def _em_remove(item, geo) -> None:
@@ -616,6 +666,7 @@ def _do_export_nodes(geo, export_path: str, wanted: set, formats: dict, sizes: d
 
     files: list = []
     errors: list = []
+    tiles = tile_indices(geo)
     for nid, node, fmap in _node_ids(_flux_nodes(geo)):
         if wanted and nid not in wanted:
             continue
@@ -630,22 +681,33 @@ def _do_export_nodes(geo, export_path: str, wanted: set, formats: dict, sizes: d
         baked = _is_bake_point(src) and _baked_ok(src)
         how = f"bake {_node_name(src)}" if baked else f"Export Manager depuis {_node_name(node)}"
         _diag(f"Mari channel start {nid} ({fmt}, {how})")
+        size = int(sizes.get(nid) or 0)
+        try:
+            before = set(os.listdir(export_path))
+        except OSError:
+            before = set()
+        written: list = []
+        failure = ""
         try:
             if baked:
-                _export_baked(src, os.path.join(export_path, template))
+                _export_baked(src, os.path.join(export_path, template), tiles)
+                written = claim_new_files(export_path, before, stem)
+                if not written:
+                    # The baked result wrote nothing: the Export Manager from the Bake Point.
+                    _diag(f"{nid}: exportBakedResult wrote nothing, Export Manager from {_node_name(src)}")
+                    how = f"Export Manager depuis {_node_name(src)}"
+                    _export_manager(geo, src, template, export_path, size)
             else:
-                _export_manager(geo, node, template, export_path, int(sizes.get(nid) or 0))
+                _export_manager(geo, node, template, export_path, size)
         except Exception as exc:  # noqa: BLE001 - one bad node never aborts all
-            errors.append(f"{nid} : {exc}")
-            _diag(f"Mari node export failed ({nid}): {exc!r}")
-            continue
-        _diag(f"Mari channel {nid}: {_time.time() - t0:.1f} s ({fmt}, {how})")
-        written = sorted(glob.glob(os.path.join(glob.escape(export_path), f"{glob.escape(stem)}.*")))
-        written = [w for w in written if "$UDIM" not in w]
+            failure = str(exc)
+            _diag(f"Mari node export failed ({nid}, {how}): {exc!r}")
+        written = written or claim_new_files(export_path, before, stem)
         if written:
             files.extend(written)
+            _diag(f"Mari channel {nid}: {_time.time() - t0:.1f} s ({fmt}, {how}, {len(written)} fichier(s))")
         else:
-            errors.append(f"{nid} : aucun fichier ecrit ({how})")
+            errors.append(f"{nid} : " + (failure or f"aucun fichier ecrit ({how}, {len(tiles)} tuile(s))"))
     _diag(f"Mari export (FLUX Export nodes): {len(files)} file(s), errors={errors}")
     if not files:
         return {"status": "error", "msg": "Mari n'a ecrit aucun fichier depuis les nodes FLUX Export : "
