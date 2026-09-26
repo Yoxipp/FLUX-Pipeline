@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 from core.logger import get_logger
@@ -44,7 +45,14 @@ def publish_mari(
 
     log.info("Mari publish: project=%s %s_%s_%s -> asking the bridge to export", project, class_tok, task_tok, name_tok)
     export_dir = Path(tempfile.mkdtemp(prefix="flux_mari_"))
-    result = mari_client.export(str(export_dir), "auto", channels or None)
+    # Each channel's own format: Mari writes it directly when it holds the channel's
+    # depth, FLUX then keeps the file as is (no re-encode of every tile).
+    params = channel_params or {}
+    formats = {"*": file_format}
+    formats.update({c: str(p.get("format")) for c, p in params.items() if p.get("format")})
+    t0 = time.monotonic()
+    result = mari_client.export(str(export_dir), "auto", channels or None, formats)
+    timings = [f"export Mari {time.monotonic() - t0:.0f} s"]
     if not result.get("ok"):
         log.warning("Mari export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Mari export failed")}
@@ -59,19 +67,28 @@ def publish_mari(
     from dcc.texture_convert import convert_maps
 
     conv_dir = Path(tempfile.mkdtemp(prefix="flux_mari_maps_"))
-    files, conv_warnings = convert_maps(files, conv_dir, channel_params or {}, file_format,
+    t0 = time.monotonic()
+    files, conv_warnings = convert_maps(files, conv_dir, params, file_format,
                                         key_of=lambda f: f.name.split(".")[0])
+    timings.append(f"conversion {time.monotonic() - t0:.0f} s")
     if not files:
         return {"ok": False, "error": "Aucune map convertie : " + " ; ".join(conv_warnings[:3])}
 
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
+    t0 = time.monotonic()
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
                                        variante, description, user, whole_name=True)
     warnings = [f"Mari : {e}" for e in result.get("errors") or []] + conv_warnings + warnings
     for w in warnings:
         log.warning("Mari publish: %s", w)
+    timings.append(f"copie {time.monotonic() - t0:.0f} s")
+    t0 = time.monotonic()
     tx_paths = _conform_published(published, "Mari") if (conform_tx and published) else []
+    if conform_tx:
+        timings.append(f".tx {time.monotonic() - t0:.0f} s")
+    log.info("Mari publish timings (%d file(s)): %s", len(files), ", ".join(timings))
 
     if not published:
         return {"ok": False, "error": "No Mari channel could be published"}
-    return {"ok": True, "published": published, "tx": tx_paths or None, "warnings": warnings}
+    return {"ok": True, "published": published, "tx": tx_paths or None, "warnings": warnings,
+            "timings": ", ".join(timings)}

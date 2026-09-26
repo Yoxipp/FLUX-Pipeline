@@ -1448,7 +1448,8 @@ export function Publisher() {
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked,
                                     channel_params: Object.keys(chanParams).length ? chanParams : undefined })
         const n = res.published?.length ?? 0
-        toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}`)
+        const timings = 'timings' in res && res.timings ? ` (${res.timings})` : ''
+        toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}${timings}`)
         res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Designer') {
         // Like Painter: the bridge exports the ticked graphs (their ticked outputs, the
@@ -1614,7 +1615,8 @@ export function Publisher() {
         if (stale()) return
         setTexItems(r.channels.map(c => ({
           name: c.name,
-          detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : ''].filter(Boolean).join(' '),
+          detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : '',
+                 c.layers != null ? `${c.layers} calque${c.layers > 1 ? 's' : ''}` : ''].filter(Boolean).join(' '),
         })))
         setTexSource(r.geo || 'Aucune geo')
         setTexChecked(new Set(r.channels.map(c => c.name)))

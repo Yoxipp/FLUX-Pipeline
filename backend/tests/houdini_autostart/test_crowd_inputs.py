@@ -192,3 +192,18 @@ class CrowdShots(unittest.TestCase):
         ns["_cached"]("k", fetch)
         ns["_cached"]("k", fetch)
         self.assertEqual(len(calls), 2)
+
+    def test_flux_import_choices_are_read(self) -> None:
+        # 2026-09-26: an animation unchecked in FLUX Import must not play in the crowd.
+        ns: dict = {}
+        exec(flux_crowd_hda.MODULE_FUNCTIONS, ns)
+        stage = Usd.Stage.CreateInMemory()
+        prim = stage.DefinePrim("/assets/OGRE")
+        Usd.ModelAPI(prim).SetAssetInfo({"name": "OGRE"})
+        vs = prim.GetVariantSets().AddVariantSet("anim_walk")
+        vs.AddVariant("on")
+        vs.AddVariant("off")
+        vs.SetVariantSelection("off")
+        stage.DefinePrim("/assets/OGRE/skel/Skeleton").SetActive(False)
+        looks = ns["_input_looks"](_Node([_Input(stage)]))
+        self.assertEqual(looks, {"OGRE": {"variants": {"anim_walk": "off"}, "inactive": ["skel/Skeleton"]}})
