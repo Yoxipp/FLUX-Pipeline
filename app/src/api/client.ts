@@ -446,7 +446,9 @@ export const api = {
   getTextureFormats: () =>
     apiCall<{ formats: Record<string, string[]>; sizes: number[] }>('GET', '/dcc/texture/formats'),
   getMariInfo: () =>
-    apiCall<{ ok: boolean; geo: string; channels: { name: string; size?: number; depth?: number; layers?: number }[] }>(
+    apiCall<{ ok: boolean; geo: string; mode?: 'channels' | 'nodes'
+              channels: { name: string; size?: number; depth?: number; layers?: number
+                          node?: string; input?: string; baked?: boolean }[] }>(
       'GET', '/dcc/mari/info', undefined, 25000),
 
   // Mari — export channels via the in-app bridge, ingest under FLUX tokens,

@@ -110,8 +110,11 @@ class MariClient:
         return _send({"action": "info"}, timeout=20.0)
 
     def export(self, export_path: str, file_format: str = "tif",
-               channels: list[str] | None = None, formats: dict[str, str] | None = None) -> dict:
-        """Ask Mari to export the current geo's channels (all, or *channels*); {ok, files}."""
+               channels: list[str] | None = None, formats: dict[str, str] | None = None,
+               sizes: dict[str, int] | None = None) -> dict:
+        """Ask Mari to export the current geo's channels (all, or *channels*); {ok, files}.
+        With FLUX Export nodes in the geo, *channels* names those nodes (their map) and
+        *sizes* is asked to Mari's Export Manager (FLUX resizes after anyway)."""
         global _busy_since, _export_dir
         if _busy_since is not None:
             return {"ok": False, "error": "un export Mari est deja en cours"}
@@ -120,7 +123,8 @@ class MariClient:
 
         def run() -> None:
             box["result"] = _send({"action": "export", "export_path": export_path, "file_format": file_format,
-                                   "channels": channels or [], "formats": formats or {}},
+                                   "channels": channels or [], "formats": formats or {},
+                                   "sizes": sizes or {}},
                                   timeout=EXPORT_TIMEOUT_S)
 
         worker = threading.Thread(target=run, daemon=True)

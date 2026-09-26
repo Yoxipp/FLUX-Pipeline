@@ -50,9 +50,11 @@ def publish_mari(
     params = channel_params or {}
     formats = {"*": file_format}
     formats.update({c: str(p.get("format")) for c, p in params.items() if p.get("format")})
+    sizes = {c: int(p["size"]) for c, p in params.items() if str(p.get("size") or "").isdigit()}
     t0 = time.monotonic()
-    result = mari_client.export(str(export_dir), "auto", channels or None, formats)
-    timings = [f"export Mari {time.monotonic() - t0:.0f} s"]
+    result = mari_client.export(str(export_dir), "auto", channels or None, formats, sizes)
+    timings = [f"export Mari {time.monotonic() - t0:.0f} s"
+               + (" (nodes FLUX Export)" if result.get("mode") == "nodes" else "")]
     if not result.get("ok"):
         log.warning("Mari export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Mari export failed")}

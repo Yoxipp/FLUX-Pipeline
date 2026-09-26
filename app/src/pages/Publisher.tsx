@@ -1671,12 +1671,15 @@ export function Publisher() {
       } else {
         const r = await api.getMariInfo()
         if (stale()) return
+        // FLUX Export nodes in the geo: FLUX exports those (one per map), not the channels.
         setTexItems(r.channels.map(c => ({
           name: c.name,
-          detail: [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : '',
-                 c.layers != null ? `${c.layers} calque${c.layers > 1 ? 's' : ''}` : ''].filter(Boolean).join(' '),
+          detail: r.mode === 'nodes'
+            ? [c.input ? `← ${c.input}` : 'rien de branché', c.baked === true ? 'baké' : c.baked === false ? 'bake pas à jour' : ''].filter(Boolean).join(' ')
+            : [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : '',
+               c.layers != null ? `${c.layers} calque${c.layers > 1 ? 's' : ''}` : ''].filter(Boolean).join(' '),
         })))
-        setTexSource(r.geo || 'Aucune geo')
+        setTexSource(r.geo ? `${r.geo}${r.mode === 'nodes' ? ' · nodes FLUX Export' : ''}` : 'Aucune geo')
         setTexChecked(new Set(r.channels.map(c => c.name)))
       }
     } catch (e) {
