@@ -161,7 +161,11 @@ _EXTRACT_CODE = textwrap.dedent(r'''
         _uv_vtx = _INC_UV and geo.findVertexAttrib("uv") is not None
         _uv_pt = _INC_UV and (not _uv_vtx) and geo.findPointAttrib("uv") is not None
         for prim in geo.prims():
-            vs = prim.vertices()
+            vs = list(prim.vertices())
+            # Houdini winds clockwise, USD rightHanded counter-clockwise: keep the first
+            # vertex and reverse the rest, like Houdini's own SOP -> USD (UTAH GEO v001
+            # was published inside out, 2026-09-26).
+            vs = vs[:1] + vs[:0:-1]
             counts.append(len(vs))
             for v in vs:
                 indices.append(v.point().number())
