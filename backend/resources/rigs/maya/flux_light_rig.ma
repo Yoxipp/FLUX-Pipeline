@@ -1,0 +1,71 @@
+//Maya ASCII 2024 scene
+//Name: flux_light_rig.ma
+//Last modified: Sat, Sep 26, 2026 11:35:05 PM
+//Codeset: 1252
+requires maya "2024";
+currentUnit -l centimeter -a degree -t film;
+fileInfo "application" "maya";
+fileInfo "product" "Maya 2024";
+fileInfo "version" "2024";
+fileInfo "cutIdentifier" "202310181224-69282f2959";
+fileInfo "osv" "Windows 11 Pro v2009 (Build: 26200)";
+fileInfo "UUID" "D55D94DA-494D-1174-3B51-398F18063D19";
+createNode transform -n "Flux_Light_Rig";
+	rename -uid "ADCE4E50-40BB-BCA9-E3BF-6BB8AC4E6865";
+	addAttr -ci true -sn "flux_rig" -ln "flux_rig" -dt "string";
+	setAttr ".flux_rig" -type "string" "light";
+createNode transform -n "Light_Key" -p "Flux_Light_Rig";
+	rename -uid "A44C075E-49D0-CA43-B4FD-31B71641C40E";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+	setAttr ".r" -type "double3" -40.000000000000007 35.000000000000007 0 ;
+createNode directionalLight -n "Light_KeyShape" -p "Light_Key";
+	rename -uid "41B3AE89-4CBA-B8F5-FFC2-C9B66AB5CFFC";
+	setAttr -k off ".v";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+createNode transform -n "Light_Fill" -p "Flux_Light_Rig";
+	rename -uid "DF86F267-40E6-134E-2C71-C8861405574F";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+	setAttr ".r" -type "double3" -15.000000000000002 -60.000000000000007 1.5902773407317588e-15 ;
+createNode directionalLight -n "Light_FillShape" -p "Light_Fill";
+	rename -uid "ED215CB5-441D-3E00-63C5-AB98CD9170A3";
+	setAttr -k off ".v";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+	setAttr ".in" 0.34999999403953552;
+createNode transform -n "Light_Rim" -p "Flux_Light_Rig";
+	rename -uid "91429C94-4DAA-0027-E7CC-BAB559327F73";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+	setAttr ".r" -type "double3" 150 20.000000000000007 180 ;
+	setAttr ".s" -type "double3" 1.0000000000000002 0.99999999999999989 1.0000000000000002 ;
+createNode directionalLight -n "Light_RimShape" -p "Light_Rim";
+	rename -uid "87723472-4384-3688-47A0-A2BC77C8E7FB";
+	setAttr -k off ".v";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+	setAttr ".in" 0.69999998807907104;
+createNode transform -n "Light_Dom" -p "Flux_Light_Rig";
+	rename -uid "20A1B59F-456E-C5AC-BA5A-EB889FA4BB2A";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+createNode ambientLight -n "Light_DomShape" -p "Light_Dom";
+	rename -uid "2721B4C4-4747-7F7A-7EE1-DCB4A72C11AF";
+	setAttr -k off ".v";
+	setAttr ".ove" yes;
+	setAttr ".ovc" 17;
+	setAttr ".in" 0.25;
+connectAttr "Light_KeyShape.ltd" ":lightList1.l" -na;
+connectAttr "Light_FillShape.ltd" ":lightList1.l" -na;
+connectAttr "Light_RimShape.ltd" ":lightList1.l" -na;
+connectAttr "Light_DomShape.ltd" ":lightList1.l" -na;
+connectAttr "Light_Key.iog" ":defaultLightSet.dsm" -na;
+connectAttr "Light_Fill.iog" ":defaultLightSet.dsm" -na;
+connectAttr "Light_Rim.iog" ":defaultLightSet.dsm" -na;
+connectAttr "Light_Dom.iog" ":defaultLightSet.dsm" -na;
+dataStructure -fmt "raw" -as "name=externalContentTable:string=node:string=key:string=upath:uint32=upathcrc:string=rpath:string=roles";
+applyMetadata -fmt "raw" -v "channel\nname externalContentTable\nstream\nname v1.0\nindexType numeric\nstructure externalContentTable\n0\n\"|Flux_Light_Rig|Light_Key|Light_KeyShape\" \"dmapName\" \"depthmap\" 2097411553 \"\" \"sourceImages\"\n1\n\"|Flux_Light_Rig|Light_Fill|Light_FillShape\" \"dmapName\" \"depthmap\" 2097411553 \"\" \"sourceImages\"\n2\n\"|Flux_Light_Rig|Light_Rim|Light_RimShape\" \"dmapName\" \"depthmap\" 2097411553 \"\" \"sourceImages\"\nendStream\nendChannel\nendAssociations\n" 
+		-scn;
+// End of flux_light_rig.ma

@@ -4,7 +4,7 @@
 global proc shelf_FluxLightRig() {
     shelfButton
         -label        "LIGHT"
-        -annotation   "FLUX : Light Rig de base (key, fill, rim + dome)"
+        -annotation   "FLUX : Light Rig (key, fill, rim + dome)"
         -image1       "flux_light.png"
         -sourceType   "python"
         -command      "from dcc.maya import maya_rigs; maya_rigs.create_light_rig()"
