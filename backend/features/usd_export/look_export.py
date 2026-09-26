@@ -276,7 +276,11 @@ def _place_bindings(found: dict[Sdf.Path, Sdf.Path], gprims: set[Sdf.Path],
 
 def asset_prim_paths(project_path: str | Path, name: str) -> list[str] | None:
     """Prim paths below the root of the asset's published USD (component LAST), or None
-    when the asset has no component yet (then the look keeps the naming rule)."""
+    when the asset has no component yet (then the look keeps the naming rule).
+
+    Defined prims only: an older look's binding on a missing mesh is a typeless "over"
+    in the component, and listing it fed the dead path back into every later look
+    (live UTAH 2026-09-26: skin bound on geo/render/Mesh, the mesh is transform1)."""
     try:
         from features.usd_assembler.component_auto import COMPONENT_EXT, component_dir
 
@@ -291,7 +295,7 @@ def asset_prim_paths(project_path: str | Path, name: str) -> list[str] | None:
         base = root.GetPath()
         pred = Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)
         return [str(p.GetPath().MakeRelativePath(base)) for p in Usd.PrimRange(root, pred)
-                if p.GetPath() != base]
+                if p.GetPath() != base and p.IsDefined()]
     except Exception as exc:                          # never block a look publish on this
         log.warning("asset %s illisible pour les chemins du look: %s", name, exc)
         return None

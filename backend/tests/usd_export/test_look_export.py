@@ -526,6 +526,30 @@ class LookPublish(unittest.TestCase):
                                  previous=before)
         self.assertEqual((got["active"][blue], got["active"][red]), (False, True))
 
+    def test_a_dead_look_binding_is_not_an_asset_prim(self) -> None:
+        """Live UTAH 2026-09-26: an older look bound geo/render/Mesh (the mesh is
+        transform1); its typeless over in the component must not count as an asset prim,
+        or every later look keeps binding the missing mesh."""
+        from features.usd_export.look_export import asset_prim_paths
+
+        self._publish_geo()
+        src = Path(self._tmp.name) / "dead" / "export.usda"
+        src.parent.mkdir(parents=True)
+        stage = Usd.Stage.CreateNew(str(src))
+        mesh = UsdGeom.Mesh.Define(stage, "/DAVID/geo/render/Mesh")
+        material = UsdShade.Material.Define(stage, "/DAVID/mtl/skin")
+        UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
+        stage.GetRootLayer().Save()
+        publish_look_asset(src, self.project, fmt="usda",
+                           dest_dir=self.project / self._REL / "shading" / "null",
+                           base_name="CHAR_SHADING_DAVID_null", user="adam")
+        add_proposed(self.project, "DAVID")
+
+        prims = asset_prim_paths(self.project, "DAVID")
+        self.assertIn("geo/render/body", prims)
+        self.assertIn("mtl/skin", prims)
+        self.assertNotIn("geo/render/Mesh", prims)
+
     def test_a_non_look_base_is_refused(self) -> None:
         src = _source_export(Path(self._tmp.name) / "src2")
         with self.assertRaises(ValueError):
