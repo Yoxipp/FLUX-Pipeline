@@ -125,6 +125,28 @@ def _rig_joints(project_path, name: str | None,
         return None, [f"squelette de {name} non verifie : {exc}"]
 
 
+def _rig_needs_republish(project_path, geo_base: str) -> list[str]:
+    """A new GEO (new points, new proxy) while a RIG is published: the RIG's weights
+    target the previous geometry and proxy (ADR 0034), say it must be republished."""
+    parts = geo_base.split("_")
+    if len(parts) < 4:
+        return []
+    try:
+        from features.publisher import last_pointer as lp
+        from features.publisher.publish_core import resolve_publish_path
+
+        for inst in dict.fromkeys(["_".join(parts[3:]), "null"]):
+            rig_base = "_".join([parts[0], "RIG", parts[2], inst])
+            for ext in (".usd", ".usda", ".usdc"):
+                dest = resolve_publish_path(Path(project_path), f"{rig_base}{ext}")
+                if dest is not None and lp.last_path(Path(dest), rig_base, ext).is_file():
+                    return [f"{rig_base} est deja publie : republie le RIG pour que ses poids "
+                            "suivent cette geo et son nouveau proxy"]
+    except Exception:           # noqa: BLE001 - a hint never blocks a publish
+        return []
+    return []
+
+
 def publish_light_asset(
     asset: LightAsset,
     project_path: str | Path,
@@ -222,6 +244,8 @@ def publish_light_asset(
         hooked = after_usd_publish(parent, base, ext, root, user=user)
         component = hooked["component"]
 
+    if contrib is not None and contrib.get("kind") == "asset" and contrib.get("type") == "GEO":
+        warnings += _rig_needs_republish(project_path, base)
     for w in warnings:
         log.warning("Light asset %s: %s", base, w)
     return {"root": last or root, "version": version_str, "folder": folder,

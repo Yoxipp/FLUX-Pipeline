@@ -39,8 +39,9 @@ class PainterPresets(unittest.TestCase):
             self.assertEqual(validate_project_config(cfg), [])
             set_painter_presets(p, ["FLUX_BEAUTY_MAPS", "FLUX_UTIL_MAPS"])
             self.assertEqual(len(presets.project_presets(p)), 2)
+            # 2026-09-26: a new project starts with the BEAUTY preset ticked.
             q = create_project("OTHER", Path(d))
-            self.assertEqual(presets.project_presets(q), [])
+            self.assertEqual(presets.project_presets(q), ["FLUX_BEAUTY_MAPS"])
 
     def test_the_old_names_become_the_flux_ones(self) -> None:
         from features.folder_manager.project_init import create_project

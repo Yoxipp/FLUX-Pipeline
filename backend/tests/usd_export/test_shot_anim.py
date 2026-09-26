@@ -153,6 +153,13 @@ class ShotAnimPublish(unittest.TestCase):
         layer = Sdf.Layer.FindOrOpen(str(res["layers"]["skel"]))
         self.assertIsNotNone(layer.GetPrimAtPath("/MARIE/geo/proxy/body"))
 
+    def test_a_new_geo_asks_for_the_rig_again(self) -> None:
+        # The RIG's weights sit on the previous geometry and proxy (ADR 0034).
+        res = publish_light_asset(_rig(), self.project, fmt="usda",
+                                  dest_dir=self.project / _REL / "model" / "null",
+                                  base_name="CHAR_GEO_DINGO_null", user="adam")
+        self.assertTrue(any("republie le RIG" in w for w in res["warnings"]), res["warnings"])
+
     def test_the_production_usd_task_lists_the_component(self) -> None:
         # 2026-09-26: the asset's "USD assemble" task in the Production tab.
         from features.usd_assembler.library import asset_usd

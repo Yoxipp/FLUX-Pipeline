@@ -66,8 +66,9 @@ def create_project(project_name: str, projects_root: Path | None = None, *,
     _seed_template_dir(project_path)
     _write_initial_tokens(project_path)
     ensure_project_config(project_path)
-    if painter_presets:
-        set_painter_presets(project_path, painter_presets)
+    # 2026-09-26: FLUX_BEAUTY_MAPS is ticked by default; the artist changes the
+    # project's presets in the Shelf Manager (Painter).
+    set_painter_presets(project_path, painter_presets or default_painter_presets())
 
     log.info("Project created: %s", project_path)
     return project_path
@@ -131,6 +132,18 @@ def _write_initial_tokens(project_path: Path) -> None:
     tokens = build_default_tokens()
     if not save_tokens(project_path, tokens):
         log.error("Could not write tokens.json for new project at %s", project_path)
+
+
+def default_painter_presets() -> list[str]:
+    """Painter presets a new project starts with: the shipped BEAUTY preset."""
+    try:
+        from dcc.substance_painter.presets import bundled_presets
+
+        bundled = bundled_presets()
+    except Exception:           # noqa: BLE001 - no preset shipped: none ticked
+        return []
+    beauty = next((n for n in bundled if "BEAUTY" in n.upper()), None)
+    return [beauty] if beauty else []
 
 
 def set_painter_presets(project_path: Path, names: list[str]) -> None:

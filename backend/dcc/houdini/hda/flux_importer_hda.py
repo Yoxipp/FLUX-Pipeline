@@ -102,25 +102,30 @@ def _api():
         _API_BASE = f"http://127.0.0.1:{_flux_port()}"
     return _API_BASE
 
-def _get(path, **params):
+def _get(path, _timeout=1.5, **params):
     url = _api() + path
     if params:
         # Encode: library keys carry ":" and free paths spaces / accents.
         url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v})
     try:
-        with urllib.request.urlopen(url, timeout=1.5) as r:
+        with urllib.request.urlopen(url, timeout=_timeout) as r:
             return json.loads(r.read())
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-def _post(path, payload):
+# Resolve opens the USD in the backend (skeleton probe, component): the first pxr import
+# of the sidecar alone can exceed the menus' 1.5 s, and a timeout emptied the path
+# (live 2026-09-26: tokens CHAR / GEO / MARIE / null / LAST resolved to nothing).
+_RESOLVE_TIMEOUT = 20.0
+
+def _post(path, payload, _timeout=_RESOLVE_TIMEOUT):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         _api() + path, data=data,
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=6) as r:
+        with urllib.request.urlopen(req, timeout=_timeout) as r:
             return json.loads(r.read())
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -232,7 +237,8 @@ def _library(node):
     if not project:
         return []
     return _cached(f"library:{project}",
-                   lambda: _get("/dcc/houdini/importer/library", project=project).get("items", []))
+                   lambda: _get("/dcc/houdini/importer/library", _timeout=_RESOLVE_TIMEOUT,
+                                project=project).get("items", []))
 
 # Type (asset / decor / shot) -> Classe (assets) or Sequence (shots) -> Element
 # (2026-09-19: one menu mixing everything was unreadable with many assets).
@@ -266,17 +272,19 @@ def menu_lib_item(node):
     items = _lib_filtered(node)
     if not items:
         return ["", "rien dans ce filtre" if _library(node) else "bibliotheque vide"]
-    out = []
+    # Nothing picked by default (2026-09-26): the artist chooses the element.
+    out = ["", "(choisir un element)"]
     for it in sorted(items, key=lambda i: (i.get("seq", ""), i.get("name") or i["key"])):
         out += [it["key"], it.get("name") or it["label"]]
     return out
 
 def on_lib_filter(node):
-    """Type / Classe / Sequence changed: keep the element if it still matches, else the first match."""
+    """Type / Classe / Sequence changed: keep the element if it still matches, else
+    none (never pick one for the artist)."""
     items = _lib_filtered(node)
     p = node.parm("lib_item")
     if p is not None and p.eval() not in [i["key"] for i in items]:
-        p.set(items[0]["key"] if items else "")
+        p.set("")
     resolve_path(node)
 
 def menu_lib_version(node):
@@ -643,17 +651,26 @@ def resolve_path(node):
     _sm = node.parm("source_mode")
     mode = _sm.evalAsString() if _sm is not None else "tokens"
     if mode == "file":
-        _apply(node, _get("/dcc/houdini/importer/probe", file=_pval(node, "free_path")))
+        _apply(node, _get("/dcc/houdini/importer/probe", _timeout=_RESOLVE_TIMEOUT,
+                          file=_pval(node, "free_path")))
         return
     if not project:
         _set_status(node, "No project selected"); return
     if mode == "library":
+        if not _pval(node, "lib_item"):
+            p = node.parm("resolved_path")
+            if p: p.set("")
+            if _is_lop(node):
+                _clear_component(node)
+            _set_status(node, "Choisis un element de la bibliotheque")
+            return
         _sync_lib_filters(node)
-        _apply(node, _get("/dcc/houdini/importer/library_resolve", project=project,
+        _apply(node, _get("/dcc/houdini/importer/library_resolve", _timeout=_RESOLVE_TIMEOUT,
+                          project=project,
                           key=_pval(node, "lib_item"), version=_pval(node, "lib_version") or "LAST"))
         return
     r = _get(
-        "/dcc/houdini/importer/resolve",
+        "/dcc/houdini/importer/resolve", _timeout=_RESOLVE_TIMEOUT,
         project=project,
         **{"class": _pval(node, "flux_class")},
         type=_pval(node, "flux_type"),
