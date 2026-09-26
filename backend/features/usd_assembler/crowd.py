@@ -201,16 +201,130 @@ def _frozen(path: Path) -> Path:
     return Path(path)
 
 
+def _bound_anim(prim, root):
+    """The SkelAnimation bound to *prim* (a Skeleton) or its nearest ancestor up to *root*."""
+    from pxr import UsdSkel
+
+    stage = prim.GetStage()
+    p = prim
+    while p and p.IsValid():
+        rel = UsdSkel.BindingAPI(p).GetAnimationSourceRel()
+        targets = rel.GetForwardedTargets() if rel else []
+        if targets:
+            anim = stage.GetPrimAtPath(targets[0])
+            return anim if anim and anim.IsA(UsdSkel.Animation) else None
+        if p == root:
+            break
+        p = p.GetParent()
+    return None
+
+
+def _anim_source(anim) -> dict | None:
+    """{"file", "prim"} the SkelAnimation *anim* comes from: the file it references
+    (a component's anims/<id>), else the file that defines it (a skinned GEO export)."""
+    from pxr import Pcp, Usd
+
+    try:
+        for arc in Usd.PrimCompositionQuery(anim).GetCompositionArcs():
+            if arc.GetArcType() not in (Pcp.ArcTypeReference, Pcp.ArcTypePayload):
+                continue
+            layer = arc.GetTargetLayer()
+            if layer is not None and layer.realPath and not arc.GetTargetPrimPath().isEmpty:
+                return {"file": layer.realPath, "prim": arc.GetTargetPrimPath().pathString}
+    except Exception:           # noqa: BLE001 - falls back on the prim stack
+        pass
+    for spec in reversed(anim.GetPrimStack()):
+        if spec.layer.realPath and not spec.path.ContainsPrimVariantSelection() and spec.typeName:
+            return {"file": spec.layer.realPath, "prim": spec.path.pathString}
+    return None
+
+
+def probe_agent(target: Path, target_prim: str = "", variants: dict[str, str] | None = None,
+                inactive: list[str] | None = None) -> dict:
+    """What one agent of an asset brings, with the FLUX Import choices applied.
+
+    {"skeletons": [path relative to the agent], "anim": {"file", "prim"} | None (the
+    animation the asset itself plays), "baked": points animated without a SkelAnimation}."""
+    from pxr import Sdf, Usd, UsdGeom, UsdSkel
+
+    stage = Usd.Stage.CreateInMemory()
+    agent = stage.DefinePrim("/agent")
+    if target_prim:
+        agent.GetReferences().AddReference(str(target), Sdf.Path(target_prim))
+    else:
+        agent.GetReferences().AddReference(str(target))
+    sets = agent.GetVariantSets()
+    for name, sel in sorted((variants or {}).items()):
+        sets.SetSelection(name, sel)
+    for rel in inactive or []:
+        if Sdf.Path.IsValidPathString(rel):
+            stage.OverridePrim(agent.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
+    out = {"skeletons": [], "anim": None, "baked": False}
+    for prim in Usd.PrimRange(agent):
+        if prim.IsA(UsdSkel.Skeleton):
+            out["skeletons"].append(prim.GetPath().MakeRelativePath(agent.GetPath()).pathString)
+            if out["anim"] is None:
+                anim = _bound_anim(prim, agent)
+                if anim is not None:
+                    out["anim"] = _anim_source(anim)
+        elif prim.IsA(UsdGeom.PointBased) and not out["baked"]:
+            out["baked"] = UsdGeom.PointBased(prim).GetPointsAttr().GetNumTimeSamples() > 1
+    return out
+
+
+def _joint_noise(joints: list[str], amplitude: float, key: str) -> list:
+    """One small rotation per joint (degrees, deterministic per *key*); roots stay put
+    (a root rotation turns the whole body)."""
+    from pxr import Gf
+
+    rng = random.Random(key)
+    out = []
+    for j in joints:
+        if "/" not in str(j):
+            out.append(Gf.Quatf(1.0))
+            continue
+        axis = Gf.Vec3d(rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))
+        if axis.GetLength() < 1e-9:
+            axis = Gf.Vec3d(0, 1, 0)
+        q = Gf.Rotation(axis.GetNormalized(), rng.uniform(-amplitude, amplitude)).GetQuat()
+        out.append(Gf.Quatf(q))
+    return out
+
+
+def _read_rotations(file: str | Path, prim: str) -> dict | None:
+    """{"joints", "samples": [(time or None, [Quatf])]} of a SkelAnimation."""
+    from pxr import Usd, UsdSkel
+
+    stage = Usd.Stage.Open(str(file), Usd.Stage.LoadNone)
+    anim = UsdSkel.Animation(stage.GetPrimAtPath(prim)) if stage else None
+    if not anim:
+        return None
+    attr = anim.GetRotationsAttr()
+    times = attr.GetTimeSamples()
+    samples = [(t, list(attr.Get(t))) for t in times] if times else [(None, list(attr.Get() or []))]
+    return {"joints": [str(j) for j in (anim.GetJointsAttr().Get() or [])], "samples": samples}
+
+
 def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, agents: list[dict],
                        clip_files: dict[str, Path], *, freeze: bool = False,
-                       sources: dict[str, dict] | None = None) -> dict:
+                       sources: dict[str, dict] | None = None,
+                       looks: dict[str, dict] | None = None, rot_noise: float = 0.0,
+                       seed: int = 0) -> dict:
     """Write the crowd layer *dest*: /crowd/<GROUP>/agent_NNNN (relative references only).
 
     *sources* ({asset: {"file", "prim"}}, from FLUX Crowd input 1): used for an asset
     without a FLUX component, so it still shows (static mesh, 2026-09-26).
+    *looks* ({asset: {"variants": {set: selection}, "inactive": [relative path]}}): the
+    FLUX Import choices of input 1, applied on every agent: an animation unchecked there
+    does not play in the crowd (2026-09-26).
+    Each agent plays its crowd clip, else the animation its asset plays, with its time
+    offset and speed; the binding is set on the skeleton itself (a component binds its
+    animation there, which beat the agent's binding: offset / speed did nothing).
+    *rot_noise* (degrees): a small rotation per joint and per agent, written in a
+    ``<dest>_noise.usdc`` sublayer.
 
     Returns {"path", "agents", "warnings"}."""
-    from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdSkel, Vt
 
     project = Path(project_path)
     dest = Path(dest)
@@ -219,28 +333,41 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
     grp = sanitize_token(group) or "crowd"
     layer = Sdf.Layer.CreateNew(str(dest)) if not dest.exists() else Sdf.Layer.FindOrOpen(str(dest))
     layer.Clear()
+    noise_path = dest.with_name(dest.stem + "_noise.usdc")
+    noise_layer = None
+    if rot_noise > 0:
+        noise_layer = Sdf.Layer.CreateNew(str(noise_path)) if not noise_path.exists() \
+            else Sdf.Layer.FindOrOpen(str(noise_path))
+        noise_layer.Clear()
+        layer.subLayerPaths.append("./" + noise_path.name)
+    elif noise_path.exists():
+        noise_path.unlink()
     stage = Usd.Stage.Open(layer)
     for scope in ("/crowd", f"/crowd/{grp}"):
         # group kind: the agents (components) stay a valid model hierarchy.
         Usd.ModelAPI(UsdGeom.Scope.Define(stage, scope).GetPrim()).SetKind("group")
     targets: dict[str, str] = {}
     target_prims: dict[str, Sdf.Path] = {}
+    probes: dict[str, dict] = {}
     starts: dict[str, float] = {}
+    rotations: dict[str, dict | None] = {}
+    noise_skipped: set[str] = set()
     written = 0
     for a in agents:
         comp = a["component"]
+        look = (looks or {}).get(comp) or {}
         if comp not in targets:
             parent = component_dir(project, comp)
             last = parent / f"{comp}_LAST{COMPONENT_EXT}" if parent is not None else None
             src = (sources or {}).get(comp) or {}
+            absolute = None
             if (last is None or not last.is_file()) and src.get("file") and Path(src["file"]).is_file():
                 warnings.append(f"{comp} : pas de component FLUX, fichier de l'entree 1 utilise")
-                targets[comp] = _rel(Path(src["file"]), dest.parent)
+                absolute = Path(src["file"])
                 if src.get("prim") and Sdf.Path.IsValidPathString(src["prim"]):
                     target_prims[comp] = Sdf.Path(src["prim"])
             elif last is None or not last.is_file():
                 warnings.append(f"{comp} : pas d'USD d'asset, agents ignores")
-                targets[comp] = ""
             else:
                 # A publish is frozen (ADR 0017): the farm renders the versions of today,
                 # not whatever LAST points to later. The preview follows LAST.
@@ -248,9 +375,22 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
                     from .component_auto import _latest_entry
 
                     last = _latest_entry(parent, comp) or last
-                targets[comp] = _rel(last, dest.parent)
+                absolute = last
+            targets[comp] = _rel(absolute, dest.parent) if absolute is not None else ""
+            if absolute is not None:
+                try:
+                    probes[comp] = probe_agent(absolute, str(target_prims.get(comp, "")),
+                                               look.get("variants"), look.get("inactive"))
+                except Exception as exc:      # noqa: BLE001 - the agent still shows
+                    log.warning("crowd probe of %s failed: %s", comp, exc)
+                    probes[comp] = {"skeletons": [], "anim": None, "baked": False}
+                pr = probes[comp]
+                if pr["baked"] and pr["anim"] is None:
+                    warnings.append(f"{comp} : anim cuite dans les points (pas de squelette anime), "
+                                    "decalage / vitesse / noise sans effet")
         if not targets[comp]:
             continue
+        probe = probes.get(comp) or {"skeletons": [], "anim": None, "baked": False}
         path = f"/crowd/{grp}/{a['name']}"
         prim = stage.DefinePrim(path)          # typeless: the component's SkelRoot comes through
         if comp in target_prims:
@@ -258,51 +398,90 @@ def author_crowd_layer(dest: str | Path, project_path: str | Path, group: str, a
         else:
             prim.GetReferences().AddReference(targets[comp])
         Usd.ModelAPI(prim).SetKind("component")
+        # The FLUX Import choices of input 1 (animations unchecked, rig off...).
+        sets = prim.GetVariantSets()
+        for name, sel in sorted((look.get("variants") or {}).items()):
+            sets.SetSelection(name, sel)
+        for rel in look.get("inactive") or []:
+            if Sdf.Path.IsValidPathString(rel):
+                stage.OverridePrim(prim.GetPath().AppendPath(Sdf.Path(rel))).SetActive(False)
         xf = UsdGeom.Xformable(prim)
         xf.AddTranslateOp().Set(Gf.Vec3d(*a["p"]))
         if a.get("ry"):
             xf.AddRotateYOp().Set(float(a["ry"]))
         if a.get("scale", 1.0) != 1.0:
             xf.AddScaleOp().Set(Gf.Vec3f(a["scale"]))
+        # The animation: the crowd clip, else the one the asset plays (checked in FLUX Import).
+        src_file, src_prim = None, ""
         clip = a.get("clip")
         if clip:
             src = clip_files.get(clip)
             if src is None:
                 warnings.append(f"clip {clip} introuvable")
             else:
-                if freeze:
-                    src = _frozen(src)
-                anim_path = f"{path}/crowd_anim"
-                anim = stage.DefinePrim(anim_path)
-                clip_root = _clip_root(src)
-                # Speed 2 = the clip plays twice as fast, around its FIRST frame (not frame 0,
-                # which pushed a 1001 clip to frame ~500: agents frozen during the shot):
-                # stage time = start + offset + (clip time - start) / speed.
-                start = starts.setdefault(str(src), _clip_start(src, clip_root))
-                scale = 1.0 / a["speed"]
-                anim.GetReferences().AddReference(
-                    _rel(src, dest.parent), Sdf.Path(f"/{clip_root}/skel/Anim"),
-                    Sdf.LayerOffset(a["offset"] + start * (1.0 - scale), scale))
-                UsdSkel.BindingAPI.Apply(prim).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+                src_file = _frozen(src) if freeze else src
+                src_prim = f"/{_clip_root(src_file)}/skel/Anim"
+        if src_file is None and probe["anim"]:
+            src_file, src_prim = Path(probe["anim"]["file"]), probe["anim"]["prim"]
+        if src_file is not None:
+            anim_path = f"{path}/crowd_anim"
+            anim = stage.DefinePrim(anim_path)
+            # Speed 2 = the clip plays twice as fast, around its FIRST frame (not frame 0,
+            # which pushed a 1001 clip to frame ~500: agents frozen during the shot):
+            # stage time = start + offset + (clip time - start) / speed.
+            key = f"{src_file}|{src_prim}"
+            start = starts.setdefault(key, _anim_start(src_file, src_prim))
+            scale = 1.0 / a["speed"]
+            shift = a["offset"] + start * (1.0 - scale)
+            anim.GetReferences().AddReference(_rel(src_file, dest.parent), Sdf.Path(src_prim),
+                                              Sdf.LayerOffset(shift, scale))
+            # On the agent AND on each skeleton: a binding on the skeleton (the component's
+            # own animation) beats one on an ancestor.
+            for where in [path] + [f"{path}/{s}" for s in probe["skeletons"]]:
+                over = stage.OverridePrim(where)
+                UsdSkel.BindingAPI.Apply(over).CreateAnimationSourceRel().SetTargets([Sdf.Path(anim_path)])
+            if noise_layer is not None:
+                if key not in rotations:
+                    try:
+                        rotations[key] = _read_rotations(src_file, src_prim)
+                    except Exception as exc:     # noqa: BLE001 - no noise on that clip
+                        log.warning("crowd noise: %s unreadable: %s", src_file, exc)
+                        rotations[key] = None
+                rot = rotations[key]
+                if rot and rot["joints"]:
+                    noise = _joint_noise(rot["joints"], rot_noise, f"{seed}:{a['name']}")
+                    spec = Sdf.CreatePrimInLayer(noise_layer, anim_path)
+                    attr = Sdf.AttributeSpec(spec, "rotations", Sdf.ValueTypeNames.QuatfArray)
+                    for t, values in rot["samples"]:
+                        noisy = Vt.QuatfArray([v * n for v, n in zip(values, noise)])
+                        if t is None:
+                            attr.default = noisy
+                        else:
+                            noise_layer.SetTimeSample(attr.path, shift + scale * t, noisy)
+                elif comp not in noise_skipped:
+                    noise_skipped.add(comp)
+                    warnings.append(f"{comp} : pas de rotation de joint lisible, pas de noise")
         written += 1
     # FLUX layer contract (ADR 0011): default prim, meters, Y up.
     stage.SetDefaultPrim(stage.GetPrimAtPath("/crowd"))
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
     layer.customLayerData = {"flux": {"role": "crowd", "group": grp, "agents": str(written)}}
+    if noise_layer is not None:
+        noise_layer.Save()
     layer.Save()
     return {"path": dest, "agents": written, "warnings": warnings}
 
 
-def _clip_start(path: Path, root: str) -> float:
-    """First frame of a clip: its stage start, else its first joint sample, else 0."""
+def _anim_start(path: str | Path, prim: str) -> float:
+    """First frame of the SkelAnimation *prim* of *path*: stage start, else first sample, else 0."""
     from pxr import Usd
 
     try:
         clip = Usd.Stage.Open(str(path), Usd.Stage.LoadNone)
         if clip.HasAuthoredTimeCodeRange():
             return float(clip.GetStartTimeCode())
-        anim = clip.GetPrimAtPath(f"/{root}/skel/Anim")
+        anim = clip.GetPrimAtPath(prim)
         for attr in (anim.GetAttributes() if anim else []):
             samples = attr.GetTimeSamples()
             if samples:
@@ -310,6 +489,11 @@ def _clip_start(path: Path, root: str) -> float:
     except Exception:           # noqa: BLE001 - the offset falls back to frame 0
         pass
     return 0.0
+
+
+def _clip_start(path: Path, root: str) -> float:
+    """First frame of a clip: its stage start, else its first joint sample, else 0."""
+    return _anim_start(path, f"/{root}/skel/Anim")
 
 
 def _clip_root(path: Path) -> str:
@@ -336,7 +520,8 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
                 publish: bool = False, user: str = "",
                 component_weights: dict[str, float] | None = None,
                 clip_weights: dict[str, float] | None = None,
-                sources: dict[str, dict] | None = None) -> dict:
+                sources: dict[str, dict] | None = None, looks: dict[str, dict] | None = None,
+                rot_noise: float = 0.0) -> dict:
     """Preview (work file in the shot) or publish (SEQ_SHOT_CROWD[_GROUP], vNNN + LAST) a crowd.
 
     A preview needs no shot (2026-09-26: a project without shots must still show
@@ -366,7 +551,8 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     if not publish:
         work = ss.stage_dir(project, seq, shot) if has_shot else project / "shot"
         dest = work / "crowd_work" / f"{base}.usda"
-        res = author_crowd_layer(dest, project, grp, agents, by_base, sources=sources)
+        res = author_crowd_layer(dest, project, grp, agents, by_base, sources=sources, looks=looks,
+                                 rot_noise=rot_noise, seed=seed)
         res["warnings"] = ([f"clip inconnu : {c}" for c in unknown]
                            + [f"aucune anim ne va sur le rig de {c} : pose de repos" for c in no_clip]
                            + res["warnings"])
@@ -387,7 +573,7 @@ def build_crowd(project_path: str | Path, seq: str, shot: str, group: str, point
     folder = sequence_folder(parent, base, ver)
     try:
         res = author_crowd_layer(folder / f"{base}.usda", project, grp, agents, by_base, freeze=True,
-                                 sources=sources)
+                                 sources=sources, looks=looks, rot_noise=rot_noise, seed=seed)
     except Exception:
         discard_rendered_version(parent, base, ".usda", ver, is_sequence=True)
         raise

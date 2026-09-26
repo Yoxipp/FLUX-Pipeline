@@ -135,6 +135,13 @@ def _pval(node, name):
     p = node.parm(name)
     return p.evalAsString() if p is not None else ""
 
+def _fval(node, name, default):
+    """Float parm, *default* when the HDA predates it (built before that parm)."""
+    try:
+        return float(node.evalParm(name)) if node.parm(name) is not None else default
+    except Exception:
+        return default
+
 def _set(node, name, value):
     p = node.parm(name)
     if p is not None:
@@ -310,6 +317,40 @@ def _input_sources(node):
                 break
     return out
 
+def _input_looks(node):
+    """{asset: {"variants": {set: selection}, "inactive": [relative path]}}: the FLUX
+    Import choices of input 1 (an animation unchecked there must not play in the crowd)."""
+    stage = _input_stage(node, 0)
+    if stage is None:
+        return {}
+    from pxr import Usd
+    out = {}
+    it = iter(Usd.PrimRange(stage.GetPseudoRoot()))
+    for prim in it:
+        if prim.IsPseudoRoot():
+            continue
+        model = Usd.ModelAPI(prim)
+        name = (model.GetAssetInfo() or {}).get("name") or (prim.GetName() if model.GetKind() == "component" else "")
+        if not name:
+            continue
+        it.PruneChildren()
+        if name in out:
+            continue
+        sets = prim.GetVariantSets()
+        variants = {}
+        for vs in sets.GetNames():
+            sel = sets.GetVariantSelection(vs)
+            if sel:
+                variants[str(vs)] = str(sel)
+        inactive = []
+        sub = iter(Usd.PrimRange(prim, Usd.PrimAllPrimsPredicate))
+        for p in sub:
+            if p != prim and not p.IsActive():
+                inactive.append(p.GetPath().MakeRelativePath(prim.GetPath()).pathString)
+                sub.PruneChildren()
+        out[str(name)] = {"variants": variants, "inactive": inactive}
+    return out
+
 def _input_points(node):
     """[{"p", "ry", "scale"}] from the first points prim of input 2, None if unwired."""
     stage = _input_stage(node, 1)
@@ -466,6 +507,8 @@ def _build(node, publish):
         _status(node, "Les points de l'entree 2 sont vides"); return
     payload = {"project": project, "seq": seq, "shot": shot, "group": _pval(node, "group") or "crowd",
                "points": pts, "components": assets, "clips": clips, "sources": _input_sources(node),
+               "looks": _input_looks(node),
+               "rot_noise": _fval(node, "rot_noise", 0.0),
                "component_weights": _weights(node, "asset"), "clip_weights": _weights(node, "clip"),
                "seed": int(node.evalParm("seed")),
                "offset": [node.evalParm("offsetx"), node.evalParm("offsety")],
@@ -595,6 +638,9 @@ _ptg.append(hou.FloatParmTemplate("offset", "Decalage min / max", 2, default_val
                                   help="Time offset of each agent's clip, in frames"))
 _ptg.append(hou.FloatParmTemplate("speed", "Vitesse min / max", 2, default_value=(1.0, 1.0),
                                   help="Playback speed of each agent's clip (2 = twice as fast)"))
+_ptg.append(hou.FloatParmTemplate("rot_noise", "Noise rotation joints", 1, default_value=(0.0,), min=0.0, max=20.0,
+                                  help="Degres : petite rotation par joint et par agent (pas la racine). "
+                                       "Seulement sur les agents animes par un squelette."))
 _ptg.append(hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                                  menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                                  help="Proxy: purpose=proxy meshes in the viewport. Geo complete: render meshes."))
