@@ -19,7 +19,7 @@ import os
 import tempfile
 
 REPORT_PATH = os.path.join(tempfile.gettempdir(), "flux_groom_probe.txt")
-_MAX_PRIMS = 60
+_MAX_PRIMS = 120
 
 
 def _out(fh, msg=""):
@@ -59,6 +59,17 @@ def _describe(fh, stage, prim):
         if name not in layers:
             layers.append(name)
     _out(fh, "    layers: %s" % ", ".join(layers[:8]))
+    # Files this prim references (.bgeo / .abc / .usd): found on disk or not.
+    for spec in prim.GetPrimStack():
+        for ref in list(spec.referenceList.GetAddedOrExplicitItems()) + list(spec.payloadList.GetAddedOrExplicitItems()):
+            if not ref.assetPath:
+                continue
+            try:
+                full = Sdf.ComputeAssetPathRelativeToLayer(spec.layer, ref.assetPath)
+            except Exception:  # noqa: BLE001
+                full = ref.assetPath
+            ok = os.path.exists(full) if full and not full.startswith("$") else None
+            _out(fh, "    fichier %s -> %s %s" % (ref.assetPath, full, {True: "OK", False: "INTROUVABLE", None: "?"}[ok]))
     for rel in prim.GetRelationships():
         for target in rel.GetTargets():
             ok = stage.GetPrimAtPath(target.GetPrimPath()).IsValid()
@@ -96,6 +107,14 @@ def _probe_node(fh, node_path):
     _out(fh, "%s  (%s)" % (node_path, node.type().name()))
     if node.errors() or node.warnings():
         _out(fh, "  erreurs=%s warnings=%s" % (node.errors(), node.warnings()))
+    try:
+        errors = [str(e) for e in stage.GetCompositionErrors()]
+    except Exception:  # noqa: BLE001 - older USD
+        errors = []
+    groom_errors = [e for e in errors if "groom" in e.lower()]
+    _out(fh, "%d erreur(s) de composition groom" % len(groom_errors))
+    for e in groom_errors[:20]:
+        _out(fh, "  ! " + e[:400])
     grooms = [p for p in stage.TraverseAll() if _is_groom(p)]
     _out(fh, "%d prim(s) groom" % len(grooms))
     for prim in grooms[:_MAX_PRIMS]:
@@ -106,7 +125,7 @@ def _probe_node(fh, node_path):
 
 def flux_groom_probe(reference_node="/stage/assetreference1", flux_node="/stage/flux_import_UTAH"):
     with open(REPORT_PATH, "w", encoding="utf-8") as fh:
-        for path in (reference_node, flux_node):
+        for path in dict.fromkeys(p for p in (reference_node, flux_node) if p):
             try:
                 _probe_node(fh, path)
             except Exception as exc:  # noqa: BLE001
