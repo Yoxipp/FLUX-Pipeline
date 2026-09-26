@@ -447,25 +447,20 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         if (!task) return <div style={_hint}>Tâche introuvable</div>
         const shim = toAssetShim(res)
         const bucket = publishesByTask[`${res.entity.id}|${task.id}`] || []
-        // The task box, always open on top of its tab: switch subtask / whole task here.
-        const box = (
-          <div style={{ padding: '10px 18px 0', flexShrink: 0 }}>
-            <TaskNode
-              task={task} asset={shim} pinnedOpen
+        // Thin strip on top of the task tab (2026-09-26): switch subtask / whole task,
+        // heart = the whole task in favorites. The area scrolls down when the panel is short.
+        const withBox = (detail: React.ReactNode) => (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
+            <TaskStrip
+              task={task} asset={shim}
               activeSub={active.kind === 'subtask' ? active.subtask : null}
               publishCount={bucket.length}
-              onOpenHeader={() => openTaskTab(res.entity.id, task.id)}
+              onOpenTask={() => openTaskTab(res.entity.id, task.id)}
               onOpenSubtask={sub => openSubtaskTab(res.entity.id, task.id, sub)}
-              completion={shim.task_details?.[task.name]?.completion ?? 0}
-              subtaskCompletions={Object.fromEntries(
-                task.known_subtasks.map(sb => [sb, shim.task_details?.[`${task.name}|${sb}`]?.completion ?? 0]))}
             />
-          </div>
-        )
-        const withBox = (detail: React.ReactNode) => (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            {box}
-            {detail}
+            <div style={{ flex: 1, minHeight: 360, display: 'flex', flexDirection: 'column' }}>
+              {detail}
+            </div>
           </div>
         )
         if (active.kind === 'task') {
@@ -967,12 +962,9 @@ const _miniBtn: React.CSSProperties = {
 }
 
 // ── one task node ────────────────────────────────────────────────────────────
-function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, completion, subtaskCompletions, inherited,
-                    pinnedOpen = false, activeSub = null }: {
+function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, completion, subtaskCompletions, inherited }: {
   task:               ProductionTask
   asset:              Asset
-  pinnedOpen?:        boolean          // task tab: always open, in the flow
-  activeSub?:         string | null    // subtask shown by the tab (highlighted)
   publishCount:       number
   onOpenHeader:       () => void
   onOpenSubtask:      (sub: string) => void
@@ -991,8 +983,8 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
   const fav = useFavoriteBinding(asset, task, null)
   const color = taskColorFromName(task.name)
   const hasSubs = task.known_subtasks.length > 0
-  const floating = expanded && !!slot && !pinnedOpen
-  const isOpen = expanded || pinnedOpen
+  const floating = expanded && !!slot
+  const isOpen = expanded
 
   useEffect(() => {
     if (!menu) return
@@ -1014,7 +1006,6 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
   }
 
   function open(e: React.MouseEvent<HTMLDivElement>) {
-    if (pinnedOpen) return
     const r = e.currentTarget.getBoundingClientRect()
     const box = e.currentTarget.parentElement?.getBoundingClientRect()
     // Open towards the left when the widest open card would leave the row on the right.
@@ -1058,7 +1049,7 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
       style={{
         ...(floating && slot ? { position: 'absolute', top: 0, ...(slot.alignRight ? { right: 0 } : { left: 0 }) } : {}),
         minWidth: isOpen ? Math.max(220, slot?.w ?? 0) : 160,
-        maxWidth: pinnedOpen ? 520 : 360,
+        maxWidth: 360,
         padding: isOpen ? '10px 12px 12px' : '9px 14px',
         borderRadius: 8,
         border: `1px solid color-mix(in oklch, ${color} 70%, black 20%)`,
@@ -1136,7 +1127,7 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                     padding: '5px 10px', borderRadius: 6,
-                    border: sub === activeSub ? '2px solid var(--paper)' : `1px solid color-mix(in oklch, ${color} 75%, black 25%)`,
+                    border: `1px solid color-mix(in oklch, ${color} 75%, black 25%)`,
                     background: color, color: 'var(--paper)',
                     fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
                     cursor: inherited ? 'default' : 'pointer',
@@ -1164,6 +1155,59 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
         </div>
       )}
     </div>
+    </div>
+  )
+}
+
+// ── task strip: thin bar on top of a task tab ───────────────────────────────
+function TaskStrip({ task, asset, activeSub, publishCount, onOpenTask, onOpenSubtask }: {
+  task:          ProductionTask
+  asset:         Asset
+  activeSub:     string | null
+  publishCount:  number
+  onOpenTask:    () => void
+  onOpenSubtask: (sub: string) => void
+}) {
+  const fav = useFavoriteBinding(asset, task, null)
+  const color = taskColorFromName(task.name)
+  const chip = (label: string, on: boolean, onClick: () => void, title?: string) => (
+    <button key={label} onClick={onClick} title={title}
+      style={{
+        flexShrink: 0, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
+        fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+        border: on ? '1px solid var(--paper)' : `1px solid color-mix(in oklch, ${color} 70%, black 25%)`,
+        background: on ? color : `color-mix(in oklch, ${color} 45%, var(--paper-2) 55%)`,
+        color: 'var(--paper)',
+      }}>{label}</button>
+  )
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+      padding: '6px 14px', borderBottom: '1px solid var(--rule)',
+      background: `color-mix(in oklch, ${color} 14%, var(--paper) 86%)`,
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', flexShrink: 0 }}>{task.name}</span>
+      <button onClick={() => void fav.toggle()}
+        title={fav.isFavorite ? 'Retirer la tâche entière des favoris' : 'Mettre la tâche entière en favori (notifications)'}
+        style={{ display: 'inline-flex', padding: 3, border: 'none', background: 'transparent', cursor: 'pointer', flexShrink: 0 }}>
+        <Heart size={12} strokeWidth={1.75} color={fav.isFavorite ? 'var(--accent-hi)' : 'var(--ink-3)'}
+               fill={fav.isFavorite ? 'var(--accent)' : 'none'} />
+      </button>
+      {publishCount > 0 && (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', flexShrink: 0 }}>{publishCount}</span>
+      )}
+      {task.known_subtasks.length > 0 && (
+        <>
+          <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--rule-2)', flexShrink: 0 }} />
+          <div
+            onWheel={e => { if (e.deltaY && !e.deltaX) e.currentTarget.scrollLeft += e.deltaY }}
+            style={{ display: 'flex', gap: 5, overflowX: 'auto', flex: 1, minWidth: 0, scrollbarWidth: 'thin' }}>
+            {chip('Tout', activeSub === null, onOpenTask, 'La tâche entière')}
+            {task.known_subtasks.map(sub => chip(sub, sub === activeSub, () => onOpenSubtask(sub)))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
