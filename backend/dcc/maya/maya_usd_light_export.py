@@ -72,7 +72,10 @@ def _extract_skeleton(joints_dag: list[str], tokens: list[str], skin: str):
     """Return (bind_transforms, rest_transforms) parallel to joints_dag.
 
     bind = world-space bind pose (inverse of the skinCluster bindPreMatrix when the
-    joint is an influence, else the current world matrix). rest = local matrix.
+    joint is an influence, else the current world matrix). rest = local matrix of the
+    BIND pose (2026-09-26: it was the pose of the current frame, so a rig exported
+    mid-animation came out posed); a joint that is not an influence keeps its current
+    local matrix.
     """
     from features.usd_export.contract import SkeletonData
 
@@ -91,14 +94,49 @@ def _extract_skeleton(joints_dag: list[str], tokens: list[str], skin: str):
 
     bind_transforms: list[tuple] = []
     rest_transforms: list[tuple] = []
+    world_bind: dict[str, "om.MMatrix"] = {}
     for dag in joints_dag:
         if dag in bind_by_dag:
             bind_transforms.append(bind_by_dag[dag])
         else:
             bind_transforms.append(_matrix16(cmds.getAttr(f"{dag}.worldMatrix[0]")))
-        rest_transforms.append(_matrix16(cmds.getAttr(f"{dag}.matrix")))
+        world_bind[dag] = om.MMatrix(bind_transforms[-1])
+    for dag in joints_dag:
+        if dag not in bind_by_dag:
+            rest_transforms.append(_matrix16(cmds.getAttr(f"{dag}.matrix")))
+            continue
+        # Maya row vectors: world = local * parent_world, so local = world * parent_world^-1.
+        parent = dag.rsplit("|", 1)[0]
+        if parent in world_bind:
+            parent_world = world_bind[parent]
+        else:
+            parent_world = om.MMatrix(_matrix16(cmds.getAttr(f"{dag}.parentMatrix[0]")))
+        rest_transforms.append(_matrix16(world_bind[dag] * parent_world.inverse()))
 
     return SkeletonData(joints=tokens, bind_transforms=bind_transforms, rest_transforms=rest_transforms)
+
+
+def _unskinned_points(mesh: str, skin: str | None) -> list[tuple]:
+    """Object-space points of *mesh*; with *skin*, BEFORE the skinCluster (envelope 0
+    while reading). UsdSkel skins the points itself: points read on the deformed mesh
+    were skinned twice when the export frame was not the bind pose (2026-09-26)."""
+    def _read():
+        flat = cmds.xform(f"{mesh}.vtx[*]", q=True, os=True, t=True) or []
+        return [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
+
+    if not skin:
+        return _read()
+    plug = f"{skin}.envelope"
+    try:
+        envelope = cmds.getAttr(plug)
+        cmds.setAttr(plug, 0.0)
+    except Exception as exc:        # locked / connected envelope: deformed points, said
+        log.warning("%s: skin envelope not settable (%s), points read deformed", _short(mesh), exc)
+        return _read()
+    try:
+        return _read()
+    finally:
+        cmds.setAttr(plug, envelope)
 
 
 def _extract_mesh(mesh: str, skin: str | None, joints_dag: list[str],
@@ -111,8 +149,7 @@ def _extract_mesh(mesh: str, skin: str | None, joints_dag: list[str],
     from features.usd_export.contract import MeshData
 
     mesh_short = _short(mesh)
-    points_flat = cmds.xform(f"{mesh}.vtx[*]", q=True, os=True, t=True) or []
-    points = [tuple(points_flat[i:i + 3]) for i in range(0, len(points_flat), 3)]
+    points = _unskinned_points(mesh, skin if (skin and want_weights) else None)
 
     # Face topology.
     vtx_counts: list[int] = []
