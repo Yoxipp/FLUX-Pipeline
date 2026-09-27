@@ -12,6 +12,7 @@ from features.folder_manager.houdini_scene_template import (
     create_sequence_hip_scene,
     create_shot_hip_scene,
 )
+from features.folder_manager.houdini_render_scene import create_sequence_render_scene_async
 from features.folder_manager.sequence_template import (
     create_sequence_usd_template,
     create_shot_usd_template,
@@ -51,6 +52,8 @@ def create_sequence(
         create_sequence_hip_scene(seq_path, seq_label)
     except Exception as exc:  # noqa: BLE001 — never let Houdini break folder creation
         log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
+    # Default render scene of the sequence (10 shots), built in the background.
+    create_sequence_render_scene_async(project_path, seq_label)
     log.info("Sequence created: %s", seq_path)
     return seq_path
 
@@ -171,7 +174,8 @@ def update_sequence(
     seq_rel   = f"shot/{seq_label}"
     seq_path  = project_path / seq_rel
 
-    if not seq_path.exists():
+    new_seq = not seq_path.exists()
+    if new_seq:
         ensure_dir(seq_path)
         add_token(project_path, "SEQ", seq_label, seq_rel)
         create_sequence_usd_template(seq_path, seq_label)
@@ -218,6 +222,9 @@ def update_sequence(
                 if not sub_dir.exists():
                     ensure_dir(sub_dir)
 
+    if new_seq:
+        # After the shots: their tokens are in the render scene next to the 10 default ones.
+        create_sequence_render_scene_async(project_path, seq_label)
     return seq_path
 
 

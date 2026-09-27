@@ -26,7 +26,8 @@ class ShotBase(unittest.TestCase):
     def setUp(self) -> None:
         self.project = Path(tempfile.mkdtemp(prefix="flux_shotbase_"))
         save_tokens(self.project, build_default_tokens())
-        for name in ("create_shot_hip_scene", "create_sequence_hip_scene"):
+        for name in ("create_shot_hip_scene", "create_sequence_hip_scene",
+                     "create_sequence_render_scene_async"):
             patcher = mock.patch.object(ssc, name, return_value=_NO_HIP)
             patcher.start()
             self.addCleanup(patcher.stop)

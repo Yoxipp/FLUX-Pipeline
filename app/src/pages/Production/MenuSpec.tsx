@@ -18,9 +18,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { readSession, writeSession } from '../../hooks/useSessionState'
-import { Pin, X, Layers, RefreshCw, Heart } from 'lucide-react'
+import { Pin, X, Layers, RefreshCw, Heart, Clapperboard } from 'lucide-react'
 import { useFavoriteBinding } from '../../hooks/useFavorites'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { UsdAssetInfo } from '../../api/client'
 import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
@@ -813,6 +814,8 @@ function TasksLanding({ res, setState, publishesByTask, onOpenTask, onOpenSubtas
         ))}
         {/* The assembled USD of the asset (component / assembly), 2026-09-26. */}
         {res.kind === 'asset' && <UsdAssembledNode name={res.entity.name} />}
+        {/* The Houdini render scene of the sequence (ADR 0036), 2026-09-27. */}
+        {res.kind === 'seq' && <SeqRenderSceneNode seq={res.entity.name} />}
       </div>
     </div>
   )
@@ -949,6 +952,75 @@ function UsdAssembledNode({ name }: { name: string }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── "Scène de rendu" of a sequence: <SEQ>_render.hip, opened in Houdini ──────────
+// Made by FLUX when the sequence is created; built on the spot when it is missing.
+const RENDER_PRESET = 'builtin:sequence_render:'
+
+function SeqRenderSceneNode({ seq }: { seq: string }) {
+  const { project } = useProject()
+  const [file, setFile] = useState<string | null>(null)
+  const [exists, setExists] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = useMemo(() => async () => {
+    if (!project || !seq) return
+    try {
+      const pr = await api.listPresets(project, true)
+      const p = pr.presets.find(x => x.id === RENDER_PRESET + seq.toUpperCase())
+      setFile(p?.file ?? null)
+      setExists(!!p?.exists)
+    } catch { setFile(null) }
+  }, [project, seq])
+  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const h = () => { void load() }
+    window.addEventListener('flux:refresh', h)
+    return () => window.removeEventListener('flux:refresh', h)
+  }, [load])
+
+  const open = async () => {
+    if (!project) return
+    setBusy(true)
+    const id = toast.loading(exists ? `Ouverture de ${file} dans Houdini…` : `Création de la scène de rendu ${seq}…`)
+    try {
+      const r = await api.launchPreset(project, RENDER_PRESET + seq.toUpperCase(), 'houdini')
+      if (r.launched) toast.success(`Houdini lancé · ${r.scene.split(/[\/]/).pop()}`, { id, duration: 4000 })
+      else toast.error('Houdini introuvable', { id, duration: 6000 })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e), { id, duration: 6000 })
+    } finally {
+      setBusy(false)
+      void load()
+    }
+  }
+
+  return (
+    <div style={{
+      minWidth: 220, maxWidth: 420, borderRadius: 8, border: '1px solid var(--rule-2)',
+      background: 'var(--paper-2)', boxShadow: 'var(--shadow-xs)', fontFamily: 'var(--sans)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px' }}>
+        <Clapperboard size={12} strokeWidth={2} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Scène de rendu</span>
+        <span style={{ flex: 1 }} />
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+          background: exists ? 'var(--accent-soft)' : 'var(--paper)', color: exists ? 'var(--accent-hi)' : 'var(--ink-4)',
+        }}>{exists ? 'prête' : 'à créer'}</span>
+      </div>
+      <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={file ?? ''}>{file ?? `${seq}_render.hip`}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => { void open() }} disabled={busy || !project} style={_miniBtn}>
+            {busy ? (exists ? 'Ouverture…' : 'Création…') : 'Ouvrir dans Houdini'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
