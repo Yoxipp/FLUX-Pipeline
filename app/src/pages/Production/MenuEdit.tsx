@@ -2,9 +2,11 @@
 // (nothing / asset / group) and on which category is currently entered.
 
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Check, Clapperboard, Copy, FolderPlus, Plus, Trash2, X } from 'lucide-react'
+import { Check, Clapperboard, Copy, FolderOpen, FolderPlus, Plus, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
+import { useSettings } from '../../hooks/useSettings'
 import { useI18n } from '../../i18n'
 import type {
   ProductionAsset as Asset,
@@ -12,7 +14,7 @@ import type {
   ProductionSequence, ProductionShot,
   ProductionState, ProductionTask,
 } from '../../types'
-import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, shotColorFromSeqColor } from './util'
+import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, expandFluxPath, shotColorFromSeqColor } from './util'
 import { ProdBtn } from './ProdButtons'
 import type { Selection } from './Production'
 
@@ -58,6 +60,27 @@ interface PendingArchive {
 
 // A sequence / shot is only deleted after typing this word (2026-09-27).
 const DELETE_PHRASE = 'Understand'
+
+// Open a Production entity's folder in the Folder Manager (B1, 2026-09-28).
+// The folder is resolved by the backend (SEQ / SHOT tokens, else shot/<SEQ>/<SHOT>),
+// then handed to the Folder Manager through its existing `openPath` deep link.
+function useOpenEntityFolder(project: string) {
+  const navigate = useNavigate()
+  const { settings } = useSettings()
+  return async (desc: ArchiveDescriptor, label: string) => {
+    try {
+      const info = await api.getEntityFolder(project, descToParams(desc), { count: false })
+      if (!info.rel_path || !info.exists) {
+        toast.error(`Pas de dossier sur le disque pour ${label}`)
+        return
+      }
+      const abs = expandFluxPath(`$FLUX/DOSSIER_PROJETS/${project}/${info.rel_path}`, settings?.workspace)
+      navigate('/projects', { state: { openPath: abs } })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+}
 
 function useArchiveDelete(project: string) {
   const [pending, setPending] = useState<PendingArchive | null>(null)
@@ -736,6 +759,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
       setRenderBusy(false)
     }
   }
+  const openFolder = useOpenEntityFolder(project)
   const archiveDel = useArchiveDelete(project)
   const remove = () => {
     archiveDel.request(
@@ -835,6 +859,9 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
           />
           <SeqColorPicker seq={seq} onPick={c => patchSeq({ color: c })} onReset={() => patchSeq({ color: undefined })} />
         </div>
+        <ProdBtn full variant="ghost" onClick={() => { void openFolder({ kind: 'seq', seq: seq.name }, seq.name) }} style={{ marginTop: 6 }}>
+          <FolderOpen size={11} strokeWidth={1.75} /> Ouvrir dans le Folder Manager
+        </ProdBtn>
         <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
           <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
         </ProdBtn>
@@ -946,6 +973,7 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
       setRenaming(false)
     }
   }
+  const openFolder = useOpenEntityFolder(project)
   const archiveDel = useArchiveDelete(project)
   const remove = () => {
     archiveDel.request(
@@ -1019,6 +1047,10 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
             placeholder="Fin" style={{ ..._input, flex: 1 }}
           />
         </div>
+        <ProdBtn full variant="ghost" disabled={!seq} style={{ marginTop: 6 }}
+                 onClick={() => { if (seq) void openFolder({ kind: 'shot', seq: seq.name, shot: shot.name }, `${seq.name} · ${shot.name}`) }}>
+          <FolderOpen size={11} strokeWidth={1.75} /> Ouvrir dans le Folder Manager
+        </ProdBtn>
         <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
           <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
         </ProdBtn>

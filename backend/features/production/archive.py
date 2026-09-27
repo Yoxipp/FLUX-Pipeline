@@ -120,8 +120,12 @@ def _count_files(folder: Path) -> int:
     return n
 
 
-def inspect_folder(project_path: Path, rel: str) -> dict:
-    """Return {rel_path, exists, file_count} for an entity folder."""
+def inspect_folder(project_path: Path, rel: str, count: bool = True) -> dict:
+    """Return {rel_path, exists, file_count} for an entity folder.
+
+    count=False skips the recursive walk (file_count stays 0): enough to navigate
+    to the folder, and cheap on big shot folders.
+    """
     target = _safe_entity_dir(project_path, rel)
     if target is None:
         return {"rel_path": _norm(rel), "exists": False, "file_count": 0}
@@ -129,7 +133,7 @@ def inspect_folder(project_path: Path, rel: str) -> dict:
     return {
         "rel_path": _norm(rel),
         "exists": exists,
-        "file_count": _count_files(target) if exists else 0,
+        "file_count": _count_files(target) if exists and count else 0,
     }
 
 

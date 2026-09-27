@@ -908,12 +908,13 @@ export const api = {
     kind: 'asset' | 'shot' | 'seq'
     class_token?: string; name?: string
     seq?: string; shot?: string
-  }) => {
+  }, opts: { count?: boolean } = {}) => {
     const qs = new URLSearchParams({ kind: params.kind })
     if (params.class_token) qs.set('class_token', params.class_token)
     if (params.name)        qs.set('name', params.name)
     if (params.seq)         qs.set('seq', params.seq)
     if (params.shot)        qs.set('shot', params.shot)
+    if (opts.count === false) qs.set('count', 'false')   // folder only, no recursive walk
     return apiCall<{ rel_path: string; exists: boolean; file_count: number }>(
       'GET', `/production/${encodeURIComponent(project)}/entity-folder?${qs}`)
   },

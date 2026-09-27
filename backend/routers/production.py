@@ -318,9 +318,11 @@ async def entity_folder(
     name: str = "",
     seq: str = "",
     shot: str = "",
+    count: bool = True,
 ) -> dict:
     """Resolve a Production entity's on-disk folder and report existence + file
-    count, so the UI can warn before archiving (prevention message)."""
+    count, so the UI can warn before archiving (prevention message).
+    count=false skips the file count (open in the Folder Manager)."""
     _ensure_project(project)
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
@@ -329,7 +331,7 @@ async def entity_folder(
         rel = prod_archive.resolve_entity_rel(project_path, kind, class_token, name, seq, shot)
         if rel is None:
             return {"rel_path": "", "exists": False, "file_count": 0}
-        return prod_archive.inspect_folder(project_path, rel)
+        return prod_archive.inspect_folder(project_path, rel, count=count)
 
     return await loop.run_in_executor(None, _do)
 
