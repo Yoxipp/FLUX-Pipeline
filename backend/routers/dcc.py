@@ -1421,8 +1421,11 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"import sys; sys.path.insert(0, r'{_backend_root}'); "
         # Every Maya-side module of the export is reloaded, not only the entry point:
         # a cached maya_usd_presets / contract kept running the old code (2026-09-27).
-        f"[sys.modules.pop(_m, None) for _m in ('dcc.maya.maya_usd_light_export', "
-        f"'dcc.maya.maya_usd_presets', 'features.usd_export.contract')]; "
+        # Plain calls, no comprehension: the commandPort runs this with separate locals
+        # and a Python 3.11 comprehension cannot see `sys` there (NameError, no export).
+        f"sys.modules.pop('dcc.maya.maya_usd_light_export', None); "
+        f"sys.modules.pop('dcc.maya.maya_usd_presets', None); "
+        f"sys.modules.pop('features.usd_export.contract', None); "
         f"from dcc.maya.maya_usd_light_export import run_light_export; "
         f"run_light_export({_arg(req.asset)}, r'{result_path}', "
         f"mesh={_arg(req.mesh)}, root_joint={_arg(req.root_joint)}, "
