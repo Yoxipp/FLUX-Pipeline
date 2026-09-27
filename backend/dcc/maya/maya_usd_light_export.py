@@ -604,7 +604,8 @@ def run_light_export(
                 asset, mesh, root_joint, frame_start, frame_end,
                 include_geo=include_geo, include_skel=include_skel,
                 include_anim=include_anim, include_weights=include_weights,
-                include_uv=include_uv, scope=scope, root=root,
+                include_uv=include_uv, include_cam=include_cam,
+                include_light=include_light, scope=scope, root=root,
             )
             if light is not None:
                 data = dataclasses.asdict(light)

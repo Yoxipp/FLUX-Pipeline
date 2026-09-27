@@ -1373,6 +1373,8 @@ class MayaLightExportRequest(BaseModel):
     include_anim:    bool = True
     include_weights: bool = True   # UsdSkel skin binding (bone capture)
     include_uv:      bool = True
+    include_cam:     bool = False   # user cameras (no preset); shot cameras: preset "camera"
+    include_light:   bool = False   # Maya lights (no preset); shot lights: preset "light"
     # Publisher preset options (ADR 0034): {"preset": "model"|"rig"|"anim"|"camera"|"light", ...}.
     # With a preset, Maya runs the preset sweep instead of the include flags.
     options:         dict | None = None
@@ -1427,7 +1429,8 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
         f"frame_start={_arg(req.frame_start)}, frame_end={_arg(req.frame_end)}, "
         f"include_geo={_arg(req.include_geo)}, include_skel={_arg(req.include_skel)}, "
         f"include_anim={_arg(req.include_anim)}, include_weights={_arg(req.include_weights)}, "
-        f"include_uv={_arg(req.include_uv)}, scope={_arg(req.scope)}, root={_arg(req.root)}, "
+        f"include_uv={_arg(req.include_uv)}, include_cam={_arg(req.include_cam)}, "
+        f"include_light={_arg(req.include_light)}, scope={_arg(req.scope)}, root={_arg(req.root)}, "
         f"options_b64='{opts_b64}')"
     )
 
