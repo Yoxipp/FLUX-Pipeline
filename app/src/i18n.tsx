@@ -149,6 +149,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'hub.recentActivity':      { fr: 'ACTIVITÉ RÉCENTE',         en: 'RECENT ACTIVITY' },
   'hub.noRecentActivity':    { fr: 'Aucune activité récente',  en: 'No recent activity' },
   'hub.teamChat':            { fr: 'TEAM CHAT',                en: 'TEAM CHAT' },
+  'hub.chatNoProject':       { fr: 'Aucun projet actif : choisis-en un pour voir son chat.', en: 'No active project: pick one to see its chat.' },
   'hub.noMessage':           { fr: 'Aucun message',            en: 'No message' },
   'hub.messagePlaceholder':  { fr: 'Message…  (@ pour mentionner)', en: 'Message…  (@ to mention)' },
   'hub.shortcuts':           { fr: 'RACCOURCIS',               en: 'SHORTCUTS' },

@@ -425,8 +425,9 @@ def anim_asset(asset: str, scope: str, opts: dict, frame_start: int, frame_end: 
                root: str | None = None):
     """Rotations of the joints that move over [start, end], baked per frame.
 
-    translate: "none" (static), "root" (the highest translating joints: the root motion,
-    whatever the rig calls them) or "all". interpolation "held" holds each key of the
+    translate: "all" (default: every translating joint), "root" (the highest translating
+    joints: the root motion, whatever the rig calls them) or "none" (rotations only,
+    static translations). interpolation "held" holds each key of the
     scene until the next (step); reduce drops the samples a consumer rebuilds exactly."""
     from features.usd_export.contract import (
         AnimData, LightAsset, SkeletonData, hold_keys, reduce_samples, rotation_moves,
@@ -461,7 +462,7 @@ def anim_asset(asset: str, scope: str, opts: dict, frame_start: int, frame_end: 
     n = len(joints)
     rotating = [i for i in range(n) if rotation_moves([r[i] for r in rows_r])]
     moving_t = [i for i in range(n) if vector_moves([r[i] for r in rows_t])]
-    mode = str(opts.get("translate") or "none")
+    mode = str(opts.get("translate") or "all")
     if mode == "all":
         translating = moving_t
     elif mode == "root":

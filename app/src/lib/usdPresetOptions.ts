@@ -33,7 +33,7 @@ const RIG: ExportOption[] = [
 const ANIM: ExportOption[] = [
   { key: 'interpolation', label: 'Interpolation', type: 'enum', default: 'smooth', tier: 'common',
     choices: [{ value: 'smooth', label: 'Smooth (courbes)' }, { value: 'held', label: 'Step (clés tenues)' }] },
-  { key: 'translate', label: 'Translations', type: 'enum', default: 'none', tier: 'common',
+  { key: 'translate', label: 'Translations', type: 'enum', default: 'all', tier: 'common',
     choices: [
       { value: 'none', label: 'Aucune (rotations seules)' },
       { value: 'root', label: 'Root motion (auto)' },

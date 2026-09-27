@@ -31,6 +31,8 @@ npm run build
 
 Sortie : `INSTALLEURS/FLUX-Setup-<version>.exe` (installeur NSIS assiste, par utilisateur, sans admin).
 
+Diffusion a l'equipe : copier ce setup dans `<FLUX_ROOT>/FLUX_UPDATE/` (sans le renommer). Au lancement suivant, chaque FLUX installe plus ancien propose la mise a jour (`app/electron/updater.ts`).
+
 ### Version (x.x.xxx)
 
 `npm run build` lance `scripts/build.cjs`, qui incremente la version avant de builder :

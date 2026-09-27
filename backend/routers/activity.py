@@ -13,7 +13,7 @@ from core.constants import ARCHIVE_STEM_ACTIVITY, ARCHIVE_STEM_MENTIONS
 from core.json_manager import file_validator, stat_sig
 from core.logger import get_logger
 from core.paths import (
-    get_activity_path, get_activity_read_path, get_chat_path,
+    get_activity_path, get_activity_read_path,
     get_mentions_path, get_mentions_read_path, get_users_dir,
 )
 from core.repository_factory import get_repository
@@ -23,7 +23,7 @@ from features.activity.activity_reader import (
 from features.activity.history import read_archive_events
 from features.activity.chat_manager import (
     get_mentions_and_unread, get_messages, get_user_list,
-    mark_mentions_read, send_message,
+    mark_mentions_read, resolve_chat_path, send_message,
 )
 
 log = get_logger(__name__)
@@ -64,6 +64,7 @@ def _not_modified(request: Request, etag: str) -> bool:
 class ChatMessage(BaseModel):
     user: str | None = None
     message: str
+    project: str
 
 
 class MarkReadRequest(BaseModel):
@@ -164,27 +165,35 @@ async def mark_all_read() -> dict:
 
 
 @router.get("/chat")
-async def get_chat(request: Request, response: Response, limit: int = 100) -> dict:
-    """Return the last *limit* chat messages.
+async def get_chat(
+    request: Request, response: Response, limit: int = 100, project: str | None = None,
+) -> dict:
+    """Return the last *limit* messages of *project*'s team chat.
 
-    Returns empty results (not 500) when FLUX_ROOT is not yet set.
+    Each project has its own chat (DOSSIER_PROJETS/<project>/teamChat.json).
+    Returns empty messages (not 500) when FLUX_ROOT is not yet set, no project is
+    given or the project does not exist; the user list is still returned.
 
     Conditional GET: the ETag reflects teamChat.json *and* the USER directory's
     stat — the latter because the response also carries the @-autocomplete user
     list, so adding/removing a user must invalidate the cached view too.
     """
     try:
-        chat_path = get_chat_path()
         users_validator = file_validator(get_users_dir())
     except RuntimeError:
         return {"messages": [], "users": []}
+    try:
+        chat_path = resolve_chat_path(project)
+    except (ValueError, FileNotFoundError, RuntimeError):
+        loop = asyncio.get_running_loop()
+        return {"messages": [], "users": await loop.run_in_executor(None, get_user_list)}
 
     # Chat log validator via the repository (SQLite-safe: teamChat.json's mtime is
     # frozen under the DB backend, so a raw file stat would 304 forever and new
     # messages would never appear). The USER dir stat stays a real filesystem
     # validator — the @-autocomplete list is folders on disk, not a repo doc.
     validator = get_repository().version_token("chat_log", str(chat_path))
-    etag = _etag(validator, f"c:{limit}:{users_validator}") if validator != "0" else None
+    etag = _etag(validator, f"c:{project}:{limit}:{users_validator}") if validator != "0" else None
     if etag and _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
 
@@ -199,10 +208,20 @@ async def get_chat(request: Request, response: Response, limit: int = 100) -> di
 
 @router.post("/chat")
 async def post_chat(req: ChatMessage) -> dict:
-    """Send a chat message (records @mentions for notified users)."""
+    """Send a message to *project*'s team chat (records @mentions for notified users)."""
     user = req.user or config.get_current_user() or "unknown"
+    try:
+        resolve_chat_path(req.project)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nom de projet invalide")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {req.project}")
+    except RuntimeError:
+        raise HTTPException(status_code=409, detail="Workspace FLUX non configure")
     loop = asyncio.get_running_loop()
-    ok = await loop.run_in_executor(None, lambda: send_message(user, req.message))
+    ok = await loop.run_in_executor(
+        None, lambda: send_message(user, req.message, project=req.project),
+    )
     if not ok:
         raise HTTPException(status_code=500, detail="Impossible d'envoyer le message")
     return {"success": True}

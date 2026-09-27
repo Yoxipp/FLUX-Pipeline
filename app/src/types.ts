@@ -57,6 +57,7 @@ export interface ChatMention {
   text: string
   date: string
   time: string
+  project?: string   // project whose team chat the mention was said in
   read: boolean
 }
 

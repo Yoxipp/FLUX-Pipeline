@@ -1,4 +1,4 @@
-# chat_manager.py — read/write teamChat.json.
+# chat_manager.py — read/write the per-project team chat (DOSSIER_PROJETS/<project>/teamChat.json).
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from core.constants import ARCHIVE_STEM_MENTIONS
 from core.logger import get_logger
 from core.paths import (
-    get_chat_path, get_mentions_path, get_mentions_read_path, get_users_dir,
+    get_mentions_path, get_mentions_read_path, get_project_chat_path, get_users_dir,
 )
 from core.repository_factory import get_repository
 from features.activity.history import append_events
@@ -36,11 +36,30 @@ def _make_id(user: str) -> str:
     return f"{datetime.now().strftime('%Y%m%dT%H%M%S')}_{user}_{uuid.uuid4().hex[:6]}"
 
 
-def send_message(user: str, message: str, path: Path | None = None) -> bool:
-    """Append a chat message to teamChat.json. Returns True on success.
+def resolve_chat_path(project: str | None) -> Path:
+    """Return the team chat file of *project*.
 
-    Any @name that matches a known user (case-insensitive, never the author) is
-    recorded as an unread mention so that user gets a red notification.
+    Raises ValueError for an empty or unsafe name (path separators, ".."), and
+    FileNotFoundError when the project folder does not exist, so a request can never
+    write a chat file outside DOSSIER_PROJETS/<project>/.
+    """
+    name = (project or "").strip()
+    if not name or name in (".", "..") or any(c in name for c in "/\\:"):
+        raise ValueError(f"invalid project name: {project!r}")
+    path = get_project_chat_path(name)
+    if not path.parent.is_dir():
+        raise FileNotFoundError(f"project not found: {name}")
+    return path
+
+
+def send_message(
+    user: str, message: str, project: str | None = None, path: Path | None = None,
+) -> bool:
+    """Append a chat message to the team chat of *project*. Returns True on success.
+
+    *path* (tests) overrides the project's chat file. Any @name that matches a known
+    user (case-insensitive, never the author) is recorded as an unread mention so
+    that user gets a red notification, tagged with the project it was said in.
     """
     date, time = _now()
     msg_id = _make_id(user)
@@ -52,25 +71,30 @@ def send_message(user: str, message: str, path: Path | None = None) -> bool:
         "date":    date,
         "time":    time,
     }
-    chat_path = path or get_chat_path()
+    chat_path = path or resolve_chat_path(project)
     # Append-only JSONL: one atomic write, so concurrent senders never clobber
     # each other's message (was a read-modify-write of the whole array).
     ok = get_repository().append_log(_CHAT_COLLECTION, str(chat_path), [entry])
     if not ok:
-        log.error("Failed to write teamChat.json at %s", chat_path)
+        log.error("Failed to write team chat at %s", chat_path)
         return ok
 
     # Record mentions (best-effort — never fail the send if this part errors).
     try:
-        _record_mentions(from_user=user, msg_id=msg_id, text=text, date=date, time=time)
+        _record_mentions(
+            from_user=user, msg_id=msg_id, text=text, date=date, time=time, project=project,
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("Failed to record chat mentions: %s", exc)
     return ok
 
 
-def get_messages(limit: int = 100, path: Path | None = None) -> list[dict]:
-    """Return up to *limit* messages in chronological order (oldest first)."""
-    messages = get_repository().read_log(_CHAT_COLLECTION, str(path or get_chat_path()))
+def get_messages(
+    limit: int = 100, project: str | None = None, path: Path | None = None,
+) -> list[dict]:
+    """Return up to *limit* messages of *project*'s chat, oldest first."""
+    chat_path = path or resolve_chat_path(project)
+    messages = get_repository().read_log(_CHAT_COLLECTION, str(chat_path))
     messages.sort(key=lambda m: (m.get("date", ""), m.get("time", "")))
     return messages[-limit:]
 
@@ -91,7 +115,9 @@ def parse_pings(message: str) -> list[str]:
 
 # ── @mentions ─────────────────────────────────────────────────────────────────
 
-def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: str) -> None:
+def _record_mentions(
+    from_user: str, msg_id: str, text: str, date: str, time: str, project: str | None = None,
+) -> None:
     """Persist an unread mention entry for each valid @name in *text*.
 
     Resolves each @name against the real user list (case-insensitive) so a typo
@@ -118,6 +144,7 @@ def _record_mentions(from_user: str, msg_id: str, text: str, date: str, time: st
             "text":      text,
             "date":      date,
             "time":      time,
+            "project":   project or "",
             "read":      False,
         }
         for to_user in targets

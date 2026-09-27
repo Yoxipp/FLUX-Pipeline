@@ -281,10 +281,14 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.4.000"
+APP_VERSION: str = "0.5.000"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out
 CONNECT_TIMEOUT_S:   float = 0.5    # localhost connect: a closed bridge port must fail fast
 MONITOR_INTERVAL_MS: int   = 2000   # connection monitor polling interval (ms)
 CHAT_POLL_INTERVAL_MS: int = 2000   # team chat refresh interval (ms)
+
+# Frame range set on the empty scene of a Maya / Houdini launched from FLUX (launcher_core).
+DEFAULT_FRAME_START: int = 1001
+DEFAULT_FRAME_END: int   = 1050

@@ -1,0 +1,20 @@
+// flux_frame_range.mel - run by Maya's -script flag when FLUX launches Maya without a scene.
+// Sets the FLUX default frame range on the new empty scene. The range comes from the
+// FLUX_FRAME_START / FLUX_FRAME_END env vars set by the launcher (launcher_core.py),
+// 1001-1050 when missing.
+
+global proc flux_apply_frame_range()
+{
+    int $start = 1001;
+    int $end = 1050;
+    string $s = `getenv "FLUX_FRAME_START"`;
+    string $e = `getenv "FLUX_FRAME_END"`;
+    if ($s != "") $start = $s;
+    if ($e != "") $end = $e;
+    playbackOptions -minTime $start -maxTime $end -animationStartTime $start -animationEndTime $end;
+    currentTime $start;
+    print ("[FLUX] frame range " + $start + "-" + $end + "\n");
+}
+
+// Deferred: runs once Maya has finished building the startup scene.
+evalDeferred -lowestPriority "flux_apply_frame_range";

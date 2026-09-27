@@ -8,6 +8,7 @@ import {
   startPythonSidecar, stopPythonSidecar, restartBackend, getApiToken, invalidateApiToken,
   getBackendStatus, onBackendStatus, type BackendStatus,
 } from './python_bridge'
+import { promptUpdateAtLaunch } from './updater'
 
 // The terminal that launched FLUX can go away (window closed, concurrently stopped)
 // while FLUX keeps running: every console.log (backend output forwarded by
@@ -312,6 +313,14 @@ ipcMain.handle('window:togglePin', (e) => {
 app.whenReady().then(async () => {
   // Windows: group under the FLUX identity so the taskbar shows our icon.
   if (process.platform === 'win32') app.setAppUserModelId('com.flux.pipeline')
+
+  // Newer installer in <FLUX_ROOT>/FLUX_UPDATE: offer the update before anything
+  // starts (the splash is always-on-top and would hide the prompt). Accepted: the
+  // installer is running, quit without starting the backend.
+  if (await promptUpdateAtLaunch(ICON)) {
+    app.quit()
+    return
+  }
 
   // Splash first — visible immediately, covers the Vite/backend startup gap.
   createSplash()

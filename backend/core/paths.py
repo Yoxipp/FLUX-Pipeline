@@ -251,7 +251,14 @@ def get_activity_path() -> Path:
 
 
 def get_chat_path() -> Path:
+    """Legacy workspace-wide team chat (before per-project chats). Read by nothing
+    at runtime anymore; kept for the SQLite migration of old workspaces."""
     return get_config_dir() / JSON_CHAT
+
+
+def get_project_chat_path(project_name: str) -> Path:
+    """Team chat of one project: DOSSIER_PROJETS/<project>/teamChat.json."""
+    return get_project_path(project_name) / JSON_CHAT
 
 
 def get_mentions_path() -> Path:

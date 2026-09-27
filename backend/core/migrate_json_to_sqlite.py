@@ -134,6 +134,8 @@ def _scan(
             docs.append(("locks", str(project)))
         if (project / JSON_PRODUCTION).exists():
             docs.append(("production", project.name))
+        if (project / JSON_CHAT).exists():   # per-project team chat (feed log)
+            logs.append(("chat_log", str(project / JSON_CHAT)))
 
     # per-user settings, keyed by user name.
     for user in _subdirs(users_dir):

@@ -8,10 +8,19 @@ import subprocess
 from pathlib import Path
 
 from core import config
-from core.constants import DCC_EXE_PATTERNS
+from core.constants import DCC_EXE_PATTERNS, DEFAULT_FRAME_END, DEFAULT_FRAME_START
 from core.logger import get_logger
 
 log = get_logger(__name__)
+
+# Startup scripts that set the FLUX default frame range on an empty scene. Passed on
+# the command line, so nothing has to be installed in the DCC prefs. Same resources
+# root as dcc/maya/maya_rigs.py (bundled by scripts/backend.spec in the frozen build).
+_STARTUP_DIR = Path(__file__).resolve().parents[2] / "resources" / "startup"
+_FRAME_RANGE_ARGS: dict[str, tuple[str, ...]] = {
+    "maya":    ("-script", str(_STARTUP_DIR / "flux_frame_range.mel")),
+    "houdini": (str(_STARTUP_DIR / "flux_frame_range.cmd"),),
+}
 
 # Windows process-creation flags — DETACHED keeps the DCC alive after the hub closes.
 _DETACHED_PROCESS = 0x00000008
@@ -120,20 +129,26 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
         log.warning("No executable found for '%s'", dcc_name)
         return False
     env = _child_env()
+    # Empty Maya / Houdini session: start on the FLUX frame range (1001-1050). A scene
+    # (preset, sequence render scene) keeps its own range.
+    extra = () if scene else _frame_range_args(dcc_name)
+    if extra:
+        env["FLUX_FRAME_START"] = str(DEFAULT_FRAME_START)
+        env["FLUX_FRAME_END"] = str(DEFAULT_FRAME_END)
+    args = [exe, *extra, scene] if scene else [exe, *extra]
     try:
         if os.name == "nt":
-            # `start "" "<exe>" [scene]` — the empty "" is start's window-title arg.
+            # `start "" "<exe>" [args]` — the empty "" is start's window-title arg.
             # The DCC is reparented away from the backend, so taskkill /T won't reach it.
             # Every argument is quoted and checked (security S4): a scene path holding
             # a quote or %VAR% could otherwise inject commands through the shell.
-            cmd = 'start "" ' + " ".join(_cmd_quoted(str(a)) for a in ([exe, scene] if scene else [exe]))
+            cmd = 'start "" ' + " ".join(_cmd_quoted(str(a)) for a in args)
             subprocess.Popen(
                 cmd, shell=True, close_fds=True, env=env,
                 creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
             )
         else:
             # POSIX: new session detaches from the hub's process group.
-            args = [exe, scene] if scene else [exe]
             subprocess.Popen(args, start_new_session=True, close_fds=True, env=env)
         log.info("Launched %s — %s%s", dcc_name, exe, f" (scene: {scene})" if scene else "")
         return True
@@ -171,6 +186,18 @@ def find_dcc_exe(dcc_key: str) -> str | None:
 
 
 # ── private ───────────────────────────────────────────────────────────────────
+
+def _frame_range_args(dcc_name: str) -> tuple[str, ...]:
+    """Command-line args running the frame-range startup script, or () when the DCC
+    has none or the script is missing (the DCC then starts normally)."""
+    args = _FRAME_RANGE_ARGS.get((dcc_name or "").lower(), ())
+    script = Path(args[-1]) if args else None
+    if script is None or not script.is_file():
+        if script is not None:
+            log.warning("Frame range startup script missing: %s", script)
+        return ()
+    return args
+
 
 def _resolve_exe(dcc_name: str) -> str | None:
     """Return exe path: custom setting first, then auto-detected, then None."""

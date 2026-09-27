@@ -547,11 +547,13 @@ export const api = {
   markAllRead: () =>
     apiCall<{ success: boolean }>('POST', '/activity/read-all'),
 
-  getChat: (limit?: number) =>
-    apiCall<{ messages: ChatMessage[]; users: string[] }>('GET', `/activity/chat${limit ? `?limit=${limit}` : ''}`),
+  // Team chat is per project (DOSSIER_PROJETS/<project>/teamChat.json).
+  getChat: (project: string, limit?: number) =>
+    apiCall<{ messages: ChatMessage[]; users: string[] }>(
+      'GET', `/activity/chat?project=${encodeURIComponent(project)}${limit ? `&limit=${limit}` : ''}`),
 
-  sendChat: (message: string, user?: string) =>
-    apiCall<{ success: boolean }>('POST', '/activity/chat', { message, user }),
+  sendChat: (project: string, message: string, user?: string) =>
+    apiCall<{ success: boolean }>('POST', '/activity/chat', { project, message, user }),
 
   markMentionsRead: (user?: string) =>
     apiCall<{ success: boolean }>('POST', '/activity/chat/mentions/read', { user }),

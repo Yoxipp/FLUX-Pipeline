@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Upload, BookOpen, FolderOpen, Activity, SendHorizonal, Layers,
@@ -6,6 +6,7 @@ import {
 import { useActivity }  from '../hooks/useActivity'
 import { useSettings }  from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
+import { useProject }   from '../ProjectContext'
 import { Avatar, Tag } from '../components/shared/ui'
 import { api } from '../api/client'
 import { HUB_CHAT_POLL_INTERVAL_MS } from '../lib/pollIntervals'
@@ -51,6 +52,10 @@ export function Hub() {
   const { settings }  = useSettings()
   const dccStatus     = useDccStatus()
   const user          = settings?.username ?? 'User'
+  const { project }   = useProject()
+  // Latest active project, so a chat poll answered after a project switch is dropped.
+  const projectRef    = useRef(project)
+  projectRef.current  = project
 
   const [chatMessages, setChatMessages] = useState<{ who: string; h: string; msg: string }[]>([])
   const [chatUsers, setChatUsers]       = useState<string[]>([])
@@ -59,15 +64,18 @@ export function Hub() {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionIdx, setMentionIdx]     = useState(0)
 
+  // Each project has its own team chat: reload (and clear) when the project changes.
   const loadChat = useCallback(async () => {
+    if (!project) { setChatMessages([]); return }
     try {
-      const data = await api.getChat(20)
+      const data = await api.getChat(project, 20)
+      if (projectRef.current !== project) return
       setChatUsers(data.users)
-      if (data.messages.length > 0) {
-        setChatMessages(data.messages.map(m => ({ who: m.user, h: m.time, msg: m.message })))
-      }
+      setChatMessages(data.messages.map(m => ({ who: m.user, h: m.time, msg: m.message })))
     } catch {}
-  }, [])
+  }, [project])
+
+  useEffect(() => { setChatMessages([]) }, [project])
 
   useEffect(() => {
     void loadChat()
@@ -99,15 +107,15 @@ export function Hub() {
   }
 
   const sendChat = useCallback(async () => {
-    if (!chatInput.trim()) return
+    if (!chatInput.trim() || !project) return
     const msg = chatInput
     setChatInput('')
     setMentionQuery(null)
     try {
-      await api.sendChat(msg, user)
+      await api.sendChat(project, msg, user)
       await loadChat()
     } catch {}
-  }, [chatInput, user, loadChat])
+  }, [chatInput, user, project, loadChat])
 
   const activityRows = events.slice(0, 4).map(e => ({ name: e.file ?? e.action, who: e.user, h: e.time, t: e.action, v: '' }))
 
@@ -165,11 +173,12 @@ export function Hub() {
             <div style={{ padding: '7px 14px', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               <div style={{ width: 14, height: 14, borderRadius: 4, border: '1px solid var(--rule-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, color: 'var(--ink-2)', boxShadow: 'var(--shadow-xs)' }}>D</div>
               <div className="cap">{t('hub.teamChat')}</div>
+              {project && <span className="lbl" style={{ color: 'var(--ink-3)' }}>{project}</span>}
             </div>
             <div style={{ flex: 1, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
               {chatMessages.length === 0 && (
                 <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>
-                  {t('hub.noMessage')}
+                  {project ? t('hub.noMessage') : t('hub.chatNoProject')}
                 </div>
               )}
               {chatMessages.map((m, i) => (
@@ -213,6 +222,7 @@ export function Hub() {
               )}
               <input
                 value={chatInput}
+                disabled={!project}
                 onChange={e => onChatInput(e.target.value)}
                 onKeyDown={e => {
                   if (mentionQuery !== null && mentionMatches.length > 0) {
