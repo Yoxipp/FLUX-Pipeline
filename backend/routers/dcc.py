@@ -1417,7 +1417,10 @@ async def maya_export_usd(req: MayaLightExportRequest) -> dict:
 
     cmd = (
         f"import sys; sys.path.insert(0, r'{_backend_root}'); "
-        f"sys.modules.pop('dcc.maya.maya_usd_light_export', None); "
+        # Every Maya-side module of the export is reloaded, not only the entry point:
+        # a cached maya_usd_presets / contract kept running the old code (2026-09-27).
+        f"[sys.modules.pop(_m, None) for _m in ('dcc.maya.maya_usd_light_export', "
+        f"'dcc.maya.maya_usd_presets', 'features.usd_export.contract')]; "
         f"from dcc.maya.maya_usd_light_export import run_light_export; "
         f"run_light_export({_arg(req.asset)}, r'{result_path}', "
         f"mesh={_arg(req.mesh)}, root_joint={_arg(req.root_joint)}, "

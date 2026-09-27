@@ -455,6 +455,18 @@ def compact_weights(
     n_inf = len(influence_joints)
     if n_inf == 0 or num_points == 0:
         return [], [], 0
+    try:
+        import numpy  # noqa: F401  (Maya and the backend both ship it)
+    except ImportError:
+        return _compact_weights_py(influence_joints, weights_flat, num_points,
+                                   max_influences=max_influences, threshold=threshold)
+    return _compact_weights_np(influence_joints, weights_flat, num_points,
+                               max_influences=max_influences, threshold=threshold)
+
+
+def _compact_weights_py(influence_joints, weights_flat, num_points, *, max_influences=0, threshold=1e-4):
+    """Pure python compact_weights (fallback without numpy, reference of the tests)."""
+    n_inf = len(influence_joints)
     rows: list[list[tuple[int, float]]] = []
     size = 1
     for p in range(num_points):
@@ -481,3 +493,63 @@ def compact_weights(
         indices.extend([j for j, _ in pairs] + [0] * pad)
         weights.extend([w for _, w in pairs] + [0.0] * pad)
     return indices, weights, size
+
+
+_COMPACT_CHUNK = 20000   # points per block: bounds the memory of a 300k points x 200 influences skin
+
+
+def _compact_weights_np(influence_joints, weights_flat, num_points, *, max_influences=0, threshold=1e-4):
+    """compact_weights with numpy. Same result; with two influences on one joint AND
+    exactly equal weights, the order of those equal weights may differ.
+
+    A rig mesh can hold 325k points x 172 influences (56M weights): the pure python
+    loop took 11 s per mesh and over 1 GB, long enough for FLUX to call Maya frozen."""
+    import numpy as np
+
+    n_inf = len(influence_joints)
+    infl = np.asarray(influence_joints, dtype=np.int64)
+    if isinstance(weights_flat, np.ndarray):
+        dense = weights_flat.reshape(num_points, n_inf)
+    else:
+        dense = np.fromiter(weights_flat, dtype=np.float64, count=num_points * n_inf).reshape(num_points, n_inf)
+    # Merge the influences mapped to one joint, in order of first appearance (the pure
+    # version merges per point in influence order: same tie order).
+    kept = np.nonzero(infl >= 0)[0]
+    joints, first = np.unique(infl[kept], return_index=True)
+    order = np.argsort(first, kind="stable")
+    joints = joints[order]
+    col_of = {int(j): c for c, j in enumerate(joints)}
+    cols = np.array([col_of[int(infl[i])] for i in kept], dtype=np.int64)
+    if len(joints) == 0:
+        return [0] * num_points, [0.0] * num_points, 1
+
+    blocks = []
+    size = 1
+    for start in range(0, num_points, _COMPACT_CHUNK):
+        w = dense[start:start + _COMPACT_CHUNK, kept]
+        w = np.where(w > threshold, w, 0.0)
+        merged = np.zeros((w.shape[0], len(joints)), dtype=np.float64)
+        if len(cols) == len(joints):        # one influence per joint (usual): columns move
+            merged[:, cols] = w
+        else:                               # duplicate mapping: sum into the joint column
+            np.add.at(merged.T, cols, w.T)
+        rank = np.argsort(-merged, axis=1, kind="stable")
+        vals = np.take_along_axis(merged, rank, axis=1)
+        count = (vals > 0).sum(axis=1)
+        if max_influences > 0:
+            count = np.minimum(count, max_influences)
+        size = max(size, int(count.max()) if count.size else 1)
+        blocks.append((rank, vals, count))
+
+    out_idx, out_w = [], []
+    for rank, vals, count in blocks:
+        rank, vals = rank[:, :size], vals[:, :size].copy()
+        keep = np.arange(size)[None, :] < count[:, None]
+        vals[~keep] = 0.0
+        total = vals.sum(axis=1, keepdims=True)
+        vals = np.divide(vals, total, out=np.zeros_like(vals), where=total > 0)
+        idx = np.where(keep, joints[rank], 0)
+        out_idx.append(idx.reshape(-1))
+        out_w.append(vals.reshape(-1))
+    return (np.concatenate(out_idx).astype(int).tolist(),
+            np.concatenate(out_w).astype(float).tolist(), size)

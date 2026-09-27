@@ -144,6 +144,11 @@ def skin_cluster(mesh: str) -> str | None:
     return skins[0] if skins else None
 
 
+# UsdSkel gives every point of a mesh the same influence count: one noisy vertex with
+# 69 weights made a 325k points mesh write 22M indices. 8 = usual rig budget (0 = all).
+DEFAULT_MAX_INFLUENCES = 8
+
+
 def skins_of(joints: list[str]) -> list[tuple[str, str]]:
     """(mesh transform, skinCluster) for every skin driven by one of *joints*.
 
@@ -367,7 +372,7 @@ def _skin_weights(mesh: str, skin: str, joint_index: dict[str, int], opts: dict)
         infl.append(j)
     idx, wts, size = compact_weights(
         infl, list(weights), len(pts),
-        max_influences=int(opts.get("max_influences") or 0),
+        max_influences=int(opts.get("max_influences", DEFAULT_MAX_INFLUENCES) or 0),
         threshold=float(opts.get("weight_threshold") or 1e-4))
     return MeshData(
         name=_short(mesh), path=mesh, points=[(p.x, p.y, p.z) for p in pts],
@@ -386,12 +391,23 @@ def rig_asset(asset: str, scope: str, opts: dict, root: str | None = None):
     from features.usd_export.contract import LightAsset, SkeletonData
 
     found = scoped_joints(scope, root)
+    # Selected meshes decide which skins go (2026-09-27: one mesh selected, but all
+    # 94 skins of the rig were read and Maya froze). Their skeleton comes from their
+    # skinClusters' influences when no joint is selected; the whole chain still goes.
+    picked = set(mesh_transforms(scope, root)) if scope == "selection" or root else set()
+    picked_skins = [(m, sk) for m in picked for sk in [skin_cluster(m)] if sk]
+    if not found and picked_skins:
+        found = [_long(i) for _, sk in picked_skins
+                 for i in (cmds.skinCluster(sk, query=True, influence=True) or [])
+                 if cmds.nodeType(i) == "joint"]
     if not found:
         where = "dans la selection" if scope == "selection" else "dans la scene"
-        raise PresetError(f"aucun joint {where} : selectionne le squelette (ou son groupe)")
+        raise PresetError(f"aucun joint {where} : selectionne le squelette, son groupe ou un mesh skinne")
     joints = [j for r in skeleton_roots(found) for j in joint_chain(r)]
     tokens = joint_tokens(joints)
     pairs = skins_of(joints)
+    if picked:
+        pairs = [(m, sk) for m, sk in pairs if m in picked]
     bind = _bind_worlds(pairs)
     mode = str(opts.get("rest_pose") or "bind")
 

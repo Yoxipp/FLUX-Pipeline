@@ -94,6 +94,34 @@ class CompactWeights(unittest.TestCase):
         self.assertAlmostEqual(sum(w), 1.0)
         self.assertAlmostEqual(w[0], 0.6 / 0.9)
 
+    def test_numpy_path_matches_the_pure_python_reference(self) -> None:
+        # Maya rigs: 325k points x 172 influences made the pure loop freeze Maya
+        # (2026-09-27); the numpy path must give the same arrays.
+        import random
+
+        from features.usd_export.contract import _compact_weights_np, _compact_weights_py
+
+        rnd = random.Random(7)
+        n_pts, n_inf = 300, 12
+        infl = [rnd.choice([-1] + list(range(20))) for _ in range(n_inf)]
+        infl = list(dict.fromkeys(infl)) + [-1] * (n_inf - len(dict.fromkeys(infl)))
+        flat = [round(rnd.random(), 3) if rnd.random() < 0.3 else 0.0 for _ in range(n_pts * n_inf)]
+        for max_inf in (0, 4):
+            ref = _compact_weights_py(infl, flat, n_pts, max_influences=max_inf, threshold=0.05)
+            got = _compact_weights_np(infl, flat, n_pts, max_influences=max_inf, threshold=0.05)
+            self.assertEqual(got[2], ref[2])
+            self.assertEqual(got[0], ref[0])
+            for a, b in zip(got[1], ref[1]):
+                self.assertAlmostEqual(a, b)
+
+    def test_numpy_path_merges_two_influences_on_one_joint(self) -> None:
+        from features.usd_export.contract import _compact_weights_np
+
+        idx, w, size = _compact_weights_np([3, 3, 5], [0.3, 0.3, 0.4], 1)
+        self.assertEqual((idx, size), ([3, 5], 2))
+        self.assertAlmostEqual(w[0], 0.6)
+        self.assertAlmostEqual(w[1], 0.4)
+
 
 if __name__ == "__main__":
     unittest.main()

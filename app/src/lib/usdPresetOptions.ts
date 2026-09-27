@@ -26,7 +26,8 @@ const RIG: ExportOption[] = [
       { value: 'current', label: 'Image courante' },
     ] },
   { key: 'skin', label: 'Poids de skin (boneCapture)', type: 'bool', default: true, tier: 'common' },
-  { key: 'max_influences', label: 'Influences max / point (0 = toutes)', type: 'int', default: 0, tier: 'advanced' },
+  { key: 'max_influences', label: 'Influences max / point (0 = toutes)', type: 'int', default: 8, tier: 'advanced',
+    hint: "USD donne le même nombre d'influences à tous les points : 8 suffit, les poids restants sont renormalisés." },
   { key: 'weight_threshold', label: 'Poids minimum', type: 'float', default: 0.0001, tier: 'advanced' },
 ]
 
