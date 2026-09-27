@@ -55,6 +55,26 @@ class ActionGraphTests(unittest.TestCase):
         self.assertIn("publish", names)
         self.assertEqual(names, sorted(names))
 
+    def test_every_yaml_of_the_config_is_listed(self):
+        # A4 (2026-09-27): all the actions, not a hand-kept list.
+        from flux_actions.graph import CONFIG_DIR
+
+        names = list_action_names()
+        for f in CONFIG_DIR.glob("*.yml"):
+            self.assertIn(f.stem, names)
+
+    def test_graph_carries_description_steps_and_docs(self):
+        graph = build_action_graph("publish_maya")
+        self.assertEqual(graph["file"], "publish_maya.yml")
+        self.assertIn("Maya", graph["description"])
+        self.assertEqual([s["name"] for s in graph["steps"]], ["select", "resolve", "export", "publish"])
+        for node in graph["nodes"]:
+            self.assertTrue(node["data"]["doc"], node["id"])          # docstring of the command
+            for param in node["data"]["params"]:
+                self.assertIn("tooltip", param)
+        order = [e for e in graph["edges"] if e["kind"] == "order"]
+        self.assertEqual(len(order), 3)                               # one per pair of steps
+
     def test_unknown_action_raises(self):
         with self.assertRaises(KeyError):
             build_action_graph("does_not_exist")

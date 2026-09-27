@@ -204,10 +204,12 @@ export const api = {
   // Running instances of a DCC with their open scene (publish picker), and the
   // instance FLUX works with (backend clients without a port follow it: Houdini).
   getDccInstances: (dcc: string) =>
-    apiCall<{ dcc: string; active: number | null; instances: { id: string; port: number; label: string; scene: string | null; selection?: string[] }[] }>(
+    apiCall<{ dcc: string; active: number | null; instances: { id: string; port: number; pid: number | null; label: string; scene: string | null; selection?: string[] }[] }>(
       'GET', `/dcc/instances/${encodeURIComponent(dcc)}`),
-  setActiveInstance: (dcc: string, port: number | null) =>
-    apiCall<{ ok: boolean }>('POST', '/dcc/active-instance', { dcc, port }),
+  // pid: the process seen on that port (A1): the backend refuses a port taken back by
+  // another process instead of publishing from the wrong scene.
+  setActiveInstance: (dcc: string, port: number | null, pid?: number | null) =>
+    apiCall<{ ok: boolean }>('POST', '/dcc/active-instance', { dcc, port, pid: pid ?? null }),
 
   // Instances of one character in the Maya scene (U2): DINGO_01, DINGO_02...
   getMayaCharacterInstances: (name: string, port?: number) =>
@@ -921,6 +923,18 @@ export const api = {
   archiveEntity: (project: string, relPath: string) =>
     apiCall<{ archived: boolean; archived_to?: string; reason?: string }>(
       'POST', `/production/${encodeURIComponent(project)}/archive`, { rel_path: relPath }),
+
+  // Delete a sequence / shot server-side: archive its folders (shot + comp / lighting),
+  // drop its tokens, remove it from production.json with a tombstone (never comes back).
+  // Rename a sequence / shot in production.json AND on disk (refused with 409 while it
+  // holds published files: their names and USD paths carry the old name).
+  renameSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot: string, newName: string) =>
+    apiCall<{ ok: boolean; archived: string; path: string; warnings: string[] }>(
+      'POST', `/production/${encodeURIComponent(project)}/rename-seq-shot`, { kind, seq, shot, new: newName }),
+
+  deleteSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot = '') =>
+    apiCall<{ ok: boolean; archived: string[]; tokens_dropped: string[]; removed_ids: string[] }>(
+      'POST', `/production/${encodeURIComponent(project)}/delete-seq-shot`, { kind, seq, shot }),
 
   // Composer ghost-token: resolve a token's folder + file count (to warn before
   // archiving it from the Publisher).

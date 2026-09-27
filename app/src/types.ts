@@ -12,6 +12,8 @@ export interface DccInstance {
   scene: string | null
   version: string | null
   label: string
+  // "busy": accepts the connection but does not answer in time (an export runs)
+  state?: 'connected' | 'busy'
 }
 
 export interface DccStatusEntry {
@@ -25,6 +27,12 @@ export interface DccStatusEntry {
   // accepts a connection. Present (and false) once the backend has checked.
   stuck?: boolean
   stuck_pid?: number | null
+  // A1: open without the FLUX bridge listening, every instance busy, the instance the
+  // backend targets (port + pid) and the chosen one that went away.
+  no_bridge?: boolean
+  busy?: boolean
+  active?: { port: number; pid: number | null } | null
+  active_lost?: { port: number; pid: number | null; now_pid: number | null; at: number } | null
 }
 
 export type DccStatusMap = Record<string, DccStatusEntry>
@@ -153,6 +161,7 @@ export interface ActionGraphParam {
   value: unknown
   wired: boolean          // fed from another command's output (never user-typed)
   hide:  boolean
+  tooltip?: string
 }
 
 export interface ActionGraphNode {
@@ -165,6 +174,8 @@ export interface ActionGraphNode {
     index:   number
     status:  string
     params:  ActionGraphParam[]
+    doc?:    string       // first paragraph of the command's docstring
+    module?: string       // python module of the command
   }
 }
 
@@ -180,6 +191,9 @@ export interface ActionGraph {
   name:  string
   nodes: ActionGraphNode[]
   edges: ActionGraphEdge[]
+  steps?: { name: string; index: number; commands: string[] }[]
+  description?: string    // header comment of the YAML
+  file?: string
 }
 
 export interface HoudiniPublishPayload {

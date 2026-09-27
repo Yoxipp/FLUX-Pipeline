@@ -1,9 +1,9 @@
-# ADR 0036: default render scene of a sequence, built by hython. hython is faked: the
-# tests check the plan (10 default shots + the shots of the sequence, project resolution),
-# what the generated script builds (the maintainer's layout: STRUCTURE, sequence env / lights, per
-# shot FLUX Shot + grafts + crypto + render settings + ROP, light_node on the lights
-# graft), that an existing scene is never overwritten and that a new sequence (no shot
-# yet) gets its 10 shots.
+# ADR 0036 / 0037: default render scene of a sequence, made by hython from the maintainer's render
+# scene (resources/scenes/houdini/flux_template_sequence_render.hip). hython is faked:
+# the tests check the plan (the shots of the sequence, at least 3 blocks, project
+# resolution), the generated script (template loaded, FLUX Sequence on top, blocks grown,
+# one render chain + FLUX Render + ROP per block), that an existing scene is never
+# overwritten and that a new sequence (no shot yet) gets the template's 3 blocks.
 
 from __future__ import annotations
 
@@ -41,26 +41,32 @@ class RenderScene(unittest.TestCase):
         plan = hr.build_plan(self.project, "seq001")
         self.assertEqual(plan["seq"], "SEQ001")
         self.assertEqual(plan["resolution"], [2048, 858])
-        names = [s["shot"] for s in plan["shots"]]
-        self.assertEqual(names, [f"SHOT{n:03d}" for n in range(1, 11)] + ["SHOT020"])
+        self.assertEqual([s["shot"] for s in plan["shots"]], ["SHOT010", "SHOT020"])
         by_name = {s["shot"]: s for s in plan["shots"]}
         self.assertEqual(by_name["SHOT010"]["range"], [1001, 1048])
         self.assertFalse(by_name["SHOT020"]["has_stage"])
-        self.assertIn("hitPz", plan["aovs"])                          # depth AOV
-        self.assertIn("__variance", plan["aovs"])                     # denoise
+        self.assertEqual(plan["blocks"], 3)                           # the template's 3 blocks
+        self.assertTrue(Path(plan["template"]).is_file())             # the maintainer's scene is shipped
+        self.assertEqual(plan["required"], ["flux_render", "flux_sequence", "flux_shot"])
+        self.assertEqual(plan["required_parms"], {"flux_shot": "content"})       # FLUX Shot Import
+        self.assertEqual(hr.render_scene_base(self.project, "SEQ001"),
+                         self.project / "shot" / "SEQ001" / "SEQ001_render")   # ADR 0038
 
-    def test_script_builds_one_branch_and_rop_per_shot(self) -> None:
+    def test_script_loads_the_template_and_grows_the_shot_blocks(self) -> None:
         script = hr._gen_script(hr.build_plan(self.project, "SEQ001"), "C:/p/SEQ001_render")
         compile(script, "render_scene", "exec")                       # valid Python for hython
-        for needle in ('createNode("flux_shot"', '"STRUCTURE"', '"graft_env_seq"', '"graft_light_seq"',
-                       'createNode("graftbranches"', 'parm("light_node").set(prev.path())',
-                       'createNode("karmacryptomatte"', 'createNode("karmarendersettings"',
-                       'createNode("usdrender"', 'parm("render_rop").set(rop.path())',
-                       'rop.parm("loppath").set(end.path())', "BRAY_HdKarma", "hou.hipFile.clear",
-                       "hou.setSessionModuleSource"):
+        for needle in ("hou.hipFile.load", 'createNode("flux_sequence"', 'structure.setInput(0, top)',
+                       'ns["grow_to"]', "reconstruis les HDA", "hou.setSessionModuleSource",
+                       'plan["template_seq"]'):
             self.assertIn(needle, script, needle)
-        self.assertEqual(hr.GRAFTS[0][0], "LIGHTS")                   # light rig = lights only
-        self.assertNotIn("hipFile.load", script)                       # built from an empty scene
+        self.assertNotIn("hipFile.clear", script)                      # the maintainer's scene, not a new one
+        from dcc.houdini.hda import flux_sequence_hda
+        module = flux_sequence_hda.MODULE_FUNCTIONS
+        compile(module, "sequence", "exec")
+        for fn in ("def grow_to", "def clone_shot", "def ensure_render_chain", "def link_rop",
+                   "def grow_box", "setBounds", 'createNode("flux_render"'):
+            self.assertIn(fn, module)
+        self.assertNotIn(".destroy()", module)                         # never deletes a shot block
 
     def test_an_existing_scene_is_never_overwritten(self) -> None:
         base = hr.render_scene_base(self.project, "SEQ001")
@@ -81,10 +87,10 @@ class RenderScene(unittest.TestCase):
         self.assertNotIn("SHOT010", res["without_stage"])             # the only staged shot
         self.assertIn("SHOT020", res["without_stage"])
 
-    def test_a_new_sequence_gets_ten_shots(self) -> None:
+    def test_a_new_sequence_gets_the_template_blocks(self) -> None:
         plan = hr.build_plan(self.project, "SEQ404")
-        self.assertEqual([s["shot"] for s in plan["shots"]], [f"SHOT{n:03d}" for n in range(1, 11)])
-        done = {"ok": True, "path": "C:/p/SEQ404_render.hip", "shots": []}
+        self.assertEqual((plan["shots"], plan["blocks"]), ([], 3))
+        done = {"ok": True, "path": "C:/p/SEQ404_render.hip", "shots": [1, 2, 3]}
         with mock.patch.object(hr, "_run_offline", return_value=done) as run:
             self.assertTrue(hr.create_sequence_render_scene(self.project, "SEQ404")["created"])
         run.assert_called_once()
@@ -99,6 +105,9 @@ class RenderScene(unittest.TestCase):
         base.parent.mkdir(parents=True)
         base.with_suffix(".hip").write_text("x", encoding="utf-8")
         presets = hr.builtin_presets(self.project)
+        self.assertEqual(presets[0]["id"], hr.TEMPLATE_PRESET_ID)              # the template itself
+        self.assertTrue(presets[0]["exists"])
+        presets = presets[1:]
         self.assertEqual([p["id"] for p in presets],
                          [hr.BUILTIN_PREFIX + "SEQ001", hr.BUILTIN_PREFIX + "SEQ002"])
         for p in presets:
@@ -113,6 +122,9 @@ class RenderScene(unittest.TestCase):
             res = hr.open_builtin_preset(self.project, hr.BUILTIN_PREFIX + "SEQ001")
         self.assertEqual(res["path"], "C:/p/SEQ001_render.hip")
         self.assertFalse(hr.open_builtin_preset(self.project, "preset_1")["ok"])
+        copy = hr.open_builtin_preset(self.project, hr.TEMPLATE_PRESET_ID)   # a copy, never the template
+        self.assertTrue(copy["ok"])
+        self.assertNotEqual(Path(copy["path"]), hr.TEMPLATE)
 
 
 if __name__ == "__main__":

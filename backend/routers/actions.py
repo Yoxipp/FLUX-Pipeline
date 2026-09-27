@@ -97,6 +97,9 @@ class GraphResponse(BaseModel):
     name: str
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
+    steps: list[dict[str, Any]] = []
+    description: str = ""
+    file: str = ""
 
 
 @router.get("/graph/list", response_model=list[str])

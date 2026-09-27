@@ -24,9 +24,17 @@ def list_anims(project_path: str | Path) -> list[dict]:
     from .shot_anim import list_asset_clips, list_shot_anims
 
     out = []
-    for item in list_shot_anims(project_path):
-        out.append({**item, "key": item["base"],
-                    "label": f"PLAN {item['seq']}/{item['shot']}  {item['character']}"})
+    shots = list_shot_anims(project_path)
+    # The key stays the base when a character exists in one sub-task only: the FLUX Anim
+    # nodes saved before the sub-tasks keep finding their animation.
+    per_base: dict[str, int] = {}
+    for item in shots:
+        per_base[item["base"]] = per_base.get(item["base"], 0) + 1
+    for item in shots:
+        sub = (item.get("subtask") or "") if per_base[item["base"]] > 1 else ""
+        out.append({**item, "key": item["base"] + (f"@{sub}" if sub else ""),
+                    "label": f"PLAN {item['seq']}/{item['shot']}  {item['character']}"
+                             + (f"  [{sub}]" if sub else "")})
     for item in list_asset_clips(project_path):
         out.append({**item, "key": item["base"], "label": f"CLIP {item['name']}  {item['clip']}"})
     return out

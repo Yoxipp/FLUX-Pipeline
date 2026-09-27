@@ -4,7 +4,8 @@
 // paths; decision D1). Every write is validated by the backend, nothing is saved on error.
 
 import { useEffect, useState } from 'react'
-import { AlertTriangle, RotateCcw, Save } from 'lucide-react'
+import { AlertTriangle, ExternalLink, RotateCcw, Save, Workflow } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { AdvancedProject, AdvancedSwitch } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
@@ -44,6 +45,7 @@ function parseLines(text: string): Record<string, string> {
 
 export function AdvancedSettings() {
   const { project: activeProject } = useProject()
+  const navigate = useNavigate()
   const [proj, setProj] = useState<AdvancedProject | null>(null)
   const [switches, setSwitches] = useState<Record<string, AdvancedSwitch>>({})
   const [error, setError] = useState('')
@@ -163,6 +165,24 @@ export function AdvancedSettings() {
           </div>
         </div>
       )}
+
+      <SecTitle>Actions (YAML)</SecTitle>
+      <div className="card" style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Workflow size={14} strokeWidth={1.75} color="var(--ink-3)" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: 'var(--ink)' }}>Graph YAML</div>
+          <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1 }}>
+            Node flow des actions (publish...), en lecture seule : le YAML reste la source.
+          </div>
+        </div>
+        <Btn sm ghost onClick={() => {
+          // Own window when Electron can open one, else the page in this window.
+          if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/action-graph')
+          else navigate('/action-graph')
+        }}>
+          <ExternalLink size={11} strokeWidth={2} /> Ouvrir le graph
+        </Btn>
+      </div>
 
       <SecTitle>Publish (ce poste)</SecTitle>
       <div className="card" style={{ padding: '6px 12px', display: 'flex', flexDirection: 'column' }}>

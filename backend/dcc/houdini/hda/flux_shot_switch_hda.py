@@ -20,6 +20,15 @@ follows this node: frame range, camera, output ``render_picture``. "Rendre ce sh
 renders one shot, "Rendre la sequence" every FLUX Shot of the same sequence, one after
 the other, each with its own range and camera.
 
+2026-09-27: shown as "FLUX Shot Import" (the node type stays ``flux_shot``: the scenes
+already made keep their nodes). The render buttons moved to FLUX Render, at the bottom of
+the branch under the Render Settings (flux_render_hda.py); ``render_picture`` /
+``render_rop`` stay hidden here so the scenes that read them keep working. New section
+"Assets et variantes": every asset of the shot (on / off) and each of its variant sets
+(shaders, geo / groom files, anim sub-task, ADR 0024), chosen per node; the inner
+``apply_variants`` Python LOP authors the choices (self-contained), above the Layer Break (never in the
+shot light publish).
+
 Same bootstrap pattern as FLUX Anim: the HDA holds a few lines that fetch the real
 module from GET /dcc/houdini/shot_switch/module, so a fix needs no HDA rebuild.
 """
@@ -34,7 +43,11 @@ from dcc.houdini.client import houdini_client
 log = get_logger(__name__)
 
 NODE_NAME = "flux_shot"
-LABEL = "FLUX Shot"
+LABEL = "FLUX Shot Import"
+# Rows of "Assets et variantes": one per asset (on / off) and per variant set of an asset.
+MAX_VARIANT_ROWS = 96
+# Pseudo variant set of a row that switches the asset itself on / off.
+ACTIVE_ROW = "__active__"
 # Output of the shot render (one folder per shot, beside the scene).
 RENDER_PICTURE = '$HIP/render/`chs("seq")`_`chs("shot")`/`chs("seq")`_`chs("shot")`.$F4.exr'
 
@@ -56,7 +69,7 @@ try:
     _load()
 except Exception:
     def _dead_menu(*a, **kw): return ["", "FLUX offline"]
-    for _n in ("menu_project", "menu_seq", "menu_shot", "menu_version", "menu_camera"):
+    for _n in ("menu_project", "menu_seq", "menu_shot", "menu_version", "menu_camera", "menu_variant"):
         globals()[_n] = _dead_menu
     def _offline(node, name):
         try:
@@ -70,6 +83,7 @@ except Exception:
     def create_render_rop(node): _offline(node, "create_render_rop")
     def render_shot(node): _offline(node, "render_shot")
     def render_sequence(node): _offline(node, "render_sequence")
+    def scan_variants(node): _offline(node, "scan_variants")
     def on_created(node): pass
     def on_loaded(node): pass
 '''
@@ -153,7 +167,12 @@ def _shots(node, fresh=False):
     key = "shots:" + project
     if fresh:
         _cache.pop(key, None)
-    return _cached(key, lambda: _fetch_shots(project))
+    # An empty list is never cached (2026-09-28: a sequence re-created a moment
+    # before left the Shot menu on "-" while its shots existed): asked again next time.
+    def _fetch():
+        shots, ok = _fetch_shots(project)
+        return shots, ok and bool(shots)
+    return _cached(key, _fetch)
 
 def _current(node):
     seq, shot = _pval(node, "seq"), _pval(node, "shot")
@@ -255,6 +274,10 @@ def resolve_path(node, opening=False):
     follow = node.parm("follow_range")
     if follow is None or follow.eval():
         apply_frame_range(node)
+    try:
+        scan_variants(node, quiet=True)
+    except Exception:
+        pass
     msg = "OK  %s %s %s" % (item["seq"], item["shot"], version)
     if item.get("range"):
         msg += "  images %d-%d" % (int(rng[0]), int(rng[1]))
@@ -400,12 +423,141 @@ def publish_light(node):
     warns = r.get("warnings") or []
     _status(node, msg + ("  |  " + " ; ".join(warns) if warns else ""))
 
+# ── Assets et variantes (2026-09-27) ────────────────────────────────────
+# Rows = [[prim, variant set]] in the hidden "var_rows_json"; row i shows its name in
+# "var_name<i>" and its choice in "var_sel<i>" ("" = keep the stage's choice). A row
+# whose set is ACTIVE_ROW switches the asset on / off.
+
+def _var_rows(node):
+    try:
+        return json.loads(_pval(node, "var_rows_json") or "[]")
+    except Exception:
+        return []
+
+def _source_stage(node):
+    """The shot stage as loaded, before this node's own choices."""
+    try:
+        return node.node("sublayer").stage()
+    except Exception:
+        return None
+
+def _asset_prims(stage):
+    """Casting of the shot: the models under /assets, /sets, /crowd (not inside them)."""
+    from pxr import Usd
+    out = []
+    for root in ("/assets", "/sets", "/crowd"):
+        top = stage.GetPrimAtPath(root)
+        if not top:
+            continue
+        todo = list(top.GetAllChildren())
+        while todo:
+            prim = todo.pop(0)
+            kind = Usd.ModelAPI(prim).GetKind()
+            if kind in ("component", "assembly", "subcomponent") or prim.GetVariantSets().GetNames():
+                out.append(prim)
+            elif prim.GetPath().pathElementCount < 4:
+                todo.extend(prim.GetAllChildren())
+    return out
+
+def scan_variants(node, quiet=False):
+    """List the assets of the shot and their variant sets. A choice already made on a row
+    (same asset, same set) is kept."""
+    stage = _source_stage(node)
+    if stage is None:
+        if not quiet:
+            _status(node, "Pas de stage charge : Resolve d'abord")
+        return
+    old = {}
+    for i, row in enumerate(_var_rows(node)):
+        sel = _pval(node, "var_sel%d" % (i + 1))
+        if sel:
+            old[tuple(row)] = sel
+    rows = []
+    for prim in _asset_prims(stage):
+        path = str(prim.GetPath())
+        rows.append([path, ACTIVE_ROW])
+        rows += [[path, name] for name in prim.GetVariantSets().GetNames()]
+    cut = len(rows) > MAX_VARIANT_ROWS
+    rows = rows[:MAX_VARIANT_ROWS]
+    _set(node, "var_rows_json", json.dumps(rows))
+    for i in range(1, MAX_VARIANT_ROWS + 1):
+        if i <= len(rows):
+            path, vset = rows[i - 1]
+            name = path.rsplit("/", 1)[-1]
+            _set(node, "var_name%d" % i, name + "  |  " + ("actif" if vset == ACTIVE_ROW else vset))
+            _set(node, "var_sel%d" % i, old.get((path, vset), ""))
+        else:
+            _set(node, "var_name%d" % i, "")
+            _set(node, "var_sel%d" % i, "")
+    if not quiet:
+        n_assets = sum(1 for r in rows if r[1] == ACTIVE_ROW)
+        msg = "%d asset(s), %d variante(s)" % (n_assets, len(rows) - n_assets)
+        _status(node, msg + ("  (liste coupee a %d lignes)" % MAX_VARIANT_ROWS if cut else ""))
+
+def menu_variant(node, parm=None):
+    """Choices of a row: "" (the stage's) then on / off or the variants of its set."""
+    try:
+        idx = int("".join(c for c in parm.name() if c.isdigit()))
+        path, vset = _var_rows(node)[idx - 1]
+    except Exception:
+        return ["", "-"]
+    stage = _source_stage(node)
+    prim = stage.GetPrimAtPath(path) if stage is not None else None
+    if vset == ACTIVE_ROW:
+        cur = "on" if (prim is None or prim.IsActive()) else "off"
+        return ["", "(stage : %s)" % cur, "on", "actif", "off", "desactive"]
+    if not prim:
+        return ["", "(asset absent)"]
+    vs = prim.GetVariantSets().GetVariantSet(vset)
+    out = ["", "(stage : %s)" % (vs.GetVariantSelection() or "-")]
+    for name in vs.GetVariantNames():
+        out += [name, name]
+    return out
+
 def on_created(node):
     threading.Thread(target=lambda: _shots(node), daemon=True).start()
 
 def on_loaded(node):
     resolve_path(node, opening=True)
 '''
+
+# The served module reads the same constants as the parm interface.
+MODULE_FUNCTIONS = f"ACTIVE_ROW = {ACTIVE_ROW!r}\nMAX_VARIANT_ROWS = {MAX_VARIANT_ROWS}\n" + MODULE_FUNCTIONS
+
+# Body of the inner apply_variants Python LOP: the choices of "Assets et variantes",
+# authored on the active layer (above the Layer Break: never in the shot light publish).
+# Self-contained, no FLUX call: a render with FLUX closed keeps the choices.
+APPLY_VARIANTS = f"""import json
+node = hou.pwd()
+top = node.parent()
+stage = node.editableStage()
+# Contenu (2026-09-28): one import per backdrop of the render scene, ENV = decors,
+# CHAR = characters. The other top-level prims are deactivated.
+_keep = {{1: ("/sets",), 2: ("/assets", "/crowd")}}.get(int(top.evalParm("content") or 0))
+if _keep:
+    for _root in stage.GetPseudoRoot().GetAllChildren():
+        _path = str(_root.GetPath())
+        if _path not in _keep and _path != "/HoudiniLayerInfo":
+            _root.SetActive(False)
+try:
+    rows = json.loads(top.evalParm("var_rows_json") or "[]")
+except Exception:
+    rows = []
+for i, (path, vset) in enumerate(rows):
+    p = top.parm("var_sel%d" % (i + 1))
+    sel = p.evalAsString() if p is not None else ""
+    if not sel:
+        continue
+    prim = stage.GetPrimAtPath(path)
+    if not prim:
+        continue
+    if vset == {ACTIVE_ROW!r}:
+        prim.SetActive(sel == "on")
+        continue
+    sets = prim.GetVariantSets()
+    if sets.HasVariantSet(vset):
+        sets.GetVariantSet(vset).SetVariantSelection(sel)
+"""
 
 
 def _build_code(hda_path: str) -> str:
@@ -440,6 +592,10 @@ _ptg.append(_menu("project", "Projet", "", "menu_project", "FLUX project"))
 _ptg.append(_menu("seq", "Sequence", "", "menu_seq", "Sequence of the scene"))
 _ptg.append(_menu("shot", "Shot", "", "menu_shot", "Shot loaded in the scene"))
 _ptg.append(_menu("version", "Version", "LAST", "menu_version", "LAST follows new publishes, vNNN is frozen"))
+_ptg.append(hou.MenuParmTemplate("content", "Contenu", ("all", "sets", "assets"),
+                                 menu_labels=("Tout le shot", "Decors (/sets)", "Persos (/assets, /crowd)"),
+                                 default_value=0,
+                                 help="Tout, or only the decors / only the characters of the shot stage"))
 _ptg.append(hou.MenuParmTemplate("geo_display", "Geometrie", ("proxy", "render"),
                                  menu_labels=("Proxy (leger)", "Geo complete"), default_value=0,
                                  help="Proxy: purpose=proxy meshes in the viewport. Geo complete: render meshes."))
@@ -474,24 +630,33 @@ _ptg.append(hou.ButtonParmTemplate("btn_publish_light", "Publier le light rig du
                                    script_callback="hou.phm().publish_light(kwargs['node'])",
                                    script_callback_language=_PY,
                                    help="Publishes the layers authored after this node as SEQ_SHOT_LIGHT"))
-_ptg.append(hou.SeparatorParmTemplate("sep_render"))
+# Rendering moved to FLUX Render (under the Render Settings). Kept hidden: scenes made
+# before read render_picture / render_rop by expression.
 _ptg.append(hou.StringParmTemplate("render_picture", "Images du shot", 1, default_value=({RENDER_PICTURE!r},),
-                                   string_type=hou.stringParmType.FileReference,
-                                   help="Output of this shot's render ROP"))
+                                   string_type=hou.stringParmType.FileReference, is_hidden=True))
 _ptg.append(hou.StringParmTemplate("render_rop", "ROP du shot", 1, default_value=("",),
-                                   string_type=hou.stringParmType.NodeReference,
-                                   help="USD Render ROP of this shot (created by the button)"))
-_ptg.append(hou.ButtonParmTemplate("btn_render_rop", "Creer le ROP du shot",
-                                   script_callback="hou.phm().create_render_rop(kwargs['node'])",
-                                   script_callback_language=_PY,
-                                   help="Karma ROP that renders this shot's branch (range, camera, output)"))
-_ptg.append(hou.ButtonParmTemplate("btn_render_shot", "Rendre ce shot",
-                                   script_callback="hou.phm().render_shot(kwargs['node'])",
-                                   script_callback_language=_PY))
-_ptg.append(hou.ButtonParmTemplate("btn_render_seq", "Rendre la sequence",
-                                   script_callback="hou.phm().render_sequence(kwargs['node'])",
-                                   script_callback_language=_PY,
-                                   help="Every FLUX Shot of this sequence in the scene, one after the other"))
+                                   string_type=hou.stringParmType.NodeReference, is_hidden=True))
+# Assets et variantes: one row per asset (on / off) and per variant set of an asset.
+_vf = hou.FolderParmTemplate("fold_variants", "Assets et variantes", folder_type=hou.folderType.Collapsible)
+_vf.addParmTemplate(hou.ButtonParmTemplate("btn_scan_variants", "Lister les assets et variantes",
+                                           script_callback="hou.phm().scan_variants(kwargs['node'])",
+                                           script_callback_language=_PY,
+                                           help="Re-read the assets of the shot stage and their variant sets"))
+_vf.addParmTemplate(hou.StringParmTemplate("var_rows_json", "rows", 1, default_value=("[]",), is_hidden=True))
+for _i in range(1, {MAX_VARIANT_ROWS} + 1):
+    _hide = '{{ var_name%d == "" }}' % _i
+    _nm = hou.StringParmTemplate("var_name%d" % _i, "", 1, default_value=("",), is_label_hidden=True)
+    _nm.setConditional(hou.parmCondType.DisableWhen, '{{ var_name%d != "~" }}' % _i)
+    _nm.setConditional(hou.parmCondType.HideWhen, _hide)
+    _nm.setJoinWithNext(True)
+    _vf.addParmTemplate(_nm)
+    _sel = hou.StringParmTemplate("var_sel%d" % _i, "", 1, default_value=("",), is_label_hidden=True,
+                                  menu_type=hou.menuType.Normal)
+    _sel.setItemGeneratorScript("hou.phm().menu_variant(kwargs['node'], kwargs['parm'])")
+    _sel.setItemGeneratorScriptLanguage(_PY)
+    _sel.setConditional(hou.parmCondType.HideWhen, _hide)
+    _vf.addParmTemplate(_sel)
+_ptg.append(_vf)
 _ptg.append(hou.SeparatorParmTemplate("sep_resolved"))
 _ptg.append(hou.StringParmTemplate("resolved_path", "Fichier charge", 1, default_value=("",)))
 _ptg.append(hou.ButtonParmTemplate("btn_resolve", "Resolve / Recharger", script_callback=_CB,
@@ -512,8 +677,12 @@ _out = next((c for c in _sub.children() if c.type().name() == "output"), None) \
 _subl = _sub.createNode("sublayer", "sublayer")
 _subl.setInput(0, _sub.indirectInputs()[0])
 _subl.parm("filepath1").setExpression('chs("../resolved_path")', hou.exprLanguage.Hscript)
+# The artist's choices of "Assets et variantes" (on / off, variant selections).
+_apply = _sub.createNode("pythonscript", "apply_variants")
+_apply.setInput(0, _subl)
+_apply.parm("python").set({APPLY_VARIANTS!r})
 _full = _sub.createNode("configureprimitive", "show_render_geo")
-_full.setInput(0, _subl)
+_full.setInput(0, _apply)
 _full.parm("primpattern").set("/assets/**/geo/render/** /sets/**/geo/render/** /crowd/**/geo/render/**")
 _full.parm("setpurpose").set(1)
 _full.parm("purpose").set("default")
@@ -534,13 +703,19 @@ _ghide.parm("visibility").set("invisible")
 _hide.parm("setvisibility").set(1)
 _hide.parm("visibility").set("invisible")
 _sw = _sub.createNode("switch", "geo_display")
-_sw.setInput(0, _subl)
+_sw.setInput(0, _apply)
 _sw.setInput(1, _ghide)
 _sw.parm("input").setExpression('ch("../geo_display")', hou.exprLanguage.Hscript)
 # Everything authored after this node is a new layer: the shot light rig publish.
 _lb = _sub.createNode("layerbreak", "layerbreak")
 _lb.setInput(0, _sw)
-_out.setInput(0, _lb)
+# Decors / Persos (a branch of the render scene, merged then grafted): no Layer Break, a
+# merge strips every layer above one and the branch came out empty (2026-09-28).
+_lbsw = _sub.createNode("switch", "layer_break_if_all")
+_lbsw.setInput(0, _lb)
+_lbsw.setInput(1, _sw)
+_lbsw.parm("input").setExpression('ch("../content") > 0', hou.exprLanguage.Hscript)
+_out.setInput(0, _lbsw)
 _sub.layoutChildren()
 
 _asset = _sub.createDigitalAsset(name=_NAME, hda_file_name=_HDA_PATH, description={LABEL!r},

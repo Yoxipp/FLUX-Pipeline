@@ -27,10 +27,11 @@ def _shot_roots(project: Path) -> list[Path]:
     return sorted(r for r in roots if r.is_dir())
 
 
-def _scan(roots: list[Path], project: Path, accept) -> list[dict]:
-    """Published motion-only animations under *roots*: one item per base, with its
-    LAST pointer and its versions. *accept(base, contrib)* -> the item fields, or None."""
-    found: dict[str, dict] = {}
+def _scan(roots: list[Path], project: Path, accept, subtask_of=None) -> list[dict]:
+    """Published motion-only animations under *roots*: one item per base (and per
+    sub-task folder when *subtask_of(root, folder)* is given), with its LAST pointer and
+    its versions. *accept(base, contrib)* -> the item fields, or None."""
+    found: dict[tuple[str, str], dict] = {}
     for root in roots:
         for path in root.rglob("*"):
             if path.suffix.lower() not in _USD_EXTS or ".proxy." in path.name:
@@ -43,13 +44,16 @@ def _scan(roots: list[Path], project: Path, accept) -> list[dict]:
                 if not m or stem != m.group("base"):
                     continue
                 base, version = m.group("base"), m.group("ver")
-            if base not in found:
+            folder = path.parent if version is None else path.parent.parent
+            sub = subtask_of(root, folder) if subtask_of else ""
+            key = (base, sub)
+            if key not in found:
                 fields = accept(base)
                 if fields is None:
-                    found[base] = {}
+                    found[key] = {}
                     continue
-                found[base] = {**fields, "base": base, "last": "", "versions": {}}
-            item = found[base]
+                found[key] = {**fields, "base": base, "subtask": sub, "last": "", "versions": {}}
+            item = found[key]
             if not item:
                 continue
             if version is None:
@@ -65,8 +69,8 @@ def _scan(roots: list[Path], project: Path, accept) -> list[dict]:
 def list_shot_anims(project_path: str | Path) -> list[dict]:
     """Every published shot animation of the project.
 
-    Returns [{"seq", "shot", "task", "character", "name", "base", "last",
-    "versions": {"vNNN": root file}}], sorted by seq / shot / character.
+    Returns [{"seq", "shot", "task", "character", "name", "base", "subtask", "last",
+    "versions": {"vNNN": root file}}], sorted by seq / shot / character / sub-task.
     ``name`` is the character's NAME token (DINGO for DINGO_02), ``last`` the LAST
     pointer file ("" when only versions exist).
     """
@@ -84,8 +88,19 @@ def list_shot_anims(project_path: str | Path) -> list[dict]:
                 "task": contrib["type"], "character": contrib["name"] or "",
                 "name": character_name(contrib, project)}
 
-    items = _scan(_shot_roots(project), project, _accept)
-    return sorted(items, key=lambda i: (i["seq"], i["shot"], i["character"]))
+    items = _scan(_shot_roots(project), project, _accept, _shot_subtask)
+    return sorted(items, key=lambda i: (i["seq"], i["shot"], i["character"], i["subtask"]))
+
+
+def _shot_subtask(root: Path, folder: Path) -> str:
+    """Sub-task of a shot publish folder: ``<SEQ root>/<SHOT>/anim/block`` -> ``BLOCK``;
+    "" when the file sits in the task folder itself. The same character published in
+    block, spline and polish gives one item each (2026-09-27: pick it per shot)."""
+    try:
+        parts = folder.relative_to(root).parts
+    except ValueError:
+        return ""
+    return parts[2].upper() if len(parts) > 2 else ""
 
 
 def list_asset_clips(project_path: str | Path) -> list[dict]:

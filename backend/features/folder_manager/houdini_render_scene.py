@@ -1,36 +1,23 @@
 # houdini_render_scene.py — the default render scene of a sequence, shipped by FLUX.
 #
-# <SEQ>/usd/lighting/<SEQ>_render.hip (.hiplc / .hipnc per licence), built by code from an
-# empty scene in an ISOLATED hython (never the artist's session: creating a usdrender ROP
-# in a live Houdini crashed it once, ADR 0021). Nothing is loaded from disk, so there is
-# no binary template to maintain and no machine path in the scene (ADR 0012).
-# Made once, when the sequence is created, with 10 shots by default (2026-09-27); the
-# layout is the one of the maintainer's hand-made render scene, cleaned of its test content.
+# <SEQ>/usd/lighting/<SEQ>_render.hip (.hiplc / .hipnc per licence), made in an ISOLATED
+# hython (never the artist's session: creating a usdrender ROP in a live Houdini crashed it
+# once, ADR 0021).
 #
-# /stage
-#   STRUCTURE                    scopes /asset/{env,char}, /lights, /cameras, /mtl, /Render
-#   graft_env_seq   <- SEQUENCE_ENV     decor shared by every shot (merge_sequence_env above)
-#   graft_light_seq <- SEQUENCE_LIGHTS  lights shared by every shot (merge_sequence_lights)
-#   per shot, one column:
-#     SHOT_<SH>            FLUX Shot (project / seq / shot / LAST): the shot stage
-#     graft_lights_<SH>    <- OUT_LIGHTS_<SH>  lights of the shot; the FLUX Shot light_node
-#                          points here so "Publier le light rig du shot" exports the lights
-#                          only, never what comes below
-#     graft_cameras_<SH>   <- OUT_CAMERAS_<SH>
-#     graft_env_<SH>       <- OUT_ENV_<SH>
-#     graft_char_<SH>      <- OUT_CHAR_<SH>
-#     CRYPTO_<SH>          Karma Cryptomatte (objects + materials)
-#     RENDER_SETTINGS_<SH> camera + images of FLUX Shot, project resolution, motion blur,
-#                          AOVs + variance (denoise)
-#     OUT_<SH>             end of the branch, rendered by the ROP
-# /out
-#   RENDER_<SEQ>_<SH>  USD Render (Karma) per shot, already linked to its FLUX Shot
-#                      (render_rop): range, camera and images follow the node, so
-#                      "Rendre ce shot" / "Rendre la sequence" work at once.
+# ADR 0037 (2026-09-27, replaces the built-by-code layout of ADR 0036 points 1 and 6):
+# the scene IS the maintainer's render scene, shipped as resources/scenes/houdini/
+# flux_template_sequence_render.hip and kept as it is (backdrops, test content, switch,
+# renderpass). FLUX only adds:
+#   * FLUX Sequence (settings, top of the tree, feeds STRUCTURE): the number of shot
+#     blocks; "Appliquer" copies the last block, shifted like the others, never deletes;
+#   * per shot block, the render chain CRYPTO_SHOTnnn -> RENDER_SETTINGS_SHOTnnn ->
+#     FLUX_RENDER_SHOTnnn (copied from shot 1's; shot 1 keeps the maintainer's chain after the
+#     switch) and its ROP /out/RENDER_<SEQ>_SHOTnnn;
+#   * the project resolution on every Render Settings, the sequence name on the ROPs.
+# The shot blocks are slots (SHOT001, SHOT002...): the artist puts a FLUX Shot Import at
+# the top of a branch to load a shot, FLUX Render follows it.
 #
-# The scene opens on the Solaris desktop, network editor in /stage (hou.session): /obj is
-# empty, opening there looked like an empty scene.
-#
+# The scene opens on the Solaris desktop, network editor in /stage (hou.session).
 # Idempotent: an existing render scene is never overwritten.
 
 from __future__ import annotations
@@ -49,17 +36,18 @@ from features.folder_manager.houdini_scene_template import (
 
 log = get_logger(__name__)
 
-# AOVs switched on in Karma Render Settings (toggle parm names, Houdini 22); __variance
-# writes the variance AOVs the denoiser needs.
-AOVS = ("beauty", "combineddiffuse", "combinedglossyreflection", "combinedemission",
-        "albedo", "hitP", "hitPz", "hitN", "motionvectors", "__variance")
 DEFAULT_RESOLUTION = (1920, 1080)
-# Shot branches of a new sequence: SHOT001..SHOT010, plus any shot already made beyond.
-DEFAULT_SHOT_COUNT = 10
-# (branch, graft primpath, source prims): the grafts of each shot column, top to bottom.
-GRAFTS = (("LIGHTS", "/lights", "/lights/*"), ("CAMERAS", "/cameras", "/cameras/*"),
-          ("ENV", "/asset/env", "/*"), ("CHAR", "/asset/char", "/*"))
-STRUCTURE_PRIMS = ("/asset", "/asset/env", "/asset/char", "/lights", "/cameras", "/mtl", "/Render")
+# the maintainer's render scene (ADR 0037), copied as the start of every sequence render scene.
+TEMPLATE = (Path(__file__).parent.parent.parent / "resources" / "scenes" / "houdini"
+            / "flux_template_sequence_render.hip")
+# The template's own sequence name (its /out ROPs), renamed to the real sequence.
+TEMPLATE_SEQ = "SEQ001"
+# Shot blocks of a new scene: the template's 3, more when the sequence already has more.
+MIN_SHOT_BLOCKS = 3
+# HDAs the generator places: missing ones mean the Shelf Manager rebuild was not done.
+REQUIRED_TYPES = ("flux_render", "flux_sequence", "flux_shot")
+# A type installed but older than the template needs: rebuilt (FLUX Shot Import "Contenu").
+REQUIRED_PARMS = {"flux_shot": "content"}
 
 # hou.session of the scene: open on Solaris, network editor in /stage.
 SESSION_SOURCE = '''# FLUX: the render scene lives in /stage and /out, show /stage when it opens.
@@ -85,15 +73,18 @@ if hou.isUIAvailable():
 
 # Built-in preset of the Template Editor / New Scene menu (never stored in presets.json).
 BUILTIN_PREFIX = "builtin:sequence_render:"
+TEMPLATE_PRESET_ID = BUILTIN_PREFIX + "__template__"
 
 
 def builtin_presets(project_path: Path) -> list[dict]:
     """One read-only "Rendu de sequence" preset per sequence of the project (Houdini, SEQ).
 
     Launching it builds <SEQ>_render.hip when missing and opens the real scene."""
-    out = []
+    # The template itself (2026-09-28): what every new sequence starts from.
+    out = [{"id": TEMPLATE_PRESET_ID, "name": "Modele scene de rendu (FLUX)", "file": TEMPLATE.name,
+            "task": "SEQ", "soft": "houdini", "builtin": True, "exists": TEMPLATE.is_file()}]
     for seq in project_sequences(project_path):
-        current = existing_hip(render_scene_base(project_path, seq))
+        current = find_render_scene(project_path, seq)
         out.append({"id": BUILTIN_PREFIX + seq, "name": f"Rendu {seq}",
                     "file": current.name if current else f"{seq}_render.hip (a creer)",
                     "task": "SEQ", "soft": "houdini", "builtin": True, "exists": current is not None})
@@ -102,15 +93,43 @@ def builtin_presets(project_path: Path) -> list[dict]:
 
 def open_builtin_preset(project_path: Path, preset_id: str) -> dict:
     """Scene to open for a built-in preset id: the sequence render scene, built if missing."""
+    if preset_id == TEMPLATE_PRESET_ID:
+        return open_template_copy()
     if not preset_id.startswith(BUILTIN_PREFIX):
         return {"ok": False, "error": f"Preset FLUX inconnu : {preset_id}"}
     return create_sequence_render_scene(project_path, preset_id[len(BUILTIN_PREFIX):])
 
 
+def open_template_copy() -> dict:
+    """A throwaway copy of the render scene template (looking at it never changes the
+    template every new sequence starts from)."""
+    import shutil
+    import tempfile
+
+    if not TEMPLATE.is_file():
+        return {"ok": False, "error": f"Template absent : {TEMPLATE}"}
+    dest = Path(tempfile.mkdtemp(prefix="flux_render_template_")) / TEMPLATE.name
+    shutil.copy2(TEMPLATE, dest)
+    return {"ok": True, "created": False, "path": str(dest)}
+
+
 def render_scene_base(project_path: Path, seq: str) -> Path:
-    """<project>/shot/<SEQ>/usd/lighting/<SEQ>_render (no extension)."""
+    """<project>/shot/<SEQ>/<SEQ>_render (no extension): the render scene alone at the root
+    of the sequence (ADR 0038, 2026-09-28)."""
+    seq = seq.upper()
+    return Path(project_path) / "shot" / seq / f"{seq}_render"
+
+
+def legacy_render_scene_base(project_path: Path, seq: str) -> Path:
+    """Where sequences made before ADR 0038 keep it: shot/<SEQ>/usd/lighting/<SEQ>_render."""
     seq = seq.upper()
     return Path(project_path) / "shot" / seq / USD_SUBDIR / LIGHTING_SUBDIR / f"{seq}_render"
+
+
+def find_render_scene(project_path: Path, seq: str) -> Path | None:
+    """The render scene of *seq* (new place, else the old one), None when not made yet."""
+    return existing_hip(render_scene_base(project_path, seq)) or existing_hip(
+        legacy_render_scene_base(project_path, seq))
 
 
 def project_sequences(project_path: Path) -> list[str]:
@@ -126,16 +145,13 @@ def project_sequences(project_path: Path) -> list[str]:
 
 
 def sequence_shots(project_path: Path, seq: str) -> list[dict]:
-    """Shots of the render scene of *seq*: SHOT001..SHOT010 plus the shots of the sequence
-    (SHOT tokens), with the range / fps of their stage when it exists."""
-    from features.folder_manager.naming_validator import format_shot
+    """Shots of *seq* (SHOT tokens), with the range / fps of their stage when it exists."""
     from features.importer.library_import import _stage_shots
     from features.usd_assembler.shot_light import list_stage_shots
 
     seq = seq.upper()
     staged = {(s["seq"], s["shot"]): s for s in list_stage_shots(project_path)}
-    names = {format_shot(n) for n in range(1, DEFAULT_SHOT_COUNT + 1)}
-    names |= {shot for s_seq, shot in _stage_shots(Path(project_path)) if s_seq == seq}
+    names = {shot for s_seq, shot in _stage_shots(Path(project_path)) if s_seq == seq}
     out = []
     for shot in sorted(names):
         info = staged.get((seq, shot)) or {}
@@ -153,157 +169,150 @@ def _resolution(project_path: Path) -> list[int]:
     return list(DEFAULT_RESOLUTION)
 
 
+HDA_PATH_TOKEN = "__FLUX_HDA_PATH__"
+
+
+def _builders() -> dict:
+    """{node type: HDA build script} for REQUIRED_TYPES, the .hda path left as a token."""
+    from dcc.houdini.hda import flux_render_hda, flux_sequence_hda, flux_shot_switch_hda
+
+    return {"flux_render": flux_render_hda._build_code(HDA_PATH_TOKEN),
+            "flux_sequence": flux_sequence_hda._build_code(HDA_PATH_TOKEN),
+            "flux_shot": flux_shot_switch_hda._build_code(HDA_PATH_TOKEN)}
+
+
 def build_plan(project_path: Path, seq: str) -> dict:
     """Everything the hython script needs, as plain JSON (tested without Houdini)."""
+    from dcc.houdini.hda.flux_sequence_hda import MODULE_FUNCTIONS
+
+    shots = sequence_shots(project_path, seq)
     return {
         "project": Path(project_path).name,
         "seq": seq.upper(),
-        "shots": sequence_shots(project_path, seq),
+        "shots": shots,
+        "blocks": max(MIN_SHOT_BLOCKS, len(shots)),
         "resolution": _resolution(project_path),
-        "aovs": list(AOVS),
-        "grafts": [list(g) for g in GRAFTS],
-        "structure": "\n".join(STRUCTURE_PRIMS),
+        "template": str(TEMPLATE).replace("\\", "/"),
+        "template_seq": TEMPLATE_SEQ,
+        "required": list(REQUIRED_TYPES),
+        "required_parms": REQUIRED_PARMS,
+        # Built in hython into the user's otls when missing (Shelf Manager not rerun yet).
+        "builders": _builders(),
+        "sequence_module": MODULE_FUNCTIONS,
         "session": SESSION_SOURCE,
     }
 
 
 def _gen_script(plan: dict, dest_base: str) -> str:
-    """Python run by hython: builds the scene from *plan*, saves dest_base + licence ext."""
+    """Python run by hython: the maintainer's template + FLUX Sequence + one render chain / FLUX Render
+    / ROP per shot block, saved as dest_base + licence ext."""
     return f'''
 import hou, json, os, traceback
 plan = json.loads({json.dumps(json.dumps(plan))})
 result = {{"ok": False}}
-
-
-def graft(stage, name, main, branch, primpath, src):
-    g = stage.createNode("graftbranches", name)
-    g.setInput(0, main)
-    g.setInput(1, branch)
-    g.parm("primpath").set(primpath)
-    g.parm("parentprimtype").set("UsdGeomScope")
-    g.parm("srcprimpath1").set(src)
-    g.parm("dstprimpath1").set("")
-    return g
-
-
-def out_branch(stage, label, comment, x, y):
-    # merge (the artist wires content into it) -> null feeding the graft
-    merge = stage.createNode("merge", "merge_" + label.lower())
-    null = stage.createNode("null", label)
-    null.setInput(0, merge)
-    null.setComment(comment)
-    null.setGenericFlag(hou.nodeFlag.DisplayComment, True)
-    merge.setPosition(hou.Vector2(x, y + 1.0))
-    null.setPosition(hou.Vector2(x, y))
-    return null
-
-
 try:
-    hou.hipFile.clear(suppress_save_prompt=True)
-    stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
-    out = hou.node("/out") or hou.node("/").createNode("ropnet", "out")
-    seq, made = plan["seq"], []
-
-    structure = stage.createNode("primitive", "STRUCTURE")
-    structure.parm("primpath").set(plan["structure"])
-    structure.parm("parentprimtype").set("UsdGeomScope")
-    structure.parm("primtype").set("UsdGeomScope")
-    structure.setPosition(hou.Vector2(0, 9))
-    seq_env = out_branch(stage, "SEQUENCE_ENV", "Decor commun a toute la sequence", 3, 7.5)
-    env_seq = graft(stage, "graft_env_seq", structure, seq_env, "/asset/env", "/*")
-    env_seq.setPosition(hou.Vector2(0, 7))
-    seq_lights = out_branch(stage, "SEQUENCE_LIGHTS", "Lumieres communes a tous les shots", 3, 5.5)
-    common = graft(stage, "graft_light_seq", env_seq, seq_lights, "/lights", "/lights/*")
-    common.setPosition(hou.Vector2(0, 5))
-
-    for i, item in enumerate(plan["shots"]):
-        sh = item["shot"]
-        x = i * 7.0
-        shot = stage.createNode("flux_shot", "SHOT_" + sh)
-        shot.setInput(0, common)
-        for pname, pval in (("project", plan["project"]), ("seq", seq), ("shot", sh), ("version", "LAST")):
-            if shot.parm(pname) is not None:
-                shot.parm(pname).set(pval)
-        if item.get("range") and shot.parmTuple("frame_range") is not None:
-            shot.parmTuple("frame_range").set(item["range"])
-        if item.get("fps") and shot.parm("fps") is not None:
-            shot.parm("fps").set(item["fps"])
-        shot.setPosition(hou.Vector2(x, 3))
-        prev, y = shot, 1.0
-        for kind, primpath, src in plan["grafts"]:
-            branch = out_branch(stage, "OUT_%s_%s" % (kind, sh),
-                                "%s du shot %s" % (kind.capitalize(), sh), x + 3, y + 0.5)
-            prev = graft(stage, "graft_%s_%s" % (kind.lower(), sh), prev, branch, primpath, src)
-            prev.setPosition(hou.Vector2(x, y))
-            if kind == "LIGHTS":
-                # "Publier le light rig du shot" exports the layers down to here: lights only.
-                shot.parm("light_node").set(prev.path())
-            y -= 2.5
-        crypto = stage.createNode("karmacryptomatte", "CRYPTO_" + sh)
-        crypto.setInput(0, prev)
-        for pname in ("doprimcrypto", "domtlcrypto"):
-            if crypto.parm(pname) is not None:
-                crypto.parm(pname).set(1)
-        rs = stage.createNode("karmarendersettings", "RENDER_SETTINGS_" + sh)
-        rs.setInput(0, crypto)
-        me = shot.path()
-        rs.parm("camera").setExpression('chs("%s/camera")' % me, hou.exprLanguage.Hscript)
-        rs.parm("picture").set('`chs("%s/render_picture")`' % me)
-        if rs.parm("res_mode") is not None:
-            rs.parm("res_mode").set("manual")
-        # "autoheight" leaves the height locked on an expression: a scripted switch to
-        # manual does not free it, so a non 16:9 project got a computed height.
-        for _p, _v in zip(rs.parmTuple("resolution"), plan["resolution"]):
-            _p.lock(False)
-            _p.deleteAllKeyframes()
-            _p.set(_v)
-        rs.parm("enablemblur").set(1)
-        for aov in plan["aovs"]:
-            if rs.parm(aov) is not None:
-                rs.parm(aov).set(1)
-        end = stage.createNode("null", "OUT_" + sh)
-        end.setInput(0, rs)
-        for j, n in enumerate((crypto, rs, end)):
-            n.setPosition(hou.Vector2(x, y - j * 1.5))
-        if i == 0:
-            end.setDisplayFlag(True)
-        rop = out.createNode("usdrender", "RENDER_%s_%s" % (seq, sh))
-        rop.parm("loppath").set(end.path())
-        if rop.parm("renderer") is not None:
-            rop.parm("renderer").set("BRAY_HdKarma")
-        rop.parm("trange").set(1)
-        rop.parm("f1").setExpression('ch("%s/frame_rangex")' % me, hou.exprLanguage.Hscript)
-        rop.parm("f2").setExpression('ch("%s/frame_rangey")' % me, hou.exprLanguage.Hscript)
-        if rop.parm("override_camera") is not None:
-            rop.parm("override_camera").setExpression('chs("%s/camera")' % me, hou.exprLanguage.Hscript)
-        if rop.parm("outputimage") is not None:
-            rop.parm("outputimage").set('`chs("%s/render_picture")`' % me)
-        rop.setPosition(hou.Vector2(x, 0))
-        shot.parm("render_rop").set(rop.path())
-        made.append(sh)
+    def _outdated(t):
+        nt = hou.nodeType(hou.lopNodeTypeCategory(), t)
+        if nt is None:
+            return True
+        need = plan["required_parms"].get(t)
+        return bool(need) and nt.parmTemplateGroup().find(need) is None
+    missing = [t for t in plan["required"] if _outdated(t)]
+    # Missing FLUX HDAs are built here into the user's otls (where the Shelf Manager
+    # writes them): a sequence made before the rebuild still gets its scene.
+    # Beside flux_shot.hda (installed by FLUX), else the Houdini prefs otls.
+    _ref = hou.nodeType(hou.lopNodeTypeCategory(), "flux_shot")
+    _lib = _ref.definition().libraryFilePath() if _ref is not None and _ref.definition() else ""
+    _otls = (os.path.dirname(_lib) if _lib and os.path.isfile(_lib)
+             else os.path.join(hou.homeHoudiniDirectory(), "otls")).replace(os.sep, "/")
+    for _t in list(missing):
+        try:
+            os.makedirs(_otls, exist_ok=True)
+            _g = {{}}
+            exec(plan["builders"][_t].replace({HDA_PATH_TOKEN!r}, _otls + "/" + _t + ".hda"), _g)
+            if not _outdated(_t):
+                missing.remove(_t)
+        except Exception:
+            pass
+    if missing:
+        raise RuntimeError("HDA FLUX absents (%s) : reconstruis les HDA depuis le Shelf Manager"
+                           % ", ".join(missing))
+    hou.hipFile.load(plan["template"], suppress_save_prompt=True, ignore_load_warnings=True)
+    stage = hou.node("/stage")
+    seq = plan["seq"]
+    ns = {{}}
+    exec(plan["sequence_module"], ns)
+    # The template's ROPs carry its sequence name.
+    out = hou.node("/out")
+    if out is not None and seq != plan["template_seq"]:
+        for rop in out.children():
+            if plan["template_seq"] in rop.name():
+                rop.setName(rop.name().replace(plan["template_seq"], seq), unique_name=True)
+    # FLUX Sequence at the top of the tree, feeding STRUCTURE.
+    top = stage.node("FLUX_SEQUENCE") or stage.createNode("flux_sequence", "FLUX_SEQUENCE")
+    for name, value in (("project", plan["project"]), ("seq", seq), ("shot_count", plan["blocks"])):
+        top.parm(name).set(value)
+    structure = stage.node("STRUCTURE")
+    if structure is not None and top.outputs():
+        structure = None            # the template already wires it
+    if structure is not None:
+        if not structure.inputs():
+            structure.setInput(0, top)
+        top.setPosition(structure.position() + hou.Vector2(0, 1.5))
+        # Into the innermost big box around STRUCTURE (SEQUENCE), not STRUCTURE's own.
+        holders = [b for b in stage.networkBoxes()
+                   if structure in b.items() and b.comment().upper() != "STRUCTURE"]
+        if holders:
+            holder = min(holders, key=lambda b: len(b.items()))
+            holder.addItem(top)
+            for b in sorted(holders, key=lambda b: len(b.items())):
+                ns["grow_box"](b)
+    added, extra = ns["grow_to"](stage, plan["blocks"], plan["project"], seq)
+    # Block n shows the n-th shot of the sequence: its imports (ENV = decors, CHAR =
+    # characters) and its FLUX Render are filled, the artist can change them.
+    real = [s["shot"] for s in plan["shots"]]
+    for n in ns["shot_numbers"](stage):
+        shot = real[n - 1] if n - 1 < len(real) else ""
+        for prefix in ("IMPORT_ENV_", "IMPORT_CHAR_", "FLUX_RENDER_"):
+            node = stage.node("%sSHOT%03d" % (prefix, n))
+            if node is None:
+                continue
+            for pname, pval in (("project", plan["project"]), ("seq", seq), ("shot", shot)):
+                if node.parm(pname) is not None and (pval or pname != "shot"):
+                    node.parm(pname).set(pval)
+    top.parm("status_msg").set("%d shot(s)" % plan["blocks"])
+    for rs in stage.children():
+        if rs.type().name().startswith("karmarendersettings") and rs.parmTuple("resolution") is not None:
+            if rs.parm("res_mode") is not None:
+                rs.parm("res_mode").set("manual")
+            for _p, _v in zip(rs.parmTuple("resolution"), plan["resolution"]):
+                _p.lock(False)
+                _p.deleteAllKeyframes()
+                _p.set(_v)
     hou.setSessionModuleSource(plan["session"])
     for _var in ("JOB", "POSE"):
-        hou.hscript("set -g %s = ''" % _var)
+        hou.hscript("set -g %s = \'\'" % _var)
     _cat = hou.licenseCategory()
     _ext = ".hip" if _cat == hou.licenseCategoryType.Commercial \\
         else ".hiplc" if _cat == hou.licenseCategoryType.Indie else ".hipnc"
     _dest = {dest_base!r} + _ext
     os.makedirs(os.path.dirname(_dest), exist_ok=True)
     hou.hipFile.save(_dest)
-    result = {{"ok": True, "path": _dest, "shots": made}}
+    result = {{"ok": True, "path": _dest, "shots": ns["shot_numbers"](stage), "added": added}}
 except Exception as exc:
     result = {{"ok": False, "error": "%s\\n%s" % (exc, traceback.format_exc())}}
 '''
 
 
 def create_sequence_render_scene(project_path: Path, seq: str) -> dict:
-    """Build <SEQ>_render.hip with one FLUX Shot column + ROP per shot of the sequence.
+    """Build <SEQ>_render.hip from the maintainer's template (ADR 0037): N shot blocks, each with its
+    render chain, FLUX Render and ROP.
 
     Never overwrites: an existing scene is returned as is ({"created": False}).
     """
     project_path = Path(project_path)
     base = render_scene_base(project_path, seq)
-    current = existing_hip(base)
+    current = find_render_scene(project_path, seq)
     if current is not None:
         return {"ok": True, "created": False, "path": str(current)}
     plan = build_plan(project_path, seq)
@@ -311,7 +320,7 @@ def create_sequence_render_scene(project_path: Path, seq: str) -> dict:
     if not res.get("ok"):
         log.warning("Render scene NOT generated for %s: %s", seq, res.get("error"))
         return {"ok": False, "error": res.get("error") or "hython"}
-    log.info("Render scene generated: %s (%d shots)", res.get("path"), len(res.get("shots", [])))
+    log.info("Render scene generated: %s (%d shot blocks)", res.get("path"), len(res.get("shots", [])))
     missing = [s["shot"] for s in plan["shots"] if not s["has_stage"]]
     return {"ok": True, "created": True, "path": res["path"], "shots": res.get("shots", []),
             "without_stage": missing}

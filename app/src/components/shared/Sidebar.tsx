@@ -635,6 +635,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const statusKey      = DCC_STATUS_KEYS[s.key] ?? s.key
           const instances      = dccStatus[statusKey]?.instances ?? []
           const activeP        = activePort(statusKey)
+          const statusBusy     = !!dccStatus[statusKey]?.busy
+          const statusNoBridge = !!dccStatus[statusKey]?.no_bridge
 
           return (
             <div key={s.key} style={{
@@ -645,12 +647,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    className={`dot${connected ? ' ok' : ''}`}
+                    className={`dot${statusBusy || statusNoBridge ? ' warn' : connected ? ' ok' : ''}`}
                     style={{ width: 5, height: 5, flexShrink: 0 }}
                   />
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {connected ? 'Port local connecté' : 'Port local inactif'}
+                  {statusBusy ? 'Occupé (un export tourne) : il répondra quand il aura fini'
+                    : statusNoBridge ? "Ouvert, mais le bridge FLUX ne tourne pas (installe l'autostart, puis relance le logiciel)"
+                    : connected ? `Connecté${instances.length === 1 && instances[0].scene != null ? ` · ${instances[0].label}` : ''}`
+                    : 'Fermé'}
                 </TooltipContent>
               </Tooltip>
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
@@ -1053,7 +1058,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                   <button
                     key={inst.id}
                     onClick={() => { setActivePort(instMenu.statusKey, inst.port); setInstMenu(null) }}
-                    title={inst.scene ?? ''}
+                    title={[inst.scene, inst.pid ? `pid ${inst.pid}` : ''].filter(Boolean).join(' · ')}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
                       padding: '6px 9px', borderRadius: 5, border: 'none', cursor: 'pointer',
@@ -1068,8 +1073,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                       {inst.port}
                     </span>
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {inst.scene ? inst.scene : inst.pid ? `pid ${inst.pid}` : inst.label}
+                      {inst.scene != null ? inst.label : inst.pid ? `pid ${inst.pid}` : inst.label}
+                      {inst.version && <span style={{ color: 'var(--ink-4)', fontSize: 9 }}> · {inst.version}</span>}
                     </span>
+                    {inst.state === 'busy' && (
+                      <span title="Occupé : un export tourne" style={{ fontSize: 8, color: 'var(--warn)', flexShrink: 0 }}>occupé</span>
+                    )}
                     {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
                     <span
                       role="button"

@@ -23,6 +23,7 @@ from features.folder_manager.naming_validator import (
     parse_filename as legacy_parse_filename,
 )
 from features.production import production_store as store
+from features.production.archive import is_archived
 
 log = get_logger(__name__)
 
@@ -425,6 +426,10 @@ def reconcile(
             continue
 
         if tokens.get("is_shot"):
+            # A publish made before its shot was deleted must not bring the shot back.
+            when = f"{event.get('date', '')} {event.get('time', '')}".strip()
+            if is_archived(production, tokens.get("SEQ", ""), tokens.get("SHOT", ""), when):
+                continue
             matched = match_or_create_seq_shot_task(production, tokens)
             if matched is None:
                 unmatched.append(event)

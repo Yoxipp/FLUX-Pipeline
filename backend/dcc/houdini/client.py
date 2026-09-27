@@ -35,9 +35,11 @@ class HoudiniClient:
     def port(self) -> int:
         if self._port is not None:
             return self._port
-        from core.dcc_instances import get_active_port
+        # The chosen instance while it is the same process; never a Houdini that took
+        # its port back (A1). Raises InstanceLostError: reported as an error dict.
+        from core.dcc_instances import resolve_port
 
-        return get_active_port("Houdini") or HOUDINI_HTTP_PORT
+        return resolve_port("Houdini")
 
     @property
     def base(self) -> str:
@@ -149,12 +151,12 @@ class HoudiniClient:
 
     def _post(self, path: str, data: dict, timeout: float = 10.0) -> dict:
         body = json.dumps(data).encode()
-        req = urllib.request.Request(
-            f"{self.base}{path}",
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
         try:
+            req = urllib.request.Request(
+                f"{self.base}{path}",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.URLError as exc:

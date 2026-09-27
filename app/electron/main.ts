@@ -162,6 +162,8 @@ async function createWindow(): Promise<void> {
 // page. The renderer shows a sidebar-less shell when the URL carries ?detached=1.
 const DETACHABLE_ROUTES = new Set([
   '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
+  // Opened from Parametres avances (read-only node flow of the YAML actions).
+  '/action-graph',
 ])
 
 function createDetachedWindow(route: string): void {

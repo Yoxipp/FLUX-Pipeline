@@ -8,15 +8,7 @@ from core.constants import DEFAULT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_seq, format_shot
-from features.folder_manager.houdini_scene_template import (
-    create_sequence_hip_scene,
-    create_shot_hip_scene,
-)
 from features.folder_manager.houdini_render_scene import create_sequence_render_scene_async
-from features.folder_manager.sequence_template import (
-    create_sequence_usd_template,
-    create_shot_usd_template,
-)
 from features.folder_manager.tokens import add_token, load_tokens
 
 log = get_logger(__name__)
@@ -43,16 +35,9 @@ def create_sequence(
 
     ensure_dir(seq_path)
     add_token(project_path, "SEQ", seq_label, seq_rel)
-    # Author the sequence USD template (root layer + base light rig). Never an
-    # empty .usd — a failure here only logs, the folder/token still stand.
-    create_sequence_usd_template(seq_path, seq_label)
-    # Author the sequence lighting .hip (general light rig) next to the USD layers.
-    # Non-fatal exactly like the USD template: a missing Houdini only logs.
-    try:
-        create_sequence_hip_scene(seq_path, seq_label)
-    except Exception as exc:  # noqa: BLE001 — never let Houdini break folder creation
-        log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
-    # Default render scene of the sequence (10 shots), built in the background.
+    # ADR 0038 (2026-09-28): no sequence USD layer, no sequence light rig / FLUX
+    # Lighting scene any more: the lights are made in the render scene.
+    # Default render scene of the sequence (the maintainer's template, ADR 0037), built in the background.
     create_sequence_render_scene_async(project_path, seq_label)
     log.info("Sequence created: %s", seq_path)
     return seq_path
@@ -84,11 +69,6 @@ def create_shot(
         seq_rel = f"shot/{seq_label}"
         ensure_dir(seq_path)
         add_token(project_path, "SEQ", seq_label, seq_rel)
-        create_sequence_usd_template(seq_path, seq_label)
-        try:
-            create_sequence_hip_scene(seq_path, seq_label)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
         log.debug("Auto-created parent sequence %s", seq_label)
 
     _scaffold_shot(shot_path)
@@ -97,13 +77,7 @@ def create_shot(
     token_key = f"{seq_label}/{shot_label}"
     add_token(project_path, "SHOT", token_key, shot_rel)
     ensure_shot_base(project_path, seq_label, shot_label)
-    # Author the shot USD template: strong shot light over the weak sequence rig.
-    create_shot_usd_template(shot_path, seq_label, shot_label)
-    # Author the shot lighting .hip (refines/overrides the seq rig). Non-fatal.
-    try:
-        create_shot_hip_scene(shot_path, seq_label, shot_label)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
+    # ADR 0038: no shot light layer / shot lighting scene (lights live in the render scene).
     # Same as a shot born in Production: its stage exists from the start (ADR 0020).
     _write_shot_stage(project_path, seq_label, shot_label)
     log.info("Shot created: %s", shot_path)
@@ -178,11 +152,6 @@ def update_sequence(
     if new_seq:
         ensure_dir(seq_path)
         add_token(project_path, "SEQ", seq_label, seq_rel)
-        create_sequence_usd_template(seq_path, seq_label)
-        try:
-            create_sequence_hip_scene(seq_path, seq_label)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("create_sequence_hip_scene failed for %s: %s", seq_label, exc)
         log.info("Sequence created (via update): %s", seq_path)
 
     for shot in shots or []:
@@ -195,11 +164,6 @@ def update_sequence(
             _scaffold_shot(shot_path)
             token_key = f"{seq_label}/{shot_label}"
             add_token(project_path, "SHOT", token_key, f"shot/{seq_label}/{shot_label}")
-            create_shot_usd_template(shot_path, seq_label, shot_label)
-            try:
-                create_shot_hip_scene(shot_path, seq_label, shot_label)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("create_shot_hip_scene failed for %s: %s", f"{seq_label}_{shot_label}", exc)
             log.info("Shot created (via seq update): %s", shot_path)
         # Same base as a shot made in the Folder Manager (create-only, old shots too).
         ensure_shot_base(project_path, seq_label, shot_label)
@@ -223,7 +187,7 @@ def update_sequence(
                     ensure_dir(sub_dir)
 
     if new_seq:
-        # After the shots: their tokens are in the render scene next to the 10 default ones.
+        # After the shots: the render scene gets one block per shot (at least 3, ADR 0037).
         create_sequence_render_scene_async(project_path, seq_label)
     return seq_path
 

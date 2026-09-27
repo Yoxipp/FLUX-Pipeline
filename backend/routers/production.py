@@ -255,6 +255,8 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     _ensure_project(project)
     loop = asyncio.get_running_loop()
     previous = await loop.run_in_executor(None, lambda: store.load_production(project))
+    # A stale client (other window / machine) must not bring back a deleted seq / shot.
+    prod_archive.keep_archived_out(payload.production, previous)
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
@@ -360,6 +362,84 @@ async def archive_entity(project: str, payload: ArchiveRequest) -> dict:
         log.warning("drop_tokens_under %s failed: %s", payload.rel_path, e)
         dropped = []
     return {"archived": True, "archived_to": archived, "tokens_dropped": dropped}
+
+
+class DeleteSeqShotRequest(BaseModel):
+    kind: str            # 'seq' | 'shot'
+    seq:  str
+    shot: str = ""
+
+
+@router.post("/{project}/delete-seq-shot")
+async def delete_seq_shot(project: str, payload: DeleteSeqShotRequest) -> dict:
+    """Delete a sequence / shot: archive its folders (shot tree + comp / lighting), drop
+    its tokens and remove it from production.json in one go, with a tombstone so neither
+    an old publish nor a stale save brings it back."""
+    _ensure_project(project)
+    if payload.kind not in ("seq", "shot"):
+        raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+
+    def _do() -> dict:
+        production = store.load_production(project)
+        res = prod_archive.delete_seq_shot(project_path, production, payload.kind, payload.seq, payload.shot)
+        if not store.save_production(project, production):
+            raise RuntimeError("Écriture production.json échouée")
+        return res
+
+    try:
+        res = await loop.run_in_executor(None, _do)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.exception("delete-seq-shot failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, **res}
+
+
+class RenameSeqShotRequest(BaseModel):
+    kind: str            # 'seq' | 'shot'
+    seq:  str
+    shot: str = ""
+    new:  str            # SEQnnn / SHOTnnn
+
+
+@router.post("/{project}/rename-seq-shot")
+async def rename_seq_shot(project: str, payload: RenameSeqShotRequest) -> dict:
+    """Rename a sequence / shot in production.json AND on disk. Refused (409) while it
+    holds artist files: publishes carry the name in their files and USD paths."""
+    from features.production import rename as prod_rename
+
+    _ensure_project(project)
+    if payload.kind not in ("seq", "shot"):
+        raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+
+    def _do() -> dict:
+        found = prod_rename.blockers(project_path, payload.kind, payload.seq, payload.shot)
+        if found:
+            shown = ", ".join(found[:4]) + (f" (+{len(found) - 4})" if len(found) > 4 else "")
+            raise PermissionError(f"{len(found)} fichier(s) publie(s) : renommer casserait leurs noms et "
+                                  f"leurs chemins USD. Cree plutot un nouveau shot. {shown}")
+        production = store.load_production(project)
+        prod_rename.rename_in_production(production, payload.kind, payload.seq, payload.shot, payload.new)
+        # Saved first: the new shot stage reads its casting / range from production.json.
+        if not store.save_production(project, production):
+            raise RuntimeError("Écriture production.json échouée")
+        return prod_rename.rename_on_disk(project_path, payload.kind, payload.seq, payload.shot, payload.new)
+
+    try:
+        res = await loop.run_in_executor(None, _do)
+    except PermissionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.exception("rename-seq-shot failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, **res}
 
 
 # ── Composer token archive (Publisher ghost-token cross) ──────────────────────

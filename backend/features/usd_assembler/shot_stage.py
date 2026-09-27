@@ -31,6 +31,12 @@ ASSETS_ROOT = "assets"
 SETS_ROOT = "sets"
 
 # Shot TYPE -> (department, strength). ADR 0019 point 6 / ADR 0020 point 2.
+# Variant set of a character animated in several ANIM sub-tasks (block / spline /
+# polish, 2026-09-27): one variant per sub-task, the most advanced one selected.
+# FLUX Shot Import lists it with the other variants of the asset.
+ANIM_VARIANT_SET = "anim_subtask"
+SUBTASK_PREFERENCE = ("POLISH", "SPLINE", "BLOCK")
+
 SHOT_DEPARTMENTS: dict[str, tuple[str, int]] = {
     "LAYOUT": ("layout", 200),
     "ANIM": ("animation", 300),
@@ -252,6 +258,12 @@ def _anim_instance(item: dict) -> str:
     return f"{name}_01" if not rest else sanitize_token(character)
 
 
+def _variant_name(subtask: str) -> str:
+    """USD variant name of an ANIM sub-task folder ("" -> "main")."""
+    name = re.sub(r"[^A-Za-z0-9_]", "_", subtask.lower()) or "main"
+    return name if not name[0].isdigit() else "v" + name
+
+
 def _default_prim(path: Path) -> str:
     from features.publisher.last_pointer import read_usd_root_info
 
@@ -352,6 +364,7 @@ def collect(project_path: str | Path, seq: str, shot: str, production: dict) -> 
                             "path": path})
 
     anim_items: list[dict] = []
+    by_inst: dict[str, dict] = {}
     for item in anims:
         inst = _anim_instance(item)
         target = next((c for c in casting if c["prim"].rsplit("/", 1)[-1] == inst), None)
@@ -359,9 +372,21 @@ def collect(project_path: str | Path, seq: str, shot: str, production: dict) -> 
             warnings.append(f"{item['base']} : aucun perso {inst} dans le stage, anim ignoree")
             continue
         path = Path(item["last"])
-        anim_items.append({"character": item["character"], "instance": inst, "prim": target["prim"],
-                           "path": path, "source_prim": _default_prim(path) or item["name"],
-                           "range": _time_range(path)})
+        variant = {"path": path, "source_prim": _default_prim(path) or item["name"]}
+        entry = by_inst.get(inst)
+        if entry is None:
+            entry = by_inst[inst] = {"character": item["character"], "instance": inst,
+                                     "prim": target["prim"], "variants": {}}
+            anim_items.append(entry)
+        entry["variants"][_variant_name(item.get("subtask") or "")] = variant
+    for entry in anim_items:
+        # The default (selected) variant: the most advanced sub-task published.
+        names = list(entry["variants"])
+        chosen = next((n for pref in SUBTASK_PREFERENCE for n in names if n == pref.lower()),
+                      sorted(names)[0])
+        entry.update(entry["variants"][chosen], default=chosen, range=_time_range(entry["variants"][chosen]["path"]))
+        if len(names) == 1:
+            entry["variants"] = {}          # one sub-task: a plain reference, no variant set
 
     departments: list[dict] = []
     for task, (dept, _strength) in sorted(SHOT_DEPARTMENTS.items(), key=lambda kv: -kv[1][1]):
@@ -450,7 +475,11 @@ def signature(project_path: str | Path, seq: str, shot: str, plan: dict, *, froz
     return {
         "layers": [list(x) for x in _layer_list(project, seq, shot, plan, folder, frozen)],
         "casting": [[c["prim"], rel(c["path"])] for c in plan["casting"]],
-        "anims": [[a["prim"], rel(a["path"]), a["source_prim"]] for a in plan["anims"]],
+        "anims": [[a["prim"], rel(a["path"]), a["source_prim"]]
+                  + ([[a["default"]] + [[n, rel(v["path"]), v["source_prim"]]
+                                        for n, v in sorted(a["variants"].items())]]
+                     if a.get("variants") else [])
+                  for a in plan["anims"]],
         "range": list(plan["range"]) if plan["range"] else None,
         "fps": plan["fps"],
         "frozen": frozen,
@@ -500,8 +529,18 @@ def _author(folder: Path, project: Path, seq: str, shot: str, version: str, plan
         anim = Sdf.Layer.CreateNew(str(anim_path))
         for a in plan["anims"]:
             spec = Sdf.CreatePrimInLayer(anim, Sdf.Path(a["prim"]))    # "over" all the way down
-            spec.referenceList.prependedItems = [
-                Sdf.Reference(rel(a["path"]), Sdf.Path(f"/{a['source_prim']}"))]
+            if not a.get("variants"):
+                spec.referenceList.prependedItems = [
+                    Sdf.Reference(rel(a["path"]), Sdf.Path(f"/{a['source_prim']}"))]
+                continue
+            # Several sub-tasks: one variant each, the most advanced selected.
+            vset = Sdf.VariantSetSpec(spec, ANIM_VARIANT_SET)
+            spec.variantSetNameList.prependedItems = [ANIM_VARIANT_SET]
+            for vname, v in sorted(a["variants"].items()):
+                var = Sdf.VariantSpec(vset, vname)
+                var.primSpec.referenceList.prependedItems = [
+                    Sdf.Reference(rel(v["path"]), Sdf.Path(f"/{v['source_prim']}"))]
+            spec.variantSelections[ANIM_VARIANT_SET] = a["default"]
         anim.Save()
 
     # 3. entry: time, units, sublayers.
@@ -562,14 +601,7 @@ def write_stage(project_path: str | Path, seq: str, shot: str, *, production: di
     can_save = False
     if own_production:
         production, can_save = load_project_production(project)
-    # Same folders for every shot, however it was created (Production sync or Folder
-    # Manager): the shot light rig template (idempotent, never overwritten).
-    try:
-        from features.folder_manager.sequence_template import create_shot_usd_template
-
-        create_shot_usd_template(shot_dir(project, seq, shot), seq, shot)
-    except Exception as exc:     # noqa: BLE001
-        log.warning("Shot light rig template skipped for %s_%s: %s", seq, shot, exc)
+    # ADR 0038: no shot light layer is made any more (an old one still found is sublayered).
     plan = collect(project, seq, shot, production)
 
     saved_cast = []

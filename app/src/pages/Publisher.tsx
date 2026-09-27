@@ -21,7 +21,7 @@ import { useProject } from '../ProjectContext'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
 import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
-import { readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
+import { readActiveInstance, readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
 import { toast } from 'sonner'
 
 
@@ -816,7 +816,7 @@ export function Publisher() {
   const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
   // Several Maya / Houdini open (2026-09-26): each one's scene and selection, the
   // artist picks which one publishes (and, in Houdini, which selected node).
-  const [openInstances, setOpenInstances] = useState<{ port: number; label: string; scene: string | null; selection?: string[] }[]>([])
+  const [openInstances, setOpenInstances] = useState<{ port: number; pid?: number | null; label: string; scene: string | null; selection?: string[] }[]>([])
   const [activeInstPort, setActiveInstPort] = useState<number | null>(null)
   const pickedNodeRef = useRef<string | null>(null)
   // Multi-instance shot anim (U2): character instances found in Maya, ticked ones publish.
@@ -1767,9 +1767,9 @@ export function Publisher() {
     return () => { cancelled = true; clearInterval(id) }
   }, [dcc])
   const chooseInstance = (port: number, node?: string, scope?: 'scene' | 'selection') => {
-    writeActiveInstancePort(dcc, port)
+    const pid = openInstances.find(i => i.port === port)?.pid ?? null
+    writeActiveInstancePort(dcc, port, pid)
     setActiveInstPort(port)
-    void api.setActiveInstance(dcc, port).catch(() => undefined)
     if (dcc === 'Houdini') {
       pickedNodeRef.current = node ?? null
       autoExtForNodeRef.current = null
@@ -1825,16 +1825,23 @@ export function Publisher() {
   )
 
   // Several Maya / Houdini open: ask which one publishes before starting.
-  const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; label: string; scene: string | null }[] } | null>(null)
+  const [instancePick, setInstancePick] = useState<{ dcc: string; items: { port: number; pid?: number | null; label: string; scene: string | null }[] } | null>(null)
   const requestPublish = useCallback(async () => {
     if (publishing) return
     if (dcc === 'Maya' || dcc === 'Houdini') {
       try {
         const r = await api.getDccInstances(dcc)
-        const chosen = readActiveInstancePort(dcc)
-        if (r.instances.length > 1 && !r.instances.some(i => i.port === chosen)) {
+        const chosen = readActiveInstance(dcc)
+        // A1: the chosen instance must still be the same process (a port taken back by
+        // another Maya / Houdini is another scene): else ask.
+        const same = chosen ? r.instances.find(i => i.port === chosen.port) : undefined
+        const valid = !!same && (chosen!.pid == null || same.pid == null || same.pid === chosen!.pid)
+        if (r.instances.length > 1 && !valid) {
           setInstancePick({ dcc, items: r.instances })
           return
+        }
+        if (r.instances.length === 1 && !valid) {
+          writeActiveInstancePort(dcc, r.instances[0].port, r.instances[0].pid ?? null)
         }
       } catch { /* listing failed: publish on the current instance */ }
     }
@@ -1842,10 +1849,14 @@ export function Publisher() {
   }, [dcc, publishing, handlePublish])
   const publishOn = (port: number) => {
     if (!instancePick) return
-    writeActiveInstancePort(instancePick.dcc, port)
+    const pid = instancePick.items.find(i => i.port === port)?.pid ?? null
     setInstancePick(null)
-    // Houdini follows the backend choice: let it land before the publish call.
-    void api.setActiveInstance(instancePick.dcc, port).catch(() => undefined).then(() => handlePublish())
+    writeMapAndPublish(instancePick.dcc, port, pid)
+  }
+  // Houdini follows the backend choice: let it land before the publish call.
+  const writeMapAndPublish = (dccKey: string, port: number, pid: number | null) => {
+    writeActiveInstancePort(dccKey, port, pid)
+    void api.setActiveInstance(dccKey, port, pid).catch(() => undefined).then(() => handlePublish())
   }
 
   // Ctrl/Cmd+P → publish (also prevents the browser print dialog)

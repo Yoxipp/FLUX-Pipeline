@@ -3,7 +3,7 @@
 # Deleting a sequence / shot / asset in the Production Tab must never hard-delete
 # data. Instead the entity's folder is MOVED into a per-project archive:
 #
-#   <project>/ARCHIVE/<YYYYMMDD-HHMMSS>/<original rel path>/…
+#   <project>/ARCHIVE/<YYYY-MM-DD>_<ARTIST>/<original rel path>/…   (2026-09-28)
 #
 # so it stays recoverable (and versions/syncs with the rest of the project). The
 # logical entity is removed from production.json by the caller AFTER a successful
@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -132,8 +133,21 @@ def inspect_folder(project_path: Path, rel: str) -> dict:
     }
 
 
-def archive_folder(project_path: Path, rel: str) -> str:
-    """Move <project>/<rel> into <project>/ARCHIVE/<timestamp>/<rel>. Return the
+def archive_label(user: str | None = None, when: datetime | None = None) -> str:
+    """Folder name of an archive: the day and the artist who deleted (2026-09-28),
+    e.g. ``2026-09-28_ADAM``."""
+    if user is None:
+        try:
+            from core import config
+            user = config.get_current_user() or ""
+        except Exception:  # noqa: BLE001 - no config: still archive
+            user = ""
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", (user or "").strip()).strip("_").upper() or "INCONNU"
+    return f"{(when or datetime.now()).strftime('%Y-%m-%d')}_{name}"
+
+
+def archive_folder(project_path: Path, rel: str, user: str | None = None) -> str:
+    """Move <project>/<rel> into <project>/ARCHIVE/<YYYY-MM-DD>_<USER>/<rel>. Return the
     archived project-relative path.
 
     Raises ValueError when *rel* does not resolve to an in-project entity folder,
@@ -145,14 +159,14 @@ def archive_folder(project_path: Path, rel: str) -> str:
     if not path_exists_safe(target):
         raise FileNotFoundError(f"Dossier introuvable : {rel}")
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = project_path / ARCHIVE_ROOT / stamp / _norm(rel)
-    # If a same-second archive of the same rel already exists, disambiguate.
+    label = archive_label(user)
+    dest = project_path / ARCHIVE_ROOT / label / _norm(rel)
+    # The same folder archived twice the same day by the same artist: _2, _3...
     if dest.exists():
-        i = 1
-        while (project_path / ARCHIVE_ROOT / f"{stamp}-{i}" / _norm(rel)).exists():
+        i = 2
+        while (project_path / ARCHIVE_ROOT / f"{label}_{i}" / _norm(rel)).exists():
             i += 1
-        dest = project_path / ARCHIVE_ROOT / f"{stamp}-{i}" / _norm(rel)
+        dest = project_path / ARCHIVE_ROOT / f"{label}_{i}" / _norm(rel)
 
     ensure_dir(dest.parent)
     shutil.move(str(target), str(dest))
@@ -252,3 +266,134 @@ def prune_absent_auto(project_path: Path, production: dict) -> int:
         log.info("Pruned %d auto entit%s absent from disk (%s)",
                  removed, "y" if removed == 1 else "ies", project_path.name)
     return removed
+
+
+# ── delete a sequence / shot for good (2026-09-27) ─────────────────────────
+# Live: a deleted shot came back a few seconds later with its folder. Two paths
+# rebuilt it: reconcile re-created the entity from its old publish events (then the
+# next save's create-only sync re-created the folder), and a stale client (another
+# window, another machine on OneDrive) saved a planning that still held it. The
+# delete now records a tombstone in production.json ("archived"): reconcile skips
+# the publishes made before it, and a save cannot bring back an archived entity id.
+# A shot re-created later by name gets a new id and new publishes, so it lives.
+
+ARCHIVED_KEY = "archived"
+# Tombstones kept in production.json (oldest dropped first).
+MAX_TOMBSTONES = 500
+
+
+def _stamp_now() -> str:
+    """Same shape as an activity event ``date + ' ' + time`` so they compare as text."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def satellite_rels(project_path: Path, kind: str, seq: str, shot: str = "") -> list[str]:
+    """Folders of a sequence / shot living outside ``shot/<SEQ>`` (comp, lighting):
+    archived with it, or the disk scan adopts the shot back from them."""
+    from core.constants import DEFAULT_SHOT_TYPE_TOKENS
+
+    sq, sh = (seq or "").upper(), (shot or "").upper()
+    if not sq or (kind == "shot" and not sh):
+        return []
+    templates = (load_tokens(project_path) or {}).get("TYPE_SHOT") or DEFAULT_SHOT_TYPE_TOKENS
+    own_root = f"shot/{sq}" if kind == "seq" else f"shot/{sq}/{sh}"
+    out: list[str] = []
+    for tpl in templates.values():
+        rel = _norm(str(tpl))
+        if kind == "seq":
+            # Everything of the sequence: cut the template at {seq}.
+            if "{seq}" not in rel:
+                continue
+            rel = rel[: rel.index("{seq}")] + sq
+        else:
+            if "{shot}" not in rel:
+                continue      # lighting/{seq} is the whole sequence's: kept for a shot
+            rel = rel[: rel.index("{shot}")].replace("{seq}", sq) + sh
+        rel = _norm(rel)
+        if "{" in rel or rel == own_root or rel.startswith(own_root + "/") or rel in out:
+            continue
+        out.append(rel)
+    return out
+
+
+def remove_entity(production: dict, kind: str, seq: str, shot: str = "", at: str | None = None) -> list[str]:
+    """Remove a sequence (with its shots) or a shot from *production* and record the
+    tombstone. Returns the removed entity ids."""
+    sq, sh = (seq or "").upper(), (shot or "").upper()
+    seq_ids = {s.get("id") for s in production.get("sequences", []) if (s.get("name") or "").upper() == sq}
+    if kind == "seq":
+        removed = set(seq_ids)
+        removed |= {s.get("id") for s in production.get("shots", []) if s.get("seq_id") in seq_ids}
+        production["sequences"] = [s for s in production.get("sequences", []) if s.get("id") not in removed]
+    elif kind == "shot":
+        removed = {s.get("id") for s in production.get("shots", [])
+                   if s.get("seq_id") in seq_ids and (s.get("name") or "").upper() == sh}
+    else:
+        return []
+    production["shots"] = [s for s in production.get("shots", []) if s.get("id") not in removed]
+    tombs = production.setdefault(ARCHIVED_KEY, [])
+    tombs.append({"kind": kind, "seq": sq, "shot": sh if kind == "shot" else "",
+                  "ids": sorted(i for i in removed if i), "at": at or _stamp_now()})
+    del tombs[:-MAX_TOMBSTONES]
+    return sorted(i for i in removed if i)
+
+
+def is_archived(production: dict, seq: str, shot: str, when: str) -> bool:
+    """True when a publish of *seq*/*shot* dated *when* ("YYYY-MM-DD HH:MM") was made
+    before that shot (or its sequence) was deleted."""
+    sq, sh = (seq or "").upper(), (shot or "").upper()
+    for t in production.get(ARCHIVED_KEY) or []:
+        if t.get("seq") != sq or (t.get("kind") == "shot" and t.get("shot") != sh):
+            continue
+        if (when or "") <= (t.get("at") or ""):
+            return True
+    return False
+
+
+def keep_archived_out(production: dict, previous: dict | None) -> int:
+    """Before a save: keep the tombstones of *previous* (a stale client does not know
+    them) and drop every entity an archive removed. Returns the entities dropped."""
+    tombs = list(production.get(ARCHIVED_KEY) or [])
+    seen = {(t.get("kind"), t.get("seq"), t.get("shot"), t.get("at")) for t in tombs}
+    for t in (previous or {}).get(ARCHIVED_KEY) or []:
+        key = (t.get("kind"), t.get("seq"), t.get("shot"), t.get("at"))
+        if key not in seen:
+            tombs.append(t)
+            seen.add(key)
+    tombs.sort(key=lambda t: t.get("at") or "")
+    if not tombs:
+        return 0
+    production[ARCHIVED_KEY] = tombs[-MAX_TOMBSTONES:]
+    # A rename (features/production/rename.py): an entity still under its old name in a
+    # stale save takes the new one, else the create-only sync rebuilds the old folder.
+    for t in tombs:
+        ren = t.get("renamed") or {}
+        old_name = t.get("shot") if t.get("kind") == "shot" else t.get("seq")
+        key = "shots" if t.get("kind") == "shot" else "sequences"
+        for e in production.get(key, []):
+            if ren.get("id") and e.get("id") == ren["id"] and e.get("name") == old_name:
+                e["name"] = ren.get("to") or e["name"]
+    dead = {i for t in tombs for i in t.get("ids") or []}
+    before = len(production.get("sequences", [])) + len(production.get("shots", []))
+    production["sequences"] = [s for s in production.get("sequences", []) if s.get("id") not in dead]
+    live_seq = {s.get("id") for s in production["sequences"]}
+    production["shots"] = [s for s in production.get("shots", [])
+                           if s.get("id") not in dead and s.get("seq_id") in live_seq]
+    return before - len(production["sequences"]) - len(production["shots"])
+
+
+def delete_seq_shot(project_path: Path, production: dict, kind: str, seq: str, shot: str = "") -> dict:
+    """Archive the folders of a sequence / shot, drop its tokens and remove it from
+    *production* (mutated, the caller saves). Missing folders are skipped."""
+    main = resolve_entity_rel(project_path, kind, seq=seq, shot=shot)
+    if main is None:
+        raise ValueError(f"{kind} introuvable : {seq} {shot}".strip())
+    archived, dropped = [], []
+    for rel in [main] + satellite_rels(project_path, kind, seq, shot):
+        try:
+            archived.append(archive_folder(project_path, rel))
+        except FileNotFoundError:
+            continue
+        dropped += drop_tokens_under(project_path, rel)
+    ids = remove_entity(production, kind, seq, shot)
+    return {"archived": archived, "tokens_dropped": dropped, "removed_ids": ids}

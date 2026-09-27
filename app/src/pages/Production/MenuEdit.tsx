@@ -49,17 +49,21 @@ function descToParams(d: ArchiveDescriptor) {
 }
 
 interface PendingArchive {
+  desc:      ArchiveDescriptor
   label:     string
   info:      { rel_path: string; exists: boolean; file_count: number } | null
   onRemoved: () => void
   busy:      boolean
 }
 
+// A sequence / shot is only deleted after typing this word (2026-09-27).
+const DELETE_PHRASE = 'Understand'
+
 function useArchiveDelete(project: string) {
   const [pending, setPending] = useState<PendingArchive | null>(null)
 
   const request = (desc: ArchiveDescriptor, label: string, onRemoved: () => void) => {
-    setPending({ label, info: null, onRemoved, busy: false })
+    setPending({ desc, label, info: null, onRemoved, busy: false })
     api.getEntityFolder(project, descToParams(desc))
       .then(info => setPending(p => (p ? { ...p, info } : p)))
       .catch(() => setPending(p => (p ? { ...p, info: { rel_path: '', exists: false, file_count: 0 } } : p)))
@@ -68,36 +72,78 @@ function useArchiveDelete(project: string) {
   const cancel = () => setPending(null)
 
   const confirm = async () => {
+    if (!pending) return
     setPending(p => (p ? { ...p, busy: true } : p))
-    let ok = true
-    const info = pending?.info
-    if (info?.exists && info.rel_path) {
-      try {
-        await api.archiveEntity(project, info.rel_path)
-      } catch (e) {
-        ok = false
-        toast.error(e instanceof Error ? e.message : String(e))
+    const { desc, info } = pending
+    try {
+      if (desc.kind === 'asset') {
+        if (info?.exists && info.rel_path) await api.archiveEntity(project, info.rel_path)
+      } else {
+        // Server-side: folders (shot + comp / lighting) archived, tokens dropped and the
+        // entity removed from production.json with a tombstone, so neither an old
+        // publish nor a stale save brings the folder back.
+        await api.deleteSeqShot(project, desc.kind, desc.seq, desc.kind === 'shot' ? desc.shot : '')
       }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+      setPending(p => (p ? { ...p, busy: false } : p))
+      return
     }
-    if (!ok) { setPending(p => (p ? { ...p, busy: false } : p)); return }
-    pending?.onRemoved()
+    pending.onRemoved()
     setPending(null)
   }
 
   const modal = pending ? (
-    <ArchiveConfirm label={pending.label} info={pending.info} busy={pending.busy} onCancel={cancel} onConfirm={confirm} />
+    <ArchiveConfirm
+      label={pending.label} info={pending.info} busy={pending.busy}
+      phrase={pending.desc.kind === 'asset' ? '' : DELETE_PHRASE}
+      onCancel={cancel} onConfirm={confirm}
+    />
   ) : null
 
   return { request, modal }
 }
 
-function ArchiveConfirm({ label, info, busy, onCancel, onConfirm }: {
+// Number of a sequence / shot: typed freely, applied once on Enter or blur (a rename
+// moves folders on disk, never one per keystroke). Escape restores the current number.
+function NumberField({ value, onCommit, width, busy }: {
+  value: number
+  onCommit: (n: number) => Promise<boolean>
+  width: number
+  busy?: boolean
+}) {
+  const shown = Number.isNaN(value) ? '' : String(value)
+  const [draft, setDraft] = useState(shown)
+  useEffect(() => { setDraft(shown) }, [shown])
+  const commit = async () => {
+    const n = parseInt(draft, 10)
+    if (Number.isNaN(n) || n <= 0 || n === value) { setDraft(shown); return }
+    if (!(await onCommit(n))) setDraft(shown)
+  }
+  return (
+    <input
+      value={draft} disabled={busy}
+      onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+      onKeyDown={e => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') { setDraft(shown); (e.target as HTMLInputElement).blur() }
+      }}
+      onBlur={() => { void commit() }}
+      title="Entree pour renommer (dossiers compris)"
+      placeholder="N°" style={{ ..._input, width }}
+    />
+  )
+}
+
+function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
   label:     string
   info:      { rel_path: string; exists: boolean; file_count: number } | null
   busy:      boolean
+  phrase:    string                  // '' = no word to type
   onCancel:  () => void
   onConfirm: () => void
 }) {
+  const [typed, setTyped] = useState('')
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
     document.addEventListener('keydown', h)
@@ -107,6 +153,8 @@ function ArchiveConfirm({ label, info, busy, onCancel, onConfirm }: {
   const analyzing = info === null
   const count = info?.file_count ?? 0
   const nonEmpty = !!info?.exists && count > 0
+  const unlocked = !phrase || typed === phrase
+  const canConfirm = !busy && !analyzing && unlocked
 
   return (
     <div
@@ -128,7 +176,7 @@ function ArchiveConfirm({ label, info, busy, onCancel, onConfirm }: {
           <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
           Archiver {label} ?
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: phrase ? 12 : 16, lineHeight: 1.5 }}>
           {analyzing
             ? 'Analyse du dossier…'
             : nonEmpty
@@ -136,10 +184,28 @@ function ArchiveConfirm({ label, info, busy, onCancel, onConfirm }: {
               : info?.exists
                 ? 'Le dossier (vide) sera déplacé vers ARCHIVE/.'
                 : "Aucun dossier sur disque : seule l'entrée logique sera retirée."}
+          {phrase && !analyzing && ' Ses autres dossiers (comp, et lighting pour une séquence) partent aussi dans ARCHIVE/.'}
         </div>
+        {phrase && (
+          <>
+            <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 6 }}>
+              Tape <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>{phrase}</code> pour confirmer.
+            </div>
+            <input
+              autoFocus value={typed} onChange={e => setTyped(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && canConfirm) onConfirm() }}
+              placeholder={phrase} spellCheck={false} autoCapitalize="off" autoCorrect="off"
+              style={{
+                width: '100%', boxSizing: 'border-box', marginBottom: 14, padding: '6px 9px', fontSize: 12,
+                fontFamily: 'var(--mono)', background: 'var(--paper-2)', color: 'var(--ink)', borderRadius: 6, outline: 'none',
+                border: `1px solid ${unlocked ? 'var(--err)' : 'var(--rule-2)'}`,
+              }}
+            />
+          </>
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <ProdBtn variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Annuler</ProdBtn>
-          <ProdBtn variant="danger" size="sm" onClick={onConfirm} disabled={busy || analyzing}>
+          <ProdBtn variant="danger" size="sm" onClick={onConfirm} disabled={!canConfirm}>
             <Trash2 size={10} strokeWidth={1.75} /> {busy ? 'Archivage…' : 'Archiver'}
           </ProdBtn>
         </div>
@@ -632,15 +698,26 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
   const patchSeq = (p: Partial<ProductionSequence>) => {
     setState(prev => ({ ...prev, sequences: prev.sequences.map(s => s.id === seq.id ? { ...s, ...p, origin: 'user' } : s) }))
   }
-  const changeSeqNumber = (v: string) => {
-    const n = parseInt(v, 10)
-    if (Number.isNaN(n) || n <= 0) return
+  const [renaming, setRenaming] = useState(false)
+  const changeSeqNumber = async (n: number): Promise<boolean> => {
     const newName = `SEQ${padSeq(n)}`
-    if (newName === seq.name) return
+    if (newName === seq.name) return true
     if (state.sequences.some(s => s.id !== seq.id && s.name === newName)) {
-      toast.error(`SEQ${padSeq(n)} existe déjà`); return
+      toast.error(`${newName} existe déjà`); return false
     }
-    patchSeq({ name: newName })
+    setRenaming(true)
+    try {
+      const r = await api.renameSeqShot(project, 'seq', seq.name, '', newName)
+      patchSeq({ name: newName })
+      toast.success(`${seq.name} renommée en ${newName}`)
+      for (const w of r.warnings ?? []) toast.warning(w)
+      return true
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setRenaming(false)
+    }
   }
   // Default Houdini render scene of the sequence (ADR 0036), built offline by hython.
   const [renderBusy, setRenderBusy] = useState(false)
@@ -749,11 +826,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
       <div style={_pad}>
         <div style={_lbl}>SÉQUENCE · {seq.name}{seq.label ? ` — ${seq.label}` : ''}</div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-          <input
-            value={Number.isNaN(seqNum) ? '' : String(seqNum)}
-            onChange={e => changeSeqNumber(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="N°" style={{ ..._input, width: 60 }}
-          />
+          <NumberField value={seqNum} onCommit={changeSeqNumber} width={60} busy={renaming} />
           <input
             value={seq.label ?? ''}
             onChange={e => patchSeq({ label: e.target.value || undefined })}
@@ -851,15 +924,27 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
   const patchShot = (p: Partial<ProductionShot>) => {
     setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === shot.id ? { ...s, ...p, origin: 'user' } : s) }))
   }
-  const changeShotNumber = (v: string) => {
-    const n = parseInt(v, 10)
-    if (Number.isNaN(n) || n <= 0) return
+  const [renaming, setRenaming] = useState(false)
+  const changeShotNumber = async (n: number): Promise<boolean> => {
     const newName = `SHOT${padSeq(n)}`
-    if (newName === shot.name) return
+    if (newName === shot.name) return true
+    if (!seq) return false
     if (state.shots.some(s => s.id !== shot.id && s.seq_id === shot.seq_id && s.name === newName)) {
-      toast.error(`${newName} existe déjà dans ${seq?.name ?? '?'}`); return
+      toast.error(`${newName} existe déjà dans ${seq.name}`); return false
     }
-    patchShot({ name: newName })
+    setRenaming(true)
+    try {
+      const r = await api.renameSeqShot(project, 'shot', seq.name, shot.name, newName)
+      patchShot({ name: newName })
+      toast.success(`${shot.name} renommé en ${newName}`)
+      for (const w of r.warnings ?? []) toast.warning(w)
+      return true
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setRenaming(false)
+    }
   }
   const archiveDel = useArchiveDelete(project)
   const remove = () => {
@@ -913,11 +998,7 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
       <div style={_pad}>
         <div style={_lbl}>SHOT · {seq?.name ?? '?'} · {shot.name}{shot.label ? ` — ${shot.label}` : ''}</div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            value={Number.isNaN(shotNum) ? '' : String(shotNum)}
-            onChange={e => changeShotNumber(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="N°" style={{ ..._input, width: 70 }}
-          />
+          <NumberField value={shotNum} onCommit={changeShotNumber} width={70} busy={renaming} />
           <input
             value={shot.label ?? ''}
             onChange={e => patchShot({ label: e.target.value || undefined })}

@@ -13,6 +13,9 @@
 // - Row heights persist in localStorage and are adjustable via a drag handle.
 // - Sequences and shots are ordered by their `order` field. Newly created seqs
 //   get an `order` that places them right before the next-higher SEQ number.
+// - Clip width = duration (2026-09-27): a shot is as wide as its frame range, a
+//   sequence is the sum of its shots, the ruler counts the frames of the edit. Dragging
+//   the right edge of a shot sets its duration (frame_end), the next shots follow.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Minus, MoveVertical, Plus } from 'lucide-react'
@@ -40,6 +43,21 @@ const ZOOM_MIN = 3
 const ZOOM_MAX = 260
 const ZOOM_DEF = 120
 const LS_ZOOM = 'flux.production.shot.zoom'
+// A shot without a frame range counts this many frames; the H zoom is the width of a
+// shot of that length (so the zoom keeps its old feel).
+const DEFAULT_SHOT_FRAMES = 50
+const DEFAULT_FRAME_START = 1001
+// Ruler steps (frames): the smallest one keeping labels at least RULER_MIN_PX apart.
+const RULER_STEPS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+const RULER_MIN_PX = 84   // "1050 43.8 s" fits
+
+// Duration in seconds at the project fps: "2.5 s", "1:05" from a minute.
+function formatSeconds(frames: number, fps: number): string {
+  const sec = frames / (fps > 0 ? fps : 24)
+  if (sec < 60) return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`
+  const m = Math.floor(sec / 60)
+  return `${m}:${String(Math.round(sec - m * 60)).padStart(2, '0')}`
+}
 
 const SEQ_ROW_DEF = 84
 const SHOT_ROW_DEF = 40
@@ -86,6 +104,17 @@ async function saveBookmarksForProject(project: string, list: Bookmark[]) {
 }
 
 const HEADER_W = 118
+
+// Duration of a shot in frames (inclusive range), DEFAULT_SHOT_FRAMES without a range.
+function shotFrames(shot: Pick<Shot, 'frame_start' | 'frame_end'>): number {
+  const a = shot.frame_start, b = shot.frame_end
+  if (typeof a === 'number' && typeof b === 'number' && b >= a) return b - a + 1
+  return DEFAULT_SHOT_FRAMES
+}
+
+function hasRange(shot: Pick<Shot, 'frame_start' | 'frame_end'>): boolean {
+  return typeof shot.frame_start === 'number' && typeof shot.frame_end === 'number' && shot.frame_end >= shot.frame_start
+}
 
 function parseNum(name: string, prefix: 'SEQ' | 'SHOT'): number {
   const m = name.toUpperCase().match(new RegExp(`^${prefix}(\\d+)`))
@@ -140,23 +169,65 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     return m
   }, [state.shots])
 
-  // Column widths per seq: at least one seq-block wide, growing with shot count.
-  // Shots are small fixed-size squares — they don't stretch with the horizontal
-  // zoom (which controls seq width instead).
-  // Gaps shrink with the zoom so a squashed sequence stays a compact row of slivers.
+  // Widths follow the durations: pixels per frame from the H zoom (pxPerBlock = a shot of
+  // DEFAULT_SHOT_FRAMES). Gaps shrink with the zoom so a squashed edit stays compact.
   const gap = pxPerBlock < 12 ? 3 : 6
-  const shotGap = pxPerBlock < 12 ? 1 : 4
+  const shotGap = pxPerBlock < 12 ? 1 : 2
   const shotSquare = Math.max(24, Math.min(42, Math.round(effShotH * 0.62)))
-  // Timeline is purely visual (no create/delete by resize). The horizontal zoom
-  // slider sizes EACH SHOT directly; the sequence column is just the sum of its
-  // shots, so it grows both with the zoom and with the shot count — the sequence
-  // follows its shots. An empty sequence still shows one shot-wide block.
-  const shotW = pxPerBlock
+  const pxPerFrame = pxPerBlock / DEFAULT_SHOT_FRAMES
+  // Live duration while an edge is dragged (committed to Production on mouse up).
+  const [resizing, setResizing] = useState<{ id: string; frames: number } | null>(null)
+  // Project fps (project.json) for the seconds shown next to the frames.
+  const [fps, setFps] = useState(24)
+  useEffect(() => {
+    let alive = true
+    if (!project) return
+    api.getAdvancedSettings(project)
+      .then(r => { const v = Number(r.project?.values?.fps); if (alive && v > 0) setFps(v) })
+      .catch(() => { /* keep 24 */ })
+    return () => { alive = false }
+  }, [project])
+  const framesOf = (shot: Shot) => (resizing && resizing.id === shot.id ? resizing.frames : shotFrames(shot))
+  const widthOf = (frames: number) => Math.max(3, Math.round(frames * pxPerFrame))
+  const shotW = pxPerBlock          // an empty sequence shows one default shot wide
+  const seqFrames = sequences.map(seq => (shotsBySeq.get(seq.id) ?? []).reduce((acc, sh) => acc + framesOf(sh), 0))
   const colWidths = sequences.map(seq => {
-    const n = shotsBySeq.get(seq.id)?.length ?? 0
-    const content = n > 0 ? n * shotW + (n - 1) * shotGap : shotW
+    const shots = shotsBySeq.get(seq.id) ?? []
+    const content = shots.length > 0
+      ? shots.reduce((acc, sh) => acc + widthOf(framesOf(sh)), 0) + (shots.length - 1) * shotGap
+      : shotW
     return content + gap
   })
+  const rulerStep = RULER_STEPS.find(st => st * pxPerFrame >= RULER_MIN_PX) ?? RULER_STEPS[RULER_STEPS.length - 1]
+
+  // Right edge of a shot: drag = new duration; the shot keeps its start (1001 if none).
+  const onResizeDown = (shot: Shot, e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const startX = e.clientX
+    const startFrames = shotFrames(shot)
+    let frames = startFrames
+    setResizing({ id: shot.id, frames })
+    const onMove = (ev: MouseEvent) => {
+      frames = Math.max(1, Math.round(startFrames + (ev.clientX - startX) / pxPerFrame))
+      setResizing({ id: shot.id, frames })
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setResizing(null)
+      if (frames === startFrames && hasRange(shot)) return
+      setState(prev => ({
+        ...prev,
+        shots: prev.shots.map(sh => {
+          if (sh.id !== shot.id) return sh
+          const start = typeof sh.frame_start === 'number' ? sh.frame_start : DEFAULT_FRAME_START
+          return { ...sh, frame_start: start, frame_end: start + frames - 1 }
+        }),
+      }))
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   // Drag handle between the two tracks
   const dragRef = useRef<{ startY: number; startSeq: number; startShot: number } | null>(null)
@@ -213,7 +284,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     const shotList = shotsBySeq.get(shot.seq_id) ?? []
     const shotIdx = shotList.findIndex(s => s.id === shot.id)
     if (shotIdx < 0) return null
-    return HEADER_W + 10 + before + shotIdx * (shotW + shotGap)
+    const inSeq = shotList.slice(0, shotIdx).reduce((acc, sh) => acc + widthOf(framesOf(sh)) + shotGap, 0)
+    return HEADER_W + 10 + before + inSeq
   }
   const bookmarkExistsFor = (kind: BookmarkKind, id: string) =>
     bookmarks.some(b => b.kind === kind && b.entityId === id)
@@ -390,7 +462,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                 </div>
               ))}
               {/* Ruler row */}
-              <div style={{ display: 'flex', alignItems: 'stretch', height: 26,
+              <div style={{ display: 'flex', alignItems: 'stretch', height: 36,
                             borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
                 <div style={{
                   width: HEADER_W, flexShrink: 0,
@@ -405,14 +477,49 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                   {sequences.map((seq, i) => {
                     const num = parseNum(seq.name, 'SEQ')
                     const label = Number.isNaN(num) ? seq.name : String(num).padStart(3, '0')
+                    // Frames of the edit before this sequence: the ruler runs over the whole edit.
+                    const f0 = seqFrames.slice(0, i).reduce((acc, n) => acc + n, 0)
+                    const shots = shotsBySeq.get(seq.id) ?? []
+                    // frame of the edit -> x in this column, following the shot widths + gaps.
+                    const xOf = (f: number) => {
+                      let x = 0, acc = f0
+                      for (const sh of shots) {
+                        const fr = framesOf(sh)
+                        if (f <= acc + fr) return x + Math.round((f - acc) * pxPerFrame)
+                        x += widthOf(fr) + shotGap; acc += fr
+                      }
+                      return x
+                    }
+                    const ticks: number[] = []
+                    if (shots.length) {
+                      for (let f = Math.ceil(f0 / rulerStep) * rulerStep; f <= f0 + seqFrames[i]; f += rulerStep) ticks.push(f)
+                    }
                     return (
-                      <div key={seq.id} style={{
-                        width: colWidths[i] - gap, marginRight: gap,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        borderLeft: i === 0 ? 'none' : '1px solid var(--rule)',
-                        fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
-                        color: 'var(--ink-3)', letterSpacing: '0.04em',
-                      }}>{label}</div>
+                      <div key={seq.id} title={`${seq.name} : ${seqFrames[i]} images, ${formatSeconds(seqFrames[i], fps)} a ${fps} fps`} style={{
+                        width: colWidths[i] - gap, marginRight: gap, position: 'relative', overflow: 'hidden',
+                        borderLeft: i === 0 ? 'none' : '2px solid var(--ink-4)',
+                        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                      }}>
+                        <span style={{
+                          position: 'absolute', top: 2, left: 5, fontFamily: 'var(--sans)', fontSize: 11,
+                          fontWeight: 700, color: 'var(--ink)', letterSpacing: '0.04em', whiteSpace: 'nowrap',
+                        }}>
+                          {label}
+                          {shots.length > 0 && (
+                            <span style={{ fontWeight: 500, color: 'var(--ink-3)' }}>
+                              {' '}· {seqFrames[i]} f · {formatSeconds(seqFrames[i], fps)}
+                            </span>
+                          )}
+                        </span>
+                        {ticks.map(f => (
+                          <div key={f} style={{ position: 'absolute', left: xOf(f), bottom: 0, height: 13, borderLeft: '1px solid var(--ink-3)' }}>
+                            <span style={{ position: 'absolute', left: 3, bottom: 1, lineHeight: 1, whiteSpace: 'nowrap', fontWeight: 600 }}>
+                              {f}
+                              <span style={{ fontWeight: 400, color: 'var(--ink-4)', fontSize: 9 }}> {formatSeconds(f, fps)}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     )
                   })}
                 </div>
@@ -487,7 +594,10 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                           <ShotClip
                             key={shot.id}
                             shot={shot}
-                            width={shotW}
+                            frames={framesOf(shot)}
+                            fps={fps}
+                            onResizeDown={e => onResizeDown(shot, e)}
+                            width={widthOf(framesOf(shot))}
                             height={shotSquare}
                             seqColor={seqCol}
                             active={selection.kind === 'shot' && selection.id === shot.id}
@@ -625,8 +735,11 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
   )
 }
 
-function ShotClip({ shot, width, height, active, onClick, onDragStart, onDrop, seqColor }: {
+function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onClick, onDragStart, onDrop, seqColor }: {
   shot:        Shot
+  frames:      number
+  fps:         number
+  onResizeDown: (e: React.MouseEvent) => void
   width:       number
   height:      number
   active:      boolean
@@ -641,19 +754,22 @@ function ShotClip({ shot, width, height, active, onClick, onDragStart, onDrop, s
   // get a distinct fill — accent hue instead of the seq-derived color.
   const override = !shot.inherit_tasks || !shot.inherit_assets
   const base = shotColorFromSeqColor(seqColor)
+  const range = hasRange(shot) ? `${shot.frame_start}-${shot.frame_end}` : 'sans plage, defaut'
   return (
     <Clip
       width={width} height={height}
       color={override ? 'var(--accent-hi)' : base}
       big={numStr}
-      small={shot.label || ''}
+      small={`${shot.label ? `${shot.label} · ` : ''}${frames} f · ${formatSeconds(frames, fps)}`}
+      onResizeDown={onResizeDown}
       active={active}
       onClick={onClick}
       onDragStart={onDragStart}
       onDrop={onDrop}
       acceptType="text/flux-shot-id"
       title={
-        `${shot.name}${shot.label ? ` — ${shot.label}` : ''}` +
+        `${shot.name}${shot.label ? ` — ${shot.label}` : ''}\n${frames} images, ${formatSeconds(frames, fps)} (${range})` +
+        '\nBord droit : glisser pour changer la duree' +
         (override ? '\nOverrides seq' : '')
       }
       badge={override ? 'OVR' : undefined}
@@ -662,7 +778,8 @@ function ShotClip({ shot, width, height, active, onClick, onDragStart, onDrop, s
 }
 
 // ── generic clip (big number, optional label under) ─────────────────────────
-function Clip({ width, height, color, big, small, active, onClick, onDragStart, onDrop, acceptType, title, badge }: {
+function Clip({ width, height, color, big, small, active, onClick, onDragStart, onDrop, acceptType, title, badge, onResizeDown }: {
+  onResizeDown?: (e: React.MouseEvent) => void
   width:       number
   height:      number
   color:       string
@@ -677,6 +794,8 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
   badge?:      string
 }) {
   const [dragOver, setDragOver] = useState(false)
+  // A press on the resize grip must not start the reorder drag of the clip.
+  const resizingRef = useRef(false)
   const bigFs = Math.max(9, Math.min(30, Math.round(height * 0.34)))
   const smallFs = Math.max(8, Math.min(18, Math.round(height * 0.22)))
   // Text only when it fits: a narrow clip is a plain colored bar (name in the tooltip),
@@ -687,7 +806,7 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
   return (
     <div
       draggable
-      onDragStart={onDragStart}
+      onDragStart={e => { if (resizingRef.current) { e.preventDefault(); return } onDragStart(e) }}
       onDragOver={e => {
         if (!e.dataTransfer.types.includes(acceptType)) return
         e.preventDefault(); e.dataTransfer.dropEffect = 'move'
@@ -731,6 +850,22 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
           background: 'rgba(0,0,0,0.35)', color: 'var(--paper)',
           letterSpacing: '0.06em', pointerEvents: 'none',
         }}>{badge}</span>
+      )}
+      {onResizeDown && width >= 8 && (
+        <div
+          title="Glisser : duree du shot"
+          onMouseDown={e => {
+            resizingRef.current = true
+            const release = () => { resizingRef.current = false; window.removeEventListener('mouseup', release) }
+            window.addEventListener('mouseup', release)
+            onResizeDown(e)
+          }}
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0, width: 6, cursor: 'ew-resize', zIndex: 2,
+            background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.28))',
+          }}
+        />
       )}
       {showBig && <span style={{
         fontWeight: 600, fontSize: bigFs, lineHeight: 1, letterSpacing: 0, whiteSpace: 'nowrap',

@@ -12,13 +12,20 @@
 #
 # Positions are left at (0, 0): the front runs an auto-layout (dagre) over the
 # graph, so the backend stays layout-agnostic.
+#
+# A4 (2026-09-27): every YAML of flux_actions/config is listed (not only the 5 the
+# runner imports), the graph carries the action's description (its header comment),
+# its steps, each command's doc (class docstring) and each parameter's tooltip. One
+# order edge per pair of consecutive steps (every command to every command was a mesh).
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Dict, List
 
 from flux_core import ActionQuery, OutputRef
+from flux_core.registry import get_command
 
 # Importing the commands package populates the registry before a YAML loads, same
 # as the runner. Kept as a side-effect import; the names are not used here.
@@ -40,11 +47,46 @@ ACTION_FILES: Dict[str, Path] = {
     "conform_texture": CONFORM_TEXTURE_ACTION,
     "generate_proxy": GENERATE_PROXY_ACTION,
 }
+CONFIG_DIR = PUBLISH_ACTION.parent
+
+
+def _action_files() -> Dict[str, Path]:
+    """The known actions plus every other YAML of the config folder (by file stem)."""
+    files = dict(ACTION_FILES)
+    if CONFIG_DIR.is_dir():
+        for f in sorted(CONFIG_DIR.glob("*.y*ml")):
+            files.setdefault(f.stem, f)
+    return files
 
 
 def list_action_names() -> List[str]:
     """Return the action names a graph can be built for, sorted."""
-    return sorted(ACTION_FILES)
+    return sorted(_action_files())
+
+
+def _header_comment(path: Path) -> str:
+    """The comment block at the top of a YAML (its description), without the ``#``."""
+    lines: List[str] = []
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            if not raw.startswith("#"):
+                if lines:
+                    break
+                continue
+            lines.append(raw[1:].strip())
+    except OSError:
+        return ""
+    return "\n".join(lines).strip()
+
+
+def _command_doc(key: str) -> Dict[str, str]:
+    """{"doc", "module"} of a registered command (docstring, first paragraph)."""
+    try:
+        cls = get_command(key)
+    except Exception:  # noqa: BLE001 - an unknown key shows without doc
+        return {"doc": "", "module": ""}
+    doc = inspect.getdoc(cls) or ""
+    return {"doc": doc.split("\n\n", 1)[0].strip(), "module": getattr(cls, "__module__", "")}
 
 
 def _node_id(step_name: str, cmd_name: str) -> str:
@@ -66,6 +108,7 @@ def _param_view(param: Any) -> Dict[str, Any]:
         "value": value,
         "wired": wired,
         "hide": param.hide,
+        "tooltip": getattr(param, "tooltip", None) or "",
     }
 
 
@@ -74,7 +117,7 @@ def build_action_graph(name: str) -> Dict[str, Any]:
 
     Raises KeyError when *name* is not a known action.
     """
-    source = ACTION_FILES[name]  # KeyError -> unknown action (handled by caller)
+    source = _action_files()[name]  # KeyError -> unknown action (handled by caller)
     query = ActionQuery.from_file(source)
     buffer = query.buffer
 
@@ -97,24 +140,17 @@ def build_action_graph(name: str) -> Dict[str, Any]:
                         "index": step.index,
                         "status": cmd.status.value,
                         "params": [_param_view(p) for p in cmd.parameters.values()],
+                        **_command_doc(cmd.command),
                     },
                 }
             )
 
-    # ── order edges: consecutive steps, every command to every command ────────
-    for earlier, later in zip(ordered, ordered[1:]):
-        for src_cmd in earlier.commands:
-            for dst_cmd in later.commands:
-                src = _node_id(earlier.name, src_cmd)
-                dst = _node_id(later.name, dst_cmd)
-                edges.append(
-                    {
-                        "id": f"order:{src}->{dst}",
-                        "source": src,
-                        "target": dst,
-                        "kind": "order",
-                    }
-                )
+    # ── order edges: one per pair of consecutive steps (first command to first) ─
+    with_cmds = [st for st in ordered if st.commands]
+    for earlier, later in zip(with_cmds, with_cmds[1:]):
+        src = _node_id(earlier.name, next(iter(earlier.commands)))
+        dst = _node_id(later.name, next(iter(later.commands)))
+        edges.append({"id": f"order:{src}->{dst}", "source": src, "target": dst, "kind": "order"})
 
     # ── data-flow edges: a parameter wired from another command's output ──────
     for step in ordered:
@@ -135,4 +171,6 @@ def build_action_graph(name: str) -> Dict[str, Any]:
                     }
                 )
 
-    return {"name": name, "nodes": nodes, "edges": edges}
+    steps = [{"name": st.name, "index": st.index, "commands": list(st.commands)} for st in ordered]
+    return {"name": name, "nodes": nodes, "edges": edges, "steps": steps,
+            "description": _header_comment(source), "file": source.name}

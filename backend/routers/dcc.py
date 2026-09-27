@@ -103,14 +103,33 @@ async def _probe_all_dccs() -> dict:
     scans = await asyncio.gather(
         *[loop.run_in_executor(None, lambda d=name: scan_instances(d)) for name in names]
     )
+    # A1: identity of each instance (scene, version, busy), cached in dcc_identity.
+    from core import dcc_identity
+    from core.dcc_instances import active_info, check_active, lost_active
+
+    flat = [(name, inst) for name, instances in zip(names, scans) for inst in instances]
+    infos = await asyncio.gather(*[
+        loop.run_in_executor(None, lambda n=n, i=i: dcc_identity.details(n, i["port"], i["pid"]))
+        for n, i in flat])
+    for (_name, inst), info in zip(flat, infos):
+        inst.update(info)
+        if inst["scene"] is not None:
+            inst["label"] = dcc_identity.scene_label(inst["scene"])
+    procs = await loop.run_in_executor(None, dcc_identity.process_names)
     status = {}
     for name, instances in zip(names, scans):
         base = DCC_PORTS[name]
+        check_active(name)
         status[name] = {
             "connected": len(instances) > 0,
             "port":      instances[0]["port"] if instances else base,
             "color":     DCC_COLORS.get(name, DCC_COLORS["disconnected"]),
             "instances": instances,
+            # Open but the FLUX bridge is not listening (autostart missing / not loaded).
+            "no_bridge": not instances and bool(dcc_identity.running_pids(name, procs)),
+            "busy":      bool(instances) and all(i.get("state") == "busy" for i in instances),
+            "active":    active_info(name),
+            "active_lost": lost_active(name),
         }
 
     # Continuous zombie detection: surface a stuck Maya (port bound by a headless
@@ -152,7 +171,6 @@ def _resolve_target_port(dcc: str, port: int | None) -> int:
 async def _maya_target(port: int | None) -> int:
     """Maya port for an export / publish: never a Maya with no window (a session that
     never finished quitting keeps its port and an empty scene, live 2026-09-18)."""
-    from core.dcc_instances import scan_instances
     from dcc.maya.maya_connection import GhostMayaError, pick_live_port
 
     requested = _resolve_target_port("Maya", port)
@@ -163,14 +181,32 @@ async def _maya_target(port: int | None) -> int:
         return pick_live_port(requested, open_ports) if open_ports else requested
 
     try:
-        return await loop.run_in_executor(None, _pick)
+        target = await loop.run_in_executor(None, _pick)
     except GhostMayaError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    # A1: the Maya chosen in FLUX closed and another session holds its port now.
+    from core.dcc_instances import active_info, check_active, lost_active
+
+    chosen = active_info("Maya")
+    if chosen and chosen["port"] == target:
+        await loop.run_in_executor(None, lambda: check_active("Maya"))
+    lost = lost_active("Maya")
+    if lost and lost["port"] == target and active_info("Maya") is None:
+        from core.dcc_instances import set_active_port
+
+        if len(await loop.run_in_executor(None, lambda: scan_instances("Maya"))) == 1:
+            set_active_port("Maya", target)          # the only Maya: nothing to confuse
+            return target
+        raise HTTPException(status_code=409, detail=(
+            f"Le Maya choisi (port {target}) a ete ferme : une autre session tient ce port maintenant. "
+            "Choisis le Maya qui publie dans FLUX, puis relance."))
+    return target
 
 
 class ActiveInstanceRequest(BaseModel):
     dcc:  str
     port: int | None = None
+    pid:  int | None = None     # the process the UI saw on that port (A1)
 
 
 @router.post("/active-instance")
@@ -180,10 +216,10 @@ async def set_active_instance(req: ActiveInstanceRequest) -> dict:
     from core.dcc_instances import set_active_port
 
     try:
-        set_active_port(req.dcc, req.port)
+        set_active_port(req.dcc, req.port, req.pid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"ok": True, "dcc": req.dcc, "port": req.port}
+    return {"ok": True, "dcc": req.dcc, "port": req.port, "pid": req.pid}
 
 
 _MAYA_CONTEXT_EXPR = ("'\\n'.join([__import__('maya.cmds', fromlist=['cmds']).file(q=True, sceneName=True) or '']"
@@ -2701,6 +2737,20 @@ async def dcc_status_websocket(websocket: WebSocket):
 async def houdini_shot_switch_module() -> dict:
     """PythonModule of the FLUX Shot HDA, exec()'d by its bootstrap (no rebuild on fix)."""
     from dcc.houdini.hda.flux_shot_switch_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/flux_render/module")
+async def houdini_flux_render_module() -> dict:
+    """PythonModule of the FLUX Render HDA (render buttons at the end of a shot branch)."""
+    from dcc.houdini.hda.flux_render_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/flux_sequence/module")
+async def houdini_flux_sequence_module() -> dict:
+    """PythonModule of the FLUX Sequence HDA (number of shot blocks of a render scene)."""
+    from dcc.houdini.hda.flux_sequence_hda import MODULE_FUNCTIONS
     return {"code": MODULE_FUNCTIONS}
 
 

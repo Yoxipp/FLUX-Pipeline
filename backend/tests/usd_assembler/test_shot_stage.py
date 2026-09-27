@@ -119,6 +119,28 @@ class ShotStage(unittest.TestCase):
             query = cache.GetSkelQuery(skel)
             self.assertEqual(bool(query.GetAnimQuery()), animated, n)
 
+    def test_anim_subtasks_become_a_variant_set(self) -> None:
+        # 2026-09-27: the same character in block and polish, chosen per shot in
+        # FLUX Shot Import: one variant per sub-task, polish selected.
+        for sub, times in (("block", (1001.0, 1002.0)), ("polish", (1001.0, 1002.0, 1003.0))):
+            publish_light_asset(
+                _rig(_anim(times)), self.project, fmt="usda",
+                dest_dir=self.project / "shot/SEQ001/SHOT010/anim" / sub,
+                base_name="SEQ001_SHOT010_ANIM_DINGO", user="adam")
+        res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        stage = Usd.Stage.Open(str(res["last"]))
+        prim = stage.GetPrimAtPath("/assets/CHAR/DINGO_01")
+        vset = prim.GetVariantSets().GetVariantSet(ss.ANIM_VARIANT_SET)
+        self.assertEqual(sorted(vset.GetVariantNames()), ["block", "polish"])
+        self.assertEqual(vset.GetVariantSelection(), "polish")
+        self.assertEqual((stage.GetStartTimeCode(), stage.GetEndTimeCode()), (1001.0, 1003.0))
+        # Switching the variant swaps the animation (the block one is 2 frames long).
+        anim = UsdSkel.Animation(stage.GetPrimAtPath("/assets/CHAR/DINGO_01/skel/Anim"))
+        self.assertEqual(len(anim.GetRotationsAttr().GetTimeSamples()), 3)
+        vset.SetVariantSelection("block")
+        anim = UsdSkel.Animation(stage.GetPrimAtPath("/assets/CHAR/DINGO_01/skel/Anim"))
+        self.assertEqual(len(anim.GetRotationsAttr().GetTimeSamples()), 2)
+
     def test_an_animation_without_casting_adds_the_character(self) -> None:
         self._publish_anim("DINGO_02")
         prod = _production()
@@ -141,9 +163,8 @@ class ShotStage(unittest.TestCase):
         res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
         self.assertTrue(any("layout" in w for w in res["warnings"]))
         entry = Sdf.Layer.FindOrOpen(str(res["entry"]))
-        # No department published: the shot light rig template (created with the stage) + the casting.
-        self.assertEqual(list(entry.subLayerPaths),
-                         ["../lighting/SEQ001_SHOT010_light.usda", "./SEQ001_SHOT010_casting.usda"])
+        # No department published: the casting only (ADR 0038: no shot light layer made).
+        self.assertEqual(list(entry.subLayerPaths), ["./SEQ001_SHOT010_casting.usda"])
 
     def test_the_old_template_root_is_retired_by_the_first_stage(self) -> None:
         from features.folder_manager.sequence_template import create_sequence_usd_template

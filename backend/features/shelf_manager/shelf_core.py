@@ -451,6 +451,8 @@ _HDA_BUILDS: tuple[tuple[str, str, str, str], ...] = (
     ("flux_anim_hda:build_hda",         "flux_anim.hda",         "hou.lopNodeTypeCategory()", "flux_anim"),
     ("flux_lighting_hda:build_hda",     "flux_lighting.hda",     "hou.lopNodeTypeCategory()", "flux_lighting"),
     ("flux_shot_switch_hda:build_hda",  "flux_shot.hda",         "hou.lopNodeTypeCategory()", "flux_shot"),
+    ("flux_render_hda:build_hda",       "flux_render.hda",       "hou.lopNodeTypeCategory()", "flux_render"),
+    ("flux_sequence_hda:build_hda",     "flux_sequence.hda",     "hou.lopNodeTypeCategory()", "flux_sequence"),
     ("flux_crowd_hda:build_hda",        "flux_crowd.hda",        "hou.lopNodeTypeCategory()", "flux_crowd"),
 )
 
