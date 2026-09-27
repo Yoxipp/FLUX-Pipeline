@@ -1312,7 +1312,7 @@ async def maya_usd_preview(preset: str, scope: str = "scene", start: int | None 
                            end: int | None = None, port: int | None = None) -> dict:
     """What a USD preset would export from Maya (2026-09-26): meshes (model),
     skeleton tree + skinned meshes (rig), moving joints (anim) or materials (look)."""
-    if preset not in ("model", "rig", "anim", "look"):
+    if preset not in ("model", "rig", "anim", "look", "camera", "light"):
         raise HTTPException(status_code=400, detail=f"preset inconnu : {preset}")
     target = await _maya_target(port)
     loop = asyncio.get_running_loop()
@@ -1373,7 +1373,7 @@ class MayaLightExportRequest(BaseModel):
     include_anim:    bool = True
     include_weights: bool = True   # UsdSkel skin binding (bone capture)
     include_uv:      bool = True
-    # Publisher preset options (ADR 0034): {"preset": "model"|"rig"|"anim", ...}.
+    # Publisher preset options (ADR 0034): {"preset": "model"|"rig"|"anim"|"camera"|"light", ...}.
     # With a preset, Maya runs the preset sweep instead of the include flags.
     options:         dict | None = None
     port:            int | None = None  # target Maya instance (None → base commandPort)

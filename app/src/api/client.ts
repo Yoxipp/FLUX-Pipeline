@@ -330,7 +330,7 @@ export const api = {
       'POST', '/dcc/maya/export-usd', payload),
 
   // What a USD preset would export from Maya (listing before the publish).
-  getMayaUsdPreview: (preset: 'model' | 'rig' | 'anim' | 'look', scope: 'scene' | 'selection',
+  getMayaUsdPreview: (preset: 'model' | 'rig' | 'anim' | 'look' | 'camera' | 'light', scope: 'scene' | 'selection',
                       start?: number, end?: number, port?: number) => {
     const qs = new URLSearchParams({ preset, scope })
     if (start !== undefined) qs.set('start', String(start))
@@ -1110,7 +1110,7 @@ export interface MayaUsdPreview {
   // model: meshes; anim: moving joints; look: materials
   items?: { name: string; path?: string; points?: number; faces?: number; uv?: boolean
             color_sets?: string[]; skinned?: boolean; token?: string; channels?: string[]
-            type?: string; meshes?: number }[]
+            type?: string; meshes?: number; focal?: number }[]
   // rig
   tree?: MayaUsdTreeNode[]; joints?: number; roots?: string[]
   skinned?: { name: string; joints: number }[]; controllers?: number

@@ -9,6 +9,9 @@
 #   anim  : the rotations of the joints that move (translations of the root motion
 #           as an option), baked per frame then reduced WITHOUT changing the motion,
 #           smooth or step (held keys).
+#   camera: the shot cameras (2026-09-27, shot LAYOUT), world transform + focal
+#           baked per frame when they move.
+#   light : the shot lights (shot LIGHT), world transform + intensity baked per frame.
 # The preview (maya_usd_preview) lists what each preset would take, with the same
 # scene sweeps as the export.
 
@@ -142,7 +145,10 @@ def skin_cluster(mesh: str) -> str | None:
 
 
 def skins_of(joints: list[str]) -> list[tuple[str, str]]:
-    """(mesh transform, skinCluster) for every skin driven by one of *joints*."""
+    """(mesh transform, skinCluster) for every skin driven by one of *joints*.
+
+    Only polygon meshes: a rig also skins NURBS surfaces (ribbons) or curves, which
+    UsdSkel weights do not cover and MFnMesh cannot read."""
     jset = set(joints)
     pairs: list[tuple[str, str]] = []
     for sk in cmds.ls(type="skinCluster") or []:
@@ -150,6 +156,9 @@ def skins_of(joints: list[str]) -> list[tuple[str, str]]:
         if not infl & jset:
             continue
         for shp in cmds.skinCluster(sk, query=True, geometry=True) or []:
+            if cmds.nodeType(shp) != "mesh":
+                log.info("rig: %s ignore (%s skinne, pas un mesh)", shp, cmds.nodeType(shp))
+                continue
             for tr in cmds.listRelatives(shp, parent=True, fullPath=True) or []:
                 pair = (_long(tr), sk)
                 if pair not in pairs:
@@ -506,9 +515,97 @@ def anim_asset(asset: str, scope: str, opts: dict, frame_start: int, frame_end: 
     return LightAsset(asset=asset, skeleton=SkeletonData([], [], []), anim=anim)
 
 
+def _scene_fps() -> float | None:
+    try:
+        import maya.mel as mel  # type: ignore[import]
+        return float(mel.eval("currentTimeUnitToFPS()"))
+    except Exception:           # noqa: BLE001
+        return None
+
+
+def _bake(items: list, nodes: list[str], frame_start: int, frame_end: int, value) -> None:
+    """Sample each node's world matrix and *value*(index) over [start, end]; fill
+    items[i].times / transforms / values only for the items that change (a still
+    camera or light stays static)."""
+    times = list(range(int(frame_start), int(frame_end) + 1))
+    if len(times) < 2 or not items:
+        return
+    now = cmds.currentTime(query=True)
+    mats: list[list] = [[] for _ in items]
+    vals: list[list] = [[] for _ in items]
+    try:
+        for t in times:
+            cmds.currentTime(t, edit=True)
+            for i, node in enumerate(nodes):
+                mats[i].append(_m16(cmds.getAttr(f"{node}.worldMatrix[0]")))
+                vals[i].append(value(i))
+    finally:
+        cmds.currentTime(now, edit=True)
+    fps = _scene_fps()
+    for i, item in enumerate(items):
+        moves = any(any(abs(a - b) > 1e-6 for a, b in zip(mats[i][0], m)) for m in mats[i][1:])
+        changes = any(abs(vals[i][0] - v) > 1e-6 for v in vals[i][1:])
+        if not (moves or changes):
+            continue
+        item.times = [float(t) for t in times]
+        item.transforms = mats[i]
+        item.fps = fps
+        yield_vals = vals[i] if changes else []
+        if hasattr(item, "focal_lengths"):
+            item.focal_lengths = yield_vals
+        else:
+            item.intensities = yield_vals
+
+
+def _scope_selection(scope: str) -> set[str]:
+    return set(cmds.ls(selection=True, long=True) or []) if scope == "selection" else set()
+
+
+def camera_asset(asset: str, scope: str, opts: dict, frame_start: int, frame_end: int):
+    """Shot cameras (LAYOUT): every user camera of the scope, baked when it moves."""
+    from dcc.maya import maya_usd_light_export as lx
+    from features.usd_export.contract import LightAsset, SkeletonData
+
+    nodes = lx._camera_nodes(scope, _scope_selection(scope))
+    if not nodes:
+        raise PresetError("aucune camera a exporter (persp / top / front / side ignorees) : "
+                          "cree la camera du plan, ou passe le scope en scene")
+    cams = [lx._camera_data(tr, shp) for tr, shp in nodes]
+    if opts.get("animated", True):
+        _bake(cams, [tr for tr, _ in nodes], frame_start, frame_end,
+              lambda i: float(cmds.getAttr(f"{nodes[i][1]}.focalLength")))
+    log.info("camera: %d camera(s), %d animee(s), %d-%d", len(cams),
+             sum(1 for c in cams if c.times), frame_start, frame_end)
+    return LightAsset(asset=asset, skeleton=SkeletonData([], [], []), cameras=cams)
+
+
+def light_asset(asset: str, scope: str, opts: dict, frame_start: int, frame_end: int):
+    """Shot lights (LIGHT): every Maya light of the scope, baked when it moves."""
+    from dcc.maya import maya_usd_light_export as lx
+    from features.usd_export.contract import LightAsset, SkeletonData
+
+    nodes = lx._light_nodes(scope, _scope_selection(scope))
+    if not nodes:
+        raise PresetError("aucune lumiere Maya a exporter (directional, point, spot, area, "
+                          "ambient) : ajoute-en une, ou passe le scope en scene")
+    lights = [lx._light_data(tr, shp, mt) for tr, shp, mt in nodes]
+    if opts.get("animated", True):
+        _bake(lights, [tr for tr, _, _ in nodes], frame_start, frame_end,
+              lambda i: float(cmds.getAttr(f"{nodes[i][1]}.intensity")))
+    log.info("light: %d lumiere(s), %d animee(s), %d-%d", len(lights),
+             sum(1 for lt in lights if lt.times), frame_start, frame_end)
+    return LightAsset(asset=asset, skeleton=SkeletonData([], [], []), lights=lights)
+
+
 def build(preset: str, asset: str, scope: str, opts: dict, frame_start: int | None,
           frame_end: int | None, root: str | None = None):
-    """LightAsset for *preset* ("model" | "rig" | "anim"); PresetError says what is wrong."""
+    """LightAsset for *preset* ("model" | "rig" | "anim" | "camera" | "light");
+    PresetError says what is wrong."""
+    if preset in ("camera", "light"):
+        fs = int(frame_start if frame_start is not None else cmds.playbackOptions(query=True, minTime=True))
+        fe = int(frame_end if frame_end is not None else cmds.playbackOptions(query=True, maxTime=True))
+        maker = camera_asset if preset == "camera" else light_asset
+        return maker(asset, scope, opts, fs, fe)
     if preset == "model":
         return model_asset(asset, scope, opts, root)
     if preset == "rig":

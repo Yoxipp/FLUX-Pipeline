@@ -6,7 +6,7 @@ import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, 
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
-import { USD_PRESET_SCHEMAS, defaultPresetOptions, presetForTask, exportedAttrs } from '../lib/usdPresetOptions'
+import { ANIMATED_PRESETS, USD_PRESET_SCHEMAS, defaultPresetOptions, presetForTask, exportedAttrs } from '../lib/usdPresetOptions'
 import type { UsdPreset } from '../lib/usdPresetOptions'
 import { zbrushSchemaForExt, defaultZbrushOptions } from '../lib/zbrushExportOptions'
 import { nukeSchemaForExt, defaultNukeOptions } from '../lib/nukeExportOptions'
@@ -361,6 +361,10 @@ const USD_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
 const USD_SHOT_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
   ANIM: { department: 'animation', label: 'anim', what: "mouvement du squelette d'un perso (seulement les joints qui bougent)",
           writer: 'light', include: { geo: false, skel: true, anim: true, weights: false, uv: false } },
+  LAYOUT: { department: 'layout', label: 'camera', what: 'caméras du plan (animées), sans géométrie ni lumière',
+            writer: 'light', include: { geo: false, skel: false, anim: false, weights: false, uv: false } },
+  LIGHT: { department: 'lighting', label: 'light', what: 'lumières du plan (animées), sans géométrie ni caméra',
+           writer: 'light', include: { geo: false, skel: false, anim: false, weights: false, uv: false } },
 }
 
 // Info popover copy for each token (explanation · expected · concrete example).
@@ -1170,7 +1174,7 @@ export function Publisher() {
   const ANIM_EXTS = ['.abc', '.usd', '.usda', '.usdc']
   // model / rig / look presets are a rest state: no frame range (2026-09-26).
   const animCapable = (dcc === 'Maya' || dcc === 'Houdini') && ANIM_EXTS.includes(exportExt)
-    && !(usdPreset && usdPreset !== 'anim')
+    && !(usdPreset && !ANIMATED_PRESETS.has(usdPreset))
   const seqCapable = (dcc === 'Houdini' && !animCapable && !['.hip', '.hiplc', '.hipnc'].includes(exportExt))
     || (dcc === 'Nuke' && exportExt !== '.nk')
 
@@ -1178,7 +1182,7 @@ export function Publisher() {
   // character is being published, every instance ticked by default.
   const shotCharName = mode === 'shot' && formatToken(sel.variante) && formatToken(sel.variante) !== 'null'
     ? characterBase(formatToken(sel.variante)) : ''
-  const instancePicker = dcc === 'Maya' && mode === 'shot' && usdLayers
+  const instancePicker = dcc === 'Maya' && mode === 'shot' && usdLayers && usdPreset === 'anim'
     && ['.usd', '.usda', '.usdc'].includes(exportExt) && !!shotCharName
   const loadInstances = useCallback(async (quiet: boolean) => {
     if (!shotCharName) return
@@ -1207,8 +1211,8 @@ export function Publisher() {
     if (dcc !== 'Maya' && dcc !== 'Houdini') return
     try {
       const r = await api.getAnimRange(dcc, mayaScope, dcc === 'Maya' ? (readActiveInstancePort('Maya') ?? undefined) : undefined)
-      // ANIM preset: Start stays 1001 (or the artist's pre-roll), End = the last key.
-      if (usdPreset !== 'anim') setFrameStart(r.start)
+      // ANIM / camera / light presets: Start stays 1001 (or the artist's pre-roll), End = the last key.
+      if (!usdPreset || !ANIMATED_PRESETS.has(usdPreset)) setFrameStart(r.start)
       setFrameEnd(r.end)
       setRangeInfo(r.source === 'keys'
         ? `Clés ${r.start}-${r.end} (${r.curves} courbe${r.curves > 1 ? 's' : ''})`
@@ -1225,7 +1229,7 @@ export function Publisher() {
   // ANIM preset (2026-09-26): animation on by default, Start 1001 (a pre-roll such
   // as 995 stays editable), End from the last key of the scene (fetch above).
   useEffect(() => {
-    if (usdPreset !== 'anim') return
+    if (!usdPreset || !ANIMATED_PRESETS.has(usdPreset)) return
     setAnimRange(true)
     setFrameStart(1001)
   }, [usdPreset])
@@ -2863,7 +2867,14 @@ export function Publisher() {
                   </span>
                 </div>
                 <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
-                  {usdOk && mode === 'shot' ? (<>
+                  {usdOk && mode === 'shot' && (usdPreset === 'camera' || usdPreset === 'light') ? (<>
+                    TASK {formatToken(sel.name)} du plan : {contribution.what}, avec la plage d'images et les fps.
+                    {on
+                      ? (usdPreset === 'camera'
+                        ? ' FLUX écrit les caméras sous /cameras (persp / top / front / side ignorées), rien d\'autre.'
+                        : ' FLUX écrit les lumières sous /lights (UsdLux), rien d\'autre. Remplace le light rig LIGHT publié depuis Houdini.')
+                      : ` ${dcc} écrit le fichier tel quel (structure non garantie).`}
+                  </>) : usdOk && mode === 'shot' ? (<>
                     TASK {formatToken(sel.name)} du plan : {contribution.what}, avec la plage d'images et les fps.
                     Le 4e token est le perso animé (<span style={{ fontFamily: 'var(--mono)' }}>SEQ_SHOT_ANIM_NAME</span>) ;
                     sélectionne son rig dans {dcc}.
@@ -2886,7 +2897,7 @@ export function Publisher() {
                       : ` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`}
                   </>) : (
                     mode === 'shot'
-                      ? `TASK ${formatToken(sel.name) || '—'} : FLUX n'écrit que l'ANIM d'un plan. ${dcc} écrit le fichier.`
+                      ? `TASK ${formatToken(sel.name) || '—'} : FLUX écrit l'ANIM, les caméras (LAYOUT) et les lumières (LIGHT) d'un plan. ${dcc} écrit le fichier.`
                       : `TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`
                   )}
                 </div>
@@ -3048,6 +3059,10 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
       summary = items.length
         ? `${items.length} joint(s) animé(s) sur ${preview.joints ?? 0}`
         : 'aucun joint ne bouge sur la plage'
+    } else if (preset === 'camera') {
+      summary = items.length ? `${items.length} caméra(s)` : "aucune caméra : l'export échouera"
+    } else if (preset === 'light') {
+      summary = items.length ? `${items.length} lumière(s)` : "aucune lumière : l'export échouera"
     } else summary = items.length ? `${items.length} matériau(x)` : 'aucun matériau sur la géo'
   }
 
@@ -3086,6 +3101,18 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
             <div key={i.token ?? i.name} style={row} title={i.token}>
               <span style={name}>{i.name}</span>
               <span style={dim}>{(i.channels ?? []).join(' + ')}</span>
+            </div>
+          ))}
+          {preset === 'camera' && items.map(i => (
+            <div key={i.path ?? i.name} style={row} title={i.path}>
+              <span style={name}>{i.name}</span>
+              <span style={dim}>{i.focal} mm</span>
+            </div>
+          ))}
+          {preset === 'light' && items.map(i => (
+            <div key={i.path ?? i.name} style={row} title={i.path}>
+              <span style={name}>{i.name}</span>
+              <span style={dim}>{i.type}</span>
             </div>
           ))}
           {preset === 'look' && items.map(i => (

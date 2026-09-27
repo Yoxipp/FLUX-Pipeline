@@ -170,7 +170,9 @@ def publish_light_asset(
     "version": "vNNN", "folder": version folder, "version_root": Path, "layers": {...},
     "warnings": [...]}.
     """
-    from .departments import character_name, contribution, is_motion_only, restrict_light_asset
+    from .departments import (
+        SHOT_PRIM_ROOTS, character_name, contribution, is_motion_only, restrict_light_asset,
+    )
 
     base = base_name or asset.asset
     contrib = contribution(base) if base_name else None
@@ -180,6 +182,8 @@ def publish_light_asset(
     if contrib is not None:
         asset, warnings = restrict_light_asset(asset, contrib)
         root_name = contrib["name"] or None
+        if contrib["kind"] == "shot" and contrib.get("type") in SHOT_PRIM_ROOTS:
+            root_name = SHOT_PRIM_ROOTS[contrib["type"]]    # /cameras, /lights
         if motion_only and contrib["kind"] == "shot":
             root_name = character_name(contrib, project_path) or None
             if root_name is None:

@@ -7,6 +7,8 @@
 #           "skinned": [{"name", "joints"}]}
 #   anim  : [{"name", "token", "channels"}] joints that move over the range
 #   look  : [{"name", "type", "meshes"}] materials of the scene / of the selected geo
+#   camera: [{"name", "path", "focal"}] shot cameras
+#   light : [{"name", "path", "type"}] shot lights
 
 from __future__ import annotations
 
@@ -138,8 +140,31 @@ def list_look(scope: str) -> dict:
     return {"items": sorted(by_mat.values(), key=lambda m: m["name"]), "geometry": len(meshes)}
 
 
+def list_cameras(scope: str) -> dict:
+    p = _p()
+    from dcc.maya import maya_usd_light_export as lx
+
+    items = [{"name": p._short(tr), "path": tr,
+              "focal": round(float(cmds.getAttr(f"{shp}.focalLength")), 2)}
+             for tr, shp in lx._camera_nodes(scope, p._scope_selection(scope))]
+    return {"items": items}
+
+
+def list_lights(scope: str) -> dict:
+    p = _p()
+    from dcc.maya import maya_usd_light_export as lx
+
+    items = [{"name": p._short(tr), "path": tr, "type": mt}
+             for tr, _shp, mt in lx._light_nodes(scope, p._scope_selection(scope))]
+    return {"items": items}
+
+
 def preview(preset: str, scope: str, start: int | None = None, end: int | None = None) -> dict:
     scope = "selection" if scope == "selection" else "scene"
+    if preset == "camera":
+        return list_cameras(scope)
+    if preset == "light":
+        return list_lights(scope)
     if preset == "model":
         return list_model(scope)
     if preset == "rig":

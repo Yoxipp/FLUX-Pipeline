@@ -47,12 +47,24 @@ LIGHT_EXPORT_CONTENT: dict[str, dict] = {
 PRESET_LABELS: dict[str, str] = {"GEO": "model", "RIG": "rig", "ANIM": "anim", "SHADING": "look"}
 
 
-# Shot tasks FLUX writes itself (2026-09-18): the motion of ONE character.
+# Shot tasks FLUX writes itself: the motion of ONE character (2026-09-18), the
+# shot cameras in LAYOUT and the shot lights in LIGHT (2026-09-27, Maya presets
+# "camera" / "light"). Prim root of a camera / light publish: /cameras, /lights.
 SHOT_EXPORT_CONTENT: dict[str, dict] = {
     "ANIM": {"department": "animation", "label": "anim", "writer": "light",
              "what": "mouvement du squelette d'un perso (seulement les joints qui bougent)",
              "include": {"geo": False, "skel": True, "anim": True, "weights": False, "uv": False}},
+    "LAYOUT": {"department": "layout", "label": "camera", "writer": "light",
+               "what": "cameras du plan (animees), sans geometrie ni lumiere",
+               "include": {"geo": False, "skel": False, "anim": False, "weights": False, "uv": False}},
+    "LIGHT": {"department": "lighting", "label": "light", "writer": "light",
+              "what": "lumieres du plan (animees), sans geometrie ni camera",
+              "include": {"geo": False, "skel": False, "anim": False, "weights": False, "uv": False}},
 }
+# Shot TYPE -> (what it keeps, prim root) for the camera / light presets.
+SHOT_CAMERA_TYPES = frozenset({"LAYOUT"})
+SHOT_LIGHT_TYPES = frozenset({"LIGHT"})
+SHOT_PRIM_ROOTS: dict[str, str] = {"LAYOUT": "cameras", "LIGHT": "lights"}
 
 
 def publisher_table() -> dict[str, dict]:
@@ -119,10 +131,35 @@ def character_name(contrib: dict, project_path) -> str:
     return raw
 
 
+def _restrict_shot_camera_light(asset: LightAsset, task: str) -> tuple[LightAsset, list[str]]:
+    """Shot LAYOUT keeps the cameras only, shot LIGHT the lights only."""
+    from .contract import SkeletonData
+
+    cameras = task in SHOT_CAMERA_TYPES
+    kept = asset.cameras if cameras else asset.lights
+    if not kept:
+        raise ValueError(
+            f"aucune {'camera' if cameras else 'lumiere'} a publier : "
+            f"{'ajoute une camera' if cameras else 'ajoute une lumiere'} a la scene (ou a la selection)")
+    warnings: list[str] = []
+    if asset.meshes or asset.skeleton.joints or asset.anim is not None:
+        warnings.append("geometrie / squelette ignores : ce publish ne contient que "
+                        + ("les cameras" if cameras else "les lumieres"))
+    other = asset.lights if cameras else asset.cameras
+    if other:
+        warnings.append("lumieres ignorees : elles se publient en LIGHT" if cameras
+                        else "cameras ignorees : elles se publient en LAYOUT")
+    return replace(asset, meshes=[], anim=None, skeleton=SkeletonData([], [], []),
+                   cameras=list(asset.cameras) if cameras else [],
+                   lights=[] if cameras else list(asset.lights)), warnings
+
+
 def restrict_light_asset(asset: LightAsset, contrib: dict) -> tuple[LightAsset, list[str]]:
     """Keep only what the publish department owns; ValueError for a TYPE the light
     export cannot write (MULT, SHADING, ...). Returns (asset, warnings)."""
     if contrib["kind"] == "shot":
+        if contrib.get("type") in SHOT_CAMERA_TYPES | SHOT_LIGHT_TYPES:
+            return _restrict_shot_camera_light(asset, contrib["type"])
         if contrib.get("type") not in SHOT_MOTION_TYPES:
             return asset, []
         # A shot animation is the motion of one character, nothing else.

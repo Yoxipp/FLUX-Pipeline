@@ -7,7 +7,7 @@
 
 import type { ExportOption } from './mayaExportOptions'
 
-export type UsdPreset = 'model' | 'rig' | 'anim' | 'look'
+export type UsdPreset = 'model' | 'rig' | 'anim' | 'look' | 'camera' | 'light'
 
 const MODEL: ExportOption[] = [
   { key: 'uv',      label: 'UV',                     type: 'bool', default: true, tier: 'common' },
@@ -44,14 +44,27 @@ const ANIM: ExportOption[] = [
 
 const LOOK: ExportOption[] = []
 
+// Shot cameras (TYPE LAYOUT) and shot lights (TYPE LIGHT), 2026-09-27.
+const CAMERA: ExportOption[] = [
+  { key: 'animated', label: 'Animation (bake par image)', type: 'bool', default: true, tier: 'common',
+    hint: 'Transform + focale échantillonnées sur la plage ; une caméra fixe reste statique.' },
+]
+const LIGHT: ExportOption[] = [
+  { key: 'animated', label: 'Animation (bake par image)', type: 'bool', default: true, tier: 'common',
+    hint: 'Transform + intensité échantillonnées sur la plage ; une lumière fixe reste statique.' },
+]
+
 export const USD_PRESET_SCHEMAS: Record<UsdPreset, ExportOption[]> = {
-  model: MODEL, rig: RIG, anim: ANIM, look: LOOK,
+  model: MODEL, rig: RIG, anim: ANIM, look: LOOK, camera: CAMERA, light: LIGHT,
 }
+
+// Presets that read a frame range (the others are a rest state).
+export const ANIMATED_PRESETS: ReadonlySet<UsdPreset> = new Set<UsdPreset>(['anim', 'camera', 'light'])
 
 // Asset / shot TYPE -> preset (the department FLUX writes for that task).
 export function presetForTask(task: string, shot = false): UsdPreset | null {
   const t = task.toUpperCase()
-  if (shot) return t === 'ANIM' ? 'anim' : null
+  if (shot) return t === 'ANIM' ? 'anim' : t === 'LAYOUT' ? 'camera' : t === 'LIGHT' ? 'light' : null
   if (t === 'GEO') return 'model'
   if (t === 'RIG') return 'rig'
   if (t === 'ANIM') return 'anim'
@@ -111,6 +124,18 @@ export function exportedAttrs(preset: UsdPreset, opts: Record<string, unknown>,
       ...(opts.translate && opts.translate !== 'none'
         ? [{ usd: 'SkelAnimation.translations', houdini: 'P (joints)', what: 'translations', rename: false }]
         : []),
+    ]
+  }
+  if (preset === 'camera') {
+    return [
+      { usd: 'Camera (/cameras/<nom>)', houdini: 'caméra LOP', what: 'focale, apertures, clipping', rename: false },
+      { usd: 'xformOp:transform', houdini: 'transform', what: opts.animated === false ? 'position' : 'position animée', rename: false },
+    ]
+  }
+  if (preset === 'light') {
+    return [
+      { usd: 'UsdLux (/lights/<nom>)', houdini: 'light LOP', what: 'type, couleur, intensité, cône', rename: false },
+      { usd: 'xformOp:transform', houdini: 'transform', what: opts.animated === false ? 'position' : 'position animée', rename: false },
     ]
   }
   return [{ usd: 'material:binding', houdini: 'shop_materialpath', what: 'assignations', rename: false }]

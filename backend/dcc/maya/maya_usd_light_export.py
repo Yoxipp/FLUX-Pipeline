@@ -268,10 +268,18 @@ def _extract_anim(joints_dag: list[str], tokens: list[str], frame_start: int, fr
     )
 
 
-def _extract_cameras(scope: str, sel_set: set[str]):
-    """Extract user cameras (skips Maya's startup persp/top/front/side)."""
-    from features.usd_export.contract import CameraData
+def _in_scope(tr: str, shp: str, scope: str, sel_set: set[str]) -> bool:
+    """A camera / light is in the selection when it, its shape or a group above it
+    is selected (an empty selection keeps everything, like before)."""
+    if scope != "selection" or not sel_set:
+        return True
+    if tr in sel_set or shp in sel_set:
+        return True
+    return any(tr.startswith(s + "|") for s in sel_set)
 
+
+def _camera_nodes(scope: str, sel_set: set[str]) -> list[tuple[str, str]]:
+    """(transform, shape) of the user cameras (skips Maya's startup persp/top/front/side)."""
     out = []
     for shp in (cmds.ls(type="camera", long=True) or []):
         try:
@@ -280,72 +288,93 @@ def _extract_cameras(scope: str, sel_set: set[str]):
         except Exception:
             pass
         tr = (cmds.listRelatives(shp, parent=True, fullPath=True) or [None])[0]
-        if tr is None:
+        if tr is None or not _in_scope(tr, shp, scope, sel_set):
             continue
-        if scope == "selection" and sel_set and tr not in sel_set and shp not in sel_set:
-            continue
-        def _g(attr, default=None):
-            try:
-                return cmds.getAttr(f"{shp}.{attr}")
-            except Exception:
-                return default
-        ortho = bool(_g("orthographic", False))
-        out.append(CameraData(
-            name=_short(tr),
-            transform=_matrix16(cmds.getAttr(f"{tr}.worldMatrix[0]")),
-            focal_length=float(_g("focalLength", 35.0)),
-            horizontal_aperture=float(_g("horizontalFilmAperture", 1.417)) * 25.4,  # inch -> mm
-            vertical_aperture=float(_g("verticalFilmAperture", 0.945)) * 25.4,
-            clipping_range=(float(_g("nearClipPlane", 0.1)), float(_g("farClipPlane", 10000.0))),
-            projection="orthographic" if ortho else "perspective",
-            fstop=(float(_g("fStop")) if _g("fStop") is not None else None),
-            focus_distance=(float(_g("focusDistance")) if _g("focusDistance") is not None else None),
-        ))
+        out.append((tr, shp))
     return out
+
+
+def _camera_data(tr: str, shp: str):
+    """CameraData of one camera at the current frame."""
+    from features.usd_export.contract import CameraData
+
+    def _g(attr, default=None):
+        try:
+            return cmds.getAttr(f"{shp}.{attr}")
+        except Exception:
+            return default
+    ortho = bool(_g("orthographic", False))
+    return CameraData(
+        name=_short(tr),
+        transform=_matrix16(cmds.getAttr(f"{tr}.worldMatrix[0]")),
+        focal_length=float(_g("focalLength", 35.0)),
+        horizontal_aperture=float(_g("horizontalFilmAperture", 1.417)) * 25.4,  # inch -> mm
+        vertical_aperture=float(_g("verticalFilmAperture", 0.945)) * 25.4,
+        clipping_range=(float(_g("nearClipPlane", 0.1)), float(_g("farClipPlane", 10000.0))),
+        projection="orthographic" if ortho else "perspective",
+        fstop=(float(_g("fStop")) if _g("fStop") is not None else None),
+        focus_distance=(float(_g("focusDistance")) if _g("focusDistance") is not None else None),
+    )
+
+
+def _extract_cameras(scope: str, sel_set: set[str]):
+    """Extract user cameras (skips Maya's startup persp/top/front/side)."""
+    return [_camera_data(tr, shp) for tr, shp in _camera_nodes(scope, sel_set)]
+
+
+# Maya light type -> UsdLux type.
+_LIGHT_TYPES: dict[str, str] = {
+    "directionalLight": "distant", "pointLight": "point", "spotLight": "spot",
+    "areaLight": "rect", "ambientLight": "dome", "volumeLight": "point",
+}
+
+
+def _light_nodes(scope: str, sel_set: set[str]) -> list[tuple[str, str, str]]:
+    """(transform, shape, maya type) of the Maya lights FLUX maps to UsdLux."""
+    out = []
+    for maya_type in _LIGHT_TYPES:
+        for shp in (cmds.ls(type=maya_type, long=True) or []):
+            tr = (cmds.listRelatives(shp, parent=True, fullPath=True) or [None])[0]
+            if tr is None or not _in_scope(tr, shp, scope, sel_set):
+                continue
+            out.append((tr, shp, maya_type))
+    return out
+
+
+def _light_data(tr: str, shp: str, maya_type: str):
+    """LightData of one light at the current frame."""
+    from features.usd_export.contract import LightData
+
+    def _g(attr, default=None):
+        try:
+            return cmds.getAttr(f"{shp}.{attr}")
+        except Exception:
+            return default
+    col = _g("color", (1.0, 1.0, 1.0))
+    if isinstance(col, list):          # getAttr color returns [(r,g,b)]
+        col = col[0] if col and isinstance(col[0], (list, tuple)) else col
+    cone = None
+    softness = None
+    if maya_type == "spotLight":
+        full = _g("coneAngle", 40.0)
+        cone = float(full) / 2.0        # Maya full angle -> USD half-angle from axis
+        pen = _g("penumbraAngle", 0.0)
+        if pen:
+            softness = max(0.0, min(1.0, abs(float(pen)) / max(float(full), 1.0)))
+    return LightData(
+        name=_short(tr),
+        transform=_matrix16(cmds.getAttr(f"{tr}.worldMatrix[0]")),
+        light_type=_LIGHT_TYPES[maya_type],
+        intensity=float(_g("intensity", 1.0)),
+        color=tuple(float(c) for c in col[:3]),
+        cone_angle=cone,
+        cone_softness=softness,
+    )
 
 
 def _extract_lights(scope: str, sel_set: set[str]):
     """Extract Maya lights, mapped to UsdLux types."""
-    from features.usd_export.contract import LightData
-
-    type_map = {
-        "directionalLight": "distant", "pointLight": "point", "spotLight": "spot",
-        "areaLight": "rect", "ambientLight": "dome", "volumeLight": "point",
-    }
-    out = []
-    for maya_type, usd_type in type_map.items():
-        for shp in (cmds.ls(type=maya_type, long=True) or []):
-            tr = (cmds.listRelatives(shp, parent=True, fullPath=True) or [None])[0]
-            if tr is None:
-                continue
-            if scope == "selection" and sel_set and tr not in sel_set and shp not in sel_set:
-                continue
-            def _g(attr, default=None):
-                try:
-                    return cmds.getAttr(f"{shp}.{attr}")
-                except Exception:
-                    return default
-            col = _g("color", (1.0, 1.0, 1.0))
-            if isinstance(col, list):          # getAttr color returns [(r,g,b)]
-                col = col[0] if col and isinstance(col[0], (list, tuple)) else col
-            cone = None
-            softness = None
-            if maya_type == "spotLight":
-                full = _g("coneAngle", 40.0)
-                cone = float(full) / 2.0        # Maya full angle -> USD half-angle from axis
-                pen = _g("penumbraAngle", 0.0)
-                if pen:
-                    softness = max(0.0, min(1.0, abs(float(pen)) / max(float(full), 1.0)))
-            out.append(LightData(
-                name=_short(tr),
-                transform=_matrix16(cmds.getAttr(f"{tr}.worldMatrix[0]")),
-                light_type=usd_type,
-                intensity=float(_g("intensity", 1.0)),
-                color=tuple(float(c) for c in col[:3]),
-                cone_angle=cone,
-                cone_softness=softness,
-            ))
-    return out
+    return [_light_data(tr, shp, mt) for tr, shp, mt in _light_nodes(scope, sel_set)]
 
 
 def _scene_skin_pairs() -> list[tuple[str, str]]:
@@ -523,7 +552,8 @@ def run_light_export(
     rebuilds the LightAsset and publishes it. Called via commandPort by the hub.
 
     *options_b64* is base64(JSON) of the Publisher preset options; with a "preset"
-    key ("model" | "rig" | "anim", ADR 0034) the preset sweep of maya_usd_presets runs
+    key ("model" | "rig" | "anim" | "camera" | "light", ADR 0034) the preset sweep of
+    maya_usd_presets runs
     instead of the include flags.
     """
     import dataclasses

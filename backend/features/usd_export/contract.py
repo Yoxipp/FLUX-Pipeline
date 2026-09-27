@@ -97,6 +97,12 @@ class CameraData:
     projection: str = "perspective"            # "perspective" | "orthographic"
     fstop: float | None = None
     focus_distance: float | None = None
+    # Animation (shot camera preset): one sample per frame in *times*. Empty = static
+    # (transform / focal_length above). focal_lengths empty = focal not animated.
+    times: list[float] = field(default_factory=list)
+    transforms: list[Mat4] = field(default_factory=list)
+    focal_lengths: list[float] = field(default_factory=list)
+    fps: float | None = None
 
 
 @dataclass
@@ -115,6 +121,11 @@ class LightData:
     height: float | None = None                # rect
     cone_angle: float | None = None            # spot (degrees)
     cone_softness: float | None = None         # spot
+    # Animation (shot light preset), like CameraData: empty = static.
+    times: list[float] = field(default_factory=list)
+    transforms: list[Mat4] = field(default_factory=list)
+    intensities: list[float] = field(default_factory=list)
+    fps: float | None = None
 
 
 @dataclass
@@ -187,6 +198,10 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             projection=str(c.get("projection", "perspective")),
             fstop=(float(c["fstop"]) if c.get("fstop") is not None else None),
             focus_distance=(float(c["focus_distance"]) if c.get("focus_distance") is not None else None),
+            times=[float(t) for t in c.get("times", [])],
+            transforms=[tuple(m) for m in c.get("transforms", [])],
+            focal_lengths=[float(f) for f in c.get("focal_lengths", [])],
+            fps=(float(c["fps"]) if c.get("fps") else None),
         )
         for c in d.get("cameras", [])
     ]
@@ -204,6 +219,10 @@ def light_asset_from_dict(d: dict) -> LightAsset:
             height=(float(l["height"]) if l.get("height") is not None else None),
             cone_angle=(float(l["cone_angle"]) if l.get("cone_angle") is not None else None),
             cone_softness=(float(l["cone_softness"]) if l.get("cone_softness") is not None else None),
+            times=[float(t) for t in l.get("times", [])],
+            transforms=[tuple(m) for m in l.get("transforms", [])],
+            intensities=[float(i) for i in l.get("intensities", [])],
+            fps=(float(l["fps"]) if l.get("fps") else None),
         )
         for l in d.get("lights", [])
     ]

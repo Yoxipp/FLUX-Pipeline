@@ -255,9 +255,31 @@ def _author_camera_layer(path: Path, root_path: str, cameras, fmt: str) -> None:
             ucam.CreateFStopAttr(float(cam.fstop))
         if cam.focus_distance is not None:
             ucam.CreateFocusDistanceAttr(float(cam.focus_distance))
-        UsdGeom.Xformable(ucam).AddTransformOp().Set(_mat(cam.transform))
+        xform_op = UsdGeom.Xformable(ucam).AddTransformOp()
+        if cam.times and cam.transforms:
+            for t, m in zip(cam.times, cam.transforms):
+                xform_op.Set(_mat(m), Usd.TimeCode(float(t)))
+        else:
+            xform_op.Set(_mat(cam.transform))
+        if cam.times and cam.focal_lengths:
+            focal = ucam.GetFocalLengthAttr()
+            for t, f in zip(cam.times, cam.focal_lengths):
+                focal.Set(float(f), Usd.TimeCode(float(t)))
+    _set_sampled_range(stage.GetRootLayer(), cameras)
     stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
     stage.GetRootLayer().Save()
+
+
+def _set_sampled_range(layer: Sdf.Layer, items) -> None:
+    """Frame range + frame rate of animated cameras / lights (same rule as the anim layer)."""
+    times = [t for it in items for t in (it.times or [])]
+    fps = next((it.fps for it in items if it.fps), None)
+    if times:
+        layer.startTimeCode = float(min(times))
+        layer.endTimeCode = float(max(times))
+    if times and fps:
+        layer.timeCodesPerSecond = float(fps)
+        layer.framesPerSecond = float(fps)
 
 
 def _author_light_layer(path: Path, root_path: str, lights, fmt: str) -> None:
@@ -304,7 +326,17 @@ def _author_light_layer(path: Path, root_path: str, lights, fmt: str) -> None:
                     shaping.CreateShapingConeSoftnessAttr(float(lt.cone_softness))
             except Exception as exc:  # pragma: no cover - version guard
                 log.warning("spot shaping skipped: %s", exc)
-        UsdGeom.Xformable(ulight).AddTransformOp().Set(_mat(lt.transform))
+        xform_op = UsdGeom.Xformable(ulight).AddTransformOp()
+        if lt.times and lt.transforms:
+            for t, m in zip(lt.times, lt.transforms):
+                xform_op.Set(_mat(m), Usd.TimeCode(float(t)))
+        else:
+            xform_op.Set(_mat(lt.transform))
+        if lt.times and lt.intensities:
+            intensity = ulight.GetIntensityAttr()
+            for t, i in zip(lt.times, lt.intensities):
+                _try(intensity.Set, float(i), Usd.TimeCode(float(t)))
+    _set_sampled_range(stage.GetRootLayer(), lights)
     stage.SetDefaultPrim(stage.GetPrimAtPath(root_path))
     stage.GetRootLayer().Save()
 
@@ -454,6 +486,9 @@ def author_light_asset(
     root_layer = root_stage.GetRootLayer()
     root_layer.subLayerPaths = sublayers
     root_layer.defaultPrim = token
+    # Animated cameras / lights: the root carries their frame rate, so the sublayer's
+    # time samples are not rescaled (timeCodesPerSecond mismatch) when composed.
+    _set_sampled_range(root_layer, list(asset.cameras) + list(asset.lights))
     if has_skel:
         # Crowd (A6, ADR 0022): assets with the same signature share a rig.
         root_layer.customLayerData = {"flux": {
