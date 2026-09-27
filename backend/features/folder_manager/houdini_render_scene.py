@@ -156,9 +156,14 @@ try:
         me = shot.path()
         rs.parm("camera").setExpression('chs("%s/camera")' % me, hou.exprLanguage.Hscript)
         rs.parm("picture").set('`chs("%s/render_picture")`' % me)
-        rs.parmTuple("resolution").set(plan["resolution"])
         if rs.parm("res_mode") is not None:
             rs.parm("res_mode").set("manual")
+        # "autoheight" leaves the height locked on an expression: a scripted switch to
+        # manual does not free it, so a non 16:9 project got a computed height.
+        for _p, _v in zip(rs.parmTuple("resolution"), plan["resolution"]):
+            _p.lock(False)
+            _p.deleteAllKeyframes()
+            _p.set(_v)
         rs.parm("enablemblur").set(1)
         for aov in plan["aovs"]:
             if rs.parm(aov) is not None:
