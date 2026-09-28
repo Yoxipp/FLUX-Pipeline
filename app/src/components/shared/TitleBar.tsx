@@ -342,7 +342,7 @@ function AdvancedConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCan
     return () => document.removeEventListener('keydown', h)
   }, [onCancel])
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '22px 24px', minWidth: 340, maxWidth: 420, boxShadow: 'var(--shadow)' }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Parametres avances</div>
         <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 14, lineHeight: 1.5 }}>
