@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -104,6 +105,21 @@ app.add_middleware(
 # Added after CORS so it runs first: browser requests without the per-launch token
 # are refused before reaching any route (security S1, see core/api_auth.py).
 app.add_middleware(ApiAuthMiddleware)
+
+
+# B3 (2026-09-28): measure before optimizing. Every request slower than
+# FLUX_SLOW_REQUEST_MS (default 300) is logged with its duration.
+_SLOW_MS = float(os.environ.get("FLUX_SLOW_REQUEST_MS", "300"))
+
+
+@app.middleware("http")
+async def log_slow_requests(request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    ms = (time.perf_counter() - start) * 1000
+    if ms >= _SLOW_MS:
+        log.warning("[slow] %s %s %.0f ms", request.method, request.url.path, ms)
+    return response
 
 
 @app.exception_handler(Exception)

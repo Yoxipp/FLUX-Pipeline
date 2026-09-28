@@ -15,6 +15,29 @@ log = get_logger(__name__)
 router = APIRouter()
 
 
+# B3 (2026-09-28): folder listings cached by the folder's own mtime. Adding, removing
+# or renaming an entry changes it (NTFS and ext4), so a hit is never stale for names;
+# one stat replaces the full listing (slow on OneDrive / network shares).
+_LIST_CACHE: dict[Path, tuple[int, list[str], list[Path]]] = {}
+_LIST_CACHE_MAX = 512
+
+
+def _list_dir_cached(project_path: Path, subpath: str, target: Path) -> tuple[list[str], list[Path]]:
+    try:
+        mtime = target.stat().st_mtime_ns
+    except OSError:
+        return list_folders(project_path, subpath), list_files_immediate(target)
+    hit = _LIST_CACHE.get(target)
+    if hit and hit[0] == mtime:
+        return list(hit[1]), list(hit[2])
+    folders = list_folders(project_path, subpath)
+    files = list_files_immediate(target)
+    if len(_LIST_CACHE) >= _LIST_CACHE_MAX:
+        _LIST_CACHE.clear()
+    _LIST_CACHE[target] = (mtime, folders, files)
+    return list(folders), list(files)
+
+
 @router.get("/projects/{project_name}/browse")
 async def browse_project(project_name: str, subpath: str = "") -> dict:
     """Browse files inside a project folder."""
@@ -30,11 +53,14 @@ async def browse_project(project_name: str, subpath: str = "") -> dict:
     if not is_subpath(target, project_path.resolve()):
         raise HTTPException(status_code=403, detail="Chemin non autorisé")
     loop = asyncio.get_running_loop()
-    folder_names = await loop.run_in_executor(
-        None, lambda: list_folders(project_path, subpath)
+    folder_names, all_files = await loop.run_in_executor(
+        None, lambda: _list_dir_cached(project_path, subpath, target)
     )
-    all_files = await loop.run_in_executor(None, lambda: list_files_immediate(target))
-    files_info = [get_file_info(f, target) for f in all_files]
+    # One modif_logs.json parse per folder (was one per file), off the event loop.
+    logs_cache: dict = {}
+    files_info = await loop.run_in_executor(
+        None, lambda: [get_file_info(f, target, logs_cache) for f in all_files]
+    )
     # V4: old Constructor files of usd/assembly are flagged "ancien" (never imported).
     from features.usd_assembler.assembly_v2 import assembly_root
     if target == assembly_root(project_path).resolve():

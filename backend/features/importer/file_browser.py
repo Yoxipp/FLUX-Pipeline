@@ -6,7 +6,7 @@ from pathlib import Path
 
 from core.constants import JSON_MODIF_LOG
 from core.paths import is_subpath
-from features.publisher.modif_log import get_logs_for_file
+from features.publisher.modif_log import get_logs_for_file, read_logs
 from features.folder_manager.naming_validator import get_base_name
 from core.logger import get_logger
 
@@ -99,8 +99,11 @@ def list_files_immediate(folder_path: Path) -> list[Path]:
         return []
 
 
-def get_file_info(file_path: Path, project_path: Path) -> dict:
-    """Return the most recent modif_log entry for *file_path*, or empty dict."""
+def get_file_info(file_path: Path, project_path: Path, logs_cache: dict[Path, list[dict]] | None = None) -> dict:
+    """Return the most recent modif_log entry for *file_path*, or empty dict.
+
+    *logs_cache* (folder -> parsed modif_logs) lets a folder listing parse each log once.
+    """
     empty = {"name": file_path.name, "base_name": "", "version": "", "date": "", "time": "", "modification": "", "user": ""}
     file_path = file_path.resolve()
     project_path = project_path.resolve()
@@ -111,13 +114,21 @@ def get_file_info(file_path: Path, project_path: Path) -> dict:
 
     folder = file_path.parent
     base = get_base_name(file_path.name)
-    entries = get_logs_for_file(folder, base)
+
+    def logs_for(where: Path) -> list[dict]:
+        if logs_cache is None:
+            return get_logs_for_file(where, base)
+        if where not in logs_cache:
+            logs_cache[where] = read_logs(where)
+        return [e for e in logs_cache[where] if e.get("name", "").startswith(base)]
+
+    entries = logs_for(folder)
 
     # Per-format layout: the file sits in <instance>/<ext>/, but the modif log is
     # written once at the instance leaf (<instance>/modif_logs.json). Fall back one
     # level up so the info panel still finds the history for a format-nested file.
     if not entries:
-        entries = get_logs_for_file(folder.parent, base)
+        entries = logs_for(folder.parent)
 
     if not entries:
         empty["base_name"] = base

@@ -40,6 +40,11 @@ interface Props {
 
 const sameSub = (a: string[], b: string[]) => a.join('/') === b.join('/')
 
+// B3: last listing of each folder visited this session (all views). A folder opens
+// at once from it, then the real listing replaces it (stale-while-revalidate).
+const listingCache = new Map<string, ExplorerItem[]>()
+const navKey = (n: NavLevel) => (n.kind === 'root' ? '' : `${n.project}/${n.subpath.join('/')}`)
+
 export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
   { paneId, active, framed, initialNav, onFocus, onReport }, ref,
 ) {
@@ -145,7 +150,10 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
 
   const loadItems = useCallback(async () => {
     const seq = ++loadSeqRef.current
-    if (!loadedNavRef.current || !sameNav(loadedNavRef.current, nav)) setItems([])
+    if (!loadedNavRef.current || !sameNav(loadedNavRef.current, nav)) {
+      setItems(listingCache.get(navKey(nav)) ?? [])
+      loadedNavRef.current = nav
+    }
     setLoading(true)
     try {
       let next: ExplorerItem[]
@@ -161,8 +169,8 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
           ...(d.files ?? []).map(f => ({ name: f.name, isDir: false, legacy: !!f.legacy })),
         ]
       }
+      listingCache.set(navKey(nav), next)
       if (seq !== loadSeqRef.current) return
-      loadedNavRef.current = nav
       setItems(next)
       // A reload after a write elsewhere keeps the selection of what still exists.
       const names = new Set(next.map(i => i.name))
