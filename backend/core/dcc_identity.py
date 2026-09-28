@@ -124,27 +124,6 @@ def running_pids(dcc: str, procs: dict[int, str] | None = None) -> list[int]:
     return sorted(pid for pid, exe in procs.items() if is_session(dcc, exe))
 
 
-def live_instances(dcc: str, instances: list[dict], procs: dict[int, str]) -> list[dict]:
-    """Drop ghost instances (B5): the pid on the port is dead, or is not a session of *dcc*.
-
-    Only for DCCs whose session exe is known, and only when the process list was read
-    (an empty list = tasklist failed: keep everything rather than hide real instances).
-    An instance without pid (netstat failed) is kept.
-    """
-    if dcc not in ("Maya", "Houdini") or not procs:
-        return instances
-    return [i for i in instances
-            if not i.get("pid") or is_session(dcc, procs.get(i["pid"], ""))]
-
-
-def unbridged_pids(dcc: str, instances: list[dict], procs: dict[int, str]) -> list[int]:
-    """Sessions of *dcc* running without a FLUX bridge (no instance holds their pid)."""
-    bridged = {i.get("pid") for i in instances}
-    if None in bridged:          # pid unknown: cannot tell which session it is
-        return [] if instances else running_pids(dcc, procs)
-    return [pid for pid in running_pids(dcc, procs) if pid not in bridged]
-
-
 # ── scene / version / busy ─────────────────────────────────────────────────────
 
 _MAYA_INFO = ("'\\n'.join([__import__('maya.cmds', fromlist=['cmds']).file(q=True, sceneName=True) or '',"

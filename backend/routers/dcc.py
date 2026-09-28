@@ -116,9 +116,6 @@ async def _probe_all_dccs() -> dict:
         if inst["scene"] is not None:
             inst["label"] = dcc_identity.scene_label(inst["scene"])
     procs = await loop.run_in_executor(None, dcc_identity.process_names)
-    # B5: a port whose owner is dead or is not that DCC (a child that inherited Maya's
-    # commandPort socket keeps it LISTEN after Maya closed) is not an instance.
-    scans = [dcc_identity.live_instances(name, instances, procs) for name, instances in zip(names, scans)]
     status = {}
     for name, instances in zip(names, scans):
         base = DCC_PORTS[name]
@@ -129,9 +126,7 @@ async def _probe_all_dccs() -> dict:
             "color":     DCC_COLORS.get(name, DCC_COLORS["disconnected"]),
             "instances": instances,
             # Open but the FLUX bridge is not listening (autostart missing / not loaded).
-            # B5: counted per process, so a Houdini without bridge shows next to one with it.
-            "no_bridge": bool(dcc_identity.unbridged_pids(name, instances, procs)),
-            "no_bridge_count": len(dcc_identity.unbridged_pids(name, instances, procs)),
+            "no_bridge": not instances and bool(dcc_identity.running_pids(name, procs)),
             "busy":      bool(instances) and all(i.get("state") == "busy" for i in instances),
             "active":    active_info(name),
             "active_lost": lost_active(name),
