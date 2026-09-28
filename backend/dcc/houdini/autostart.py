@@ -432,6 +432,7 @@ def _install_to(prefs_dir: Path) -> dict:
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     results = [_write_block(scripts / name) for name in _STARTUP_FILES]
     failed = [r for r in results if not r["success"]]
     if failed:
@@ -442,6 +443,9 @@ def _install_to(prefs_dir: Path) -> dict:
 
 def _write_block(startup: Path) -> dict:
     """Write or upgrade the FLUX block in one startup script (123.py / 456.py)."""
+=======
+    startup = scripts / "123.py"
+>>>>>>> parent of 7f3db07f (fix: DCC detection drops ghost instances, Houdini autostart also in 456.py)
 =======
     startup = scripts / "123.py"
 >>>>>>> parent of 7f3db07f (fix: DCC detection drops ghost instances, Houdini autostart also in 456.py)
