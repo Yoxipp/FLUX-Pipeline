@@ -89,6 +89,131 @@ def _command_doc(key: str) -> Dict[str, str]:
     return {"doc": doc.split("\n\n", 1)[0].strip(), "module": getattr(cls, "__module__", "")}
 
 
+# ── B4 (2026-09-28): inputs, outputs, notes, hidden hooks ────────────────────
+# All read from the code / YAML text, never from a run: still read only (ADR 0008).
+
+# What a command writes besides its output keys, and what runs behind it without a
+# YAML step (the publish hooks). Kept here, next to the view, because the engine has
+# no declaration for side effects. Update when publish_core / usd_publish_hooks change.
+COMMAND_EFFECTS: Dict[str, List[Dict[str, str]]] = {
+    "copy_publish": [
+        {"kind": "output", "label": "Fichier vNNN", "detail": "version immuable, publish_layout.publish_into_layout (ADR 0017)"},
+        {"kind": "output", "label": "LAST", "detail": "copie, .link ou pointeur USD derive de vNNN (ADR 0017)"},
+        {"kind": "output", "label": "modif_logs.json", "detail": "modif_log.append_log (note de publish, historique)"},
+        {"kind": "output", "label": "Activite", "detail": "activity_writer.log_publish (fil Activity)"},
+        {"kind": "hook", "label": "Proxy USD", "detail": "usd_publish_hooks : action generate_proxy si USD avec meshes, interrupteur proxy_usd"},
+        {"kind": "hook", "label": "Controle USD (R3)", "detail": "validate.publish_check, avertissements dans modif_logs"},
+        {"kind": "hook", "label": "Component (asset)", "detail": "component_auto.refresh_from_publish_folder (ADR 0019 / 0023)"},
+        {"kind": "hook", "label": "Stage du shot", "detail": "shot_stage.refresh_from_publish_folder, departement de shot (ADR 0020)"},
+    ],
+    "houdini_export": [
+        {"kind": "output", "label": "Fichier vNNN", "detail": "le ROP ecrit directement la version immuable (ADR 0017)"},
+        {"kind": "output", "label": "LAST", "detail": "derive apres le cook ; sequence = .link"},
+        {"kind": "output", "label": "modif_logs.json", "detail": "modif_log.append_log"},
+        {"kind": "output", "label": "Activite", "detail": "activity_writer.log_publish"},
+    ],
+    "conform_texture": [
+        {"kind": "output", "label": "Textures .tx", "detail": "texture_conform.conform_set (Painter / Mari, interrupteur conform)"},
+    ],
+    "generate_proxy": [
+        {"kind": "output", "label": "Layer proxy", "detail": "<source>.proxy.usda (purpose proxy)"},
+    ],
+}
+
+
+def _command_outputs(key: str) -> List[str]:
+    """Output keys of a command: the keys of the dict literals its execute() returns."""
+    import ast
+    import textwrap
+
+    try:
+        src = textwrap.dedent(inspect.getsource(get_command(key)))
+    except Exception:  # noqa: BLE001 - unknown command / no source (frozen build)
+        return []
+    keys: List[str] = []
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
+            for k in node.value.keys:
+                if isinstance(k, ast.Constant) and isinstance(k.value, str) and k.value not in keys:
+                    keys.append(k.value)
+    return keys
+
+
+def _runner_inputs(source: Path) -> List[Dict[str, Any]]:
+    """What the runner injects into this action at launch (read in runner.py).
+
+    * context  : keys of the ``context`` dict passed to ActionQuery.from_file
+    * runtime  : parameters set with query.set_parameter("step", "cmd", "param", ...)
+    """
+    import ast
+
+    from flux_actions import runner
+
+    try:
+        tree = ast.parse(Path(runner.__file__).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return []
+    consts = {n: getattr(runner, n) for n in dir(runner) if n.endswith("_ACTION")}
+    inputs: List[Dict[str, Any]] = []
+    seen = set()
+    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
+    calls_of = {fn.name: [c for c in ast.walk(fn) if isinstance(c, ast.Call)] for fn in funcs}
+    # A function uses the action when it loads its YAML, or calls a helper that does
+    # (run_publish_action -> _build_publish_query).
+    users = {name for name, calls in calls_of.items()
+             if any(isinstance(a, ast.Name) and consts.get(a.id) == source for c in calls for a in c.args)}
+    users |= {name for name, calls in calls_of.items()
+              if any(isinstance(c.func, ast.Name) and c.func.id in users for c in calls)}
+    for fn in funcs:
+        if fn.name not in users:
+            continue
+        calls = calls_of[fn.name]
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+                    and any(isinstance(t, ast.Name) and t.id == "context" for t in node.targets)):
+                for k in node.value.keys:
+                    if isinstance(k, ast.Constant) and ("context", k.value) not in seen:
+                        seen.add(("context", k.value))
+                        inputs.append({"kind": "context", "name": k.value, "target": "", "function": fn.name})
+        for c in calls:
+            if isinstance(c.func, ast.Attribute) and c.func.attr == "set_parameter" and len(c.args) >= 3:
+                parts = [a.value for a in c.args[:3] if isinstance(a, ast.Constant)]
+                if len(parts) == 3 and ("runtime", tuple(parts)) not in seen:
+                    seen.add(("runtime", tuple(parts)))
+                    inputs.append({"kind": "runtime", "name": parts[2],
+                                   "target": _node_id(parts[0], parts[1]), "function": fn.name})
+    return inputs
+
+
+def _yaml_notes(path: Path) -> Dict[str, List[str]]:
+    """Comments written inside the YAML, by "step" or "step.command" (header excluded)."""
+    notes: Dict[str, List[str]] = {}
+    step = cmd = ""
+    in_steps = False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return notes
+    for raw in lines:
+        body = raw.strip()
+        if not body:
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if body.startswith("#"):
+            if in_steps and step:
+                notes.setdefault(f"{step}.{cmd}" if cmd else step, []).append(body.lstrip("#").strip())
+            continue
+        key = body.split(":", 1)[0].strip()
+        if indent == 0:
+            in_steps = key == "steps"
+            step = cmd = ""
+        elif in_steps and indent == 2:
+            step, cmd = key, ""
+        elif in_steps and indent == 6 and body.endswith(":") and step:
+            cmd = key
+    return notes
+
+
 def _node_id(step_name: str, cmd_name: str) -> str:
     return f"{step_name}.{cmd_name}"
 
@@ -125,10 +250,12 @@ def build_action_graph(name: str) -> Dict[str, Any]:
     edges: List[Dict[str, Any]] = []
 
     ordered = buffer.ordered_steps()
+    notes = _yaml_notes(source)
 
     # ── nodes: one per command ────────────────────────────────────────────────
     for step in ordered:
         for cmd_name, cmd in step.commands.items():
+            nid = _node_id(step.name, cmd_name)
             nodes.append(
                 {
                     "id": _node_id(step.name, cmd_name),
@@ -140,6 +267,9 @@ def build_action_graph(name: str) -> Dict[str, Any]:
                         "index": step.index,
                         "status": cmd.status.value,
                         "params": [_param_view(p) for p in cmd.parameters.values()],
+                        "outputs": _command_outputs(cmd.command),
+                        "effects": COMMAND_EFFECTS.get(cmd.command, []),
+                        "note": "\n".join(notes.get(nid, [])),
                         **_command_doc(cmd.command),
                     },
                 }
@@ -171,6 +301,8 @@ def build_action_graph(name: str) -> Dict[str, Any]:
                     }
                 )
 
-    steps = [{"name": st.name, "index": st.index, "commands": list(st.commands)} for st in ordered]
+    steps = [{"name": st.name, "index": st.index, "commands": list(st.commands),
+              "note": "\n".join(notes.get(st.name, []))} for st in ordered]
     return {"name": name, "nodes": nodes, "edges": edges, "steps": steps,
+            "inputs": _runner_inputs(source),
             "description": _header_comment(source), "file": source.name}

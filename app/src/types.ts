@@ -176,8 +176,17 @@ export interface ActionGraphNode {
     params:  ActionGraphParam[]
     doc?:    string       // first paragraph of the command's docstring
     module?: string       // python module of the command
+    outputs?: string[]    // B4: output keys the command returns (its ports)
+    effects?: ActionGraphEffect[]   // B4: files written + hidden hooks
+    note?:    string      // B4: YAML comments inside the command block
   }
 }
+
+// B4: what a command writes besides its outputs, or a hook that runs behind it.
+export interface ActionGraphEffect { kind: 'output' | 'hook'; label: string; detail: string }
+
+// B4: what the runner injects at launch (context snapshot or set_parameter).
+export interface ActionGraphInput { kind: 'context' | 'runtime'; name: string; target: string; function: string }
 
 export interface ActionGraphEdge {
   id:     string
@@ -191,7 +200,8 @@ export interface ActionGraph {
   name:  string
   nodes: ActionGraphNode[]
   edges: ActionGraphEdge[]
-  steps?: { name: string; index: number; commands: string[] }[]
+  steps?: { name: string; index: number; commands: string[]; note?: string }[]
+  inputs?: ActionGraphInput[]
   description?: string    // header comment of the YAML
   file?: string
 }
