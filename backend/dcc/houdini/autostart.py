@@ -18,6 +18,10 @@ from core.paths import get_flux_root
 
 log = get_logger(__name__)
 
+# Startup scripts that carry the FLUX block. 123.py runs only when Houdini starts WITHOUT a
+# scene; 456.py runs on every scene load (a .hip double-clicked outside FLUX). B5 2026-09-28.
+_STARTUP_FILES = ("123.py", "456.py")
+
 # Markers used to locate the FLUX block in 123.py — never change these.
 _BLOCK_BEGIN = "# >>> FLUX autostart — do not edit manually"
 _BLOCK_END   = "# <<< FLUX autostart"
@@ -328,20 +332,22 @@ _NEW_BLOCK = (
     f"{_BLOCK_BEGIN}\n"
     f"try:\n"
     f"    import sys as _flux_sys, os as _flux_os, hou as _flux_hou\n"
-    f"    # Dynamic $FLUX: whichever FLUX is currently running wins over the installed value.\n"
-    f"    try:\n"
-    f"        import urllib.request as _flux_ureq, json as _flux_json, pathlib as _flux_pl\n"
-    f"        _flux_port_file = _flux_pl.Path(_flux_os.environ.get('APPDATA', '')) / 'FLUX' / 'backend_port'\n"
-    f"        _flux_port = int(_flux_port_file.read_text().strip()) if _flux_port_file.exists() else 8765\n"
-    f"        with _flux_ureq.urlopen('http://127.0.0.1:' + str(_flux_port) + '/system/flux-root', timeout=1.0) as _r:\n"
-    f"            _flux_root = _flux_json.loads(_r.read().decode()).get('root') or ''\n"
-    f"        if _flux_root:\n"
-    f"            _flux_hou.putenv('FLUX', _flux_root.replace('\\\\', '/'))\n"
-    f"            print('[FLUX] $FLUX -> ' + _flux_root)\n"
-    f"    except Exception as _flux_env_exc:\n"
-    f"        print('[FLUX] $FLUX left to flux.json package (no live backend): ' + str(_flux_env_exc))\n"
-    f"    _flux_sys.path.insert(0, _flux_os.path.join(_flux_hou.homeHoudiniDirectory(), 'scripts'))\n"
-    f"    import flux_houdini_server\n"
+    f"    # B5: also in 456.py (a Houdini opened on a .hip skips 123.py): once per session.\n"
+    f"    if 'flux_houdini_server' not in _flux_sys.modules:\n"
+    f"        # Dynamic $FLUX: whichever FLUX is currently running wins over the installed value.\n"
+    f"        try:\n"
+    f"            import urllib.request as _flux_ureq, json as _flux_json, pathlib as _flux_pl\n"
+    f"            _flux_port_file = _flux_pl.Path(_flux_os.environ.get('APPDATA', '')) / 'FLUX' / 'backend_port'\n"
+    f"            _flux_port = int(_flux_port_file.read_text().strip()) if _flux_port_file.exists() else 8765\n"
+    f"            with _flux_ureq.urlopen('http://127.0.0.1:' + str(_flux_port) + '/system/flux-root', timeout=1.0) as _r:\n"
+    f"                _flux_root = _flux_json.loads(_r.read().decode()).get('root') or ''\n"
+    f"            if _flux_root:\n"
+    f"                _flux_hou.putenv('FLUX', _flux_root.replace('\\\\', '/'))\n"
+    f"                print('[FLUX] $FLUX -> ' + _flux_root)\n"
+    f"        except Exception as _flux_env_exc:\n"
+    f"            print('[FLUX] $FLUX left to flux.json package (no live backend): ' + str(_flux_env_exc))\n"
+    f"        _flux_sys.path.insert(0, _flux_os.path.join(_flux_hou.homeHoudiniDirectory(), 'scripts'))\n"
+    f"        import flux_houdini_server\n"
     f"except Exception as _flux_exc:\n"
     f"    print(f'[FLUX] Autostart error (Houdini continues normally): {{_flux_exc}}')\n"
     f"{_BLOCK_END}"
@@ -430,26 +436,27 @@ def _install_to(prefs_dir: Path) -> dict:
     _write_flux_package(prefs_dir, get_flux_root())
     _write_flux_jump_pref(prefs_dir)
 
-    startup = scripts / "123.py"
+    results = [_write_block(scripts / name) for name in _STARTUP_FILES]
+    failed = [r for r in results if not r["success"]]
+    if failed:
+        return failed[0]
+    changed = [r for r in results if r["message"] != "already_installed"]
+    return changed[0] if changed else results[0]
+
+
+def _write_block(startup: Path) -> dict:
+    """Write or upgrade the FLUX block in one startup script (123.py / 456.py)."""
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
         b_start = existing.find(_BLOCK_BEGIN)
         b_end   = existing.find(_BLOCK_END, b_start)
         old_fragment = existing[b_start : b_end + len(_BLOCK_END)] if b_end > b_start else ""
-        # Upgrade a legacy block (no try/except, hardcoded path, or __file__ which is
-        # undefined in Houdini's exec context).
-        needs_upgrade = (
-            "try:" not in old_fragment
-            or "homeHoudiniDirectory" not in old_fragment
-            or "__file__" in old_fragment
-            # New: dynamic $FLUX from the running backend (2026-09-22).
-            or "system/flux-root" not in old_fragment
-        )
-        if needs_upgrade:
+        # Upgrade any block that is not exactly the current one (legacy path, no guard...).
+        if old_fragment != _NEW_BLOCK:
             try:
                 startup.write_text(existing.replace(old_fragment, _NEW_BLOCK), encoding="utf-8")
             except OSError as exc:
-                return {"success": False, "message": f"Cannot upgrade 123.py: {exc}", "path": str(startup)}
+                return {"success": False, "message": f"Cannot upgrade {startup.name}: {exc}", "path": str(startup)}
             return {"success": True, "message": f"upgraded: {startup}", "path": str(startup)}
         return {"success": True, "message": "already_installed", "path": str(startup)}
 
@@ -457,19 +464,42 @@ def _install_to(prefs_dir: Path) -> dict:
         with open(startup, "a", encoding="utf-8") as fh:
             fh.write(f"\n{_NEW_BLOCK}\n")
     except OSError as exc:
-        return {"success": False, "message": f"Cannot write 123.py: {exc}", "path": str(startup)}
+        return {"success": False, "message": f"Cannot write {startup.name}: {exc}", "path": str(startup)}
     return {"success": True, "message": f"installed: {startup}", "path": str(startup)}
 
 
 def is_installed(houdini_exe_path: str | None = None) -> bool:
     for prefs_dir in _all_prefs_dirs(houdini_exe_path):
-        startup = prefs_dir / "scripts" / "123.py"
         try:
-            if startup.exists() and _BLOCK_BEGIN in startup.read_text(encoding="utf-8"):
+            if all((prefs_dir / "scripts" / n).exists()
+                   and _NEW_BLOCK in (prefs_dir / "scripts" / n).read_text(encoding="utf-8")
+                   for n in _STARTUP_FILES):
                 return True
         except OSError:
             continue
     return False
+
+
+def has_trace(houdini_exe_path: str | None = None) -> bool:
+    """A FLUX block, current or old, sits in a startup script: the artist opted in."""
+    for prefs_dir in _all_prefs_dirs(houdini_exe_path):
+        for name in _STARTUP_FILES:
+            startup = prefs_dir / "scripts" / name
+            try:
+                if startup.exists() and _BLOCK_BEGIN in startup.read_text(encoding="utf-8"):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def refresh(houdini_exe_path: str | None = None) -> dict:
+    """Launch-time upgrade (bridge file + 123.py / 456.py blocks), without the HDA build."""
+    dirs = _all_prefs_dirs(houdini_exe_path)
+    results = [_install_to(d) for d in dirs if (d / "scripts").is_dir()]
+    changed = [r["message"] for r in results if r.get("message") != "already_installed"]
+    return {"success": all(r["success"] for r in results),
+            "message": "; ".join(changed) if changed else "already_installed"}
 
 
 def install(houdini_exe_path: str | None = None) -> dict:
@@ -502,26 +532,25 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
         _remove_env_block(prefs_dir)
         _remove_flux_package(prefs_dir)
         _remove_flux_jump_pref(prefs_dir)
-        startup = prefs_dir / "scripts" / "123.py"
-        if not startup.exists():
-            continue
-        try:
-            content = startup.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        if _BLOCK_BEGIN not in content:
-            continue
-        cleaned = re.sub(
-            rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
-            "",
-            content,
-            flags=re.DOTALL,
-        )
-        try:
-            startup.write_text(cleaned, encoding="utf-8")
-            removed_any = True
-        except OSError:
-            continue
+        for name in _STARTUP_FILES:
+            startup = prefs_dir / "scripts" / name
+            try:
+                content = startup.read_text(encoding="utf-8") if startup.exists() else ""
+            except OSError:
+                continue
+            if _BLOCK_BEGIN not in content:
+                continue
+            cleaned = re.sub(
+                rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
+                "",
+                content,
+                flags=re.DOTALL,
+            )
+            try:
+                startup.write_text(cleaned, encoding="utf-8")
+                removed_any = True
+            except OSError:
+                continue
 
     # Remove the importer HDA dependency too (symmetry with install; non-fatal).
     version = _resolve_version(houdini_exe_path)
