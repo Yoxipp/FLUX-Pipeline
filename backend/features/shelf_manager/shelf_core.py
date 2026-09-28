@@ -676,31 +676,6 @@ def reconcile_installed_dccs() -> dict:
     except Exception as exc:  # never block startup
         log.warning("Auto-update Maya autostart failed (non-fatal): %s", exc)
 
-    # ── Other DCCs (2026-09-28): every autostart already installed is brought up to
-    # date at launch (bridge files + startup block), never installed where it never was.
-    # A module may expose has_trace (an old block counts) and refresh (no heavy step, e.g.
-    # Houdini without the HDA build); otherwise is_installed / install are used.
-    from importlib import import_module
-
-    from core import config as _config
-
-    for key, mod_name in (("houdini", "houdini"), ("nuke", "nuke"), ("zbrush", "zbrush"),
-                          ("substance_painter", "substance_painter"), ("mari", "mari"),
-                          ("substance_designer", "substance_designer"), ("marvelous", "marvelous")):
-        try:
-            mod = import_module(f"dcc.{mod_name}.autostart")
-            exe = (_config.get("dcc_paths", {}) or {}).get(key)
-            traced = getattr(mod, "has_trace", mod.is_installed)
-            if not traced(exe):
-                continue
-            result = getattr(mod, "refresh", mod.install)(exe)
-            msg = str(result.get("message", "")) if isinstance(result, dict) else str(result)
-            if msg and msg != "already_installed":
-                log.info("Auto-update %s autostart: %s", key, msg)
-                report.setdefault("autostart", []).append({"dcc": key, "result": msg})
-        except Exception as exc:  # never block startup
-            log.warning("Auto-update %s autostart failed (non-fatal): %s", key, exc)
-
     return report
 
 

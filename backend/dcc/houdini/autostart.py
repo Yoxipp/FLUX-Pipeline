@@ -433,6 +433,7 @@ def _install_to(prefs_dir: Path) -> dict:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     results = [_write_block(scripts / name) for name in _STARTUP_FILES]
     failed = [r for r in results if not r["success"]]
     if failed:
@@ -452,6 +453,9 @@ def _write_block(startup: Path) -> dict:
 =======
     startup = scripts / "123.py"
 >>>>>>> parent of 7f3db07f (fix: DCC detection drops ghost instances, Houdini autostart also in 456.py)
+=======
+    startup = scripts / "123.py"
+>>>>>>> parent of 4b5dc7de (feat: outdated DCC autostarts are upgraded when FLUX starts)
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
         b_start = existing.find(_BLOCK_BEGIN)
@@ -491,28 +495,6 @@ def is_installed(houdini_exe_path: str | None = None) -> bool:
         except OSError:
             continue
     return False
-
-
-def has_trace(houdini_exe_path: str | None = None) -> bool:
-    """A FLUX block, current or old, sits in a startup script: the artist opted in."""
-    for prefs_dir in _all_prefs_dirs(houdini_exe_path):
-        for name in _STARTUP_FILES:
-            startup = prefs_dir / "scripts" / name
-            try:
-                if startup.exists() and _BLOCK_BEGIN in startup.read_text(encoding="utf-8"):
-                    return True
-            except OSError:
-                continue
-    return False
-
-
-def refresh(houdini_exe_path: str | None = None) -> dict:
-    """Launch-time upgrade (bridge file + 123.py / 456.py blocks), without the HDA build."""
-    dirs = _all_prefs_dirs(houdini_exe_path)
-    results = [_install_to(d) for d in dirs if (d / "scripts").is_dir()]
-    changed = [r["message"] for r in results if r.get("message") != "already_installed"]
-    return {"success": all(r["success"] for r in results),
-            "message": "; ".join(changed) if changed else "already_installed"}
 
 
 def install(houdini_exe_path: str | None = None) -> dict:
