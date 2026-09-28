@@ -10,6 +10,9 @@
 # path, archives the previous LAST, sets the ROP output and cooks in one block.
 # Data flows by named reference (value: {from: "step.command.output_key"}).
 # Production context (project_path, user, project_name) is injected at run time.
+#
+# FR:
+# Publish depuis Houdini : choix du ROP puis cuisson directe dans la version vNNN depuis le Houdini ouvert ; LAST derive apres.
 
 name: publish_houdini
 shelf: publish

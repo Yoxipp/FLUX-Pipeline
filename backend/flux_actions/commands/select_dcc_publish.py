@@ -25,6 +25,7 @@ from features.folder_manager.naming_validator import parse_filename
 @register("select_dcc_publish")
 class SelectDccPublish(CommandBase):
     """Validate a DCC scene publish target and compute its logical FLUX filename."""
+    doc_fr = "Verifie la cible d'un publish depuis un logiciel et calcule son nom FLUX."
 
     parameters = {
         # The FLUX base name of the scene, e.g. "CHAR_RIG_HERO_null" (no extension).

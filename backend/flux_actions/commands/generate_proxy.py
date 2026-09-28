@@ -27,6 +27,7 @@ class GenerateProxy(CommandBase):
     """Generate a decimated purpose=proxy sibling for each render mesh in a USD.
     Done by FLUX itself in Python (pxr + fast-simplification): no Houdini, no DCC
     opened, no license token."""
+    doc_fr = "Cree un proxy decime (purpose=proxy) pour chaque mesh de rendu d'un USD. Fait par FLUX en Python (pxr + fast-simplification) : pas de Houdini, aucun logiciel ouvert, aucune licence."
 
     parameters = {
         "source": {

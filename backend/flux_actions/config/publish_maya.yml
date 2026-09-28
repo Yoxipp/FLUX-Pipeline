@@ -10,6 +10,9 @@
 # here the source_path is produced by the export step, not picked by the user.
 # Data flows by named reference (value: {from: "step.command.output_key"}).
 # Production context (project_path, user, project_name) is injected at run time.
+#
+# FR:
+# Publish depuis Maya : choix, destination, export depuis le Maya ouvert, puis la meme copie que le publish local.
 
 name: publish_maya
 shelf: publish

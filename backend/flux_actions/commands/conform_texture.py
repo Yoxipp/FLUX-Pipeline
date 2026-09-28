@@ -29,6 +29,7 @@ from features.publisher.texture_conform import (
 class ConformTexture(CommandBase):
     """Conform a texture / UDIM set to Karma-friendly mipped, tiled .tx files.
     Done by FLUX itself with OpenImageIO make_texture: no DCC opened, no license token."""
+    doc_fr = 'Convertit une texture / un set UDIM en .tx mipmappes et tiles pour Karma. Fait par FLUX avec OpenImageIO : aucun logiciel ouvert, aucune licence.'
 
     parameters = {
         "source": {

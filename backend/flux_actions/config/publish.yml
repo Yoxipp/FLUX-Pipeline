@@ -11,6 +11,14 @@
 # Data flows by named reference (value: {from: "step.command.output_key"}).
 # Production context (project_path, user, project_name) is injected at run time
 # via the action context snapshot, not through parameters.
+#
+# FR:
+# Publish local : trois etapes, une commande chacune.
+#   select  -> choisit la source, calcule le nom FLUX
+#   resolve -> trouve le dossier de destination
+#   publish -> copie versionnee (vNNN + LAST) + logs dans ce dossier
+# La copie reutilise le chemin resolu (lien de donnees), jamais recalcule.
+# Le contexte (projet, utilisateur) est donne par FLUX au lancement.
 
 name: publish
 shelf: publish

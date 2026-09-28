@@ -60,6 +60,23 @@ class Catalog(unittest.TestCase):
         self.assertTrue(catalog.reset_action("demo"))
         self.assertEqual(catalog.resolve_action_file(Path("x/demo.yml")), Path("x/demo.yml"))
 
+    def test_utility_nodes_chain(self) -> None:
+        work = self.tmp / "work"
+        doc = {"name": "files_demo", "steps": [
+            {"name": "a", "index": 10, "commands": [{"name": "dir", "command": "make_folder",
+                                                     "parameters": {"path": str(work / "out")}}]},
+            {"name": "b", "index": 20, "commands": [{"name": "txt", "command": "write_text", "parameters": {
+                "path": str(work / "out" / "note.txt"), "text": "hello"}}]},
+            {"name": "c", "index": 30, "commands": [{"name": "ls", "command": "list_files", "parameters": {
+                "folder": {"from": "a.dir.path"}, "pattern": "*.txt"}}]},
+            {"name": "d", "index": 40, "commands": [{"name": "cp", "command": "copy_file", "parameters": {
+                "source": {"from": "c.ls.first"}, "destination": str(work / "copy.txt")}}]},
+        ]}
+        query = ActionQuery.from_file(Path(catalog.save_action(doc)["path"]))
+        self.assertIs(asyncio.run(query.execute()), Status.COMPLETED)
+        self.assertEqual((work / "copy.txt").read_text(encoding="utf-8"), "hello")
+        self.assertTrue(catalog.list_functions()[0]["useful"])
+
     def test_team_node_is_written_and_registered(self) -> None:
         res = catalog.save_user_node("team_echo", catalog.node_template("team_echo"))
         self.assertEqual(res["error"], "")

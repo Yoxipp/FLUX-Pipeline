@@ -20,6 +20,7 @@ import json
 import re
 import sys
 import time
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,22 @@ from flux_core.registry import all_commands
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SCAN_PACKAGES = ("features", "core", "dcc")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+
+# Functions put first in the palette ("utiles"): the pipeline helpers a brick needs most.
+USEFUL_FUNCTIONS = (
+    "core.paths:get_project_path", "core.paths:get_projects_dir", "core.paths:get_flux_root",
+    "core.paths:is_subpath", "features.folder_manager.tokens:load_tokens",
+    "features.folder_manager.naming_validator:get_base_name",
+    "features.publisher.publish_core:resolve_publish_path", "features.publisher.publish_core:resolve_publish_filename",
+    "features.publisher.publish_layout:flat_version_path", "features.publisher.modif_log:read_logs",
+    "features.publisher.modif_log:get_logs_for_file", "features.publisher.modif_log:append_log",
+    "features.publisher.publish_note:publish_notes", "features.publisher.usd_proxy:generate_proxy",
+    "features.publisher.texture_conform:conform_set", "features.production.archive:resolve_entity_rel",
+    "features.production.archive:archive_folder", "features.activity.activity_writer:log_event",
+    "features.importer.file_browser:list_folders", "features.importer.file_browser:list_files_immediate",
+    "features.usd_assembler.component_auto:refresh_from_publish_folder",
+    "features.usd_assembler.shot_stage:refresh_from_publish_folder", "core.dcc_identity:running_pids",
+)
 
 NODE_TEMPLATE = '''# {name}.py - FLUX node written by the team (CONFIG/nodes).
 #
@@ -158,7 +175,7 @@ def list_commands() -> List[Dict[str, Any]]:
                    "label": s.get("label") or n, "hide": bool(s.get("hide")), "tooltip": s.get("tooltip") or ""}
                   for n, s in cls.merged_parameters().items()]
         origin = "equipe" if cls.__module__.startswith("flux_user_nodes.") else "flux"
-        out.append({"key": key, "doc": doc, "params": params, "outputs": outputs, "origin": origin,
+        out.append({"key": key, "doc": doc, "doc_fr": getattr(cls, "doc_fr", "") or doc, "params": params, "outputs": outputs, "origin": origin,
                     "module": cls.__module__})
     return out
 
@@ -199,7 +216,9 @@ def list_functions() -> List[Dict[str, Any]]:
             if any(p.startswith(("_", "test")) or p == "__pycache__" for p in rel.parts[1:]):
                 continue
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")   # old escape sequences in docstrings
+                    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
             except (OSError, SyntaxError, UnicodeDecodeError):
                 continue
             module = ".".join(rel.parts)
@@ -220,8 +239,10 @@ def list_functions() -> List[Dict[str, Any]]:
                 args += [{"name": x.arg, "type": _type_of(x.annotation), "value": _literal(d),
                           "required": d is None} for x, d in zip(a.kwonlyargs, a.kw_defaults)]
                 doc = (ast.get_docstring(fn) or "").split("\n\n", 1)[0].strip()
-                out.append({"id": f"{module}:{fn.name}", "module": module, "name": fn.name,
+                fid = f"{module}:{fn.name}"
+                out.append({"id": fid, "module": module, "name": fn.name, "useful": fid in USEFUL_FUNCTIONS,
                             "args": args, "doc": doc, "outputs": _returned_keys(fn) or ["result"]})
+    out.sort(key=lambda f: (not f["useful"], f["id"]))
     _functions_cache = (time.monotonic(), out)
     return out
 
@@ -276,7 +297,10 @@ def _comment(lines: str, indent: int) -> List[str]:
 
 def render_action_yaml(doc: Dict[str, Any]) -> str:
     """Our own emitter for the action schema: readable, keeps notes as comments."""
-    out = _comment(doc.get("description", ""), 0)
+    desc = doc.get("description", "")
+    if doc.get("description_fr") and doc.get("description_fr") != desc:
+        desc = f"{desc}\n\nFR:\n{doc['description_fr']}"
+    out = _comment(desc, 0)
     if out:
         out.append("")
     out += [f"name: {doc['name']}", "", "steps:"]

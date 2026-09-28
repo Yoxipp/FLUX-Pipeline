@@ -29,6 +29,7 @@ class BuildOutputPath(CommandBase):
     (the default), the existing token resolution runs unchanged, byte-for-byte, so
     nothing moves until the maintainer sets a root.
     """
+    doc_fr = "Trouve le dossier de destination d'un nom de fichier FLUX dans le projet (tokens)."
 
     # project_path comes from the production context snapshot, not from a param.
     required_metadata = ["project_path"]

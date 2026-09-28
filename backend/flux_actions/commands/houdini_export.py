@@ -27,6 +27,7 @@ from dcc.houdini.houdini_export import publish_houdini_rop
 class HoudiniExport(CommandBase):
     """Cook the selected Houdini ROP straight into the resolved destination.
     Runs in the Houdini the artist has open (FLUX bridge), not in a background hython."""
+    doc_fr = "Cuit le ROP Houdini choisi directement dans la destination. Tourne dans le Houdini ouvert par l'artiste (bridge FLUX), pas dans un hython en arriere-plan."
 
     # project_path comes from the production context snapshot, not from a param.
     required_metadata = ["project_path"]

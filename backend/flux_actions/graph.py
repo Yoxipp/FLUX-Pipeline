@@ -81,14 +81,22 @@ def _header_comment(path: Path) -> str:
     return "\n".join(lines).strip()
 
 
+def _split_description(text: str) -> Dict[str, str]:
+    """Header comment -> {"description", "description_fr"}: French text follows a "FR:" line."""
+    en, sep, fr = text.partition("\nFR:")
+    en, fr = en.strip(), fr.strip()
+    return {"description": en, "description_fr": fr if sep else en}
+
+
 def _command_doc(key: str) -> Dict[str, str]:
     """{"doc", "module"} of a registered command (docstring, first paragraph)."""
     try:
         cls = get_command(key)
     except Exception:  # noqa: BLE001 - an unknown key shows without doc
-        return {"doc": "", "module": ""}
-    doc = inspect.getdoc(cls) or ""
-    return {"doc": doc.split("\n\n", 1)[0].strip(), "module": getattr(cls, "__module__", "")}
+        return {"doc": "", "doc_fr": "", "module": ""}
+    doc = (inspect.getdoc(cls) or "").split("\n\n", 1)[0].strip()
+    # doc_fr: French doc of the command, shown when the UI is in French.
+    return {"doc": doc, "doc_fr": getattr(cls, "doc_fr", "") or doc, "module": getattr(cls, "__module__", "")}
 
 
 # ── B4 (2026-09-28): inputs, outputs, notes, hidden hooks ────────────────────
@@ -316,4 +324,4 @@ def build_action_graph(name: str) -> Dict[str, Any]:
             "inputs": _runner_inputs(shipped) if shipped else [],
             # "equipe": edited copy in CONFIG/actions (shared); "flux": shipped YAML only.
             "origin": "equipe" if team else "flux", "has_default": shipped is not None,
-            "description": _header_comment(source), "file": source.name}
+            **_split_description(_header_comment(source)), "file": source.name}

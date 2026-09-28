@@ -52,6 +52,7 @@ def _coerce(value: Any, annotation: Any) -> Any:
 @register("call_function")
 class CallFunction(CommandBase):
     """Run one function of the FLUX code; its arguments are the node inputs."""
+    doc_fr = 'Lance une fonction du code de FLUX ; ses arguments sont les entrees du node.'
 
     parameters = {
         "function": {

@@ -8,6 +8,9 @@
 # source / out_dir are set at run time (UI or runner). Placement into the
 # versioned publish layout is wired in a later phase; here the source parameter
 # names the texture directly.
+#
+# FR:
+# Conversion des textures en .tx (OpenImageIO) au publish, pour que Karma ne refasse pas les mipmaps au rendu.
 
 name: conform_texture
 shelf: publish

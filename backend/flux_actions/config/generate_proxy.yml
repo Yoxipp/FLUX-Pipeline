@@ -6,6 +6,9 @@
 # No Houdini, no license token.
 #
 # source / out are set at run time (UI or runner); reduction keeps its default.
+#
+# FR:
+# Proxy USD au publish : un mesh decime (purpose=proxy) par mesh de rendu, calcule par FLUX sans Houdini.
 
 name: generate_proxy
 shelf: publish

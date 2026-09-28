@@ -24,6 +24,7 @@ from features.publisher.publish_core import copy_publish as run_copy_publish
 @register("copy_publish")
 class CopyPublish(CommandBase):
     """Copy the selected file into the resolved folder, reusing the legacy core."""
+    doc_fr = 'Copie le fichier choisi dans le dossier resolu : vNNN, LAST, logs, puis les hooks USD.'
 
     required_metadata = ["project_path", "user"]
 

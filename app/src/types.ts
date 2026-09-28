@@ -176,6 +176,7 @@ export interface ActionGraphNode {
     status:  string
     params:  ActionGraphParam[]
     doc?:    string       // first paragraph of the command's docstring
+    doc_fr?: string       // French doc (UI in French)
     module?: string       // python module of the command
     outputs?: string[]    // B4: output keys the command returns (its ports)
     effects?: ActionGraphEffect[]   // B4: files written + hidden hooks
@@ -188,8 +189,8 @@ export interface ActionGraphEffect { kind: 'output' | 'hook'; label: string; det
 
 // B6 node editor catalogue: registered commands (FLUX + team) and code functions.
 export interface CatalogParam { name: string; type: string; value: unknown; label?: string; hide?: boolean; tooltip?: string; required?: boolean }
-export interface CatalogCommand { key: string; doc: string; params: CatalogParam[]; outputs: string[]; origin: 'flux' | 'equipe'; module: string }
-export interface CatalogFunction { id: string; module: string; name: string; args: CatalogParam[]; doc: string; outputs: string[] }
+export interface CatalogCommand { key: string; doc: string; doc_fr?: string; params: CatalogParam[]; outputs: string[]; origin: 'flux' | 'equipe'; module: string }
+export interface CatalogFunction { id: string; module: string; name: string; useful?: boolean; args: CatalogParam[]; doc: string; outputs: string[] }
 export interface ActionCatalog { commands: CatalogCommand[]; functions: CatalogFunction[]; node_errors: Record<string, string> }
 
 // B4: what the runner injects at launch (context snapshot or set_parameter).
@@ -212,6 +213,7 @@ export interface ActionGraph {
   origin?: 'flux' | 'equipe'   // B6: "equipe" = team copy in CONFIG/actions
   has_default?: boolean        // B6: a shipped YAML exists (reset possible)
   description?: string    // header comment of the YAML
+  description_fr?: string // its French part (after a "FR:" line)
   file?: string
 }
 

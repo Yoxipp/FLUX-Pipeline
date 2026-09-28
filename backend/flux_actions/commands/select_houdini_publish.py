@@ -29,6 +29,7 @@ from features.folder_manager.naming_validator import parse_filename
 @register("select_houdini_publish")
 class SelectHoudiniPublish(CommandBase):
     """Validate a Houdini publish target and carry the cook intent forward."""
+    doc_fr = "Verifie la cible d'un publish Houdini et transmet ce qu'il faut cuire."
 
     parameters = {
         # The FLUX base name of the scene, e.g. "CHAR_RIG_HERO_null" (no extension).

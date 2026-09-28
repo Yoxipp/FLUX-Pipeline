@@ -23,6 +23,7 @@ from features.folder_manager.naming_validator import parse_filename
 @register("select_publish")
 class SelectPublish(CommandBase):
     """Validate the publish source and compute its logical FLUX filename."""
+    doc_fr = 'Choisit le fichier source et calcule son nom FLUX.'
 
     parameters = {
         # The concrete file to publish (a DCC export, or a plain local file).

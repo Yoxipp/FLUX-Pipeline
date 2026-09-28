@@ -27,6 +27,7 @@ from dcc.maya.maya_export_client import run_maya_export
 class MayaExport(CommandBase):
     """Export the open Maya scene/selection to a temp file, reusing the legacy core.
     Runs in the Maya the artist has open (commandPort bridge), not in a background mayapy."""
+    doc_fr = 'Exporte la scene / selection Maya ouverte dans un fichier temporaire. Tourne dans le Maya ouvert (commandPort), pas dans un mayapy en arriere-plan.'
 
     parameters = {
         # Logical FLUX filename (from select), names the temp export file.

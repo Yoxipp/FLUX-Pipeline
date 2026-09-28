@@ -102,6 +102,7 @@ class GraphResponse(BaseModel):
     origin: str = "flux"
     has_default: bool = True
     description: str = ""
+    description_fr: str = ""
     file: str = ""
 
 

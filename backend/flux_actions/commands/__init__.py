@@ -18,6 +18,7 @@ from . import (  # noqa: F401
     select_dcc_publish,
     select_houdini_publish,
     select_publish,
+    utility,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "conform_texture",
     "generate_proxy",
     "call_function",
+    "utility",
 ]
