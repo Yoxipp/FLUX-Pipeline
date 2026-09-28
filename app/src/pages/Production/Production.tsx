@@ -280,8 +280,8 @@ export function Production() {
 
         {editOpen && (
           <div style={{
-            width: 260, flexShrink: 0, borderLeft: '1px solid var(--rule)',
-            background: 'var(--paper-2)', overflowY: 'auto',
+            width: 280, flexShrink: 0, borderLeft: '1px solid var(--rule)',
+            background: 'var(--paper-2)', overflowY: 'auto', overflowX: 'hidden',
           }}>
             <MenuEdit
               project={project}

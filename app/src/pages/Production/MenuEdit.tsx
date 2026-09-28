@@ -1384,4 +1384,6 @@ const _input: React.CSSProperties = {
   border: '1px solid var(--rule-2)', borderRadius: 6,
   padding: '6px 9px', fontSize: 11, fontFamily: 'var(--sans)',
   outline: 'none',
+  // An <input> keeps an intrinsic ~150 px width: two in a row overflowed the 260 px panel.
+  minWidth: 0, boxSizing: 'border-box',
 }
