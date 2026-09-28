@@ -60,8 +60,10 @@ def _action_files() -> Dict[str, Path]:
 
 
 def list_action_names() -> List[str]:
-    """Return the action names a graph can be built for, sorted."""
-    return sorted(_action_files())
+    """Return the action names a graph can be built for (shipped + team-made), sorted."""
+    from flux_actions.catalog import team_actions
+
+    return sorted(set(_action_files()) | set(team_actions()))
 
 
 def _header_comment(path: Path) -> str:
@@ -242,7 +244,14 @@ def build_action_graph(name: str) -> Dict[str, Any]:
 
     Raises KeyError when *name* is not a known action.
     """
-    source = _action_files()[name]  # KeyError -> unknown action (handled by caller)
+    from flux_actions.catalog import load_user_nodes, team_actions
+
+    load_user_nodes()
+    shipped = _action_files().get(name)
+    team = team_actions().get(name)
+    if shipped is None and team is None:
+        raise KeyError(name)  # unknown action (handled by caller)
+    source = team or shipped
     query = ActionQuery.from_file(source)
     buffer = query.buffer
 
@@ -304,5 +313,7 @@ def build_action_graph(name: str) -> Dict[str, Any]:
     steps = [{"name": st.name, "index": st.index, "commands": list(st.commands),
               "note": "\n".join(notes.get(st.name, []))} for st in ordered]
     return {"name": name, "nodes": nodes, "edges": edges, "steps": steps,
-            "inputs": _runner_inputs(source),
+            "inputs": _runner_inputs(shipped) if shipped else [],
+            # "equipe": edited copy in CONFIG/actions (shared); "flux": shipped YAML only.
+            "origin": "equipe" if team else "flux", "has_default": shipped is not None,
             "description": _header_comment(source), "file": source.name}

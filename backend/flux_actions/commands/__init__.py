@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from . import (  # noqa: F401
     build_output_path,
+    call_function,
     conform_texture,
     copy_publish,
     generate_proxy,
@@ -29,4 +30,5 @@ __all__ = [
     "copy_publish",
     "conform_texture",
     "generate_proxy",
+    "call_function",
 ]

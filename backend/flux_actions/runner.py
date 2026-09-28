@@ -39,6 +39,13 @@ CONFORM_TEXTURE_ACTION = Path(__file__).parent / "config" / "conform_texture.yml
 # The USD proxy generation action (decimate render meshes to purpose=proxy).
 GENERATE_PROXY_ACTION = Path(__file__).parent / "config" / "generate_proxy.yml"
 
+
+def _action_file(default: Path) -> Path:
+    """The team's edited copy of an action (CONFIG/actions, ADR 0039) when there is one."""
+    from flux_actions.catalog import resolve_action_file
+
+    return resolve_action_file(default)
+
 # The resolve step name inside publish.yml (last step of a preview run).
 _RESOLVE_STEP = "resolve"
 
@@ -58,7 +65,7 @@ def _build_publish_query(
         "user": user,
     }
     return ActionQuery.from_file(
-        PUBLISH_ACTION, context=context, logger=logger, on_diff=on_diff
+        _action_file(PUBLISH_ACTION), context=context, logger=logger, on_diff=on_diff
     )
 
 
@@ -121,7 +128,7 @@ def run_maya_publish_action(
         "user": user,
     }
     query = ActionQuery.from_file(
-        PUBLISH_MAYA_ACTION, context=context, logger=logger, on_diff=on_diff
+        _action_file(PUBLISH_MAYA_ACTION), context=context, logger=logger, on_diff=on_diff
     )
 
     query.set_parameter("select", "select", "base_name", base_name)
@@ -183,7 +190,7 @@ def run_houdini_publish_action(
         "user": user,
     }
     query = ActionQuery.from_file(
-        PUBLISH_HOUDINI_ACTION, context=context, logger=logger, on_diff=on_diff
+        _action_file(PUBLISH_HOUDINI_ACTION), context=context, logger=logger, on_diff=on_diff
     )
 
     query.set_parameter("select", "select", "base_name", base_name)
@@ -237,7 +244,7 @@ def run_conform_texture_action(
     counts), or None when the graph does not complete.
     """
     query = ActionQuery.from_file(
-        CONFORM_TEXTURE_ACTION, context={}, logger=logger, on_diff=on_diff
+        _action_file(CONFORM_TEXTURE_ACTION), context={}, logger=logger, on_diff=on_diff
     )
 
     query.set_parameter("conform", "conform", "source", str(source))
@@ -271,7 +278,7 @@ def run_generate_proxy_action(
     counts), or None when the graph does not complete.
     """
     query = ActionQuery.from_file(
-        GENERATE_PROXY_ACTION, context={}, logger=logger, on_diff=on_diff
+        _action_file(GENERATE_PROXY_ACTION), context={}, logger=logger, on_diff=on_diff
     )
 
     query.set_parameter("proxy", "proxy", "source", str(source))
@@ -297,7 +304,7 @@ def build_publish_form() -> List[Dict[str, Any]]:
     parameter is a user field when it is not hidden and its value is not wired
     from another command's output (an OutputRef is machine-fed, never typed).
     """
-    query = ActionQuery.from_file(PUBLISH_ACTION)
+    query = ActionQuery.from_file(_action_file(PUBLISH_ACTION))
     fields: List[Dict[str, Any]] = []
     for step in query.buffer.ordered_steps():
         for cmd_name, cmd in step.commands.items():

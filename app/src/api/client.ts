@@ -2,6 +2,7 @@
 
 import type {
   ActionFormResponse,
+  ActionCatalog,
   ActionGraph,
   ActionPreviewResponse,
   ActivityEvent,
@@ -271,6 +272,18 @@ export const api = {
 
   getActionGraph: (name: string) =>
     apiCall<ActionGraph>('GET', `/actions/${encodeURIComponent(name)}/graph`),
+
+  // B6 node editor (ADR 0040): catalogue, team copy of an action, team nodes.
+  getActionCatalog: () =>
+    apiCall<ActionCatalog>('GET', '/actions/catalog'),
+  saveAction: (action: Record<string, unknown>) =>
+    apiCall<{ path: string }>('POST', '/actions/save', { action }),
+  resetAction: (name: string) =>
+    apiCall<{ reset: boolean }>('DELETE', `/actions/${encodeURIComponent(name)}/team`),
+  getNodeTemplate: (name: string) =>
+    apiCall<{ code: string }>('GET', `/actions/nodes/template?name=${encodeURIComponent(name)}`),
+  saveNode: (name: string, code: string) =>
+    apiCall<{ path: string; error: string }>('POST', '/actions/nodes', { name, code }),
 
   getHoudiniState: () =>
     apiCall<HoudiniState>('GET', '/dcc/houdini/state'),

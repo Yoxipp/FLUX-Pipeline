@@ -98,6 +98,9 @@ class GraphResponse(BaseModel):
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
     steps: list[dict[str, Any]] = []
+    inputs: list[dict[str, Any]] = []
+    origin: str = "flux"
+    has_default: bool = True
     description: str = ""
     file: str = ""
 
@@ -116,3 +119,64 @@ async def action_graph(name: str) -> GraphResponse:
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Action inconnue : {name}")
     return GraphResponse(**graph)
+
+
+# ── node editor (B6, ADR 0040): catalogue, team nodes, team copies of actions ─────
+# Writes only under FLUX_ROOT/CONFIG (actions/, nodes/), shared by the team. The
+# shipped YAML is never written. Reached from "Parametres avances" only.
+
+
+@router.get("/catalog")
+async def action_catalog() -> dict:
+    """Every node the editor can add: commands (FLUX + team) and code functions."""
+    from flux_actions import catalog
+
+    loop = asyncio.get_running_loop()
+    commands = await loop.run_in_executor(None, catalog.list_commands)
+    functions = await loop.run_in_executor(None, catalog.list_functions)
+    return {"commands": commands, "functions": functions, "node_errors": catalog.load_user_nodes()}
+
+
+class SaveActionRequest(BaseModel):
+    action: dict[str, Any]
+
+
+@router.post("/save")
+async def save_action(req: SaveActionRequest) -> dict:
+    from flux_actions import catalog
+
+    try:
+        return catalog.save_action(req.action)
+    except Exception as exc:  # noqa: BLE001 - schema / link / unknown command
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/{name}/team")
+async def reset_action(name: str) -> dict:
+    from flux_actions import catalog
+
+    return {"reset": catalog.reset_action(name)}
+
+
+@router.get("/nodes/template")
+async def node_template(name: str = "mon_node") -> dict:
+    from flux_actions import catalog
+
+    return {"code": catalog.node_template(name)}
+
+
+class SaveNodeRequest(BaseModel):
+    name: str
+    code: str
+
+
+@router.post("/nodes")
+async def save_node(req: SaveNodeRequest) -> dict:
+    from flux_actions import catalog
+
+    try:
+        return catalog.save_user_node(req.name, req.code)
+    except SyntaxError as exc:
+        raise HTTPException(status_code=400, detail=f"Erreur Python ligne {exc.lineno} : {exc.msg}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
