@@ -27,7 +27,8 @@ from features.publisher.texture_conform import (
 
 @register("conform_texture")
 class ConformTexture(CommandBase):
-    """Conform a texture / UDIM set to Karma-friendly mipped, tiled .tx files."""
+    """Conform a texture / UDIM set to Karma-friendly mipped, tiled .tx files.
+    Done by FLUX itself with OpenImageIO make_texture: no DCC opened, no license token."""
 
     parameters = {
         "source": {

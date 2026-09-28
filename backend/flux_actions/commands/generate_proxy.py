@@ -24,7 +24,9 @@ from features.publisher.usd_proxy import (
 
 @register("generate_proxy")
 class GenerateProxy(CommandBase):
-    """Generate a decimated purpose=proxy sibling for each render mesh in a USD."""
+    """Generate a decimated purpose=proxy sibling for each render mesh in a USD.
+    Done by FLUX itself in Python (pxr + fast-simplification): no Houdini, no DCC
+    opened, no license token."""
 
     parameters = {
         "source": {
