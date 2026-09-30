@@ -45,6 +45,35 @@ class MariScriptsDir(unittest.TestCase):
                 self.assertTrue(autostart.uninstall()["success"])
                 self.assertFalse(autostart.is_installed())
 
+    def test_existing_init_py_gets_a_flux_block(self):
+        # 2026-09-30: with an init.py in the folder Mari 7 runs only that file.
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts = Path(tmp) / "s"
+            scripts.mkdir()
+            init = scripts / "init.py"
+            init.write_text("import mari\nprint('tablet')\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"FLUX_MARI_SCRIPTS_DIR": str(scripts)}):
+                self.assertFalse(autostart.is_installed())
+                (scripts / "flux_mari_bridge.py").write_text("# old copy", encoding="utf-8")
+                self.assertFalse(autostart.is_installed())   # copy without block: reinstall
+                self.assertTrue(autostart.install()["success"])
+                self.assertTrue(autostart.install()["success"])   # idempotent
+                text = init.read_text(encoding="utf-8")
+                self.assertTrue(text.startswith("import mari\nprint('tablet')\n"))
+                self.assertEqual(text.count(autostart._BLOCK_BEGIN), 1)
+                self.assertIn("flux_mari_bridge.py", text)
+                compile(text, "init.py", "exec")
+                self.assertTrue(autostart.is_installed())
+                self.assertTrue(autostart.uninstall()["success"])
+                self.assertEqual(init.read_text(encoding="utf-8"), "import mari\nprint('tablet')\n")
+
+    def test_no_init_py_is_never_created(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"FLUX_MARI_SCRIPTS_DIR": str(Path(tmp) / "s")}):
+            self.assertTrue(autostart.install()["success"])
+            self.assertFalse((Path(tmp) / "s" / "init.py").exists())
+            self.assertTrue(autostart.is_installed())
+
     def test_diagnose_quotes_the_bridge_log(self):
         with tempfile.TemporaryDirectory() as tmp:
             logf = Path(tmp) / "flux_mari_bridge.log"
