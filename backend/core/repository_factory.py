@@ -75,6 +75,12 @@ from core.paths import get_project_production_path  # noqa: E402  (kept next to 
 
 register_collection("production", lambda doc_id: get_project_production_path(str(doc_id)))
 
+# calendar: one calendar.json per project (team commitments, 2026-09-30), keyed
+# like production by the project name.
+from core.paths import get_project_calendar_path  # noqa: E402  (kept next to use)
+
+register_collection("calendar", lambda doc_id: get_project_calendar_path(str(doc_id)))
+
 # user_settings: one User.json per artist, at USER/<name>/UserSettings/User.json.
 # doc_id = the user name; the path is resolved fresh each call (get_user_dir), so a
 # runtime set_flux_root still wins (matches the old direct read/write_json).

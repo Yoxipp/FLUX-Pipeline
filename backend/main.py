@@ -20,7 +20,7 @@ from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
-from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, system, usd_assembler
+from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, system, team_calendar, usd_assembler
 
 log = get_logger("main")
 
@@ -162,6 +162,7 @@ app.include_router(usd_assembler.router,  prefix="/usd",            tags=["UsdAs
 app.include_router(logs.router,           prefix="/logs",           tags=["Logs"])
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
 app.include_router(production.router,     prefix="/production",     tags=["Production"])
+app.include_router(team_calendar.router,  prefix="/calendar",       tags=["Calendar"])
 app.include_router(system.router,         prefix="/system",         tags=["System"])
 
 

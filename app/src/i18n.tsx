@@ -68,6 +68,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'nav.templateEditor':      { fr: 'Éditeur de templates',     en: 'Template Editor' },
   'nav.shelfManager':        { fr: 'Shelf Manager',            en: 'Shelf Manager' },
   'nav.production':          { fr: 'Production',               en: 'Production' },
+  'nav.calendar':            { fr: 'Calendrier',               en: 'Calendar' },
   'nav.activity':            { fr: 'Activité',                 en: 'Activity' },
   'nav.actionPublish':       { fr: 'Publish (action)',         en: 'Publish (action)' },
 

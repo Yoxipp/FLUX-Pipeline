@@ -244,6 +244,11 @@ def get_project_production_path(project_name: str) -> Path:
     return get_project_path(project_name) / JSON_PRODUCTION
 
 
+def get_project_calendar_path(project_name: str) -> Path:
+    from core.constants import JSON_CALENDAR
+    return get_project_path(project_name) / JSON_CALENDAR
+
+
 # ── CONFIG / shared JSON paths ────────────────────────────────────────────────
 
 def get_activity_path() -> Path:

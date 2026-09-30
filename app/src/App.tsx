@@ -24,6 +24,7 @@ import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
 import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
+import { Calendar }      from './pages/Calendar'
 import { AdvancedSettings } from './pages/AdvancedSettings'
 import { DiskUsage } from './pages/DiskUsage'
 import { FirstLaunch }   from './pages/FirstLaunch'
@@ -145,6 +146,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/usd"       element={<UsdPage />} />
               <Route path="/templates" element={<TemplateEditor />} />
               <Route path="/production" element={<Production />} />
+              <Route path="/calendar"  element={<Calendar />} />
               <Route path="/advanced"  element={<AdvancedSettings />} />
               <Route path="/disk"      element={<DiskUsage />} />
             </Routes>

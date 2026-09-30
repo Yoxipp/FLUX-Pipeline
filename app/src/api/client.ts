@@ -2,6 +2,7 @@
 
 import type {
   ActionFormResponse,
+  CalendarItem,
   ActionCatalog,
   ActionGraph,
   ActionPreviewResponse,
@@ -945,6 +946,18 @@ export const api = {
   renameSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot: string, newName: string) =>
     apiCall<{ ok: boolean; archived: string; path: string; warnings: string[] }>(
       'POST', `/production/${encodeURIComponent(project)}/rename-seq-shot`, { kind, seq, shot, new: newName }),
+
+  // Team calendar of a project: commitments, proposals (ping) and answers.
+  getCalendar: (project: string) =>
+    apiCall<{ items: CalendarItem[]; me: string }>('GET', `/calendar/${encodeURIComponent(project)}`),
+  createCalendarItem: (project: string, body: { title: string; owner: string; start: string; end: string; note: string; link: string }) =>
+    apiCall<{ item: CalendarItem }>('POST', `/calendar/${encodeURIComponent(project)}/items`, body),
+  respondCalendarItem: (project: string, id: string, action: 'accept' | 'postpone' | 'decline', start = '', end = '') =>
+    apiCall<{ item: CalendarItem }>('POST', `/calendar/${encodeURIComponent(project)}/items/${encodeURIComponent(id)}/respond`, { action, start, end }),
+  updateCalendarItem: (project: string, id: string, patch: Partial<Pick<CalendarItem, 'title' | 'note' | 'link' | 'start' | 'end' | 'status'>>) =>
+    apiCall<{ item: CalendarItem }>('PATCH', `/calendar/${encodeURIComponent(project)}/items/${encodeURIComponent(id)}`, patch),
+  deleteCalendarItem: (project: string, id: string) =>
+    apiCall<{ ok: boolean }>('DELETE', `/calendar/${encodeURIComponent(project)}/items/${encodeURIComponent(id)}`),
 
   // Lock / unlock a sequence or shot (unlock needs phrase "Understand").
   lockSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot: string, locked: boolean, phrase = '') =>

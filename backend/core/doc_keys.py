@@ -6,7 +6,7 @@
 # store it. This module translates, at the repository seam, store keys <-> logical keys:
 #
 #   tokens, locks        <project dir>              -> <project_id>
-#   production           <project name>             -> <project_id>
+#   production, calendar <project name>             -> <project_id>
 #   modif_log            <project dir>/<rel folder> -> <project_id>/<rel folder>
 #   feeds, read_state,   <FLUX_ROOT>/<rel file>     -> ws:<rel file>
 #   feed_archive
@@ -30,7 +30,7 @@ from core.constants import JSON_PROJECT
 
 WS_PREFIX = "ws:"
 PROJECT_PATH_COLLECTIONS = frozenset({"tokens", "locks"})
-PROJECT_NAME_COLLECTIONS = frozenset({"production"})
+PROJECT_NAME_COLLECTIONS = frozenset({"production", "calendar"})
 FOLDER_COLLECTIONS = frozenset({"modif_log"})
 WORKSPACE_COLLECTIONS = frozenset(
     {"read_state", "activity_log", "chat_log", "mentions_log", "feed_archive"}

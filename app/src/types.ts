@@ -380,3 +380,21 @@ export interface ProductionPayload {
   shots_on_disk?: Array<[string, string]>   // [seq_name, shot_name] pairs on disk
 }
 
+
+// Team calendar (backend features/calendar/calendar_store.py, 2026-09-30).
+export type CalendarStatus = 'proposed' | 'accepted' | 'declined' | 'done'
+export interface CalendarHistory { at: string; by: string; action: string; start?: string; end?: string }
+export interface CalendarItem {
+  id: string
+  title: string
+  note: string
+  link: string
+  owner: string          // who commits
+  created_by: string     // who wrote it (someone else = a proposal)
+  start: string          // YYYY-MM-DD
+  end: string            // YYYY-MM-DD, inclusive
+  status: CalendarStatus
+  created_at: string
+  updated_at: string
+  history: CalendarHistory[]
+}

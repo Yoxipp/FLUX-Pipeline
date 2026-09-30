@@ -33,6 +33,7 @@ from core.constants import (
     JSON_MENTIONS_READ,
     JSON_MODIF_LOG,
     JSON_PRODUCTION,
+    JSON_CALENDAR,
     JSON_TOKENS,
     JSON_USER_SETTINGS,
 )
@@ -97,6 +98,8 @@ def _json_locate_factory(projects_dir: Path, users_dir: Path, prefs_path: Path):
             return Path(str(doc_id)) / JSON_MODIF_LOG
         if collection == "production":
             return projects_dir / str(doc_id) / JSON_PRODUCTION
+        if collection == "calendar":
+            return projects_dir / str(doc_id) / JSON_CALENDAR
         if collection == "user_settings":
             return users_dir / str(doc_id) / "UserSettings" / JSON_USER_SETTINGS
         if collection == "config":
@@ -134,6 +137,8 @@ def _scan(
             docs.append(("locks", str(project)))
         if (project / JSON_PRODUCTION).exists():
             docs.append(("production", project.name))
+        if (project / JSON_CALENDAR).exists():
+            docs.append(("calendar", project.name))
         if (project / JSON_CHAT).exists():   # per-project team chat (feed log)
             logs.append(("chat_log", str(project / JSON_CHAT)))
 
