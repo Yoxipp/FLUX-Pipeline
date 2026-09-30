@@ -17,7 +17,7 @@ from features.activity.activity_reader import get_all_events
 log = get_logger(__name__)
 
 _ARCHIVE_COLLECTION = "feed_archive"
-MAX_DAYS = 400          # one calendar screen is 42 days; this only bounds a bad request
+MAX_DAYS = 800          # the month view scrolls ~19 months; this only bounds a bad request
 
 
 def _months(start: str, end: str) -> list[str]:

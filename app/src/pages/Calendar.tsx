@@ -18,6 +18,12 @@ import type { CalendarItem, CalendarPublish, CalendarStatus } from '../types'
 
 const POLL_MS = 30_000
 const MONTH_CHIPS = 4
+// Month view = one continuous scroll of weeks (2026-09-30), 6 months back to 12 ahead.
+const ROW_H = 128
+const MONTHS_BACK = 6
+const MONTHS_AHEAD = 12
+const DAY_MS = 86_400_000
+const weeksBetween = (a: Date, b: Date) => Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / (7 * DAY_MS))
 
 // ── text (FR / EN, follows the language chosen in the settings) ──────────────
 type Lang = 'fr' | 'en'
@@ -586,11 +592,48 @@ export function Calendar() {
   const waiting = useMemo(() => items.filter(it => it.status === 'proposed' && same(it.created_by, me) && !same(it.owner, me)), [items, me])
   const pickedItem = items.find(it => it.id === picked) ?? null
 
-  // Visible days: 6 weeks from the Monday before the 1st, or the week of the cursor.
+  // Month view: every week from MONTHS_BACK before to MONTHS_AHEAD after this month, scrolled
+  // continuously. Week view: the week of the cursor.
+  const range = useMemo(() => {
+    const now = new Date()
+    const start = mondayOf(new Date(now.getFullYear(), now.getMonth() - MONTHS_BACK, 1))
+    const lastOfEnd = new Date(now.getFullYear(), now.getMonth() + MONTHS_AHEAD + 1, 0)
+    const end = addDays(mondayOf(lastOfEnd), 6)
+    return { start, weeks: weeksBetween(start, end) + 1 }
+  }, [])
   const days = useMemo(() => {
-    const first = view === 'month' ? mondayOf(new Date(cursor.getFullYear(), cursor.getMonth(), 1)) : mondayOf(cursor)
-    return Array.from({ length: view === 'month' ? 42 : 7 }, (_, i) => addDays(first, i))
-  }, [cursor, view])
+    if (view === 'month') return Array.from({ length: range.weeks * 7 }, (_, i) => addDays(range.start, i))
+    return Array.from({ length: 7 }, (_, i) => addDays(mondayOf(cursor), i))
+  }, [cursor, view, range])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [visibleMonth, setVisibleMonth] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1) })
+  const scrollToRow = (row: number, smooth: boolean) => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: Math.max(0, Math.min(row, range.weeks - 1)) * ROW_H, behavior: smooth ? 'smooth' : 'auto' })
+  }
+  const scrollToMonth = (m: Date, smooth: boolean) => {
+    const now = new Date()
+    const lo = new Date(now.getFullYear(), now.getMonth() - MONTHS_BACK, 1)
+    const hi = new Date(now.getFullYear(), now.getMonth() + MONTHS_AHEAD, 1)
+    const target = m < lo ? lo : m > hi ? hi : m
+    scrollToRow(weeksBetween(range.start, mondayOf(target)), smooth)
+  }
+  // Title follows the month shown at the top of the grid.
+  const onGridScroll = () => {
+    const el = scrollRef.current
+    if (!el || view !== 'month') return
+    const row = Math.min(range.weeks - 1, Math.floor(el.scrollTop / ROW_H + 0.5))
+    const sunday = addDays(range.start, row * 7 + 6)
+    const m = new Date(sunday.getFullYear(), sunday.getMonth(), 1)
+    setVisibleMonth(v => (v.getTime() === m.getTime() ? v : m))
+  }
+  // Entering the month view lands on the current month.
+  useEffect(() => {
+    if (view !== 'month') return
+    const id = requestAnimationFrame(() => scrollToMonth(visibleMonth, false))
+    return () => cancelAnimationFrame(id)
+  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
   const firstDay = iso(days[0])
   const lastDay = iso(days[days.length - 1])
   useEffect(() => {
@@ -609,11 +652,16 @@ export function Calendar() {
     .filter(it => it.start <= day && day <= it.end)
     .sort((a, b) => a.start.localeCompare(b.start) || a.owner.localeCompare(b.owner))
 
-  const move = (dir: number) => setCursor(c => view === 'month'
-    ? new Date(c.getFullYear(), c.getMonth() + dir, 1)
-    : addDays(c, 7 * dir))
+  const move = (dir: number) => {
+    if (view === 'month') scrollToMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + dir, 1), true)
+    else setCursor(c => addDays(c, 7 * dir))
+  }
+  const goToday = () => {
+    if (view === 'month') scrollToRow(weeksBetween(range.start, mondayOf(new Date())), true)
+    else setCursor(new Date())
+  }
   const title = view === 'month'
-    ? `${MONTHS[l][cursor.getMonth()]} ${cursor.getFullYear()}`
+    ? `${MONTHS[l][visibleMonth.getMonth()]} ${visibleMonth.getFullYear()}`
     : tr(`Semaine du ${shortDate(iso(days[0]), l)} au ${shortDate(iso(days[6]), l)}`,
          `Week of ${shortDate(iso(days[0]), l)} to ${shortDate(iso(days[6]), l)}`)
   const today = todayIso()
@@ -632,7 +680,7 @@ export function Calendar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{tr('Calendrier', 'Calendar')}</div>
           <button style={{ ...btn(), padding: 4 }} onClick={() => move(-1)}><ChevronLeft size={13} /></button>
-          <button style={btn()} onClick={() => setCursor(new Date())}>{tr("Aujourd'hui", 'Today')}</button>
+          <button style={btn()} onClick={goToday}>{tr("Aujourd'hui", 'Today')}</button>
           <button style={{ ...btn(), padding: 4 }} onClick={() => move(1)}><ChevronRight size={13} /></button>
           <div style={{ fontSize: 12, color: 'var(--ink-2)', minWidth: 150, textTransform: view === 'month' ? 'capitalize' : undefined }}>{title}</div>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -657,14 +705,13 @@ export function Calendar() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', borderBottom: '1px solid var(--rule)' }}>
           {WEEKDAYS[l].map(d => <div key={d} style={{ ...lbl, padding: '6px 8px', marginBottom: 0 }}>{d}</div>)}
         </div>
-        <div style={{
+        <div ref={scrollRef} onScroll={onGridScroll} style={{
           flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-          gridAutoRows: view === 'month' ? 'minmax(96px, 1fr)' : 'minmax(100%, auto)',
+          gridAutoRows: view === 'month' ? `${ROW_H}px` : 'minmax(100%, auto)', alignContent: 'start',
         }}>
           {days.map(d => {
             const day = iso(d)
             const list = itemsOn(day)
-            const outside = view === 'month' && d.getMonth() !== cursor.getMonth()
             const weekend = d.getDay() === 0 || d.getDay() === 6
             const past = day < today
             // 2026-09-30: weekends and past days dark, days to come light.
@@ -685,11 +732,17 @@ export function Calendar() {
                      boxShadow: inSpan ? 'inset 0 0 0 1px var(--accent)' : undefined,
                      borderRight: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: 5,
                      display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, cursor: 'copy',
-                     background: cellBg, opacity: outside ? 0.5 : 1,
+                     background: cellBg, overflow: 'hidden',
                    }}>
                 <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500,
                               color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
+                  {/* The 1st of each month carries its name: you see where a month starts while scrolling. */}
+                  {view === 'month' && d.getDate() === 1 && (
+                    <span style={{ marginLeft: 5, color: 'var(--accent-hi)', fontWeight: 700, textTransform: 'capitalize' }}>
+                      {MONTHS[l][d.getMonth()]}{d.getMonth() === 0 ? ` ${d.getFullYear()}` : ''}
+                    </span>
+                  )}
                 </div>
                 {showPub && pubsOn(day).length > 0 && (
                   <PublishBand pubs={pubsOn(day)} />
