@@ -399,3 +399,6 @@ export interface CalendarItem {
   updated_at: string
   history: CalendarHistory[]
 }
+
+// A publish shown on the calendar (features/calendar/publishes.py).
+export interface CalendarPublish { id: string; date: string; time: string; user: string; file: string; dest_folder: string }

@@ -3,6 +3,7 @@
 import type {
   ActionFormResponse,
   CalendarItem,
+  CalendarPublish,
   ActionCatalog,
   ActionGraph,
   ActionPreviewResponse,
@@ -950,6 +951,8 @@ export const api = {
   // Team calendar of a project: commitments, proposals (ping) and answers.
   getCalendar: (project: string) =>
     apiCall<{ items: CalendarItem[]; me: string }>('GET', `/calendar/${encodeURIComponent(project)}`),
+  getCalendarPublishes: (project: string, start: string, end: string) =>
+    apiCall<{ publishes: CalendarPublish[] }>('GET', `/calendar/${encodeURIComponent(project)}/publishes?start=${start}&end=${end}`),
   createCalendarItem: (project: string, body: { title: string; owner: string; start: string; end: string; note: string; link: string }) =>
     apiCall<{ item: CalendarItem }>('POST', `/calendar/${encodeURIComponent(project)}/items`, body),
   respondCalendarItem: (project: string, id: string, action: 'accept' | 'postpone' | 'decline', start = '', end = '') =>

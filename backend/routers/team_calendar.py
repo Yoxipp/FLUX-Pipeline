@@ -65,6 +65,20 @@ async def _mutate(project: str, fn):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project}/publishes")
+async def get_publishes(project: str, start: str, end: str) -> dict:
+    """Publishes of the project between two dates (activity log, archives included)."""
+    from features.calendar.publishes import publishes_between
+
+    _ensure_project(project)
+    loop = asyncio.get_running_loop()
+    try:
+        items = await loop.run_in_executor(None, lambda: publishes_between(project, start, end))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"publishes": items}
+
+
 @router.get("/{project}")
 async def get_calendar(project: str) -> dict:
     _ensure_project(project)

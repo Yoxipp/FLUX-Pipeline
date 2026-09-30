@@ -10,11 +10,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { toast } from 'sonner'
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react'
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X } from 'lucide-react'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useI18n } from '../i18n'
-import type { CalendarItem, CalendarStatus } from '../types'
+import type { CalendarItem, CalendarPublish, CalendarStatus } from '../types'
 
 const POLL_MS = 30_000
 const MONTH_CHIPS = 4
@@ -257,6 +257,37 @@ function Chip({ it, selected, onClick, full }: { it: CalendarItem; selected: boo
   )
 }
 
+// ── publishes of a day (2026-09-30): one band, unfolded into time / person / file ──
+const PUB_COLOR = 'var(--prod-shot)'
+const PUB_KEY = 'flux.calendar.publishes'
+
+function PublishBand({ pubs, open, onToggle }: { pubs: CalendarPublish[]; open: boolean; onToggle: () => void }) {
+  const { tr } = useTr()
+  return (
+    <div onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onToggle() }}
+         style={{
+           fontSize: 10, borderRadius: 4, cursor: 'pointer', color: 'var(--ink)',
+           background: `color-mix(in oklch, ${PUB_COLOR} 16%, transparent)`, borderLeft: `3px solid ${PUB_COLOR}`,
+           padding: '2px 5px', minWidth: 0,
+         }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <Upload size={9} strokeWidth={2} color={PUB_COLOR} />
+        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {pubs.length} {pubs.length > 1 ? tr('publishs', 'publishes') : 'publish'}
+        </span>
+        <ChevronDown size={9} style={{ transform: open ? 'rotate(180deg)' : undefined, flexShrink: 0 }} />
+      </div>
+      {open && pubs.map(p => (
+        <div key={p.id} title={`${p.file}${p.dest_folder ? `\n${p.dest_folder}` : ''}`}
+             style={{ fontSize: 9.5, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+          <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>{p.time}</span> · {p.user}
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)' }}>{p.file}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Legend() {
   const { l } = useTr()
   const row = (key: CalendarStatus) => (
@@ -470,6 +501,14 @@ export function Calendar() {
   const [creating, setCreating] = useState<{ start: string; end: string } | null>(null)   // span of the new task
   // Click-drag over the grid (2026-09-30): the span turns orange, release opens New task.
   const [drag, setDrag] = useState<{ a: string; b: string } | null>(null)
+  // Publishes on the calendar: a checkbox (remembered on this machine), one band per day.
+  const [showPub, setShowPub] = useState<boolean>(() => { try { return localStorage.getItem(PUB_KEY) === '1' } catch { return false } })
+  const [pubs, setPubs] = useState<CalendarPublish[]>([])
+  const [openPubDays, setOpenPubDays] = useState<Set<string>>(new Set())
+  const togglePub = (on: boolean) => {
+    setShowPub(on)
+    try { localStorage.setItem(PUB_KEY, on ? '1' : '0') } catch { /* private mode */ }
+  }
   useEffect(() => {
     if (!drag) return
     const up = () => {
@@ -504,6 +543,20 @@ export function Calendar() {
     const first = view === 'month' ? mondayOf(new Date(cursor.getFullYear(), cursor.getMonth(), 1)) : mondayOf(cursor)
     return Array.from({ length: view === 'month' ? 42 : 7 }, (_, i) => addDays(first, i))
   }, [cursor, view])
+  const firstDay = iso(days[0])
+  const lastDay = iso(days[days.length - 1])
+  useEffect(() => {
+    if (!showPub || !project) { setPubs([]); return }
+    let alive = true
+    const fetchPubs = () => api.getCalendarPublishes(project, firstDay, lastDay)
+      .then(r => { if (alive) setPubs(r.publishes) })
+      .catch(() => { if (alive) setPubs([]) })
+    void fetchPubs()
+    const t = setInterval(() => { void fetchPubs() }, POLL_MS)
+    return () => { alive = false; clearInterval(t) }
+  }, [showPub, project, firstDay, lastDay])
+  const pubsOn = (day: string) => pubs.filter(p => p.date === day && (!who || same(p.user, who)))
+
   const itemsOn = (day: string) => shown
     .filter(it => it.start <= day && day <= it.end)
     .sort((a, b) => a.start.localeCompare(b.start) || a.owner.localeCompare(b.owner))
@@ -544,6 +597,10 @@ export function Calendar() {
               <option key={u} value={u}>{same(u, me) ? `${u} (${tr('moi', 'me')})` : u}</option>
             ))}
           </select>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={showPub} onChange={e => togglePub(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+            {tr('Publishs', 'Publishes')}
+          </label>
           <button style={{ ...btn(true), marginLeft: 'auto' }} onClick={() => { setPicked(null); setCreating({ start: today, end: today }) }}>
             <Plus size={11} /> {tr('Ajouter une tâche', 'Add a task')}</button>
         </div>
@@ -586,6 +643,10 @@ export function Calendar() {
                               color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
                 </div>
+                {showPub && pubsOn(day).length > 0 && (
+                  <PublishBand pubs={pubsOn(day)} open={openPubDays.has(day)}
+                               onToggle={() => setOpenPubDays(prev => { const n = new Set(prev); if (n.has(day)) n.delete(day); else n.add(day); return n })} />
+                )}
                 {list.slice(0, max).map(it => (
                   <Chip key={it.id} it={it} full={view === 'week'} selected={it.id === picked}
                         onClick={() => { setCreating(null); setPicked(it.id) }} />
