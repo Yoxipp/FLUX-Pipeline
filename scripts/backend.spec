@@ -43,6 +43,9 @@ app_datas = [
      "features/usd_assembler/recipe"),
     (str(ROOT / "backend/dcc/houdini/flux_houdini_server.py"), "dcc/houdini"),
     (str(ROOT / "backend/dcc/mari/mari_bridge.py"), "dcc/mari"),
+    # Nuke's init.py / menu.py blocks import these from _internal (stdlib + nuke only).
+    (str(ROOT / "backend/dcc/nuke/flux_nuke_server.py"), "dcc/nuke"),
+    (str(ROOT / "backend/dcc/nuke/flux_nuke_menu.py"), "dcc/nuke"),
     (str(ROOT / "backend/dcc/substance_painter/substance_painter_bridge.py"),
      "dcc/substance_painter"),
     (str(ROOT / "backend/dcc/zbrush/zbrush_bridge_plugin.py"), "dcc/zbrush"),
