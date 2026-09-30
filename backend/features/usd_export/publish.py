@@ -147,6 +147,20 @@ def _rig_needs_republish(project_path, geo_base: str) -> list[str]:
     return []
 
 
+def log_usd_publish(user: str, project_path: str | Path, filename: str, dest_folder: Path) -> None:
+    """Record a USD publish in the team activity feed (Activity, calendar), never fatal.
+
+    2026-09-30: model / look publishes done through the USD exports (Maya light
+    export, Houdini look export) were written to disk but never reached the feed, so
+    they were missing from the Activity and the calendar.
+    """
+    try:
+        from features.activity.activity_writer import log_publish
+        log_publish(user or "unknown", filename, Path(project_path).name, dest_folder=dest_folder)
+    except Exception as exc:  # noqa: BLE001 - the publish itself succeeded
+        log.warning("Activity log of %s failed (non-fatal): %s", filename, exc)
+
+
 def publish_light_asset(
     asset: LightAsset,
     project_path: str | Path,
@@ -238,6 +252,8 @@ def publish_light_asset(
                          layer_target=f"{folder.name}/{root.name}")
 
     log.info("Published light asset %s (%s) -> %s", base, version_str, folder)
+    if dest_dir is not None:
+        log_usd_publish(user, project_path, f"{base}_{version_str}{ext}", parent)
 
     # USD_ASSEMBLER_V2 A1 / ADR 0019: proxy layer beside the version root, then the
     # asset (component). Only for token-resolved publishes (dest_dir); never fails.

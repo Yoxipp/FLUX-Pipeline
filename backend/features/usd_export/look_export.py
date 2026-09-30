@@ -826,6 +826,8 @@ def publish_look_asset(source: str | Path, project_path: str | Path, *,
 
     version_str = format_version(ver)
     log.info("Published look %s (%s) -> %s", base_name, version_str, folder)
+    from .publish import log_usd_publish
+    log_usd_publish(user, project_path, f"{base_name}_{version_str}{ext}", parent)
     for w in authored["warnings"]:
         log.warning("Look %s: %s", base_name, w)
     return {"root": last or root, "version": version_str, "folder": folder,
