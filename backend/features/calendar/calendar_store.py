@@ -8,7 +8,8 @@
 # One calendar.json per project (collection "calendar", keyed by project name, like
 # production.json). Items:
 #   {id, title, note, link, owner, created_by, start, end (YYYY-MM-DD),
-#    status: proposed | accepted | declined | done, created_at, updated_at,
+#    status: proposed | accepted (not started) | in_progress | done | declined,
+#    created_at, updated_at,
 #    history: [{at, by, action, start?, end?}]}
 
 from __future__ import annotations
@@ -23,7 +24,10 @@ log = get_logger(__name__)
 
 _COLLECTION = "calendar"
 SCHEMA_VERSION = 1
-STATUSES = ("proposed", "accepted", "declined", "done")
+STATUSES = ("proposed", "accepted", "in_progress", "done", "declined")
+# Progress the owner sets (2026-09-30): not started (red), in progress (orange), done (green).
+PROGRESS = ("accepted", "in_progress", "done")
+_PROGRESS_ACTION = {"accepted": "reopen", "in_progress": "start", "done": "done"}
 MAX_TITLE = 200
 MAX_NOTE = 4000
 MAX_HISTORY = 50
@@ -166,11 +170,11 @@ def update_item(data: dict, item_id: str, by: str, **changes) -> dict:
     if status is not None:
         if not is_owner:
             raise CalendarForbidden("Seule la personne engagee change le statut")
-        if status not in ("accepted", "done"):
+        if status not in PROGRESS or item.get("status") not in PROGRESS:
             raise CalendarError(f"Statut refuse : {status!r}")
         if status != item.get("status"):
             item["status"] = status
-            _log(item, by, "done" if status == "done" else "reopen")
+            _log(item, by, _PROGRESS_ACTION[status])
     item["updated_at"] = _now()
     return item
 

@@ -63,6 +63,14 @@ class Proposals(unittest.TestCase):
         with self.assertRaises(cal.CalendarForbidden):
             cal.update_item(self.d, self.it["id"], "adam", start="2026-10-20")
 
+    def test_progress_needs_an_answer_first(self):
+        with self.assertRaises(cal.CalendarError):
+            cal.update_item(self.d, self.it["id"], "milo", status="in_progress")
+        cal.respond(self.d, self.it["id"], "milo", "accept")
+        cal.update_item(self.d, self.it["id"], "milo", status="in_progress")
+        self.assertEqual(self.it["status"], "in_progress")
+        self.assertEqual(self.it["history"][-1]["action"], "start")
+
     def test_owner_marks_done_and_either_deletes(self):
         cal.respond(self.d, self.it["id"], "milo", "accept")
         cal.update_item(self.d, self.it["id"], "milo", status="done")

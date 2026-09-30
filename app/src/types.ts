@@ -382,7 +382,7 @@ export interface ProductionPayload {
 
 
 // Team calendar (backend features/calendar/calendar_store.py, 2026-09-30).
-export type CalendarStatus = 'proposed' | 'accepted' | 'declined' | 'done'
+export type CalendarStatus = 'proposed' | 'accepted' | 'in_progress' | 'done' | 'declined'
 export interface CalendarHistory { at: string; by: string; action: string; start?: string; end?: string }
 export interface CalendarItem {
   id: string

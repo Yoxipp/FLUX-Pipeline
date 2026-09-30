@@ -115,7 +115,7 @@ class UpdateRequest(BaseModel):
     link:   str | None = None
     start:  str | None = None
     end:    str | None = None
-    status: str | None = None   # done | accepted (reopen)
+    status: str | None = None   # accepted (not started) | in_progress | done
 
 
 @router.patch("/{project}/items/{item_id}")
