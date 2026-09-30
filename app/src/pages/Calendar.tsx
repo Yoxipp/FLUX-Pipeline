@@ -261,30 +261,79 @@ function Chip({ it, selected, onClick, full }: { it: CalendarItem; selected: boo
 const PUB_COLOR = 'var(--prod-shot)'
 const PUB_KEY = 'flux.calendar.publishes'
 
-function PublishBand({ pubs, open, onToggle }: { pubs: CalendarPublish[]; open: boolean; onToggle: () => void }) {
+// Unfolded list: an opaque card over the grid (never clipped by the cell), spread over
+// 2-3 columns when a day has many publishes (2026-09-30), kept inside the window.
+const PUB_ROWS_PER_COL = 8
+const PUB_COL_W = 190
+
+function PublishBand({ pubs }: { pubs: CalendarPublish[] }) {
   const { tr } = useTr()
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
+  const bandRef = useRef<HTMLDivElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const cols = Math.min(3, Math.max(1, Math.ceil(pubs.length / PUB_ROWS_PER_COL)))
+  const width = cols * PUB_COL_W
+  useEffect(() => {
+    if (!at) return
+    const close = (e: Event) => {
+      const t = e.target as Node
+      if (cardRef.current?.contains(t) || bandRef.current?.contains(t)) return
+      setAt(null)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)   // grid scrolled: the card would drift
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', close)
+    }
+  }, [at])
+  const toggle = () => {
+    if (at) { setAt(null); return }
+    const r = bandRef.current?.getBoundingClientRect()
+    if (!r) return
+    const x = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
+    setAt({ x, y: r.bottom + 4 })
+  }
   return (
-    <div onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onToggle() }}
-         style={{
-           fontSize: 10, borderRadius: 4, cursor: 'pointer', color: 'var(--ink)',
-           background: `color-mix(in oklch, ${PUB_COLOR} 16%, transparent)`, borderLeft: `3px solid ${PUB_COLOR}`,
-           padding: '2px 5px', minWidth: 0,
-         }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <Upload size={9} strokeWidth={2} color={PUB_COLOR} />
+    <>
+      <div ref={bandRef} onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); toggle() }}
+           style={{
+             fontSize: 10, borderRadius: 4, cursor: 'pointer', color: 'var(--ink)',
+             background: `color-mix(in oklch, ${PUB_COLOR} 30%, var(--paper-2))`, borderLeft: `3px solid ${PUB_COLOR}`,
+             padding: '2px 5px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4,
+           }}>
+        <Upload size={9} strokeWidth={2} color="var(--ink)" />
         <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {pubs.length} {pubs.length > 1 ? tr('publishs', 'publishes') : 'publish'}
         </span>
-        <ChevronDown size={9} style={{ transform: open ? 'rotate(180deg)' : undefined, flexShrink: 0 }} />
+        <ChevronDown size={9} style={{ transform: at ? 'rotate(180deg)' : undefined, flexShrink: 0 }} />
       </div>
-      {open && pubs.map(p => (
-        <div key={p.id} title={`${p.file}${p.dest_folder ? `\n${p.dest_folder}` : ''}`}
-             style={{ fontSize: 9.5, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
-          <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>{p.time}</span> · {p.user}
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)' }}>{p.file}</div>
+      {at && (
+        <div ref={cardRef} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}
+             style={{
+               position: 'fixed', left: at.x, top: at.y, zIndex: 60, width,
+               maxHeight: `calc(100vh - ${at.y + 12}px)`, overflowY: 'auto', cursor: 'default',
+               background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 8,
+               boxShadow: 'var(--shadow-md)', padding: 8,
+               display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+               gridAutoFlow: 'row', columnGap: 12, rowGap: 6,
+             }}>
+          {pubs.map(p => (
+            <div key={p.id} title={`${p.file}${p.dest_folder ? `\n${p.dest_folder}` : ''}`}
+                 style={{ fontSize: 10, color: 'var(--ink-2)', lineHeight: 1.35, minWidth: 0,
+                          borderLeft: `2px solid ${PUB_COLOR}`, paddingLeft: 6 }}>
+              <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>{p.time}</span> · {p.user}
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', overflowWrap: 'anywhere' }}>{p.file}</div>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      )}
+    </>
   )
 }
 
@@ -504,7 +553,6 @@ export function Calendar() {
   // Publishes on the calendar: a checkbox (remembered on this machine), one band per day.
   const [showPub, setShowPub] = useState<boolean>(() => { try { return localStorage.getItem(PUB_KEY) === '1' } catch { return false } })
   const [pubs, setPubs] = useState<CalendarPublish[]>([])
-  const [openPubDays, setOpenPubDays] = useState<Set<string>>(new Set())
   const togglePub = (on: boolean) => {
     setShowPub(on)
     try { localStorage.setItem(PUB_KEY, on ? '1' : '0') } catch { /* private mode */ }
@@ -644,8 +692,7 @@ export function Calendar() {
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
                 </div>
                 {showPub && pubsOn(day).length > 0 && (
-                  <PublishBand pubs={pubsOn(day)} open={openPubDays.has(day)}
-                               onToggle={() => setOpenPubDays(prev => { const n = new Set(prev); if (n.has(day)) n.delete(day); else n.add(day); return n })} />
+                  <PublishBand pubs={pubsOn(day)} />
                 )}
                 {list.slice(0, max).map(it => (
                   <Chip key={it.id} it={it} full={view === 'week'} selected={it.id === picked}
