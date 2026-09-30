@@ -48,9 +48,32 @@ class _SentinelResult(unittest.TextTestResult):
             os.fsync(fh.fileno())
 
 
+def _isolate_activity_feed() -> None:
+    """Point the activity feed (and its monthly archives) at a temp dir for the whole run.
+
+    2026-09-30: tests that publish into a temp project called log_publish, which
+    wrote into the REAL team feed (CONFIG/activite.json on the shared FLUX_ROOT): 532
+    fake "PROJ" publishes. Tests that pass their own path or patch these names still
+    win (they patch after this).
+    """
+    import tempfile
+    from pathlib import Path
+
+    from core import paths
+    from features.activity import activity_writer, history
+
+    tmp = Path(tempfile.mkdtemp(prefix="flux_tests_feed_"))
+    feed = tmp / "activite.json"
+    paths.get_activity_path = lambda: feed
+    activity_writer.get_activity_path = lambda: feed
+    history.get_archive_dir = lambda: tmp / "archive"
+    history.get_archive_path = lambda stem, yyyymm: tmp / "archive" / f"{stem}_{yyyymm}.json"
+
+
 def _run_child() -> None:
     """In-child: run the suite, write the sentinel, hard-exit before teardown."""
     sys.path.insert(0, _BACKEND)
+    _isolate_activity_feed()
     suite = unittest.TestLoader().discover(start_dir=_HERE, pattern="test_*.py")
     runner = unittest.TextTestRunner(verbosity=2, resultclass=_SentinelResult)
     result = runner.run(suite)
