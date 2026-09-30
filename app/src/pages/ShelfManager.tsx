@@ -17,11 +17,6 @@ const LIGHT_COLOR = 'oklch(84% 0.16 92)'
 // ZBrush: FLUX menu of the bridge (Export FLUX, Save +1) on top of the FLUX UI (2026-09-30).
 const ZBRUSH_COLOR = 'oklch(70% 0.15 52)'
 
-// "FLUX_BEAUTY_MAPS" -> "BEAUTY" for the shelf button label.
-function presetLabel(name: string): string {
-  return name.replace(/^FLUX_/i, '').replace(/_MAPS$/i, '') || name
-}
-
 const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: string; primary?: boolean }) => (
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
     <div style={{
@@ -99,8 +94,6 @@ export function ShelfManager() {
     }
   }
   const isPainter = dcc === 'Painter'
-  // What the Publisher will offer: the project's presets, all of them when none is picked.
-  const painterShelf = painterPicked.length ? painterPicked : painterBundled
 
   const currentData: ShelfData = shelfData[dcc] ?? { versions: [], installed: {}, hdas_installed: {} }
   const versions = currentData.versions
@@ -195,6 +188,7 @@ export function ShelfManager() {
   const hdaOk   = version ? (currentData.hdas_installed[version] ?? false) : false
   const isHoudini = dcc === 'Houdini'
   const isZBrush = dcc === 'ZBrush'
+  const hasPreview = isHoudini || isZBrush || dcc === 'Maya'
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -240,15 +234,11 @@ export function ShelfManager() {
             </div>
           )}
 
-          {/* aperçu shelf */}
-          <div>
+          {/* aperçu shelf: only the DCCs that really have a FLUX shelf (2026-09-30) */}
+          {hasPreview && <div>
             <SecTitle>Aperçu du shelf</SecTitle>
             <div className="card" style={{ padding: '14px 20px', display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', minHeight: 62 }}>
-              {isPainter ? (
-                painterShelf.length ? painterShelf.map(p => (
-                  <ShelfBtn key={p} icon={<FluxLogo size={20} color={PAINTER_COLOR} />} label={presetLabel(p)} />
-                )) : <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>Aucun preset FLUX livré</div>
-              ) : isZBrush ? (
+              {isZBrush ? (
                 <>
                   <ShelfBtn icon={<FluxLogo size={20} color={ZBRUSH_COLOR} />} label="EXPORT FLUX" primary />
                   <ShelfBtn icon={<FluxLogo size={20} color={CAM_COLOR} />} label="SAVE +1" />
@@ -273,7 +263,7 @@ export function ShelfManager() {
                 </>
               )}
             </div>
-          </div>
+          </div>}
 
           {/* PAINTER: export presets of the project (moved from the Folder Manager). */}
           {isPainter && (
