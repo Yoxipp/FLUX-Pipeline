@@ -648,14 +648,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    className={`dot${statusBusy || statusNoBridge ? ' warn' : connected ? ' ok' : ''}`}
+                    className={`dot${statusBusy || (statusNoBridge && !connected) ? ' warn' : connected ? ' ok' : ''}`}
                     style={{ width: 5, height: 5, flexShrink: 0 }}
                   />
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {statusBusy ? 'Occupé (un export tourne) : il répondra quand il aura fini'
-                    : statusNoBridge ? "Ouvert, mais le bridge FLUX ne tourne pas (installe l'autostart, puis relance le logiciel)"
+                    : statusNoBridge && !connected ? "Ouvert, mais le bridge FLUX ne tourne pas (installe l'autostart, puis relance le logiciel)"
                     : connected ? `Connecté${instances.length === 1 && instances[0].scene != null ? ` · ${instances[0].label}` : ''}`
+                      + (statusNoBridge ? ` · +${dccStatus[statusKey]?.no_bridge_count ?? 1} ouvert(s) sans bridge` : '')
                     : 'Fermé'}
                 </TooltipContent>
               </Tooltip>

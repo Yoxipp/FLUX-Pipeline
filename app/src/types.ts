@@ -30,6 +30,7 @@ export interface DccStatusEntry {
   // A1: open without the FLUX bridge listening, every instance busy, the instance the
   // backend targets (port + pid) and the chosen one that went away.
   no_bridge?: boolean
+  no_bridge_count?: number   // B5: sessions running without the bridge
   busy?: boolean
   active?: { port: number; pid: number | null } | null
   active_lost?: { port: number; pid: number | null; now_pid: number | null; at: number } | null
