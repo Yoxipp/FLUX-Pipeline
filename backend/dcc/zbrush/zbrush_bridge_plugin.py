@@ -618,14 +618,17 @@ def _register_zbrush_ui() -> None:
         _log(f"add_button Save +1 → {ok3}")
     except Exception as exc:
         _log(f"UI registration failed (non-critical): {exc!r}")
-    # Top-level FLUX menu (2026-09-30): the two buttons stay reachable whatever UI
-    # is loaded (the FLUX UI .cfg cannot hold plugin buttons itself).
+    # Top-level FLUX menu (2026-09-30): appended to the menu bar (after Help) and
+    # docked in the right tray with an always-open sub-palette, so the two buttons are
+    # always visible whatever UI is loaded. The API cannot put a bare button in the
+    # menu bar itself.
     try:
-        if zbc.add_palette("FLUX", 0):
-            zbc.add_button("FLUX:Export FLUX", "Publier le tool actif via FLUX", _on_publish_click)
-            zbc.add_button("FLUX:Save +1", "Sauvegarde le projet en version suivante (v004 -> v005)",
-                           _on_save_increment_click)
-            _log("FLUX palette registered")
+        if zbc.add_palette("FLUX", docking_bar=1):
+            zbc.add_subpalette("FLUX:Bridge", title_mode=2)
+            zbc.add_button("FLUX:Bridge:Export FLUX", "Publier le tool actif via FLUX", _on_publish_click, width=1.0)
+            zbc.add_button("FLUX:Bridge:Save +1", "Sauvegarde le projet en version suivante (v004 -> v005)",
+                           _on_save_increment_click, width=1.0)
+            _log("FLUX palette registered (menu bar + right tray)")
     except Exception as exc:
         _log(f"FLUX palette registration failed (non-critical): {exc!r}")
     _apply_autosave_interval()
