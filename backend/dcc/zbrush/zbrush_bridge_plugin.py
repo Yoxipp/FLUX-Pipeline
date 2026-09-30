@@ -19,6 +19,7 @@ Protocol (newline-framed JSON):
 from __future__ import annotations
 
 import json
+import re
 import os
 import select
 import socket
@@ -530,8 +531,73 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
         _focus_zbrush_window()
 
 
+_VERSION_RE = re.compile(r"^(?P<stem>.*?)(?P<num>\d+)(?P<ext>\.zpr)$", re.IGNORECASE)
+
+
+def next_increment_path(path: str) -> str:
+    """Next version of a project path: 'Dragon_v004.zpr' -> 'Dragon_v005.zpr' (padding
+    kept), 'Dragon.zpr' -> 'Dragon_v001.zpr'. Pure function, testable outside ZBrush."""
+    base, ext = os.path.splitext(path)
+    if ext.lower() != ".zpr":
+        path, ext = base + ".zpr", ".zpr"
+    m = _VERSION_RE.match(path)
+    if not m:
+        return f"{os.path.splitext(path)[0]}_v001.zpr"
+    num = m.group("num")
+    return f"{m.group('stem')}{int(num) + 1:0{len(num)}d}{m.group('ext')}"
+
+
+def _on_save_increment_click(*args: object, **kwargs: object) -> None:
+    """'Save +1' button: saves the project as the next version next to the last one.
+    No project saved yet (or the last file was an export): ZBrush asks for a name."""
+    if not _ZBRUSH_AVAILABLE:
+        return
+    try:
+        last = (zbc.get_last_used_filename() or "").replace("\\", "/")
+        if last.lower().endswith(".zpr") and os.path.isdir(os.path.dirname(last)):
+            target = next_increment_path(last)
+            while os.path.exists(target):          # never overwrite an existing version
+                target = next_increment_path(target)
+        else:
+            target = zbc.ask_filename("*.zpr", "", "Sauvegarder le projet")
+            if not target:
+                return
+        zbc.set_next_filename(target)
+        zbc.press("File:Save As")
+        zbc.set_notebar_text(f"FLUX : sauvegarde {os.path.basename(target)}")
+        _log(f"Save +1 -> {target}")
+    except Exception as exc:
+        _log(f"Save +1 failed: {exc!r}")
+        zbc.show_note(f"Sauvegarde impossible : {exc}")
+
+
+# Native ZBrush QuickSave (no timer exists in the Python API, so FLUX cannot drive an
+# auto-save itself): the interval is set at startup. Item paths differ between builds.
+AUTOSAVE_MINUTES = float(os.environ.get("FLUX_ZBRUSH_AUTOSAVE_MIN", "10"))
+_QUICKSAVE_INTERVAL_PATHS = (
+    "Preferences:QuickSave:Save Interval",
+    "Preferences:Quick Save:Save Interval",
+    "Preferences:QuickSave:Interval",
+)
+
+
+def _apply_autosave_interval() -> None:
+    if not _ZBRUSH_AVAILABLE or AUTOSAVE_MINUTES <= 0:
+        return
+    for item in _QUICKSAVE_INTERVAL_PATHS:
+        try:
+            if zbc.exists(item):
+                zbc.set(item, AUTOSAVE_MINUTES)
+                _log(f"QuickSave interval {AUTOSAVE_MINUTES} min via {item}")
+                return
+        except Exception as exc:
+            _log(f"QuickSave interval via {item} failed: {exc!r}")
+    _log("QuickSave interval item not found (non-critical)")
+
+
 def _register_zbrush_ui() -> None:
-    """Register 'Publish to FLUX' button in ZPlugin:FLUX Bridge (2026.1+ API)."""
+    """Register the FLUX buttons in ZPlugin:FLUX Bridge (2026.1+ API). the maintainer can drag them
+    into a custom UI (Preferences > Config > Enable Customize, Ctrl+Alt drag)."""
     if not _ZBRUSH_AVAILABLE:
         _log("ZBrush module not available — skipping UI registration")
         return
@@ -544,8 +610,15 @@ def _register_zbrush_ui() -> None:
             _on_publish_click,
         )
         _log(f"add_button → {ok2}")
+        ok3 = zbc.add_button(
+            "ZPlugin:FLUX Bridge:Save +1",
+            "Sauvegarde le projet en version suivante (v004 -> v005)",
+            _on_save_increment_click,
+        )
+        _log(f"add_button Save +1 → {ok3}")
     except Exception as exc:
         _log(f"UI registration failed (non-critical): {exc!r}")
+    _apply_autosave_interval()
 
 
 # ── Module-level init ─────────────────────────────────────────────────────────
