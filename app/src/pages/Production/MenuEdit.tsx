@@ -2,16 +2,17 @@
 // (nothing / asset / group) and on which category is currently entered.
 
 import { useEffect, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Check, Clapperboard, Copy, FolderOpen, FolderPlus, Plus, Trash2, X } from 'lucide-react'
+import { Check, Clapperboard, Copy, FolderOpen, FolderPlus, Lock, LockOpen, Plus, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
 import { useI18n } from '../../i18n'
 import type {
   ProductionAsset as Asset,
   CastingLink, ProductionAssetGroup, ProductionPublish,
-  ProductionSequence, ProductionShot,
+  ProductionLock, ProductionSequence, ProductionShot,
   ProductionState, ProductionTask,
 } from '../../types'
 import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, expandFluxPath, shotColorFromSeqColor } from './util'
@@ -233,6 +234,79 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
           </ProdBtn>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Lock of a sequence / shot (2026-09-30): anyone locks in one click, unlocking asks
+// to type Understand. A locked record cannot be edited, renamed or deleted (the backend
+// enforces it too); task progress and comments stay open.
+const _lockedFieldset: CSSProperties = { border: 0, padding: 0, margin: 0, minWidth: 0 }
+
+function LockControl({ project, kind, seqName, shotName, own, inherited, onChange }: {
+  project:   string
+  kind:      'seq' | 'shot'
+  seqName:   string
+  shotName:  string
+  own:       ProductionLock | undefined          // lock of this record
+  inherited: ProductionLock | undefined          // lock of its sequence (shots only)
+  onChange:  (lock: ProductionLock | undefined) => void
+}) {
+  const [asking, setAsking] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const call = async (locked: boolean, phrase = '') => {
+    setBusy(true)
+    try {
+      const r = await api.lockSeqShot(project, kind, seqName, shotName, locked, phrase)
+      onChange(r.locked ?? undefined)
+      setAsking(false); setTyped('')
+      toast.success(locked ? `${shotName || seqName} verrouillé` : `${shotName || seqName} déverrouillé`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (inherited && !own) {
+    return (
+      <div style={{ ..._lbl, marginTop: 6, textTransform: 'none', letterSpacing: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <Lock size={11} strokeWidth={1.9} /> Verrouillé avec sa séquence {seqName} ({inherited.by})
+      </div>
+    )
+  }
+  if (!own) {
+    return (
+      <ProdBtn full variant="ghost" onClick={() => { void call(true) }} disabled={busy} style={{ marginTop: 6 }}>
+        <Lock size={11} strokeWidth={1.75} /> Verrouiller
+      </ProdBtn>
+    )
+  }
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ ..._lbl, textTransform: 'none', letterSpacing: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <Lock size={11} strokeWidth={1.9} /> Verrouillé par {own.by}
+      </div>
+      {!asking ? (
+        <ProdBtn full variant="ghost" onClick={() => setAsking(true)} style={{ marginTop: 6 }}>
+          <LockOpen size={11} strokeWidth={1.75} /> Déverrouiller
+        </ProdBtn>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <input
+            autoFocus value={typed} onChange={e => setTyped(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && typed === DELETE_PHRASE) void call(false, typed)
+              if (e.key === 'Escape') { setAsking(false); setTyped('') }
+            }}
+            placeholder={`Tape ${DELETE_PHRASE}`} spellCheck={false}
+            style={{ ..._input, flex: 1, fontFamily: 'var(--mono)' }}
+          />
+          <ProdBtn size="sm" onClick={() => { void call(false, typed) }} disabled={busy || typed !== DELETE_PHRASE}>
+            <LockOpen size={10} strokeWidth={1.75} /> OK
+          </ProdBtn>
+        </div>
+      )}
     </div>
   )
 }
@@ -845,10 +919,15 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     setTaskName(''); setTaskSubtask('')
   }
 
+  const locked = !!seq.locked
+  const setLock = (lock: ProductionLock | undefined) =>
+    setState(prev => ({ ...prev, sequences: prev.sequences.map(s => s.id === seq.id ? { ...s, locked: lock } : s) }))
+
   return (
     <>
       <div style={_pad}>
         <div style={_lbl}>SÉQUENCE · {seq.name}{seq.label ? ` — ${seq.label}` : ''}</div>
+        <fieldset disabled={locked} style={_lockedFieldset}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
           <NumberField value={seqNum} onCommit={changeSeqNumber} width={60} busy={renaming} />
           <input
@@ -859,12 +938,17 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
           />
           <SeqColorPicker seq={seq} onPick={c => patchSeq({ color: c })} onReset={() => patchSeq({ color: undefined })} />
         </div>
+        </fieldset>
         <ProdBtn full variant="ghost" onClick={() => { void openFolder({ kind: 'seq', seq: seq.name }, seq.name) }} style={{ marginTop: 6 }}>
           <FolderOpen size={11} strokeWidth={1.75} /> Ouvrir dans le Folder Manager
         </ProdBtn>
-        <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
-          <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
-        </ProdBtn>
+        <LockControl project={project} kind="seq" seqName={seq.name} shotName=""
+                     own={seq.locked} inherited={undefined} onChange={setLock} />
+        {!locked && (
+          <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
+            <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
+          </ProdBtn>
+        )}
       </div>
 
       <div style={_pad}>
@@ -877,12 +961,14 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
         </div>
       </div>
 
+      <fieldset disabled={locked} style={_lockedFieldset}>
       <AssetsPicker
         state={state}
         setState={setState}
         entityKind="seq"
         entity={seq}
       />
+      </fieldset>
 
       <div style={_pad}>
         <div style={_lbl}>{t('prod.newShot')}</div>
@@ -907,6 +993,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
         </ProdBtn>
       </div>
 
+      <fieldset disabled={locked} style={_lockedFieldset}>
       <div style={_pad}>
         <div style={_lbl}>{t('prod.newTask')} (séquence)</div>
         <input
@@ -929,6 +1016,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
           <Plus size={12} strokeWidth={2} /> {t('prod.newTask')}
         </ProdBtn>
       </div>
+      </fieldset>
       {archiveDel.modal}
     </>
   )
@@ -1021,10 +1109,15 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
     setTaskName(''); setTaskSubtask('')
   }
 
+  const locked = !!shot.locked || !!seq?.locked
+  const setLock = (lock: ProductionLock | undefined) =>
+    setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === shot.id ? { ...s, locked: lock } : s) }))
+
   return (
     <>
       <div style={_pad}>
         <div style={_lbl}>SHOT · {seq?.name ?? '?'} · {shot.name}{shot.label ? ` — ${shot.label}` : ''}</div>
+        <fieldset disabled={locked} style={_lockedFieldset}>
         <div style={{ display: 'flex', gap: 6 }}>
           <NumberField value={shotNum} onCommit={changeShotNumber} width={70} busy={renaming} />
           <input
@@ -1047,15 +1140,23 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
             placeholder="Fin" style={{ ..._input, flex: 1 }}
           />
         </div>
+        </fieldset>
         <ProdBtn full variant="ghost" disabled={!seq} style={{ marginTop: 6 }}
                  onClick={() => { if (seq) void openFolder({ kind: 'shot', seq: seq.name, shot: shot.name }, `${seq.name} · ${shot.name}`) }}>
           <FolderOpen size={11} strokeWidth={1.75} /> Ouvrir dans le Folder Manager
         </ProdBtn>
-        <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
-          <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
-        </ProdBtn>
+        {seq && (
+          <LockControl project={project} kind="shot" seqName={seq.name} shotName={shot.name}
+                       own={shot.locked} inherited={seq.locked} onChange={setLock} />
+        )}
+        {!locked && (
+          <ProdBtn full variant="danger" onClick={remove} style={{ marginTop: 6 }}>
+            <Trash2 size={11} strokeWidth={1.75} /> {t('prod.delete')}
+          </ProdBtn>
+        )}
       </div>
 
+      <fieldset disabled={locked} style={_lockedFieldset}>
       <div style={_pad}>
         <label style={{ ..._lbl, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 6 }}>
           <input type="checkbox" checked={shot.inherit_tasks}
@@ -1098,6 +1199,7 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
           </ProdBtn>
         </div>
       )}
+      </fieldset>
       {archiveDel.modal}
     </>
   )

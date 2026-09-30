@@ -596,7 +596,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                             shot={shot}
                             frames={framesOf(shot)}
                             fps={fps}
-                            onResizeDown={e => onResizeDown(shot, e)}
+                            onResizeDown={e => { if (!(shot.locked || seq.locked)) onResizeDown(shot, e) }}
+                            locked={!!(shot.locked || seq.locked)}
                             width={widthOf(framesOf(shot))}
                             height={shotSquare}
                             seqColor={seqCol}
@@ -730,13 +731,15 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
       onDragStart={onDragStart}
       onDrop={onDrop}
       acceptType="text/flux-seq-id"
-      title={`${seq.name}${seq.label ? ` — ${seq.label}` : ''} · ${shotCount} shot${shotCount > 1 ? 's' : ''}`}
+      title={`${seq.name}${seq.label ? ` — ${seq.label}` : ''} · ${shotCount} shot${shotCount > 1 ? 's' : ''}${seq.locked ? ' · verrouillée' : ''}`}
+      badge={seq.locked ? 'LOCK' : undefined}
     />
   )
 }
 
-function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onClick, onDragStart, onDrop, seqColor }: {
+function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onClick, onDragStart, onDrop, seqColor, locked }: {
   shot:        Shot
+  locked:      boolean              // own lock or its sequence's: no resize (2026-09-30)
   frames:      number
   fps:         number
   onResizeDown: (e: React.MouseEvent) => void
@@ -770,9 +773,10 @@ function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onCl
       title={
         `${shot.name}${shot.label ? ` — ${shot.label}` : ''}\n${frames} images, ${formatSeconds(frames, fps)} (${range})` +
         '\nBord droit : glisser pour changer la duree' +
-        (override ? '\nOverrides seq' : '')
+        (override ? '\nOverrides seq' : '') +
+        (locked ? '\nVerrouillé' : '')
       }
-      badge={override ? 'OVR' : undefined}
+      badge={locked ? 'LOCK' : override ? 'OVR' : undefined}
     />
   )
 }

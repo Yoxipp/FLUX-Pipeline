@@ -899,7 +899,7 @@ export const api = {
   // backend — there is no separate "materialize" call any more; structure is kept
   // in sync automatically in both directions.
   setProduction: (project: string, production: ProductionState) =>
-    apiCall<{ success: boolean; synced?: Record<string, number> }>(
+    apiCall<{ success: boolean; synced?: Record<string, number>; locked_kept?: string[] }>(
       'PUT', `/production/${encodeURIComponent(project)}`, { production }),
 
   // Fan out a "comment" activity event so favorited-task subscribers see it in
@@ -945,6 +945,11 @@ export const api = {
   renameSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot: string, newName: string) =>
     apiCall<{ ok: boolean; archived: string; path: string; warnings: string[] }>(
       'POST', `/production/${encodeURIComponent(project)}/rename-seq-shot`, { kind, seq, shot, new: newName }),
+
+  // Lock / unlock a sequence or shot (unlock needs phrase "Understand").
+  lockSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot: string, locked: boolean, phrase = '') =>
+    apiCall<{ ok: boolean; locked: { by: string; at: string } | null }>(
+      'POST', `/production/${encodeURIComponent(project)}/lock`, { kind, seq, shot, locked, phrase }),
 
   deleteSeqShot: (project: string, kind: 'seq' | 'shot', seq: string, shot = '') =>
     apiCall<{ ok: boolean; archived: string[]; tokens_dropped: string[]; removed_ids: string[] }>(

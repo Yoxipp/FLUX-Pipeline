@@ -24,6 +24,7 @@ from features.folder_manager.tokens import load_tokens, remove_token
 from features.folder_manager.naming_validator import get_base_name
 from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import archive as prod_archive
+from features.production import lock as prod_lock
 from features.production import production_store as store
 from features.production import ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
@@ -257,6 +258,8 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     previous = await loop.run_in_executor(None, lambda: store.load_production(project))
     # A stale client (other window / machine) must not bring back a deleted seq / shot.
     prod_archive.keep_archived_out(payload.production, previous)
+    # Locked seq / shot records come back as stored (2026-09-30).
+    locked_kept = prod_lock.keep_locked(payload.production, previous)
     ok = await loop.run_in_executor(None, lambda: store.save_production(project, payload.production))
     if not ok:
         raise HTTPException(status_code=500, detail="Écriture production.json échouée")
@@ -277,7 +280,7 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
     except Exception as e:  # noqa: BLE001 — sync is best-effort, save already succeeded
         log.warning("Production→disk sync failed for %r: %s", project, e)
 
-    return {"success": True, "synced": synced, "shot_stages": stages}
+    return {"success": True, "synced": synced, "shot_stages": stages, "locked_kept": locked_kept}
 
 
 @router.post("/{project}/comment")
@@ -385,6 +388,7 @@ async def delete_seq_shot(project: str, payload: DeleteSeqShotRequest) -> dict:
 
     def _do() -> dict:
         production = store.load_production(project)
+        prod_lock.ensure_unlocked(production, payload.kind, payload.seq, payload.shot)
         res = prod_archive.delete_seq_shot(project_path, production, payload.kind, payload.seq, payload.shot)
         if not store.save_production(project, production):
             raise RuntimeError("Écriture production.json échouée")
@@ -392,6 +396,8 @@ async def delete_seq_shot(project: str, payload: DeleteSeqShotRequest) -> dict:
 
     try:
         res = await loop.run_in_executor(None, _do)
+    except prod_lock.LockedError as e:
+        raise HTTPException(status_code=423, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -420,6 +426,7 @@ async def rename_seq_shot(project: str, payload: RenameSeqShotRequest) -> dict:
     loop = asyncio.get_running_loop()
 
     def _do() -> dict:
+        prod_lock.ensure_unlocked(store.load_production(project), payload.kind, payload.seq, payload.shot)
         found = prod_rename.blockers(project_path, payload.kind, payload.seq, payload.shot)
         if found:
             shown = ", ".join(found[:4]) + (f" (+{len(found) - 4})" if len(found) > 4 else "")
@@ -434,12 +441,52 @@ async def rename_seq_shot(project: str, payload: RenameSeqShotRequest) -> dict:
 
     try:
         res = await loop.run_in_executor(None, _do)
+    except prod_lock.LockedError as e:
+        raise HTTPException(status_code=423, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         log.exception("rename-seq-shot failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, **res}
+
+
+class LockSeqShotRequest(BaseModel):
+    kind:   str          # 'seq' | 'shot'
+    seq:    str
+    shot:   str = ""
+    locked: bool
+    phrase: str = ""     # "Understand" to unlock
+
+
+@router.post("/{project}/lock")
+async def lock_seq_shot(project: str, payload: LockSeqShotRequest) -> dict:
+    """Lock / unlock a sequence or shot (2026-09-30). Anyone can; unlocking needs the
+    phrase. A lock blocks editing, renaming and deleting the record."""
+    _ensure_project(project)
+    if payload.kind not in ("seq", "shot"):
+        raise HTTPException(status_code=400, detail=f"kind invalide : {payload.kind!r}")
+    user = config.get_current_user() or "unknown"
+    loop = asyncio.get_running_loop()
+
+    def _do() -> dict:
+        production = store.load_production(project)
+        entity = prod_lock.set_lock(production, payload.kind, payload.seq, payload.shot,
+                                    payload.locked, user, payload.phrase)
+        if not store.save_production(project, production):
+            raise RuntimeError("Écriture production.json échouée")
+        return {"locked": entity.get(prod_lock.LOCK_KEY)}
+
+    try:
+        res = await loop.run_in_executor(None, _do)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        log.exception("lock-seq-shot failed")
         raise HTTPException(status_code=500, detail=str(e))
     return {"ok": True, **res}
 

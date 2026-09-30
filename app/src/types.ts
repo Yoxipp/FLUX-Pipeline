@@ -319,7 +319,11 @@ export interface ProductionSequence {
   assets: CastingLink[]
   task_details?: Record<string, ProductionTaskDetail>
   notes?: string
+  locked?: ProductionLock          // 2026-09-30: blocks edits / rename / delete
 }
+
+// Lock of a sequence / shot (backend features/production/lock.py).
+export interface ProductionLock { by: string; at: string }
 
 // Casting link (ADR 0020): count = number of instances in the shot stage (NAME_01, NAME_02...),
 // origin "auto" = added because an animation was published for that character.
@@ -344,6 +348,7 @@ export interface ProductionShot {
   task_details?: Record<string, ProductionTaskDetail>
   frame_start?: number            // shot frame range (ADR 0020), written on the shot stage
   frame_end?: number
+  locked?: ProductionLock
 }
 
 export interface ProductionState {

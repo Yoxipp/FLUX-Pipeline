@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
+import { toast } from 'sonner'
 import type {
   ProductionPayload, ProductionPublish, ProductionState,
 } from '../types'
@@ -93,12 +94,18 @@ export function useProduction(project: string | null | undefined): UseProduction
     const proj = project
     const snapshot = state
     const t = setTimeout(() => {
-      void api.setProduction(proj, snapshot).catch(() => {
+      void api.setProduction(proj, snapshot).then(r => {
+        // A locked seq / shot was edited here: the server kept it as stored.
+        if (r.locked_kept?.length) {
+          toast.warning(`Verrouillé, modification annulée : ${r.locked_kept.join(', ')}`)
+          void reload()
+        }
+      }).catch(() => {
         /* keep local edits; user sees them until next successful save */
       })
     }, 400)
     return () => clearTimeout(t)
-  }, [state, project])
+  }, [state, project]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return { state, setState, publishesByTask, publishesUnmatched, sequencesOnDisk, shotsOnDisk, loading, reload }
 }
