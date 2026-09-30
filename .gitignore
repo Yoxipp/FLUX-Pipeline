@@ -69,3 +69,8 @@ backend/resources/shelves/houdini/backup/
 
 # Session scratch files
 scratchpad/
+
+# Houdini session outputs written at the repo root when $HIP points here
+/untitled.hip
+/sourceimages/
+/flux_anim/
