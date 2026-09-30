@@ -21,6 +21,11 @@ log = get_logger(__name__)
 # Startup scripts that carry the FLUX block. 123.py runs only when Houdini starts WITHOUT a
 # scene; 456.py runs on every scene load (a .hip double-clicked outside FLUX). B5 2026-09-28.
 _STARTUP_FILES = ("123.py", "456.py")
+# 2026-09-30 (B5, tested live on Houdini 22): a Houdini opened on a .hip runs
+# neither 123.py nor 456.py (nor uiready.py), only pythonX.Ylibs/pythonrc.py. The block
+# also goes there, for every Python the installed Houdini ships (python313 -> 3.13).
+_PYTHONRC = "pythonrc.py"
+_DEFAULT_PY_VERSIONS = ("3.13",)
 
 # Markers used to locate the FLUX block in 123.py — never change these.
 _BLOCK_BEGIN = "# >>> FLUX autostart — do not edit manually"
@@ -332,8 +337,9 @@ _NEW_BLOCK = (
     f"{_BLOCK_BEGIN}\n"
     f"try:\n"
     f"    import sys as _flux_sys, os as _flux_os, hou as _flux_hou\n"
-    f"    # B5: also in 456.py (a Houdini opened on a .hip skips 123.py): once per session.\n"
-    f"    if 'flux_houdini_server' not in _flux_sys.modules:\n"
+    f"    # B5: also in 456.py and pythonrc.py (a .hip opened outside FLUX skips 123.py):\n"
+    f"    # once per session, and only with a UI (never in hython / hbatch).\n"
+    f"    if 'flux_houdini_server' not in _flux_sys.modules and _flux_hou.isUIAvailable():\n"
     f"        # Dynamic $FLUX: whichever FLUX is currently running wins over the installed value.\n"
     f"        try:\n"
     f"            import urllib.request as _flux_ureq, json as _flux_json, pathlib as _flux_pl\n"
@@ -415,7 +421,29 @@ def _all_prefs_dirs(houdini_exe_path: str | None = None) -> list[Path]:
     return dirs
 
 
-def _install_to(prefs_dir: Path) -> dict:
+def _py_versions(houdini_exe_path: str | None) -> list[str]:
+    """Python versions shipped with this Houdini ($HFS/python313 -> '3.13')."""
+    found: list[str] = []
+    if houdini_exe_path:
+        hfs = Path(houdini_exe_path).resolve().parent.parent
+        try:
+            for d in sorted(hfs.glob("python3*")):
+                m = re.fullmatch(r"python3(\d+)", d.name)
+                if d.is_dir() and m:
+                    found.append(f"3.{m.group(1)}")
+        except OSError:
+            pass
+    return found or list(_DEFAULT_PY_VERSIONS)
+
+
+def _startup_targets(prefs_dir: Path, houdini_exe_path: str | None = None) -> list[Path]:
+    """Every startup script that carries the FLUX block in *prefs_dir*."""
+    targets = [prefs_dir / "scripts" / name for name in _STARTUP_FILES]
+    targets += [prefs_dir / f"python{v}libs" / _PYTHONRC for v in _py_versions(houdini_exe_path)]
+    return targets
+
+
+def _install_to(prefs_dir: Path, houdini_exe_path: str | None = None) -> dict:
     """Deploy the server + write/upgrade the FLUX block in prefs_dir/scripts/123.py."""
     scripts = prefs_dir / "scripts"
     try:
@@ -436,13 +464,17 @@ def _install_to(prefs_dir: Path) -> dict:
     _write_flux_package(prefs_dir, get_flux_root())
     _write_flux_jump_pref(prefs_dir)
 
-    results = [_write_block(scripts / name) for name in _STARTUP_FILES]
+    results = [_write_block(t) for t in _startup_targets(prefs_dir, houdini_exe_path)]
     failed = [r for r in results if not r["success"]]
     return failed[0] if failed else results[0]
 
 
 def _write_block(startup: Path) -> dict:
-    """Write or upgrade the FLUX block in one startup script (123.py / 456.py)."""
+    """Write or upgrade the FLUX block in one startup script (123.py / 456.py / pythonrc.py)."""
+    try:
+        startup.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"success": False, "message": f"Cannot create {startup.parent}: {exc}", "path": str(startup)}
     existing = startup.read_text(encoding="utf-8") if startup.exists() else ""
     if _BLOCK_BEGIN in existing:
         b_start = existing.find(_BLOCK_BEGIN)
@@ -468,9 +500,8 @@ def _write_block(startup: Path) -> dict:
 def is_installed(houdini_exe_path: str | None = None) -> bool:
     for prefs_dir in _all_prefs_dirs(houdini_exe_path):
         try:
-            if all((prefs_dir / "scripts" / n).exists()
-                   and _NEW_BLOCK in (prefs_dir / "scripts" / n).read_text(encoding="utf-8")
-                   for n in _STARTUP_FILES):
+            if all(t.exists() and _NEW_BLOCK in t.read_text(encoding="utf-8")
+                   for t in _startup_targets(prefs_dir, houdini_exe_path)):
                 return True
         except OSError:
             continue
@@ -488,7 +519,7 @@ def install(houdini_exe_path: str | None = None) -> dict:
     if not dirs:
         return {"success": False, "message": "Houdini prefs directory not found", "path": None}
 
-    results = [_install_to(d) for d in dirs]
+    results = [_install_to(d, houdini_exe_path) for d in dirs]
     primary = dict(results[0])
     primary["success"] = any(r["success"] for r in results)
     extras = [r["path"] for r in results[1:] if r.get("path")]
@@ -507,8 +538,7 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
         _remove_env_block(prefs_dir)
         _remove_flux_package(prefs_dir)
         _remove_flux_jump_pref(prefs_dir)
-        for name in _STARTUP_FILES:
-            startup = prefs_dir / "scripts" / name
+        for startup in _startup_targets(prefs_dir, houdini_exe_path):
             try:
                 content = startup.read_text(encoding="utf-8") if startup.exists() else ""
             except OSError:

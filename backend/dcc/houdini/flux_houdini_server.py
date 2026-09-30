@@ -42,6 +42,16 @@ _last_pushed_state: dict = {}
 class _ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     """One thread per connection so SSE doesn't block /run or /state."""
     daemon_threads = True
+    # B5 (tested live 2026-09-30): HTTPServer sets SO_REUSEADDR, which on Windows lets a
+    # second Houdini bind the SAME port without error, so both claimed 48884. The port
+    # must be exclusive for each Houdini to take the next free one of its range.
+    allow_reuse_address = False
+
+    def server_bind(self) -> None:
+        import socket as _socket
+        if hasattr(_socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(_socket.SOL_SOCKET, _socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 class _Handler(BaseHTTPRequestHandler):

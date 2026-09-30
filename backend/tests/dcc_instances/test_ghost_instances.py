@@ -55,5 +55,32 @@ class AutostartBothScripts(unittest.TestCase):
         self.assertIn("print('mine')", (self.prefs / "scripts" / "123.py").read_text(encoding="utf-8"))
 
 
+class AutostartPythonrc(unittest.TestCase):
+    """2026-09-30, tested live: Houdini 22 opened on a .hip runs only pythonrc.py."""
+
+    def test_targets_follow_the_pythons_of_the_install(self) -> None:
+        hfs = Path(tempfile.mkdtemp(prefix="flux_hfs_"))
+        self.addCleanup(shutil.rmtree, hfs, True)
+        for d in ("bin", "python311", "python313", "pythonlib"):
+            (hfs / d).mkdir()
+        exe = str(hfs / "bin" / "houdini.exe")
+        prefs = Path("P")
+        targets = autostart._startup_targets(prefs, exe)
+        self.assertIn(prefs / "python3.13libs" / "pythonrc.py", targets)
+        self.assertIn(prefs / "python3.11libs" / "pythonrc.py", targets)
+        self.assertIn(prefs / "scripts" / "123.py", targets)
+        self.assertEqual(autostart._py_versions(None), ["3.13"])
+
+    def test_block_skips_sessions_without_ui(self) -> None:
+        self.assertIn("_flux_hou.isUIAvailable()", autostart._NEW_BLOCK)
+
+    def test_write_block_creates_the_libs_folder(self) -> None:
+        prefs = Path(tempfile.mkdtemp(prefix="flux_hprefs_"))
+        self.addCleanup(shutil.rmtree, prefs, True)
+        target = prefs / "python3.13libs" / "pythonrc.py"
+        self.assertTrue(autostart._write_block(target)["success"])
+        self.assertEqual(target.read_text(encoding="utf-8").count(autostart._BLOCK_BEGIN), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
