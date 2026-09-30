@@ -520,6 +520,7 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
         if _ZBRUSH_AVAILABLE:
             zbc.show_note("Erreur : bridge FLUX non initialisé.\nRedémarre ZBrush.")
         return
+    _autosave_ztl()     # option 2: a .ztl at each FLUX click, before the publish
     _in_freeze = True
     _focus_flux_window()
     _log("Entering zbc.freeze()")
@@ -547,13 +548,57 @@ def next_increment_path(path: str) -> str:
     return f"{m.group('stem')}{int(num) + 1:0{len(num)}d}{m.group('ext')}"
 
 
-def _on_save_increment_click(*args: object, **kwargs: object) -> None:
-    """'Save +1' button: saves the project as the next version next to the last one.
-    No project saved yet (or the last file was an export): ZBrush asks for a name."""
+# Last project (.zpr) saved or opened: the tool auto-save writes a .ztl would otherwise
+# become ZBrush's "last used file" and Save +1 would version the auto-save instead.
+_last_project: str = ""
+_AUTOSAVE_FALLBACK_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "FLUX", "zbrush_autosave")
+
+
+def autosave_ztl_path(project: str, tool: str, fallback_dir: str = _AUTOSAVE_FALLBACK_DIR) -> str:
+    """Where the tool auto-save goes: next to the project (<project>_autosave.ztl), else
+    <fallback_dir>/<tool>_autosave.ztl. One rolling file, overwritten each time.
+    Pure function, testable outside ZBrush."""
+    if project and project.lower().endswith(".zpr") and os.path.isdir(os.path.dirname(project)):
+        return os.path.splitext(project)[0] + "_autosave.ztl"
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", os.path.basename(tool or "tool")).strip("_.") or "tool"
+    return os.path.join(fallback_dir, f"{name}_autosave.ztl").replace("\\", "/")
+
+
+def _remember_project() -> str:
+    """Refresh _last_project from ZBrush's last used file when it is a project."""
+    global _last_project
+    try:
+        last = (zbc.get_last_used_filename() or "").replace("\\", "/")
+        if last.lower().endswith(".zpr"):
+            _last_project = last
+    except Exception:
+        pass
+    return _last_project
+
+
+def _autosave_ztl() -> None:
+    """Option 2 (2026-09-30): save the active tool as .ztl at each FLUX button click,
+    on top of ZBrush's native QuickSave (.zpr). Never blocks the button's own action."""
     if not _ZBRUSH_AVAILABLE:
         return
     try:
-        last = (zbc.get_last_used_filename() or "").replace("\\", "/")
+        target = autosave_ztl_path(_remember_project(), zbc.get_active_tool_path())
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        zbc.set_next_filename(target)
+        zbc.press("Tool:Save")
+        _log(f"Auto-save ztl -> {target}")
+    except Exception as exc:
+        _log(f"Auto-save ztl failed (non-critical): {exc!r}")
+
+
+def _on_save_increment_click(*args: object, **kwargs: object) -> None:
+    """'Save +1' button: saves the project as the next version next to the last one.
+    No project saved yet (or the last file was an export): ZBrush asks for a name."""
+    global _last_project
+    if not _ZBRUSH_AVAILABLE:
+        return
+    try:
+        last = _remember_project()
         if last.lower().endswith(".zpr") and os.path.isdir(os.path.dirname(last)):
             target = next_increment_path(last)
             while os.path.exists(target):          # never overwrite an existing version
@@ -564,8 +609,10 @@ def _on_save_increment_click(*args: object, **kwargs: object) -> None:
                 return
         zbc.set_next_filename(target)
         zbc.press("File:Save As")
+        _last_project = target.replace("\\", "/")
         zbc.set_notebar_text(f"FLUX : sauvegarde {os.path.basename(target)}")
         _log(f"Save +1 -> {target}")
+        _autosave_ztl()
     except Exception as exc:
         _log(f"Save +1 failed: {exc!r}")
         zbc.show_note(f"Sauvegarde impossible : {exc}")

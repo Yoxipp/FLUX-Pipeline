@@ -244,7 +244,7 @@ export function ShelfManager() {
                   <ShelfBtn icon={<FluxLogo size={20} color={CAM_COLOR} />} label="SAVE +1" />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 6, paddingLeft: 16, borderLeft: '1px solid var(--rule-2)' }}>
                     <div style={{ fontSize: 11, color: 'var(--ink)', fontFamily: 'var(--mono)' }}>flux_ui_zbrush</div>
-                    <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>UI FLUX (template Rongeart) · menu FLUX · auto-save QuickSave 10 min</div>
+                    <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>UI FLUX (template Rongeart) · menu FLUX · .ztl à chaque clic FLUX + QuickSave 10 min</div>
                   </div>
                 </>
               ) : dcc === 'Maya' ? (
