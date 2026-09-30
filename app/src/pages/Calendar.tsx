@@ -63,13 +63,6 @@ const shortDate = (s: string, l: Lang) => { const d = fromIso(s); return `${d.ge
 const span = (it: CalendarItem, l: Lang) =>
   it.start === it.end ? shortDate(it.start, l) : `${shortDate(it.start, l)} ${l === 'en' ? 'to' : 'au'} ${shortDate(it.end, l)}`
 
-// One flat color per person (hash of the name), shown as a small square.
-function userColor(name: string): string {
-  let h = 0
-  for (const ch of name.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) % 360
-  return `oklch(66% 0.09 ${h})`
-}
-
 const isLate = (it: CalendarItem) => (it.status === 'accepted' || it.status === 'in_progress') && it.end < todayIso()
 
 const btn = (primary = false, danger = false): CSSProperties => ({
@@ -221,10 +214,8 @@ function Chip({ it, selected, onClick, full }: { it: CalendarItem; selected: boo
         color: 'var(--ink)', minWidth: 0,
       }}
     >
-      <span title={it.owner} style={{ width: 7, height: 7, borderRadius: 2, flexShrink: 0, marginTop: full ? 3 : 0, background: userColor(it.owner) }} />
       <div style={{ minWidth: 0, overflow: 'hidden', whiteSpace: full ? 'normal' : 'nowrap', textOverflow: 'ellipsis' }}>
         {it.status === 'done' && <Check size={9} strokeWidth={2.4} style={{ marginRight: 3, verticalAlign: -1 }} />}
-        {late && <span style={{ color: 'var(--err)', fontWeight: 700, marginRight: 3 }}>!</span>}
         {it.title}
         {full && <div style={{ fontSize: 9.5, color: 'var(--ink-2)' }}>{it.owner}{it.link ? ` · ${it.link}` : ''}</div>}
       </div>
@@ -337,7 +328,6 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{it.title}</div>
           <div style={{ fontSize: 10.5, color: 'var(--ink-2)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: userColor(it.owner), display: 'inline-block' }} />
             {it.owner} · {span(it, l)}
           </div>
         </div>
@@ -526,6 +516,11 @@ export function Calendar() {
             const list = itemsOn(day)
             const outside = view === 'month' && d.getMonth() !== cursor.getMonth()
             const weekend = d.getDay() === 0 || d.getDay() === 6
+            const past = day < today
+            // 2026-09-30: weekend dark, days to come light, past days greyed.
+            const cellBg = weekend ? 'var(--bg-deep)'
+              : past ? 'color-mix(in oklch, var(--ink-4) 45%, var(--paper))'
+              : 'color-mix(in oklch, var(--ink) 7%, var(--paper-2))'
             const max = view === 'month' ? MONTH_CHIPS : list.length
             return (
               <div key={day} onClick={() => { setPicked(null); setCreating(day) }}
@@ -533,9 +528,10 @@ export function Calendar() {
                    style={{
                      borderRight: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: 5,
                      display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, cursor: 'copy',
-                     background: weekend ? 'var(--paper-2)' : 'var(--paper)', opacity: outside ? 0.45 : 1,
+                     background: cellBg, opacity: outside ? 0.5 : 1,
                    }}>
-                <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 400, color: day === today ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
+                <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500,
+                              color: day === today ? 'var(--accent-hi)' : past ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
                 </div>
                 {list.slice(0, max).map(it => (
@@ -585,9 +581,6 @@ export function Calendar() {
         <div>
           <div style={lbl}>{tr('Légende', 'Legend')}</div>
           <Legend />
-          <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6 }}>
-            {tr('! rouge : en retard. Carré de couleur : la personne.', 'Red !: late. Colored square: the person.')}
-          </div>
         </div>
       </div>
     </div>
