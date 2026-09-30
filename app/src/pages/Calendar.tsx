@@ -79,13 +79,21 @@ const input: CSSProperties = {
 }
 const lbl: CSSProperties = { fontSize: 9.5, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }
 
-// ── FLUX date picker (replaces the native date input) ────────────────────────
-function DateField({ value, onChange, min }: { value: string; onChange: (v: string) => void; min?: string }) {
-  const { l } = useTr()
+// ── FLUX range picker (replaces the native date inputs) ──────────────────────
+// 2026-09-30: press a day and drag to another (30 -> 2), the span turns orange and
+// fills Start / End. A click then a second click works too. One calendar under the
+// Start / End row, as wide as the panel (never overflows it).
+function DateRange({ start, end, onChange, min }: {
+  start: string; end: string; onChange: (s: string, e: string) => void; min?: string
+}) {
+  const { l, tr } = useTr()
   const [open, setOpen] = useState(false)
-  const [month, setMonth] = useState(() => fromIso(value || todayIso()))
+  const [month, setMonth] = useState(() => fromIso(start || todayIso()))
+  const [anchor, setAnchor] = useState<string | null>(null)   // first day pressed
+  const [hover, setHover] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (open) setMonth(fromIso(value || todayIso())) }, [open, value])
+  useEffect(() => { if (open) { setMonth(fromIso(start || todayIso())); setAnchor(null); setHover(null) } }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
@@ -94,22 +102,46 @@ function DateField({ value, onChange, min }: { value: string; onChange: (v: stri
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
+
+  const commit = (a: string, b: string) => {
+    const [s, e] = a <= b ? [a, b] : [b, a]
+    onChange(s, e)
+    setAnchor(null); setHover(null); setDragging(false); setOpen(false)
+  }
+  // Shown span: the one being picked, else the current value.
+  const [lo, hi] = anchor
+    ? [anchor, hover ?? anchor].sort()
+    : [start, end]
   const first = mondayOf(new Date(month.getFullYear(), month.getMonth(), 1))
   const cells = Array.from({ length: 42 }, (_, i) => addDays(first, i))
   const today = todayIso()
-  return (
-    <div ref={ref} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+  const shown = (v: string) => (v ? `${shortDate(v, l)} ${fromIso(v).getFullYear()}` : '—')
+  const field = (label: string, value: string) => (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={lbl}>{label}</div>
       <button type="button" onClick={() => setOpen(o => !o)}
               style={{ ...input, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', textAlign: 'left',
                        borderColor: open ? 'var(--accent)' : 'var(--rule-2)' }}>
         <CalendarDays size={11} strokeWidth={1.8} color="var(--ink-3)" />
-        {value ? shortDate(value, l) + ' ' + fromIso(value).getFullYear() : '—'}
+        {shown(value)}
       </button>
+    </div>
+  )
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {field(tr('Début', 'Start'), start)}
+        {field(tr('Fin', 'End'), end)}
+      </div>
       {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 50, width: 224, padding: 8,
-          background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 8, boxShadow: 'var(--shadow-md)',
-        }}>
+        <div
+          onMouseUp={() => setDragging(false)}
+          style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50, padding: 8,
+            background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 8, boxShadow: 'var(--shadow-md)',
+            userSelect: 'none',
+          }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <button type="button" style={{ ...btn(), padding: 3 }} onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}><ChevronLeft size={12} /></button>
             <div style={{ flex: 1, textAlign: 'center', fontSize: 11, color: 'var(--ink)', textTransform: 'capitalize' }}>
@@ -117,47 +149,48 @@ function DateField({ value, onChange, min }: { value: string; onChange: (v: stri
             </div>
             <button type="button" style={{ ...btn(), padding: 3 }} onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}><ChevronRight size={12} /></button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
-            {WEEKDAYS[l].map(d => <div key={d} style={{ fontSize: 8.5, color: 'var(--ink-4)', textAlign: 'center' }}>{d.slice(0, 2)}</div>)}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', rowGap: 2 }}>
+            {WEEKDAYS[l].map(d => <div key={d} style={{ fontSize: 8.5, color: 'var(--ink-4)', textAlign: 'center', paddingBottom: 2 }}>{d.slice(0, 2)}</div>)}
             {cells.map(d => {
               const day = iso(d)
               const off = !!min && day < min
-              const sel = day === value
+              const inSpan = !!lo && day >= lo && day <= hi
+              const edge = day === lo || day === hi
               return (
-                <button type="button" key={day} disabled={off}
-                        onClick={() => { onChange(day); setOpen(false) }}
-                        style={{
-                          fontSize: 10, padding: '4px 0', borderRadius: 4, cursor: off ? 'default' : 'pointer',
-                          border: day === today ? '1px solid var(--rule-2)' : '1px solid transparent',
-                          background: sel ? 'var(--accent-soft)' : 'transparent',
-                          color: off ? 'var(--ink-4)' : sel ? 'var(--accent-hi)' : d.getMonth() === month.getMonth() ? 'var(--ink)' : 'var(--ink-3)',
-                          opacity: off ? 0.5 : 1, fontFamily: 'var(--sans)',
-                        }}>
+                <div key={day}
+                     onMouseDown={e => {
+                       if (off) return
+                       e.preventDefault()
+                       // Second click of a click-click pick: closes the span.
+                       if (anchor && !dragging) { commit(anchor, day); return }
+                       setAnchor(day); setHover(day); setDragging(true)
+                     }}
+                     onMouseEnter={() => { if (!off && anchor) setHover(day) }}
+                     onMouseUp={() => {
+                       if (off || !anchor || !dragging) return
+                       if (day !== anchor) commit(anchor, day)
+                       else setDragging(false)   // plain click: wait for the second click
+                     }}
+                     style={{
+                       fontSize: 10, padding: '4px 0', textAlign: 'center', cursor: off ? 'default' : 'pointer',
+                       background: inSpan ? (edge ? 'color-mix(in oklch, var(--accent) 45%, transparent)' : 'var(--accent-soft)') : 'transparent',
+                       borderRadius: edge ? 4 : 0,
+                       outline: day === today && !inSpan ? '1px solid var(--rule-2)' : undefined, outlineOffset: -1,
+                       color: off ? 'var(--ink-4)' : inSpan ? 'var(--accent-hi)' : d.getMonth() === month.getMonth() ? 'var(--ink)' : 'var(--ink-3)',
+                       opacity: off ? 0.5 : 1, fontWeight: edge && inSpan ? 700 : 400,
+                     }}>
                   {d.getDate()}
-                </button>
+                </div>
               )
             })}
           </div>
+          <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6 }}>
+            {anchor
+              ? tr('Clique ou relâche sur le dernier jour', 'Click or release on the last day')
+              : tr('Clique-glisse du premier au dernier jour', 'Click and drag from the first to the last day')}
+          </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function DateRange({ start, end, onChange, min }: {
-  start: string; end: string; onChange: (s: string, e: string) => void; min?: string
-}) {
-  const { tr } = useTr()
-  return (
-    <div style={{ display: 'flex', gap: 6 }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={lbl}>{tr('Début', 'Start')}</div>
-        <DateField value={start} min={min} onChange={v => onChange(v, end < v ? v : end)} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={lbl}>{tr('Fin', 'End')}</div>
-        <DateField value={end} min={start} onChange={v => onChange(start, v)} />
-      </div>
     </div>
   )
 }
@@ -200,6 +233,7 @@ function Chip({ it, selected, onClick, full }: { it: CalendarItem; selected: boo
   const proposed = it.status === 'proposed'
   return (
     <div
+      onMouseDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onClick() }}
       title={`${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}${late ? tr(' · en retard', ' · late') : ''}`}
       style={{
@@ -239,19 +273,19 @@ function Legend() {
 }
 
 // ── create form ──────────────────────────────────────────────────────────────
-function CreateForm({ project, me, users, day, onDone, onCancel }: {
-  project: string; me: string; users: string[]; day: string
+function CreateForm({ project, me, users, range, onDone, onCancel }: {
+  project: string; me: string; users: string[]; range: { start: string; end: string }
   onDone: (it: CalendarItem) => void; onCancel: () => void
 }) {
   const { tr } = useTr()
   const [title, setTitle] = useState('')
   const [owner, setOwner] = useState(me)
-  const [start, setStart] = useState(day)
-  const [end, setEnd] = useState(day)
+  const [start, setStart] = useState(range.start)
+  const [end, setEnd] = useState(range.end)
   const [link, setLink] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setStart(day); setEnd(day) }, [day])
+  useEffect(() => { setStart(range.start); setEnd(range.end) }, [range.start, range.end])
   const forOther = !!owner && !same(owner, me)
   const submit = async () => {
     setBusy(true)
@@ -433,7 +467,18 @@ export function Calendar() {
   const [cursor, setCursor] = useState(() => new Date())
   const [who, setWho] = useState('')                 // '' = everyone
   const [picked, setPicked] = useState<string | null>(null)
-  const [creating, setCreating] = useState<string | null>(null)   // day of the new task
+  const [creating, setCreating] = useState<{ start: string; end: string } | null>(null)   // span of the new task
+  // Click-drag over the grid (2026-09-30): the span turns orange, release opens New task.
+  const [drag, setDrag] = useState<{ a: string; b: string } | null>(null)
+  useEffect(() => {
+    if (!drag) return
+    const up = () => {
+      const [start, end] = [drag.a, drag.b].sort()
+      setPicked(null); setCreating({ start, end }); setDrag(null)
+    }
+    window.addEventListener('mouseup', up)
+    return () => window.removeEventListener('mouseup', up)
+  }, [drag])
 
   const load = useCallback(() => {
     if (!project) return
@@ -499,7 +544,7 @@ export function Calendar() {
               <option key={u} value={u}>{same(u, me) ? `${u} (${tr('moi', 'me')})` : u}</option>
             ))}
           </select>
-          <button style={{ ...btn(true), marginLeft: 'auto' }} onClick={() => { setPicked(null); setCreating(today) }}>
+          <button style={{ ...btn(true), marginLeft: 'auto' }} onClick={() => { setPicked(null); setCreating({ start: today, end: today }) }}>
             <Plus size={11} /> {tr('Ajouter une tâche', 'Add a task')}</button>
         </div>
 
@@ -517,21 +562,28 @@ export function Calendar() {
             const outside = view === 'month' && d.getMonth() !== cursor.getMonth()
             const weekend = d.getDay() === 0 || d.getDay() === 6
             const past = day < today
-            // 2026-09-30: weekend dark, days to come light, past days greyed.
-            const cellBg = weekend ? 'var(--bg-deep)'
-              : past ? 'color-mix(in oklch, var(--ink-4) 45%, var(--paper))'
+            // 2026-09-30: weekends and past days dark, days to come light.
+            const dark = weekend || past
+            const selSpan = drag ? [drag.a, drag.b].sort() : creating ? [creating.start, creating.end] : null
+            const inSpan = !!selSpan && day >= selSpan[0] && day <= selSpan[1]
+            const cellBg = inSpan ? 'color-mix(in oklch, var(--accent) 22%, var(--paper))'
+              : dark ? 'var(--bg-deep)'
               : 'color-mix(in oklch, var(--ink) 7%, var(--paper-2))'
             const max = view === 'month' ? MONTH_CHIPS : list.length
             return (
-              <div key={day} onClick={() => { setPicked(null); setCreating(day) }}
-                   title={tr('Cliquer pour ajouter une tâche ce jour-là', 'Click to add a task on that day')}
+              <div key={day}
+                   onMouseDown={e => { if (e.button === 0) { e.preventDefault(); setDrag({ a: day, b: day }) } }}
+                   onMouseEnter={() => { if (drag) setDrag(g => (g ? { ...g, b: day } : g)) }}
+                   title={tr('Clic ou clic-glisser sur plusieurs jours pour ajouter une tâche', 'Click, or click and drag over several days, to add a task')}
                    style={{
+                     userSelect: 'none',
+                     boxShadow: inSpan ? 'inset 0 0 0 1px var(--accent)' : undefined,
                      borderRight: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: 5,
                      display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, cursor: 'copy',
                      background: cellBg, opacity: outside ? 0.5 : 1,
                    }}>
                 <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500,
-                              color: day === today ? 'var(--accent-hi)' : past ? 'var(--ink-2)' : 'var(--ink)' }}>
+                              color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
                 </div>
                 {list.slice(0, max).map(it => (
@@ -548,7 +600,7 @@ export function Calendar() {
       {/* side panel */}
       <div style={{ width: 300, flexShrink: 0, borderLeft: '1px solid var(--rule)', background: 'var(--paper-2)', overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {creating && (
-          <CreateForm project={project} me={me} users={users} day={creating}
+          <CreateForm project={project} me={me} users={users} range={creating}
                       onCancel={() => setCreating(null)}
                       onDone={it => { upsert(it); setCreating(null); setPicked(it.id) }} />
         )}
