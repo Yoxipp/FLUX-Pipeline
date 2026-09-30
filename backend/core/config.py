@@ -1,4 +1,4 @@
-﻿# config.py — read/write local config.json (next to the exe).
+# config.py — read/write local config.json (next to the exe).
 # Contains: workspace, username, last_project, theme, dcc_paths, dcc_ports.
 # One file per user-machine install — no shared state on the network drive.
 

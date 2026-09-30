@@ -1,4 +1,4 @@
-﻿# maya_import.py — import / reference files into the current Maya scene.
+# maya_import.py — import / reference files into the current Maya scene.
 # Runs inside Maya (Python 3.10). Also exposes open_importer() for shelf button.
 
 from __future__ import annotations

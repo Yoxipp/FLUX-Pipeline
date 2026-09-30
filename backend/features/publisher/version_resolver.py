@@ -1,4 +1,4 @@
-﻿# version_resolver.py — scan published folders for versioned files, compute next version.
+# version_resolver.py — scan published folders for versioned files, compute next version.
 
 from __future__ import annotations
 

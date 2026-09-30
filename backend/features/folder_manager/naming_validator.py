@@ -1,4 +1,4 @@
-﻿# naming_validator.py — token parsing, formatting and filename validation.
+# naming_validator.py — token parsing, formatting and filename validation.
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from core.constants import (
     ACTIVE_VERSION_LABEL,
     DEFAULT_INSTANCE,
     DEFAULT_PADDING,
-    TOKEN_TYPES,
-    TOKEN_TYPES_SHOT,
 )
 
 # Characters forbidden in any token

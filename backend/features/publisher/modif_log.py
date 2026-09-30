@@ -1,4 +1,4 @@
-﻿# modif_log.py — read/write per-folder modif_logs.json.
+# modif_log.py — read/write per-folder modif_logs.json.
 
 from __future__ import annotations
 

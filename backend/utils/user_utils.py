@@ -1,4 +1,4 @@
-﻿# user_utils.py — user management wrappers over config.py and paths.py.
+# user_utils.py — user management wrappers over config.py and paths.py.
 
 from __future__ import annotations
 

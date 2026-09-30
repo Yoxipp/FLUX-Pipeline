@@ -1,4 +1,4 @@
-﻿# activity_writer.py — append events to CONFIG/activite.json.
+# activity_writer.py — append events to CONFIG/activite.json.
 
 from __future__ import annotations
 

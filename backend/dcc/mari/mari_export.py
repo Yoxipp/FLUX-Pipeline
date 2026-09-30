@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 
 from core.logger import get_logger
-from dcc.substance_painter.substance_export import map_token_from_filename
 
 log = get_logger(__name__)
 

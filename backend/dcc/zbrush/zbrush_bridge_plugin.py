@@ -1,4 +1,4 @@
-"""
+r"""
 FLUX ZBrush Bridge Plugin — v1.2
 =================================
 Place this file in ZBrush's ZPlugs64 directory.
@@ -88,7 +88,7 @@ try:
 except Exception:
     pass
 
-_log(f"=== PLUGIN FILE LOAD ===")
+_log("=== PLUGIN FILE LOAD ===")
 _log(f"__name__={__name__!r}  __file__={globals().get('__file__', '<not set>')!r}")
 _log(f"_ZBRUSH_AVAILABLE={_ZBRUSH_AVAILABLE}  import_err={_ZBRUSH_IMPORT_ERR}")
 _log(f"HOST={HOST}  PORT={PORT}")

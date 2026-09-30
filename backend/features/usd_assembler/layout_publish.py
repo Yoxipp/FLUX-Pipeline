@@ -15,7 +15,7 @@ from pathlib import Path
 from core.logger import get_logger
 
 from .assembly_v2 import (
-    ASSEMBLY_EXT, DEFAULT_CLASS, _check_name, assembly_dir, assembly_root, current_entry,
+    ASSEMBLY_EXT, DEFAULT_CLASS, _check_name, assembly_root, current_entry,
     read_instances, write_version,
 )
 from .structure.naming import sanitize_token

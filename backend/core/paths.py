@@ -1,4 +1,4 @@
-﻿# paths.py — single source of truth for all absolute path construction.
+# paths.py — single source of truth for all absolute path construction.
 # Every other module MUST call these helpers instead of building paths manually.
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 from core.constants import (
-    FLUX_ROOT_DIRS,
     FLUX_MARKER_FILENAME,
     JSON_ACTIVITY,
     JSON_CHAT,

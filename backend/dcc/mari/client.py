@@ -10,7 +10,6 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 from core.constants import DCC_PORTS
 from dcc.json_bridge import send_json_line

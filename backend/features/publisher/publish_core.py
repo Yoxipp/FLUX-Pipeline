@@ -1,4 +1,4 @@
-﻿# publish_core.py — core publish pipeline: path resolution, version archiving, file copy.
+# publish_core.py — core publish pipeline: path resolution, version archiving, file copy.
 
 from __future__ import annotations
 

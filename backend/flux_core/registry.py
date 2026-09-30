@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, Tuple, Type
+from typing import Dict, Iterable, Tuple
 
 # key -> CommandBase subclass. Filled by the @register decorator at import time.
 _REGISTRY: Dict[str, type] = {}

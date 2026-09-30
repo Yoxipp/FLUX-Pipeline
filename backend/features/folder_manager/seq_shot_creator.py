@@ -1,4 +1,4 @@
-﻿# seq_shot_creator.py — create sequence and shot folder trees, register SEQ/SHOT tokens.
+# seq_shot_creator.py — create sequence and shot folder trees, register SEQ/SHOT tokens.
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-﻿# maya_publish.py — full publish workflow triggered from Maya shelf.
+# maya_publish.py — full publish workflow triggered from Maya shelf.
 # Runs inside Maya (Python 3.10): export scene → publish_core.publish_file().
 
 from __future__ import annotations

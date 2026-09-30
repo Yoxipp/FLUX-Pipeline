@@ -662,7 +662,6 @@ def _export_manager(geo, node, template: str, out_dir: str, size: int = 0) -> No
 
 
 def _do_export_nodes(geo, export_path: str, wanted: set, formats: dict, sizes: dict) -> dict:
-    import glob
 
     files: list = []
     errors: list = []

@@ -1,4 +1,4 @@
-﻿# asset_creator.py — create asset folder trees and register NAME tokens.
+# asset_creator.py — create asset folder trees and register NAME tokens.
 
 from __future__ import annotations
 

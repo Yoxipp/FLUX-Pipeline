@@ -1,4 +1,4 @@
-"""
+r"""
 FLUX — ZBrush plugin autostart manager.
 
 Implements BOTH official ZBrush Python plugin loading mechanisms:

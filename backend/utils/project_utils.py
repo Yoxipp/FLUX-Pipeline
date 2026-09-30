@@ -1,4 +1,4 @@
-﻿# project_utils.py — project management wrappers over config.py and paths.py.
+# project_utils.py — project management wrappers over config.py and paths.py.
 
 from __future__ import annotations
 

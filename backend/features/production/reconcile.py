@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from core.logger import get_logger
 from features.folder_manager.naming_validator import (

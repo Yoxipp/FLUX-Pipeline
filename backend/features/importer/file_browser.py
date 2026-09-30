@@ -1,4 +1,4 @@
-﻿# file_browser.py — read-only file browsing within a project path.
+# file_browser.py — read-only file browsing within a project path.
 
 from __future__ import annotations
 

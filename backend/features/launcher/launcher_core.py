@@ -1,4 +1,4 @@
-﻿# launcher_core.py — detect installed DCCs and launch them as detached processes.
+# launcher_core.py — detect installed DCCs and launch them as detached processes.
 
 from __future__ import annotations
 

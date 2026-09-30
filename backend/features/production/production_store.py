@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from core.logger import get_logger
 from core.repository_factory import get_repository

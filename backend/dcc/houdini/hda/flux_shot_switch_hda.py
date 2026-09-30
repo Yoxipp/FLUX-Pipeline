@@ -35,7 +35,6 @@ module from GET /dcc/houdini/shot_switch/module, so a fix needs no HDA rebuild.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from core.logger import get_logger
 from dcc.houdini.client import houdini_client

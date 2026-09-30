@@ -23,7 +23,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS
+from core.constants import DEFAULT_CLASS_TOKENS
 from core.logger import get_logger
 from core.paths import ensure_dir, is_subpath, path_exists_safe
 from features.folder_manager.tokens import load_tokens

@@ -1,4 +1,4 @@
-﻿# maya_connection.py — commandPort server management (Maya side) + command dispatch (hub side).
+# maya_connection.py — commandPort server management (Maya side) + command dispatch (hub side).
 #
 # Imported from two contexts:
 #   Maya (Python 3.10) : start_server, stop_server, open_hub

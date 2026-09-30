@@ -25,7 +25,7 @@ from pathlib import Path
 from core.logger import get_logger
 from core.paths import ensure_dir, path_exists_safe
 from features.production.archive import (
-    ARCHIVED_KEY, MAX_TOMBSTONES, _norm, _stamp_now, archive_folder, drop_tokens_under,
+    ARCHIVED_KEY, MAX_TOMBSTONES, _stamp_now, archive_folder, drop_tokens_under,
     resolve_entity_rel, satellite_rels,
 )
 

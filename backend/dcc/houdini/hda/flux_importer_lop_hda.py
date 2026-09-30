@@ -24,7 +24,6 @@ target is greyed (its toggle is kept); warnings show as text and as a node warni
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from core.logger import get_logger
 from dcc.houdini.client import houdini_client

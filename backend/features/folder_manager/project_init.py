@@ -1,4 +1,4 @@
-﻿# project_init.py — create a new Flux project on disk.
+# project_init.py — create a new Flux project on disk.
 #
 # Responsibilities:
 #   - validate project name

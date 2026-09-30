@@ -1135,7 +1135,6 @@ class MayaImportRequest(BaseModel):
 from dcc.maya.import_prep import (  # noqa: E402
     ascii_path as _ascii_path,
     call_maya_update as _maya_call_json,
-    drop_proxy_prims as _drop_proxy_prims,
     usd_source_for_maya as _maya_usd_source,
 )
 

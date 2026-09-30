@@ -1,4 +1,4 @@
-﻿# tokens.py — load, save and query tokens.json for a Flux project.
+# tokens.py — load, save and query tokens.json for a Flux project.
 #
 # tokens.json is the single source of truth for token→path resolution.
 # Every other pipeline module (publisher, importer, DCC bridge) reads from here
