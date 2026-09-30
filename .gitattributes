@@ -10,3 +10,4 @@
 *.exr    binary
 *.tx     binary
 *.spexp  binary
+*.cfg    binary

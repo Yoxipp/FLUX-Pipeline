@@ -14,6 +14,8 @@ const PAINTER_COLOR = 'oklch(72% 0.17 150)'
 // Maya base rigs of the Flux shelf: Camera Rig green, Light Rig yellow (2026-09-26).
 const CAM_COLOR   = 'oklch(72% 0.17 150)'
 const LIGHT_COLOR = 'oklch(84% 0.16 92)'
+// ZBrush: FLUX menu of the bridge (Export FLUX, Save +1) on top of the FLUX UI (2026-09-30).
+const ZBRUSH_COLOR = 'oklch(70% 0.15 52)'
 
 // "FLUX_BEAUTY_MAPS" -> "BEAUTY" for the shelf button label.
 function presetLabel(name: string): string {
@@ -192,6 +194,7 @@ export function ShelfManager() {
   const shelfOk = version ? (currentData.installed[version] ?? false) : false
   const hdaOk   = version ? (currentData.hdas_installed[version] ?? false) : false
   const isHoudini = dcc === 'Houdini'
+  const isZBrush = dcc === 'ZBrush'
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -229,7 +232,7 @@ export function ShelfManager() {
             <div>
               <SecTitle>État</SecTitle>
               <div style={{ display: 'flex', gap: 16 }}>
-                <Badge ok={shelfOk} label={shelfOk ? 'Shelf installé' : 'Shelf absent'} />
+                <Badge ok={shelfOk} label={isZBrush ? (shelfOk ? 'UI FLUX installée' : 'UI FLUX absente') : shelfOk ? 'Shelf installé' : 'Shelf absent'} />
                 {isHoudini && (
                   <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés' : 'HDAs absents'} />
                 )}
@@ -245,6 +248,15 @@ export function ShelfManager() {
                 painterShelf.length ? painterShelf.map(p => (
                   <ShelfBtn key={p} icon={<FluxLogo size={20} color={PAINTER_COLOR} />} label={presetLabel(p)} />
                 )) : <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>Aucun preset FLUX livré</div>
+              ) : isZBrush ? (
+                <>
+                  <ShelfBtn icon={<FluxLogo size={20} color={ZBRUSH_COLOR} />} label="EXPORT FLUX" primary />
+                  <ShelfBtn icon={<FluxLogo size={20} color={CAM_COLOR} />} label="SAVE +1" />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 6, paddingLeft: 16, borderLeft: '1px solid var(--rule-2)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--ink)', fontFamily: 'var(--mono)' }}>flux_ui_zbrush</div>
+                    <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>UI FLUX (template Rongeart) · menu FLUX · auto-save QuickSave 10 min</div>
+                  </div>
+                </>
               ) : dcc === 'Maya' ? (
                 <>
                   <ShelfBtn icon={<FluxLogo size={20} color={ANIM_COLOR} />} label="ANIM" />
@@ -299,7 +311,7 @@ export function ShelfManager() {
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
                 <Zap size={12} strokeWidth={2} />
-                {isHoudini ? 'Installer shelf + HDAs' : 'Installer le shelf'}
+                {isHoudini ? 'Installer shelf + HDAs' : isZBrush ? 'Installer UI FLUX + bridge' : 'Installer le shelf'}
               </Btn>
               <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
                 <RefreshCw size={11} strokeWidth={2} />
@@ -314,6 +326,12 @@ export function ShelfManager() {
               <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
                 Installer copie la shelf et les HDAs (reconstruits si Houdini est ouvert).
                 Retirer enlève la shelf seulement : l'Autostart garde les HDAs.
+              </div>
+            )}
+            {isZBrush && (
+              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
+                Installer remplace l'interface de ZBrush par l'UI FLUX (la tienne est gardée une fois de côté)
+                et installe le bridge : menu FLUX avec Export FLUX et Save +1. Retirer remet ton interface. Relance ZBrush.
               </div>
             )}
           </div>}

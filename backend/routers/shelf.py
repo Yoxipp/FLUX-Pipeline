@@ -22,7 +22,7 @@ from features.shelf_manager.shelf_core import (
 log = get_logger(__name__)
 router = APIRouter()
 
-_SUPPORTED_DCCS = ("Maya", "Houdini")
+_SUPPORTED_DCCS = ("Maya", "Houdini", "ZBrush")
 
 
 class ShelfInstallRequest(BaseModel):

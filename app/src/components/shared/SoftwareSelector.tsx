@@ -10,7 +10,7 @@ const SW_DCC = [
   { name: 'Painter',   v: '2024' },
   { name: 'Designer',  v: '2024' },
   { name: 'Mari',      v: '7.0' },
-  { name: 'ZBrush',    v: '2025' },
+  { name: 'ZBrush',    v: '2026' },
   { name: 'Photoshop', v: '2025' },
 ]
 

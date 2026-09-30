@@ -112,6 +112,10 @@ def get_installed_versions(dcc_name: str) -> list[str]:
     Checks MAYA_APP_DIR / HOUDINI_USER_PREF_DIR first, then the registry-resolved
     Documents folder. Only directories whose names start with a digit are included.
     """
+    if dcc_name == "ZBrush":
+        from features.shelf_manager import zbrush_ui
+        return zbrush_ui.get_versions()
+
     docs = _get_documents_dir()
     versions: list[str] = []
 
@@ -136,6 +140,9 @@ def get_installed_versions(dcc_name: str) -> list[str]:
 
 def is_shelf_installed(dcc_name: str, version: str) -> bool:
     """Return True if the Flux shelf file exists in the DCC user directory."""
+    if dcc_name == "ZBrush":
+        from features.shelf_manager import zbrush_ui
+        return zbrush_ui.is_installed(version)
     shelf_dir = get_dcc_shelf_dir(dcc_name, version)
     filename = _SHELF_FILENAME.get(dcc_name)
     if shelf_dir is None or filename is None:
@@ -152,6 +159,10 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     """
     if dcc_name == "Maya":
         return install_flux_shelf(version)
+    if dcc_name == "ZBrush":
+        # ZBrush "shelf" = the FLUX UI (flux_ui_zbrush.cfg) + the bridge (FLUX menu).
+        from features.shelf_manager import zbrush_ui
+        return zbrush_ui.install(version)
 
     src = get_shelf_source_path(dcc_name)
     if src is None:
@@ -340,6 +351,9 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     For Houdini the HDAs are kept: the autostart still relies on them.
     Returns (success, message).
     """
+    if dcc_name == "ZBrush":
+        from features.shelf_manager import zbrush_ui
+        return zbrush_ui.remove(version)
     dest_dir = get_dcc_shelf_dir(dcc_name, version)
     filename = _SHELF_FILENAME.get(dcc_name)
     if dest_dir is None or filename is None:
