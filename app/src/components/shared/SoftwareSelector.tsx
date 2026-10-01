@@ -31,7 +31,8 @@ export function SoftwareSelector({ active = 'Maya', onChange, showLocal = true }
     }}>
       <div className="cap">LOGICIEL</div>
       <div style={{ width: 1, height: 12, background: 'var(--rule-2)' }} />
-      <div style={{ display: 'flex', gap: 4, overflowX: 'auto', alignItems: 'center', paddingTop: 2, paddingBottom: 2 }}>
+      <div className="chip-row" style={{ gap: 4, flex: 1 }}
+           onWheel={e => { if (e.deltaY && !e.deltaX) e.currentTarget.scrollLeft += e.deltaY }}>
         {SW_DCC.map(s => (
           <Pill key={s.name} active={s.name === active} onClick={() => onChange?.(s.name)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
             {s.name}<span style={{ marginLeft: 5, fontSize: 8, opacity: 0.55, fontFamily: 'var(--mono)' }}>{s.v}</span>

@@ -121,6 +121,12 @@ body {
 }
 .pill.disabled { opacity: 0.28; pointer-events: none; }
 
+/* Horizontal row of pills / chips that scrolls (2026-10-01): the padding leaves room for
+   the last pill's border and its hover scale, the scrollbar is hidden (wheel scrolls it). */
+.chip-row { display: flex; align-items: center; overflow-x: auto; min-width: 0; padding: 3px 6px; margin: -3px -6px; scrollbar-width: none; }
+.chip-row::-webkit-scrollbar { display: none; }
+.chip-row > * { flex-shrink: 0; }
+
 /* ── dots ── */
 .dot {
   width: 6px; height: 6px; border-radius: 50%;
@@ -165,7 +171,6 @@ body {
 }
 .btn.ghost:hover { background: var(--paper-2); color: var(--ink); border-color: var(--rule-2); }
 .btn.sm { height: 22px; padding: 0 8px; font-size: 9px; border-radius: 5px; }
-.btn.kbd { border-style: dashed; border-color: var(--ink-4); color: var(--ink-3); background: transparent; box-shadow: none; }
 
 /* ── input ── */
 .field {

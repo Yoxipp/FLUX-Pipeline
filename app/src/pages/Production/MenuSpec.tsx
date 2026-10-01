@@ -1271,7 +1271,7 @@ function TaskStrip({ task, asset, activeSub, publishCount, onOpenTask, onOpenSub
           <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--rule-2)', flexShrink: 0 }} />
           <div
             onWheel={e => { if (e.deltaY && !e.deltaX) e.currentTarget.scrollLeft += e.deltaY }}
-            style={{ display: 'flex', gap: 5, overflowX: 'auto', flex: 1, minWidth: 0, scrollbarWidth: 'thin' }}>
+            className="chip-row" style={{ gap: 5, flex: 1 }}>
             {chip('Tout', activeSub === null, onOpenTask, 'La tâche entière')}
             {task.known_subtasks.map(sub => chip(sub, sub === activeSub, () => onOpenSubtask(sub)))}
           </div>
