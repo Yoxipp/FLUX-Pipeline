@@ -375,11 +375,11 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
   task:     { title: 'Task', desc: "L'étape de production — détermine le sous-dossier de l'asset.", expected: 'Geo, Shading, Groom, Rig, Cfx, Mult ou Ref', example: 'Rig → assets/chara/JEROME/rig' },
   instance: { title: 'Instance', desc: 'Sous-variante fonctionnelle. Suggestions basées sur Catégorie + Name + Task.', expected: 'Champ libre (null par défaut)', example: 'CHAR_RIG_JEROME_null_LAST' },
   variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
-  seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ###', example: 'SEQ001' },
-  shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT###', example: 'SHOT010' },
-  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT (COMP depuis Nuke)', example: 'SEQ001_SHOT010_ANIM_DINGO' },
-  shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ001_SHOT010_ANIM_DINGO' },
-  shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ001_SHOT010_ANIM_block_LAST' },
+  seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ#### (de 10 en 10)', example: 'SEQ0010' },
+  shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT#### (de 10 en 10, 0015 pour intercaler)', example: 'SHOT0010' },
+  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT (COMP depuis Nuke)', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
+  shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
+  shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ0010_SHOT0010_ANIM_block_LAST' },
 }
 
 // ── PublishComposer ───────────────────────────────────────────────────────────

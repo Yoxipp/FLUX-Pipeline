@@ -223,27 +223,36 @@ tr { page-break-inside:avoid; }
 <li><code>tokens.json</code> : la liste des valeurs autorisées (classes d'assets, noms, séquences, shots, types, tâches) et les règles de nom ;</li>
 <li><code>project.json</code> : identité du projet (<code>project_id</code> stable), fps, résolution, unités USD (1 mètre par unité, axe Y), config couleur OCIO, presets Painter.</li>
 </ul>
-<h3>Les tokens principaux</h3>
+<h3>Les tokens (champs du Publisher)</h3>
 <table>
-<tr><th>Token</th><th>Exemples</th><th>Rôle</th></tr>
-<tr><td>CLASS</td><td>CHAR, PROP, SET, VEH</td><td>Famille d'asset</td></tr>
-<tr><td>NAME</td><td>DINGO, CHAIR</td><td>Nom de l'asset</td></tr>
-<tr><td>TYPE (asset)</td><td>GEO, SHADING / LOOKDEV, RIG, GROOM, ANIM (clip)</td><td>Département de l'asset</td></tr>
-<tr><td>SEQ / SHOT</td><td>SEQ001 / SHOT010</td><td>Séquence et plan</td></tr>
-<tr><td>TYPE_SHOT</td><td>LAYOUT, ANIM, CFX, FX, CROWD, LIGHT, COMP</td><td>Département du shot</td></tr>
-<tr><td>TASK, version</td><td>modeling, v003</td><td>Tâche et numéro</td></tr>
+<tr><th>Champ (token)</th><th>Valeurs par défaut</th><th>Rôle</th></tr>
+<tr><td>Catégorie (CLASS)</td><td>CHAR, PROPS, ENV, SET, FXRIG</td><td>Famille d'asset, donne le dossier (CHAR → <code>assets/chara</code>)</td></tr>
+<tr><td>Name (NAME)</td><td>DINGO, CHAIR... (créés par l'équipe)</td><td>Nom de l'asset</td></tr>
+<tr><td>Task (TYPE)</td><td>GEO, SHADING, GROOM, RIG, ANIM, CFX, MULT, REF</td><td>Département de l'asset, donne le sous-dossier (GEO → <code>model</code>)</td></tr>
+<tr><td>Instance (INSTANCE)</td><td><code>null</code> par défaut, ou libre (body, eyes...)</td><td>Sous-partie de l'asset dans un département</td></tr>
+<tr><td>Variante (VARIANTE)</td><td>libre, optionnelle (red, damaged...)</td><td>Déclinaison</td></tr>
+<tr><td>Sequence / Shot (SEQ / SHOT)</td><td>SEQ0010 / SHOT0020</td><td>Séquence et plan (4 chiffres, de 10 en 10)</td></tr>
+<tr><td>Task de shot (TYPE_SHOT)</td><td>LAYOUT, ANIM, FX, CFX, CROWD, LIGHT, COMP</td><td>Département du plan</td></tr>
+<tr><td>Perso (mode Shot, Task ANIM)</td><td>NAME d'un asset : DINGO, DINGO_02</td><td>Personnage animé dans le plan</td></tr>
+<tr><td>Version</td><td><code>v001</code>, <code>v002</code>... et <code>LAST</code></td><td>Numéro de publish</td></tr>
 </table>
-<p>Exemple de nom de publish : <code>PROJ_CHAR_DINGO_GEO_v003.usd</code>. FLUX lit ces tokens et sait que c'est la géométrie de l'asset DINGO, version 3.</p>
+<p>Forme des noms :</p>
+<pre>asset : CATEGORIE_TASK_NAME_INSTANCE[_VARIANTE]_vNNN   CHAR_GEO_DINGO_null_v003.usd
+shot  : SEQ_SHOT_TASK[_PERSO ou _VARIANTE]_vNNN        SEQ0010_SHOT0020_ANIM_DINGO_v003.usd</pre>
+<p>FLUX lit ces tokens dans le nom et en déduit tout : <code>CHAR_GEO_DINGO_null_v003.usd</code> est la géométrie de l'asset DINGO, version 3, rangée dans <code>assets/chara/DINGO/model/null/</code>.</p>
+<p>Les séquences et les shots se numérotent de 10 en 10 (SEQ0010, SEQ0020). Pour en glisser un entre deux, tape le numéro principal puis un chiffre secondaire : 1 et 5 donnent 0015. Les anciens noms à 3 chiffres (SEQ001, SHOT010) restent valides.</p>
 <h3>Arborescence type</h3>
 <pre>DOSSIER_PROJETS/&lt;PROJET&gt;/
   project.json, tokens.json, teamChat.json
-  asset/&lt;CLASS&gt;/&lt;NAME&gt;/&lt;dept&gt;/...        travail + publishs par département
-  asset/&lt;CLASS&gt;/&lt;NAME&gt;/usd/                component USD de l'asset
-  shot/&lt;SEQ&gt;/&lt;SHOT&gt;/layout|anim|cfx|fx/   un dossier par département de shot
-  shot/&lt;SEQ&gt;/&lt;SHOT&gt;/usd/lighting/          stage USD du shot + lighting
-  shot/&lt;SEQ&gt;/usd/                          USD de séquence
-  lighting/&lt;SEQ&gt;/                           scène de rendu de séquence
-  comp/                                      compositing</pre>
+  assets/chara|props|enviros|sets|fx_rig/&lt;NAME&gt;/
+      model|shading|groom|rig|anim|CFX_Rig|mult|reference/&lt;INSTANCE&gt;/
+                                             travail + publishs par département
+      usd/                                   component USD de l'asset
+  shot/&lt;SEQ&gt;/&lt;SHOT&gt;/layout|anim|cfx|fx|crowd/   un dossier par département de shot
+  shot/&lt;SEQ&gt;/&lt;SHOT&gt;/usd/                stage USD du shot
+  shot/&lt;SEQ&gt;/&lt;SEQ&gt;_render.hip           scène de rendu de la séquence
+  lighting/&lt;SEQ&gt;/                           publishs LIGHT
+  comp/&lt;SEQ&gt;/&lt;SHOT&gt;/                       compositing</pre>
 <div class="warn">Ne crée jamais de dossier ni de fichier de publish à la main. Si un token manque (nouvel asset, nouveau shot), crée-le dans FLUX : il sera ajouté à <code>tokens.json</code> et les dossiers seront créés au bon endroit.</div>
 </section>
 
@@ -253,13 +262,13 @@ tr { page-break-inside:avoid; }
 <h3>1. Préparer (responsable prod / lead)</h3>
 <ol>
 <li>Créer le projet (Folder Manager, onglet de création). <code>project.json</code> et <code>tokens.json</code> sont générés.</li>
-<li>Créer les assets (CLASS + NAME), les séquences et les shots. Chaque shot reçoit son socle : un dossier par département + <code>usd/lighting</code> + stage.</li>
+<li>Créer les assets (Catégorie + Name), les séquences et les shots. Chaque shot reçoit son socle : un dossier par département + <code>usd/lighting</code> + stage.</li>
 <li>Dans <b>Production</b> : plages d'images des shots (1001-1050 par défaut), casting (quels assets dans quel shot, combien d'instances), responsables, calendrier.</li>
 </ol>
 <h3>2. Fabriquer les assets</h3>
 <div class="stack">
 <div class="layer"><div class="k">GEO</div><div class="v">Modeling Maya / ZBrush → publish GEO (USD léger : géo + squelette + poids si skinné). Aussi abc, obj, fbx, mb, ma.</div></div>
-<div class="layer"><div class="k">SHADING / LOOKDEV</div><div class="v">Textures Painter / Mari / Designer → publish par map (conversion .tx auto). Lookdev Houdini → publish SHADING (matériaux + assign, variantes).</div></div>
+<div class="layer"><div class="k">SHADING</div><div class="v">Textures Painter / Mari / Designer → publish par map (conversion .tx auto). Lookdev Houdini → publish SHADING (matériaux + assign, variantes).</div></div>
 <div class="layer"><div class="k">RIG</div><div class="v">Maya → publish RIG (squelette USD + scène .mb pour l'anim).</div></div>
 <div class="layer"><div class="k">GROOM / CFX</div><div class="v">Houdini / Marvelous → publish, proxy de groom généré.</div></div>
 <div class="layer o"><div class="k">Component</div><div class="v">Page USD : « Nouveau component » une fois par asset. Ensuite chaque publish le met à jour tout seul.</div></div>
@@ -322,7 +331,7 @@ tr { page-break-inside:avoid; }
 <ol>
 <li><b>Source</b> : un logiciel connecté (pastille verte) ou un fichier local. Si plusieurs Maya / Houdini tournent, FLUX te demande lequel (scène ouverte affichée).</li>
 <li><b>Mode</b> : Asset ou Shot.</li>
-<li><b>Les quatre cases</b> : CLASS / NAME / TYPE / TASK pour un asset ; SEQ / SHOT / TYPE_SHOT / Perso pour un shot. Elles construisent le nom.</li>
+<li><b>Les champs</b> : Catégorie / Name / Task / Instance / Variante pour un asset ; Sequence / Shot / Task / Perso ou Variante pour un shot. Ils construisent le nom (A4). Le bouton <i>i</i> de chaque champ explique ce qu'il attend.</li>
 <li><b>Format</b> et options (voir tableau).</li>
 <li><b>Commentaire</b> (devient la note de publish), puis <b>Publier</b>. Un toast confirme la version écrite.</li>
 </ol>
@@ -353,7 +362,7 @@ tr { page-break-inside:avoid; }
 <h3>Anim</h3>
 <ul>
 <li>Activer ANIMATION remplit Start / End avec la première et la dernière clé ; bouton <b>Clés</b> pour relire.</li>
-<li>Mode Shot, 4e case Perso : le bloc INSTANCES liste DINGO_01, DINGO_02... Un publish par instance cochée : <code>SEQ_SHOT_ANIM_DINGO</code>, <code>..._DINGO_02</code>.</li>
+<li>Mode Shot, champ Perso : le bloc INSTANCES liste DINGO_01, DINGO_02... Un publish par instance cochée : <code>SEQ0010_SHOT0020_ANIM_DINGO</code>, <code>..._DINGO_02</code>.</li>
 <li>Les joints sont vérifiés contre le rig publié de l'asset.</li>
 </ul>
 <h3>Textures (Painter / Mari)</h3>
@@ -363,10 +372,10 @@ tr { page-break-inside:avoid; }
 <section class="chap">
 <h1>A9. Versions : vNNN et LAST</h1>
 <p>Chaque publish crée deux choses dans le <b>même dossier plat</b> :</p>
-<pre>GEO/
-  PROJ_CHAR_DINGO_GEO_v001.usd      version 1, jamais modifiée
-  PROJ_CHAR_DINGO_GEO_v002.usd      version 2, jamais modifiée
-  PROJ_CHAR_DINGO_GEO_LAST.usd      pointe toujours vers la dernière</pre>
+<pre>assets/chara/DINGO/model/null/
+  CHAR_GEO_DINGO_null_v001.usd      version 1, jamais modifiée
+  CHAR_GEO_DINGO_null_v002.usd      version 2, jamais modifiée
+  CHAR_GEO_DINGO_null_LAST.usd      pointe toujours vers la dernière</pre>
 <table>
 <tr><th>Type de fichier</th><th>Ce qu'est le LAST</th></tr>
 <tr><td>USD</td><td>un petit layer qui référence la vNNN (métadonnées recopiées)</td></tr>
@@ -430,6 +439,7 @@ tr { page-break-inside:avoid; }
 <ul>
 <li><b>Tableau</b> des assets et des shots, détail par tâche (onglets de tâches ouverts gardés).</li>
 <li><b>Synchronisation avec le disque</b> : ce qui est créé dans Production est créé sur le disque et inversement. Elle ne supprime jamais rien toute seule.</li>
+<li><b>Créer / renommer</b> une séquence ou un shot : champ numéro (3 chiffres) + champ secondaire (1 chiffre). Vide = dizaine suivante ; 1 → 0010 ; 1 et 5 → 0015. Un renommage déplace aussi les dossiers, refusé si le shot contient déjà des publishs.</li>
 <li><b>Casting</b> par séquence et par shot, avec nombre d'instances (boutons − / +).</li>
 <li><b>Plage</b> d'images par shot (utilisée par le stage et le rendu).</li>
 <li><b>Verrouiller</b> une séquence ou un shot (panneau Edit) : champs grisés, pas de suppression ni de renommage. Déverrouiller demande de taper un mot de confirmation.</li>
@@ -506,7 +516,7 @@ tr { page-break-inside:avoid; }
 <section class="chap">
 <h1>A18. Lighting et rendu</h1>
 <ol>
-<li>Production → séquence → <b>Scène de rendu Houdini</b> : crée <code>lighting/&lt;SEQ&gt;/&lt;SEQ&gt;_render.hip</code> depuis le template de l'équipe. Jamais écrasée si elle existe.</li>
+<li>Production → séquence → <b>Scène de rendu Houdini</b> : crée <code>shot/&lt;SEQ&gt;/&lt;SEQ&gt;_render.hip</code> depuis le template de l'équipe. Jamais écrasée si elle existe.</li>
 <li>Contenu : FLUX Sequence + COMMON_LIGHTS, puis par shot : FLUX Shot → SHOT_LIGHTS → Karma Cryptomatte → Karma Render Settings (résolution projet, AOV) → OUT + ROP Karma.</li>
 <li>Light rig de séquence (plus faible) + light rig de shot (au-dessus). Publish LIGHT → couche lighting du stage.</li>
 <li>Rendu Karma (usdrender / husk) en <code>.exr</code> multi-parties avec AOV et cryptomattes.</li>
