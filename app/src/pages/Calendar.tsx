@@ -709,9 +709,14 @@ export function Calendar() {
           flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
           gridAutoRows: view === 'month' ? `${ROW_H}px` : 'minmax(100%, auto)', alignContent: 'start',
         }}>
-          {days.map(d => {
+          {days.map((d, i) => {
             const day = iso(d)
             const list = itemsOn(day)
+            // 2026-10-01: an accent stair line follows "today" in the grid, between
+            // the past and today / the days to come (top of today's week, left of today).
+            const weekBefore = iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7))
+            const lineTop = view === 'month' && day >= today && weekBefore < today
+            const lineLeft = view === 'month' && day === today && i % 7 !== 0
             const weekend = d.getDay() === 0 || d.getDay() === 6
             const past = day < today
             // 2026-09-30: weekends and past days dark, days to come light.
@@ -732,8 +737,10 @@ export function Calendar() {
                      boxShadow: inSpan ? 'inset 0 0 0 1px var(--accent)' : undefined,
                      borderRight: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: 5,
                      display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, cursor: 'copy',
-                     background: cellBg, overflow: 'hidden',
+                     background: cellBg, overflow: 'hidden', position: 'relative',
                    }}>
+                {lineTop && <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
+                {lineLeft && <span style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
                 <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500,
                               color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
