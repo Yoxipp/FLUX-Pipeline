@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { Check, Clapperboard, Copy, FolderOpen, FolderPlus, Lock, LockOpen, Plus, Trash2, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
+import { productionSync } from '../../hooks/useProduction'
 import { useI18n } from '../../i18n'
 import type {
   ProductionAsset as Asset,
@@ -130,32 +131,57 @@ function useArchiveDelete(project: string) {
 
 // Number of a sequence / shot: typed freely, applied once on Enter or blur (a rename
 // moves folders on disk, never one per keystroke). Escape restores the current number.
-function NumberField({ value, onCommit, width, busy }: {
-  value: number
-  onCommit: (n: number) => Promise<boolean>
-  width: number
-  busy?: boolean
+// 2026-10-01: a seq / shot number is typed as a main number (3 digits) and an
+// optional secondary digit: 1 -> 0010, 2 -> 0020, 1 + 5 -> 0015 (slotted in between).
+const composeNum = (main: string, sub: string): number =>
+  (parseInt(main || '0', 10) || 0) * NUM_STEP + (parseInt(sub || '0', 10) || 0)
+const splitNum = (n: number): [string, string] =>
+  Number.isNaN(n) ? ['', ''] : [String(Math.floor(n / NUM_STEP)), n % NUM_STEP ? String(n % NUM_STEP) : '']
+
+function SplitNumInputs({ main, sub, setMain, setSub, onEnter, onEscape, busy }: {
+  main: string; sub: string
+  setMain: (v: string) => void; setSub: (v: string) => void
+  onEnter?: () => void; onEscape?: () => void; busy?: boolean
 }) {
-  const shown = Number.isNaN(value) ? '' : String(value)
-  const [draft, setDraft] = useState(shown)
-  useEffect(() => { setDraft(shown) }, [shown])
-  const commit = async () => {
-    const n = parseInt(draft, 10)
-    if (Number.isNaN(n) || n <= 0 || n === value) { setDraft(shown); return }
-    if (!(await onCommit(n))) setDraft(shown)
+  const keys = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') onEnter?.()
+    if (e.key === 'Escape') onEscape?.()
   }
   return (
-    <input
-      value={draft} disabled={busy}
-      onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
-      onKeyDown={e => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        if (e.key === 'Escape') { setDraft(shown); (e.target as HTMLInputElement).blur() }
-      }}
-      onBlur={() => { void commit() }}
-      title="Entree pour renommer (dossiers compris)"
-      placeholder="N°" style={{ ..._input, width }}
-    />
+    <>
+      <input value={main} disabled={busy} maxLength={3} placeholder="N°" title="Numero (3 chiffres) : 1 -> 0010"
+             onChange={e => setMain(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))} onKeyDown={keys}
+             style={{ ..._input, width: 52 }} />
+      <input value={sub} disabled={busy} maxLength={1} placeholder="+" title="Numero secondaire (1 chiffre) : 1 et 5 -> 0015"
+             onChange={e => setSub(e.target.value.replace(/[^0-9]/g, '').slice(0, 1))} onKeyDown={keys}
+             style={{ ..._input, width: 30, textAlign: 'center' }} />
+    </>
+  )
+}
+
+/** Rename field: the two inputs commit together when the focus leaves both (or Enter). */
+function SplitNumberField({ value, onCommit, busy }: {
+  value: number
+  onCommit: (n: number) => Promise<boolean>
+  busy?: boolean
+}) {
+  const [m0, s0] = splitNum(value)
+  const [main, setMain] = useState(m0)
+  const [sub, setSub] = useState(s0)
+  useEffect(() => { setMain(m0); setSub(s0) }, [m0, s0])
+  const reset = () => { setMain(m0); setSub(s0) }
+  const commit = async () => {
+    const n = composeNum(main, sub)
+    if (!main || n <= 0 || n === value) { reset(); return }
+    if (!(await onCommit(n))) reset()
+  }
+  return (
+    <div style={{ display: 'flex', gap: 4 }}
+         onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) void commit() }}>
+      <SplitNumInputs main={main} sub={sub} setMain={setMain} setSub={setSub} busy={busy}
+                      onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
+                      onEscape={() => { reset(); (document.activeElement as HTMLElement | null)?.blur() }} />
+    </div>
   )
 }
 
@@ -732,11 +758,13 @@ function ShotCreateSection({ state, setState, setSelection }: {
 }) {
   const { t } = useI18n()
   const [num, setNum] = useState('')
+  const [sub, setSub] = useState('')
   const [label, setLabel] = useState('')
   const create = () => {
-    // No number entered -> next ten after the last sequence (0010, 0020...).
-    let n = parseInt(num, 10)
-    if (Number.isNaN(n) || n <= 0) n = nextTen(state.sequences.map(s => parseSeqNum(s.name)).filter(x => !Number.isNaN(x)))
+    // No main number -> next ten after the last sequence (0010, 0020...), plus the secondary digit.
+    const n = num ? composeNum(num, sub)
+      : nextTen(state.sequences.map(s => parseSeqNum(s.name)).filter(x => !Number.isNaN(x))) + composeNum('', sub)
+    if (n <= 0) return
     const nm = `SEQ${padSeq(n)}`
     if (state.sequences.some(s => s.name === nm)) return
     const id = nid('seq')
@@ -753,19 +781,13 @@ function ShotCreateSection({ state, setState, setSelection }: {
       ],
     }))
     setSelection({ kind: 'seq', id })
-    setNum(''); setLabel('')
+    setNum(''); setSub(''); setLabel('')
   }
   return (
     <div style={_pad}>
       <div style={_lbl}>{t('prod.newSequence')}</div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          value={num}
-          placeholder="N°"
-          onChange={e => setNum(e.target.value.replace(/[^0-9]/g, ''))}
-          onKeyDown={e => { if (e.key === 'Enter') create() }}
-          style={{ ..._input, width: 70 }}
-        />
+        <SplitNumInputs main={num} sub={sub} setMain={setNum} setSub={setSub} onEnter={create} />
         <input
           value={label}
           placeholder="Label (optionnel)"
@@ -791,6 +813,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
 }) {
   const { t }         = useI18n()
   const [shotNum, setShotNum] = useState('')
+  const [shotSub, setShotSub] = useState('')
   const [shotLabelInput, setShotLabelInput] = useState('')
   const [taskName, setTaskName] = useState('')
   const [taskSubtask, setTaskSubtask] = useState('')
@@ -808,8 +831,9 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     }
     setRenaming(true)
     try {
+      await productionSync.flush()            // no late save of the old name after the rename
       const r = await api.renameSeqShot(project, 'seq', seq.name, '', newName)
-      patchSeq({ name: newName })
+      await productionSync.reload()           // the server holds the new name, the folders, the tokens
       toast.success(`${seq.name} renommée en ${newName}`)
       for (const w of r.warnings ?? []) toast.warning(w)
       return true
@@ -854,14 +878,13 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     )
   }
   const createShot = () => {
-    // No number entered -> next ten after the last shot of the sequence (0010, 0020...).
-    let n = parseInt(shotNum, 10)
-    if (Number.isNaN(n) || n <= 0) {
-      n = nextTen(state.shots
-        .filter(s => s.seq_id === seq.id)
-        .map(s => parseShotNum(s.name))
-        .filter(x => !Number.isNaN(x)))
-    }
+    // No main number -> next ten after the last shot of the sequence (0010, 0020...), plus the secondary digit.
+    const n = shotNum ? composeNum(shotNum, shotSub)
+      : nextTen(state.shots
+          .filter(s => s.seq_id === seq.id)
+          .map(s => parseShotNum(s.name))
+          .filter(x => !Number.isNaN(x))) + composeNum('', shotSub)
+    if (n <= 0) return
     const nm = `SHOT${padSeq(n)}`
     if (state.shots.some(s => s.seq_id === seq.id && s.name === nm)) return
     const id = nid('shot')
@@ -883,7 +906,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
       ],
     }))
     // Keep the seq focused; user is bulk-adding shots.
-    setShotNum(''); setShotLabelInput('')
+    setShotNum(''); setShotSub(''); setShotLabelInput('')
   }
 
   const addTask = () => {
@@ -932,7 +955,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
         <div style={_lbl}>SÉQUENCE · {seq.name}{seq.label ? ` — ${seq.label}` : ''}</div>
         <fieldset disabled={locked} style={_lockedFieldset}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
-          <NumberField value={seqNum} onCommit={changeSeqNumber} width={60} busy={renaming} />
+          <SplitNumberField value={seqNum} onCommit={changeSeqNumber} busy={renaming} />
           <input
             value={seq.label ?? ''}
             onChange={e => patchSeq({ label: e.target.value || undefined })}
@@ -976,13 +999,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
       <div style={_pad}>
         <div style={_lbl}>{t('prod.newShot')}</div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            value={shotNum}
-            placeholder="N°"
-            onChange={e => setShotNum(e.target.value.replace(/[^0-9]/g, ''))}
-            onKeyDown={e => { if (e.key === 'Enter') createShot() }}
-            style={{ ..._input, width: 70 }}
-          />
+          <SplitNumInputs main={shotNum} sub={shotSub} setMain={setShotNum} setSub={setShotSub} onEnter={createShot} />
           <input
             value={shotLabelInput}
             placeholder="Label (optionnel)"
@@ -1052,8 +1069,9 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
     }
     setRenaming(true)
     try {
+      await productionSync.flush()
       const r = await api.renameSeqShot(project, 'shot', seq.name, shot.name, newName)
-      patchShot({ name: newName })
+      await productionSync.reload()
       toast.success(`${shot.name} renommé en ${newName}`)
       for (const w of r.warnings ?? []) toast.warning(w)
       return true
@@ -1122,7 +1140,7 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
         <div style={_lbl}>SHOT · {seq?.name ?? '?'} · {shot.name}{shot.label ? ` — ${shot.label}` : ''}</div>
         <fieldset disabled={locked} style={_lockedFieldset}>
         <div style={{ display: 'flex', gap: 6 }}>
-          <NumberField value={shotNum} onCommit={changeShotNumber} width={70} busy={renaming} />
+          <SplitNumberField value={shotNum} onCommit={changeShotNumber} busy={renaming} />
           <input
             value={shot.label ?? ''}
             onChange={e => patchShot({ label: e.target.value || undefined })}

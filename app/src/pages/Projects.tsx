@@ -266,34 +266,51 @@ function TokenFinder({ project, onChange }: {
 
 // ── Sous-composants partagés ──────────────────────────────────────────────────
 
+// Seq / shot number (2026-10-01): main number on 3 digits (-/+ by 10) and an optional
+// secondary digit: 1 -> 0010, 1 + 5 -> 0015, to slot a shot in between.
 function Spinner({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [draft, setDraft] = useState(String(value).padStart(4, '0'))
+  const main = Math.floor(value / 10)
+  const sub = value % 10
+  const [draft, setDraft] = useState(String(main).padStart(3, '0'))
 
-  useEffect(() => { setDraft(String(value).padStart(4, '0')) }, [value])
+  useEffect(() => { setDraft(String(main).padStart(3, '0')) }, [main])
 
   const commit = () => {
     const n = parseInt(draft, 10)
-    if (!isNaN(n) && n >= 1) { onChange(n); setDraft(String(n).padStart(4, '0')) }
-    else setDraft(String(value).padStart(4, '0'))
+    if (!isNaN(n) && n >= 0 && n * 10 + sub >= 1) { onChange(n * 10 + sub); setDraft(String(n).padStart(3, '0')) }
+    else setDraft(String(main).padStart(3, '0'))
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, overflow: 'hidden', background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)' }}>
-      <div onClick={() => onChange(Math.max(1, value - 1))} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
-        <Minus size={10} strokeWidth={2} />
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, overflow: 'hidden', background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)' }}>
+        <div onClick={() => onChange(Math.max(10, value - 10))} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
+          <Minus size={10} strokeWidth={2} />
+        </div>
+        <input
+          type="text"
+          inputMode="numeric"
+          maxLength={3}
+          value={draft}
+          onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit() }}
+          style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
+        />
+        <div onClick={() => onChange(value + 10)} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
+          <Plus size={10} strokeWidth={2} />
+        </div>
       </div>
       <input
         type="text"
         inputMode="numeric"
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit() }}
-        style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
+        maxLength={1}
+        placeholder="+"
+        title="Numero secondaire : 1 et 5 -> 0015"
+        value={sub ? String(sub) : ''}
+        onChange={e => { const d = parseInt(e.target.value.replace(/[^0-9]/g, '').slice(-1) || '0', 10); if (main * 10 + d >= 1) onChange(main * 10 + d) }}
+        style={{ width: 28, height: 28, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)', borderRadius: 5, outline: 'none', boxShadow: 'var(--shadow-inset)' }}
       />
-      <div onClick={() => onChange(value + 1)} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
-        <Plus size={10} strokeWidth={2} />
-      </div>
     </div>
   )
 }
