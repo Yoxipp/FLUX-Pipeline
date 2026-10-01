@@ -4,130 +4,202 @@
 <meta charset="utf-8">
 <title>Manuel de FLUX</title>
 <style>
-@page { size: A4; margin: 18mm 16mm 18mm 16mm; }
-:root { --ink:#1d2330; --mute:#5b6475; --line:#d9dde5; --soft:#f3f5f8; --acc:#e0782a; --acc2:#2f5d8a; }
+:root { --ink:#1d2330; --mute:#5b6475; --line:#dde1e8; --soft:#f3f5f8; --paper:#ffffff; --bg:#eef0f4; --acc:#e0782a; --acc2:#2f5d8a; --accsoft:#fdf1e6; }
 * { box-sizing:border-box; }
-body { font-family:"Segoe UI",Arial,sans-serif; color:var(--ink); font-size:10.2pt; line-height:1.5; margin:0; background:#fff; }
-h1 { font-size:22pt; margin:0 0 6mm; color:var(--acc2); border-bottom:2px solid var(--acc); padding-bottom:2mm; }
-h2 { font-size:14pt; margin:7mm 0 2mm; color:var(--acc2); }
-h3 { font-size:11.5pt; margin:5mm 0 1.5mm; }
-p { margin:0 0 2.5mm; }
-ul, ol { margin:0 0 3mm; padding-left:6mm; }
-li { margin-bottom:1mm; }
-code { font-family:Consolas,monospace; font-size:9pt; background:var(--soft); padding:0 1.2mm; border-radius:2px; }
-pre { font-family:Consolas,monospace; font-size:8.6pt; background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:3mm; white-space:pre-wrap; margin:0 0 3mm; page-break-inside:avoid; }
-table { border-collapse:collapse; width:100%; margin:0 0 4mm; font-size:9.2pt; page-break-inside:auto; }
-th, td { border:1px solid var(--line); padding:1.4mm 2mm; vertical-align:top; text-align:left; }
+html { scroll-behavior:smooth; scroll-padding-top:18px; }
+body { font-family:"Segoe UI",Arial,sans-serif; color:var(--ink); font-size:14.5px; line-height:1.6; margin:0; background:var(--bg); }
+a { color:var(--acc2); }
+.layout { display:flex; align-items:flex-start; gap:28px; max-width:1240px; margin:0 auto; padding:24px 20px 80px; }
+.side { position:sticky; top:16px; width:250px; flex-shrink:0; max-height:calc(100vh - 32px); overflow-y:auto; background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:10px 8px; font-size:12.5px; }
+.side a { display:flex; gap:8px; padding:4px 8px; border-radius:6px; color:var(--ink); text-decoration:none; line-height:1.35; }
+.side a span { color:var(--mute); min-width:26px; }
+.side a:hover { background:var(--soft); }
+.side a.on { background:var(--accsoft); color:#a4531a; font-weight:600; }
+.side a.on span { color:var(--acc); }
+.side .brand { font-weight:800; color:var(--acc); font-size:16px; letter-spacing:2px; margin-bottom:4px; }
+.side .brand small { color:var(--mute); font-weight:500; letter-spacing:0; font-size:12px; }
+.side .grp { margin:10px 8px 4px; font-size:10.5px; font-weight:700; letter-spacing:.08em; color:var(--mute); text-transform:uppercase; }
+main { flex:1; min-width:0; max-width:900px; }
+section { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:22px 30px 18px; margin:0 0 18px; }
+h1 { font-size:22px; margin:0 0 14px; color:var(--acc2); border-bottom:2px solid var(--acc); padding-bottom:8px; }
+h2 { font-size:17px; margin:22px 0 8px; color:var(--acc2); }
+h3 { font-size:15px; margin:18px 0 6px; }
+p { margin:0 0 10px; }
+ul, ol { margin:0 0 12px; padding-left:22px; }
+li { margin-bottom:4px; }
+code { font-family:Consolas,monospace; font-size:12.5px; background:var(--soft); padding:1px 5px; border-radius:4px; }
+pre { font-family:Consolas,monospace; font-size:12.5px; background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:12px 14px; white-space:pre-wrap; margin:0 0 12px; overflow-x:auto; }
+table { border-collapse:collapse; width:100%; margin:0 0 14px; font-size:13px; }
+th, td { border:1px solid var(--line); padding:6px 9px; vertical-align:top; text-align:left; }
 th { background:var(--soft); }
-tr { page-break-inside:avoid; }
-.part { page-break-before:always; }
-.chap { page-break-before:always; }
-.cover { height:255mm; display:flex; flex-direction:column; justify-content:center; }
-.cover .logo { font-size:54pt; font-weight:700; color:var(--acc); letter-spacing:4px; }
-.cover .sub { font-size:18pt; color:var(--acc2); margin-top:4mm; }
-.cover .meta { margin-top:18mm; color:var(--mute); font-size:10.5pt; }
-.partpage { height:240mm; display:flex; flex-direction:column; justify-content:center; }
-.partpage .n { color:var(--acc); font-size:14pt; font-weight:600; }
-.partpage .t { font-size:30pt; color:var(--acc2); font-weight:700; }
-.partpage p { color:var(--mute); max-width:140mm; margin-top:5mm; }
-.note { border-left:3px solid var(--acc); background:#fdf4ec; padding:2mm 3mm; margin:0 0 3mm; page-break-inside:avoid; }
-.warn { border-left:3px solid #b3261e; background:#fbeeee; padding:2mm 3mm; margin:0 0 3mm; page-break-inside:avoid; }
-.tag { display:inline-block; font-size:7.8pt; padding:0 1.6mm; border-radius:2px; border:1px solid var(--line); color:var(--mute); }
+.cover { padding:28px 30px 24px; }
+.cover .logo { font-size:30px; font-weight:800; color:var(--ink); letter-spacing:4px; line-height:1; }
+.cover .sub { font-size:16px; color:var(--mute); margin-top:4px; }
+.cover p { max-width:680px; margin-top:12px; }
+.cover .meta { margin-top:14px; color:var(--mute); font-size:12px; }
+.cover .go { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+.part { padding:16px 30px; border-left:4px solid var(--acc2); }
+.part .n { color:var(--mute); font-weight:700; letter-spacing:.1em; font-size:11px; }
+.part .t { font-size:20px; font-weight:700; color:var(--ink); }
+.part p { color:var(--mute); margin:4px 0 0; max-width:680px; }
+.toc-head { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+.pill-link { display:inline-block; padding:7px 14px; border-radius:999px; border:1px solid var(--line); background:var(--soft); color:var(--ink); text-decoration:none; font-weight:600; font-size:13px; }
+.pill-link:hover { border-color:var(--acc); }
+.pill-link.acc { border-color:var(--acc); color:#a4531a; background:#fff; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:8px; }
+.tile { display:flex; gap:8px; align-items:baseline; padding:9px 11px; border:1px solid var(--line); border-radius:8px; text-decoration:none; color:var(--ink); background:#fff; font-size:13px; line-height:1.3; }
+.tile span { font-weight:700; color:var(--acc); min-width:28px; }
+.tile:hover { border-color:var(--acc); background:var(--accsoft); }
+.note { border-left:3px solid var(--acc); background:var(--accsoft); padding:8px 12px; margin:0 0 12px; border-radius:0 6px 6px 0; }
+.warn { border-left:3px solid #b3261e; background:#fbeeee; padding:8px 12px; margin:0 0 12px; border-radius:0 6px 6px 0; }
+.tag { display:inline-block; font-size:11px; padding:0 6px; border-radius:4px; border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
 .tag.ok { border-color:#3c8a4a; color:#2d6c38; }
 .tag.exp { border-color:var(--acc); color:#a4531a; }
-.tag.todo { border-color:#8a8f99; }
-.toc { font-size:10pt; }
-.toc ol { list-style:none; padding-left:0; }
-.toc ol ol { padding-left:6mm; }
-.toc li { margin:0.8mm 0; }
-.toc .p { font-weight:700; color:var(--acc2); margin-top:3mm; }
-/* flow diagrams */
-.flow { display:flex; flex-wrap:wrap; align-items:center; gap:2mm; margin:0 0 4mm; page-break-inside:avoid; }
-.box { border:1.2px solid var(--acc2); border-radius:4px; padding:1.6mm 2.6mm; font-size:9pt; background:#fff; text-align:center; }
+.flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 14px; }
+.box { border:1.5px solid var(--acc2); border-radius:6px; padding:6px 10px; font-size:12.5px; background:#fff; text-align:center; }
 .box b { display:block; color:var(--acc2); }
 .box.a { border-color:var(--acc); }
 .box.a b { color:var(--acc); }
-.arr { color:var(--mute); font-size:12pt; }
-.stack { display:flex; flex-direction:column; gap:1.2mm; margin:0 0 4mm; page-break-inside:avoid; }
-.layer { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; font-size:9pt; }
-.layer .k { width:42mm; background:var(--acc2); color:#fff; padding:1.6mm 2.4mm; font-weight:600; }
-.layer .v { padding:1.6mm 2.4mm; flex:1; }
+.arr { color:var(--mute); }
+.stack { display:flex; flex-direction:column; gap:5px; margin:0 0 14px; }
+.layer { display:flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; font-size:13px; }
+.layer .k { width:150px; flex-shrink:0; background:var(--acc2); color:#fff; padding:6px 10px; font-weight:600; }
+.layer .v { padding:6px 10px; flex:1; }
 .layer.o .k { background:var(--acc); }
-.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:3mm; margin-bottom:4mm; }
-.card { border:1px solid var(--line); border-radius:4px; padding:2.5mm 3mm; page-break-inside:avoid; }
-.card h4 { margin:0 0 1mm; font-size:10pt; color:var(--acc2); }
-.small { font-size:8.8pt; color:var(--mute); }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+.card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+.card h4 { margin:0 0 4px; font-size:13.5px; color:var(--acc2); }
+.small { font-size:12.5px; color:var(--mute); }
+.top { position:fixed; right:18px; bottom:18px; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px 12px; text-decoration:none; font-weight:600; font-size:12.5px; }
+@media (max-width: 900px) {
+  .layout { display:block; padding:12px; }
+  .side { position:static; width:auto; max-height:none; margin-bottom:12px; }
+  section { padding:16px; }
+  .grid2 { grid-template-columns:1fr; }
+}
+@media print {
+  body { background:#fff; }
+  .side, .top { display:none; }
+  .layout { display:block; padding:0; }
+  section { border:none; page-break-before:always; }
+}
 </style>
 </head>
-<body>
+<body id="top">
+<div class="layout">
+<nav class="side">
+<a class="brand" href="#top">FLUX <small>Manuel</small></a>
+<a href="#sommaire" data-id="sommaire"><span>≡</span>Sommaire</a>
+<a href="#intro" data-id="intro"><span>0</span>Avant de commencer</a>
+<div class="grp">A · Utilisation</div>
+<a class="" href="#a1" data-id="a1"><span>A1</span>FLUX en une page</a>
+<a class="" href="#a2" data-id="a2"><span>A2</span>Installer, lancer, mettre à jour</a>
+<a class="" href="#a3" data-id="a3"><span>A3</span>L&#x27;interface</a>
+<a class="" href="#a4" data-id="a4"><span>A4</span>Le projet : tokens, noms, arborescence</a>
+<a class="" href="#a5" data-id="a5"><span>A5</span>Le process voulu : du travail au rendu</a>
+<a class="" href="#a6" data-id="a6"><span>A6</span>Accueil (Hub) et chat d&#x27;équipe</a>
+<a class="" href="#a7" data-id="a7"><span>A7</span>Folder Manager</a>
+<a class="" href="#a8" data-id="a8"><span>A8</span>Publisher</a>
+<a class="" href="#a9" data-id="a9"><span>A9</span>Versions : vNNN et LAST</a>
+<a class="" href="#a10" data-id="a10"><span>A10</span>Importer dans un logiciel</a>
+<a class="" href="#a11" data-id="a11"><span>A11</span>Page USD : components, décors, shots</a>
+<a class="" href="#a12" data-id="a12"><span>A12</span>Production</a>
+<a class="" href="#a13" data-id="a13"><span>A13</span>Calendrier et Activité</a>
+<a class="" href="#a14" data-id="a14"><span>A14</span>Shelf Manager et Template Editor</a>
+<a class="" href="#a15" data-id="a15"><span>A15</span>Disque : taille et nettoyage</a>
+<a class="" href="#a16" data-id="a16"><span>A16</span>Paramètres avancés et Graph YAML</a>
+<a class="" href="#a17" data-id="a17"><span>A17</span>FLUX dans chaque logiciel</a>
+<a class="" href="#a18" data-id="a18"><span>A18</span>Lighting et rendu</a>
+<a class="" href="#a19" data-id="a19"><span>A19</span>Règles de travail</a>
+<a class="" href="#a20" data-id="a20"><span>A20</span>Dépannage</a>
+<a class="" href="#a21" data-id="a21"><span>A21</span>Index des fonctions</a>
+<div class="grp">B · Technique</div>
+<a class="" href="#b1" data-id="b1"><span>B1</span>Principes et décisions</a>
+<a class="" href="#b2" data-id="b2"><span>B2</span>Architecture générale</a>
+<a class="" href="#b3" data-id="b3"><span>B3</span>Démarrage de l&#x27;app et sécurité locale</a>
+<a class="" href="#b4" data-id="b4"><span>B4</span>Organisation du code</a>
+<a class="" href="#b5" data-id="b5"><span>B5</span>Configuration et stockage</a>
+<a class="" href="#b6" data-id="b6"><span>B6</span>Métadonnées : JSON, SQLite, remote</a>
+<a class="" href="#b7" data-id="b7"><span>B7</span>Nommage par tokens</a>
+<a class="" href="#b8" data-id="b8"><span>B8</span>Publish : chaîne complète</a>
+<a class="" href="#b9" data-id="b9"><span>B9</span>Moteur d&#x27;actions YAML</a>
+<a class="" href="#b10" data-id="b10"><span>B10</span>USD dans FLUX</a>
+<a class="" href="#b11" data-id="b11"><span>B11</span>Bridges DCC</a>
+<a class="" href="#b12" data-id="b12"><span>B12</span>Activity, chat, calendrier, logs</a>
+<a class="" href="#b13" data-id="b13"><span>B13</span>Textures (.tx) et proxies</a>
+<a class="" href="#b14" data-id="b14"><span>B14</span>Build, installeur, mises à jour</a>
+<a class="" href="#b15" data-id="b15"><span>B15</span>Tests et qualité</a>
+<a class="" href="#b16" data-id="b16"><span>B16</span>Registre des décisions (ADR)</a>
+<a class="" href="#b17" data-id="b17"><span>B17</span>État, limites et suite</a>
+<a class="" href="#b18" data-id="b18"><span>B18</span>Glossaire</a>
+</nav>
+<main>
 
 <!-- ============ COUVERTURE ============ -->
 <section class="cover">
   <div class="logo">FLUX</div>
   <div class="sub">Manuel de FLUX</div>
-  <p style="margin-top:6mm;max-width:150mm">Le pipeline 3D / VFX des équipes ESMA : projets, nommage, publish, import dans les logiciels, USD, production, rendu. Partie A pour les artistes, partie B pour comprendre la technique.</p>
-  <div class="meta">Version du document : 30 septembre 2026<br>Branche de référence : <code>Clean_al</code><br>Licence du logiciel : Apache-2.0</div>
+  <p>Le pipeline 3D / VFX des équipes ESMA : projets, nommage, publish, import dans les logiciels, USD, production, rendu. Partie A : utilisation. Partie B : fonctionnement interne.</p>
+  <div class="go"><a class="pill-link" href="#sommaire">Sommaire</a><a class="pill-link" href="#partie-a">A. Utilisation</a><a class="pill-link" href="#partie-b">B. Technique</a><a class="pill-link" href="#a21">Index des fonctions</a></div>
+  <div class="meta">Version du document : 1er octobre 2026 · livré avec FLUX, copié dans <code>FLUX_UPDATE</code> à chaque lancement · Licence Apache-2.0</div>
 </section>
 
 <!-- ============ SOMMAIRE ============ -->
-<section class="chap toc">
+<section class="toc" id="sommaire">
 <h1>Sommaire</h1>
-<ol>
-  <li class="p">Avant de commencer</li>
-  <li><ol><li>0.1 Comment lire ce manuel</li><li>0.2 Légende des états</li></ol></li>
-  <li class="p">Partie A : Guide de l'artiste</li>
-  <li><ol>
-    <li>A1 FLUX en une page</li>
-    <li>A2 Installer, lancer, mettre à jour</li>
-    <li>A3 L'interface : fenêtre, barre latérale, barre d'état</li>
-    <li>A4 Le projet : tokens, noms, arborescence</li>
-    <li>A5 Le process voulu : du travail au rendu</li>
-    <li>A6 Accueil (Hub) et chat d'équipe</li>
-    <li>A7 Folder Manager</li>
-    <li>A8 Publisher</li>
-    <li>A9 Versions : vNNN et LAST</li>
-    <li>A10 Importer dans un logiciel (Open in, FLUX Import)</li>
-    <li>A11 Page USD : components, décors, shots</li>
-    <li>A12 Production</li>
-    <li>A13 Calendrier et Activité</li>
-    <li>A14 Shelf Manager, Template Editor</li>
-    <li>A15 Disque : taille et nettoyage</li>
-    <li>A16 Paramètres avancés et Graph YAML</li>
-    <li>A17 FLUX dans chaque logiciel</li>
-    <li>A18 Lighting et rendu</li>
-    <li>A19 Règles d'or de l'artiste</li>
-    <li>A20 Dépannage</li>
-    <li>A21 Où trouver quoi (index des features)</li>
-  </ol></li>
-  <li class="p">Partie B : Technique</li>
-  <li><ol>
-    <li>B1 Principes et décisions</li>
-    <li>B2 Architecture générale</li>
-    <li>B3 Démarrage de l'app et sécurité locale</li>
-    <li>B4 Organisation du code</li>
-    <li>B5 Configuration et stockage</li>
-    <li>B6 Métadonnées : JSON, SQLite, remote</li>
-    <li>B7 Nommage par tokens</li>
-    <li>B8 Publish : chaîne complète</li>
-    <li>B9 Moteur d'actions YAML</li>
-    <li>B10 USD dans FLUX</li>
-    <li>B11 Bridges DCC</li>
-    <li>B12 Activity, chat, calendrier, logs</li>
-    <li>B13 Textures (.tx) et proxies</li>
-    <li>B14 Build, installeur, mises à jour</li>
-    <li>B15 Tests et qualité</li>
-    <li>B16 Registre des décisions (ADR)</li>
-    <li>B17 État, limites et suite</li>
-    <li>B18 Glossaire</li>
-  </ol></li>
-</ol>
+<div class="toc-head"><a class="pill-link" href="#intro">0. Avant de commencer</a><a class="pill-link" href="#partie-a">A. Utilisation</a><a class="pill-link" href="#partie-b">B. Technique</a><a class="pill-link" href="#a21">Index des fonctions</a><a class="pill-link" href="#b18">Glossaire</a></div>
+<h2>A. Utilisation</h2>
+<div class="tiles">
+<a class="tile" href="#a1"><span>A1</span>FLUX en une page</a>
+<a class="tile" href="#a2"><span>A2</span>Installer, lancer, mettre à jour</a>
+<a class="tile" href="#a3"><span>A3</span>L&#x27;interface</a>
+<a class="tile" href="#a4"><span>A4</span>Le projet : tokens, noms, arborescence</a>
+<a class="tile" href="#a5"><span>A5</span>Le process voulu : du travail au rendu</a>
+<a class="tile" href="#a6"><span>A6</span>Accueil (Hub) et chat d&#x27;équipe</a>
+<a class="tile" href="#a7"><span>A7</span>Folder Manager</a>
+<a class="tile" href="#a8"><span>A8</span>Publisher</a>
+<a class="tile" href="#a9"><span>A9</span>Versions : vNNN et LAST</a>
+<a class="tile" href="#a10"><span>A10</span>Importer dans un logiciel</a>
+<a class="tile" href="#a11"><span>A11</span>Page USD : components, décors, shots</a>
+<a class="tile" href="#a12"><span>A12</span>Production</a>
+<a class="tile" href="#a13"><span>A13</span>Calendrier et Activité</a>
+<a class="tile" href="#a14"><span>A14</span>Shelf Manager et Template Editor</a>
+<a class="tile" href="#a15"><span>A15</span>Disque : taille et nettoyage</a>
+<a class="tile" href="#a16"><span>A16</span>Paramètres avancés et Graph YAML</a>
+<a class="tile" href="#a17"><span>A17</span>FLUX dans chaque logiciel</a>
+<a class="tile" href="#a18"><span>A18</span>Lighting et rendu</a>
+<a class="tile" href="#a19"><span>A19</span>Règles de travail</a>
+<a class="tile" href="#a20"><span>A20</span>Dépannage</a>
+<a class="tile" href="#a21"><span>A21</span>Index des fonctions</a>
+</div>
+<h2>B. Technique</h2>
+<div class="tiles">
+<a class="tile" href="#b1"><span>B1</span>Principes et décisions</a>
+<a class="tile" href="#b2"><span>B2</span>Architecture générale</a>
+<a class="tile" href="#b3"><span>B3</span>Démarrage de l&#x27;app et sécurité locale</a>
+<a class="tile" href="#b4"><span>B4</span>Organisation du code</a>
+<a class="tile" href="#b5"><span>B5</span>Configuration et stockage</a>
+<a class="tile" href="#b6"><span>B6</span>Métadonnées : JSON, SQLite, remote</a>
+<a class="tile" href="#b7"><span>B7</span>Nommage par tokens</a>
+<a class="tile" href="#b8"><span>B8</span>Publish : chaîne complète</a>
+<a class="tile" href="#b9"><span>B9</span>Moteur d&#x27;actions YAML</a>
+<a class="tile" href="#b10"><span>B10</span>USD dans FLUX</a>
+<a class="tile" href="#b11"><span>B11</span>Bridges DCC</a>
+<a class="tile" href="#b12"><span>B12</span>Activity, chat, calendrier, logs</a>
+<a class="tile" href="#b13"><span>B13</span>Textures (.tx) et proxies</a>
+<a class="tile" href="#b14"><span>B14</span>Build, installeur, mises à jour</a>
+<a class="tile" href="#b15"><span>B15</span>Tests et qualité</a>
+<a class="tile" href="#b16"><span>B16</span>Registre des décisions (ADR)</a>
+<a class="tile" href="#b17"><span>B17</span>État, limites et suite</a>
+<a class="tile" href="#b18"><span>B18</span>Glossaire</a>
+</div>
 </section>
 
 <!-- ============ 0 ============ -->
-<section class="chap">
+<section class="chap" id="intro">
 <h1>0. Avant de commencer</h1>
 <h2>0.1 Comment lire ce manuel</h2>
-<p><b>Artiste</b> : lis la partie A dans l'ordre jusqu'à A5, puis va directement au chapitre de ton outil ou de ton logiciel. A19 (règles d'or) et A20 (dépannage) sont à connaître. A21 donne l'emplacement de chaque fonction.</p>
+<p><b>Artiste</b> : lis la partie A dans l'ordre jusqu'à A5, puis va directement au chapitre de ton outil ou de ton logiciel. A19 (règles de travail) et A20 (dépannage) sont à connaître. A21 donne l'emplacement de chaque fonction.</p>
 <p><b>TD, développeur, curieux</b> : la partie B explique comment tout marche à l'intérieur : processus, fichiers, formats, API, USD, décisions d'architecture.</p>
 <h2>0.2 Légende des états</h2>
 <table>
@@ -140,13 +212,13 @@ tr { page-break-inside:avoid; }
 </section>
 
 <!-- ============ PARTIE A ============ -->
-<section class="part partpage">
+<section class="part" id="partie-a">
   <div class="n">PARTIE A</div>
-  <div class="t">Guide de l'artiste</div>
+  <div class="t">Utilisation</div>
   <p>Tout ce qu'il faut pour travailler au quotidien avec FLUX : organiser le projet, publier, récupérer le travail des autres, assembler en USD, suivre la production et rendre.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a1">
 <h1>A1. FLUX en une page</h1>
 <p>FLUX est une application de bureau Windows qui remplace toutes les manipulations de fichiers à la main entre les logiciels de l'équipe. Elle :</p>
 <ul>
@@ -173,14 +245,13 @@ tr { page-break-inside:avoid; }
 </ol>
 </section>
 
-<section class="chap">
+<section class="chap" id="a2">
 <h1>A2. Installer, lancer, mettre à jour</h1>
 <h3>Installer</h3>
 <ol>
 <li>Lance <code>FLUX-Setup-x.x.xxx.exe</code> (fourni par l'équipe, dossier <code>FLUX_UPDATE</code> du serveur ou de OneDrive).</li>
 <li>Au premier lancement, l'écran <b>Premier lancement</b> demande le <b>workspace</b> (dossier racine FLUX : local, OneDrive ou serveur ESMA) et ton <b>nom d'utilisateur</b>.</li>
 <li>FLUX crée dans le workspace : <code>DOSSIER_PROJETS/</code> (les projets), <code>USER/</code> (réglages par personne), <code>CONFIG/</code> (réglages d'équipe), <code>FLUX_UPDATE/</code> (installeurs).</li>
-<li>Va dans <b>Shelf Manager</b> et installe les shelves / plugins des logiciels que tu utilises (A14).</li>
 </ol>
 <h3>Lancer</h3>
 <p>Double-clic sur FLUX. L'app démarre un petit serveur local (invisible) qui fait le travail. Si un antivirus le bloque au démarrage, FLUX réessaie tout seul et affiche un bandeau « reconnexion » tant que le serveur ne répond pas.</p>
@@ -190,7 +261,7 @@ tr { page-break-inside:avoid; }
 <p><b>Paramètres</b> : coche les DCC que tu utilises. Les autres disparaissent du lanceur et de la barre d'état.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a3">
 <h1>A3. L'interface</h1>
 <div class="grid2">
 <div class="card"><h4>Barre de titre</h4>Projet actif, épingle « toujours au premier plan », console de logs (tiroir), réglages de fenêtre.</div>
@@ -201,23 +272,23 @@ tr { page-break-inside:avoid; }
 <h3>Pages de la barre latérale</h3>
 <table>
 <tr><th>Groupe</th><th>Page</th><th>Sert à</th><th>Chapitre</th></tr>
-<tr><td>-</td><td>Accueil</td><td>Vue d'ensemble, publishs récents, chat du projet</td><td>A6</td></tr>
-<tr><td rowspan="3">ASSETS</td><td>Publisher</td><td>Publier depuis un logiciel ou un fichier</td><td>A8</td></tr>
-<tr><td>USD</td><td>Bibliothèque : components, décors, shots</td><td>A11</td></tr>
-<tr><td>Shelf Manager</td><td>Installer shelves, HDA, plugins</td><td>A14</td></tr>
-<tr><td rowspan="6">PIPELINE</td><td>Production</td><td>Tableau assets / shots, casting, plages, verrous</td><td>A12</td></tr>
-<tr><td>Folder Manager</td><td>Explorer le projet, créer assets / seq / shots, ouvrir dans un logiciel</td><td>A7</td></tr>
-<tr><td>Calendrier</td><td>Planning d'équipe, engagements</td><td>A13</td></tr>
-<tr><td>Activité</td><td>Fil de tout ce qui se passe, mentions</td><td>A13</td></tr>
-<tr><td>Template Editor</td><td>Presets de scènes et d'arborescence</td><td>A14</td></tr>
-<tr><td>Disque</td><td>Taille des projets, nettoyage</td><td>A15</td></tr>
-<tr><td>LAUNCHER</td><td>Logiciels</td><td>Lancer un logiciel, voir ses instances, le fermer</td><td>A17</td></tr>
+<tr><td>-</td><td>Accueil</td><td>Vue d'ensemble, publishs récents, chat du projet</td><td><a href="#a6">A6</a></td></tr>
+<tr><td rowspan="3">ASSETS</td><td>Publisher</td><td>Publier depuis un logiciel ou un fichier</td><td><a href="#a8">A8</a></td></tr>
+<tr><td>USD</td><td>Bibliothèque : components, décors, shots</td><td><a href="#a11">A11</a></td></tr>
+<tr><td>Shelf Manager</td><td>Installer shelves, HDA, plugins</td><td><a href="#a14">A14</a></td></tr>
+<tr><td rowspan="6">PIPELINE</td><td>Production</td><td>Tableau assets / shots, casting, plages, verrous</td><td><a href="#a12">A12</a></td></tr>
+<tr><td>Folder Manager</td><td>Explorer le projet, créer assets / seq / shots, ouvrir dans un logiciel</td><td><a href="#a7">A7</a></td></tr>
+<tr><td>Calendrier</td><td>Planning d'équipe, engagements</td><td><a href="#a13">A13</a></td></tr>
+<tr><td>Activité</td><td>Fil de tout ce qui se passe, mentions</td><td><a href="#a13">A13</a></td></tr>
+<tr><td>Template Editor</td><td>Presets de scènes et d'arborescence</td><td><a href="#a14">A14</a></td></tr>
+<tr><td>Disque</td><td>Taille des projets, nettoyage</td><td><a href="#a15">A15</a></td></tr>
+<tr><td>LAUNCHER</td><td>Logiciels</td><td>Lancer un logiciel, voir ses instances, le fermer</td><td><a href="#a17">A17</a></td></tr>
 </table>
 <p class="small">Ce manuel est aussi dans <code>&lt;workspace&gt;/FLUX_UPDATE/FLUX_Manuel.html</code>, mis à jour à chaque version de FLUX. Pages cachées accessibles depuis Paramètres avancés : Graph YAML (<code>/action-graph</code>), Action Publish.</p>
 <p>FLUX retient ta position : revenir sur le Folder Manager rouvre le même dossier, Production garde l'entité sélectionnée (jusqu'au prochain relancement).</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a4">
 <h1>A4. Le projet : tokens, noms, arborescence</h1>
 <p>Un projet FLUX est un dossier dans <code>DOSSIER_PROJETS/</code> avec deux fichiers de référence :</p>
 <ul>
@@ -260,7 +331,7 @@ tr { page-break-inside:avoid; }
 <div class="warn">Ne crée jamais de dossier ni de fichier de publish à la main. Si un token manque (nouvel asset, nouveau shot), crée-le dans FLUX : il sera ajouté à <code>tokens.json</code> et les dossiers seront créés au bon endroit.</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="a5">
 <h1>A5. Le process voulu : du travail au rendu</h1>
 <p>Voici le parcours d'un plan dans FLUX, tel qu'il est pensé pour l'équipe.</p>
 <h3>1. Préparer (responsable prod / lead)</h3>
@@ -294,7 +365,7 @@ tr { page-break-inside:avoid; }
 <div class="note">Chaque étape consomme les <code>LAST</code> des étapes précédentes : un nouveau publish de modeling arrive automatiquement dans le lighting sans rien refaire. Pour le rendu final, FLUX figera les <code>LAST</code> en <code>vNNN</code> pour que rien ne bouge pendant le calcul.</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="a6">
 <h1>A6. Accueil (Hub) et chat d'équipe</h1>
 <ul>
 <li><b>Publishs récents</b> du projet actif : qui, quoi, quand. Clic = ouvrir l'emplacement.</li>
@@ -303,7 +374,7 @@ tr { page-break-inside:avoid; }
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="a7">
 <h1>A7. Folder Manager</h1>
 <p>L'explorateur du projet, qui connaît les règles FLUX.</p>
 <h3>Vues</h3>
@@ -328,14 +399,14 @@ tr { page-break-inside:avoid; }
 <p>Depuis Production, le bouton <b>Ouvrir dans le Folder Manager</b> ouvre directement le dossier d'une séquence ou d'un shot.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a8">
 <h1>A8. Publisher</h1>
 <p>Le Publisher envoie ton travail dans le projet avec le bon nom, au bon endroit, en version immuable.</p>
 <h3>Étapes</h3>
 <ol>
 <li><b>Source</b> : un logiciel connecté (pastille verte) ou un fichier local. Si plusieurs Maya / Houdini tournent, FLUX te demande lequel (scène ouverte affichée).</li>
 <li><b>Mode</b> : Asset ou Shot.</li>
-<li><b>Les champs</b> : Catégorie / Name / Task / Instance / Variante pour un asset ; Sequence / Shot / Task / Perso ou Variante pour un shot. Ils construisent le nom (A4). Le bouton <i>i</i> de chaque champ explique ce qu'il attend.</li>
+<li><b>Les champs</b> : Catégorie / Name / Task / Instance / Variante pour un asset ; Sequence / Shot / Task / Perso ou Variante pour un shot. Ils construisent le nom (<a href="#a4">A4</a>). Le bouton <i>i</i> de chaque champ explique ce qu'il attend.</li>
 <li><b>Format</b> et options (voir tableau).</li>
 <li><b>Commentaire</b> (devient la note de publish), puis <b>Publier</b>. Un toast confirme la version écrite.</li>
 </ol>
@@ -373,7 +444,7 @@ tr { page-break-inside:avoid; }
 <p>Tableau par map : cocher les maps, format, profondeur (seules celles que le format supporte), taille. Painter lit les presets du projet (FLUX_BEAUTY_MAPS, FLUX_UTIL_MAPS). Mari : node <b>FLUX Export</b> dans le graphe (menu FLUX), suivi de l'export tuile par tuile.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a9">
 <h1>A9. Versions : vNNN et LAST</h1>
 <p>Chaque publish crée deux choses dans le <b>même dossier plat</b> :</p>
 <pre>assets/chara/DINGO/model/null/
@@ -393,7 +464,7 @@ tr { page-break-inside:avoid; }
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="a10">
 <h1>A10. Importer dans un logiciel</h1>
 <h3>Depuis l'app</h3>
 <p>Folder Manager, clic droit sur un publish → <b>Open in &lt;logiciel&gt;</b>. Le logiciel doit être ouvert et connecté (pastille verte).</p>
@@ -410,7 +481,7 @@ tr { page-break-inside:avoid; }
 <p>Import natif du LAST ou de la vNNN (Read Nuke, ouverture Photoshop, import ZBrush...).</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a11">
 <h1>A11. Page USD : components, décors, shots</h1>
 <p>La page <b>USD</b> ouvre la <b>Bibliothèque</b> : assets (components), décors (assemblies), et l'état des shots.</p>
 <h3>Component (un asset prêt à charger)</h3>
@@ -438,7 +509,7 @@ tr { page-break-inside:avoid; }
 <p>Rien n'a changé = pas de nouvelle version. Une version peut être <b>figée</b>.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a12">
 <h1>A12. Production</h1>
 <ul>
 <li><b>Tableau</b> des assets et des shots, détail par tâche (onglets de tâches ouverts gardés).</li>
@@ -453,7 +524,7 @@ tr { page-break-inside:avoid; }
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="a13">
 <h1>A13. Calendrier et Activité</h1>
 <h3>Calendrier</h3>
 <ul>
@@ -465,7 +536,7 @@ tr { page-break-inside:avoid; }
 <p>Fil de tout ce qui se passe (publishs, créations, archives, messages), mentions non lues, actions directes depuis une ligne (ouvrir, aller au fichier).</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a14">
 <h1>A14. Shelf Manager et Template Editor</h1>
 <h3>Shelf Manager</h3>
 <ul>
@@ -478,7 +549,7 @@ tr { page-break-inside:avoid; }
 <p>Presets de scènes et d'arborescences : ce que FLUX crée quand on lance un logiciel « New Scene » sur un asset ou un shot. Preset livré <b>Rendu &lt;SEQ&gt;</b> qui ouvre la scène de rendu de séquence.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a15">
 <h1>A15. Disque : taille et nettoyage</h1>
 <ul>
 <li>Taille des projets et des dossiers.</li>
@@ -487,7 +558,7 @@ tr { page-break-inside:avoid; }
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="a16">
 <h1>A16. Paramètres avancés et Graph YAML</h1>
 <h3>Paramètres avancés</h3>
 <ul>
@@ -499,8 +570,9 @@ tr { page-break-inside:avoid; }
 <p>Affiche chaque action de FLUX (publish, conversion de texture, proxy...) sous forme de nodes : entrées, commandes, sorties. Mode <b>Éditer</b> : palette de nodes (commandes FLUX, nodes de l'équipe dans <code>CONFIG/nodes/</code>, fonctions internes), <b>Tab</b> sous la souris pour chercher un node. Réservé aux TD : une action modifiée change le comportement pour toute l'équipe.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="a17">
 <h1>A17. FLUX dans chaque logiciel</h1>
+<p>Quand tu commences à travailler dans un logiciel avec FLUX : <b>Shelf Manager</b> → choisis le logiciel → <b>Installer</b> (shelf, HDA ou plugin, voir <a href="#a14">A14</a>), puis relance le logiciel. Une seule fois par poste.</p>
 <table>
 <tr><th>Logiciel</th><th>Ce que FLUX installe</th><th>Ce que tu y fais</th><th>État</th></tr>
 <tr><td>Maya 2024</td><td>shelf FLUX, script de démarrage (port 7001-7008)</td><td>publish, import, MAJ, CAM / LIGHT, USD léger</td><td><span class="tag ok">validé</span></td></tr>
@@ -517,7 +589,7 @@ tr { page-break-inside:avoid; }
 <div class="warn">Houdini : ne modifie jamais <code>houdini.env</code> pour FLUX (crash de Houdini 22). <code>$FLUX</code> est posé automatiquement au lancement.</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="a18">
 <h1>A18. Lighting et rendu</h1>
 <ol>
 <li>Production → séquence → <b>Scène de rendu Houdini</b> : crée <code>shot/&lt;SEQ&gt;/&lt;SEQ&gt;_render.hip</code> depuis le template de l'équipe. Jamais écrasée si elle existe.</li>
@@ -528,8 +600,8 @@ tr { page-break-inside:avoid; }
 </ol>
 </section>
 
-<section class="chap">
-<h1>A19. Règles d'or de l'artiste</h1>
+<section class="chap" id="a19">
+<h1>A19. Règles de travail</h1>
 <ol>
 <li>Tout nouveau nom (asset, shot, tâche) se crée dans FLUX, jamais dans l'explorateur Windows.</li>
 <li>Ne renomme, ne déplace, n'efface jamais un publish à la main. Une version publiée ne se modifie pas : on republie.</li>
@@ -544,7 +616,7 @@ tr { page-break-inside:avoid; }
 </ol>
 </section>
 
-<section class="chap">
+<section class="chap" id="a20">
 <h1>A20. Dépannage</h1>
 <table>
 <tr><th>Symptôme</th><th>Cause probable</th><th>Que faire</th></tr>
@@ -559,8 +631,8 @@ tr { page-break-inside:avoid; }
 </table>
 </section>
 
-<section class="chap">
-<h1>A21. Où trouver quoi</h1>
+<section class="chap" id="a21">
+<h1>A21. Index des fonctions</h1>
 <table>
 <tr><th>Je veux...</th><th>Où</th></tr>
 <tr><td>Créer un projet / asset / séquence / shot</td><td>Folder Manager → onglets de création (ou Production)</td></tr>
@@ -589,13 +661,13 @@ tr { page-break-inside:avoid; }
 </section>
 
 <!-- ============ PARTIE B ============ -->
-<section class="part partpage">
+<section class="part" id="partie-b">
   <div class="n">PARTIE B</div>
   <div class="t">Technique</div>
   <p>Comment FLUX est construit : processus, couches de code, formats de fichiers, API, moteur d'actions, USD, bridges, build, tests et décisions d'architecture.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="b1">
 <h1>B1. Principes et décisions</h1>
 <table>
 <tr><th>Principe</th><th>Conséquence</th></tr>
@@ -611,7 +683,7 @@ tr { page-break-inside:avoid; }
 <p>Cible 2028 : 4 équipes sur le serveur ESMA avec un service de métadonnées central (ADR 0003), rendu farm Tractor avec versions gelées (ADR 0009, 0015), extensions YAML + plugins Python (ADR 0014).</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="b2">
 <h1>B2. Architecture générale</h1>
 <div class="flow">
   <div class="box a"><b>Electron main</b>app/electron</div><span class="arr">spawn →</span>
@@ -652,7 +724,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <p>Règle d'imports (contrat <code>backend/.importlinter</code>) : <code>flux_core</code> isolé ; les stores n'importent pas <code>core.json_manager</code>. Cycles connus masqués par imports paresseux : <code>core.local_storage → features.publisher</code>, <code>features.shelf_manager → dcc.houdini</code>, <code>features.usd_assembler → flux_actions.switch</code>.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="b3">
 <h1>B3. Démarrage de l'app et sécurité locale</h1>
 <h3>Séquence de démarrage</h3>
 <ol>
@@ -674,7 +746,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <p>Toute requête plus lente que <code>FLUX_SLOW_REQUEST_MS</code> est loguée. Logs visibles dans la console in-app (<code>core/logger.py</code>, <code>routers/logs.py</code>, <code>components/shared/Console.tsx</code>) ; les logs Maya y sont relayés.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="b4">
 <h1>B4. Organisation du code</h1>
 <pre>Flux_Pipeline_dev/
   NOTES.md, AGENTS.md, STRUCTURE.md, LICENSE, NOTICE
@@ -718,7 +790,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 </table>
 </section>
 
-<section class="chap">
+<section class="chap" id="b5">
 <h1>B5. Configuration et stockage</h1>
 <table>
 <tr><th>Fichier</th><th>Portée</th><th>Contenu</th></tr>
@@ -751,7 +823,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="b6">
 <h1>B6. Métadonnées : JSON, SQLite, remote</h1>
 <p>Protocole <code>MetadataRepository</code> : get / set / update / delete, logs, <code>version_token</code>. Implémentations :</p>
 <table>
@@ -770,7 +842,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <div class="warn">Pas de SQLite sur OneDrive ou partage réseau, pas de synchronisation maison. Le multi-utilisateur passera par un service central.</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="b7">
 <h1>B7. Nommage par tokens</h1>
 <p>Le cœur du modèle de données : <b>le nom de fichier porte les tokens, l'arborescence est déduite des tokens</b>.</p>
 <ul>
@@ -783,7 +855,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="b8">
 <h1>B8. Publish : chaîne complète</h1>
 <div class="flow">
   <div class="box a"><b>UI / shelf / HDA</b></div><span class="arr">→</span>
@@ -809,7 +881,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <div class="warn">Zone à risque : <code>publish_core.py</code>, <code>publish_layout.py</code>, <code>resolve_publish_path</code> touchent tous les publishs de tous les DCC et la compatibilité des projets V3.</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="b9">
 <h1>B9. Moteur d'actions YAML</h1>
 <p>Inspiré de Silex. <code>flux_core</code> (aucune dépendance FLUX ni DCC) exécute des actions décrites en YAML ; <code>flux_actions</code> fournit les commandes et la config.</p>
 <ul>
@@ -821,7 +893,7 @@ React renderer (app/src)      --HTTP + X-Flux-Token-->  routers/*
 <div class="note">Piège : un nouveau YAML dans <code>flux_actions/config/</code> doit être tracké (exception <code>!backend/flux_actions/config/*.yml</code> du <code>.gitignore</code>, vérifier avec <code>git check-ignore</code>).</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="b10">
 <h1>B10. USD dans FLUX</h1>
 <p><code>usd-core</code> (pip) est dans le backend, importé en lazy. Il ne doit jamais atteindre le Python de Houdini (crash) : d'où le package <code>flux.json</code> et l'interdiction de <code>houdini.env</code>.</p>
 <h3>Trois produits</h3>
@@ -855,7 +927,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <p>Pose de repos = pose de bind (depuis les <code>bindPreMatrix</code>), points du mesh skinné lus avant le skinCluster ; ANIM = SkelAnimation seule (joints qui bougent). Presets ADR 0034.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="b11">
 <h1>B11. Bridges DCC</h1>
 <table>
 <tr><th>DCC</th><th>Transport</th><th>Ports</th></tr>
@@ -881,7 +953,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <div class="warn">Code copié dans les prefs des logiciels : toute modification d'un autostart, du serveur Houdini ou d'un HDA doit être réinstallée et testée dans le logiciel.</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="b12">
 <h1>B12. Activity, chat, calendrier, logs</h1>
 <ul>
 <li>Logs JSONL append-only avec lock inter-process, rotation mensuelle.</li>
@@ -892,7 +964,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="b13">
 <h1>B13. Textures (.tx) et proxies</h1>
 <h3>Conversion .tx (<code>texture_conform.py</code>)</h3>
 <p>OpenImageIO <code>make_texture</code> : mip-maps, tuiles, colorspace selon le rôle de la map et le conteneur, hash de la source dans <code>ImageDescription</code> (pas de reconversion inutile), UDIM, parallèle. Karma lit le .tx. Pas d'<code>imaketx</code> (licence Houdini), pas de <code>.rat</code>.</p>
@@ -902,7 +974,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <p>pxr + fast-simplification (MIT) + numpy : décimation (20 000 → ~2 000 triangles), <code>purpose=proxy</code>. Groom (ADR 0026) : BasisCurves réduites (1 courbe sur 10), largeurs et skin gardés. Un link Proxy manuel gagne.</p>
 </section>
 
-<section class="chap">
+<section class="chap" id="b14">
 <h1>B14. Build, installeur, mises à jour</h1>
 <table>
 <tr><th>But</th><th>Commande</th></tr>
@@ -919,7 +991,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 <div class="warn">Chemins sensibles au build (liste complète dans <code>STRUCTURE.md</code>) : <code>backend.spec</code>, <code>electron-builder.yml</code>, <code>python_bridge.ts</code>, <code>main.ts</code>, <code>tsconfig.electron.json</code>, <code>vite.config.ts</code>, <code>package.json</code>, <code>index.html</code>, <code>backend/resources/</code>. Toujours builder avec le même Python que celui qui a les dépendances (<code>python -m PyInstaller</code>).</div>
 </section>
 
-<section class="chap">
+<section class="chap" id="b15">
 <h1>B15. Tests et qualité</h1>
 <ul>
 <li>Backend : depuis <code>backend/</code>, <code>python tests/run_tests.py</code> → <code>verdict: PASS</code>. Une suite : <code>python -m unittest discover -s tests/&lt;suite&gt; -t .</code></li>
@@ -930,7 +1002,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="b16">
 <h1>B16. Registre des décisions (ADR)</h1>
 <p>Dossier <code>docs/decisions/</code>. Une décision acceptée ne se rouvre que par une nouvelle ADR.</p>
 <table>
@@ -967,7 +1039,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 </table>
 </section>
 
-<section class="chap">
+<section class="chap" id="b17">
 <h1>B17. État, limites et suite</h1>
 <h3>Validé en production</h3>
 <p>App, installeur, mises à jour ; projets / tokens / arborescence ; Production ; publish Maya (7 formats), Houdini (5 formats), fichier local, ZBrush ; import Maya / Houdini ; pipe USD (component, anim de shot, stage) ; activité / chat ; compatibilité des projets V3.</p>
@@ -988,7 +1060,7 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 </ul>
 </section>
 
-<section class="chap">
+<section class="chap" id="b18">
 <h1>B18. Glossaire</h1>
 <table>
 <tr><th>Terme</th><th>Définition</th></tr>
@@ -1013,5 +1085,23 @@ SHOT    &lt;SHOT&gt;/usd/&lt;SEQ&gt;_&lt;SHOT&gt;_LAST.usda    stage (ADR 0020)<
 </table>
 </section>
 
+</main>
+</div>
+<a class="top" href="#sommaire">↑ Sommaire</a>
+<script>
+// Highlight the chapter being read in the side menu.
+(function () {
+  var links = {};
+  document.querySelectorAll(".side a[data-id]").forEach(function (a) { links[a.dataset.id] = a; });
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting || !links[e.target.id]) return;
+      Object.keys(links).forEach(function (k) { links[k].classList.remove("on"); });
+      links[e.target.id].classList.add("on");
+    });
+  }, { rootMargin: "-10% 0px -80% 0px" });
+  document.querySelectorAll("section[id]").forEach(function (sec) { obs.observe(sec); });
+})();
+</script>
 </body>
 </html>
