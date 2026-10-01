@@ -223,22 +223,25 @@ tr { page-break-inside:avoid; }
 <li><code>tokens.json</code> : la liste des valeurs autorisées (classes d'assets, noms, séquences, shots, types, tâches) et les règles de nom ;</li>
 <li><code>project.json</code> : identité du projet (<code>project_id</code> stable), fps, résolution, unités USD (1 mètre par unité, axe Y), config couleur OCIO, presets Painter.</li>
 </ul>
-<h3>Les tokens (champs du Publisher)</h3>
+<h3>Les tokens, dans l'ordre du nom de fichier</h3>
+<p><b>ASSET</b> : <code>CHAR_GEO_DINGO_null_v003.usd</code></p>
 <table>
-<tr><th>Champ (token)</th><th>Valeurs par défaut</th><th>Rôle</th></tr>
-<tr><td>Catégorie (CLASS)</td><td>CHAR, PROPS, ENV, SET, FXRIG</td><td>Famille d'asset, donne le dossier (CHAR → <code>assets/chara</code>)</td></tr>
-<tr><td>Name (NAME)</td><td>DINGO, CHAIR... (créés par l'équipe)</td><td>Nom de l'asset</td></tr>
-<tr><td>Task (TYPE)</td><td>GEO, SHADING, GROOM, RIG, ANIM, CFX, MULT, REF</td><td>Département de l'asset, donne le sous-dossier (GEO → <code>model</code>)</td></tr>
-<tr><td>Instance (INSTANCE)</td><td><code>null</code> par défaut, ou libre (body, eyes...)</td><td>Sous-partie de l'asset dans un département</td></tr>
-<tr><td>Variante (VARIANTE)</td><td>libre, optionnelle (red, damaged...)</td><td>Déclinaison</td></tr>
-<tr><td>Sequence / Shot (SEQ / SHOT)</td><td>SEQ0010 / SHOT0020</td><td>Séquence et plan (4 chiffres, de 10 en 10)</td></tr>
-<tr><td>Task de shot (TYPE_SHOT)</td><td>LAYOUT, ANIM, FX, CFX, CROWD, LIGHT, COMP</td><td>Département du plan</td></tr>
-<tr><td>Perso (mode Shot, Task ANIM)</td><td>NAME d'un asset : DINGO, DINGO_02</td><td>Personnage animé dans le plan</td></tr>
-<tr><td>Version</td><td><code>v001</code>, <code>v002</code>... et <code>LAST</code></td><td>Numéro de publish</td></tr>
+<tr><th></th><th>1. Catégorie</th><th>2. Task</th><th>3. Name</th><th>4. Instance</th><th>5. Variante</th><th>6. Version</th></tr>
+<tr><th>Token</th><td>CLASS</td><td>TYPE</td><td>NAME</td><td>INSTANCE</td><td>VARIANTE</td><td>vNNN / LAST</td></tr>
+<tr><th>Exemple</th><td>CHAR</td><td>GEO</td><td>DINGO</td><td>null</td><td>(vide)</td><td>v003</td></tr>
+<tr><th>Valeurs</th><td>CHAR, PROPS, ENV, SET, FXRIG</td><td>GEO, SHADING, GROOM, RIG, ANIM, CFX, MULT, REF</td><td>créés par l'équipe</td><td><code>null</code> par défaut, ou libre (body, eyes...)</td><td>libre, optionnelle (red, damaged...)</td><td>v001, v002... + LAST</td></tr>
+<tr><th>Rôle</th><td>famille d'asset</td><td>département</td><td>nom de l'asset</td><td>sous-partie, sous-tâche</td><td>déclinaison</td><td>numéro de publish</td></tr>
+<tr><th>Dossier</th><td><code>assets/chara</code></td><td><code>model</code></td><td><code>DINGO</code></td><td><code>null</code></td><td>-</td><td>-</td></tr>
 </table>
-<p>Forme des noms :</p>
-<pre>asset : CATEGORIE_TASK_NAME_INSTANCE[_VARIANTE]_vNNN   CHAR_GEO_DINGO_null_v003.usd
-shot  : SEQ_SHOT_TASK[_PERSO ou _VARIANTE]_vNNN        SEQ0010_SHOT0020_ANIM_DINGO_v003.usd</pre>
+<p><b>SHOT</b> : <code>SEQ0010_SHOT0020_ANIM_DINGO_v003.usd</code></p>
+<table>
+<tr><th></th><th>1. Sequence</th><th>2. Shot</th><th>3. Task</th><th>4. Perso / Variante</th><th>5. Version</th></tr>
+<tr><th>Token</th><td>SEQ</td><td>SHOT</td><td>TYPE_SHOT</td><td>NAME d'un asset / VARIANTE</td><td>vNNN / LAST</td></tr>
+<tr><th>Exemple</th><td>SEQ0010</td><td>SHOT0020</td><td>ANIM</td><td>DINGO</td><td>v003</td></tr>
+<tr><th>Valeurs</th><td>SEQ0010, SEQ0020... (0015 pour intercaler)</td><td>SHOT0010, SHOT0020... (0015 pour intercaler)</td><td>LAYOUT, ANIM, FX, CFX, CROWD, LIGHT, COMP</td><td>Perso en ANIM (DINGO, DINGO_02), sinon variante libre (block...)</td><td>v001, v002... + LAST</td></tr>
+<tr><th>Rôle</th><td>séquence</td><td>plan</td><td>département du plan</td><td>perso animé ou déclinaison</td><td>numéro de publish</td></tr>
+<tr><th>Dossier</th><td><code>shot/SEQ0010</code></td><td><code>SHOT0020</code></td><td><code>anim</code></td><td>-</td><td>-</td></tr>
+</table>
 <p>FLUX lit ces tokens dans le nom et en déduit tout : <code>CHAR_GEO_DINGO_null_v003.usd</code> est la géométrie de l'asset DINGO, version 3, rangée dans <code>assets/chara/DINGO/model/null/</code>.</p>
 <p>Les séquences et les shots se numérotent de 10 en 10 (SEQ0010, SEQ0020). Pour en glisser un entre deux, tape le numéro principal puis un chiffre secondaire : 1 et 5 donnent 0015. Les anciens noms à 3 chiffres (SEQ001, SHOT010) restent valides.</p>
 <h3>Arborescence type</h3>
