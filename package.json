@@ -1,7 +1,7 @@
 {
   "name": "flux-pipeline",
-  "version": "0.7.0",
-  "fluxVersion": "0.7.000",
+  "version": "0.8.0",
+  "fluxVersion": "0.8.000",
   "description": "FLUX Pipeline Hub",
   "main": "dist-electron/main.js",
   "scripts": {
