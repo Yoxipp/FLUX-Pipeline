@@ -27,6 +27,12 @@ export interface UseProductionResult {
   reload: () => Promise<void>
 }
 
+/** Set by the mounted Production page: flush its pending save, reload from the server. */
+export const productionSync: { flush: () => Promise<void>; reload: () => Promise<void> } = {
+  flush: async () => {},
+  reload: async () => {},
+}
+
 export function useProduction(project: string | null | undefined): UseProductionResult {
   const [state, setStateRaw]         = useState<ProductionState>(EMPTY_STATE)
   const [publishesByTask, setPublishesByTask] = useState<Record<string, ProductionPublish[]>>({})
@@ -89,23 +95,36 @@ export function useProduction(project: string | null | undefined): UseProduction
   }, [])
 
   // Debounced persist. 400 ms mirrors Projects.tsx.
+  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => Promise<void> } | null>(null)
   useEffect(() => {
     if (!project || !loaded.current) return
     const proj = project
     const snapshot = state
-    const t = setTimeout(() => {
-      void api.setProduction(proj, snapshot).then(r => {
-        // A locked seq / shot was edited here: the server kept it as stored.
+    const run = () => {
+      pending.current = null
+      return api.setProduction(proj, snapshot).then(r => {
         if (r.locked_kept?.length) {
           toast.warning(`Verrouillé, modification annulée : ${r.locked_kept.join(', ')}`)
           void reload()
         }
-      }).catch(() => {
-        /* keep local edits; user sees them until next successful save */
-      })
-    }, 400)
-    return () => clearTimeout(t)
+      }).catch(() => { /* keep local edits; user sees them until next successful save */ })
+    }
+    const t = setTimeout(() => { void run() }, 400)
+    pending.current = { timer: t, run }
+    return () => { clearTimeout(t); if (pending.current?.timer === t) pending.current = null }
   }, [state, project]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A rename / delete on the server must not race a late debounced save (2026-10-01:
+  // 1 -> 2 -> 100 in a row brought old names back): flush first, reload after.
+  useEffect(() => {
+    productionSync.flush = async () => {
+      const p = pending.current
+      if (!p) return
+      clearTimeout(p.timer)
+      await p.run()
+    }
+    productionSync.reload = reload
+  }, [reload])
 
   return { state, setState, publishesByTask, publishesUnmatched, sequencesOnDisk, shotsOnDisk, loading, reload }
 }

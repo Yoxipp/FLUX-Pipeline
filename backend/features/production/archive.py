@@ -370,6 +370,12 @@ def keep_archived_out(production: dict, previous: dict | None) -> int:
     production[ARCHIVED_KEY] = tombs[-MAX_TOMBSTONES:]
     # A rename (features/production/rename.py): an entity still under its old name in a
     # stale save takes the new one, else the create-only sync rebuilds the old folder.
+    # Names of renamed entities belong to the server (only the rename route changes them):
+    # quick successive renames (1 -> 2 -> 100) share the same minute stamp, so replaying
+    # the chain is not enough, the stored name wins.
+    renamed_ids = {(t.get("kind"), (t.get("renamed") or {}).get("id")) for t in tombs if t.get("renamed")}
+    stored = {("shot", e.get("id")): e.get("name") for e in (previous or {}).get("shots", [])}
+    stored.update({("seq", e.get("id")): e.get("name") for e in (previous or {}).get("sequences", [])})
     for t in tombs:
         ren = t.get("renamed") or {}
         old_name = t.get("shot") if t.get("kind") == "shot" else t.get("seq")
@@ -377,6 +383,11 @@ def keep_archived_out(production: dict, previous: dict | None) -> int:
         for e in production.get(key, []):
             if ren.get("id") and e.get("id") == ren["id"] and e.get("name") == old_name:
                 e["name"] = ren.get("to") or e["name"]
+    for kind, key in (("shot", "shots"), ("seq", "sequences")):
+        for e in production.get(key, []):
+            ident = (kind, e.get("id"))
+            if ident in renamed_ids and stored.get(ident):
+                e["name"] = stored[ident]
     dead = {i for t in tombs for i in t.get("ids") or []}
     before = len(production.get("sequences", [])) + len(production.get("shots", []))
     production["sequences"] = [s for s in production.get("sequences", []) if s.get("id") not in dead]

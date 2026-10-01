@@ -98,6 +98,20 @@ class RenameSeqShot(unittest.TestCase):
         keep_archived_out(stale, saved)
         self.assertEqual(sorted(s["name"] for s in stale["shots"]), ["SHOT015", "SHOT020"])
 
+    def test_quick_successive_renames_keep_the_stored_name(self) -> None:
+        # 2026-10-01: 010 -> 015 -> 100 -> 015 in the same minute, the page's late
+        # saves still carry intermediate names: the stored name always wins.
+        from features.production.archive import keep_archived_out
+
+        saved = _production()
+        for old, new in (("SHOT010", "SHOT015"), ("SHOT015", "SHOT100"), ("SHOT100", "SHOT015")):
+            rename.rename_in_production(saved, "shot", "SEQ001", old, new)
+        for stale_name in ("SHOT010", "SHOT015", "SHOT100"):
+            stale = _production()
+            stale["shots"][0]["name"] = stale_name
+            keep_archived_out(stale, saved)
+            self.assertEqual(sorted(s["name"] for s in stale["shots"]), ["SHOT015", "SHOT020"], stale_name)
+
     def test_bad_or_taken_names_are_refused(self) -> None:
         with self.assertRaises(ValueError):
             rename.rename_in_production(_production(), "shot", "SEQ001", "SHOT010", "SHOT020")
