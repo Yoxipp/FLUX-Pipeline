@@ -121,6 +121,11 @@ function parseNum(name: string, prefix: 'SEQ' | 'SHOT'): number {
   return m ? Number(m[1]) : Number.NaN
 }
 
+// Digits as written in the name: SEQ001 (old projects) and SEQ0010 both keep their own width.
+function numDigits(name: string, prefix: 'SEQ' | 'SHOT'): string {
+  return name.toUpperCase().match(new RegExp(`^${prefix}(\\d+)`))?.[1] ?? name
+}
+
 function useLocalNumber(key: string, def: number, clampMin: number, clampMax: number): [number, (n: number) => void] {
   const [v, setV] = useState<number>(() => {
     try { const s = Number(localStorage.getItem(key)); if (!Number.isNaN(s) && s > 0) return Math.min(clampMax, Math.max(clampMin, s)) } catch { /* blocked */ }
@@ -476,7 +481,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                 <div style={{ display: 'flex', padding: '0 10px' }}>
                   {sequences.map((seq, i) => {
                     const num = parseNum(seq.name, 'SEQ')
-                    const label = Number.isNaN(num) ? seq.name : String(num).padStart(3, '0')
+                    const label = Number.isNaN(num) ? seq.name : numDigits(seq.name, 'SEQ')
                     // Frames of the edit before this sequence: the ruler runs over the whole edit.
                     const f0 = seqFrames.slice(0, i).reduce((acc, n) => acc + n, 0)
                     const shots = shotsBySeq.get(seq.id) ?? []
@@ -717,7 +722,7 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
   shotCount:   number
 }) {
   const num = parseNum(seq.name, 'SEQ')
-  const numStr = Number.isNaN(num) ? seq.name : String(num).padStart(3, '0')
+  const numStr = Number.isNaN(num) ? seq.name : numDigits(seq.name, 'SEQ')
   const seqColor = effectiveSeqColor(seq)
 
   return (
@@ -752,7 +757,7 @@ function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onCl
   seqColor:    string
 }) {
   const num = parseNum(shot.name, 'SHOT')
-  const numStr = Number.isNaN(num) ? shot.name : String(num).padStart(3, '0')
+  const numStr = Number.isNaN(num) ? shot.name : numDigits(shot.name, 'SHOT')
   // Shots that override (don't inherit tasks or assets from the parent seq)
   // get a distinct fill — accent hue instead of the seq-derived color.
   const override = !shot.inherit_tasks || !shot.inherit_assets

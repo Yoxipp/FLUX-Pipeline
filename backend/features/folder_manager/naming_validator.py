@@ -8,7 +8,7 @@ import unicodedata
 from core.constants import (
     ACTIVE_VERSION_LABEL,
     DEFAULT_INSTANCE,
-    DEFAULT_PADDING,
+    SEQ_SHOT_PADDING,
 )
 
 # Characters forbidden in any token
@@ -38,11 +38,11 @@ def format_token(raw: str) -> str:
     return cleaned.upper().strip("_")
 
 
-def format_seq(number: int, padding: int = DEFAULT_PADDING) -> str:
+def format_seq(number: int, padding: int = SEQ_SHOT_PADDING) -> str:
     return f"SEQ{str(number).zfill(padding)}"
 
 
-def format_shot(number: int, padding: int = DEFAULT_PADDING) -> str:
+def format_shot(number: int, padding: int = SEQ_SHOT_PADDING) -> str:
     return f"SHOT{str(number).zfill(padding)}"
 
 

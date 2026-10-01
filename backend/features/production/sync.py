@@ -80,6 +80,7 @@ def sync_production_to_disk(project_path: Path, production: dict) -> dict:
             continue
         shots_by_seq.setdefault(seq.get("name", ""), []).append({
             "number": n,
+            "label": shot.get("name", "").upper(),
             "tasks": [
                 {"token": t.get("name") or (t.get("type_tokens") or [""])[0],
                  "subtasks": list(t.get("known_subtasks") or [])}
@@ -93,7 +94,8 @@ def sync_production_to_disk(project_path: Path, production: dict) -> dict:
         if seq_num is None:
             continue
         try:
-            update_sequence(project_path, seq_num, shots_by_seq.get(seq_name, []), class_map)
+            update_sequence(project_path, seq_num, shots_by_seq.get(seq_name, []), class_map,
+                            seq_label=seq_name.upper())
             created["sequences"] += 1
         except Exception as exc:  # noqa: BLE001
             log.warning("sync sequence %r failed: %s", seq_name, exc)

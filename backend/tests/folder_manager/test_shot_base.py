@@ -42,7 +42,7 @@ class ShotBase(unittest.TestCase):
     def test_folder_manager_and_production_give_the_same_folders(self) -> None:
         with mock.patch("features.usd_assembler.shot_stage.write_stage") as write_stage:
             fm = ssc.create_shot(self.project, 1, 10)
-        write_stage.assert_called_once_with(self.project, "SEQ001", "SHOT010")
+        write_stage.assert_called_once_with(self.project, "SEQ0001", "SHOT0010")   # new: 4 digits
         production = {"sequences": [{"id": "s1", "name": "SEQ001"}],
                       "shots": [{"seq_id": "s1", "name": "SHOT020", "tasks": []}]}
         sync_production_to_disk(self.project, production)

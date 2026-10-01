@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.constants import DEFAULT_PADDING
+import re
+
+from core.constants import SEQ_SHOT_PADDING
 from core.logger import get_logger
 from core.paths import ensure_dir
 from features.folder_manager.naming_validator import format_seq, format_shot
@@ -19,14 +21,19 @@ log = get_logger(__name__)
 def create_sequence(
     project_path: Path,
     seq_number: int,
-    padding: int = DEFAULT_PADDING,
+    padding: int = SEQ_SHOT_PADDING,
+    *,
+    seq_label: str | None = None,
 ) -> Path:
-    """Create /shot/<SEQ###>/ and register the SEQ token.
+    """Create /shot/<SEQ####>/ and register the SEQ token.
+
+    The label is the existing SEQ token with that number (SEQ001 in an older project),
+    else a new 4-digit one (SEQ0010), unless *seq_label* gives it.
 
     Returns the sequence Path.
     Raises FileExistsError if it already exists.
     """
-    seq_label = format_seq(seq_number, padding)
+    seq_label = seq_label or seq_label_for(project_path, seq_number, padding)
     seq_rel   = f"shot/{seq_label}"
     seq_path  = project_path / seq_rel
 
@@ -47,7 +54,10 @@ def create_shot(
     project_path: Path,
     seq_number: int,
     shot_number: int,
-    padding: int = DEFAULT_PADDING,
+    padding: int = SEQ_SHOT_PADDING,
+    *,
+    seq_label: str | None = None,
+    shot_label: str | None = None,
 ) -> Path:
     """Create /shot/<SEQ###>/<SHOT###>/ with standard sub-folders.
 
@@ -55,8 +65,8 @@ def create_shot(
     Returns the shot Path.
     Raises FileExistsError if the shot already exists.
     """
-    seq_label  = format_seq(seq_number, padding)
-    shot_label = format_shot(shot_number, padding)
+    seq_label  = seq_label or seq_label_for(project_path, seq_number, padding)
+    shot_label = shot_label or shot_label_for(project_path, seq_label, shot_number, padding)
     shot_rel   = f"shot/{seq_label}/{shot_label}"
     shot_path  = project_path / shot_rel
 
@@ -131,9 +141,14 @@ def update_sequence(
     seq_number: int,
     shots: list[dict] | None = None,
     class_tokens: dict[str, str] | None = None,
-    padding: int = DEFAULT_PADDING,
+    padding: int = SEQ_SHOT_PADDING,
+    *,
+    seq_label: str | None = None,
 ) -> Path:
     """Idempotent version of :func:`create_sequence`.
+
+    Production passes its own names (*seq_label*, ``label`` of each shot) so an older
+    SEQ001 / SHOT010 is never re-padded into a second folder.
 
     * Ensures the sequence folder exists.
     * For each entry in *shots* (``[{'number': int, 'tasks': [{'token': str,
@@ -144,7 +159,7 @@ def update_sequence(
 
     Never overwrites or deletes anything — only creates what is missing.
     """
-    seq_label = format_seq(seq_number, padding)
+    seq_label = seq_label or seq_label_for(project_path, seq_number, padding)
     seq_rel   = f"shot/{seq_label}"
     seq_path  = project_path / seq_rel
 
@@ -158,7 +173,8 @@ def update_sequence(
         n = shot.get("number") if isinstance(shot, dict) else shot
         if n is None:
             continue
-        shot_label = format_shot(int(n), padding)
+        given = shot.get("label") if isinstance(shot, dict) else None
+        shot_label = given or shot_label_for(project_path, seq_label, int(n), padding)
         shot_path  = project_path / "shot" / seq_label / shot_label
         if not shot_path.exists():
             _scaffold_shot(shot_path)
@@ -214,14 +230,37 @@ def list_sequences(project_path: Path) -> list[str]:
     return sorted(tokens.get("SEQ", {}).keys())
 
 
-def list_shots(project_path: Path, seq_number: int | None = None, padding: int = DEFAULT_PADDING) -> list[str]:
+def list_shots(project_path: Path, seq_number: int | None = None, padding: int = SEQ_SHOT_PADDING) -> list[str]:
     """Return sorted SHOT token keys, optionally filtered to a single sequence."""
     tokens = load_tokens(project_path)
     shots = sorted(tokens.get("SHOT", {}).keys())
     if seq_number is None:
         return shots
-    prefix = format_seq(seq_number, padding) + "/"
+    prefix = seq_label_for(project_path, seq_number, padding) + "/"
     return [s for s in shots if s.startswith(prefix)]
+
+
+def seq_label_for(project_path: Path, number: int, padding: int = SEQ_SHOT_PADDING) -> str:
+    """Existing SEQ token with this number (any width), else a new padded label."""
+    for key in (load_tokens(project_path) or {}).get("SEQ", {}):
+        if _number_of(key, "SEQ") == number:
+            return key
+    return format_seq(number, padding)
+
+
+def shot_label_for(project_path: Path, seq_label: str, number: int,
+                   padding: int = SEQ_SHOT_PADDING) -> str:
+    """Existing SHOT token of *seq_label* with this number (any width), else a new label."""
+    prefix = f"{seq_label}/"
+    for key in (load_tokens(project_path) or {}).get("SHOT", {}):
+        if key.startswith(prefix) and _number_of(key[len(prefix):], "SHOT") == number:
+            return key[len(prefix):]
+    return format_shot(number, padding)
+
+
+def _number_of(label: str, prefix: str) -> int | None:
+    m = re.fullmatch(prefix + r"(\d+)", label.upper())
+    return int(m.group(1)) if m else None
 
 
 # ── internals ─────────────────────────────────────────────────────────────────

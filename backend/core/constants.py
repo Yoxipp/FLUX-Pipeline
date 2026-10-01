@@ -101,8 +101,12 @@ TOKEN_TYPES_SHOT: tuple[str, ...] = ("CLASS", "SEQ", "SHOT", "VARIANTE", "ITER")
 
 ACTIVE_VERSION_LABEL: str = "LAST"   # e.g. CHAR_RIG_JEROME_null_LAST.mb
 
-# Default padding for sequence and shot numbers (e.g. 3 → SEQ001)
+# Default padding for version numbers (e.g. 3 → v001)
 DEFAULT_PADDING: int = 3
+
+# Padding of NEW sequence and shot names (2026-10-01): SEQ0010, SHOT0010, numbered by
+# steps of 10 so 0011 or 0015 can be slotted in between. Existing SEQ001 / SHOT010 keep theirs.
+SEQ_SHOT_PADDING: int = 4
 
 # Default instance token when user provides none
 DEFAULT_INSTANCE: str = "null"
@@ -282,7 +286,7 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.7.000"
+APP_VERSION: str = "0.8.000"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out

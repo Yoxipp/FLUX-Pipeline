@@ -141,7 +141,7 @@ def rename_on_disk(project_path: Path, kind: str, seq: str, shot: str, new: str)
             drop_tokens_under(project_path, main)
         _move_satellites(project_path, kind, seq, shot, new)
         seq_num, shot_num = int(seq[3:]), int(new[4:])
-        new_path = create_shot(project_path, seq_num, shot_num)
+        new_path = create_shot(project_path, seq_num, shot_num, seq_label=seq, shot_label=new)
         for d in dirs:
             ensure_dir(new_path / d)
         return {"archived": archived, "path": str(new_path), "warnings": warnings}
@@ -186,7 +186,8 @@ def rename_on_disk(project_path: Path, kind: str, seq: str, shot: str, new: str)
         warnings.append(f"scene de rendu gardee ({render_new.name}) : ses FLUX Shot Import / FLUX Sequence / "
                         f"FLUX Render nomment encore {seq}, change la sequence dans leurs parametres")
     for shot_name, dirs in shots:
-        new_path = create_shot(project_path, int(new[3:]), int(shot_name[4:]))
+        new_path = create_shot(project_path, int(new[3:]), int(shot_name[4:]),
+                               seq_label=new, shot_label=shot_name)
         for d in dirs:
             ensure_dir(new_path / d)
         ensure_shot_base(project_path, new, shot_name)

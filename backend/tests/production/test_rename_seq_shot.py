@@ -33,8 +33,8 @@ class RenameSeqShot(unittest.TestCase):
                          mock.patch("features.folder_manager.houdini_render_scene.create_sequence_render_scene_async")]
         for p in self.patches:
             p.start()
-        ssc.create_shot(self.project, 1, 10)
-        ssc.create_shot(self.project, 1, 20)
+        ssc.create_shot(self.project, 1, 10, seq_label="SEQ001", shot_label="SHOT010")   # older 3-digit project
+        ssc.create_shot(self.project, 1, 20, seq_label="SEQ001", shot_label="SHOT020")
         (self.project / "shot/SEQ001/SHOT010/anim/block").mkdir(parents=True)
         (self.project / "shot/SEQ001/SHOT010/usd").mkdir(exist_ok=True)     # the shot stage (FLUX)
         (self.project / "shot/SEQ001/SHOT010/usd/stage.usda").write_text("generated", encoding="utf-8")

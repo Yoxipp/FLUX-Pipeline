@@ -267,14 +267,14 @@ function TokenFinder({ project, onChange }: {
 // ── Sous-composants partagés ──────────────────────────────────────────────────
 
 function Spinner({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [draft, setDraft] = useState(String(value).padStart(3, '0'))
+  const [draft, setDraft] = useState(String(value).padStart(4, '0'))
 
-  useEffect(() => { setDraft(String(value).padStart(3, '0')) }, [value])
+  useEffect(() => { setDraft(String(value).padStart(4, '0')) }, [value])
 
   const commit = () => {
     const n = parseInt(draft, 10)
-    if (!isNaN(n) && n >= 1) { onChange(n); setDraft(String(n).padStart(3, '0')) }
-    else setDraft(String(value).padStart(3, '0'))
+    if (!isNaN(n) && n >= 1) { onChange(n); setDraft(String(n).padStart(4, '0')) }
+    else setDraft(String(value).padStart(4, '0'))
   }
 
   return (
@@ -422,8 +422,9 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
   onCreateShot: (project: string, seqN: number, shotN: number) => Promise<void>
   onRefreshSequences: () => void
 }) {
-  const [seqN, setSeqN]             = useState(1)
-  const [shotN, setShotN]           = useState(1)
+  // SEQ0010 / SHOT0010 by default, steps of 10 leave room for 0011, 0015...
+  const [seqN, setSeqN]             = useState(10)
+  const [shotN, setShotN]           = useState(10)
   const [seq, setSeq]               = useState('')
   const [statusSeq, setStatusSeq]   = useState('')
   const [statusShot, setStatusShot] = useState('')
@@ -434,7 +435,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
     if (!currentProject) return
     try {
       await onCreateSequence(currentProject, seqN)
-      setStatusSeq('✓ SQ' + String(seqN).padStart(3, '0'))
+      setStatusSeq('✓ SEQ' + String(seqN).padStart(4, '0'))
       onRefreshSequences()
     } catch (e) {
       setStatusSeq('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
@@ -446,7 +447,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
     const seqNum = parseInt(seq.replace(/\D/g, ''), 10) || seqN
     try {
       await onCreateShot(currentProject, seqNum, shotN)
-      setStatusShot(`✓ SQ${String(seqNum).padStart(3, '0')}_SH${String(shotN).padStart(3, '0')}`)
+      setStatusShot(`✓ SEQ${String(seqNum).padStart(4, '0')}_SHOT${String(shotN).padStart(4, '0')}`)
     } catch (e) {
       setStatusShot('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
     }

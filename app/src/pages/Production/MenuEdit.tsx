@@ -702,7 +702,10 @@ function GroupSection({ group, setState, setSelection }: {
 }
 
 // ── shot / seq sections ──────────────────────────────────────────────────────
-const padSeq = (n: number, len = 3) => String(n).padStart(len, '0')
+// 2026-10-01: SEQ0010 / SHOT0010, 4 digits, steps of 10 so 0011 or 0015 can be slotted in between.
+const padSeq = (n: number, len = 4) => String(n).padStart(len, '0')
+const NUM_STEP = 10
+const nextTen = (nums: number[]) => (nums.length ? Math.floor(Math.max(...nums) / NUM_STEP) + 1 : 1) * NUM_STEP
 const parseSeqNum  = (name: string) => Number((name.match(/SEQ(\d+)/i) || [])[1] ?? NaN)
 const parseShotNum = (name: string) => Number((name.match(/SHOT(\d+)/i) || [])[1] ?? NaN)
 const ANIM_DEFAULT_SUBTASKS = ['BLOCK', 'SPLINE', 'POLISH']
@@ -731,8 +734,9 @@ function ShotCreateSection({ state, setState, setSelection }: {
   const [num, setNum] = useState('')
   const [label, setLabel] = useState('')
   const create = () => {
-    const n = parseInt(num, 10)
-    if (Number.isNaN(n) || n <= 0) return
+    // No number entered -> next ten after the last sequence (0010, 0020...).
+    let n = parseInt(num, 10)
+    if (Number.isNaN(n) || n <= 0) n = nextTen(state.sequences.map(s => parseSeqNum(s.name)).filter(x => !Number.isNaN(x)))
     const nm = `SEQ${padSeq(n)}`
     if (state.sequences.some(s => s.name === nm)) return
     const id = nid('seq')
@@ -770,7 +774,7 @@ function ShotCreateSection({ state, setState, setSelection }: {
           style={{ ..._input, flex: 1, fontFamily: 'var(--sans)' }}
         />
       </div>
-      <ProdBtn full onClick={create} style={{ marginTop: 6 }} disabled={!num.trim()}>
+      <ProdBtn full onClick={create} style={{ marginTop: 6 }}>
         <Plus size={12} strokeWidth={2} /> {t('prod.newSequence')}
       </ProdBtn>
     </div>
@@ -850,14 +854,13 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
     )
   }
   const createShot = () => {
-    // No number entered → auto-pick max(existing shot num) + 1 (or 1 if none).
+    // No number entered -> next ten after the last shot of the sequence (0010, 0020...).
     let n = parseInt(shotNum, 10)
     if (Number.isNaN(n) || n <= 0) {
-      const nums = state.shots
+      n = nextTen(state.shots
         .filter(s => s.seq_id === seq.id)
         .map(s => parseShotNum(s.name))
-        .filter(x => !Number.isNaN(x))
-      n = nums.length ? Math.max(...nums) + 1 : 1
+        .filter(x => !Number.isNaN(x)))
     }
     const nm = `SHOT${padSeq(n)}`
     if (state.shots.some(s => s.seq_id === seq.id && s.name === nm)) return
