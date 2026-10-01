@@ -9,6 +9,7 @@ import {
   getBackendStatus, onBackendStatus, type BackendStatus,
 } from './python_bridge'
 import { promptUpdateAtLaunch } from './updater'
+import { spawn } from 'child_process'
 
 // The terminal that launched FLUX can go away (window closed, concurrently stopped)
 // while FLUX keeps running: every console.log (backend output forwarded by
@@ -276,6 +277,29 @@ ipcMain.handle('notification:show', (_event, { title, body }: { title: string; b
 
 ipcMain.handle('shell:openPath', (_event, filePath: string) => {
   shell.openPath(filePath)
+})
+
+// Settings > "Desinstaller FLUX": start the NSIS uninstaller that sits next to FLUX.exe
+// ("Uninstall FLUX.exe") and quit so it can delete the app. The uninstaller itself
+// removes what FLUX added to the DCCs (scripts/installer.nsh, customUnInstall), so the
+// button and a double-click on the exe do exactly the same thing.
+ipcMain.handle('app:uninstall', async (): Promise<{ ok: boolean; reason?: string }> => {
+  if (!app.isPackaged) return { ok: false, reason: 'dev' }
+  const uninstaller = path.join(path.dirname(process.execPath), 'Uninstall FLUX.exe')
+  if (!fs.existsSync(uninstaller)) return { ok: false, reason: `introuvable : ${uninstaller}` }
+  try {
+    const child = spawn(uninstaller, [], { detached: true, stdio: 'ignore' })
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('spawn', () => resolve())
+    })
+    child.unref()
+  } catch (err) {
+    return { ok: false, reason: String(err) }
+  }
+  // Let the renderer get the answer, then quit (before-quit stops the backend).
+  setTimeout(() => app.quit(), 300)
+  return { ok: true }
 })
 
 // ── Backend status / recovery ─────────────────────────────────────────────────

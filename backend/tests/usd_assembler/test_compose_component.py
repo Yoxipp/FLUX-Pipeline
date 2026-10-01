@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 
@@ -72,7 +73,11 @@ class ComposeComponent(unittest.TestCase):
 
     def test_matches_golden(self) -> None:
         stage = _compose_stage()
-        produced = stage.GetRootLayer().ExportToString()
+        # Line endings vary with the platform and git checkout: compare text only.
+        produced = stage.GetRootLayer().ExportToString().replace("\r\n", "\n")
+        if os.environ.get("FLUX_REGEN_GOLDEN") == "1":
+            # Accept the current output as the new reference (review the git diff).
+            _GOLDEN.write_text(produced, encoding="utf-8", newline="")
         self.assertTrue(_GOLDEN.exists(), f"golden missing: {_GOLDEN}")
         self.assertEqual(produced, _GOLDEN.read_text(encoding="utf-8"))
 

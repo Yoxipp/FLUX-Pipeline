@@ -569,3 +569,139 @@ def uninstall(houdini_exe_path: str | None = None) -> dict:
             log.warning("HDA removal (autostart) errored (non-fatal): %s", exc)
 
     return {"success": True, "message": "uninstalled" if removed_any else "not_installed"}
+
+
+# ---------------------------------------------------------------------------
+# Full uninstall (FLUX uninstaller): every Houdini version, every prefs root
+# ---------------------------------------------------------------------------
+
+_SERVER_FILENAME = "flux_houdini_server.py"
+_SHELF_FILENAME = "Flux.shelf"
+
+
+def all_user_prefs_dirs() -> list[Path]:
+    """Every houdiniX.Y prefs dir on this machine (home, real Documents, ~/Documents).
+
+    Unlike _all_prefs_dirs (one version, from the configured exe), this sweeps every
+    version so the FLUX uninstaller leaves no Houdini behind.
+    """
+    found: list[Path] = []
+    env = os.environ.get("HOUDINI_USER_PREF_DIR")
+    if env and Path(env).is_dir():
+        found.append(Path(env))
+    home = Path.home()
+    for base in (home, _get_documents_dir(), home / "Documents"):
+        try:
+            for d in sorted(base.glob("houdini*")):
+                if d.is_dir() and re.match(r"houdini\d+\.\d+$", d.name) and d not in found:
+                    found.append(d)
+        except OSError:
+            continue
+    return found
+
+
+def _flux_files_in(prefs_dir: Path) -> list[Path]:
+    """Files FLUX owns entirely inside one prefs dir (deleted as a whole)."""
+    files = [
+        prefs_dir / "scripts" / _SERVER_FILENAME,
+        prefs_dir / "packages" / _PACKAGE_FILENAME,
+        prefs_dir / "toolbar" / _SHELF_FILENAME,
+    ]
+    otls = prefs_dir / "otls"
+    for pattern in ("flux_*.hda", "backup/flux_*.hda"):
+        try:
+            files.extend(otls.glob(pattern))
+        except OSError:
+            pass
+    return [f for f in files if f.is_file()]
+
+
+def _block_files_in(prefs_dir: Path) -> list[Path]:
+    """User startup scripts that may carry a FLUX block (only the block is removed)."""
+    targets = [prefs_dir / "scripts" / name for name in _STARTUP_FILES]
+    try:
+        targets += sorted(prefs_dir.glob(f"python*libs/{_PYTHONRC}"))
+    except OSError:
+        pass
+    return targets
+
+
+def find_traces(prefs_dir: Path) -> list[Path]:
+    """What FLUX left in *prefs_dir*: owned files + scripts holding a FLUX block."""
+    traces = _flux_files_in(prefs_dir)
+    for f in _block_files_in(prefs_dir):
+        try:
+            if f.is_file() and _BLOCK_BEGIN in f.read_text(encoding="utf-8", errors="replace"):
+                traces.append(f)
+        except OSError:
+            continue
+    try:
+        env_text = (prefs_dir / "houdini.env").read_text(encoding="utf-8", errors="replace")
+        if _ENV_BEGIN in env_text:
+            traces.append(prefs_dir / "houdini.env")
+    except OSError:
+        pass
+    return traces
+
+
+def purge_prefs_dir(prefs_dir: Path) -> list[str]:
+    """Remove every FLUX trace from one prefs dir; the user's own content is kept.
+
+    FLUX blocks are cut out of 123.py / 456.py / pythonrc.py / houdini.env (the rest
+    of each file stays), jump.pref loses only the FLUX lines, and the files FLUX owns
+    (server script, flux.json package, Flux shelf, flux_*.hda) are deleted.
+    Returns the paths that were changed or deleted.
+    """
+    changed: list[str] = []
+    for f in _flux_files_in(prefs_dir):
+        try:
+            f.unlink()
+            changed.append(str(f))
+        except OSError as exc:
+            log.warning("Uninstall: could not delete %s: %s", f, exc)
+    backup = prefs_dir / "otls" / "backup"
+    try:
+        if backup.is_dir() and not any(backup.iterdir()):
+            backup.rmdir()
+    except OSError:
+        pass
+
+    for f in _block_files_in(prefs_dir):
+        try:
+            content = f.read_text(encoding="utf-8") if f.is_file() else ""
+        except OSError:
+            continue
+        if _BLOCK_BEGIN not in content:
+            continue
+        cleaned = re.sub(
+            rf"\n?{re.escape(_BLOCK_BEGIN)}.*?{re.escape(_BLOCK_END)}\n?",
+            "",
+            content,
+            flags=re.DOTALL,
+        )
+        try:
+            if cleaned.strip():
+                f.write_text(cleaned, encoding="utf-8")
+            else:
+                f.unlink()          # the file only ever held the FLUX block
+            changed.append(str(f))
+        except OSError as exc:
+            log.warning("Uninstall: could not clean %s: %s", f, exc)
+
+    _remove_env_block(prefs_dir)
+    _remove_flux_jump_pref(prefs_dir)
+
+    # Folders FLUX created that are now empty (scripts/, packages/, pythonX.Ylibs/...).
+    try:
+        sub_dirs = [prefs_dir / "scripts", prefs_dir / "packages", prefs_dir / "otls",
+                    prefs_dir / "toolbar", *prefs_dir.glob("python*libs")]
+    except OSError:
+        sub_dirs = []
+    for d in sub_dirs:
+        try:
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+                changed.append(str(d))
+        except OSError:
+            pass
+    return changed

@@ -608,6 +608,10 @@ export const api = {
       by_project: { project: string; size: number; file_count: number }[];
     }>('GET', `/system/disk-usage?limit=${limit}${project ? `&project=${encodeURIComponent(project)}` : ''}`),
 
+  // Settings > Desinstaller FLUX: what the uninstaller would remove / keep (read only).
+  getUninstallPlan: () =>
+    apiCall<{ remove: { label: string; paths: string[] }[]; keep: string[] }>('GET', '/system/uninstall-plan'),
+
   browseProject: (project_name: string, subpath?: string) =>
     apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
 

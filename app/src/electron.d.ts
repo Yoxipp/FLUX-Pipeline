@@ -11,6 +11,7 @@ declare global {
       getAppVersion: () => Promise<string>
       showNotification: (title: string, body: string) => Promise<void>
       openPath: (filePath: string) => Promise<void>
+      uninstallFlux?: () => Promise<{ ok: boolean; reason?: string }>
       windowMinimize: () => void
       windowMaximize: () => void
       windowClose: () => void

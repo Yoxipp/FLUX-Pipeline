@@ -53,3 +53,38 @@
 !macro customInstall
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "FluxVersion" "${FLUX_VERSION}"
 !macroend
+
+; --- customUnInstall --------------------------------------------------------
+; "Uninstall FLUX.exe" (next to FLUX.exe, also launched by Settings > Desinstaller FLUX)
+; removes everything FLUX added to this machine, not only the app files:
+;   1. flux_backend.exe --uninstall-cleanup : FLUX blocks / bridges / plugins / HDAs /
+;      shelves / $FLUX package / ZBrush PYTHONPATH entry in the DCCs
+;      (backend/features/system/uninstall.py). Python and its packages, the DCCs,
+;      the projects and the user's own startup code are never touched.
+;   2. the per-user data dirs FLUX writes (config, prefs, logs, staged HDAs).
+; Skipped on an update: the old version is uninstalled before the new one is
+; installed, and the DCCs / preferences must survive that.
+; Runs before electron-builder deletes $INSTDIR, so the backend exe still exists.
+!macro customUnInstall
+  ${ifNot} ${isUpdated}
+    ; A backend left running would keep files of $INSTDIR locked.
+    nsExec::Exec 'taskkill /F /T /IM flux_backend.exe'
+    Pop $0
+    IfFileExists "$INSTDIR\resources\backend\flux_backend.exe" 0 flux_no_backend
+      DetailPrint "FLUX : nettoyage des logiciels (Maya, Houdini, Nuke...)"
+      nsExec::ExecToLog '"$INSTDIR\resources\backend\flux_backend.exe" --uninstall-cleanup'
+      Pop $0
+    flux_no_backend:
+    ; Per-user data: electron always uses the current user's app data.
+    ${if} $installMode == "all"
+      SetShellVarContext current
+    ${endif}
+    RMDir /r "$APPDATA\FLUX"
+    RMDir /r "$APPDATA\FluxPipeline"
+    RMDir /r "$LOCALAPPDATA\FLUX"
+    RMDir /r "$APPDATA\flux-pipeline"
+    ${if} $installMode == "all"
+      SetShellVarContext all
+    ${endif}
+  ${endif}
+!macroend

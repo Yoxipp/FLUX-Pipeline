@@ -16,6 +16,12 @@ from fastapi.responses import JSONResponse
 # Ensure backend/ is on sys.path when run directly
 sys.path.insert(0, os.path.dirname(__file__))
 
+# FLUX uninstaller (scripts/installer.nsh, customUnInstall): remove what FLUX added to
+# the DCCs, then exit without starting the server. See features/system/uninstall.py.
+if "--uninstall-cleanup" in sys.argv:
+    from features.system.uninstall import run_cleanup_cli
+    sys.exit(run_cleanup_cli())
+
 from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION

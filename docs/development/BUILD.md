@@ -86,6 +86,14 @@ En mode frozen, `shelf_core.py` retrouve `resources/` via `sys._MEIPASS` ; `conf
 
 Cible `nsis` x64, `oneClick: false`, `perMachine: false`, hooks `scripts/installer.nsh` (detection MAJ vs installation neuve).
 
+Desinstallation : `Uninstall FLUX.exe` (pose par NSIS a cote de `FLUX.exe`, aussi lance par Reglages > Desinstaller FLUX,
+phrase `Understand and Uninstall`). Hook `customUnInstall` de `installer.nsh`, saute pendant une MAJ : tue
+`flux_backend.exe`, lance `flux_backend.exe --uninstall-cleanup` (`backend/features/system/uninstall.py` : blocs FLUX
+dans 123.py / 456.py / pythonrc.py / userSetup.py / init.py, fichier supprime s'il ne contenait que FLUX, bridges,
+plugins, HDA `flux_*`, shelves, package `flux.json`, entree PYTHONPATH ZBrush, UI ZBrush, presets Painter non modifies,
+temp `flux_*`), puis supprime `%APPDATA%\FLUX`, `%APPDATA%\FluxPipeline`, `%LOCALAPPDATA%\FLUX`. Jamais touches : Python
+et ses paquets, les logiciels, les projets / FLUX_ROOT, le code perso des scripts de demarrage.
+
 ## Specificites
 
 * `signAndEditExecutable: false` : sans Developer Mode, l'extraction de `winCodeSign` echoue (symlinks). Pour une release signee : certificat + retirer la ligne.

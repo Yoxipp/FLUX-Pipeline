@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showNotification: (title: string, body: string): Promise<void> =>
     ipcRenderer.invoke('notification:show', { title, body }),
 
+  // Launches "Uninstall FLUX.exe" and quits FLUX (Settings > Desinstaller FLUX).
+  uninstallFlux: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('app:uninstall'),
   openPath: (filePath: string): Promise<void> =>
     ipcRenderer.invoke('shell:openPath', filePath),
 

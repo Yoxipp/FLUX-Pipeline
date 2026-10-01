@@ -51,7 +51,8 @@ class Composition(unittest.TestCase):
         comp = composition(self.project / "assets/chara/UTAH/usd/UTAH_LAST.usda")
         self.assertEqual(comp["default_prim"], "UTAH")
         tree = comp["tree"]
-        self.assertEqual((tree["path"], tree["kind"], tree["type"]), ("/UTAH", "component", "SkelRoot"))
+        # GEO only, no skin: the root stays an Xform, RIG makes it a SkelRoot (ADR 0034).
+        self.assertEqual((tree["path"], tree["kind"], tree["type"]), ("/UTAH", "component", "Xform"))
         self.assertEqual(tree["arcs"][0]["arc"], "payload")
         self.assertEqual(sorted(tree["variant_sets"]), ["geo_B", "geo_null"])      # one per file
         self.assertEqual(sorted(tree["variant_sets"]["geo_B"]["variants"]), ["off", "on"])

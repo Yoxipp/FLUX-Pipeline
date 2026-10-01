@@ -387,6 +387,46 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     return True, f"Removed: {target}"
 
 
+def find_flux_maya_traces(version: str) -> list[Path]:
+    """FLUX shelves (shelf_Flux*.mel, current + older names) and shelf icons in Maya <version> prefs."""
+    found: list[Path] = []
+    shelf_dir = get_dcc_shelf_dir("Maya", version)
+    if shelf_dir is None:
+        return found
+    try:
+        found += sorted(shelf_dir.glob("shelf_Flux*.mel"))
+    except OSError:
+        pass
+    icons_src = _RESOURCES_ROOT / "maya" / "icons"
+    if icons_src.is_dir():
+        found += [shelf_dir.parent / "icons" / png.name for png in icons_src.glob("*.png")
+                  if (shelf_dir.parent / "icons" / png.name).is_file()]
+    return found
+
+
+def remove_flux_maya_traces(version: str) -> list[str]:
+    """Delete the FLUX shelves + icons of Maya <version> (FLUX uninstaller). Best-effort.
+
+    Only files named after what FLUX ships are touched; the user's own shelves stay.
+    The copy in the Maya install dir is removed too when it is writable.
+    """
+    removed: list[str] = []
+    targets = find_flux_maya_traces(version)
+    install_dir = _get_maya_install_shelf_dir(version)
+    if install_dir is not None:
+        try:
+            targets += sorted(install_dir.glob("shelf_Flux*.mel"))
+        except OSError:
+            pass
+    for f in targets:
+        try:
+            f.unlink()
+            removed.append(str(f))
+        except OSError as exc:
+            log.warning("Uninstall: could not delete %s: %s", f, exc)
+    return removed
+
+
 # ── Houdini HDA management ────────────────────────────────────────────────────
 
 def get_dcc_otls_dirs(version: str) -> list[Path]:

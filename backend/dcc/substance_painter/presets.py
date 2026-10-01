@@ -64,6 +64,33 @@ def install_presets() -> list[str]:
     return installed
 
 
+
+def find_installed_presets() -> list[Path]:
+    """FLUX presets present in Painter AND still identical to the shipped copy."""
+    dest_dir = painter_presets_dir()
+    found: list[Path] = []
+    for src in sorted(_BUNDLED_DIR.glob("*.spexp")) if _BUNDLED_DIR.is_dir() else []:
+        dest = dest_dir / src.name
+        try:
+            if dest.is_file() and dest.read_bytes() == src.read_bytes():
+                found.append(dest)
+        except OSError:
+            continue
+    return found
+
+
+def remove_presets() -> list[str]:
+    """Delete the FLUX presets from Painter (FLUX uninstaller). A preset the user edited
+    no longer matches the shipped copy and is kept. Returns the deleted paths."""
+    removed: list[str] = []
+    for f in find_installed_presets():
+        try:
+            f.unlink()
+            removed.append(str(f))
+        except OSError as exc:
+            log.warning("Painter preset %s not removed: %s", f.name, exc)
+    return removed
+
 def project_presets(project_path: str | Path) -> list[str]:
     """Export presets the project uses (empty = no choice made: every preset)."""
     from features.folder_manager.project_config import read_project_config

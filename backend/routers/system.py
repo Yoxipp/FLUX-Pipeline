@@ -33,3 +33,12 @@ async def flux_root() -> dict:
         "root":         str(root) if root else "",
         "projects_dir": str(get_projects_dir()),
     }
+
+
+@router.get("/uninstall-plan")
+async def uninstall_plan() -> dict:
+    """What "Desinstaller FLUX" would remove on this machine, and what it keeps.
+    Read only: the removal itself runs in the uninstaller (installer.nsh)."""
+    from features.system.uninstall import plan
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, plan)

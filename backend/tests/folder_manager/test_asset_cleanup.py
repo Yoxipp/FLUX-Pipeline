@@ -64,14 +64,14 @@ class AssetCleanup(unittest.TestCase):
     def test_scan_proposes_the_right_places(self) -> None:
         scan = ac.scan_asset(self.project, "OGRE")
         moves = {(i["path"], i["target"]): i for i in self._by(scan, "move")}
-        geo = str(self.geo.relative_to(self.project)).replace("\\\\", "/")
+        geo = self.geo.relative_to(self.project).as_posix()
         self.assertIn((f"{geo}/abc", geo), moves)
         self.assertIn(("CHAR_GEO_OGRE_null_v001.abc", ), [tuple(n.split(" -> ")[:1]) for n in moves[(f"{geo}/abc", geo)]["names"]])
         nested = moves[(f"{geo}/FBX/CHAR_GEO_OGRE_null_FBX_V003", geo)]
         self.assertEqual(nested["names"], ["CHAR_GEO_OGRE_null.fbx -> CHAR_GEO_OGRE_null_v003.fbx"])
-        bcol = str(self.bcol.relative_to(self.project)).replace("\\\\", "/")
+        bcol = self.bcol.relative_to(self.project).as_posix()
         self.assertIn(("assets/chara/OGRE/old_textures", bcol), moves)
-        col = str(self.col.relative_to(self.project)).replace("\\\\", "/")
+        col = self.col.relative_to(self.project).as_posix()
         self.assertIn((col, bcol), moves)                                          # COL v001 -> BCOL v001
         self.assertTrue(any(i["kind"] == "old_map_name" and i["action"] == "drop_dup" for i in scan["items"]))
         self.assertTrue(any(i["path"] == f"{geo}/abc" and i["action"] == "drop_dup" for i in scan["items"]))
@@ -111,7 +111,7 @@ class AssetCleanup(unittest.TestCase):
 
     def test_a_scene_or_usd_naming_a_path_keeps_it(self) -> None:
         _touch(self.project / "seq/SEQ001/SHOT010/light.hipnc",
-               "tex = $FLUX/PROJ/" + str(self.col.relative_to(self.project)).replace("\\\\", "/")
+               "tex = $FLUX/PROJ/" + self.col.relative_to(self.project).as_posix()
                + "/CHAR_SHADING_OGRE_COL_v001.png")
         scan = ac.scan_asset(self.project, "OGRE")
         kept = [i for i in scan["items"] if i["kind"] == "old_map_name" and not i["safe"]]
