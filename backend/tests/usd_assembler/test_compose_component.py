@@ -79,6 +79,7 @@ class ComposeComponent(unittest.TestCase):
             # Accept the current output as the new reference (review the git diff).
             _GOLDEN.write_text(produced, encoding="utf-8", newline="")
         self.assertTrue(_GOLDEN.exists(), f"golden missing: {_GOLDEN}")
+        self.maxDiff = None
         self.assertEqual(produced, _GOLDEN.read_text(encoding="utf-8"))
 
     def test_determinism(self) -> None:

@@ -1,0 +1,21 @@
+#usda 1.0
+(
+    defaultPrim = "CHAR_hero"
+)
+
+def Xform "CHAR_hero" (
+    kind = "component"
+    prepend payload = @geometry.usd@
+    variants = {
+        string look = "default"
+    }
+    prepend variantSets = "look"
+)
+{
+    variantSet "look" = {
+        "default" {
+
+        }
+    }
+}
+
