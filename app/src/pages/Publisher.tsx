@@ -1859,18 +1859,6 @@ export function Publisher() {
     void api.setActiveInstance(dccKey, port, pid).catch(() => undefined).then(() => handlePublish())
   }
 
-  // Ctrl/Cmd+P → publish (also prevents the browser print dialog)
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-        e.preventDefault()
-        void requestPublish()
-      }
-    }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [requestPublish])
-
   const filename = buildFilename()
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -1881,8 +1869,6 @@ export function Publisher() {
       {/* Header */}
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Publish</div>
-        <div style={{ flex: 1 }} />
-        <Btn kbd sm>Ctrl+P</Btn>
       </div>
 
       <SoftwareSelector active={dcc} onChange={setDcc} />
