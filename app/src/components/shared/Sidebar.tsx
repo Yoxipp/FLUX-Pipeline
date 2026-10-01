@@ -583,21 +583,20 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </div>
 
       <NavGroup title="ASSETS">
-        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={Upload}     label={t('nav.publisher')}     active={pathname === '/publisher'} indent route="/publisher" onClick={() => navigate('/publisher')} />
         {/* Action engine test bench (Phase 2): route kept at /action-publish, hidden
-            from the menu on purpose. It is NOT a replacement for the Publisher; it
-            only proves the generic form + destination preview. Re-add when the rich
-            Publisher's logic is wired through the engine. */}
+            from the menu on purpose. It is NOT a replacement for the Publisher. */}
         <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent route="/usd" onClick={() => navigate('/usd')} />
+        <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent route="/shelf" onClick={() => navigate('/shelf')} />
       </NavGroup>
 
+      {/* 2026-10-01: Production first, then the project folders, the team, the tools. */}
       <NavGroup title="PIPELINE">
-        <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent route="/shelf" onClick={() => navigate('/shelf')} />
-        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent route="/templates" onClick={() => navigate('/templates')} />
         <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent route="/production" onClick={() => navigate('/production')} />
+        <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
+        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent route="/templates" onClick={() => navigate('/templates')} />
         <NavItem icon={HardDrive}      label="Disque"                  active={pathname === '/disk'}       indent route="/disk" onClick={() => navigate('/disk')} />
       </NavGroup>
 
