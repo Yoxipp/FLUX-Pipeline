@@ -11,6 +11,7 @@ from pathlib import Path
 
 from core import config
 from core.constants import FLUX_MARKER_FILENAME, FLUX_ROOT_DIRS
+from features.system.manual import ensure_manual
 from core.logger import get_logger
 from core.paths import ensure_dir, get_flux_root, set_config_username, set_flux_root
 from utils import user_utils
@@ -74,6 +75,7 @@ async def init_first_launch(req: InitRequest) -> dict:
         for d in FLUX_ROOT_DIRS:
             ensure_dir(root / d)
         (root / FLUX_MARKER_FILENAME).touch()
+        ensure_manual(root / "FLUX_UPDATE")
         # Bootstrap keys go into config.json (next to exe / %APPDATA%/FluxPipeline/
         # when frozen) because is_first_launch reads that file directly - it must NOT
         # depend on the metadata repository, whose location depends on the workspace.
@@ -137,6 +139,7 @@ async def update_settings(req: SettingsUpdate) -> dict:
             for d in FLUX_ROOT_DIRS:
                 ensure_dir(ws / d)
             (ws / FLUX_MARKER_FILENAME).touch(exist_ok=True)
+            ensure_manual(ws / "FLUX_UPDATE")
             set_flux_root(ws)
             config.set("workspace", str(ws))
         await loop.run_in_executor(None, _update_workspace)

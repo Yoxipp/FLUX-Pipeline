@@ -65,6 +65,12 @@ async def lifespan(app: FastAPI):
             log.info("[FLUX] Advanced switches applied: %s", applied)
     except Exception as exc:  # never block startup on a prefs hiccup
         log.warning("[FLUX] Advanced switches skipped: %s", exc)
+    # The manual ships with each FLUX version into FLUX_UPDATE (next to the installers).
+    try:
+        from features.system.manual import ensure_manual_in_flux_root
+        ensure_manual_in_flux_root()
+    except Exception as exc:  # never block startup on a manual copy hiccup
+        log.warning("[FLUX] Manual copy skipped: %s", exc)
     # Keep the Maya shelf / autostart in sync with this FLUX. Houdini HDAs are only
     # ever (re)built live from source (Shelf Manager or Houdini autostart): FLUX no
     # longer ships .hda files, whose old copies used to overwrite fresh builds.
