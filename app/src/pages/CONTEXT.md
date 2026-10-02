@@ -7,6 +7,21 @@ Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Produc
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
+## Production (2026-10-02)
+
+* `ProductionTracking.tsx` + `tracking.css` : table Shots/Assets par departement, recherche,
+  filtre de sequence/categorie, miniatures, casting, dependances, zoom et editeur de colonnes
+  de projet. Style plat, fonds chauds et accent Flux. Les panneaux restent accessibles par
+  Proprieties et Taches/retakes ; anciennes preferences conservees.
+* `tracking.ts` : statuts agreges, heritage des taches/casting, dependances, materialisation
+  des taches et patch de review sans perdre les notes. Configuration optionnelle
+  `production.tracking.departments`, review dans `task_details.status` (ADR 0041).
+* Un badge ouvre `MenuSpec.initialOpen` avec l'entite, la tache et la sous-tache choisies.
+  Aucun nouveau store de review. N/A + cree une tache explicitement. Les miniatures utilisent
+  les references versionnees existantes, sous `_production/thumbnails/<id>`.
+* La timeline et les categories/groupes restent dans le selecteur de vue ; le suivi
+  tabulaire est la vue initiale. La configuration globale de presets utilisateurs reste hors scope.
+
 ## Folder Manager (`Projects.tsx` + `folder_manager/`, B2 2026-09-28)
 
 * `Projects.tsx` : la page. Barre laterale (listes sauvegardees, presets, tailles), Token Finder, onglets de creation,

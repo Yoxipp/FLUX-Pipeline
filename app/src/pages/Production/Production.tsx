@@ -1,14 +1,6 @@
-// Production.tsx — Production Tab shell.
-//
-// Layout:
-//   ┌───────────────────────────────────────────────┬───────┐
-//   │              Timeline / Grid                  │ Edit  │
-//   ├───────────────────────────────────────────────┴───────┤
-//   │              Spec (Tasks / TaskDetail)                │
-//   └───────────────────────────────────────────────────────┘
-//
-// Phase 1 lands the ASSET grid + MenuEdit + MenuSpec end-to-end. The SHOT
-// timeline lives behind the mode toggle so Phase 2 slots in without a rewrite.
+// Production shell: department tracker by default, optional timeline/category
+// views, collapsible properties and resizable task/retake details. All views
+// share the existing production store and entity selection.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -21,6 +13,7 @@ import { ProductionShot } from './ProductionShot'
 import { MenuEdit } from './MenuEdit'
 import { MenuSpec } from './MenuSpec'
 import { useSessionState } from '../../hooks/useSessionState'
+import { ProductionTracking } from './ProductionTracking'
 
 type Mode = 'asset' | 'shot'
 export type Selection =
@@ -81,9 +74,10 @@ export function Production() {
   const { t } = useI18n()
   const location = useLocation() as { state?: { openFavorite?: FavoriteOpenTarget } | null }
   const prod = useProduction(project || null)
-  const [mode, setMode]         = useLocalStr<Mode>(LS.mode, 'asset')
-  const [editOpen, setEditOpen] = useLocalBool(LS.editOpen, true)
-  const [specOpen, setSpecOpen] = useLocalBool(LS.specOpen, true)
+  const [mode, setMode]         = useLocalStr<Mode>(LS.mode, 'shot')
+  const [editOpen, setEditOpen] = useLocalBool(LS.editOpen, false)
+  const [specOpen, setSpecOpen] = useLocalBool(LS.specOpen, false)
+  const [view, setView] = useState<'table' | 'legacy'>('table')
   // Session-kept (U3): coming back to Production reselects the same entity (same project only).
   const [selState, setSelState] = useSessionState<{ project: string; sel: Selection }>(
     'prod.selection', { project: project || '', sel: { kind: 'none' } })
@@ -207,7 +201,7 @@ export function Production() {
       {/* Toolbar */}
       <div style={{
         padding: '10px 16px', borderBottom: '1px solid var(--rule)',
-        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule-2)', borderRadius: 6, overflow: 'hidden' }}>
           {(['asset', 'shot'] as Mode[]).map(m => (
@@ -228,6 +222,11 @@ export function Production() {
             >{t(m === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>
           ))}
         </div>
+        <select aria-label="Vue de production" value={view} onChange={e => setView(e.target.value as 'table' | 'legacy')}
+          style={{ background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule-2)', borderRadius: 4, padding: '5px 8px', fontSize: 11 }}>
+          <option value="table">Suivi par département</option>
+          <option value="legacy">{mode === 'shot' ? 'Timeline' : 'Catégories et groupes'}</option>
+        </select>
         <div style={{ flex: 1 }} />
         {/* current project — always visible, right side of the toolbar */}
         <div
@@ -248,15 +247,27 @@ export function Production() {
         </div>
         <button
           onClick={() => setEditOpen(!editOpen)}
-          title={editOpen ? 'Replier le menu Edit' : 'Déployer le menu Edit'}
-          style={_iconBtn}
-        >{editOpen ? <PanelRightClose size={13} strokeWidth={1.75} /> : <PanelRightOpen size={13} strokeWidth={1.75} />}</button>
+          title={editOpen ? 'Replier les propriétés et la création' : 'Ouvrir les propriétés et la création'}
+          aria-expanded={editOpen}
+          style={{ ..._iconBtn, width: 'auto', gap: 6, padding: '0 8px' }}
+        >{editOpen ? <PanelRightClose size={13} strokeWidth={1.75} /> : <PanelRightOpen size={13} strokeWidth={1.75} />} Propriétés</button>
       </div>
 
       {/* Middle: main + edit */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0 }}>
         <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-          {mode === 'asset' && (
+          {view === 'table' && <ProductionTracking
+            key={`${project}:${mode}`}
+            project={project} mode={mode} state={prod.state} setState={prod.setState}
+            selection={selection} setSelection={setSelection} loading={prod.loading}
+            onEdit={() => setEditOpen(true)}
+            onOpenDetail={(sel, task, subtask) => {
+              setSelection(sel)
+              setSpecOpen(true)
+              setPendingSpec({ task: task.name, subtask })
+            }}
+          />}
+          {view === 'legacy' && mode === 'asset' && (
             <ProductionAsset
               state={prod.state}
               setState={prod.setState}
@@ -267,7 +278,7 @@ export function Production() {
               onAssetClicked={() => setSpecOpen(true)}
             />
           )}
-          {mode === 'shot' && (
+          {view === 'legacy' && mode === 'shot' && (
             <ProductionShot
               state={prod.state}
               setState={prod.setState}
@@ -334,7 +345,7 @@ export function Production() {
           }}
         >
           {specOpen ? <ChevronDown size={11} strokeWidth={2} color="var(--ink-4)" /> : <ChevronUp size={11} strokeWidth={2} color="var(--ink-4)" />}
-          <span className="cap" style={{ letterSpacing: '0.08em' }}>Spec</span>
+          <span className="cap" style={{ letterSpacing: '0.08em' }}>Tâches et retakes</span>
           <span style={{ flex: 1 }} />
           {selected && (
             <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>

@@ -276,6 +276,7 @@ export interface ProductionComment {
 }
 
 export interface ProductionTaskDetail {
+  status?:     string             // explicit review token; completion never implies approval
   notes?:      string
   completion?: number             // 0-100
   comments?:   ProductionComment[]
@@ -292,6 +293,8 @@ export interface ProductionTask {
 }
 
 export interface ProductionAsset {
+  thumbnail?: ProductionThumbnail
+  dependencies?: ProductionDependency[]
   id: string
   class: string                   // CHAR / PROPS / ENV / FXRIG …
   name: string
@@ -336,6 +339,8 @@ export interface CastingLink {
 }
 
 export interface ProductionShot {
+  thumbnail?: ProductionThumbnail
+  dependencies?: ProductionDependency[]
   id: string
   seq_id: string
   name: string                    // SHOT010
@@ -353,11 +358,25 @@ export interface ProductionShot {
 }
 
 export interface ProductionState {
+  tracking?: { departments: ProductionDepartment[] }
   version: number
   sequences: ProductionSequence[]
   shots:     ProductionShot[]
   assets:    ProductionAsset[]
   asset_groups: ProductionAssetGroup[]
+}
+
+export interface ProductionThumbnail { rel_path: string; file: string }
+export interface ProductionDependency { entity_id: string; task?: string }
+export interface ProductionDepartment {
+  id: string
+  name: string
+  task_tokens: string[]
+  scope: 'shot' | 'asset'
+  active: boolean
+  fixed?: boolean
+  statuses: string[]
+  depends_on: string[]
 }
 
 // Publish event enriched by reconcile — carries the parsed INSTANCE for grouping.
