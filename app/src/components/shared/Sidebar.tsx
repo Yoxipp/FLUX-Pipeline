@@ -447,18 +447,24 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       } else {
         await api.installDccAutostart(key)
         setAutostartInstalled(prev => ({ ...prev, [key]: true }))
+        if (key === 'houdini') {
+          toast.success('Plug Houdini installé', {
+            description: 'Relance Houdini quand tu le souhaites pour charger le plug et les modifications. Ta session reste ouverte.',
+            duration: 10000,
+          })
+        }
         // Ping pour confirmer que le bridge tourne déjà (ZBrush peut-être déjà ouvert)
         try {
           const pong = await api.pingDcc(key)
           _setServerOk(key, pong.connected)
           const label = pong.connected
             ? (pong.version ? `v${pong.version}` : '✓')
-            : '✗'
+            : '✓ installé'
           setPingResult(prev => ({ ...prev, [key]: label }))
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         } catch {
           _setServerOk(key, false)
-          setPingResult(prev => ({ ...prev, [key]: '✗' }))
+          setPingResult(prev => ({ ...prev, [key]: '✓ installé' }))
           setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
         }
       }

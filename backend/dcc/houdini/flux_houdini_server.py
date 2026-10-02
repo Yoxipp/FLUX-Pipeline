@@ -271,7 +271,6 @@ FLUX_PORT_COUNT = 8
 def start(port: int | None = None) -> None:
     global _httpd
     if _httpd is not None:
-        _safe_status(f"[FLUX] Serveur Houdini déjà actif sur le port {_httpd.server_address[1]}")
         return
 
     # 1. Critical path: bind the HTTP server. This alone makes FLUX see Houdini as
@@ -294,7 +293,6 @@ def start(port: int | None = None) -> None:
     #    tear down the already-bound server (that would drop the connection handle
     #    while the port stays open — "connected but dead").
     _register_queue_processor()
-    _safe_status(f"[FLUX] Bien connecté au port local {port}", "ImportantMessage")
 
 
 def stop() -> None:
