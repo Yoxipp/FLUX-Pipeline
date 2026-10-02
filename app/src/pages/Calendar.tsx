@@ -9,6 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { calendarLinksShot } from './Production/shotCalendar'
 import { toast } from 'sonner'
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X } from 'lucide-react'
 import { api } from '../api/client'
@@ -359,16 +361,16 @@ function Legend() {
 }
 
 // ── create form ──────────────────────────────────────────────────────────────
-function CreateForm({ project, me, users, range, onDone, onCancel }: {
+function CreateForm({ project, me, users, range, initialLink = '', onDone, onCancel }: {
   project: string; me: string; users: string[]; range: { start: string; end: string }
-  onDone: (it: CalendarItem) => void; onCancel: () => void
+  initialLink?: string; onDone: (it: CalendarItem) => void; onCancel: () => void
 }) {
   const { tr } = useTr()
   const [title, setTitle] = useState('')
   const [owner, setOwner] = useState(me)
   const [start, setStart] = useState(range.start)
   const [end, setEnd] = useState(range.end)
-  const [link, setLink] = useState('')
+  const [link, setLink] = useState(initialLink)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => { setStart(range.start); setEnd(range.end) }, [range.start, range.end])
@@ -546,6 +548,12 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
 export function Calendar() {
   const { l, tr } = useTr()
   const { project } = useProject()
+  const [params, setParams] = useSearchParams()
+  const sequence = params.get('seq') ?? ''
+  const shot = params.get('shot') ?? ''
+  const shotScope = Boolean(sequence && shot && params.get('project') === project)
+  const [loadedProject, setLoadedProject] = useState('')
+  const focusedLink = useRef('')
   const [items, setItems] = useState<CalendarItem[]>([])
   const [me, setMe] = useState('')
   const [users, setUsers] = useState<string[]>([])
@@ -576,7 +584,7 @@ export function Calendar() {
   const load = useCallback(() => {
     if (!project) return
     api.getCalendar(project)
-      .then(r => { setItems(r.items); setMe(r.me) })
+      .then(r => { setItems(r.items); setMe(r.me); setLoadedProject(project) })
       .catch(e => toast.error(`${tr('Calendrier indisponible', 'Calendar unavailable')} : ${e instanceof Error ? e.message : String(e)}`))
   }, [project]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -587,7 +595,22 @@ export function Calendar() {
   }, [load])
   useEffect(() => { api.listUsers().then(r => setUsers(r.users)).catch(() => setUsers([])) }, [])
 
-  const shown = useMemo(() => items.filter(it => !who || same(it.owner, who)), [items, who])
+  const shown = useMemo(() => items.filter(it => (!who || same(it.owner, who)) && (!shotScope || calendarLinksShot(it.link, sequence, shot))), [items, who, shotScope, sequence, shot])
+  useEffect(() => {
+    if (!shotScope) { focusedLink.current = ''; return }
+    if (loadedProject !== project) return
+    const key = `${project}/${sequence}/${shot}`
+    if (focusedLink.current === key) return
+    focusedLink.current = key
+    const linked = items.filter(it => it.status !== 'declined' && calendarLinksShot(it.link, sequence, shot))
+      .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || a.end.localeCompare(b.end))
+    setWho('')
+    if (linked.length) {
+      setView('week'); setCursor(fromIso(linked[0].start)); setPicked(linked[0].id); setCreating(null)
+    } else {
+      setPicked(null); setCreating({ start: todayIso(), end: todayIso() })
+    }
+  }, [shotScope, project, sequence, shot, items, loadedProject])
   const toAnswer = useMemo(() => items.filter(it => it.status === 'proposed' && same(it.owner, me)), [items, me])
   const waiting = useMemo(() => items.filter(it => it.status === 'proposed' && same(it.created_by, me) && !same(it.owner, me)), [items, me])
   const pickedItem = items.find(it => it.id === picked) ?? null
@@ -679,6 +702,7 @@ export function Calendar() {
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{tr('Calendrier', 'Calendar')}</div>
+          {shotScope && <button style={btn(true)} onClick={() => { setParams({}); setPicked(null); setCreating(null) }} title={tr('Afficher tout le calendrier', 'Show the whole calendar')}>{sequence} · {shot}<X size={11} /></button>}
           <button style={{ ...btn(), padding: 4 }} onClick={() => move(-1)}><ChevronLeft size={13} /></button>
           <button style={btn()} onClick={goToday}>{tr("Aujourd'hui", 'Today')}</button>
           <button style={{ ...btn(), padding: 4 }} onClick={() => move(1)}><ChevronRight size={13} /></button>
@@ -768,7 +792,7 @@ export function Calendar() {
       {/* side panel */}
       <div style={{ width: 300, flexShrink: 0, borderLeft: '1px solid var(--rule)', background: 'var(--paper-2)', overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {creating && (
-          <CreateForm project={project} me={me} users={users} range={creating}
+          <CreateForm key={`${project}:${shotScope ? sequence + shot : ''}`} project={project} me={me} users={users} range={creating} initialLink={shotScope ? `${sequence} ${shot}` : ''}
                       onCancel={() => setCreating(null)}
                       onDone={it => { upsert(it); setCreating(null); setPicked(it.id) }} />
         )}

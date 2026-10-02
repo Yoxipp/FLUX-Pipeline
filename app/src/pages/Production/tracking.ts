@@ -142,10 +142,10 @@ export function blockers(state: ProductionState, entity: TrackingEntity, dep: Pr
   return result
 }
 
-/** Materialize a sequence template only when opening/editing it, with its own id. */
+/** Materialize editable templates with their own id. Locked shots accept review metadata only. */
 export function ensureTrackingTask(state: ProductionState, entityId: string, template: ProductionTask): ProductionState {
   const materialize = <T extends TrackingEntity>(s: T): T => {
-    if (s.id !== entityId || s.tasks.some(t => t.name.toUpperCase() === template.name.toUpperCase())) return s
+    if (s.id !== entityId || trackingLocked(state, s) || s.tasks.some(t => t.name.toUpperCase() === template.name.toUpperCase())) return s
     return { ...s, tasks: [...s.tasks, { ...template, id: `t_${crypto.randomUUID()}`, type_tokens: [...template.type_tokens], known_subtasks: [...template.known_subtasks] }] }
   }
   return { ...state, shots: state.shots.map(materialize), assets: state.assets.map(materialize) }

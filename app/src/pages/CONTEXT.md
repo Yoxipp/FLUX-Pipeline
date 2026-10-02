@@ -34,6 +34,15 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * Timeline est ouverte dans la bande d'onglets des Shots des le depart ; Main reste la vue
   initiale. Les onglets ouverts et filtres Main survivent a l'ouverture des retakes.
   La configuration globale de presets utilisateurs reste hors scope.
+* Timing concerne les shots seulement. Les badges de statut restent editables sur les shots
+  verrouilles : seuls les `task_details` changent, aucune tache structurelle n'est ajoutee.
+* `shotCalendar.ts` + `ShotDeadlineBadge.tsx` : badge de delai a droite du label, calendrier
+  relu toutes les 30 secondes et au focus/refresh. Liens par tokens exacts sequence + shot.
+  None sans lien non refuse, Done si tous les statuts visibles sont APPROVED (cellules
+  optionnelles vides ignorees), sinon echeance ouverte la plus proche : Extra-late <= 0 jour,
+  Late < 5 jours, In time >= 5 jours. Une fin calendrier ne vaut pas approval de production.
+  Le menu Calendar ouvre `/calendar?project=...&seq=...&shot=...`, filtre la grille et
+  selectionne la tache liee ; sans tache, le formulaire reprend le lien sans creer d'entree.
 
 ## Folder Manager (`Projects.tsx` + `folder_manager/`, B2 2026-09-28)
 

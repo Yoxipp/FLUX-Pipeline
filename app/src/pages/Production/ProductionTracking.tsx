@@ -9,6 +9,7 @@ import { blockers, departmentTasks, dependencyLabel, effectiveCasting, effective
 import type { TrackingEntity } from './tracking'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { EntityContextMenu } from './EntityContextMenu'
+import { ShotDeadlineBadge, useShotCalendar } from './ShotDeadlineBadge'
 import { ProductionShowMenu, ProductionRelatedMenu, type ShowFilter } from './ProductionTableMenus'
 import './tracking.css'
 
@@ -36,6 +37,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   const scrollRef = useRef<HTMLDivElement>(null)
   const { settings } = useSettings()
   const username = settings?.username ?? ''
+  const calendar = useShotCalendar(project, mode === 'shot')
   const departments = useMemo(() => trackingDepartments(state, mode), [state, mode])
   const changeZoom = (next: number) => setZoom(Math.round(Math.max(0.65, Math.min(1.4, next)) * 100) / 100)
   useEffect(() => {
@@ -93,7 +95,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       if (['+', '=', '-', '0'].includes(e.key)) { e.preventDefault(); changeZoom(e.key === '0' ? 1 : zoom + (e.key === '-' ? -0.1 : 0.1)) }
     }}>
       <table className="tracking-table" style={{ zoom }}>
-        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th><th>Timing</th><th>{mode === 'shot' ? 'Assets liés' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} title={d.task_tokens.join(', ')}>{d.name}</th>)}</tr></thead>
+        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Assets liés' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} title={d.task_tokens.join(', ')}>{d.name}</th>)}</tr></thead>
         <tbody>{entities.map(entity => {
           const isShot = 'seq_id' in entity
           const seq = isShot ? state.sequences.find(s => s.id === entity.seq_id) : null
@@ -107,10 +109,10 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
               <div className="tracking-name">
                 <span className="tracking-parent">{seq?.name ?? (isShot ? '?' : entity.class)}</span>
                 <EntityContextMenu project={project} state={state} entity={entity} setState={setState} setSelection={setSelection} onEdit={onEdit} />
-                {isShot && entity.label && <span className="tracking-label" title={entity.label}>{entity.label}</span>}
+                {isShot && <div className="tracking-label-row">{entity.label && <span className="tracking-label" title={entity.label}>{entity.label}</span>}<ShotDeadlineBadge state={state} shot={entity} calendar={calendar} /></div>}
               </div>
             </div></td>
-            <td className="tracking-timing">{isShot && entity.frame_start != null && entity.frame_end != null ? <><span>{entity.frame_start}–{entity.frame_end}</span><small>{entity.frame_end - entity.frame_start + 1} f</small></> : <span className="tracking-muted">—</span>}</td>
+            {mode === 'shot' && <td className="tracking-timing">{isShot && entity.frame_start != null && entity.frame_end != null ? <><span>{entity.frame_start}–{entity.frame_end}</span><small>{entity.frame_end - entity.frame_start + 1} f</small></> : <span className="tracking-muted">—</span>}</td>}
             <td className="tracking-relations"><ProductionRelatedMenu items={relatedItems} onOpen={onOpenEntity} /></td>
             {departments.map(dep => {
               const tasks = departmentTasks(state, entity, dep)
@@ -120,8 +122,8 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
               return <td key={dep.id} className="tracking-status-cell"><div className="tracking-task-badges">{visible.map(task => {
                 const status = trackingTaskStatus(entity, task, dep)
                 const editable = !trackingLocked(state, entity) || entity.tasks.some(own => own.name.toUpperCase() === task.name.toUpperCase())
-                return <div key={task.name}>{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}<TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={task} status={status} statuses={dep.statuses} disabled={!editable}
-                  title={`${dep.name} : ${status || 'Aucun statut'} - Clic droit pour les actions`} onClick={() => openCell(entity, task)} />
+                return <div key={task.name}>{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}<TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={task} status={status} statuses={dep.statuses}
+                  title={`${dep.name} : ${status || 'Aucun statut'} - Clic droit pour les actions`} onClick={editable ? () => openCell(entity, task) : undefined} />
                   {status && blocked.map(label => <span key={label} className="tracking-blocked">{label}</span>)}
                 </div>
               })}</div></td>

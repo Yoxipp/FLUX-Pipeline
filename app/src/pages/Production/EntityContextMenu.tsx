@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import * as Dropdown from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
 import { LockKeyhole, X } from 'lucide-react'
@@ -16,6 +17,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
   setState: (patch: (prev: ProductionState) => ProductionState) => void
   setSelection: (selection: Selection) => void; onEdit: () => void
 }) {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
   const [unlock, setUnlock] = useState(false)
@@ -48,7 +50,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible') }
   }
   return <>
-    <span className="tracking-entity-name" role="button" tabIndex={0} aria-label={`Actions de ${entity.name}`} title="Clic droit : Edit, Lock, Delete"
+    <span className="tracking-entity-name" role="button" tabIndex={0} aria-label={`Actions de ${entity.name}`} title={isShot ? 'Clic droit : Edit, Calendar, Lock, Delete' : 'Clic droit : Edit, Delete'}
       onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = e.currentTarget.getBoundingClientRect(); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>
       <strong>{entity.name}{locked && <LockKeyhole size={11} />}</strong>
@@ -57,6 +59,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
       <Dropdown.Portal><Dropdown.Content className="production-context-menu" align="start" collisionPadding={10}>
         <Dropdown.Label className="production-menu-artist">{entity.name}</Dropdown.Label>
         <Dropdown.Item className="production-menu-item" onSelect={() => { setSelection(selection); onEdit() }}>Edit</Dropdown.Item>
+        {isShot && <Dropdown.Item className="production-menu-item" onSelect={() => navigate(`/calendar?${new URLSearchParams({ seq: seq?.name ?? '', shot: entity.name, project })}`)}>Calendar</Dropdown.Item>}
         {isShot && <Dropdown.Item disabled={busy || inherited} className="production-menu-item" onSelect={() => { if (locked) setUnlock(true); else void lock(true) }}>{locked ? 'Unlock' : 'Lock'}{inherited ? ` · ${seq?.name}` : ''}</Dropdown.Item>}
         <Dropdown.Item disabled={locked} className="production-menu-item production-menu-delete" onSelect={() => void remove()}>Delete</Dropdown.Item>
       </Dropdown.Content></Dropdown.Portal>

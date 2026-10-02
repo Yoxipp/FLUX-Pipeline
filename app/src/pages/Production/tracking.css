@@ -125,3 +125,10 @@
 .tracking-department-grip { cursor:grab !important; padding:6px !important; border:0 !important; background:transparent !important; }
 .tracking-department-grip:active { cursor:grabbing !important; }
 .production-settings-page [role="alert"] { color:#ec666f; }
+.tracking-label-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tracking-label-row .tracking-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tracking-deadline { --deadline-color: #8b919e; flex-shrink: 0; border-radius: 4px; padding: 2px 5px; font-size: 9px; font-weight: 650; line-height: 1.2; color: var(--deadline-color); background: color-mix(in srgb, var(--deadline-color) 16%, transparent); box-shadow: 0 0 7px color-mix(in srgb, var(--deadline-color) 20%, transparent); }
+.tracking-deadline[data-deadline="In time"] { --deadline-color: #66b7ff; }
+.tracking-deadline[data-deadline="Late"] { --deadline-color: #ffce55; }
+.tracking-deadline[data-deadline="Extra-late"] { --deadline-color: #ff6376; }
+.tracking-deadline[data-deadline="Done"] { --deadline-color: #61e0a1; }
