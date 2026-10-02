@@ -35,6 +35,8 @@ export function effectiveTasks(state: ProductionState, entity: TrackingEntity): 
 export function trackingDepartments(state: ProductionState, scope: 'asset' | 'shot'): ProductionDepartment[] {
   const configured = state.tracking?.departments ?? DEFAULT_DEPARTMENTS
   const result = configured.filter(d => d.scope === scope)
+  // Once configured, this list is authoritative, including deliberate deletion.
+  if (state.tracking) return result
   // Existing departments remain reachable even on projects with custom task names.
   const entities = scope === 'shot' ? state.shots : state.assets
   for (const entity of entities) for (const task of effectiveTasks(state, entity)) {
@@ -44,6 +46,29 @@ export function trackingDepartments(state: ProductionState, scope: 'asset' | 'sh
     }
   }
   return result
+}
+
+/** Fixed departments display TODO without materializing a task or disk folder. */
+export function trackingTaskStatus(entity: TrackingEntity, task: ProductionTask, dep: ProductionDepartment): string {
+  const keys = [task.name.toUpperCase(), ...task.known_subtasks.map(s => `${task.name.toUpperCase()}|${s.toUpperCase()}`)]
+  const reviewed = keys.some(k => Boolean(entity.task_details?.[k]?.status) || (entity.task_details?.[k]?.completion ?? 0) > 0)
+  return dep.fixed || reviewed ? taskStatus(entity, task) : ''
+}
+
+export function taskAssignedTo(entity: TrackingEntity, task: ProductionTask, username: string): boolean {
+  if (!username.trim()) return false
+  const name = username.trim().toUpperCase(), prefix = task.name.toUpperCase()
+  return Object.entries(entity.task_details ?? {}).some(([key, detail]) =>
+    (key.toUpperCase() === prefix || key.toUpperCase().startsWith(`${prefix}|`)) && detail.assignee?.trim().toUpperCase() === name)
+}
+
+export function moveDepartment(departments: ProductionDepartment[], from: string, to: string): ProductionDepartment[] {
+  const start = departments.findIndex(d => d.id === from), end = departments.findIndex(d => d.id === to)
+  if (start < 0 || end < 0 || start === end) return departments
+  const next = [...departments]
+  const [item] = next.splice(start, 1)
+  next.splice(end, 0, item)
+  return next
 }
 
 export function effectiveCasting(state: ProductionState, shot: ProductionShot): CastingLink[] {

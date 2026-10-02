@@ -101,12 +101,50 @@ test('dependencies on assets, shots and departments expose missing and unapprove
   assert.equal(m.blockers(s, s.shots[0], d).length, 2)
   assert.equal(m.dependencyReady(s, { entity_id: 'b' }), false)
 })
-test('configured columns retain fixed flags, active states, tokens and custom legacy tasks', () => {
+test('configured departments are authoritative and preserve unmapped tasks without restoring deleted columns', () => {
   const s = fixture(); s.tracking = { departments: [{ ...dep('anim'), active: false, statuses: ['WIP', 'APPROVED'] }] }
   s.shots[0].tasks.push(task('custom', 'MATCHMOVE'))
   const columns = m.trackingDepartments(s, 'shot')
   assert.equal(columns.find(d => d.id === 'anim').active, false)
   assert.equal(columns.find(d => d.id === 'anim').fixed, true)
-  assert.ok(columns.some(d => d.name === 'MATCHMOVE'))
+  assert.equal(columns.length, 1)
+  assert.equal(s.shots[0].tasks.at(-1).name, 'MATCHMOVE')
   assert.equal(s.tracking.departments.length, 1)
+})
+
+test('fixed departments display TODO without materializing tasks; optional departments stay empty', () => {
+  const s = fixture(), t = task('fx', 'FX')
+  assert.equal(m.trackingTaskStatus(s.shots[0], t, { ...dep('fx'), fixed: true }), 'TODO')
+  assert.equal(m.trackingTaskStatus(s.shots[0], t, dep('fx')), '')
+  assert.equal(s.shots[0].tasks.length, 0)
+  s.shots[0].task_details = { FX: { status: 'TODO' } }
+  assert.equal(m.trackingTaskStatus(s.shots[0], t, dep('fx')), 'TODO')
+})
+test('optional department review appears after an explicit subtask status', () => {
+  const s = fixture(), t = task('fx', 'FX', ['FX'], ['SIM'])
+  s.shots[0].task_details = { 'FX|SIM': { status: 'RTK' } }
+  assert.equal(m.trackingTaskStatus(s.shots[0], t, dep('fx')), 'RTK')
+})
+test('Mine matches exact task or subtask assignments case insensitively', () => {
+  const s = fixture(), e = s.shots[0]
+  e.task_details = { 'ANIM|BLOCK': { assignee: ' Tom ' }, ANIMATION: { assignee: 'OTHER' }, FX: { assignee: 'MILO' } }
+  assert.equal(m.taskAssignedTo(e, anim, 'tom'), true)
+  assert.equal(m.taskAssignedTo(e, anim, 'MILO'), false)
+  assert.equal(m.taskAssignedTo(e, anim, ''), false)
+  assert.equal(m.taskAssignedTo(e, task('fx', 'FX'), 'MILO'), true)
+})
+test('department reordering preserves configuration objects and does not change production tasks', () => {
+  const deps = m.DEFAULT_DEPARTMENTS.filter(d => d.scope === 'shot')
+  const next = m.moveDepartment(deps, 'anim', 'layout')
+  assert.deepEqual(next.slice(0, 2).map(d => d.id), ['anim', 'layout'])
+  assert.equal(next[0], deps[1])
+  assert.equal(deps[0].id, 'layout')
+  assert.equal(m.moveDepartment(deps, 'missing', 'layout'), deps)
+})
+test('deleted departments stay deleted even with their tasks and reviews still present', () => {
+  const s = fixture(); s.tracking = { departments: [] }
+  assert.deepEqual(m.trackingDepartments(s, 'shot'), [])
+  assert.deepEqual(m.trackingDepartments(s, 'asset'), [])
+  assert.equal(s.sequences[0].tasks[0].name, 'ANIM')
+  assert.equal(s.assets[0].task_details.RIG.completion, 100)
 })

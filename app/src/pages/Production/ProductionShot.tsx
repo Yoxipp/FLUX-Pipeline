@@ -18,7 +18,7 @@
 //   the right edge of a shot sets its duration (frame_end), the next shots follow.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Minus, MoveVertical, Plus } from 'lucide-react'
+import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, MoveVertical } from 'lucide-react'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -375,19 +375,15 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <ArrowDownUp size={11} strokeWidth={1.75} color="var(--ink-3)" style={{ transform: 'rotate(90deg)' }} />
           <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
-          <button onClick={() => setZoom(pxPerBlock <= 20 ? pxPerBlock - 2 : pxPerBlock - 20)} style={_zoomBtn}><Minus size={11} strokeWidth={2} /></button>
           <input type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={1} value={pxPerBlock}
                  onChange={e => setZoom(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <button onClick={() => setZoom(pxPerBlock < 20 ? pxPerBlock + 2 : pxPerBlock + 20)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{pxPerBlock}px</span>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <MoveVertical size={11} strokeWidth={1.75} color="var(--ink-3)" />
           <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>V</span>
-          <button onClick={() => setVZ(vZoom - 0.1)} style={_zoomBtn}><Minus size={11} strokeWidth={2} /></button>
           <input type="range" min={VZOOM_MIN} max={VZOOM_MAX} step={0.05} value={vZoom}
                  onChange={e => setVZ(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <button onClick={() => setVZ(vZoom + 0.1)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
         </div>
 

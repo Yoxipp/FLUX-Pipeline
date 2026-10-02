@@ -84,7 +84,7 @@ function useOpenEntityFolder(project: string) {
   }
 }
 
-function useArchiveDelete(project: string) {
+export function useArchiveDelete(project: string) {
   const [pending, setPending] = useState<PendingArchive | null>(null)
 
   const request = (desc: ArchiveDescriptor, label: string, onRemoved: () => void) => {

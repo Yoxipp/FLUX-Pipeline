@@ -276,6 +276,7 @@ export interface ProductionComment {
 }
 
 export interface ProductionTaskDetail {
+  assignee?:   string             // pipeline artist assigned to this task or subtask
   status?:     string             // explicit review token; completion never implies approval
   notes?:      string
   completion?: number             // 0-100

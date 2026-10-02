@@ -31,6 +31,7 @@ interface Props {
   publishes:     ProductionPublish[]
   subtaskFilter: string | null
   detailKey:     string                         // task_details key : "<task>" or "<task>|<subtask>"
+  headerActions?: React.ReactNode
   pinned?:       boolean
   onTogglePin?:  () => void
   onPatchTask:   (patch: Partial<ProductionTask>) => void
@@ -47,7 +48,7 @@ const CLASS_TO_PUBLISHER_CATEGORY: Record<string, string> = {
 
 export function TaskDetail({
   asset, task, entityKind, publishes, subtaskFilter, detailKey,
-  pinned, onTogglePin,
+  pinned, onTogglePin, headerActions,
   onPatchTask, onPatchDetail, onDeleteTask,
 }: Props) {
   const { t }        = useI18n()
@@ -153,7 +154,7 @@ export function TaskDetail({
   // "Name", subtask → "Variante").
   const goPublishHere = () => {
     const taskTok = (sel.task || task.type_tokens[0] || task.name || '').toUpperCase()
-    const instTok = (sel.instance || subtaskFilter || '').toUpperCase()
+    const instTok = '' // Artist supplies Instance in the Publisher.
     if (entityKind === 'asset') {
       const category = CLASS_TO_PUBLISHER_CATEGORY[asset.class.toUpperCase()] ?? asset.class.toUpperCase()
       navigate('/publisher', { state: { prefill: {
@@ -185,6 +186,7 @@ export function TaskDetail({
             · {subtaskFilter}
           </span>
         )}
+        {headerActions}
         <span style={{ flex: 1 }} />
         {/* publish here — opens the Publisher with the composer pre-filled */}
         <button onClick={goPublishHere} title="Faire un publish ici" style={_headerBtn}>

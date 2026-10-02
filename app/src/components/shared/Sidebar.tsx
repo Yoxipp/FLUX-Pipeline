@@ -116,7 +116,9 @@ function NavGroup({ title, children, defaultOpen = true }: {
 
 export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  const [productionExpanded, setProductionExpanded] = useState(false)
+  const productionMode = new URLSearchParams(search).get('mode') ?? localStorage.getItem('flux.production.mode') ?? 'shot'
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
   const { isEnabled: isDccEnabled } = useEnabledDccs()
@@ -598,7 +600,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
       {/* 2026-10-01: Production first, then the project folders, the team, the tools. */}
       <NavGroup title="PIPELINE">
-        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent route="/production" onClick={() => navigate('/production')} />
+        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent route="/production" onClick={() => { setProductionExpanded(v => !v); navigate('/production') }} />
+        {productionExpanded && <div aria-label="Modes de production">{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 44, width: '100%', border: 0, textAlign: 'left' }} onClick={() => navigate(`/production?mode=${mode}`)}>{mode === 'asset' ? 'Assets' : 'Shots'}</button>)}</div>}
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />

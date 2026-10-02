@@ -32,6 +32,8 @@ import type {
   ProductionShot, ProductionState, ProductionTask, ProductionTaskDetail,
 } from '../../types'
 import { TaskDetail } from './TaskDetail'
+import { TaskStatusBadge } from './TaskStatusBadge'
+import { detailStatus, taskMatchesDepartment, trackingDepartments, trackingTaskStatus } from './tracking'
 import { taskColorFromName } from './util'
 import type { Selection } from './Production'
 
@@ -40,6 +42,11 @@ interface Props {
   setState:           (patch: (prev: ProductionState) => ProductionState) => void
   selection:          Selection
   publishesByTask:    Record<string, ProductionPublish[]>
+  main?:              React.ReactNode
+  workspaceMode?:     'asset' | 'shot'
+  timeline?:          React.ReactNode
+  settingsPane?:      React.ReactNode
+  entityView?:        (entityId: string) => React.ReactNode | null
   loading?:           boolean
   initialOpen?:       { task: string; subtask?: string } | null
   onInitialOpenApplied?: () => void
@@ -52,6 +59,8 @@ type ResolvedEntity =
 
 type Tab =
   | { key: string; kind: 'root' }
+  | { key: string; kind: 'timeline' }
+  | { key: string; kind: 'settings' }
   | { key: string; kind: 'assets' }                                        // anchored to selection (shot/seq only)
   | { key: string; kind: 'entityRoot'; entityId: string }                  // free-floating tasks-landing for a specific entity
   | { key: string; kind: 'task';    entityId: string; taskId: string }
@@ -160,7 +169,7 @@ function toAssetShim(res: ResolvedEntity): Asset {
 type SpecSnapshot = { tabs: Tab[]; activeKey: string; entityId: string | undefined }
 const specSessionKey = (project: string) => `prod.specTabs:${project}`
 
-export function MenuSpec({ state, setState, selection, publishesByTask, loading, initialOpen, onInitialOpenApplied }: Props) {
+export function MenuSpec({ state, setState, selection, publishesByTask, loading, initialOpen, onInitialOpenApplied, main, timeline, workspaceMode, settingsPane, entityView }: Props) {
   const { t } = useI18n()
   const { project } = useProject()
 
@@ -170,6 +179,12 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   const [activeKey, setActiveKey] = useState<string>(snap?.activeKey ?? 'root')
   const lastEntityRef = useRef<string | undefined>(snap?.entityId)
   const skipPinRestoreRef = useRef(Boolean(snap))
+  const previousMode = useRef(workspaceMode)
+  useEffect(() => {
+    if (previousMode.current === workspaceMode) return
+    previousMode.current = workspaceMode
+    setActiveKey('root')
+  }, [workspaceMode])
 
   const selectedRes: ResolvedEntity | null = useMemo(() => {
     if (selection.kind === 'asset' || selection.kind === 'shot' || selection.kind === 'seq') {
@@ -189,6 +204,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     if (id === undefined && selection.kind !== 'none') return
     if (id === lastEntityRef.current) return
     lastEntityRef.current = id
+    if (main) return
     const pinnedKeys = new Set(readPinned(project).map(refToKey))
     setTabs(prev => {
       const kept = prev.filter(tab => tab.kind === 'root' || pinnedKeys.has(tab.key))
@@ -198,17 +214,18 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     })
   }, [selectedRes?.entity.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const showAssetsTab = selectedRes?.kind === 'shot' || selectedRes?.kind === 'seq'
+  const showAssetsTab = !main && (selectedRes?.kind === 'shot' || selectedRes?.kind === 'seq')
   const displayedTabs: Tab[] = useMemo(() => {
-    const others = tabs.filter(t => t.kind !== 'root')
+    const others = tabs.filter(t => t.kind !== 'root' && t.kind !== 'assets' && t.kind !== 'timeline')
+    if (main) return [ROOT_TAB, ...(timeline ? [{ key: 'timeline', kind: 'timeline' as const }] : []), ...others]
     return showAssetsTab ? [ROOT_TAB, ASSETS_TAB, ...others] : [ROOT_TAB, ...others]
-  }, [tabs, showAssetsTab])
+  }, [tabs, showAssetsTab, main, timeline])
 
   // If the active tab is 'assets' but the selection loses shot/seq context,
   // fall back to root so the strip stays consistent.
   useEffect(() => {
-    if (activeKey === 'assets' && !showAssetsTab) setActiveKey('root')
-  }, [showAssetsTab, activeKey])
+    if ((activeKey === 'assets' && !showAssetsTab) || (activeKey === 'timeline' && !timeline)) setActiveKey('root')
+  }, [showAssetsTab, activeKey, timeline])
 
   // Restore pinned tabs when the active project changes.
   useEffect(() => {
@@ -248,7 +265,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     if (!hasData) return
     setTabs(prev => {
       const kept = prev.filter(tab => {
-        if (tab.kind === 'root' || tab.kind === 'assets') return true
+        if (tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') return true
         const res = resolveEntity(state, tab.entityId)
         if (!res) return false
         if (tab.kind === 'entityRoot') return true
@@ -272,11 +289,22 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
 
   // Consume external deep-link (fav row click) — asset-only for now.
   useEffect(() => {
-    if (!initialOpen || !selectedRes) return
+    if (!initialOpen) return
+    if (initialOpen.task === 'SETTINGS') {
+      setTabs(prev => prev.some(t => t.kind === 'settings') ? prev : [...prev, { key: 'settings', kind: 'settings' }])
+      setActiveKey('settings'); onInitialOpenApplied?.(); return
+    }
+    if (!selectedRes) return
+    if (initialOpen.task.toUpperCase() === 'ENTITY') {
+      openEntityRootTab(selectedRes.entity.id)
+      onInitialOpenApplied?.()
+      return
+    }
     // "USD": the asset's tasks landing with its "USD assemble" task open (USD page link).
     if (initialOpen.task.toUpperCase() === 'USD') {
       try { sessionStorage.setItem(USD_OPEN_KEY, selectedRes.entity.name) } catch { /* blocked */ }
-      setActiveKey('root')
+      if (main) openEntityRootTab(selectedRes.entity.id)
+      else setActiveKey('root')
       onInitialOpenApplied?.()
       return
     }
@@ -297,7 +325,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
       setActiveKey(key)
     }
     onInitialOpenApplied?.()
-  }, [initialOpen, selectedRes?.entity.id])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialOpen, selectedRes])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tab management helpers
   // One tab per task (2026-09-26): opening a subtask, or the whole task, reuses the
@@ -346,7 +374,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
       const to   = prev.findIndex(x => x.key === toKey)
       if (from < 0 || to < 0) return prev
       const src = prev[from]
-      if (src.kind === 'root' || src.kind === 'assets') return prev
+      if (src.kind === 'root' || src.kind === 'assets' || src.kind === 'timeline' || src.kind === 'settings') return prev
       const next = prev.slice()
       next.splice(from, 1)
       const insertAt = Math.max(1, next.findIndex(x => x.key === toKey))
@@ -360,7 +388,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
     return readPinned(project).some(p => refToKey(p) === key)
   }
   const togglePin = (tab: Tab) => {
-    if (!project || tab.kind === 'root' || tab.kind === 'assets') return
+    if (!project || tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') return
     const cur = readPinned(project)
     const ref: PinnedRef =
       tab.kind === 'entityRoot'
@@ -379,17 +407,19 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   const active = displayedTabs.find(x => x.key === activeKey) ?? ROOT_TAB
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+      <div role="tablist" aria-label="Onglets de production" style={{
         display: 'flex', alignItems: 'flex-end',
-        padding: '6px 6px 0',
+        padding: '2px 6px 0',
         borderBottom: '1px solid var(--rule)', background: 'var(--paper)',
-        overflow: 'hidden', flexShrink: 0,
+        overflowX: 'auto', flexShrink: 0,
       }}>
         {displayedTabs.map((tab, i) => (
           <TabChip
             key={tab.key}
             tab={tab}
+            entityTable={Boolean(entityView)}
+            rootLabel={main ? 'Main' : undefined}
             state={state}
             selectedRes={selectedRes}
             active={tab.key === activeKey}
@@ -403,7 +433,9 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         ))}
       </div>
 
-      {active.kind === 'root' && (
+      {main && <div style={{ display: active.kind === 'root' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }}>{main}</div>}
+      {timeline && <div style={{ display: active.kind === 'timeline' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }}>{timeline}</div>}
+      {active.kind === 'root' && !main && (
         selectedRes
           ? <TasksLanding
               res={selectedRes}
@@ -424,9 +456,12 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           onOpenAsset={(assetId) => openEntityRootTab(assetId)}
         />
       )}
+      {displayedTabs.some(tab => tab.kind === 'settings') && <div style={{ display: active.kind === 'settings' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }}>{settingsPane}</div>}
       {active.kind === 'entityRoot' && (() => {
         const res = resolveEntity(state, active.entityId)
         if (!res) return <div style={_hint}>Entité introuvable</div>
+        const view = entityView?.(active.entityId)
+        if (view) return view
         return (
           <TasksLanding
             res={res}
@@ -445,6 +480,13 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         if (!task) return <div style={_hint}>Tâche introuvable</div>
         const shim = toAssetShim(res)
         const bucket = publishesByTask[`${res.entity.id}|${task.id}`] || []
+        const department = trackingDepartments(state, res.kind === 'asset' ? 'asset' : 'shot').find(d => taskMatchesDepartment(task, d))
+        const subtask = active.kind === 'subtask' ? active.subtask : ''
+        const subdetail = shim.task_details?.[`${task.name.toUpperCase()}|${subtask.toUpperCase()}`]
+        const status = department ? subtask
+          ? department.fixed || subdetail?.status || (subdetail?.completion ?? 0) > 0 ? detailStatus(subdetail) : ''
+          : trackingTaskStatus(shim, task, department) : undefined
+        const statusBadge = <TaskStatusBadge project={project || ''} state={state} setState={setState} entity={res.entity} task={task} subtask={subtask} statuses={department?.statuses} status={status} />
         // Thin strip on top of the task tab (2026-09-26): switch subtask / whole task,
         // heart = the whole task in favorites. The area scrolls down when the panel is short.
         const withBox = (detail: React.ReactNode) => (
@@ -465,6 +507,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           return withBox(
             <TaskDetail
               asset={shim} task={task}
+              headerActions={statusBadge}
               entityKind={res.kind}
               subtaskFilter={null}
               detailKey={task.name}
@@ -484,6 +527,7 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
           <TaskDetail
             asset={shim} task={task}
             entityKind={res.kind}
+              headerActions={statusBadge}
             subtaskFilter={active.subtask}
             detailKey={`${task.name}|${active.subtask}`}
             publishes={bucket.filter(p => publishMatchesSubtask(p, active.subtask))}
@@ -500,7 +544,9 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
 }
 
 // ── tab chip ────────────────────────────────────────────────────────────────
-function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, onTogglePin, onReorder, index }: {
+function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, onTogglePin, onReorder, index, rootLabel, entityTable }: {
+  entityTable?:   boolean
+  rootLabel?:     string
   tab:            Tab
   state:          ProductionState
   selectedRes:    ResolvedEntity | null
@@ -513,7 +559,10 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
   index:          number
 }) {
   const { label, color, sub } = useMemo(() => {
+    if (tab.kind === 'settings') return { label: 'Settings', color: 'var(--accent)', sub: '' }
+    if (tab.kind === 'timeline') return { label: 'Timeline', color: 'var(--accent)', sub: '' }
     if (tab.kind === 'root') {
+      if (rootLabel) return { label: rootLabel, color: 'var(--accent)', sub: '' }
       if (!selectedRes) return { label: 'Tasks', color: 'var(--accent)', sub: '' }
       const shim = toAssetShim(selectedRes)
       return {
@@ -531,7 +580,7 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
       const shim = res ? toAssetShim(res) : null
       return {
         label: shim ? `${shim.class}${shim.class ? ' · ' : ''}${shim.name}` : '—',
-        color: 'var(--accent)', sub: 'tasks',
+        color: 'var(--accent)', sub: entityTable && res && res.kind !== 'seq' ? res.kind : 'tasks',
       }
     }
     const res = resolveEntity(state, tab.entityId)
@@ -543,15 +592,19 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
       color: taskColorFromName(name),
       sub: tab.kind === 'subtask' ? tab.subtask : '',
     }
-  }, [tab, state, selectedRes])
+  }, [tab, state, selectedRes, rootLabel, entityTable])
 
-  const draggable = tab.kind !== 'root' && tab.kind !== 'assets'
-  const closable = tab.kind !== 'root' && tab.kind !== 'assets'
-  const pinnable = tab.kind !== 'root' && tab.kind !== 'assets'
+  const draggable = tab.kind !== 'root' && tab.kind !== 'assets' && tab.kind !== 'timeline' && tab.kind !== 'settings'
+  const closable = tab.kind !== 'root' && tab.kind !== 'assets' && tab.kind !== 'timeline'
+  const pinnable = tab.kind !== 'root' && tab.kind !== 'assets' && tab.kind !== 'timeline' && tab.kind !== 'settings'
   const [dragOver, setDragOver] = useState(false)
 
   return (
     <div
+      role="tab"
+      aria-selected={active}
+      tabIndex={0}
+      onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelect() } }}
       onClick={onSelect}
       draggable={draggable}
       onDragStart={e => {
@@ -576,7 +629,7 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
       }}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: '8px 12px 6px',
+        padding: '6px 12px 5px',
         marginRight: 2, marginBottom: -1,
         borderTopLeftRadius: 8, borderTopRightRadius: 8,
         borderTop: `3px solid ${active ? color : 'transparent'}`,
@@ -590,15 +643,15 @@ function TabChip({ tab, state, selectedRes, active, pinned, onSelect, onClose, o
         cursor: draggable ? 'grab' : 'pointer',
         userSelect: 'none',
         fontFamily: 'var(--sans)', fontSize: 11, fontWeight: active ? 600 : 500,
-        flex: (tab.kind === 'root' || tab.kind === 'assets') ? '0 0 auto' : '1 1 100px',
-        minWidth: (tab.kind === 'root' || tab.kind === 'assets') ? undefined : 70,
-        maxWidth: (tab.kind === 'root' || tab.kind === 'assets') ? undefined : 200,
+        flex: (tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') ? '0 0 auto' : '1 1 100px',
+        minWidth: (tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') ? undefined : 70,
+        maxWidth: (tab.kind === 'root' || tab.kind === 'assets' || tab.kind === 'timeline' || tab.kind === 'settings') ? undefined : 200,
         minHeight: 0, overflow: 'hidden',
         position: 'relative', zIndex: active ? 2 : 1,
       }}
       title={label + (sub ? ` · ${sub}` : '')}
     >
-      {tab.kind !== 'root' && tab.kind !== 'assets' && (
+      {tab.kind !== 'root' && tab.kind !== 'assets' && tab.kind !== 'timeline' && (
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
       )}
       <span style={{
