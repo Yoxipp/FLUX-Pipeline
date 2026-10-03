@@ -177,6 +177,12 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
   const snap = useRef(project ? readSession<SpecSnapshot>(specSessionKey(project)) : undefined).current
   const [tabs, setTabs]           = useState<Tab[]>(snap?.tabs ?? [ROOT_TAB])
   const [activeKey, setActiveKey] = useState<string>(snap?.activeKey ?? 'root')
+  const previousTab = useRef(activeKey)
+  useEffect(() => {
+    if (previousTab.current === activeKey) return
+    previousTab.current = activeKey
+    window.dispatchEvent(new Event('flux:production-tab-change'))
+  }, [activeKey])
   const lastEntityRef = useRef<string | undefined>(snap?.entityId)
   const skipPinRestoreRef = useRef(Boolean(snap))
   const previousMode = useRef(workspaceMode)
@@ -484,30 +490,23 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
         const subtask = active.kind === 'subtask' ? active.subtask : ''
         const subdetail = shim.task_details?.[`${task.name.toUpperCase()}|${subtask.toUpperCase()}`]
         const status = department ? subtask
-          ? department.fixed || subdetail?.status || (subdetail?.completion ?? 0) > 0 ? detailStatus(subdetail) : ''
+          ? subdetail?.status === '' ? '' : department.fixed || subdetail?.status || (subdetail?.completion ?? 0) > 0 ? detailStatus(subdetail) : ''
           : trackingTaskStatus(shim, task, department) : undefined
         const statusBadge = <TaskStatusBadge project={project || ''} state={state} setState={setState} entity={res.entity} task={task} subtask={subtask} statuses={department?.statuses} status={status} />
-        // Thin strip on top of the task tab (2026-09-26): switch subtask / whole task,
-        // heart = the whole task in favorites. The area scrolls down when the panel is short.
-        const withBox = (detail: React.ReactNode) => (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto' }}>
-            <TaskStrip
-              task={task} asset={shim}
-              activeSub={active.kind === 'subtask' ? active.subtask : null}
-              publishCount={bucket.length}
-              onOpenTask={() => openTaskTab(res.entity.id, task.id)}
-              onOpenSubtask={sub => openSubtaskTab(res.entity.id, task.id, sub)}
-            />
-            <div style={{ flex: 1, minHeight: 360, display: 'flex', flexDirection: 'column' }}>
-              {detail}
-            </div>
-          </div>
-        )
+        const renderHeader = (actions: React.ReactNode) => <TaskStrip
+          task={task} asset={shim}
+          activeSub={active.kind === 'subtask' ? active.subtask : null}
+          publishCount={bucket.length}
+          onOpenTask={() => openTaskTab(res.entity.id, task.id)}
+          onOpenSubtask={sub => openSubtaskTab(res.entity.id, task.id, sub)}
+          actions={actions}
+        />
         if (active.kind === 'task') {
-          return withBox(
+          return (
             <TaskDetail
               asset={shim} task={task}
               headerActions={statusBadge}
+              renderHeader={renderHeader}
               entityKind={res.kind}
               subtaskFilter={null}
               detailKey={task.name}
@@ -516,18 +515,15 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
               onTogglePin={() => togglePin(active)}
               onPatchTask={patch => patchEntityTask(setState, res, task.id, patch)}
               onPatchDetail={patch => patchEntityDetail(setState, res, task.name, patch)}
-              onDeleteTask={() => {
-                removeEntityTask(setState, res, task.id)
-                closeTab(active.key)
-              }}
             />
           )
         }
-        return withBox(
+        return (
           <TaskDetail
             asset={shim} task={task}
             entityKind={res.kind}
-              headerActions={statusBadge}
+            headerActions={statusBadge}
+            renderHeader={renderHeader}
             subtaskFilter={active.subtask}
             detailKey={`${task.name}|${active.subtask}`}
             publishes={bucket.filter(p => publishMatchesSubtask(p, active.subtask))}
@@ -535,7 +531,6 @@ export function MenuSpec({ state, setState, selection, publishesByTask, loading,
             onTogglePin={() => togglePin(active)}
             onPatchTask={patch => patchEntityTask(setState, res, task.id, patch)}
             onPatchDetail={patch => patchEntityDetail(setState, res, `${task.name}|${active.subtask}`, patch)}
-            onDeleteTask={() => closeTab(active.key)}
           />
         )
       })()}
@@ -1282,15 +1277,15 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
 }
 
 // ── task strip: thin bar on top of a task tab ───────────────────────────────
-function TaskStrip({ task, asset, activeSub, publishCount, onOpenTask, onOpenSubtask }: {
+function TaskStrip({ task, activeSub, publishCount, onOpenTask, onOpenSubtask, actions }: {
   task:          ProductionTask
   asset:         Asset
+  actions:       React.ReactNode
   activeSub:     string | null
   publishCount:  number
   onOpenTask:    () => void
   onOpenSubtask: (sub: string) => void
 }) {
-  const fav = useFavoriteBinding(asset, task, null)
   const color = taskColorFromName(task.name)
   const chip = (label: string, on: boolean, onClick: () => void, title?: string) => (
     <button key={label} onClick={onClick} title={title}
@@ -1305,17 +1300,11 @@ function TaskStrip({ task, asset, activeSub, publishCount, onOpenTask, onOpenSub
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-      padding: '6px 14px', borderBottom: '1px solid var(--rule)',
+      padding: '6px 14px', flexWrap: 'wrap', borderBottom: '1px solid var(--rule)',
       background: `color-mix(in oklch, ${color} 14%, var(--paper) 86%)`,
     }}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
       <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', flexShrink: 0 }}>{task.name}</span>
-      <button onClick={() => void fav.toggle()}
-        title={fav.isFavorite ? 'Retirer la tâche entière des favoris' : 'Mettre la tâche entière en favori (notifications)'}
-        style={{ display: 'inline-flex', padding: 3, border: 'none', background: 'transparent', cursor: 'pointer', flexShrink: 0 }}>
-        <Heart size={12} strokeWidth={1.75} color={fav.isFavorite ? 'var(--accent-hi)' : 'var(--ink-3)'}
-               fill={fav.isFavorite ? 'var(--accent)' : 'none'} />
-      </button>
       {publishCount > 0 && (
         <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', flexShrink: 0 }}>{publishCount}</span>
       )}
@@ -1330,6 +1319,8 @@ function TaskStrip({ task, asset, activeSub, publishCount, onOpenTask, onOpenSub
           </div>
         </>
       )}
+      <span style={{ flex: 1 }} />
+      {actions}
     </div>
   )
 }
@@ -1379,22 +1370,6 @@ function patchEntityDetail(
       return { ...prev, shots: prev.shots.map(s => s.id === res.entity.id ? { ...s, task_details: merge(s.task_details) } : s) }
     }
     return { ...prev, sequences: prev.sequences.map(s => s.id === res.entity.id ? { ...s, task_details: merge(s.task_details) } : s) }
-  })
-}
-
-function removeEntityTask(
-  setState: (patch: (prev: ProductionState) => ProductionState) => void,
-  res: ResolvedEntity, taskId: string,
-) {
-  setState(prev => {
-    const filterTasks = (tasks: ProductionTask[]) => tasks.filter(x => x.id !== taskId)
-    if (res.kind === 'asset') {
-      return { ...prev, assets: prev.assets.map(a => a.id === res.entity.id ? { ...a, tasks: filterTasks(a.tasks) } : a) }
-    }
-    if (res.kind === 'shot') {
-      return { ...prev, shots: prev.shots.map(s => s.id === res.entity.id ? { ...s, tasks: filterTasks(s.tasks) } : s) }
-    }
-    return { ...prev, sequences: prev.sequences.map(s => s.id === res.entity.id ? { ...s, tasks: filterTasks(s.tasks) } : s) }
   })
 }
 

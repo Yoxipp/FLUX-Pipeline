@@ -41,6 +41,9 @@ test('Done requires production approval; optional empty tasks do not count', () 
   s.tracking.departments.push({ ...s.tracking.departments[0], id: 'render', name: 'Rendering', fixed: false, task_tokens: ['RENDER'] })
   s.shots[0].task_details = { LIGHT: { status: 'APPROVED' } }
   assert.equal(status([item('2026-10-01')], s), 'Done')
+  s.shots[0].task_details.LIGHT.status = ''
+  assert.notEqual(status([item('2026-10-01')], s), 'Done')
+  s.shots[0].task_details.LIGHT.status = 'APPROVED'
   assert.equal(status([], s), 'None')
   s.shots[0].task_details.RENDER = { status: 'WIP' }
   assert.equal(status([item('2026-10-01')], s), 'Extra-late')

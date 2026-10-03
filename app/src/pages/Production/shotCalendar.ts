@@ -17,9 +17,9 @@ export function shotDeadline(state: ProductionState, shot: ProductionShot, items
     if (!tasks.length) {
       const virtual = { id: '', name: dep.task_tokens[0] ?? dep.name.toUpperCase(), order: 0, type_tokens: [], known_subtasks: [] }
       const status = trackingTaskStatus(shot, virtual, dep)
-      return status ? [status] : []
+      return status ? [status] : dep.fixed ? ['TODO'] : []
     }
-    return tasks.map(task => trackingTaskStatus(shot, task, dep)).filter(Boolean)
+    return tasks.map(task => trackingTaskStatus(shot, task, dep) || (dep.fixed ? 'TODO' : '')).filter(Boolean)
   })
   if (statuses.length && statuses.every(status => status === 'APPROVED')) return 'Done'
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())

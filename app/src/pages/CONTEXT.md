@@ -34,6 +34,38 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * Timeline est ouverte dans la bande d'onglets des Shots des le depart ; Main reste la vue
   initiale. Les onglets ouverts et filtres Main survivent a l'ouverture des retakes.
   La configuration globale de presets utilisateurs reste hors scope.
+* `TrackingMenus.tsx` + `tableRows.ts` : sequences en blocs repliables, clic droit du nom
+  pour Edit ; clic droit du titre de departement pour prioriser un statut. Tri local a
+  la vue, par sequence, sans changer l'ordre sauvegarde. Icone artiste accent sous les
+  badges assignes a l'utilisateur ; tooltip affiche uniquement les artistes concernes.
+* `taskSelection.ts` : Ctrl/Meta + clic autour du badge ajoute/retire une tache, Shift + clic selectionne
+  un rectangle de lignes/departements visibles. Clic droit sur la selection : assignation,
+  prise en charge, statut commun ou suppression des badges avec confirmation. Une seule
+  mise a jour de production par action groupee ; filtres/repli retirent les taches masquees.
+  Clic simple autour du badge deselectionne tout ; le badge ouvre toujours les retakes.
+  Fonctionne dans Shots et Assets, y compris cellules optionnelles vides et shots verrouilles.
+  Hovers artiste/NEED : echelle explicite 0.9 * zoom du tableau ; texte, espacements et
+  fleche redimensionnes en pixels via --tooltip-scale, sans zoom CSS sur le popup porte.
+  Hovers zoomes ancres directement via getBoundingClientRect en coordonnees fenetre
+  (`shared/tooltipPosition.ts`), avec suivi du zoom et retournement aux bords.
+  Rendu zoome non interactif : disableHoverableContent ferme au pointerleave ; fermeture
+  aussi au blur, clic exterieur, scroll, Echap ou ouverture d'un autre tooltip.
+  Cellules vides : bouton invisible sans interception du pointeur ; la zone de selection
+  couvre aussi le centre vide et le menu de statut cree les badges selectionnes.
+* `useProductionShow.ts` + `showPreference.ts` : filtre Show conserve dans localStorage
+  par projet et mode, avec preferences distinctes pour les vues d'entite. Survit a la
+  navigation et aux redemarrages ; donnees manquantes/corrompues retournent All.
+  Les cellules reservent des emplacements fixes au-dessus/dessous du badge : NEED
+  rouge au-dessus, tooltip avec les dependances requises, icone artiste en dessous.
+  Leur apparition/disparition ne change ni la position du badge ni la hauteur de ligne.
+* Supprimer le badge passe par une confirmation simple et ecrit `task_details.status = ''`.
+  Cette valeur explicite cache meme un badge fixe sans retirer la tache, les sous-taches,
+  l'artiste ou les notes ; le clic droit de la cellule permet de choisir un nouveau statut.
+  Un badge fixe efface ne suffit pas a faire passer le shot en Done.
+* Retakes : `TaskDetail.renderHeader` insere le statut et les actions dans le seul bandeau
+  colore `TaskStrip`. Aucune suppression de tache/sous-tache depuis cette page.
+  Sidebar Production : fleche, trait continu vers Assets/Shots, fermeture aux changements
+  d'onglet (`flux:production-tab-change`) ou de page sauf maintien via l'icone de fenetre.
 * Timing concerne les shots seulement. Les badges de statut restent editables sur les shots
   verrouilles : seuls les `task_details` changent, aucune tache structurelle n'est ajoutee.
 * `shotCalendar.ts` + `ShotDeadlineBadge.tsx` : badge de delai a droite du label, calendrier

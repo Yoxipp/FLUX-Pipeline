@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlus, Plus, Search, Settings2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, ImagePlus, Plus, Search, Settings2, UserRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
 import type { ProductionDependency, ProductionState, ProductionTask, ProductionThumbnail } from '../../types'
 import type { Selection } from './Production'
-import { blockers, departmentTasks, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
+import { blockers, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
 import type { TrackingEntity } from './tracking'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { EntityContextMenu } from './EntityContextMenu'
 import { ShotDeadlineBadge, useShotCalendar } from './ShotDeadlineBadge'
-import { ProductionShowMenu, ProductionRelatedMenu, type ShowFilter } from './ProductionTableMenus'
+import { DepartmentSortMenu, SequenceEditMenu } from './TrackingMenus'
+import { productionRowGroups, type DepartmentSort } from './tableRows'
+import { ProductionShowMenu, ProductionRelatedMenu } from './ProductionTableMenus'
+import { useProductionShow } from './useProductionShow'
+import { emptyTaskSelection, pruneTaskSelection, selectProductionTask, taskSelectionKey, trackingCellTasks, type TaskActionTarget } from './taskSelection'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
 import './tracking.css'
 
 interface Props {
@@ -31,7 +36,10 @@ interface Props {
 
 export function ProductionTracking({ project, mode, state, setState, selection, setSelection, onOpenDetail, onEdit, onNew, onSettings, onOpenEntity, onlyEntityId, loading }: Props) {
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<ShowFilter>({ kind: 'all' })
+  const [filter, setFilter] = useProductionShow(project, mode, onlyEntityId)
+  const [sort, setSort] = useState<DepartmentSort>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [taskSelection, setTaskSelection] = useState(emptyTaskSelection)
   // New 100% baseline is 90% of the original interface. Old saved zoom is retired.
   const [zoom, setZoom] = useState(1)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -68,6 +76,18 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       return parentOrder(a) - parentOrder(b) || a.order - b.order || a.name.localeCompare(b.name, undefined, { numeric: true })
     })
   }, [state, mode, query, filter, username, onlyEntityId])
+  const groups = productionRowGroups(state, entities, mode, departments, sort, mode === 'shot' && filter.kind === 'all' && !query && !onlyEntityId ? state.sequences : [])
+  const visibleTargets: TaskActionTarget[] = groups.filter(group => !collapsed.has(group.id)).flatMap(group => group.entities.flatMap(entity =>
+    departments.flatMap((dep, columnOrder) => trackingCellTasks(state, entity, dep, filter.kind === 'mine', username).map(task => ({
+      entity, task, departmentId: dep.id, columnOrder, statuses: dep.statuses, status: trackingTaskStatus(entity, task, dep),
+    }))),
+  ))
+  const visibleKeys = visibleTargets.map(taskSelectionKey)
+  const visibleSignature = JSON.stringify(visibleKeys)
+  useEffect(() => { setTaskSelection(prev => pruneTaskSelection(prev, visibleKeys)) }, [visibleSignature])
+  const selectedKeys = new Set(taskSelection.keys)
+  const selectedTargets = [...new Map(visibleTargets.filter(target => selectedKeys.has(taskSelectionKey(target))).map(target => [taskSelectionKey(target), target])).values()]
+  const columnCount = departments.length + (mode === 'shot' ? 3 : 2)
   const selectEntity = (entity: TrackingEntity): Selection => ({ kind: 'seq_id' in entity ? 'shot' : 'asset', id: entity.id })
   const openCell = (entity: TrackingEntity, task: ProductionTask) => {
     setState(prev => ensureTrackingTask(prev, entity.id, task))
@@ -85,20 +105,30 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
     <div className="tracking-toolbar">
       <label className="tracking-search"><Search size={14} /><input aria-label="Rechercher dans la production" placeholder={mode === 'shot' ? 'Rechercher un shot, un asset...' : 'Rechercher un asset...'} value={query} onChange={e => setQuery(e.target.value)} /></label>
       <span className="tracking-count">{entities.length} / {mode === 'shot' ? state.shots.length : state.assets.length}</span>
+      {selectedTargets.length > 0 && <div className="tracking-selection-summary"><span role="status">{selectedTargets.length} tâche{selectedTargets.length > 1 ? 's' : ''} sélectionnée{selectedTargets.length > 1 ? 's' : ''}</span><button aria-label="Effacer la sélection de tâches" onClick={() => setTaskSelection(emptyTaskSelection())}><X size={12} /></button></div>}
       <div className="tracking-spacer" />
       <ProductionShowMenu filter={filter} onChange={setFilter} sequences={state.sequences} />
       <button onClick={onSettings}><Settings2 size={13} /> Settings</button>
       <button onClick={beginCreate}><Plus size={13} /> New</button>
     </div>
     <div ref={scrollRef} className="tracking-scroll" tabIndex={0} aria-label="Tableau de suivi de production" onKeyDown={e => {
+      if (e.key === 'Escape' && e.currentTarget.contains(e.target as Node)) { setTaskSelection(emptyTaskSelection()); return }
       if (e.target !== e.currentTarget || (!e.ctrlKey && !e.metaKey)) return
       if (['+', '=', '-', '0'].includes(e.key)) { e.preventDefault(); changeZoom(e.key === '0' ? 1 : zoom + (e.key === '-' ? -0.1 : 0.1)) }
     }}>
       <table className="tracking-table" style={{ zoom }}>
-        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Assets liés' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} title={d.task_tokens.join(', ')}>{d.name}</th>)}</tr></thead>
-        <tbody>{entities.map(entity => {
+        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Assets liés' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} /></th>)}</tr></thead>
+        {groups.map(group => <tbody key={group.id} className={mode === 'shot' ? 'tracking-sequence-block' : undefined}>
+          {mode === 'shot' && <>
+            <tr className="tracking-sequence-gap" aria-hidden><td colSpan={columnCount} /></tr>
+            <tr className="tracking-sequence-heading"><td colSpan={columnCount}><div className="tracking-sequence-bar">
+              <button aria-label={`${collapsed.has(group.id) ? 'Déplier' : 'Replier'} ${group.sequence?.name ?? 'Séquence manquante'}`} aria-expanded={!collapsed.has(group.id)} onClick={() => setCollapsed(prev => { const next = new Set(prev); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next })}>{collapsed.has(group.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}</button>
+              {group.sequence ? <SequenceEditMenu sequence={group.sequence} onEdit={() => { setSelection({ kind: 'seq', id: group.sequence!.id }); onEdit() }} /> : <span>Séquence manquante</span>}
+              {group.sequence?.label && <span className="tracking-muted">{group.sequence.label}</span>}<span className="tracking-sequence-count">{group.entities.length} shots</span>
+            </div></td></tr>
+          </>}
+          {!collapsed.has(group.id) && group.entities.map(entity => {
           const isShot = 'seq_id' in entity
-          const seq = isShot ? state.sequences.find(s => s.id === entity.seq_id) : null
           const isSelected = (selection.kind === 'asset' || selection.kind === 'shot') && selection.id === entity.id
           const links = isShot ? effectiveCasting(state, entity) : []
           const linkedShots = !isShot ? state.shots.filter(sh => effectiveCasting(state, sh).some(l => l.id === entity.id)) : []
@@ -107,7 +137,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
             <td className="tracking-identity"><div className="tracking-name-cell">
               <Thumbnail key={`${project}:${entity.id}`} project={project} entity={entity} locked={trackingLocked(state, entity)} onChange={thumbnail => patchThumbnail(entity.id, thumbnail)} />
               <div className="tracking-name">
-                <span className="tracking-parent">{seq?.name ?? (isShot ? '?' : entity.class)}</span>
+                {!isShot && <span className="tracking-parent">{entity.class}</span>}
                 <EntityContextMenu project={project} state={state} entity={entity} setState={setState} setSelection={setSelection} onEdit={onEdit} />
                 {isShot && <div className="tracking-label-row">{entity.label && <span className="tracking-label" title={entity.label}>{entity.label}</span>}<ShotDeadlineBadge state={state} shot={entity} calendar={calendar} /></div>}
               </div>
@@ -115,25 +145,42 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
             {mode === 'shot' && <td className="tracking-timing">{isShot && entity.frame_start != null && entity.frame_end != null ? <><span>{entity.frame_start}–{entity.frame_end}</span><small>{entity.frame_end - entity.frame_start + 1} f</small></> : <span className="tracking-muted">—</span>}</td>}
             <td className="tracking-relations"><ProductionRelatedMenu items={relatedItems} onOpen={onOpenEntity} /></td>
             {departments.map(dep => {
-              const tasks = departmentTasks(state, entity, dep)
-              const candidates = tasks.length ? tasks : [{ id: `t_${entity.id}_${dep.id}`, name: dep.task_tokens[0] ?? dep.name.toUpperCase(), order: entity.tasks.length, type_tokens: dep.task_tokens.slice(0, 1), known_subtasks: [], origin: 'user' as const }]
-              const visible = filter.kind === 'mine' ? candidates.filter(t => taskAssignedTo(entity, t, username)) : candidates
+              const visible = trackingCellTasks(state, entity, dep, filter.kind === 'mine', username)
               const blocked = blockers(state, entity, dep, departments)
-              return <td key={dep.id} className="tracking-status-cell"><div className="tracking-task-badges">{visible.map(task => {
+              return <td key={dep.id} className="tracking-status-cell" onClick={event => {
+                if (!event.currentTarget.contains(event.target as Node) || (event.target as HTMLElement).closest('button')) return
+                const additive = event.ctrlKey || event.metaKey
+                if (!additive && !event.shiftKey) setTaskSelection(emptyTaskSelection())
+                else if (visible.length === 1) setTaskSelection(prev => selectProductionTask(prev, visibleTargets, taskSelectionKey({ entity, task: visible[0] }), additive, event.shiftKey))
+              }}><div className="tracking-task-badges">{visible.map(task => {
                 const status = trackingTaskStatus(entity, task, dep)
                 const editable = !trackingLocked(state, entity) || entity.tasks.some(own => own.name.toUpperCase() === task.name.toUpperCase())
-                return <div key={task.name}>{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}<TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={task} status={status} statuses={dep.statuses}
-                  title={`${dep.name} : ${status || 'Aucun statut'} - Clic droit pour les actions`} onClick={editable ? () => openCell(entity, task) : undefined} />
-                  {status && blocked.map(label => <span key={label} className="tracking-blocked">{label}</span>)}
+                const taskKey = taskSelectionKey({ entity, task })
+                const taskSelected = selectedKeys.has(taskKey)
+                return <div key={task.name} className="tracking-task-slot" data-task-selected={taskSelected || undefined}>
+                  <div className="tracking-task-meta">{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}
+                    {status && blocked.length > 0 && <Tooltip scale={0.9 * zoom}><TooltipTrigger asChild><button className="tracking-need" aria-label={`Dépendances requises : ${blocked.join(', ')}`}>NEED</button></TooltipTrigger><TooltipContent>{[...new Set(blocked)].map(label => <div key={label}>{label}</div>)}</TooltipContent></Tooltip>}
+                  </div>
+                  <TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={task} status={status} statuses={dep.statuses}
+                  tooltipScale={0.9 * zoom}
+                  actionTargets={taskSelected ? selectedTargets : undefined}
+                  selectionControl={{ label: `Sélection de ${entity.name} · ${task.name}`, selected: taskSelected, onClick: event => {
+                    const additive = event.ctrlKey || event.metaKey
+                    if (additive || event.shiftKey) setTaskSelection(prev => selectProductionTask(prev, visibleTargets, taskKey, additive, event.shiftKey))
+                    else setTaskSelection(emptyTaskSelection())
+                  } }}
+                  onContextTask={() => { if (!taskSelected) setTaskSelection({ keys: [taskKey], anchor: taskKey }) }}
+                  onClick={editable ? () => openCell(entity, task) : undefined} />
+                  <div className="tracking-task-artist">{taskAssignedTo(entity, task, username) && <UserRound size={12} className="tracking-assigned-user" aria-label="Cette tâche vous est assignée" />}</div>
                 </div>
               })}</div></td>
             })}
           </tr>
-        })}</tbody>
+        })}</tbody>)}
       </table>
       {!entities.length && <div className="tracking-empty"><strong>{loading ? 'Chargement...' : 'Aucun résultat'}</strong><span>{filter.kind === 'mine' ? 'Aucun job assigné à votre artiste.' : 'Modifiez la recherche ou le filtre Show.'}</span>{!loading && filter.kind === 'all' && !query && !onlyEntityId && <button onClick={beginCreate}>New</button>}</div>}
     </div>
-    <div className="tracking-footer"><span>Ctrl + molette pour zoomer</span><span>Clic droit sur un statut ou un shot pour les actions</span></div>
+    <div className="tracking-footer"><span>Ctrl + molette pour zoomer · Ctrl / Shift + clic autour des badges pour sélectionner</span><span>{selectedTargets.length ? 'Clic droit pour les actions · Clic autour d’un badge ou Échap pour effacer' : 'Clic droit sur un statut ou un shot pour les actions'}</span></div>
   </div>
 }
 

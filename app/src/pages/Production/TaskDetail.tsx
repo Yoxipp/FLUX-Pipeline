@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Check, Copy, Download, Film, FolderOpen, FolderTree, Heart,
-  Image as ImageIcon, List, Pin, Trash2, UploadCloud, X,
+  Image as ImageIcon, List, Pin, UploadCloud, X,
 } from 'lucide-react'
 import { api } from '../../api/client'
 import { useI18n } from '../../i18n'
@@ -36,7 +36,7 @@ interface Props {
   onTogglePin?:  () => void
   onPatchTask:   (patch: Partial<ProductionTask>) => void
   onPatchDetail: (patch: Partial<ProductionTaskDetail>) => void
-  onDeleteTask:  () => void
+  renderHeader?: (actions: React.ReactNode) => React.ReactNode
 }
 
 const nid = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`
@@ -49,7 +49,7 @@ const CLASS_TO_PUBLISHER_CATEGORY: Record<string, string> = {
 export function TaskDetail({
   asset, task, entityKind, publishes, subtaskFilter, detailKey,
   pinned, onTogglePin, headerActions,
-  onPatchTask, onPatchDetail, onDeleteTask,
+  onPatchTask, onPatchDetail, renderHeader,
 }: Props) {
   const { t }        = useI18n()
   const navigate     = useNavigate()
@@ -65,7 +65,6 @@ export function TaskDetail({
   // Project-relative root of this task/subtask (from PathBrowser) — the /ref
   // embed folder lives under it. Empty until tokens resolve.
   const [refBasePath, setRefBasePath] = useState('')
-  const [confirmOpen, setConfirmOpen] = useState(false)
   const [publishListOpen, setPublishListOpen] = useState(false)
   // Current TASK/INSTANCE selection mirrored up from PathBrowser — feeds "Publish here".
   const [sel, setSel] = useState<{ task: string; instance: string }>({ task: '', instance: '' })
@@ -84,14 +83,6 @@ export function TaskDetail({
     }
     setSubtaskInput('')
   }
-  // Subtask deletion is now only reachable from the big delete button in the
-  // subtask view — removes it from the parent task and closes the tab.
-  const deleteCurrentSubtask = () => {
-    if (!subtaskFilter) return
-    onPatchTask({ known_subtasks: task.known_subtasks.filter(s => s.toUpperCase() !== subtaskFilter.toUpperCase()) })
-    onDeleteTask()
-  }
-
   const postComment = () => {
     const txt = commentInput.trim()
     if (!txt) return
@@ -172,22 +163,8 @@ export function TaskDetail({
     }
   }
 
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      {/* header */}
-      <div style={{
-        padding: '8px 14px', borderBottom: '1px solid var(--rule)',
-        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-      }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)' }}>{task.name}</span>
-        {subtaskFilter && (
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
-            · {subtaskFilter}
-          </span>
-        )}
+  const headerControls = <div className="production-retake-actions">
         {headerActions}
-        <span style={{ flex: 1 }} />
         {/* publish here — opens the Publisher with the composer pre-filled */}
         <button onClick={goPublishHere} title="Faire un publish ici" style={_headerBtn}>
           <UploadCloud size={12} strokeWidth={1.75} color="var(--accent-hi)" />
@@ -215,11 +192,11 @@ export function TaskDetail({
         )}
         {/* favorite heart — user-wide, wired below */}
         <FavoriteToggle detailKey={detailKey} asset={asset} task={task} subtask={subtaskFilter} />
-        {/* delete — far right; the only entry point, confirmed before it runs */}
-        <button onClick={() => setConfirmOpen(true)} title={t('prod.delete')} style={_headerBtn}>
-          <Trash2 size={12} strokeWidth={1.75} color="var(--err)" />
-        </button>
-      </div>
+  </div>
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {renderHeader ? renderHeader(headerControls) : <div className="production-retake-header">{headerControls}</div>}
 
       {/* two-column body */}
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: 0 }}>
@@ -393,14 +370,6 @@ export function TaskDetail({
           <MediaEmbed project={project || ''} relPath={refBasePath} color={color} />
         </div>
       </div>
-
-      {confirmOpen && (
-        <ConfirmDelete
-          label={subtaskFilter ? `le subtask « ${subtaskFilter} »` : `la tâche « ${task.name} »`}
-          onCancel={() => setConfirmOpen(false)}
-          onConfirm={() => { setConfirmOpen(false); subtaskFilter ? deleteCurrentSubtask() : onDeleteTask() }}
-        />
-      )}
 
       {publishListOpen && (
         <PublishListModal
@@ -972,64 +941,6 @@ const _dropHint: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   background: 'color-mix(in oklch, var(--paper) 55%, transparent)',
   color: 'var(--ink)', fontSize: 11, fontWeight: 600, textAlign: 'center', padding: 12,
-}
-
-// ── confirm-before-delete dialog ─────────────────────────────────────────────
-function ConfirmDelete({ label, onCancel, onConfirm }: {
-  label:     string
-  onCancel:  () => void
-  onConfirm: () => void
-}) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel()
-      if (e.key === 'Enter') onConfirm()
-    }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [onCancel, onConfirm])
-
-  return (
-    <div
-      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.55)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-      }}
-    >
-      <div style={{
-        width: 340, maxWidth: '92vw',
-        background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 12,
-        boxShadow: 'var(--shadow)', padding: '18px 18px 14px',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
-          fontSize: 13, fontWeight: 600, color: 'var(--ink)',
-        }}>
-          <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
-          Supprimer {label} ?
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16 }}>
-          Cette action est définitive.
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button onClick={onCancel} style={_confirmCancelBtn}>Annuler</button>
-          <button onClick={onConfirm} autoFocus style={_confirmDeleteBtn}>Supprimer</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const _confirmCancelBtn: React.CSSProperties = {
-  padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-  border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-  color: 'var(--ink-2)', cursor: 'pointer',
-}
-const _confirmDeleteBtn: React.CSSProperties = {
-  padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-  border: '1px solid var(--err)', background: 'var(--err)',
-  color: 'var(--paper)', cursor: 'pointer',
 }
 
 // ── local atoms ──────────────────────────────────────────────────────────────

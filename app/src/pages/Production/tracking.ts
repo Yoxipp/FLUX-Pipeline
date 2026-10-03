@@ -50,6 +50,7 @@ export function trackingDepartments(state: ProductionState, scope: 'asset' | 'sh
 
 /** Fixed departments display TODO without materializing a task or disk folder. */
 export function trackingTaskStatus(entity: TrackingEntity, task: ProductionTask, dep: ProductionDepartment): string {
+  if (entity.task_details?.[task.name.toUpperCase()]?.status === '') return ''
   const keys = [task.name.toUpperCase(), ...task.known_subtasks.map(s => `${task.name.toUpperCase()}|${s.toUpperCase()}`)]
   const reviewed = keys.some(k => Boolean(entity.task_details?.[k]?.status) || (entity.task_details?.[k]?.completion ?? 0) > 0)
   return dep.fixed || reviewed ? taskStatus(entity, task) : ''
@@ -79,6 +80,7 @@ export function effectiveCasting(state: ProductionState, shot: ProductionShot): 
 }
 
 export function detailStatus(detail?: ProductionTaskDetail): string {
+  if (detail?.status === '') return ''
   if (detail?.status) return detail.status.toUpperCase()
   // Legacy percentages are work in progress, never evidence of review approval.
   return (detail?.completion ?? 0) > 0 ? 'WIP' : 'TODO'
@@ -90,6 +92,7 @@ export function departmentTasks(state: ProductionState, entity: TrackingEntity, 
 
 export function taskStatus(entity: TrackingEntity, task: ProductionTask): string {
   const details = entity.task_details ?? {}
+  if (details[task.name.toUpperCase()]?.status === '') return ''
   if (details[task.name.toUpperCase()]?.status) return detailStatus(details[task.name.toUpperCase()])
   const subs = task.known_subtasks.map(s => details[`${task.name.toUpperCase()}|${s.toUpperCase()}`]).filter(Boolean)
   if (subs.length) {
@@ -158,7 +161,7 @@ export function patchTrackingDetail(state: ProductionState, entityId: string, ta
     if (e.id !== entityId) return e
     const details = { ...e.task_details, [key]: { ...e.task_details?.[key], status } }
     // Reviewing a subtask supersedes a previous explicit department override.
-    if (subtask && details[task.name.toUpperCase()]?.status) {
+    if (subtask && details[task.name.toUpperCase()]?.status != null) {
       const { status: _oldStatus, ...rest } = details[task.name.toUpperCase()]
       details[task.name.toUpperCase()] = rest
     }

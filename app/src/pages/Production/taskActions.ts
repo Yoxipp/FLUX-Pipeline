@@ -3,6 +3,21 @@ import { ensureTrackingTask, patchTrackingDetail } from './tracking'
 
 export type TaskEntity = ProductionAsset | ProductionShot | ProductionSequence
 
+/** Clear the badge, retaining task structure, assignee and all review content. Empty is explicit, even for fixed departments. */
+export function clearTaskBadge(state: ProductionState, entityId: string, task: ProductionTask, subtask = ''): ProductionState {
+  const key = `${task.name.toUpperCase()}${subtask ? `|${subtask.toUpperCase()}` : ''}`
+  const patch = <T extends TaskEntity>(entity: T): T => {
+    if (entity.id !== entityId) return entity
+    const details: Record<string, ProductionTaskDetail> = { ...entity.task_details, [key]: { ...entity.task_details?.[key], status: '' } }
+    if (subtask && details[task.name.toUpperCase()]?.status) {
+      const { status: _status, ...rest } = details[task.name.toUpperCase()]
+      details[task.name.toUpperCase()] = rest
+    }
+    return { ...entity, task_details: details }
+  }
+  return { ...state, assets: state.assets.map(patch), shots: state.shots.map(patch), sequences: state.sequences.map(patch) }
+}
+
 export function patchTaskArtist(state: ProductionState, entityId: string, task: ProductionTask, subtask: string, assignee: string): ProductionState {
   const next = ensureTrackingTask(state, entityId, task)
   const key = `${task.name.toUpperCase()}${subtask ? `|${subtask.toUpperCase()}` : ''}`

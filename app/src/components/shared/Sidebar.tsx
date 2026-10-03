@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, HardDrive, CalendarDays,
+  ClipboardList, AlertTriangle, Check, X, HardDrive, CalendarDays, PanelLeft,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -118,6 +118,17 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [productionExpanded, setProductionExpanded] = useState(false)
+  const [productionPinned, setProductionPinned] = useState(false)
+  const openingProduction = useRef(false)
+  useEffect(() => {
+    if (openingProduction.current) { openingProduction.current = false; return }
+    if (!productionPinned) setProductionExpanded(false)
+  }, [pathname, search, productionPinned])
+  useEffect(() => {
+    const close = () => { if (!productionPinned) setProductionExpanded(false) }
+    window.addEventListener('flux:production-tab-change', close)
+    return () => window.removeEventListener('flux:production-tab-change', close)
+  }, [productionPinned])
   const productionMode = new URLSearchParams(search).get('mode') ?? localStorage.getItem('flux.production.mode') ?? 'shot'
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
@@ -600,8 +611,12 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
       {/* 2026-10-01: Production first, then the project folders, the team, the tools. */}
       <NavGroup title="PIPELINE">
-        <NavItem icon={ClipboardList}  label={t('nav.production')}     active={pathname === '/production'} indent route="/production" onClick={() => { setProductionExpanded(v => !v); navigate('/production') }} />
-        {productionExpanded && <div aria-label="Modes de production">{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 44, width: '100%', border: 0, textAlign: 'left' }} onClick={() => navigate(`/production?mode=${mode}`)}>{mode === 'asset' ? 'Assets' : 'Shots'}</button>)}</div>}
+        <div className="production-nav-row">
+          <NavItem icon={ClipboardList} label={t('nav.production')} active={pathname === '/production'} indent route="/production" onClick={() => { setProductionExpanded(v => !v); if (pathname !== '/production') { openingProduction.current = true; navigate('/production') } }} />
+          <button className="production-nav-control" aria-label="Maintenir le menu Production ouvert" aria-pressed={productionPinned} onClick={() => { setProductionPinned(v => !v); setProductionExpanded(!productionPinned) }}><PanelLeft size={12} /></button>
+          <button className="production-nav-control" aria-label={productionExpanded ? 'Replier Production' : 'Déplier Production'} aria-expanded={productionExpanded} onClick={() => setProductionExpanded(v => !v)}>{productionExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
+        </div>
+        {productionExpanded && <div className="production-nav-children" aria-label="Modes de production">{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => { if (!productionPinned) setProductionExpanded(false); navigate(`/production?mode=${mode}`) }}>{mode === 'asset' ? 'Assets' : 'Shots'}</button>)}</div>}
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />

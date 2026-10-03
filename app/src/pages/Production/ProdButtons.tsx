@@ -55,12 +55,12 @@ export function ProdBtn({
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         boxShadow: variant === 'solid' ? '0 1px 3px rgba(0,0,0,0.35)' : undefined,
-        transition: 'transform 0.12s, filter 0.12s',
+        transition: 'background-color 0.12s',
         width: full ? '100%' : undefined,
         ...style,
       }}
-      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.filter = 'brightness(1.08)' } }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.filter = 'brightness(1)' }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = `color-mix(in srgb, ${bg} 90%, var(--ink) 10%)` }}
+      onMouseLeave={e => { e.currentTarget.style.background = bg }}
     >
       {children}
     </button>

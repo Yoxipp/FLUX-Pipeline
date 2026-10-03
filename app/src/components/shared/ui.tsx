@@ -1,4 +1,6 @@
 import React, { type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
+import { tooltipPosition } from './tooltipPosition'
 import { Check as CheckIcon, ChevronDown } from 'lucide-react'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
@@ -175,30 +177,147 @@ function TooltipProvider({
   return <TooltipPrimitive.Provider delayDuration={delayDuration} {...props} />
 }
 
-export function Tooltip(props: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipProvider><TooltipPrimitive.Root {...props} /></TooltipProvider>
+const TooltipZoomContext = React.createContext({
+  zoom: 1,
+  triggerRef: { current: null } as React.MutableRefObject<HTMLButtonElement | null>,
+  screenPositioned: false,
+  open: false,
+  contentId: '',
+})
+
+export function Tooltip({ scale, ...props }: React.ComponentProps<typeof TooltipPrimitive.Root> & { scale?: number }) {
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null)
+  const [zoom, setZoom] = React.useState(1)
+  const [open, setOpen] = React.useState(props.defaultOpen ?? false)
+  const isOpen = props.open ?? open
+  const contentId = React.useId()
+  const screenPositioned = scale != null || zoom !== 1
+
+  React.useEffect(() => {
+    if (!isOpen || !screenPositioned) return
+    const close = () => { setOpen(false); props.onOpenChange?.(false) }
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close()
+    }
+    const outsideClick = (event: PointerEvent) => {
+      if (!triggerRef.current?.contains(event.target as Node)) close()
+    }
+    document.addEventListener('keydown', dismiss)
+    document.addEventListener('tooltip.open', close)
+    document.addEventListener('pointerdown', outsideClick)
+    document.addEventListener('scroll', close, true)
+    window.addEventListener('blur', close)
+    return () => {
+      document.removeEventListener('keydown', dismiss)
+      document.removeEventListener('tooltip.open', close)
+      document.removeEventListener('pointerdown', outsideClick)
+      document.removeEventListener('scroll', close, true)
+      window.removeEventListener('blur', close)
+    }
+  }, [isOpen, screenPositioned, props.onOpenChange])
+
+  React.useLayoutEffect(() => {
+    if (scale != null || !isOpen || !triggerRef.current) return
+    // Body/html already scale the portal. Only recover zoom below its host.
+    const ancestors: HTMLElement[] = []
+    for (let element: HTMLElement | null = triggerRef.current;
+      element && element !== document.body; element = element.parentElement) {
+      ancestors.push(element)
+    }
+    const updateZoom = () => setZoom(ancestors.reduce((scale, element) => {
+      const value = getComputedStyle(element).zoom
+      const parsed = parseFloat(value)
+      return scale * (Number.isFinite(parsed) && parsed > 0
+        ? parsed / (value.endsWith('%') ? 100 : 1) : 1)
+    }, 1))
+    updateZoom()
+    const observer = new MutationObserver(updateZoom)
+    ancestors.forEach(element => observer.observe(element, {
+      attributes: true, attributeFilter: ['style', 'class'],
+    }))
+    return () => observer.disconnect()
+  }, [isOpen, scale])
+
+  return (
+    <TooltipZoomContext.Provider value={{ zoom: scale ?? zoom, triggerRef, screenPositioned, open: isOpen, contentId }}>
+      <TooltipProvider>
+        <TooltipPrimitive.Root {...props} open={isOpen}
+          disableHoverableContent={screenPositioned || props.disableHoverableContent} onOpenChange={nextOpen => {
+          setOpen(nextOpen)
+          props.onOpenChange?.(nextOpen)
+        }} />
+      </TooltipProvider>
+    </TooltipZoomContext.Provider>
+  )
 }
 
 export function TooltipTrigger(props: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger {...props} />
+  const { triggerRef, screenPositioned, open, contentId } = React.useContext(TooltipZoomContext)
+  return <TooltipPrimitive.Trigger {...props} ref={triggerRef} aria-describedby={screenPositioned ? open ? contentId : undefined : props['aria-describedby']} />
+}
+
+function ScreenTooltip({ children, className, style, side = 'top', align = 'center', sideOffset = 6 }: {
+  children: React.ReactNode; className?: string; style?: CSSProperties
+  side?: 'top' | 'bottom' | 'left' | 'right'; align?: 'start' | 'center' | 'end'; sideOffset?: number
+}) {
+  const { zoom, triggerRef, contentId } = React.useContext(TooltipZoomContext)
+  const popup = React.useRef<HTMLDivElement>(null)
+  const [position, setPosition] = React.useState<ReturnType<typeof tooltipPosition> | null>(null)
+  React.useLayoutEffect(() => {
+    let frame = 0
+    const update = () => {
+      const trigger = triggerRef.current, content = popup.current
+      if (trigger && content) {
+        const dimensions = content.getBoundingClientRect()
+        const next = tooltipPosition(trigger.getBoundingClientRect(), dimensions.width, dimensions.height,
+          window.innerWidth, window.innerHeight, (sideOffset + 8) * zoom, side, align)
+        setPosition(prev => prev && prev.left === next.left && prev.top === next.top && prev.side === next.side && prev.arrow === next.arrow ? prev : next)
+      }
+    }
+    const follow = () => { update(); frame = requestAnimationFrame(follow) }
+    update()
+    frame = requestAnimationFrame(follow)
+    return () => cancelAnimationFrame(frame)
+  }, [zoom, triggerRef, sideOffset, side, align])
+  const arrowStyle: CSSProperties = position?.side === 'bottom'
+    ? { left: position.arrow, top: 0, transform: 'translate(-50%, -100%) rotate(180deg)' }
+    : position?.side === 'left'
+      ? { left: '100%', top: position.arrow, transform: 'translate(-25%, -50%) rotate(-90deg)' }
+      : position?.side === 'right'
+        ? { left: 0, top: position.arrow, transform: 'translate(-75%, -50%) rotate(90deg)' }
+        : { left: position?.arrow ?? 0, top: '100%', transform: 'translateX(-50%)' }
+  return createPortal(<div ref={popup} id={contentId} role="tooltip" className={['tooltip-content', className].filter(Boolean).join(' ')}
+    style={{ ...style, '--tooltip-scale': zoom, position: 'fixed', left: position?.left ?? 0, top: position?.top ?? 0,
+      visibility: position ? 'visible' : 'hidden', pointerEvents: 'none', animation: 'none' } as CSSProperties}>
+    {children}
+    <span aria-hidden style={{ position: 'absolute', width: 20 * zoom, height: 10 * zoom, ...arrowStyle }}>
+      <span style={{ display: 'block', transform: `scale(${zoom})`, transformOrigin: 'top left', width: 20, height: 10 }}><TooltipArrow /></span>
+    </span>
+  </div>, document.body)
 }
 
 export function TooltipContent({
   className,
   sideOffset = 6,
   children,
+  style,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  const { zoom, screenPositioned, open } = React.useContext(TooltipZoomContext)
+  if (screenPositioned) return open ? <ScreenTooltip className={className} style={style} side={props.side} align={props.align} sideOffset={sideOffset}>{children}</ScreenTooltip> : null
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
-        sideOffset={sideOffset}
+        sideOffset={sideOffset * zoom}
         className={['tooltip-content', className].filter(Boolean).join(' ')}
+        style={{ ...style, '--tooltip-scale': zoom } as CSSProperties}
         {...props}
       >
         {children}
         <TooltipPrimitive.Arrow asChild>
-          <span><TooltipArrow /></span>
+          <span style={{ display: 'block', width: 20 * zoom, height: 10 * zoom }}>
+            <span style={{ display: 'block', width: 20, height: 10, transform: `scale(${zoom})`, transformOrigin: 'top left' }}><TooltipArrow /></span>
+          </span>
         </TooltipPrimitive.Arrow>
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>

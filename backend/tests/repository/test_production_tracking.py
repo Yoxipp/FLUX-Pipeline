@@ -9,6 +9,26 @@ from tests.repository._backend import setUpModule, tearDownModule  # noqa: F401
 
 
 class ProductionTrackingTests(unittest.TestCase):
+    def test_cleared_badges_roundtrip_without_losing_tasks_or_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with _patch_path(Path(directory) / 'production.json'):
+                data = store.default_schema()
+                seq = store.add_sequence(data, 'SEQ0010')
+                shot = store.add_shot(data, seq['id'], 'SHOT0010')
+                asset = store.add_asset(data, 'CHAR', 'HERO')
+                for entity in [seq, shot, asset]:
+                    task = store.add_task(entity, 'ANIM', ['ANIM'])
+                    task['known_subtasks'] = ['BLOCK']
+                    store.update_task_detail(entity, 'ANIM', {'status': '', 'assignee': 'TOM', 'notes': 'Keep'})
+                    store.update_task_detail(entity, 'ANIM|BLOCK', {'status': '', 'comments': [{'id': 'c', 'text': 'Keep'}]})
+                self.assertTrue(store.save_production('TRACKING_TEST', data))
+                loaded = store.load_production('TRACKING_TEST')
+                self.assertEqual(loaded, data)
+                for entity in [loaded['sequences'][0], loaded['shots'][0], loaded['assets'][0]]:
+                    self.assertEqual(entity['task_details']['ANIM']['status'], '')
+                    self.assertEqual(entity['task_details']['ANIM']['assignee'], 'TOM')
+                    self.assertEqual(entity['tasks'][0]['known_subtasks'], ['BLOCK'])
+
     def test_shot_tracking_and_thumbnail_roundtrip(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
