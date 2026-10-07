@@ -102,8 +102,8 @@ export function WorkProfileDialog() {
             </label>
             <label>{PREF_LABELS.publisherSoft}{dot('publisherSoft')}
               <select value={prefs.publisherSoft} onChange={e => setPref('publisherSoft', e.target.value)}>
-                <option value="">Maya (défaut)</option>
-                {PUBLISHER_SOFTS.filter(s => s !== 'Maya').map(s => <option key={s} value={s}>{s}</option>)}
+                <option value="">Par défaut (Maya)</option>
+                {PUBLISHER_SOFTS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
             <div className="work-profile-field">{PREF_LABELS.launcher}{dot('launcher')}

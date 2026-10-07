@@ -4,8 +4,11 @@ import { useLocation } from 'react-router-dom'
 import {
   Star, LayoutGrid, Clock, Archive,
   HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw,
-  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2,
+  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2, ChevronDown, ChevronRight, Check, UserRound,
 } from 'lucide-react'
+import * as Menu from '@radix-ui/react-dropdown-menu'
+import { useWorkProfile } from '../WorkProfileContext'
+import { openWorkProfile } from '../components/shared/WorkProfileDialog'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
 import type { Preset } from '../types'
@@ -30,26 +33,14 @@ import type {
 
 type SidebarTab = 'tous' | 'favoris' | 'recents' | 'archives'
 
-const TILE_SIZE_KEY = 'flux.folderManager.tileSize'
-
-function loadTileSize(): TileSize {
-  try {
-    const v = localStorage.getItem(TILE_SIZE_KEY)
-    if (v === 'sm' || v === 'md' || v === 'lg') return v
-  } catch { /* localStorage unavailable */ }
-  return 'md'
-}
-
-// Views layout (B2), persisted per-browser like the tile size.
-const LAYOUT_KEY = 'flux.folderManager.layout'
-
-function loadLayout(): PaneLayout {
-  try {
-    const v = localStorage.getItem(LAYOUT_KEY)
-    if (v === 'single' || v === 'stacked' || v === 'side' || v === 'quad') return v
-  } catch { /* localStorage unavailable */ }
-  return 'single'
-}
+// Tile size, views and the creation forms are work prefs (ADR 0042): they follow the
+// artist's profile. Ctrl + wheel over the views changes the tile size.
+const TILE_ORDER: TileSize[] = ['sm', 'md', 'lg']
+const TILE_CHOICES: { id: TileSize; icon: typeof Square; title: string }[] = [
+  { id: 'sm', icon: Grid3x3, title: 'Petites tuiles' },
+  { id: 'md', icon: Grid2x2, title: 'Tuiles moyennes' },
+  { id: 'lg', icon: Square,  title: 'Grandes tuiles' },
+]
 
 const LAYOUTS: { id: PaneLayout; icon: typeof Square; title: string }[] = [
   { id: 'single',  icon: Square,   title: 'Une vue' },
@@ -943,11 +934,9 @@ export function Projects() {
 
   // ── Views (B2) ─────────────────────────────────────────────────────────────
 
-  const [layout, setLayout] = useState<PaneLayout>(loadLayout)
-  const changeLayout = useCallback((l: PaneLayout) => {
-    setLayout(l)
-    try { localStorage.setItem(LAYOUT_KEY, l) } catch { /* localStorage unavailable */ }
-  }, [])
+  const { prefs: workPrefs, setPref: setWorkPref } = useWorkProfile()
+  const layout: PaneLayout = workPrefs.folderLayout
+  const changeLayout = useCallback((l: PaneLayout) => setWorkPref('folderLayout', l), [setWorkPref])
   const paneCount = PANE_COUNT[layout]
   const [activePane, setActivePane] = useSessionState('fm.activePane', 0)
   const activeIdx = Math.min(activePane, paneCount - 1)
@@ -977,12 +966,24 @@ export function Projects() {
   const [tab, setTab]               = useSessionState<Tab>('fm.tab', 'project')
   const [sidebarTab, setSidebarTab] = useSessionState<SidebarTab>('fm.sidebarTab', 'tous')
 
-  // Explorer tile size (small / medium / large), persisted per-browser
-  const [tileSize, setTileSize]   = useState<TileSize>(loadTileSize)
-  const changeTileSize = useCallback((s: TileSize) => {
-    setTileSize(s)
-    try { localStorage.setItem(TILE_SIZE_KEY, s) } catch { /* localStorage unavailable */ }
-  }, [])
+  // Explorer tile size (small / medium / large), a work pref; Ctrl + wheel steps it.
+  const tileSize: TileSize = workPrefs.folderTileSize
+  const changeTileSize = useCallback((s: TileSize) => setWorkPref('folderTileSize', s), [setWorkPref])
+  const viewsRef = useRef<HTMLDivElement>(null)
+  const tileSizeRef = useRef(tileSize)
+  tileSizeRef.current = tileSize
+  useEffect(() => {
+    const node = viewsRef.current
+    if (!node) return
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const i = TILE_ORDER.indexOf(tileSizeRef.current) + (e.deltaY < 0 ? 1 : -1)
+      if (i >= 0 && i < TILE_ORDER.length) changeTileSize(TILE_ORDER[i])
+    }
+    node.addEventListener('wheel', wheel, { passive: false })
+    return () => node.removeEventListener('wheel', wheel)
+  }, [changeTileSize])
 
   const [sequences, setSequences] = useState<string[]>([])
   // Preset quick-drop (RETAKES-3): the linked presets of the active view's project.
@@ -1359,21 +1360,11 @@ export function Projects() {
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Folder Manager</div>
         <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: 4 }}>
-          {LAYOUTS.map(({ id, icon: Icon, title }) => {
-            const on = layout === id
-            return (
-              <div
-                key={id}
-                title={title}
-                onClick={() => changeLayout(id)}
-                style={{ width: 28, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, cursor: 'pointer', background: on ? 'var(--accent-soft)' : 'transparent', border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)' }}
-              >
-                <Icon size={13} strokeWidth={1.75} color={on ? 'var(--accent)' : 'var(--ink-4)'} />
-              </div>
-            )
-          })}
-        </div>
+        <ViewMenu
+          layout={layout} onLayout={changeLayout}
+          tileSize={tileSize} onTileSize={changeTileSize}
+          createPanel={workPrefs.folderCreatePanel} onCreatePanel={v => setWorkPref('folderCreatePanel', v)}
+        />
       </div>
 
       {/* Barre commune : annuler + Token Finder (résultats dans la vue active) + presse-papier */}
@@ -1480,30 +1471,6 @@ export function Projects() {
 
           <div style={{ height: 1, background: 'var(--rule)', margin: '10px 0 0' }} />
 
-          {/* Taille des tuiles de l'explorer */}
-          <div style={{ padding: '8px 12px 2px' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>TAILLE</div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {([
-                { id: 'sm' as TileSize, icon: Grid3x3,    title: 'Petites tuiles' },
-                { id: 'md' as TileSize, icon: Grid2x2,    title: 'Tuiles moyennes' },
-                { id: 'lg' as TileSize, icon: Square,     title: 'Grandes tuiles' },
-              ]).map(({ id, icon: Icon, title }) => {
-                const active = tileSize === id
-                return (
-                  <div
-                    key={id}
-                    title={title}
-                    onClick={() => changeTileSize(id)}
-                    style={{ flex: 1, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, cursor: 'pointer', background: active ? 'var(--accent-soft)' : 'transparent', border: active ? '1px solid var(--accent)' : '1px solid var(--rule-2)', transition: 'background 0.08s' }}
-                  >
-                    <Icon size={14} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
           <div style={{ flex: 1 }} />
           <div style={{ padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
@@ -1547,7 +1514,7 @@ export function Projects() {
           )}
 
           {/* Vues d'exploration : restent montées (état gardé) quand une liste est affichée */}
-          <div style={{
+          <div ref={viewsRef} title="Ctrl + molette : taille des tuiles" style={{
             flex: 1, minHeight: 0, minWidth: 0,
             display: sidebarTab === 'tous' ? 'grid' : 'none',
             gridTemplateColumns: twoCols ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)',
@@ -1571,6 +1538,15 @@ export function Projects() {
 
         {/* Panneau droit (suit la vue active) */}
         <div style={{ width: 200, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          <button
+            className="fm-create-toggle" aria-expanded={workPrefs.folderCreatePanel}
+            onClick={() => setWorkPref('folderCreatePanel', !workPrefs.folderCreatePanel)}
+          >
+            {workPrefs.folderCreatePanel ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            <span className="cap">Créer</span>
+            {!workPrefs.folderCreatePanel && <span className="fm-create-hint">Projet, asset, shot, dossier</span>}
+          </button>
+          {workPrefs.folderCreatePanel && <>
           <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)' }}>
             {TABS.map(t => (
               <div
@@ -1603,6 +1579,8 @@ export function Projects() {
               />
             )}
           </div>
+          </>}
+          {!workPrefs.folderCreatePanel && <div style={{ flex: 1 }} />}
 
           {/* N7: note of the selected published file (hidden when it has none) */}
           {nav.kind === 'inside' && selectedNames.size === 1 && (
@@ -1644,5 +1622,52 @@ export function Projects() {
       )}
     </div>
     </FolderManagerContext.Provider>
+  )
+}
+
+// "Affichage" menu of the Folder Manager header (ADR 0042): views, tile size and the
+// creation forms in one place instead of seven always-visible buttons.
+function ViewMenu({ layout, onLayout, tileSize, onTileSize, createPanel, onCreatePanel }: {
+  layout: PaneLayout; onLayout: (l: PaneLayout) => void
+  tileSize: TileSize; onTileSize: (s: TileSize) => void
+  createPanel: boolean; onCreatePanel: (v: boolean) => void
+}) {
+  const Current = LAYOUTS.find(l => l.id === layout)?.icon ?? Square
+  return (
+    <Menu.Root modal={false}>
+      <Menu.Trigger className="fm-view-trigger" aria-label="Affichage">
+        <Current size={13} strokeWidth={1.75} />
+        <span>Affichage</span>
+        <ChevronDown size={11} />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Content className="launcher-menu" side="bottom" align="end" sideOffset={4} collisionPadding={10}>
+          <Menu.Label className="launcher-menu-label">Vues</Menu.Label>
+          <Menu.RadioGroup value={layout} onValueChange={v => onLayout(v as PaneLayout)}>
+            {LAYOUTS.map(({ id, icon: Icon, title }) => (
+              <Menu.RadioItem key={id} value={id} className="launcher-menu-item">
+                <Icon size={13} strokeWidth={1.75} />{title}
+                <Menu.ItemIndicator style={{ marginLeft: 'auto', display: 'inline-flex' }}><Check size={13} /></Menu.ItemIndicator>
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+          <Menu.Separator className="launcher-menu-separator" />
+          <Menu.Label className="launcher-menu-label">Taille · Ctrl + molette</Menu.Label>
+          <Menu.RadioGroup value={tileSize} onValueChange={v => onTileSize(v as TileSize)}>
+            {TILE_CHOICES.map(({ id, icon: Icon, title }) => (
+              <Menu.RadioItem key={id} value={id} className="launcher-menu-item">
+                <Icon size={13} strokeWidth={1.75} />{title}
+                <Menu.ItemIndicator style={{ marginLeft: 'auto', display: 'inline-flex' }}><Check size={13} /></Menu.ItemIndicator>
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+          <Menu.Separator className="launcher-menu-separator" />
+          <Menu.CheckboxItem className="launcher-menu-item" checked={createPanel} onCheckedChange={v => onCreatePanel(v === true)}>
+            <span style={{ width: 13, display: 'inline-flex' }}>{createPanel && <Check size={13} />}</span>Formulaires de création
+          </Menu.CheckboxItem>
+          <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
+        </Menu.Content>
+      </Menu.Portal>
+    </Menu.Root>
   )
 }

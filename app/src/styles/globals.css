@@ -389,3 +389,11 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .launcher-menu-item[data-highlighted] { background: var(--paper); color: var(--ink); }
 .launcher-menu-item[data-disabled] { opacity: .45; cursor: default; }
 .launcher-menu-separator { height: 1px; margin: 4px 2px; background: var(--rule); }
+
+/* Folder Manager: "Affichage" menu and foldable creation forms (ADR 0042). */
+.fm-view-trigger { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid var(--rule-2); border-radius: 5px; background: transparent; color: var(--ink-3); font: 11px var(--sans); cursor: pointer; }
+.fm-view-trigger:hover, .fm-view-trigger[data-state="open"] { background: var(--paper-2); color: var(--ink); }
+.fm-view-trigger:focus-visible, .fm-create-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fm-create-toggle { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--rule); background: var(--paper-2); color: var(--ink-3); cursor: pointer; text-align: left; flex-shrink: 0; }
+.fm-create-toggle:hover { color: var(--ink); }
+.fm-create-hint { margin-left: auto; font-size: 9.5px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
