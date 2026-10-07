@@ -33,7 +33,7 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   les references versionnees existantes, sous `_production/thumbnails/<id>`.
 * Timeline est ouverte dans la bande d'onglets des Shots des le depart ; Main reste la vue
   initiale. Les onglets ouverts et filtres Main survivent a l'ouverture des retakes.
-  La configuration globale de presets utilisateurs reste hors scope.
+  Les profils de travail (ADR 0042) ne touchent pas a Production, sauf la page de demarrage.
 * `TrackingMenus.tsx` + `tableRows.ts` : sequences en blocs repliables, clic droit du nom
   pour Edit ; clic droit du titre de departement pour prioriser un statut. Tri local a
   la vue, par sequence, sans changer l'ordre sauvegarde. Icone artiste accent sous les
@@ -78,7 +78,8 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 
 ## Folder Manager (`Projects.tsx` + `folder_manager/`, B2 2026-09-28)
 
-* `Projects.tsx` : la page. Barre laterale (listes sauvegardees, presets, tailles), Token Finder, onglets de creation,
+* `Projects.tsx` : la page. Barre laterale (listes sauvegardees, presets), menu Affichage (vues, taille des tuiles,
+  formulaires de creation repliables ; prefs de travail ADR 0042, Ctrl + molette = taille), Token Finder, onglets de creation,
   panneau droit, choix des vues (1 / 2 empilees / 2 cote a cote / 4), et l'etat partage par les vues
   (`FolderManagerContext` : favoris, presse-papier, undo, `transfer` = tout deplacement / copie, `fsTick` = relecture
   de toutes les vues apres une ecriture). La vue active (dernier clic, cadre accent) pilote le panneau droit, le projet

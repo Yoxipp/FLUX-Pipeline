@@ -4,3 +4,22 @@
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
 Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC connectes), `Console` (logs `/logs`), `BackendBanner` (reconnexion), `ExportOptions` + `SoftwareSelector` (Publisher), `ActionForm`, `ui.tsx`, `Logo`.
+
+## Profils de travail et interface allegee (2026-10-07, ADR 0042)
+
+* `WorkProfileDialog.tsx` + `workProfile.css` : seul endroit ou s'editent les prefs de travail
+  (page de demarrage, Launcher, logiciel du Publisher, tuiles / vues / creation du Folder Manager)
+  et les profils (FLUX integres, projet, perso). Ouvert par `openWorkProfile()` depuis Parametres,
+  le clic droit du Launcher et le menu Affichage du Folder Manager. Monte une fois dans `App`.
+* Etat : `app/src/WorkProfileContext.tsx` (User.json `work_profile`, sauvegarde debouncee 400 ms,
+  profils du projet actif via `/folder/projects/{p}/work-profiles`) ; modele pur et validation
+  dans `app/src/lib/workProfiles.ts` (tests `scripts/tests/work-profiles.test.cjs`).
+* `Sidebar` Launcher : mode compact par defaut. Lancer reste visible ; chemin, bridge, Photoshop et
+  New Scene au survol / focus et dans le clic droit de la ligne (aussi touche Menu / Shift+F10,
+  Entree lance). Restent toujours visibles : chemin manquant, Maya bloque, plusieurs instances,
+  chargements. "Auto-detecter" n'apparait que s'il manque un chemin. Mode complet par profil.
+* `SoftwareSelector` : `isVisible` replie derriere `+N` les logiciels non actives par l'utilisateur
+  (le logiciel actif reste affiche). Utilise par Publisher et Shelf Manager.
+* `TitleBar` / Parametres : resume du profil actif (et "modifie"), couleurs de console repliees.
+* `tooltipPosition.viewportRect` : Electron 31 (Chromium 126) renvoie des rects non zoomes sous un
+  ancetre `zoom` CSS ; toute ancre `position: fixed` portee dans body doit passer par cette fonction.
