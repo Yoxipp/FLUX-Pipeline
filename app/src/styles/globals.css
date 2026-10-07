@@ -374,3 +374,18 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .flux-toast-ok   { border-color: var(--ok)   !important; color: var(--ok)   !important; background: color-mix(in oklch, var(--ok)   8%, var(--paper-2)) !important; }
 .flux-toast-warn { border-color: var(--warn) !important; color: var(--warn) !important; background: color-mix(in oklch, var(--warn) 8%, var(--paper-2)) !important; }
 .flux-toast-err  { border-color: var(--err)  !important; color: var(--err)  !important; background: color-mix(in oklch, var(--err)  8%, var(--paper-2)) !important; }
+
+/* Launcher compact (ADR 0042): secondary actions on hover/focus, attention states always. */
+.launcher-row { border-radius: 5px; outline: none; }
+.launcher-row:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.launcher-row[data-compact] .launcher-secondary:not([data-attention]) { display: none !important; }
+.launcher-row[data-compact]:hover .launcher-secondary,
+.launcher-row[data-compact]:focus-within .launcher-secondary { display: inline-flex !important; }
+.launcher-row[data-compact]:hover { background: var(--paper-2); }
+.launcher-hint { padding: 2px 18px 6px; font-size: 9.5px; color: var(--ink-4); }
+.launcher-menu { min-width: 210px; padding: 5px; background: var(--paper-2); border: 1px solid var(--rule-2); border-radius: 8px; box-shadow: var(--shadow-md); z-index: 1000; font: 12px var(--sans); color: var(--ink); }
+.launcher-menu-label { padding: 5px 8px 4px; font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.launcher-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; cursor: pointer; outline: none; color: var(--ink-2); }
+.launcher-menu-item[data-highlighted] { background: var(--paper); color: var(--ink); }
+.launcher-menu-item[data-disabled] { opacity: .45; cursor: default; }
+.launcher-menu-separator { height: 1px; margin: 4px 2px; background: var(--rule); }

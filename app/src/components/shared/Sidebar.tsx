@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, HardDrive, CalendarDays, PanelLeft,
+  ClipboardList, AlertTriangle, Check, X, HardDrive, CalendarDays, PanelLeft, UserRound,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -17,6 +17,10 @@ import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui'
+import * as Menu from '@radix-ui/react-dropdown-menu'
+import { createPortal } from 'react-dom'
+import { useWorkProfile } from '../../WorkProfileContext'
+import { openWorkProfile } from './WorkProfileDialog'
 
 interface Props {
   dccStatus: DccStatusMap
@@ -133,6 +137,11 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
   const { isEnabled: isDccEnabled } = useEnabledDccs()
+  // ADR 0042: compact launcher = launch always visible, other actions on hover/focus
+  // and in the row's context menu; states that need action stay visible.
+  const { prefs: workPrefs, setPref: setWorkPref } = useWorkProfile()
+  const compactLauncher = workPrefs.launcher === 'compact'
+  const [launcherMenu, setLauncherMenu] = useState<{ soft: string; x: number; y: number } | null>(null)
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
   const [findingAll, setFindingAll]           = useState(false)
@@ -561,10 +570,13 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   // Open the per-soft menu of tasks that have presets in the active project.
   const openNewScene = (soft: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!activeProject) { toast.error('Aucun projet actif — choisis-en un dans le Folder Manager'); return }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    openNewSceneAt(soft, rect.left, rect.top)
+  }
+  const openNewSceneAt = (soft: string, x: number, y: number) => {
+    if (!activeProject) { toast.error('Aucun projet actif — choisis-en un dans le Folder Manager'); return }
     setHoverTask(null)
-    setNewScene({ soft, x: rect.left, y: rect.top })
+    setNewScene({ soft, x, y })
   }
 
   // Launch the chosen preset (or the empty default scene) in *soft*.
@@ -663,7 +675,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           const statusNoBridge = !!dccStatus[statusKey]?.no_bridge
 
           return (
-            <div key={s.key} style={{
+            <div key={s.key} className="launcher-row" data-compact={compactLauncher || undefined}
+              tabIndex={0} aria-label={`${s.name} : clic droit pour toutes les actions`}
+              onContextMenu={e => { e.preventDefault(); setLauncherMenu({ soft: s.key, x: e.clientX, y: e.clientY }) }}
+              onKeyDown={e => {
+                if (e.target !== e.currentTarget) return
+                if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+                  e.preventDefault()
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setLauncherMenu({ soft: s.key, x: rect.left + 18, y: rect.bottom })
+                } else if (e.key === 'Enter' && !isLoading) { e.preventDefault(); void handleLaunch(s.key) }
+              }}
+              style={{
               display: 'flex', alignItems: 'center', gap: 4,
               padding: '5px 10px 5px 18px',
               fontSize: 11, color: connected ? 'var(--ink-2)' : 'var(--ink-4)',
@@ -700,7 +723,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
               <div
                 onClick={() => void handlePickPath(s.key)}
-                className="scale-hover-lg"
+                className="scale-hover-lg launcher-secondary" data-attention={!hasPath || undefined}
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (hasPath ? 'var(--accent)' : 'var(--rule-2)'),
@@ -726,7 +749,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
               <div
                 onClick={() => { if (!autoLoading) void handleToggleAutostart(s.key) }}
-                className="scale-hover-lg"
+                className="scale-hover-lg launcher-secondary" data-attention={autoLoading || undefined}
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--rule-2)'),
@@ -789,7 +812,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
                   <div
                     onClick={() => { if (!psBusy) void handlePhotoshop() }}
-                    className="scale-hover-lg"
+                    className="scale-hover-lg launcher-secondary" data-attention={psBusy || undefined}
                     style={{
                       width: 16, height: 16, borderRadius: 4,
                       border: '1px solid ' + (psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--rule-2)'),
@@ -917,7 +940,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <TooltipTrigger asChild>
               <div
                 onClick={(e) => openNewScene(s.key, e)}
-                className="scale-hover-lg"
+                className="scale-hover-lg launcher-secondary"
                 style={{
                   width: 16, height: 16, borderRadius: 4,
                   border: '1px solid ' + (hasPreset ? 'var(--accent)' : 'var(--rule-2)'),
@@ -937,7 +960,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           )
         })}
 
-        {/* Bouton global auto-détection des chemins */}
+        {/* Bouton global auto-detection des chemins (compact : seulement s'il manque un chemin,
+            sinon dans le clic droit d'un logiciel) */}
+        {(!compactLauncher || findingAll || SOFTWARE.some(x => isDccEnabled(x.key) && !dccPaths[x.key])) &&
         <div style={{ padding: '5px 10px 6px' }}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -967,7 +992,33 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               Détecter automatiquement tous les chemins .exe
             </TooltipContent>
           </Tooltip>
-        </div>
+        </div>}
+        {compactLauncher && <div className="launcher-hint">Clic droit sur un logiciel pour toutes les actions</div>}
+        {launcherMenu && (() => {
+          const soft = launcherMenu.soft
+          const name = SOFTWARE.find(x => x.key === soft)?.name ?? soft
+          const connected = dccDot(dccStatus, soft) === 'ok'
+          const plug = soft !== 'photoshop'
+          const installed = !!autostartInstalled[soft]
+          return <Menu.Root open onOpenChange={o => { if (!o) setLauncherMenu(null) }} modal={false}>
+            {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: launcherMenu.x, top: launcherMenu.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
+            <Menu.Portal><Menu.Content className="launcher-menu" side="bottom" align="start" collisionPadding={10}>
+              <Menu.Label className="launcher-menu-label">{name}</Menu.Label>
+              <Menu.Item className="launcher-menu-item" disabled={launching.has(soft)} onSelect={() => void handleLaunch(soft)}><Play size={13} />{connected ? 'Nouvelle instance' : 'Lancer'}</Menu.Item>
+              <Menu.Item className="launcher-menu-item" onSelect={() => openNewSceneAt(soft, launcherMenu.x, launcherMenu.y)}><FilePlus2 size={13} />New Scene…</Menu.Item>
+              <Menu.Separator className="launcher-menu-separator" />
+              <Menu.Item className="launcher-menu-item" onSelect={() => void handlePickPath(soft)}><FolderOpen size={13} />{dccPaths[soft] ? 'Changer le chemin…' : 'Définir le chemin…'}</Menu.Item>
+              {plug && <Menu.Item className="launcher-menu-item" disabled={autostartLoading.has(soft)} onSelect={() => void handleToggleAutostart(soft)}><Plug size={13} />{installed ? 'Désinstaller le bridge' : 'Installer le bridge'}</Menu.Item>}
+              {!plug && <Menu.Item className="launcher-menu-item" disabled={psBusy} onSelect={() => void handlePhotoshop()}><Plug size={13} />Vérifier Photoshop</Menu.Item>}
+              <Menu.Item className="launcher-menu-item" disabled={findingAll} onSelect={() => void handleAutoFindAll()}><Search size={13} />Auto-détecter tous les chemins</Menu.Item>
+              <Menu.Separator className="launcher-menu-separator" />
+              <Menu.CheckboxItem className="launcher-menu-item" checked={!compactLauncher} onCheckedChange={v => setWorkPref('launcher', v ? 'full' : 'compact')}>
+                <span style={{ width: 13, display: 'inline-flex' }}>{!compactLauncher && <Check size={13} />}</span>Afficher tous les boutons
+              </Menu.CheckboxItem>
+              <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
+            </Menu.Content></Menu.Portal>
+          </Menu.Root>
+        })()}
       </NavGroup>
 
       <div style={{ flex: 1 }} />
