@@ -14,7 +14,9 @@ from core.logger import get_logger
 from core.paths import force_remove, force_rmtree, get_project_path, get_projects_dir, is_subpath
 from features.folder_manager.asset_creator import create_asset, heal_tokens_from_disk, list_assets
 from features.folder_manager.locks import is_locked, load_locks, set_lock
-from features.folder_manager.project_config import ensure_project_config, is_direct_project_dir
+from features.folder_manager.project_config import (
+    ensure_project_config, is_direct_project_dir, read_work_profiles, write_work_profiles,
+)
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
@@ -75,6 +77,33 @@ async def get_project_config(project_name: str) -> dict:
     loop = asyncio.get_running_loop()
     config, warnings = await loop.run_in_executor(None, lambda: ensure_project_config(project_path))
     return {"config": config, "warnings": warnings}
+
+
+class WorkProfilesPayload(BaseModel):
+    profiles: list[dict]
+
+
+@router.get("/projects/{project_name}/work-profiles")
+async def get_work_profiles(project_name: str) -> dict:
+    """Work profiles the project shares with its artists (project.json "ui")."""
+    project_path = get_project_path(project_name)
+    if not is_direct_project_dir(project_path, get_projects_dir()):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_running_loop()
+    return {"profiles": await loop.run_in_executor(None, lambda: read_work_profiles(project_path))}
+
+
+@router.put("/projects/{project_name}/work-profiles")
+async def put_work_profiles(project_name: str, payload: WorkProfilesPayload) -> dict:
+    project_path = get_project_path(project_name)
+    if not is_direct_project_dir(project_path, get_projects_dir()):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_running_loop()
+    try:
+        profiles = await loop.run_in_executor(None, lambda: write_work_profiles(project_path, payload.profiles))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"profiles": profiles}
 
 
 @router.get("/projects")
