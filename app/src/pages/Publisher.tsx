@@ -18,6 +18,9 @@ import { MARVELOUS_OPTIONS, defaultMarvelousOptions } from '../lib/marvelousExpo
 import { api } from '../api/client'
 import type { DesignerPackage, MayaUsdPreview, MayaUsdTreeNode, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
+import { useWorkProfile } from '../WorkProfileContext'
+import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { SOFTWARE } from '../lib/dccs'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
 import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
@@ -632,6 +635,17 @@ export function Publisher() {
   const { settings } = useSettings()
   const location = useLocation()
   const [dcc, setDcc]           = useState('Maya')
+  // Work profile (ADR 0042): first software shown, unless the user or a navigation
+  // (Production prefill, ZBrush freeze) already picked one.
+  const { ready: prefsReady, prefs: workPrefs } = useWorkProfile()
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const dccPicked = useRef(false)
+  const changeDcc = useCallback((name: string) => { dccPicked.current = true; setDcc(name) }, [])
+  useEffect(() => {
+    if (!prefsReady || dccPicked.current) return
+    dccPicked.current = true
+    if (workPrefs.publisherSoft && !location.state?.zbrushConnected) setDcc(workPrefs.publisherSoft)
+  }, [prefsReady]) // eslint-disable-line react-hooks/exhaustive-deps
   const { project, projects, setProject } = useProject()
   const [tokens, setTokens]     = useState<Record<string, Record<string, string>>>({})
 
@@ -1871,7 +1885,7 @@ export function Publisher() {
         <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Publish</div>
       </div>
 
-      <SoftwareSelector active={dcc} onChange={setDcc} />
+      <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
 
       <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 

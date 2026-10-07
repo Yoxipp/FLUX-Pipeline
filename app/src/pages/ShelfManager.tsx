@@ -5,6 +5,8 @@ import { Btn, SecTitle, Pill, Check } from '../components/shared/ui'
 import { FluxLogo } from '../components/shared/Logo'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
+import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { SOFTWARE } from '../lib/dccs'
 
 // Shelf tool tints — ANIM (orange) / RIG (blue), matching the Maya shelf icons.
 const ANIM_COLOR = 'oklch(70% 0.15 52)'
@@ -58,6 +60,7 @@ type AllShelvesResponse = Record<string, ShelfData>
 type LogEntry = { type: 'ok' | 'err' | 'info'; msg: string }
 
 export function ShelfManager() {
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
   const [dcc, setDcc] = useState('Houdini')
   const [version, setVersion] = useState('')
   const [shelfData, setShelfData] = useState<AllShelvesResponse>({})
@@ -197,7 +200,8 @@ export function ShelfManager() {
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Gestion du Shelf</div>
       </div>
 
-      <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false} />
+      <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false}
+        isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
