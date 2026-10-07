@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight, SlidersHorizontal, Pin, Trash2 } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, ChevronRight, X, Minus, Maximize2, FolderOpen, RefreshCw, RotateCcw, ChevronsRight, SlidersHorizontal, Pin, Trash2, UserRound } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar, Popover, PopoverTrigger, PopoverContent, PopoverClose } from './ui'
@@ -11,6 +11,8 @@ import { useI18n } from '../../i18n'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
 import { SOFTWARE } from '../../lib/dccs'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { useWorkProfile } from '../../WorkProfileContext'
+import { openWorkProfile } from './WorkProfileDialog'
 
 interface Props {
   username: string | null
@@ -61,7 +63,10 @@ function SettingsPopover({ username }: { username: string }) {
   const [logColors, setLogColors]   = useState<Record<string, string>>({})
   const { isEnabled: isDccEnabled, setEnabled: setEnabledDccs } = useEnabledDccs()
   const [advancedAsk, setAdvancedAsk] = useState(false)
+  // Console colors are rarely changed: folded by default, count shown when overridden.
+  const [logOpen, setLogOpen] = useState(false)
   const [uninstallAsk, setUninstallAsk] = useState(false)
+  const workProfile = useWorkProfile()
   const navigate = useNavigate()
 
   // Every DCC stays listed here; unchecked ones are hidden from Launcher + StatusBar.
@@ -138,6 +143,27 @@ function SettingsPopover({ username }: { username: string }) {
         </div>
       </div>
 
+      {/* profil de travail (ADR 0042) : un resume, le detail est dans la fenetre dediee */}
+      <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>Profil de travail</div>
+        <div
+          role="button" tabIndex={0}
+          onClick={openWorkProfile}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWorkProfile() } }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 10px', borderRadius: 7,
+            border: '1px solid var(--rule-2)', background: 'var(--paper)',
+            fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer',
+          }}
+        >
+          <UserRound size={11} strokeWidth={1.75} />
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workProfile.activeProfile?.name ?? 'Profil'}</span>
+          {workProfile.modified.length > 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--warn)' }}>modifié</span>}
+          <ChevronRight size={11} strokeWidth={1.75} color="var(--ink-4)" />
+        </div>
+      </div>
+
       {/* workspace */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>{t('settings.workspace')}</div>
@@ -204,8 +230,14 @@ function SettingsPopover({ username }: { username: string }) {
 
       {/* couleurs des logs */}
       <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>{t('settings.logColors')}</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: logOpen ? 8 : 0 }}>
+          <button
+            onClick={() => setLogOpen(v => !v)} aria-expanded={logOpen}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: 0, border: 0, background: 'transparent', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)' }}
+          >
+            {logOpen ? <ChevronDown size={9} /> : <ChevronRight size={9} />}{t('settings.logColors')}
+            {!logOpen && Object.keys(logColors).length > 0 && <span style={{ letterSpacing: 0, textTransform: 'none' }}>({Object.keys(logColors).length})</span>}
+          </button>
           {Object.keys(logColors).length > 0 && (
             <span
               onClick={handleResetLogColors}
@@ -215,7 +247,7 @@ function SettingsPopover({ username }: { username: string }) {
             >{t('settings.logColorsReset')}</span>
           )}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {logOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {LOG_LEVELS.map(l => (
             <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input
@@ -230,7 +262,7 @@ function SettingsPopover({ username }: { username: string }) {
               )}
             </div>
           ))}
-        </div>
+        </div>}
       </div>
 
       {/* logiciels (per-user enabled DCCs) */}

@@ -1,6 +1,8 @@
 // App.tsx — shell principal : routing, TitleBar, Sidebar, StatusBar.
 
 import { useEffect, useRef, useState } from 'react'
+import { StartPageRedirect, WorkProfileProvider } from './WorkProfileContext'
+import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
 import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
@@ -119,6 +121,8 @@ function AppShell({ settings }: { settings: Settings }) {
 
   return (
     <HashRouter>
+      <WorkProfileProvider>
+      {!DETACHED && <StartPageRedirect />}
       <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
         {showLogin && <Login onDone={() => setShowLogin(false)} />}
 
@@ -157,6 +161,7 @@ function AppShell({ settings }: { settings: Settings }) {
         {!DETACHED && <StatusBar dccStatus={dccStatus} />}
         {!DETACHED && <MentionWatcher />}
         {!DETACHED && <FavoriteWatcher />}
+        <WorkProfileDialog />
       </div>
       <Toaster
         position="top-center"
@@ -177,6 +182,7 @@ function AppShell({ settings }: { settings: Settings }) {
           },
         }}
       />
+      </WorkProfileProvider>
     </HashRouter>
   )
 }

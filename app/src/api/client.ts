@@ -629,6 +629,12 @@ export const api = {
   setCurrentProject: (project: string) =>
     apiCall<{ project: string }>('PUT', '/project/current', { project }),
 
+  // Work profiles shared by a project (project.json "ui.work_profiles", ADR 0042)
+  getProjectWorkProfiles: (project: string) =>
+    apiCall<{ profiles: unknown[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/work-profiles`),
+  setProjectWorkProfiles: (project: string, profiles: unknown[]) =>
+    apiCall<{ profiles: unknown[] }>('PUT', `/folder/projects/${encodeURIComponent(project)}/work-profiles`, { profiles }),
+
   createProject: (name: string, painter_presets?: string[]) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name, painter_presets: painter_presets ?? null }),
   // Painter export presets: shipped with FLUX (bundled) and those of a project.
