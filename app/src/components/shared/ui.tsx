@@ -1,6 +1,6 @@
 import React, { type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { tooltipPosition } from './tooltipPosition'
+import { effectiveZoom, tooltipPosition, viewportRect } from './tooltipPosition'
 import { Check as CheckIcon, ChevronDown } from 'lucide-react'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
@@ -224,12 +224,8 @@ export function Tooltip({ scale, ...props }: React.ComponentProps<typeof Tooltip
       element && element !== document.body; element = element.parentElement) {
       ancestors.push(element)
     }
-    const updateZoom = () => setZoom(ancestors.reduce((scale, element) => {
-      const value = getComputedStyle(element).zoom
-      const parsed = parseFloat(value)
-      return scale * (Number.isFinite(parsed) && parsed > 0
-        ? parsed / (value.endsWith('%') ? 100 : 1) : 1)
-    }, 1))
+    const trigger = triggerRef.current
+    const updateZoom = () => setZoom(effectiveZoom(trigger))
     updateZoom()
     const observer = new MutationObserver(updateZoom)
     ancestors.forEach(element => observer.observe(element, {
@@ -269,7 +265,7 @@ function ScreenTooltip({ children, className, style, side = 'top', align = 'cent
       const trigger = triggerRef.current, content = popup.current
       if (trigger && content) {
         const dimensions = content.getBoundingClientRect()
-        const next = tooltipPosition(trigger.getBoundingClientRect(), dimensions.width, dimensions.height,
+        const next = tooltipPosition(viewportRect(trigger), dimensions.width, dimensions.height,
           window.innerWidth, window.innerHeight, (sideOffset + 8) * zoom, side, align)
         setPosition(prev => prev && prev.left === next.left && prev.top === next.top && prev.side === next.side && prev.arrow === next.arrow ? prev : next)
       }

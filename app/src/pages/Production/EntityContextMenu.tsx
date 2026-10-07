@@ -11,6 +11,7 @@ import type { ProductionState } from '../../types'
 import type { Selection } from './Production'
 import { useArchiveDelete } from './MenuEdit'
 import { trackingLocked, type TrackingEntity } from './tracking'
+import { viewportRect } from '../../components/shared/tooltipPosition'
 
 export function EntityContextMenu({ project, state, entity, setState, setSelection, onEdit }: {
   project: string; state: ProductionState; entity: TrackingEntity
@@ -52,7 +53,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
   return <>
     <span className="tracking-entity-name" role="button" tabIndex={0} aria-label={`Actions de ${entity.name}`} title={isShot ? 'Clic droit : Edit, Calendar, Lock, Delete' : 'Clic droit : Edit, Delete'}
       onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = e.currentTarget.getBoundingClientRect(); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = viewportRect(e.currentTarget); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>
       <strong>{entity.name}{locked && <LockKeyhole size={11} />}</strong>
     </span>
     <Dropdown.Root open={open} onOpenChange={setOpen} modal={false}>{createPortal(<Dropdown.Trigger tabIndex={-1} aria-hidden style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}

@@ -13,6 +13,7 @@ import { applyTaskSelection, type TaskActionTarget } from './taskSelection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
 import { expandFluxPath } from './util'
 import './tracking.css'
+import { viewportRect } from '../../components/shared/tooltipPosition'
 
 interface Props {
   project: string; state: ProductionState; setState: (patch: (prev: ProductionState) => ProductionState) => void
@@ -84,7 +85,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
     {selectionControl && <button ref={selectionButton} className="tracking-task-select" aria-label={selectionControl.label} aria-pressed={selectionControl.selected}
       onClick={selectionControl.onClick}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = e.currentTarget.getBoundingClientRect(); showMenu(rect.left, rect.bottom) } }} />}
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }} />}
     <Tooltip scale={tooltipScale}><TooltipTrigger asChild><button ref={button} className="tracking-status" data-status={STATUS_TOKENS.includes(status) ? status : 'UNKNOWN'} disabled={disabled}
       aria-label={`${task.name} : ${status || 'Aucun statut - clic droit'}`}
       data-empty={!status || undefined}
@@ -93,10 +94,10 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
       onClick={() => {
         if (!status) return
         if (onClick) onClick()
-        else { const rect = button.current!.getBoundingClientRect(); showMenu(rect.left, rect.bottom) }
+        else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = e.currentTarget.getBoundingClientRect(); showMenu(rect.left, rect.bottom) } }}>{status}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}</TooltipContent></Tooltip>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}</TooltipContent></Tooltip>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" side="bottom" align="start" collisionPadding={10} onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>

@@ -4,7 +4,7 @@ const fs=require('node:fs'),ts=require('typescript')
 const source=fs.readFileSync('app/src/components/shared/tooltipPosition.ts','utf8')
 const mod={exports:{}}
 new Function('exports','module',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(mod.exports,mod)
-const {tooltipPosition}=mod.exports
+const {tooltipPosition,scaleRect}=mod.exports
 const rect=(left,top,width=60,height=20)=>({left,top,width,height,right:left+width,bottom:top+height})
 test('screen anchor stays centered with exactly the requested gap at all zooms',()=>{
  for(const scale of [.585,.63,.9,1,1.26]){
@@ -31,4 +31,9 @@ test('side placement and alignment respect the same viewport coordinates',()=>{
  const a=rect(200,100)
  assert.deepEqual(tooltipPosition(a,80,30,600,400,10,'right','start'),{left:270,top:100,side:'right',arrow:10})
  assert.equal(tooltipPosition(rect(580,100),80,30,600,400,10,'right').side,'left')
+})
+test('unzoomed rects from Chromium < 128 are scaled back to viewport pixels',()=>{
+ // Electron 31 reports a button at 200px under zoom .9 * .8; it is really at 144px.
+ const r=scaleRect(rect(200,100,100,20),.72),want={left:144,top:72,right:216,bottom:86.4,width:72,height:14.4}
+ for(const k of Object.keys(want))assert.ok(Math.abs(r[k]-want[k])<1e-9,k)
 })

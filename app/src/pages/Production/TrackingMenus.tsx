@@ -4,6 +4,7 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import { ArrowDownWideNarrow, Check } from 'lucide-react'
 import type { ProductionDepartment, ProductionSequence } from '../../types'
 import type { DepartmentSort } from './tableRows'
+import { viewportRect } from '../../components/shared/tooltipPosition'
 
 export function DepartmentSortMenu({ department, sort, onSort }: { department: ProductionDepartment; sort: DepartmentSort; onSort: (sort: DepartmentSort) => void }) {
   const [open, setOpen] = useState(false)
@@ -11,7 +12,7 @@ export function DepartmentSortMenu({ department, sort, onSort }: { department: P
   const sorted = sort?.id === department.id
   return <>
     <button className="tracking-department-heading" aria-label={`Trier ${department.name}`} onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = e.currentTarget.getBoundingClientRect(); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>{department.name}{sorted && <ArrowDownWideNarrow size={12} />}</button>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = viewportRect(e.currentTarget); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>{department.name}{sorted && <ArrowDownWideNarrow size={12} />}</button>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>{createPortal(<Menu.Trigger tabIndex={-1} aria-hidden style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" align="start" collisionPadding={10}>
         <Menu.Label className="production-menu-artist">Sort · {department.name}</Menu.Label>
@@ -28,7 +29,7 @@ export function SequenceEditMenu({ sequence, onEdit }: { sequence: ProductionSeq
   return <>
     <span role="button" tabIndex={0} className="tracking-sequence-name" aria-label={`Actions de ${sequence.name}`}
       onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = e.currentTarget.getBoundingClientRect(); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>{sequence.name}</span>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = viewportRect(e.currentTarget); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>{sequence.name}</span>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>{createPortal(<Menu.Trigger tabIndex={-1} aria-hidden style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" align="start"><Menu.Label className="production-menu-artist">{sequence.name}</Menu.Label><Menu.Item className="production-menu-item" onSelect={onEdit}>Edit</Menu.Item></Menu.Content></Menu.Portal>
     </Menu.Root>
