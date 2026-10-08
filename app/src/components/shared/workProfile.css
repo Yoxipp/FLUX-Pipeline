@@ -43,3 +43,7 @@
 @keyframes work-profile-fade { from { opacity:0; } to { opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .work-profile-dialog, .work-profile-overlay { animation:none; } }
 @media (max-width:640px) { .work-profile-body { grid-template-columns:1fr; } .work-profile-list { border-right:0; padding-right:0; } .work-profile-save { flex-wrap:wrap; } }
+.work-profile-departments { display:flex; flex-direction:column; gap:6px; }
+.work-profile-seg-label { align-self:center; min-width:46px; font:10px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--ink-4); }
+.work-profile-check small { margin-left:6px; color:var(--ink-4); font-size:10.5px; }
+.work-profile-field > .work-profile-check { color:var(--ink-2); }

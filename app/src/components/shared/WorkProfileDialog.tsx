@@ -1,15 +1,17 @@
-// WorkProfileDialog.tsx - the one place where work prefs and profiles are edited (ADR 0042).
-// Opened from Settings, the Launcher context menu and the Folder Manager view menu
-// through openWorkProfile(); mounted once in the app shell.
+// WorkProfileDialog.tsx - the one place where work profiles are managed (ADR 0042, 0043).
+// A profile presets the Production Show columns and the activity notifications; both stay
+// editable by hand where they live (Production > Show, Activity > Notifications).
+// Opened from Settings, the Launcher context menu, Show and Activity through openWorkProfile().
 
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Check, RotateCcw, Share2, Trash2, UserRound, X } from 'lucide-react'
 import { useWorkProfile } from '../../WorkProfileContext'
 import {
-  BUILTIN_PROFILES, PUBLISHER_SOFTS, START_PAGES,
+  BUILTIN_PROFILES, NOTIFY_OPTIONS, PUBLISHER_SOFTS, START_PAGES, joinDepartments, splitDepartments,
   type ProfileRef, type WorkPrefs, type WorkProfile,
 } from '../../lib/workProfiles'
+import { DEFAULT_DEPARTMENTS } from '../../pages/Production/tracking'
 import './workProfile.css'
 
 const OPEN_EVENT = 'flux:open-work-profile'
@@ -22,9 +24,30 @@ const PREF_LABELS: Record<keyof WorkPrefs, string> = {
   startPage: 'Page de démarrage',
   launcher: 'Launcher',
   publisherSoft: 'Logiciel du Publisher',
-  folderTileSize: 'Taille des tuiles',
-  folderLayout: 'Vues',
-  folderCreatePanel: 'Formulaires de création',
+  productionDepartments: 'Production · colonnes de Show',
+  notifyMention: 'Mentions',
+  notifyFollowed: 'Tâches suivies',
+  notifyPublish: 'Publishs du projet',
+  notifyComment: 'Commentaires du projet',
+  notifyError: 'Erreurs',
+}
+
+const DEPARTMENT_GROUPS = (['shot', 'asset'] as const).map(scope => ({
+  scope, label: scope === 'shot' ? 'Shots' : 'Assets',
+  names: DEFAULT_DEPARTMENTS.filter(d => d.scope === scope).map(d => d.name.toUpperCase()),
+}))
+
+function DepartmentChips({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const picked = splitDepartments(value)
+  const known = DEPARTMENT_GROUPS.flatMap(g => g.names)
+  const extra = picked.filter(n => !known.includes(n))
+  const toggle = (name: string) => onChange(joinDepartments(picked.includes(name) ? picked.filter(n => n !== name) : [...picked, name]))
+  const chip = (name: string) => <button key={name} role="checkbox" aria-checked={picked.includes(name)} data-on={picked.includes(name) || undefined} onClick={() => toggle(name)}>{name.charAt(0) + name.slice(1).toLowerCase()}</button>
+  return <div className="work-profile-departments">
+    <div className="work-profile-seg"><button role="checkbox" aria-checked={!picked.length} data-on={!picked.length || undefined} onClick={() => onChange('')}>Toutes</button></div>
+    {DEPARTMENT_GROUPS.map(g => <div key={g.scope} className="work-profile-seg"><span className="work-profile-seg-label">{g.label}</span>{g.names.map(chip)}</div>)}
+    {extra.length > 0 && <div className="work-profile-seg"><span className="work-profile-seg-label">Projet</span>{extra.map(chip)}</div>}
+  </div>
 }
 
 function Segmented<T extends string>({ value, options, onChange, label }: {
@@ -78,8 +101,9 @@ export function WorkProfileDialog() {
           <Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close>
         </div>
         <p className="work-profile-intro">
-          Un profil mémorise votre configuration de travail : page d'accueil, Launcher, Publisher et Folder Manager.
-          Il suit votre utilisateur sur tous les postes. Langue, accent, workspace et logiciels actifs restent dans les Paramètres.
+          Un profil pré-règle votre vue Production (colonnes de Show) et vos notifications d'activité, ainsi que la page
+          d'accueil, le Launcher et le Publisher. Tout reste modifiable à la main : Production &gt; Show, Activity &gt; Notifications.
+          Le profil suit votre utilisateur sur tous les postes.
         </p>
         <div className="work-profile-body">
           <div className="work-profile-list">
@@ -111,18 +135,16 @@ export function WorkProfileDialog() {
                 options={[{ value: 'compact', label: 'Compact' }, { value: 'full', label: 'Tous les boutons' }]} />
               <small>Compact : lancer reste visible, les autres actions apparaissent au survol et au clic droit.</small>
             </div>
-            <div className="work-profile-field">Folder Manager · {PREF_LABELS.folderTileSize.toLowerCase()}{dot('folderTileSize')}
-              <Segmented label={PREF_LABELS.folderTileSize} value={prefs.folderTileSize} onChange={v => setPref('folderTileSize', v)}
-                options={[{ value: 'sm', label: 'Petites' }, { value: 'md', label: 'Moyennes' }, { value: 'lg', label: 'Grandes' }]} />
+            <div className="work-profile-field">{PREF_LABELS.productionDepartments}{dot('productionDepartments')}
+              <DepartmentChips value={prefs.productionDepartments} onChange={v => setPref('productionDepartments', v)} />
+              <small>Un mode sans département coché affiche toutes ses colonnes.</small>
             </div>
-            <div className="work-profile-field">Folder Manager · {PREF_LABELS.folderLayout.toLowerCase()}{dot('folderLayout')}
-              <Segmented label={PREF_LABELS.folderLayout} value={prefs.folderLayout} onChange={v => setPref('folderLayout', v)}
-                options={[{ value: 'single', label: '1' }, { value: 'stacked', label: '2 empilées' }, { value: 'side', label: '2 côte à côte' }, { value: 'quad', label: '4' }]} />
+            <div className="work-profile-field">Notifications d'activité
+              {NOTIFY_OPTIONS.map(o => <label key={o.key} className="work-profile-check" title={o.hint}>
+                <input type="checkbox" checked={prefs[o.key]} onChange={e => setPref(o.key, e.target.checked)} />
+                {o.label}<small>{o.hint}</small>{dot(o.key)}
+              </label>)}
             </div>
-            <label className="work-profile-check">
-              <input type="checkbox" checked={prefs.folderCreatePanel} onChange={e => setPref('folderCreatePanel', e.target.checked)} />
-              Folder Manager · formulaires de création dépliés{dot('folderCreatePanel')}
-            </label>
           </div>
         </div>
         <div className="work-profile-save">

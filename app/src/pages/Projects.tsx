@@ -4,11 +4,9 @@ import { useLocation } from 'react-router-dom'
 import {
   Star, LayoutGrid, Clock, Archive,
   HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw,
-  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2, ChevronDown, ChevronRight, Check, UserRound,
+  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2, ChevronDown, ChevronRight, Check,
 } from 'lucide-react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { useWorkProfile } from '../WorkProfileContext'
-import { openWorkProfile } from '../components/shared/WorkProfileDialog'
 import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
 import { api } from '../api/client'
 import type { Preset } from '../types'
@@ -33,8 +31,27 @@ import type {
 
 type SidebarTab = 'tous' | 'favoris' | 'recents' | 'archives'
 
-// Tile size, views and the creation forms are work prefs (ADR 0042): they follow the
-// artist's profile. Ctrl + wheel over the views changes the tile size.
+// Tile size, views and the creation forms are page preferences, persisted per browser
+// (not part of a work profile, ADR 0043). Ctrl + wheel over the views changes the tile size.
+const TILE_SIZE_KEY = 'flux.folderManager.tileSize'
+const LAYOUT_KEY = 'flux.folderManager.layout'
+const CREATE_PANEL_KEY = 'flux.folderManager.createPanel'
+
+function useLocalPref<T extends string>(key: string, fallback: T, valid: readonly T[]): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const v = localStorage.getItem(key)
+      if (v && (valid as readonly string[]).includes(v)) return v as T
+    } catch { /* localStorage unavailable */ }
+    return fallback
+  })
+  const change = useCallback((next: T) => {
+    setValue(next)
+    try { localStorage.setItem(key, next) } catch { /* localStorage unavailable */ }
+  }, [key])
+  return [value, change]
+}
+
 const TILE_ORDER: TileSize[] = ['sm', 'md', 'lg']
 const TILE_CHOICES: { id: TileSize; icon: typeof Square; title: string }[] = [
   { id: 'sm', icon: Grid3x3, title: 'Petites tuiles' },
@@ -934,9 +951,10 @@ export function Projects() {
 
   // ── Views (B2) ─────────────────────────────────────────────────────────────
 
-  const { prefs: workPrefs, setPref: setWorkPref } = useWorkProfile()
-  const layout: PaneLayout = workPrefs.folderLayout
-  const changeLayout = useCallback((l: PaneLayout) => setWorkPref('folderLayout', l), [setWorkPref])
+  const [layout, changeLayout] = useLocalPref<PaneLayout>(LAYOUT_KEY, 'single', ['single', 'stacked', 'side', 'quad'])
+  const [createPanelValue, setCreatePanelValue] = useLocalPref(CREATE_PANEL_KEY, 'open', ['open', 'closed'])
+  const createPanel = createPanelValue === 'open'
+  const setCreatePanel = useCallback((open: boolean) => setCreatePanelValue(open ? 'open' : 'closed'), [setCreatePanelValue])
   const paneCount = PANE_COUNT[layout]
   const [activePane, setActivePane] = useSessionState('fm.activePane', 0)
   const activeIdx = Math.min(activePane, paneCount - 1)
@@ -966,9 +984,8 @@ export function Projects() {
   const [tab, setTab]               = useSessionState<Tab>('fm.tab', 'project')
   const [sidebarTab, setSidebarTab] = useSessionState<SidebarTab>('fm.sidebarTab', 'tous')
 
-  // Explorer tile size (small / medium / large), a work pref; Ctrl + wheel steps it.
-  const tileSize: TileSize = workPrefs.folderTileSize
-  const changeTileSize = useCallback((s: TileSize) => setWorkPref('folderTileSize', s), [setWorkPref])
+  // Explorer tile size (small / medium / large), persisted per browser; Ctrl + wheel steps it.
+  const [tileSize, changeTileSize] = useLocalPref<TileSize>(TILE_SIZE_KEY, 'md', TILE_ORDER)
   const viewsRef = useRef<HTMLDivElement>(null)
   const tileSizeRef = useRef(tileSize)
   tileSizeRef.current = tileSize
@@ -1363,7 +1380,7 @@ export function Projects() {
         <ViewMenu
           layout={layout} onLayout={changeLayout}
           tileSize={tileSize} onTileSize={changeTileSize}
-          createPanel={workPrefs.folderCreatePanel} onCreatePanel={v => setWorkPref('folderCreatePanel', v)}
+          createPanel={createPanel} onCreatePanel={setCreatePanel}
         />
       </div>
 
@@ -1539,14 +1556,14 @@ export function Projects() {
         {/* Panneau droit (suit la vue active) */}
         <div style={{ width: 200, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           <button
-            className="fm-create-toggle" aria-expanded={workPrefs.folderCreatePanel}
-            onClick={() => setWorkPref('folderCreatePanel', !workPrefs.folderCreatePanel)}
+            className="fm-create-toggle" aria-expanded={createPanel}
+            onClick={() => setCreatePanel(!createPanel)}
           >
-            {workPrefs.folderCreatePanel ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            {createPanel ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             <span className="cap">Créer</span>
-            {!workPrefs.folderCreatePanel && <span className="fm-create-hint">Projet, asset, shot, dossier</span>}
+            {!createPanel && <span className="fm-create-hint">Projet, asset, shot, dossier</span>}
           </button>
-          {workPrefs.folderCreatePanel && <>
+          {createPanel && <>
           <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)' }}>
             {TABS.map(t => (
               <div
@@ -1580,7 +1597,7 @@ export function Projects() {
             )}
           </div>
           </>}
-          {!workPrefs.folderCreatePanel && <div style={{ flex: 1 }} />}
+          {!createPanel && <div style={{ flex: 1 }} />}
 
           {/* N7: note of the selected published file (hidden when it has none) */}
           {nav.kind === 'inside' && selectedNames.size === 1 && (
@@ -1625,7 +1642,7 @@ export function Projects() {
   )
 }
 
-// "Affichage" menu of the Folder Manager header (ADR 0042): views, tile size and the
+// "Affichage" menu of the Folder Manager header (ADR 0042, page prefs per ADR 0043): views, tile size and the
 // creation forms in one place instead of seven always-visible buttons.
 function ViewMenu({ layout, onLayout, tileSize, onTileSize, createPanel, onCreatePanel }: {
   layout: PaneLayout; onLayout: (l: PaneLayout) => void
@@ -1665,7 +1682,6 @@ function ViewMenu({ layout, onLayout, tileSize, onTileSize, createPanel, onCreat
           <Menu.CheckboxItem className="launcher-menu-item" checked={createPanel} onCheckedChange={v => onCreatePanel(v === true)}>
             <span style={{ width: 13, display: 'inline-flex' }}>{createPanel && <Check size={13} />}</span>Formulaires de création
           </Menu.CheckboxItem>
-          <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
         </Menu.Content>
       </Menu.Portal>
     </Menu.Root>

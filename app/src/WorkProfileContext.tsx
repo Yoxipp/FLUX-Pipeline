@@ -35,19 +35,9 @@ interface WorkProfileValue {
 
 const WorkProfileContext = createContext<WorkProfileValue | null>(null)
 
-// Folder Manager values stored per-browser before ADR 0042: first-load seed only.
-function legacyPrefs(): Partial<WorkPrefs> {
-  try {
-    return {
-      folderTileSize: (localStorage.getItem('flux.folderManager.tileSize') ?? undefined) as WorkPrefs['folderTileSize'],
-      folderLayout: (localStorage.getItem('flux.folderManager.layout') ?? undefined) as WorkPrefs['folderLayout'],
-    }
-  } catch { return {} }
-}
-
 export function WorkProfileProvider({ children }: { children: ReactNode }) {
   const { project } = useProject()
-  const [state, setState] = useState<UserWorkProfile>(() => readUserWorkProfile(undefined, legacyPrefs()))
+  const [state, setState] = useState<UserWorkProfile>(() => readUserWorkProfile(undefined))
   const [ready, setReady] = useState(false)
   const [projectProfiles, setProjectProfiles] = useState<WorkProfile[]>([])
   const loaded = useRef(false)
@@ -55,7 +45,7 @@ export function WorkProfileProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let alive = true
     api.getUserData()
-      .then(data => { if (alive) setState(readUserWorkProfile(data.work_profile, legacyPrefs())) })
+      .then(data => { if (alive) setState(readUserWorkProfile(data.work_profile)) })
       .catch(() => { /* backend down: keep the local seed, never overwrite the store */ })
       .finally(() => { if (alive) { loaded.current = true; setReady(true) } })
     return () => { alive = false }
