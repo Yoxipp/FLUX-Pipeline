@@ -10,6 +10,11 @@
 // fans the result out to every consumer. `flux:refresh` / `flux:mentions` still
 // trigger an immediate refetch, so user-visible latency stays low even though
 // the idle cadence dropped to 30s.
+//
+// Retake 04: the activity feed is no longer the global log. It is the active
+// project's feed for the current artist (GET /activity/notifications, scope global),
+// every event annotated server-side with its `reason` (followed shot, favorite,
+// assigned task). The unread badge counts only events that concern the artist.
 
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
@@ -19,7 +24,8 @@ import { api } from '../api/client'
 import {
   FEED_POLL_INTERVAL_MS, IDLE_AFTER_MS, IDLE_POLL_INTERVAL_MS,
 } from '../lib/pollIntervals'
-import type { ActivityEvent, ChatMention } from '../types'
+import { useProject } from '../ProjectContext'
+import type { ActivityEvent, ChatMention, FollowedShot } from '../types'
 
 // Upper bound for the shared activity fetch. FavoriteWatcher needs a deep window
 // to catch matches; other consumers (badge, Hub) slice this down locally.
@@ -27,6 +33,8 @@ const ACTIVITY_LIMIT = 100
 
 interface FeedsValue {
   events: ActivityEvent[]
+  followedShots: FollowedShot[]
+  feedProject: string
   unreadCount: number
   activityLoaded: boolean
   mentions: ChatMention[]
@@ -41,6 +49,11 @@ const FeedsContext = createContext<FeedsValue | null>(null)
 
 export function FeedsProvider({ children }: { children: ReactNode }) {
   const [events, setEvents]             = useState<ActivityEvent[]>([])
+  const [followedShots, setFollowedShots] = useState<FollowedShot[]>([])
+  const [feedProject, setFeedProject]   = useState('')
+  const { project } = useProject()
+  const projectRef = useRef(project)
+  projectRef.current = project
   const [unreadCount, setUnreadCount]   = useState(0)
   const [activityLoaded, setActivityLoaded] = useState(false)
   const [mentions, setMentions]         = useState<ChatMention[]>([])
@@ -49,19 +62,21 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
 
   // Stored ETags (Phase 2): echoed back each tick so an unchanged file answers
   // 304 and we skip both the transfer and a needless re-render.
-  const activityEtag = useRef<string | undefined>(undefined)
   const mentionsEtag = useRef<string | undefined>(undefined)
 
   const refreshActivity = useCallback(async () => {
+    const current = projectRef.current
+    if (!current) {
+      setEvents([]); setFollowedShots([]); setUnreadCount(0); setFeedProject(''); setActivityLoaded(true)
+      return
+    }
     try {
-      const r = await api.getActivityConditional(ACTIVITY_LIMIT, activityEtag.current)
-      activityEtag.current = r.etag
-      if (r.notModified || !r.data) {
-        setActivityLoaded(true)   // first tick may already be 304-clean
-        return                    // unchanged — keep state, no re-render
-      }
-      setEvents(r.data.events)
-      setUnreadCount(r.data.unread_count)
+      const r = await api.getNotifications(current, 'global', ACTIVITY_LIMIT)
+      if (projectRef.current !== current) return   // project switched meanwhile
+      setEvents(r.events)
+      setFollowedShots(r.followed_shots)
+      setUnreadCount(r.events.filter(e => e.reason && !e.read).length)
+      setFeedProject(current)
       setActivityLoaded(true)
     } catch {
       // backend non disponible — garde le state existant
@@ -158,12 +173,15 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshActivity, refreshMentions])
 
+  // Another project = another feed, fetched at once.
+  useEffect(() => { void refreshActivity() }, [project, refreshActivity])
+
   const value = useMemo<FeedsValue>(() => ({
-    events, unreadCount, activityLoaded,
+    events, followedShots, feedProject, unreadCount, activityLoaded,
     mentions, unreadMentions, mentionsLoaded,
     refreshActivity, refreshMentions, markAllRead,
   }), [
-    events, unreadCount, activityLoaded, mentions, unreadMentions, mentionsLoaded,
+    events, followedShots, feedProject, unreadCount, activityLoaded, mentions, unreadMentions, mentionsLoaded,
     refreshActivity, refreshMentions, markAllRead,
   ])
 
@@ -179,8 +197,8 @@ function useFeeds(): FeedsValue {
 /** Shared activity feed (events + unread badge). `loaded` flips true after the
  *  first successful fetch — watchers use it to avoid replaying the backlog. */
 export function useActivityFeed() {
-  const { events, unreadCount, activityLoaded, refreshActivity, markAllRead } = useFeeds()
-  return { events, unreadCount, loaded: activityLoaded, refresh: refreshActivity, markAllRead }
+  const { events, followedShots, feedProject, unreadCount, activityLoaded, refreshActivity, markAllRead } = useFeeds()
+  return { events, followedShots, project: feedProject, unreadCount, loaded: activityLoaded, refresh: refreshActivity, markAllRead }
 }
 
 /** Shared mentions feed (full list + unread count). */

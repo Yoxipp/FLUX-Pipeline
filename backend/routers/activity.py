@@ -129,6 +129,50 @@ async def get_activity(
     return {"events": events, "unread_count": unread}
 
 
+@router.get("/notifications")
+async def get_notifications(project: str, scope: str = "self", limit: int = 200) -> dict:
+    """Activity of ONE project for the CURRENT artist (retake 04).
+
+    scope "self": only events of shots they follow, favorite tasks and tasks assigned
+    to them; "global": every event of the project. Each event carries ``reason``
+    (None when it does not concern the artist). The artist is the backend's current
+    user, never a query parameter, so one artist cannot read another's selection.
+    """
+    from features.activity.notifications import assignments, followed_shots, personal_feed
+    from features.production.production_store import load_production
+    from utils.user_utils import read_user_data
+
+    if scope not in ("self", "global"):
+        raise HTTPException(status_code=400, detail="scope must be 'self' or 'global'")
+    user = config.get_current_user() or ""
+    try:
+        path = get_activity_path()
+    except RuntimeError:
+        return {"events": [], "followed_shots": [], "user": user}
+
+    def _build() -> dict:
+        events, _ = get_events_and_unread(limit=5000, project=project, path=path)
+        favorites = []
+        if user:
+            prod_prefs = read_user_data(user).get("production") or {}
+            favorites = [f for f in prod_prefs.get("favorites") or [] if isinstance(f, str)]
+        try:
+            production = load_production(project)
+        except Exception:   # noqa: BLE001 - a project without production still has activity
+            production = {}
+        seqs = {s.get("id"): str(s.get("name", "")).upper() for s in production.get("sequences", [])}
+        existing = {(seqs.get(s.get("seq_id"), ""), str(s.get("name", "")).upper())
+                    for s in production.get("shots", [])}
+        feed = personal_feed(events, project=project, scope=scope, favorites=favorites,
+                             assigned=assignments(production, user))
+        return {"events": feed[:max(1, min(limit, 1000))], "user": user,
+                "followed_shots": [{"seq": seq, "shot": shot, "exists": (seq, shot) in existing}
+                                   for seq, shot in followed_shots(favorites, project)]}
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _build)
+
+
 @router.get("/history")
 async def get_activity_history(limit: int = 200, offset: int = 0, kind: str = "activity") -> dict:
     """Return older, rotated events from the cold archives — on demand only.

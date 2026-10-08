@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { StartPageRedirect, WorkProfileProvider, useWorkProfile } from './WorkProfileContext'
-import { notificationReason } from './lib/activityNotify'
+import { notificationReason, REASON_LABEL } from './lib/activityNotify'
 import { useProject } from './ProjectContext'
 import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
 import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
@@ -14,9 +14,7 @@ import { useBackendStatus } from './hooks/useBackendStatus'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
-import { useFavorites, eventMatchesFavorite } from './hooks/useFavorites'
 import { useSettings }   from './hooks/useSettings'
-import { parseFluxFilename } from './pages/Production/util'
 import { Hub }           from './pages/Hub'
 import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
@@ -71,40 +69,36 @@ function MentionWatcher() {
   return null
 }
 
-// Polls the activity feed and pops a floating toast + native notification for
-// every NEW event the work profile asks for (ADR 0043): followed (favorite) tasks,
-// and optionally publishes / comments / errors of other artists in the active
-// project. Silent on the very first poll so the backlog isn't replayed.
+// Pops a floating toast + native notification for every NEW event of the active
+// project's personal feed (retake 04): the backend already says why an event
+// concerns the artist (followed shot, favorite task, assigned task); the work
+// profile adds publishes / comments / errors of other artists (ADR 0043).
+// Silent on the first snapshot of a project so its backlog isn't replayed.
 function FavoriteWatcher() {
   const navigate = useNavigate()
-  const { favorites } = useFavorites()
-  const { events, loaded } = useActivityFeed()
+  const { events, loaded, project: feedProject } = useActivityFeed()
   const { prefs } = useWorkProfile()
   const { project } = useProject()
   const { settings } = useSettings()
-  const seen = useRef<Set<string> | null>(null)
-  const favRef = useRef<string[]>(favorites)
-  useEffect(() => { favRef.current = favorites }, [favorites])
+  const seen = useRef<{ project: string; ids: Set<string> } | null>(null)
   const ctxRef = useRef({ prefs, project, username: settings?.username ?? '' })
   ctxRef.current = { prefs, project, username: settings?.username ?? '' }
   useEffect(() => {
     if (!loaded) return
-    // First real snapshot seeds `seen` silently so the backlog isn't replayed.
-    if (seen.current === null) { seen.current = new Set(events.map(e => e.id)); return }
+    // First snapshot of a project seeds `seen` silently so the backlog isn't replayed.
+    if (seen.current === null || seen.current.project !== feedProject) {
+      seen.current = { project: feedProject, ids: new Set(events.map(e => e.id)) }
+      return
+    }
     for (const e of events) {
-      if (seen.current.has(e.id)) continue
-      seen.current.add(e.id)
+      if (seen.current.ids.has(e.id)) continue
+      seen.current.ids.add(e.id)
       if (!e.file || !e.project) continue
-      const parsed = parseFluxFilename(e.file)
-      const favs = favRef.current
-      const match = !!parsed && favs.some(k => eventMatchesFavorite(k, {
-        project: e.project!, class: parsed.class, name: parsed.name,
-        task: parsed.task, instance: parsed.instance,
-      }))
-      const reason = notificationReason(e, { ...ctxRef.current, followed: match })
+      const reason = notificationReason(e, { ...ctxRef.current, followed: !!e.reason })
       if (!reason) continue
+      const why = e.reason ? REASON_LABEL[e.reason] : ''
       const title = reason === 'followed'
-        ? e.action === 'comment' ? `${e.user} · commentaire sur favori` : `${e.user} · ${e.action} sur favori`
+        ? `${e.user} · ${e.action === 'comment' ? 'commentaire' : e.action} · ${why}`
         : reason === 'error' ? `${e.user} · erreur` : `${e.user} · ${e.action}`
       const body  = e.file
       toast(title, {
@@ -115,7 +109,7 @@ function FavoriteWatcher() {
       })
       void window.electronAPI?.showNotification?.(title, body)
     }
-  }, [events, loaded, navigate])
+  }, [events, loaded, feedProject, navigate])
   return null
 }
 

@@ -48,7 +48,12 @@ export interface ActivityEvent {
   date: string
   time: string
   read: boolean
+  // Why it concerns the current artist (GET /activity/notifications, retake 04):
+  // a followed shot, a favorite task, a task assigned to them; null = project-wide only.
+  reason?: 'followed_shot' | 'favorite' | 'assigned' | null
 }
+
+export interface FollowedShot { seq: string; shot: string; exists: boolean }
 
 export interface ChatMessage {
   id: string

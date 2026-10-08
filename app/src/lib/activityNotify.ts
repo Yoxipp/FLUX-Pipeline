@@ -17,10 +17,18 @@ export function actionToType(action: string): ActivityType {
 
 export type NotifyReason = 'followed' | 'publish' | 'comment' | 'error'
 
+/** Why the backend says an event concerns the artist (GET /activity/notifications). */
+export const REASON_LABEL: Record<'followed_shot' | 'favorite' | 'assigned', string> = {
+  followed_shot: 'shot suivi',
+  favorite:      'tâche favorite',
+  assigned:      'tâche assignée',
+}
+
 /**
- * Why an activity event pops a notification, or null. Followed tasks keep their old
- * rule (any author); project-wide categories only count other artists' events of the
- * active project, so nothing leaks across projects.
+ * Why an activity event pops a notification, or null. `followed` = the backend gave the
+ * event a personal reason (followed shot, favorite or assigned task, any author);
+ * project-wide categories only count other artists' events of the active project, so
+ * nothing leaks across projects.
  */
 export function notificationReason(
   event: { user: string; action: string; project?: string },

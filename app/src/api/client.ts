@@ -8,6 +8,7 @@ import type {
   ActionGraph,
   ActionPreviewResponse,
   ActivityEvent,
+  FollowedShot,
   ChatMention,
   ChatMessage,
   FileEntry,
@@ -550,6 +551,13 @@ export const api = {
   getActivityConditional: (limit: number, etag?: string) =>
     apiGetConditional<{ events: ActivityEvent[]; unread_count: number }>(
       `/activity?limit=${limit}`, etag),
+
+  // Personal notifications of ONE project for the current artist (retake 04):
+  // scope 'self' = followed shots, favorite and assigned tasks; 'global' = every
+  // event of the project, each annotated with its `reason`.
+  getNotifications: (project: string, scope: 'self' | 'global', limit = 200) =>
+    apiCall<{ events: ActivityEvent[]; followed_shots: FollowedShot[]; user: string }>(
+      'GET', `/activity/notifications?${new URLSearchParams({ project, scope, limit: String(limit) })}`),
 
   getMentionsConditional: (etag?: string) =>
     apiGetConditional<{ mentions: ChatMention[]; unread_count: number }>(
