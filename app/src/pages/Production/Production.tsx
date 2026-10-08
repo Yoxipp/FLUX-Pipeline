@@ -11,6 +11,7 @@ import { MenuSpec } from './MenuSpec'
 import { ProductionTracking } from './ProductionTracking'
 import { NewProductionDialog } from './NewProductionDialog'
 import { ProductionSettings } from './ProductionSettings'
+import type { CreateKind } from './CreateMenu'
 
 export type Selection = { kind: 'none' } | { kind: 'asset' | 'group' | 'seq' | 'shot'; id: string }
 export interface FavoriteOpenTarget {
@@ -35,6 +36,8 @@ export function Production() {
   const selection: Selection = selState.project === (project || '') ? selState.sel : { kind: 'none' }
   const setSelection = useCallback((sel: Selection) => setSelState({ project: project || '', sel }), [project, setSelState])
   const [dialog, setDialog] = useState<'new' | 'edit' | null>(null)
+  const [createKind, setCreateKind] = useState<CreateKind | undefined>(undefined)
+  const openCreate = (kind?: CreateKind) => { setCreateKind(kind); setDialog('new') }
   const [pendingSpec, setPendingSpec] = useState<{ task: string; subtask?: string } | null>(null)
   const favorite = (location.state as { openFavorite?: FavoriteOpenTarget } | null)?.openFavorite
   useEffect(() => {
@@ -55,7 +58,7 @@ export function Production() {
     <MenuSpec state={prod.state} setState={prod.setState} selection={selection} publishesByTask={prod.publishesByTask} loading={prod.loading} workspaceMode={mode}
       initialOpen={pendingSpec} onInitialOpenApplied={() => setPendingSpec(null)}
       main={<ProductionTracking key={`${project}:${mode}`} project={project} mode={mode} state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} loading={prod.loading}
-        onEdit={() => setDialog('edit')} onNew={() => setDialog('new')} onSettings={() => setPendingSpec({ task: 'SETTINGS' })}
+        onEdit={() => setDialog('edit')} onNew={openCreate} onSettings={() => setPendingSpec({ task: 'SETTINGS' })}
         onOpenEntity={openEntity}
         onOpenDetail={(sel, task, subtask) => { setSelection(sel); setPendingSpec({ task: task.name, subtask }) }} />}
       settingsPane={<ProductionSettings key={`${project}:${mode}`} state={prod.state} setState={prod.setState} mode={mode} />}
@@ -64,11 +67,11 @@ export function Production() {
         const shot = prod.state.shots.find(a => a.id === id)
         if (!asset && !shot) return null
         return <ProductionTracking key={`${project}:entity:${id}`} project={project} mode={asset ? 'asset' : 'shot'} onlyEntityId={id} state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} loading={prod.loading}
-          onEdit={() => setDialog('edit')} onNew={() => setDialog('new')} onSettings={() => setPendingSpec({ task: 'SETTINGS' })} onOpenEntity={openEntity}
+          onEdit={() => setDialog('edit')} onNew={openCreate} onSettings={() => setPendingSpec({ task: 'SETTINGS' })} onOpenEntity={openEntity}
           onOpenDetail={(sel, task, subtask) => { setSelection(sel); setPendingSpec({ task: task.name, subtask }) }} />
       }}
-      timeline={mode === 'shot' ? <div style={{ flex: 1, overflow: 'auto' }}><div className="production-timeline-toolbar"><button onClick={() => setDialog('new')}>New</button></div><ProductionShot state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} onEntityClicked={() => setDialog('edit')} /></div> : undefined} />
-    {dialog === 'new' && <NewProductionDialog key={`${project}:${mode}`} project={project} mode={mode} state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} onClose={() => setDialog(null)} />}
+      timeline={mode === 'shot' ? <div style={{ flex: 1, overflow: 'auto' }}><ProductionShot state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} onEntityClicked={() => setDialog('edit')} onCreate={openCreate} /></div> : undefined} />
+    {dialog === 'new' && <NewProductionDialog key={`${project}:${mode}:${createKind ?? ''}`} initialKind={createKind} project={project} mode={mode} state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} onClose={() => setDialog(null)} />}
     <Dialog.Root open={dialog === 'edit'} onOpenChange={open => { if (!open) setDialog(null) }}><Dialog.Portal><Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog production-entity-dialog">
       <div className="production-dialog-heading"><Dialog.Title>Éditer l’entité</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div><Dialog.Description>Configuration de l’entité sélectionnée</Dialog.Description>
       <MenuEdit project={project} state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} mode={selection.kind === 'asset' || selection.kind === 'group' ? 'asset' : 'shot'} activeCategory={null} publishesByTask={prod.publishesByTask} sequencesOnDisk={prod.sequencesOnDisk} shotsOnDisk={prod.shotsOnDisk} />

@@ -13,12 +13,18 @@
 // - Row heights persist in localStorage and are adjustable via a drag handle.
 // - Sequences and shots are ordered by their `order` field. Newly created seqs
 //   get an `order` that places them right before the next-higher SEQ number.
+// - Mouse (retake 05): wheel = scroll along the edit, Shift+wheel = scroll the page,
+//   Ctrl+wheel = zoom anchored under the cursor, Ctrl+Shift+wheel = row height,
+//   middle-button drag = pan. "Tout voir" fits the whole edit. Sliders stay for
+//   touch screens / no wheel. A wheel over a field never moves the timeline.
+// - Create (top of the toolbar) opens the Shot or Sequence form (CreateMenu).
 // - Clip width = duration (2026-09-27): a shot is as wide as its frame range, a
 //   sequence is the sum of its shots, the ruler counts the frames of the edit. Dragging
 //   the right edge of a shot sets its duration (frame_end), the next shots follow.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, MoveVertical } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical, X } from 'lucide-react'
+import { CreateMenu, type CreateKind } from './CreateMenu'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -34,7 +40,14 @@ interface Props {
   selection:       Selection
   setSelection:    (s: Selection) => void
   onEntityClicked?: () => void
+  onCreate?:       (kind: CreateKind) => void
 }
+
+const LS_HINT = 'flux.production.shot.gestureHint'
+const GESTURES = 'Molette : défiler · Maj + molette : page · Ctrl + molette : zoom · Ctrl + Maj + molette : hauteur · clic milieu glissé : déplacer'
+
+const isField = (el: EventTarget | null) =>
+  el instanceof HTMLElement && !!el.closest('input, select, textarea, [contenteditable="true"]')
 
 // H zoom == per-shot width. Min is intentionally tiny so a whole sequence can be
 // squashed to a compact overview (shots become thin slivers); the number/label
@@ -139,7 +152,7 @@ function useLocalNumber(key: string, def: number, clampMin: number, clampMax: nu
   return [v, set]
 }
 
-export function ProductionShot({ state, setState, selection, setSelection, onEntityClicked }: Props) {
+export function ProductionShot({ state, setState, selection, setSelection, onEntityClicked, onCreate }: Props) {
   const { t } = useI18n()
   const { project } = useProject()
 
@@ -367,11 +380,79 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     })
   }
 
+  // ── mouse navigation (retake 05) ──────────────────────────────────────────
+  // Zoom anchored under the cursor: remember which frame sat under the pointer and
+  // put it back there once the new width is laid out.
+  const zoomAnchor = useRef<{ frame: number; px: number } | null>(null)
+  const zoomRef = useRef(pxPerBlock); zoomRef.current = pxPerBlock
+  const vZoomRef = useRef(vZoom); vZoomRef.current = vZoom
+  useLayoutEffect(() => {
+    const el = scrollWrapRef.current, a = zoomAnchor.current
+    if (!el || !a) return
+    zoomAnchor.current = null
+    el.scrollLeft = Math.max(0, a.frame * (pxPerBlock / DEFAULT_SHOT_FRAMES) + HEADER_W + 10 - a.px)
+  }, [pxPerBlock])
+  const [hasTimeline, setHasTimeline] = useState(false)
+  useEffect(() => { setHasTimeline(sequences.length > 0) }, [sequences.length])
+  useEffect(() => {
+    const el = scrollWrapRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (isField(e.target)) return
+      const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        if (e.shiftKey) { setVZ(vZoomRef.current * (delta > 0 ? 0.9 : 1.1)); return }
+        const rect = el.getBoundingClientRect()
+        const px = e.clientX - rect.left
+        const cur = zoomRef.current
+        zoomAnchor.current = { frame: Math.max(0, (el.scrollLeft + px - HEADER_W - 10) / (cur / DEFAULT_SHOT_FRAMES)), px }
+        setZoom(Math.round(cur * (delta > 0 ? 0.85 : 1 / 0.85)))
+        return
+      }
+      if (e.shiftKey) return   // page scroll, handled by the parent scroller
+      if (el.scrollWidth <= el.clientWidth) return
+      e.preventDefault()
+      el.scrollLeft += delta
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [hasTimeline])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Middle-button drag pans the edit (horizontal) and the page (vertical).
+  const startPan = (e: React.MouseEvent) => {
+    if (e.button !== 1) return
+    e.preventDefault()
+    const el = scrollWrapRef.current
+    const page = el?.closest('[data-timeline-page]') as HTMLElement | null
+    if (!el) return
+    const x0 = e.clientX, y0 = e.clientY, left0 = el.scrollLeft, top0 = page?.scrollTop ?? 0
+    const move = (ev: MouseEvent) => {
+      el.scrollLeft = left0 - (ev.clientX - x0)
+      if (page) page.scrollTop = top0 - (ev.clientY - y0)
+    }
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.style.cursor = '' }
+    document.body.style.cursor = 'grabbing'
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  // Back to the whole edit: the zoom that fits every frame in the visible width.
+  const fitAll = () => {
+    const el = scrollWrapRef.current
+    const total = seqFrames.reduce((a, b) => a + b, 0)
+    if (!el || total <= 0) return
+    const avail = el.clientWidth - HEADER_W - 24 - sequences.length * gap
+    setZoom(Math.floor(Math.max(1, avail) / total * DEFAULT_SHOT_FRAMES))
+    el.scrollLeft = 0
+  }
+  const [showHint, setShowHint] = useState(() => { try { return !localStorage.getItem(LS_HINT) } catch { return false } })
+  const hideHint = () => { setShowHint(false); try { localStorage.setItem(LS_HINT, '1') } catch { /* blocked */ } }
+
   return (
-    <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}
+    <div data-timeline-page style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}
          onClick={(e) => { if (e.target === e.currentTarget) setSelection({ kind: 'none' }) }}>
-      {/* Toolbar */}
+      {/* Toolbar: Create first, then view controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        {onCreate && <div className="production-timeline-toolbar"><CreateMenu mode="shot" hasSequences={sequences.length > 0} onCreate={onCreate} /></div>}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <ArrowDownUp size={11} strokeWidth={1.75} color="var(--ink-3)" style={{ transform: 'rotate(90deg)' }} />
           <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
@@ -386,6 +467,11 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                  onChange={e => setVZ(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
         </div>
+
+        <button onClick={fitAll} disabled={sequences.length === 0} title={`Tout voir · ${GESTURES}`}
+          style={{ ..._zoomBtn, width: 'auto', padding: '0 8px', gap: 5, fontSize: 10 }}>
+          <Maximize2 size={11} strokeWidth={2} /> Tout voir
+        </button>
 
         {/* Bookmarks */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -427,6 +513,14 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         </div>
       </div>
 
+      {showHint && sequences.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: 'var(--ink-3)' }}>
+          <span>{GESTURES}</span>
+          <button onClick={hideHint} aria-label="Masquer l'aide" title="Masquer (toujours dans l'infobulle de Tout voir)"
+            style={{ display: 'inline-flex', border: 0, background: 'transparent', color: 'var(--ink-4)', cursor: 'pointer', padding: 2 }}><X size={11} /></button>
+        </div>
+      )}
+
       {sequences.length === 0 && (
         <div style={{ padding: '32px 4px', fontSize: 11, color: 'var(--ink-4)' }}>
           {t('prod.emptyTimeline')}
@@ -443,7 +537,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         }}>
           {/* Single horizontal scroll container. Header cells stick to the left
               via position:sticky so they stay visible while the lanes scroll. */}
-          <div ref={scrollWrapRef} className="timeline-scroll" style={{ overflowX: 'scroll', overflowY: 'hidden', position: 'relative' }}>
+          <div ref={scrollWrapRef} className="timeline-scroll" onMouseDown={startPan} style={{ overflowX: 'scroll', overflowY: 'hidden', position: 'relative' }}>
             <div style={{ minWidth: HEADER_W + contentW, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               {/* Bookmark overlay — vertical markers spanning ruler + tracks */}
               {bookmarkPositions.map((p, i) => (

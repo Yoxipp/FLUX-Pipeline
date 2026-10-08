@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, ImagePlus, Plus, Search, Settings2, UserRound, X } from 'lucide-react'
+import { CreateMenu, type CreateKind } from './CreateMenu'
+import { ChevronDown, ChevronRight, ImagePlus, Search, Settings2, UserRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
@@ -29,7 +30,7 @@ interface Props {
   setSelection: (s: Selection) => void
   onOpenDetail: (selection: Selection, task: ProductionTask, subtask?: string) => void
   onEdit: () => void
-  onNew: () => void
+  onNew: (kind?: CreateKind) => void
   onSettings: () => void
   onOpenEntity: (selection: Selection) => void
   onlyEntityId?: string
@@ -103,10 +104,10 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   const patchThumbnail = (entityId: string, thumbnail: ProductionThumbnail) => setState(prev => ({
     ...prev, shots: prev.shots.map(e => e.id === entityId ? { ...e, thumbnail } : e), assets: prev.assets.map(e => e.id === entityId ? { ...e, thumbnail } : e),
   }))
-  const beginCreate = () => {
+  const beginCreate = (kind: CreateKind) => {
     const seq = filter.kind === 'seq' ? state.sequences.find(s => s.id === filter.id) : selection.kind === 'seq' ? state.sequences.find(s => s.id === selection.id) : state.sequences[0]
     setSelection(mode === 'shot' && seq ? { kind: 'seq', id: seq.id } : { kind: 'none' })
-    onNew()
+    onNew(kind)
   }
   return <div className="production-tracking">
     <div className="tracking-toolbar">
@@ -116,7 +117,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       <ProductionShowMenu filter={filter} onChange={setFilter} sequences={state.sequences}
         departments={allDepartments} departmentPref={workPrefs.productionDepartments} onDepartmentPref={v => setWorkPref('productionDepartments', v)} />
       <button onClick={onSettings}><Settings2 size={13} /> Settings</button>
-      <button onClick={beginCreate}><Plus size={13} /> New</button>
+      <CreateMenu mode={mode} hasSequences={state.sequences.length > 0} onCreate={beginCreate} />
     </div>
     <div ref={scrollRef} className="tracking-scroll" tabIndex={0} aria-label="Tableau de suivi de production" onKeyDown={e => {
       if (e.key === 'Escape' && e.currentTarget.contains(e.target as Node)) { setTaskSelection(emptyTaskSelection()); return }
@@ -187,7 +188,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
           </tr>
         })}</tbody>)}
       </table>
-      {!entities.length && <div className="tracking-empty"><strong>{loading ? 'Chargement...' : 'Aucun résultat'}</strong><span>{filter.kind === 'mine' ? 'Aucun job assigné à votre artiste.' : 'Modifiez la recherche ou le filtre Show.'}</span>{!loading && filter.kind === 'all' && !query && !onlyEntityId && <button onClick={beginCreate}>New</button>}</div>}
+      {!entities.length && <div className="tracking-empty"><strong>{loading ? 'Chargement...' : 'Aucun résultat'}</strong><span>{filter.kind === 'mine' ? 'Aucun job assigné à votre artiste.' : 'Modifiez la recherche ou le filtre Show.'}</span>{!loading && filter.kind === 'all' && !query && !onlyEntityId && <button onClick={() => beginCreate(mode === 'asset' ? 'asset' : state.sequences.length ? 'shot' : 'seq')}>Create</button>}</div>}
     </div>
     <div className="tracking-footer"><span>Ctrl + molette pour zoomer · Ctrl / Shift + clic sur un badge pour sélectionner</span><span>{selectedTargets.length ? 'Clic droit pour les actions · Clic dans le vide ou Échap pour effacer' : 'Clic droit sur un statut ou un shot pour les actions'}</span></div>
   </div>

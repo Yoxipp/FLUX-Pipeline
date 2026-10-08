@@ -5,15 +5,20 @@ import { api } from '../../api/client'
 import type { ProductionState } from '../../types'
 import type { Selection } from './Production'
 import { createShotBatch } from './taskActions'
+import type { CreateKind } from './CreateMenu'
 
 interface Props {
   project: string; mode: 'asset' | 'shot'; state: ProductionState
   setState: (patch: (prev: ProductionState) => ProductionState) => void
   selection: Selection; setSelection: (selection: Selection) => void; onClose: () => void
+  initialKind?: CreateKind   // chosen in the Create menu (retake 05)
 }
 
-export function NewProductionDialog({ project, mode, state, setState, selection, setSelection, onClose }: Props) {
-  const [kind, setKind] = useState(mode === 'shot' ? state.sequences.length ? 'shot' : 'seq' : 'asset')
+const KIND_LABEL: Record<string, string> = { shot: 'Shot', seq: 'Séquence', asset: 'Asset', group: 'Groupe' }
+
+export function NewProductionDialog({ project, mode, state, setState, selection, setSelection, onClose, initialKind }: Props) {
+  const [kind, setKind] = useState<string>(initialKind && !(initialKind === 'shot' && !state.sequences.length)
+    ? initialKind : mode === 'shot' ? state.sequences.length ? 'shot' : 'seq' : 'asset')
   const [seqId, setSeqId] = useState(selection.kind === 'seq' ? selection.id : selection.kind === 'shot' ? state.shots.find(s => s.id === selection.id)?.seq_id ?? '' : state.sequences[0]?.id ?? '')
   const [category, setCategory] = useState('CHAR')
   const [categories, setCategories] = useState(['CHAR', 'PROPS', 'ENV', 'FXRIG'])
@@ -63,7 +68,7 @@ export function NewProductionDialog({ project, mode, state, setState, selection,
   }
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal>
     <Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog">
-      <div className="production-dialog-heading"><Dialog.Title>New</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div>
+      <div className="production-dialog-heading"><Dialog.Title>Create · {KIND_LABEL[kind] ?? kind}</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div>
       <Dialog.Description>Créer dans {project}</Dialog.Description>
       <form onSubmit={e => { e.preventDefault(); create() }} className="production-create-form">
         <label>Type<select value={kind} onChange={e => { setKind(e.target.value); setError('') }}>{mode === 'shot' ? <><option value="shot">Shot</option><option value="seq">Séquence</option></> : <><option value="asset">Asset</option><option value="group">Groupe</option></>}</select></label>

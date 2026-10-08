@@ -22,6 +22,13 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * Production est a 90% par defaut ; boutons de zoom retires, Ctrl+molette reste disponible.
 * `NewProductionDialog.tsx` : creation asset/groupe ou sequence/shots, choix de sequence,
   creation multiple validee avant sauvegarde. Assets/Shots sont sous Production dans la sidebar.
+* `CreateMenu.tsx` (retake 05) : un bouton Create en haut du tableau et de la Timeline, menu
+  Shot / Sequence (ou Asset / Groupe) qui ouvre `NewProductionDialog` sur ce type ; Shot grise
+  sans sequence. Timeline (`ProductionShot.tsx`) : molette = defiler, Maj+molette = page,
+  Ctrl+molette = zoom sous le curseur, Ctrl+Maj+molette = hauteur, clic milieu glisse = deplacer,
+  bouton Tout voir ; aide des gestes affichee au premier usage puis dans l'infobulle.
+  Molette ignoree sur un champ ; curseurs H / V gardes (tactile, pas de molette).
+  Clic droit d'un shot : Suivre le shot (notifications Self, ADR 0045).
 * `TaskStatusBadge.tsx` + `taskActions.ts` : meme menu clic droit Main/retakes, statuts,
   artiste courant/prise/assignation via les utilisateurs du pipe, Publisher (Instance vide)
   et chemin Folder Manager resolu au backend. Artiste stocke dans `task_details.assignee`.

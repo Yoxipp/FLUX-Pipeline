@@ -93,7 +93,7 @@
 .production-artist-list button { justify-content:flex-start; width:100%; border:0; background:transparent; }
 .production-artist-list button svg:last-child { margin-left:auto; }
 .production-entity-dialog { width:min(460px,calc(100vw - 32px)); }
-.production-timeline-toolbar { padding:8px 16px; display:flex; justify-content:flex-end; }
+.production-timeline-toolbar { display:flex; }
 @keyframes production-menu-in { from { opacity:0; transform:translateY(-4px) scale(.97); } to { opacity:1; transform:translateY(0) scale(1); } }
 @keyframes production-dialog-in { from { opacity:0; transform:translate(-50%,-48%) scale(.98); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
 @keyframes production-fade-in { from { opacity:0; } to { opacity:1; } }
