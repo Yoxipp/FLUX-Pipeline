@@ -10,3 +10,8 @@ Metier par domaine : `folder_manager`, `production`, `publisher`, `importer`, `a
 `usd_assembler/component_recipe.py` + `component_auto.py` (ADR 0023) : component cree a la main (`create_component`), recette = departements (tokens TYPE d'asset, une fois chacun) + fichiers (publish ou chemin manuel, format par extension, nature, cibles, proxy de, dependances). Un variantSet `on`/`off` par fichier dans la couche du departement. Un publish ne cree jamais de component : `refresh_from_publish` re-compose seulement un component existant qui utilise ce departement. Les nouveaux publishs sont proposes (`proposed_files`), jamais ajoutes seuls. Anciens components (slots, ADR 0019) lus comme recette (`_legacy_recipe`), reecrits au format 0023 a la mise a jour suivante. ADR 0024 : les fichiers ("links") sont groupes en blocks a nom libre (`model` / `look` / `rig` a la creation) ; chaque link porte sa task (`department`), son arc (`reference` / `payload` / `sublayer` : ce dernier entre dans les sublayers du payload, toujours actif), une variante optionnelle (variantSet du block, un seul choix actif) et une case proxy (proxy des autres links du block). `departments` = tasks des links. Recette 0023 sans `blocks` : un block par task.
 
 Metadonnees via `core.repository_factory.get_repository()`, octets via filesystem / `get_storage()`.
+
+`review/keyframe.py` (ADR 0047) : client du protocole de l'API externe de Keyframe Pro (port 18181,
+entete 10 caracteres + JSON), projet = une timeline dans l'ordre + autres videos du dossier ; repli
+ligne de commande (premiere video) en mode Demo. `production/ref_media.py` : chaque depot `/ref` est
+journalise dans `ref/modif_logs.json` (versions, auteur), `versions()` et `shot_previews()`.

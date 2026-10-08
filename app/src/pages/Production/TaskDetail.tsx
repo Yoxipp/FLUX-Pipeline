@@ -8,10 +8,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  Check, Copy, Download, Film, FolderOpen, FolderTree, Heart,
-  Image as ImageIcon, List, Pin, UploadCloud, X,
+  Check, Clapperboard, Copy, Download, Film, FolderOpen, FolderTree, Heart, History,
+  Image as ImageIcon, List, Pin, RotateCcw, UploadCloud, X,
 } from 'lucide-react'
-import { api } from '../../api/client'
+import { api, type RefVersion } from '../../api/client'
+import { readSession, writeSession } from '../../hooks/useSessionState'
+import { openInKeyframe } from '../../lib/keyframe'
 import { useI18n } from '../../i18n'
 import { useProject } from '../../ProjectContext'
 import { useCommentReadState } from '../../hooks/useCommentReadState'
@@ -367,7 +369,8 @@ export function TaskDetail({
             />
           )}
 
-          <MediaEmbed project={project || ''} relPath={refBasePath} color={color} />
+          <MediaEmbed project={project || ''} relPath={refBasePath} color={color}
+            context={`${entityKind === 'shot' ? `${asset.class} ${asset.name}` : asset.name} · ${task.name}${subtaskFilter ? ` · ${subtaskFilter}` : ''}`} />
         </div>
       </div>
 
@@ -723,9 +726,14 @@ const _slotLocked: React.CSSProperties = {
 
 // ── media embed (reference images / videos / playblasts, /ref folder) ────────
 // A single-slot viewer below the recent publishes: drop an image or video to
-// deposit a new version on disk; the newest (LAST) is always what shows. Videos
+// deposit a new version on disk; the newest (LAST) shows by default. Videos
 // play on hover (muted, looping, no controls). Click opens a full-screen
 // overlay; clicking the greyed backdrop minimises it back.
+// Retake 10: a strip UNDER the media (never over it) names the version shown;
+// "Versions" lists every deposit from the ref folder's modif log (author, date,
+// status, thumbnail) to watch an older one, with "Dernière version" to come
+// back. The choice is kept for the session per zone. Keyframe Pro opens the
+// shown version with the other versions of the folder (retake 09).
 const _IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'apng', 'avif', 'svg']
 const _VIDEO_EXT = ['mp4', 'webm', 'ogv', 'ogg', 'm4v', 'mov', 'mkv']
 
@@ -736,32 +744,48 @@ function isAcceptedMedia(file: File): boolean {
   return _IMAGE_EXT.includes(ext) || _VIDEO_EXT.includes(ext)
 }
 
-function MediaEmbed({ project, relPath, color }: {
+const viewKey = (project: string, relPath: string) => `ref.view:${project}:${relPath}`
+
+function MediaEmbed({ project, relPath, color, context }: {
   project: string
   relPath: string
   color:   string
+  context: string          // "SEQ010 SHOT020 · ANIM": the Keyframe source names
 }) {
   const [latest, setLatest] = useState<{ file: string; kind: string } | null>(null)
+  const [versions, setVersions] = useState<RefVersion[]>([])
   const [rev, setRev]       = useState(0)          // cache-buster: LAST.* is overwritten in place
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [full, setFull]     = useState(false)
+  const [listOpen, setListOpen] = useState(false)
+  const [mediaError, setMediaError] = useState(false)
+  // Version being watched (vNNN file), null = the latest. Session memory per zone,
+  // so switching tabs keeps it; a restart comes back to the latest.
+  const [viewing, setViewingState] = useState<string | null>(null)
+  useEffect(() => { setViewingState(readSession<string | null>(viewKey(project, relPath)) ?? null); setListOpen(false) }, [project, relPath])
+  const setViewing = (file: string | null) => {
+    setViewingState(file); writeSession(viewKey(project, relPath), file); setMediaError(false)
+  }
 
   const canUse = !!project && !!relPath
 
   const refresh = useCallback((): (() => void) | undefined => {
-    if (!canUse) { setLatest(null); return undefined }
+    if (!canUse) { setLatest(null); setVersions([]); return undefined }
     let ok = true
     api.getRefLatest(project, relPath)
       .then(r => { if (ok) setLatest(r.found && r.file && r.kind ? { file: r.file, kind: r.kind } : null) })
       .catch(() => { if (ok) setLatest(null) })
+    api.getRefVersions(project, relPath)
+      .then(r => { if (ok) setVersions(r.versions) })
+      .catch(() => { if (ok) setVersions([]) })
     return () => { ok = false }
   }, [project, relPath, canUse])
 
   useEffect(() => refresh(), [refresh])
 
   const doUpload = useCallback(async (files: FileList | File[]) => {
-    if (!canUse) { toast.error('Chemin non résolu — impossible de déposer'); return }
+    if (!canUse) { toast.error('Chemin non résolu, impossible de déposer'); return }
     const list = Array.from(files).filter(isAcceptedMedia)
     if (list.length === 0) { toast.error('Formats acceptés : images et vidéos (pas d’audio)'); return }
     setUploading(true)
@@ -769,6 +793,7 @@ function MediaEmbed({ project, relPath, color }: {
       // Deposit sequentially so the version numbering stays deterministic.
       for (const f of list) await api.depositRef(project, relPath, f)
       setRev(v => v + 1)
+      setViewing(null)                         // a new deposit is what you want to see
       refresh()
       toast.success(list.length > 1 ? `${list.length} fichiers déposés` : 'Fichier déposé')
     } catch (e) {
@@ -776,7 +801,7 @@ function MediaEmbed({ project, relPath, color }: {
     } finally {
       setUploading(false)
     }
-  }, [project, relPath, canUse, refresh])
+  }, [project, relPath, canUse, refresh])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation()
@@ -784,24 +809,45 @@ function MediaEmbed({ project, relPath, color }: {
     if (e.dataTransfer.files?.length) void doUpload(e.dataTransfer.files)
   }
 
+  const newest = versions.find(v => v.latest) ?? null
+  const watched = viewing ? versions.find(v => v.file === viewing) ?? null : null
+  const lostVersion = !!viewing && versions.length > 0 && (!watched || !watched.available)
+  // What the slot shows: the watched version, else LAST.
+  const shown = watched && watched.available
+    ? { file: watched.file, kind: watched.kind, playable: watched.playable, version: watched.version, old: !watched.latest }
+    : latest
+      ? { file: latest.file, kind: latest.kind, playable: newest ? newest.playable : true, version: newest?.version ?? '', old: false }
+      : null
+  const unreadable = !!shown && (!shown.playable || mediaError)
+  const nextVersion = `v${String((versions.reduce((m, v) => Math.max(m, Number(v.version.slice(1)) || 0), 0)) + 1).padStart(3, '0')}`
+
   const download = async () => {
-    if (!latest) return
-    const ext = latest.file.split('.').pop() ?? ''
-    const suggested = `${relPath.split('/').pop() || 'ref'}_${latest.file}`
+    if (!shown) return
+    const ext = shown.file.split('.').pop() ?? ''
+    const suggested = `${relPath.split('/').pop() || 'ref'}_${shown.file}`
     const dest = await window.electronAPI?.saveFile?.(suggested, [
-      { name: latest.kind === 'video' ? 'Vidéo' : 'Image', extensions: [ext] },
+      { name: shown.kind === 'video' ? 'Vidéo' : 'Image', extensions: [ext] },
       { name: 'Tous les fichiers', extensions: ['*'] },
     ])
     if (!dest) return
     try {
-      await api.exportRef(project, relPath, latest.file, dest)
+      await api.exportRef(project, relPath, shown.file, dest)
       toast.success('Téléchargé')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     }
   }
 
-  const src = latest ? `${api.refFileUrl(project, relPath, latest.file)}&rev=${rev}` : ''
+  const { settings } = useSettings()
+  const openKeyframe = (file: string, version: string) => {
+    const rel = `${relPath}/ref/${file}`
+    void openInKeyframe(project, [{ rel_path: rel, label: `${context} · ${version || file}` }], {
+      title: context,
+      fallbackPath: expandFluxPath(`$FLUX/DOSSIER_PROJETS/${project}/${rel}`, settings?.workspace),
+    })
+  }
+
+  const src = shown ? `${api.refFileUrl(project, relPath, shown.file)}&rev=${rev}` : ''
 
   return (
     <>
@@ -814,73 +860,207 @@ function MediaEmbed({ project, relPath, color }: {
         onDragOver={e => { if (canUse) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dragOver) setDragOver(true) } }}
         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
         onDrop={onDrop}
-        style={{
-          position: 'relative',
-          borderRadius: 8,
-          border: `1px ${latest ? 'solid' : 'dashed'} ${dragOver ? color : 'var(--rule-2)'}`,
-          background: dragOver ? `color-mix(in oklch, ${color} 12%, var(--paper))` : 'var(--paper)',
-          overflow: 'hidden',
-          minHeight: latest ? undefined : 90,
-          aspectRatio: latest ? '16 / 9' : undefined,
-          maxHeight: 320,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: latest ? 'pointer' : 'default',
-        }}
-        onClick={() => { if (latest) setFull(true) }}
-        title={latest ? 'Cliquer pour agrandir' : 'Glissez une image ou une vidéo ici'}
       >
-        {latest ? (
-          <>
-            <HoverMedia src={src} kind={latest.kind} />
-            <button
-              onClick={e => { e.stopPropagation(); void download() }}
-              title="Télécharger"
-              style={{
-                position: 'absolute', top: 6, right: 6, zIndex: 2,
-                width: 26, height: 26, borderRadius: 6, border: '1px solid var(--rule-2)',
-                background: 'color-mix(in oklch, var(--paper) 80%, transparent)',
-                color: 'var(--ink-2)', cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                backdropFilter: 'blur(2px)',
-              }}
-            >
-              <Download size={13} strokeWidth={1.75} />
-            </button>
-            {dragOver && (
-              <div style={_dropHint}>Déposer pour remplacer (nouvelle version)</div>
-            )}
-          </>
-        ) : (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-            color: 'var(--ink-4)', fontSize: 10, padding: 12, textAlign: 'center',
-          }}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <ImageIcon size={16} strokeWidth={1.5} />
-              <Film size={16} strokeWidth={1.5} />
+        <div
+          style={{
+            position: 'relative',
+            borderRadius: shown ? '8px 8px 0 0' : 8,
+            border: `1px ${shown ? 'solid' : 'dashed'} ${dragOver ? color : shown?.old ? 'var(--warn)' : 'var(--rule-2)'}`,
+            background: dragOver ? `color-mix(in oklch, ${color} 12%, var(--paper))` : 'var(--paper)',
+            overflow: 'hidden',
+            minHeight: shown ? undefined : 90,
+            aspectRatio: shown ? '16 / 9' : undefined,
+            maxHeight: 320,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: shown && !unreadable ? 'pointer' : 'default',
+          }}
+          onClick={() => { if (shown && !unreadable) setFull(true) }}
+          title={shown ? (unreadable ? '' : 'Cliquer pour agrandir') : 'Glissez une image ou une vidéo ici'}
+        >
+          {shown && !unreadable ? (
+            <>
+              <HoverMedia key={src} src={src} kind={shown.kind} onError={() => setMediaError(true)} />
+              <button
+                onClick={e => { e.stopPropagation(); void download() }}
+                title="Télécharger"
+                style={{
+                  position: 'absolute', top: 6, right: 6, zIndex: 2,
+                  width: 26, height: 26, borderRadius: 6, border: '1px solid var(--rule-2)',
+                  background: 'color-mix(in oklch, var(--paper) 80%, transparent)',
+                  color: 'var(--ink-2)', cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  backdropFilter: 'blur(2px)',
+                }}
+              >
+                <Download size={13} strokeWidth={1.75} />
+              </button>
+            </>
+          ) : shown ? (
+            <div style={_placeholder}>
+              <Film size={18} strokeWidth={1.5} />
+              <span>Format non lisible dans FLUX ({shown.file.split('.').pop()})</span>
+              <button style={_stripBtn} onClick={e => { e.stopPropagation(); openKeyframe(shown.file, shown.version) }}>
+                <Clapperboard size={11} strokeWidth={1.75} /> Ouvrir dans Keyframe Pro
+              </button>
             </div>
-            {canUse
-              ? <span><UploadCloud size={11} style={{ verticalAlign: '-2px' }} strokeWidth={1.75} /> Glissez une image ou une vidéo</span>
-              : <span>Chemin non résolu</span>}
+          ) : (
+            <div style={_placeholder}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <ImageIcon size={16} strokeWidth={1.5} />
+                <Film size={16} strokeWidth={1.5} />
+              </div>
+              {canUse
+                ? <span><UploadCloud size={11} style={{ verticalAlign: '-2px' }} strokeWidth={1.75} /> Glissez une image ou une vidéo</span>
+                : <span>Chemin non résolu</span>}
+            </div>
+          )}
+          {dragOver && <div style={_dropHint}>{shown ? `Déposer : nouvelle version ${nextVersion}` : 'Déposer pour créer v001'}</div>}
+        </div>
+
+        {/* Strip under the media: which version, the way back, the version list, Keyframe. */}
+        {(shown || lostVersion) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+            padding: '5px 8px', border: `1px solid ${shown?.old || lostVersion ? 'var(--warn)' : 'var(--rule-2)'}`, borderTop: 'none',
+            borderRadius: listOpen ? 0 : '0 0 8px 8px',
+            background: shown?.old || lostVersion ? 'color-mix(in oklch, var(--warn) 10%, var(--paper-2))' : 'var(--paper-2)',
+            fontSize: 10, color: 'var(--ink-2)',
+          }}>
+            {lostVersion ? (
+              <span style={{ color: 'var(--warn)', fontWeight: 600 }}>Version {watched?.version ?? viewing} inaccessible</span>
+            ) : shown && (
+              <>
+                <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: shown.old ? 'var(--warn)' : 'var(--ink)' }}>{shown.version || 'LAST'}</span>
+                <span style={{ color: 'var(--ink-4)' }}>{shown.old ? 'ancienne version' : 'dernière version'}</span>
+              </>
+            )}
+            {(shown?.old || lostVersion) && (
+              <button style={{ ..._stripBtn, borderColor: 'var(--warn)' }} onClick={() => setViewing(null)} title="Revenir à la dernière version">
+                <RotateCcw size={10} strokeWidth={2} /> Dernière version
+              </button>
+            )}
+            <span style={{ flex: 1 }} />
+            {versions.length > 1 && (
+              <button style={_stripBtn} aria-expanded={listOpen} onClick={() => setListOpen(o => !o)}
+                title="Voir les autres versions de cette zone">
+                <History size={10} strokeWidth={2} /> Versions ({versions.length})
+              </button>
+            )}
+            {shown && shown.kind === 'video' && (
+              <button style={_stripBtn} onClick={() => openKeyframe(shown.file, shown.version)}
+                title="Ouvrir dans Keyframe Pro, avec les autres versions du dossier">
+                <Clapperboard size={10} strokeWidth={2} /> Keyframe
+              </button>
+            )}
           </div>
+        )}
+        {listOpen && versions.length > 1 && (
+          <VersionList
+            project={project} relPath={relPath} versions={versions}
+            current={watched?.file ?? newest?.file ?? ''}
+            onPick={v => { setViewing(v.latest ? null : v.file); setListOpen(false) }}
+            onKeyframe={v => openKeyframe(v.file, v.version)}
+            onClose={() => setListOpen(false)}
+          />
         )}
       </div>
 
-      {full && latest && (
-        <FullscreenMedia src={src} kind={latest.kind} onClose={() => setFull(false)} />
+      {full && shown && !unreadable && (
+        <FullscreenMedia src={src} kind={shown.kind} onClose={() => setFull(false)} />
       )}
     </>
   )
 }
 
+// Every version of the zone, newest first. Arrow keys move, Enter watches, Escape closes.
+function VersionList({ project, relPath, versions, current, onPick, onKeyframe, onClose }: {
+  project:    string
+  relPath:    string
+  versions:   RefVersion[]
+  current:    string
+  onPick:     (v: RefVersion) => void
+  onKeyframe: (v: RefVersion) => void
+  onClose:    () => void
+}) {
+  const listRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLButtonElement>('[data-current="true"]') ?? listRef.current?.querySelector<HTMLButtonElement>('button[data-row]')
+    el?.focus()
+  }, [])
+  const onKey = (e: React.KeyboardEvent) => {
+    const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('button[data-row]') ?? [])]
+    const i = rows.indexOf(document.activeElement as HTMLButtonElement)
+    if (e.key === 'ArrowDown') { e.preventDefault(); rows[Math.min(rows.length - 1, i + 1)]?.focus() }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); rows[Math.max(0, i - 1)]?.focus() }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose() }
+  }
+  return (
+    <div ref={listRef} role="listbox" aria-label="Versions" onKeyDown={onKey} style={{
+      border: '1px solid var(--rule-2)', borderTop: 'none', borderRadius: '0 0 8px 8px',
+      background: 'var(--paper)', maxHeight: 260, overflowY: 'auto', padding: 4,
+    }}>
+      {versions.map(v => {
+        const isCurrent = v.file === current
+        const status = !v.available ? 'Inaccessible' : !v.playable ? 'Non lisible ici' : v.latest ? 'Dernière' : ''
+        return (
+          <div key={v.file} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              data-row role="option" aria-selected={isCurrent} data-current={isCurrent}
+              disabled={!v.available}
+              onClick={() => onPick(v)}
+              style={{
+                flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: 4,
+                borderRadius: 5, border: `1px solid ${isCurrent ? 'var(--accent)' : 'transparent'}`,
+                background: isCurrent ? 'var(--accent-soft)' : 'transparent', textAlign: 'left',
+                cursor: v.available ? 'pointer' : 'not-allowed', opacity: v.available ? 1 : 0.55, color: 'var(--ink)',
+              }}
+            >
+              <VersionThumb src={v.available && v.playable ? api.refFileUrl(project, relPath, v.file) : ''} kind={v.kind} />
+              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700 }}>{v.version}</span>
+                  {status && <span style={{ ..._chip, color: v.latest && v.available ? 'var(--ok)' : 'var(--warn)' }}>{status}</span>}
+                  {isCurrent && <span style={{ ..._chip, color: 'var(--accent-hi)' }}>affichée</span>}
+                </span>
+                <span style={{ fontSize: 9, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {v.logged ? `${v.user || '?'} · ${v.date} ${v.time}` : 'avant le journal (auteur et date inconnus)'}
+                  {v.source_name ? ` · ${v.source_name}` : ''}
+                </span>
+              </span>
+            </button>
+            {v.available && v.kind === 'video' && (
+              <button style={_miniIconBtn} title="Ouvrir cette version dans Keyframe Pro" onClick={() => onKeyframe(v)}>
+                <Clapperboard size={9} strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// First frame of a video (metadata only) or the image; an icon when not shown here.
+function VersionThumb({ src, kind }: { src: string; kind: string }) {
+  const box: React.CSSProperties = {
+    width: 56, height: 32, borderRadius: 3, flexShrink: 0, background: '#000', overflow: 'hidden',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)',
+  }
+  if (!src) return <span style={{ ...box, background: 'var(--paper-2)' }}>{kind === 'video' ? <Film size={12} /> : <ImageIcon size={12} />}</span>
+  return kind === 'video'
+    ? <video src={`${src}#t=0.1`} muted preload="metadata" style={{ ...box, objectFit: 'cover' }} />
+    : <img src={src} alt="" style={{ ...box, objectFit: 'cover' }} />
+}
+
 // Video plays on hover only (muted / looping / no controls); images just show.
-function HoverMedia({ src, kind }: { src: string; kind: string }) {
+function HoverMedia({ src, kind, onError }: { src: string; kind: string; onError?: () => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   if (kind === 'video') {
     return (
       <video
         ref={videoRef}
         src={src}
+        onError={onError}
         muted loop playsInline preload="metadata"
         onMouseEnter={() => { void videoRef.current?.play().catch(() => {}) }}
         onMouseLeave={() => { const v = videoRef.current; if (v) { v.pause(); v.currentTime = 0 } }}
@@ -889,7 +1069,7 @@ function HoverMedia({ src, kind }: { src: string; kind: string }) {
     )
   }
   return (
-    <img src={src} alt="référence"
+    <img src={src} alt="référence" onError={onError}
          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
   )
 }
@@ -936,6 +1116,19 @@ function FullscreenMedia({ src, kind, onClose }: { src: string; kind: string; on
   )
 }
 
+const _placeholder: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+  color: 'var(--ink-4)', fontSize: 10, padding: 12, textAlign: 'center',
+}
+const _stripBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4, height: 20, padding: '0 7px',
+  borderRadius: 4, border: '1px solid var(--rule-2)', background: 'var(--paper)',
+  color: 'var(--ink-2)', fontSize: 9.5, cursor: 'pointer', whiteSpace: 'nowrap',
+}
+const _chip: React.CSSProperties = {
+  fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+}
 const _dropHint: React.CSSProperties = {
   position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none',
   display: 'flex', alignItems: 'center', justifyContent: 'center',

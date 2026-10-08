@@ -37,6 +37,14 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   bouton Tout voir ; aide des gestes affichee au premier usage puis dans l'infobulle.
   Molette ignoree sur un champ ; curseurs H / V gardes (tactile, pas de molette).
   Clic droit d'un shot : Suivre le shot (notifications Self, ADR 0045).
+  ADR 0047 : clic sur un clip = selection + apercu sous le montage (`TimelinePreview.tsx`, logique
+  `previewEdit.ts`) ; clic droit = Editer, Montage de la sequence, Keyframe Pro, bookmark. Source de
+  l'apercu (Auto / Tout / etape) gardee en localStorage. Montage de la sequence ou du film lu dans FLUX
+  (duree des shots respectee, trous gardes) ou envoye a Keyframe Pro. Point blanc = media disponible.
+* `TaskDetail.tsx` > `MediaEmbed` (retake 10, ADR 0047) : bandeau sous la video (version affichee,
+  Derniere version, Versions (n), Keyframe), liste des versions depuis le modif log du dossier `ref/`
+  (auteur, date, statut, miniature, fleches / Entree / Echap), choix garde pour la session par zone.
+  `lib/keyframe.ts` : appel `/review/keyframe/open` + toasts + lecteur systeme si Keyframe absent.
 * `TaskStatusBadge.tsx` + `taskActions.ts` : meme menu clic droit Main/retakes, statuts,
   artiste courant/prise/assignation via les utilisateurs du pipe, Publisher (Instance vide)
   et chemin Folder Manager resolu au backend. Artiste stocke dans `task_details.assignee`.

@@ -1054,6 +1054,23 @@ export const api = {
       'GET', `/production/${encodeURIComponent(project)}/ref/latest?${qs}`)
   },
 
+  // Every version of a /ref zone, newest first, from its modif log (retake 10).
+  getRefVersions: (project: string, relPath: string) => {
+    const qs = new URLSearchParams({ rel_path: relPath })
+    return apiCall<{ versions: RefVersion[] }>(
+      'GET', `/production/${encodeURIComponent(project)}/ref/versions?${qs}`)
+  },
+
+  // LAST media of each task of the given shots (Timeline preview, auto edit).
+  getShotPreviews: (project: string, shots: Array<{ seq: string; shot: string; tasks: string[] }>) =>
+    apiCall<{ shots: Array<{ seq: string; shot: string; media: ShotPreviewMedia[] }> }>(
+      'POST', `/production/${encodeURIComponent(project)}/shot-previews`, { shots }),
+
+  // Keyframe Pro (retake 09): status of this machine, open pipeline videos.
+  keyframeStatus: () => apiCall<KeyframeStatus>('GET', '/review/keyframe/status', undefined, 8000),
+  keyframeOpen: (project: string, items: Array<{ rel_path?: string; path?: string; label?: string }>, title = 'FLUX', siblings = true) =>
+    apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
+
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
   refFileUrl: (project: string, relPath: string, name: string) => {
     const qs = new URLSearchParams({ rel_path: relPath, name })
@@ -1237,4 +1254,32 @@ export interface UsdComposition {
   file: string; default_prim: string
   layers: { path: string; root: boolean }[]
   tree: UsdPrimNode | null
+}
+
+// /ref versions (retake 10): one row per deposit, from the ref folder's modif log.
+export interface RefVersion {
+  version: string; file: string; ext: string; kind: string
+  user: string; date: string; time: string
+  source_name: string      // name of the dropped file
+  logged: boolean          // false: file older than the log (no author / date)
+  available: boolean       // file still on disk
+  playable: boolean        // the renderer can show it (mov / mkv often cannot)
+  latest: boolean          // what LAST is a copy of
+}
+export interface ShotPreviewMedia {
+  task: string; rel_path: string; file: string; ext: string; kind: string
+  version: string; version_file: string; version_count: number; abs_path: string
+}
+// Keyframe Pro (retake 09, backend features/review/keyframe.py).
+export interface KeyframeStatus {
+  installed: boolean; exe: string; flavor: '' | 'pro' | 'mp'
+  api: 'ready' | 'not_running' | 'not_licensed' | 'error'
+}
+export interface KeyframeOpenResult {
+  mode: 'api' | 'cli' | 'none'
+  code?: string
+  message: string
+  opened: Array<{ path: string; label?: string }>
+  skipped: Array<{ path: string; label?: string; reason: string }>
+  siblings?: number
 }

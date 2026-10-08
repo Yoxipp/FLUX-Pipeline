@@ -650,7 +650,9 @@ async def deposit_ref(project: str, request: Request, rel_path: str = "", filena
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
-            None, lambda: ref_media.deposit(project_path, rel_path, filename, data)
+            None, lambda: ref_media.deposit(
+                project_path, rel_path, filename, data, config.get_current_user() or "",
+            )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -675,6 +677,46 @@ async def latest_ref(project: str, rel_path: str = "") -> dict:
     if not info:
         return {"found": False}
     return {"found": True, **info}
+
+
+@router.get("/{project}/ref/versions")
+async def ref_versions(project: str, rel_path: str = "") -> dict:
+    """Every version of a /ref zone, newest first, from its modif log (retake 10)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+    try:
+        rows = await loop.run_in_executor(None, lambda: ref_media.versions(project_path, rel_path))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"versions": rows}
+
+
+class ShotPreviewQuery(BaseModel):
+    seq: str
+    shot: str
+    tasks: list[str] = []
+
+
+class ShotPreviewsRequest(BaseModel):
+    shots: list[ShotPreviewQuery]
+
+
+@router.post("/{project}/shot-previews")
+async def shot_previews(project: str, payload: ShotPreviewsRequest) -> dict:
+    """LAST media of each task of the given shots (Timeline preview, auto edit)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+
+    def _do() -> list[dict]:
+        return [
+            {"seq": q.seq, "shot": q.shot,
+             "media": ref_media.shot_previews(project_path, q.seq, q.shot, q.tasks)}
+            for q in payload.shots
+        ]
+
+    return {"shots": await loop.run_in_executor(None, _do)}
 
 
 @router.get("/{project}/ref/file")

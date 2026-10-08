@@ -19,13 +19,22 @@
 //   (2026-10-08). Sliders stay for touch screens / no wheel. A wheel over a
 //   field never moves the timeline.
 // - Create (top of the toolbar) opens the Shot or Sequence form (CreateMenu).
+// - Click (Tom, after retake 09): selects and shows the preview under the edit
+//   (TimelinePreview: storyboard / animatic / anim ... per the Source picker, the
+//   auto edit of a sequence or of the film, Keyframe Pro). The former click action
+//   (Edit) and the others moved to the right-click menu.
 // - Clip width = duration (2026-09-27): a shot is as wide as its frame range, a
 //   sequence is the sum of its shots, the ruler counts the frames of the edit. Dragging
 //   the right edge of a shot sets its duration (frame_end), the next shots follow.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import * as Dropdown from '@radix-ui/react-dropdown-menu'
 import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical } from 'lucide-react'
 import { CreateMenu, type CreateKind } from './CreateMenu'
+import { TimelinePreview } from './TimelinePreview'
+import { buildMontage, pickMedia, previewCandidates, type PreviewMedia, type PreviewSource } from './previewEdit'
+import { openInKeyframe } from '../../lib/keyframe'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -82,6 +91,7 @@ const VZOOM_MIN = 0.6
 const VZOOM_MAX = 3.0
 const VZOOM_DEF = 1.0
 const LS_VZOOM = 'flux.production.shot.vzoom'
+const LS_PREVIEW_SOURCE = 'flux.production.timeline.previewSource'
 
 // Bookmarks are per-user (stored in User.json via /settings/user-data under
 // `production.bookmarks.<project>`). Not scoped to the machine.
@@ -205,6 +215,66 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     return () => { alive = false }
   }, [project])
   const framesOf = (shot: Shot) => (resizing && resizing.id === shot.id ? resizing.frames : shotFrames(shot))
+
+  // ── preview + auto edit (TimelinePreview) ─────────────────────────────────
+  const [source, setSourceState] = useState<PreviewSource>(() => {
+    try { return localStorage.getItem(LS_PREVIEW_SOURCE) || 'auto' } catch { return 'auto' }
+  })
+  const setSource = (v: PreviewSource) => { setSourceState(v); try { localStorage.setItem(LS_PREVIEW_SOURCE, v) } catch { /* blocked */ } }
+  const [montage, setMontage] = useState<{ seqId?: string } | null>(null)
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [previews, setPreviews] = useState<Record<string, PreviewMedia[]>>({})
+  const [previewsLoading, setPreviewsLoading] = useState(false)
+  // One request for the whole edit; again when shots / tasks change or on flux:refresh.
+  const previewQuery = useMemo(() => state.shots.map(shot => ({
+    id: shot.id,
+    seq: state.sequences.find(s => s.id === shot.seq_id)?.name ?? '',
+    shot: shot.name,
+    tasks: previewCandidates(state, shot).map(c => c.token),
+  })).filter(q => q.seq), [state])
+  const previewKey = JSON.stringify(previewQuery.map(q => [q.id, q.seq, q.shot, q.tasks]))
+  const [refreshTick, setRefreshTick] = useState(0)
+  useEffect(() => {
+    const h = () => setRefreshTick(t => t + 1)
+    window.addEventListener('flux:refresh', h)
+    return () => window.removeEventListener('flux:refresh', h)
+  }, [])
+  useEffect(() => {
+    let alive = true
+    if (!project || previewQuery.length === 0) { setPreviews({}); return }
+    setPreviewsLoading(true)
+    api.getShotPreviews(project, previewQuery.map(({ seq, shot, tasks }) => ({ seq, shot, tasks })))
+      .then(r => {
+        if (!alive) return
+        const map: Record<string, PreviewMedia[]> = {}
+        r.shots.forEach((row, i) => { map[previewQuery[i].id] = row.media })
+        setPreviews(map)
+      })
+      .catch(() => { if (alive) setPreviews({}) })
+      .finally(() => { if (alive) setPreviewsLoading(false) })
+    return () => { alive = false }
+  }, [project, previewKey, refreshTick])   // eslint-disable-line react-hooks/exhaustive-deps
+  const stableFrames = useCallback((shot: Shot) => shotFrames(shot), [])
+
+  // Right-click menu of a clip (the former click actions live here).
+  const [ctx, setCtx] = useState<{ kind: 'seq' | 'shot'; id: string; x: number; y: number } | null>(null)
+  const openCtx = (kind: 'seq' | 'shot', id: string, x: number, y: number) => {
+    setSelection({ kind, id }); setCtx({ kind, id, x, y })
+  }
+  const keyframeShot = (shot: Shot) => {
+    const seq = state.sequences.find(s => s.id === shot.seq_id)
+    const m = pickMedia(previews[shot.id] ?? [], previewCandidates(state, shot), source === 'all' ? 'auto' : source)[0]
+    const label = `${seq?.name ?? ''} ${shot.name}`
+    if (!m) { void openInKeyframe(project || '', []); return }
+    void openInKeyframe(project || '', [{ path: m.abs_path, label: `${label} · ${m.label} · ${m.version || 'LAST'}` }], { title: label, fallbackPath: m.abs_path })
+  }
+  const keyframeSeq = (seqId: string) => {
+    const seq = state.sequences.find(s => s.id === seqId)
+    const clips = buildMontage(state, previews, source, fps, stableFrames, seqId).filter(c => c.media)
+    if (clips.length === 0) { void openInKeyframe(project || '', []); return }
+    void openInKeyframe(project || '', clips.map(c => ({ path: c.media!.abs_path, label: `${c.seq} ${c.shot} · ${c.media!.label} · ${c.media!.version || 'LAST'}` })),
+      { title: seq?.name ?? 'Montage', siblings: false, fallbackPath: clips[0].media!.abs_path })
+  }
   const widthOf = (frames: number) => Math.max(3, Math.round(frames * pxPerFrame))
   const shotW = pxPerBlock          // an empty sequence shows one default shot wide
   const seqFrames = sequences.map(seq => (shotsBySeq.get(seq.id) ?? []).reduce((acc, sh) => acc + framesOf(sh), 0))
@@ -345,9 +415,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     }
     if (!next) return
     scrollToBookmark(next.x)
-    // Also focus the target so MenuEdit / MenuSpec reflect it.
+    // Also select the target: its preview shows under the edit (Edit = right click).
     setSelection({ kind: next.b.kind, id: next.b.entityId })
-    onEntityClicked?.()
   }
 
   const reorderSeq = (draggedId: string, targetId: string) => {
@@ -628,7 +697,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                         width={colWidths[i] - gap}
                         height={effSeqH - 18}
                         active={selection.kind === 'seq' && selection.id === seq.id}
-                        onClick={() => { setSelection({ kind: 'seq', id: seq.id }); onEntityClicked?.() }}
+                        onClick={() => { setSelection({ kind: 'seq', id: seq.id }); setMontage(null) }}
+                        onContextMenu={(x, y) => openCtx('seq', seq.id, x, y)}
                         onDragStart={e => {
                           e.dataTransfer.effectAllowed = 'move'
                           e.dataTransfer.setData('text/flux-seq-id', seq.id)
@@ -686,7 +756,10 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                             height={shotSquare}
                             seqColor={seqCol}
                             active={selection.kind === 'shot' && selection.id === shot.id}
-                            onClick={() => { setSelection({ kind: 'shot', id: shot.id }); onEntityClicked?.() }}
+                            playing={playingId === shot.id}
+                            hasMedia={(previews[shot.id] ?? []).length > 0}
+                            onClick={() => { setSelection({ kind: 'shot', id: shot.id }); setMontage(null) }}
+                            onContextMenu={(x, y) => openCtx('shot', shot.id, x, y)}
                             onDragStart={e => {
                               e.dataTransfer.effectAllowed = 'move'
                               e.dataTransfer.setData('text/flux-shot-id', shot.id)
@@ -707,6 +780,34 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         </div>
         )
       })()}
+
+      {sequences.length > 0 && (
+        <TimelinePreview project={project || ''} state={state} selection={selection} previews={previews} loading={previewsLoading}
+          source={source} setSource={setSource} fps={fps} framesOf={stableFrames}
+          montage={montage} setMontage={setMontage} onPlayingShot={setPlayingId} />
+      )}
+
+      <Dropdown.Root open={!!ctx} onOpenChange={o => { if (!o) setCtx(null) }} modal={false}>
+        {createPortal(<Dropdown.Trigger tabIndex={-1} aria-hidden style={{ position: 'fixed', left: ctx?.x ?? 0, top: ctx?.y ?? 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
+        <Dropdown.Portal><Dropdown.Content className="production-context-menu" align="start" collisionPadding={10}>
+          {ctx && (() => {
+            const shot = ctx.kind === 'shot' ? state.shots.find(s => s.id === ctx.id) : undefined
+            const seqId = shot ? shot.seq_id : ctx.id
+            const seq = state.sequences.find(s => s.id === seqId)
+            const marked = bookmarkExistsFor(ctx.kind, ctx.id)
+            return <>
+              <Dropdown.Label className="production-menu-artist">{shot ? `${seq?.name ?? ''} ${shot.name}` : seq?.name}</Dropdown.Label>
+              <Dropdown.Item className="production-menu-item" onSelect={() => onEntityClicked?.()}>Éditer</Dropdown.Item>
+              <Dropdown.Item className="production-menu-item" onSelect={() => setMontage({ seqId })}>Montage de {seq?.name}</Dropdown.Item>
+              {shot && <Dropdown.Item className="production-menu-item" onSelect={() => keyframeShot(shot)}>Ouvrir dans Keyframe Pro</Dropdown.Item>}
+              <Dropdown.Item className="production-menu-item" onSelect={() => keyframeSeq(seqId)}>Montage de {seq?.name} dans Keyframe Pro</Dropdown.Item>
+              <Dropdown.Item className="production-menu-item" onSelect={() => persistBookmarks(marked
+                ? bookmarks.filter(b => !(b.kind === ctx.kind && b.entityId === ctx.id))
+                : [...bookmarks, { kind: ctx.kind, entityId: ctx.id }])}>{marked ? 'Retirer le bookmark' : 'Poser un bookmark'}</Dropdown.Item>
+            </>
+          })()}
+        </Dropdown.Content></Dropdown.Portal>
+      </Dropdown.Root>
     </div>
   )
 }
@@ -790,12 +891,13 @@ const effectiveSeqColor = (seq: ProductionSequence): string =>
 // The timeline is purely visual now: sequences and shots are created/deleted
 // from the Edit menu, never by resizing a clip. So a seq clip is just a draggable
 // (reorder) colored block — no right-edge grip.
-function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, shotCount }: {
+function SeqClip({ seq, width, height, active, onClick, onContextMenu, onDragStart, onDrop, shotCount }: {
   seq:         ProductionSequence
   width:       number
   height:      number
   active:      boolean
   onClick:     () => void
+  onContextMenu: (x: number, y: number) => void
   onDragStart: React.DragEventHandler
   onDrop:      React.DragEventHandler
   shotCount:   number
@@ -812,6 +914,7 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
       small={seq.label || ''}
       active={active}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDrop={onDrop}
       acceptType="text/flux-seq-id"
@@ -821,7 +924,10 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
   )
 }
 
-function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onClick, onDragStart, onDrop, seqColor, locked }: {
+function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, playing, hasMedia, onClick, onContextMenu, onDragStart, onDrop, seqColor, locked }: {
+  playing:     boolean              // current shot of the montage being played
+  hasMedia:    boolean              // something published in Production to preview
+  onContextMenu: (x: number, y: number) => void
   shot:        Shot
   locked:      boolean              // own lock or its sequence's: no resize (2026-09-30)
   frames:      number
@@ -850,12 +956,16 @@ function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onCl
       small={`${shot.label ? `${shot.label} · ` : ''}${frames} f · ${formatSeconds(frames, fps)}`}
       onResizeDown={onResizeDown}
       active={active}
+      playing={playing}
+      dot={hasMedia}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDrop={onDrop}
       acceptType="text/flux-shot-id"
       title={
         `${shot.name}${shot.label ? ` — ${shot.label}` : ''}\n${frames} images, ${formatSeconds(frames, fps)} (${range})` +
+        (hasMedia ? '\nAperçu disponible' : '\nRien de publié en Production') +
         '\nBord droit : glisser pour changer la duree' +
         (override ? '\nOverrides seq' : '') +
         (locked ? '\nVerrouillé' : '')
@@ -866,8 +976,11 @@ function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onCl
 }
 
 // ── generic clip (big number, optional label under) ─────────────────────────
-function Clip({ width, height, color, big, small, active, onClick, onDragStart, onDrop, acceptType, title, badge, onResizeDown }: {
+function Clip({ width, height, color, big, small, active, playing, dot, onClick, onContextMenu, onDragStart, onDrop, acceptType, title, badge, onResizeDown }: {
   onResizeDown?: (e: React.MouseEvent) => void
+  playing?:    boolean
+  dot?:        boolean
+  onContextMenu: (x: number, y: number) => void
   width:       number
   height:      number
   color:       string
@@ -903,6 +1016,14 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
       onDragLeave={() => setDragOver(false)}
       onDrop={e => { setDragOver(false); onDrop(e) }}
       onClick={(e) => { e.stopPropagation(); onClick() }}
+      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e.clientX, e.clientY) }}
+      tabIndex={0}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() }
+        else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onContextMenu(r.left, r.bottom)
+        }
+      }}
       title={title}
       style={{
         // border-box so the given width INCLUDES padding/border — otherwise each
@@ -916,7 +1037,7 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
         border: `1px solid color-mix(in oklch, ${color} 75%, black 20%)`,
         outline: active
           ? '2px solid var(--accent)'
-          : dragOver ? '2px dashed var(--accent-hi)' : 'none',
+          : playing ? '2px solid var(--ink)' : dragOver ? '2px dashed var(--accent-hi)' : 'none',
         outlineOffset: active ? 1 : 0,
         boxShadow: active
           ? `0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent)`
@@ -938,6 +1059,12 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
           background: 'rgba(0,0,0,0.35)', color: 'var(--paper)',
           letterSpacing: '0.06em', pointerEvents: 'none',
         }}>{badge}</span>
+      )}
+      {dot && width >= 14 && (
+        <span aria-hidden style={{
+          position: 'absolute', left: 4, top: 4, width: 5, height: 5, borderRadius: '50%',
+          background: 'var(--paper)', opacity: 0.9, pointerEvents: 'none',
+        }} />
       )}
       {onResizeDown && width >= 8 && (
         <div

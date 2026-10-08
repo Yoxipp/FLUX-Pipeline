@@ -8,8 +8,11 @@
 #     ├── v002.png
 #     └── LAST.png        ← a copy of the most recent deposit (what the UI shows)
 #
-# Only images and (silent) videos are accepted — no audio files. The UI always
-# displays LAST; the versioned files are archives, never surfaced.
+# Only images and (silent) videos are accepted — no audio files. The UI shows
+# LAST by default; older versions are listed from the folder's modif log
+# (retake 10): every deposit appends one entry (vNNN file, author, date, the
+# dropped file's name) to ref/modif_logs.json, the same publication log the
+# Publisher and the Folder Manager "LOG JSON" panel use.
 
 from __future__ import annotations
 
@@ -19,9 +22,15 @@ from pathlib import Path
 
 from core.paths import is_subpath
 from features.folder_manager.tokens import get_path_for_token, load_tokens
+from features.publisher.modif_log import append_log, read_logs
 
 # Extensions the embed zone understands. Kept broad on the video side; the
 # renderer plays whatever Chromium can decode (mp4/webm reliably, mov/m4v often).
+# What Chromium plays / shows inline. mov and mkv often carry codecs it cannot
+# decode (ProRes, DNxHD): the viewer then offers Keyframe Pro instead.
+BROWSER_PLAYABLE_EXTS = {".mp4", ".webm", ".ogv", ".ogg", ".m4v",
+                         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".apng", ".avif", ".svg"}
+
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".apng", ".avif", ".svg"}
 VIDEO_EXTS = {".mp4", ".webm", ".ogv", ".ogg", ".m4v", ".mov", ".mkv"}
 ALLOWED_EXTS = IMAGE_EXTS | VIDEO_EXTS
@@ -136,8 +145,8 @@ def _next_version(ref_dir: Path) -> int:
     return highest + 1
 
 
-def deposit(project_path: Path, rel_path: str, filename: str, data: bytes) -> dict:
-    """Store *data* as the next version and refresh LAST. Returns the LAST info."""
+def deposit(project_path: Path, rel_path: str, filename: str, data: bytes, user: str = "") -> dict:
+    """Store *data* as the next version, refresh LAST and log it. Returns the LAST info."""
     ext = Path(filename or "").suffix.lower()
     if ext not in ALLOWED_EXTS:
         raise ValueError(f"Format non supporté : {ext or '(aucune extension)'}")
@@ -162,7 +171,93 @@ def deposit(project_path: Path, rel_path: str, filename: str, data: bytes) -> di
     last_name = f"LAST{ext}"
     (ref_dir / last_name).write_bytes(data)
 
+    # The publication relation the version list reads (never the file names alone).
+    append_log(ref_dir, f"{version}{ext}", version, Path(filename).name, user or "unknown")
+
     return {"ok": True, "version": version, "file": last_name, "ext": ext, "kind": kind_for_ext(ext)}
+
+
+def versions(project_path: Path, rel_path: str) -> list[dict]:
+    """Every deposited version of a /ref zone, newest first.
+
+    Source of truth = the ref folder's modif log (one entry per deposit). Each
+    entry says whether its file is still on disk (`available`) and whether the
+    renderer can play it (`playable`). Files on disk that predate the log (old
+    deposits) are listed too, flagged `logged: False`, so nothing silently
+    disappears. `latest` marks the version LAST is a copy of.
+    """
+    ref_dir = _safe_ref_dir(project_path, rel_path)
+    if not ref_dir.exists():
+        return []
+    on_disk: dict[str, Path] = {}
+    for f in ref_dir.iterdir():
+        if f.is_file() and _VERSION_RE.match(f.stem) and f.suffix.lower() in ALLOWED_EXTS:
+            on_disk[f.name.lower()] = f
+
+    rows: dict[str, dict] = {}
+    for entry in read_logs(ref_dir):
+        name = str(entry.get("name") or "")
+        m = _VERSION_RE.match(Path(name).stem)
+        if not m or name.lower() in rows:
+            continue                       # newest entry wins for a reused name
+        ext = Path(name).suffix.lower()
+        rows[name.lower()] = {
+            "version": f"v{int(m.group(1)):03d}", "num": int(m.group(1)), "file": name,
+            "ext": ext, "kind": kind_for_ext(ext),
+            "user": entry.get("user", ""), "date": entry.get("date", ""), "time": entry.get("time", ""),
+            "source_name": entry.get("modification", ""), "logged": True,
+            "available": name.lower() in on_disk,
+            "playable": ext in BROWSER_PLAYABLE_EXTS,
+        }
+    for key, f in on_disk.items():
+        if key in rows:
+            continue
+        num = int(_VERSION_RE.match(f.stem).group(1))
+        ext = f.suffix.lower()
+        rows[key] = {
+            "version": f"v{num:03d}", "num": num, "file": f.name, "ext": ext, "kind": kind_for_ext(ext),
+            "user": "", "date": "", "time": "", "source_name": "", "logged": False,
+            "available": True, "playable": ext in BROWSER_PLAYABLE_EXTS,
+        }
+    result = sorted(rows.values(), key=lambda r: r["num"], reverse=True)
+    newest = next((r for r in result if r["available"]), None)
+    for r in result:
+        r["latest"] = r is newest
+        del r["num"]
+    return result
+
+
+def shot_previews(project_path: Path, seq: str, shot: str, tasks: list[str]) -> list[dict]:
+    """The LAST media of each task /ref zone of a shot, in the order of *tasks*.
+
+    Used by the Production Timeline (click on a shot) and the auto edit: one
+    entry per task that holds an image or a video, with its project-relative
+    ref root (to stream it) and its absolute path (for Keyframe Pro).
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for task in tasks:
+        task_u = (task or "").strip().upper()
+        if not task_u or task_u in seen:
+            continue
+        seen.add(task_u)
+        rel = resolve_ref_root(project_path, "shot", seq=seq, shot=shot, task=task_u)
+        try:
+            info = latest(project_path, rel)
+        except ValueError:
+            continue
+        if not info:
+            continue
+        vers = versions(project_path, rel)
+        top = next((v for v in vers if v["latest"]), None)
+        out.append({
+            "task": task_u, "rel_path": rel, **info,
+            "version": top["version"] if top else "",
+            "version_file": top["file"] if top else "",
+            "version_count": len(vers),
+            "abs_path": str(_safe_ref_dir(project_path, rel) / info["file"]),
+        })
+    return out
 
 
 def latest(project_path: Path, rel_path: str) -> dict | None:
