@@ -98,3 +98,7 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 
 * Menu Notifications (en-tete) : mentions, taches suivies, publishs / commentaires / erreurs
   des autres artistes du projet actif. Pre-regle par le profil de travail (ADR 0043).
+
+* Table Production (2026-10-08) : layout fixe (`colgroup`), Shot / Timing / Casting gardent leur largeur
+  et les departements masques elargissent les colonnes de departement. Plus de resume
+  "X taches selectionnees" : Ctrl / Shift + clic sur le badge selectionne, clic simple ouvre les retakes.

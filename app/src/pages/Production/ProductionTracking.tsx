@@ -36,6 +36,8 @@ interface Props {
   loading: boolean
 }
 
+const IDENTITY_WIDTH = 280, TIMING_WIDTH = 110, CASTING_WIDTH = 170, DEPARTMENT_MIN_WIDTH = 110
+
 export function ProductionTracking({ project, mode, state, setState, selection, setSelection, onOpenDetail, onEdit, onNew, onSettings, onOpenEntity, onlyEntityId, loading }: Props) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useProductionShow(project, mode, onlyEntityId)
@@ -110,7 +112,6 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
     <div className="tracking-toolbar">
       <label className="tracking-search"><Search size={14} /><input aria-label="Rechercher dans la production" placeholder={mode === 'shot' ? 'Rechercher un shot, un asset...' : 'Rechercher un asset...'} value={query} onChange={e => setQuery(e.target.value)} /></label>
       <span className="tracking-count">{entities.length} / {mode === 'shot' ? state.shots.length : state.assets.length}</span>
-      {selectedTargets.length > 0 && <div className="tracking-selection-summary"><span role="status">{selectedTargets.length} tâche{selectedTargets.length > 1 ? 's' : ''} sélectionnée{selectedTargets.length > 1 ? 's' : ''}</span><button aria-label="Effacer la sélection de tâches" onClick={() => setTaskSelection(emptyTaskSelection())}><X size={12} /></button></div>}
       <div className="tracking-spacer" />
       <ProductionShowMenu filter={filter} onChange={setFilter} sequences={state.sequences}
         departments={allDepartments} departmentPref={workPrefs.productionDepartments} onDepartmentPref={v => setWorkPref('productionDepartments', v)} />
@@ -122,8 +123,10 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       if (e.target !== e.currentTarget || (!e.ctrlKey && !e.metaKey)) return
       if (['+', '=', '-', '0'].includes(e.key)) { e.preventDefault(); changeZoom(e.key === '0' ? 1 : zoom + (e.key === '-' ? -0.1 : 0.1)) }
     }}>
-      <table className="tracking-table" style={{ zoom }}>
-        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Assets liés' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} /></th>)}</tr></thead>
+      <table className="tracking-table" style={{ zoom, minWidth: IDENTITY_WIDTH + (mode === 'shot' ? TIMING_WIDTH : 0) + CASTING_WIDTH + departments.length * DEPARTMENT_MIN_WIDTH }}>
+        {/* Fixed layout: Shot / Timing / Casting keep their width, hidden departments widen the department columns. */}
+        <colgroup><col style={{ width: IDENTITY_WIDTH }} />{mode === 'shot' && <col style={{ width: TIMING_WIDTH }} />}<col style={{ width: CASTING_WIDTH }} />{departments.map(d => <col key={d.id} />)}</colgroup>
+        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Casting' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} /></th>)}</tr></thead>
         {groups.map(group => <tbody key={group.id} className={mode === 'shot' ? 'tracking-sequence-block' : undefined}>
           {mode === 'shot' && <>
             <tr className="tracking-sequence-gap" aria-hidden><td colSpan={columnCount} /></tr>
@@ -186,7 +189,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       </table>
       {!entities.length && <div className="tracking-empty"><strong>{loading ? 'Chargement...' : 'Aucun résultat'}</strong><span>{filter.kind === 'mine' ? 'Aucun job assigné à votre artiste.' : 'Modifiez la recherche ou le filtre Show.'}</span>{!loading && filter.kind === 'all' && !query && !onlyEntityId && <button onClick={beginCreate}>New</button>}</div>}
     </div>
-    <div className="tracking-footer"><span>Ctrl + molette pour zoomer · Ctrl / Shift + clic autour des badges pour sélectionner</span><span>{selectedTargets.length ? 'Clic droit pour les actions · Clic autour d’un badge ou Échap pour effacer' : 'Clic droit sur un statut ou un shot pour les actions'}</span></div>
+    <div className="tracking-footer"><span>Ctrl + molette pour zoomer · Ctrl / Shift + clic sur un badge pour sélectionner</span><span>{selectedTargets.length ? 'Clic droit pour les actions · Clic dans le vide ou Échap pour effacer' : 'Clic droit sur un statut ou un shot pour les actions'}</span></div>
   </div>
 }
 

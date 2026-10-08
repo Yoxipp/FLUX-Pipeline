@@ -91,7 +91,9 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
       data-empty={!status || undefined}
       data-selectable-empty={!status && selectionControl ? true : undefined}
       tabIndex={!status && selectionControl ? -1 : undefined}
-      onClick={() => {
+      onClick={event => {
+        // Ctrl / Meta / Shift + click selects the badge itself; a plain click opens the retakes.
+        if (selectionControl && (event.ctrlKey || event.metaKey || event.shiftKey)) { selectionControl.onClick(event); return }
         if (!status) return
         if (onClick) onClick()
         else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
