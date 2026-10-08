@@ -35,3 +35,8 @@ export function useSessionState<T>(key: string, initial: T | (() => T)): [T, (v:
   }, [key])
   return [value, set]
 }
+
+/** Forget every session value whose key starts with *prefix* (a page's "Reset"). */
+export function clearSession(prefix: string): void {
+  for (const key of [...memory.keys()]) if (key.startsWith(prefix)) memory.delete(key)
+}

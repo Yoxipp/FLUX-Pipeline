@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Check, RotateCcw, Share2, Trash2, UserRound, X } from 'lucide-react'
 import { useWorkProfile } from '../../WorkProfileContext'
+import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { SOFTWARE } from '../../lib/dccs'
 import {
   BUILTIN_PROFILES, NOTIFY_OPTIONS, PUBLISHER_SOFTS, START_PAGES, joinDepartments, splitDepartments,
   type ProfileRef, type WorkPrefs, type WorkProfile,
@@ -71,6 +73,7 @@ function ProfileGroup({ title, profiles, source, active, onApply, onDelete, empt
 
 export function WorkProfileDialog() {
   const wp = useWorkProfile()
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<ProfileRef | null>(null)
@@ -121,7 +124,9 @@ export function WorkProfileDialog() {
             <label>{PREF_LABELS.publisherSoft}{dot('publisherSoft')}
               <select value={prefs.publisherSoft} onChange={e => setPref('publisherSoft', e.target.value)}>
                 <option value="">Par défaut (Maya)</option>
-                {PUBLISHER_SOFTS.map(s => <option key={s} value={s}>{s}</option>)}
+                {/* Only the software enabled in Settings > Logiciels (+ local file). */}
+                {PUBLISHER_SOFTS.filter(n => { const key = SOFTWARE.find(x => x.name === n)?.key; return !key || isDccEnabled(key) || n === prefs.publisherSoft })
+                  .map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
             {/* The launcher has a single mode since ADR 0044 (logo + Play menu): the old

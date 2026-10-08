@@ -51,6 +51,16 @@ type LogEntry = { type: 'ok' | 'err' | 'info'; msg: string }
 export function ShelfManager() {
   const { isEnabled: isDccEnabled } = useEnabledDccs()
   const [dcc, setDcc] = useState('Houdini')
+  // Same software list as the launcher: the ones enabled in Settings > Logiciels.
+  const dccEnabled = useCallback((name: string) => {
+    const key = SOFTWARE.find(x => x.name === name)?.key
+    return !key || isDccEnabled(key)
+  }, [isDccEnabled])
+  useEffect(() => {
+    if (dccEnabled(dcc)) return
+    const first = SOFTWARE.find(x => isDccEnabled(x.key))
+    if (first) { setDcc(first.name); setVersion('') }
+  }, [dcc, dccEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
   const [version, setVersion] = useState('')
   const [shelfData, setShelfData] = useState<AllShelvesResponse>({})
   const [log, setLog] = useState<LogEntry[]>([])
@@ -188,7 +198,7 @@ export function ShelfManager() {
       {/* One toolbar: software, target version, state, actions (ADR 0044). */}
       <div className="page-toolbar">
         <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false}
-          isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
+          isVisible={dccEnabled} />
         {!isPainter && (versions.length === 0
           ? <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucune version {dcc} détectée</span>
           : <ExpandPicker mono title="Version cible" placeholder="Version" value={version}

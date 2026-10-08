@@ -27,6 +27,7 @@ import { TextureMapTable, mapParams as buildMapParams } from './publisher/Textur
 import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstance, readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
+import { useSessionState, readSession, writeSession, clearSession } from '../hooks/useSessionState'
 import { toast } from 'sonner'
 
 
@@ -594,49 +595,72 @@ function characterBase(token: string): string {
   return token.replace(/_\d+$/, '')
 }
 
+// Session memory of the publish setup (2026-10-08): kept across page changes,
+// forgotten at FLUX restart or by the "Réinitialiser" button.
+const PUB = 'publisher.'
+
 export function Publisher() {
+  const [generation, setGeneration] = useState(0)
+  const resetAll = useCallback(() => {
+    const dcc = readSession<string>(PUB + 'dcc')
+    clearSession(PUB)
+    if (dcc) writeSession(PUB + 'dcc', dcc)   // the software stays, the publish restarts
+    setGeneration(g => g + 1)
+  }, [])
+  return <PublisherPage key={generation} onReset={resetAll} />
+}
+
+function PublisherPage({ onReset }: { onReset: () => void }) {
   const { settings } = useSettings()
   const location = useLocation()
-  const [dcc, setDcc]           = useState('Maya')
+  const [dcc, setDcc]           = useSessionState(PUB + 'dcc', 'Maya')
   // Work profile (ADR 0042): first software shown, unless the user or a navigation
   // (Production prefill, ZBrush freeze) already picked one.
   const { ready: prefsReady, prefs: workPrefs } = useWorkProfile()
   const { isEnabled: isDccEnabled } = useEnabledDccs()
-  const dccPicked = useRef(false)
+  const dccPicked = useRef(readSession(PUB + 'dcc') !== undefined)
   const changeDcc = useCallback((name: string) => { dccPicked.current = true; setDcc(name) }, [])
+  const dccEnabled = useCallback((name: string) => {
+    const key = SOFTWARE.find(x => x.name === name)?.key
+    return !key || isDccEnabled(key)
+  }, [isDccEnabled])
+  useEffect(() => {
+    if (dccEnabled(dcc)) return
+    setDcc(SOFTWARE.find(x => isDccEnabled(x.key))?.name ?? 'Fichier local')
+  }, [dcc, dccEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!prefsReady || dccPicked.current) return
     dccPicked.current = true
-    if (workPrefs.publisherSoft && !location.state?.zbrushConnected) setDcc(workPrefs.publisherSoft)
+    if (workPrefs.publisherSoft && dccEnabled(workPrefs.publisherSoft) && !location.state?.zbrushConnected) setDcc(workPrefs.publisherSoft)
   }, [prefsReady]) // eslint-disable-line react-hooks/exhaustive-deps
   const { project, projects, setProject } = useProject()
   const [tokens, setTokens]     = useState<Record<string, Record<string, string>>>({})
 
   // Composer state
-  const [mode, setMode]       = useState<PublishMode>('asset')
-  const [sel, setSel]         = useState<ComposerSel>(EMPTY_SEL)
+  const [mode, setMode]       = useSessionState<PublishMode>(PUB + 'mode', 'asset')
+  const [sel, setSel]         = useSessionState<ComposerSel>(PUB + 'sel', EMPTY_SEL)
   const [seqs, setSeqs]   = useState<string[]>([])
   const [shots, setShots] = useState<string[]>([])
 
   // Export config (shared for all DCCs)
-  const [exportExt, setExportExt]   = useState('.abc')
-  const [isSequence, setIsSequence] = useState(false)
+  const [exportExt, setExportExt]   = useSessionState(PUB + 'exportExt', '.abc')
+  const [isSequence, setIsSequence] = useSessionState(PUB + 'isSequence', false)
   // ANIMATION = one file with time samples over a frame range (abc / USD).
   // SÉQUENCE = one file per frame ($F4 folder). Frame fields are shared.
-  const [animRange, setAnimRange] = useState(false)
-  const [frameStart, setFrameStart] = useState(1)
-  const [frameEnd, setFrameEnd]     = useState(100)
-  const [frameStep, setFrameStep]   = useState(1)
+  const [animRange, setAnimRange] = useSessionState(PUB + 'animRange', false)
+  const [frameStart, setFrameStart] = useSessionState(PUB + 'frameStart', 1)
+  const [frameEnd, setFrameEnd]     = useSessionState(PUB + 'frameEnd', 100)
+  const [frameStep, setFrameStep]   = useSessionState(PUB + 'frameStep', 1)
   // Where Start / End came from (U1): the keys of the DCC, its timeline, or typed by hand.
   const [rangeInfo, setRangeInfo]   = useState('')
 
   // Per-format export options (Maya). Reset to the format's defaults whenever the
   // active extension changes — defaults reproduce the pre-options export exactly.
-  const [mayaExportOpts, setMayaExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(schemaForExt('.abc')))
-  const [houExportOpts, setHouExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(houdiniSchemaForExt('.abc')))
+  const [mayaExportOpts, setMayaExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'mayaExportOpts', () => defaultOptions(schemaForExt('.abc')))
+  const [houExportOpts, setHouExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'houExportOpts', () => defaultOptions(houdiniSchemaForExt('.abc')))
   // Houdini export attribute filter (F): keep-only / remove named point attributes.
-  const [houAttrMode, setHouAttrMode] = useState<'none' | 'keep' | 'remove'>('none')
-  const [houAttrNames, setHouAttrNames] = useState<string[]>([])
+  const [houAttrMode, setHouAttrMode] = useSessionState<'none' | 'keep' | 'remove'>(PUB + 'houAttrMode', 'none')
+  const [houAttrNames, setHouAttrNames] = useSessionState<string[]>(PUB + 'houAttrNames', [])
 
   // Resizable right panel (draggable splitter). Width persists per viewer; a
   // "Reset interface" action in the settings fires 'flux:reset-ui' to restore it.
@@ -645,7 +669,9 @@ export function Publisher() {
   // Node path we last auto-suggested a format for, so the Houdini poll suggests a
   // format once per newly-selected node instead of clobbering a manual override
   // (e.g. rop_geometry → .obj) on every 3s tick.
-  const autoExtForNodeRef = useRef<string | null>(null)
+  // Starts on the node restored from the session: coming back to the page must not
+  // re-suggest its format over the artist's choice.
+  const autoExtForNodeRef = useRef<string | null>(readSession<string>(PUB + 'ropNodePath') || null)
 
   useEffect(() => {
     try { localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth)) } catch { /* blocked storage */ }
@@ -680,17 +706,17 @@ export function Publisher() {
   }, [rightWidth])
 
   // Source / description / state
-  const [sourcePath, setSourcePath]   = useState('')
+  const [sourcePath, setSourcePath]   = useSessionState(PUB + 'sourcePath', '')
   // Local-file source: multiple files can be picked at once (texture sets). The
   // first also fills sourcePath so the single-file path/name UI still works.
-  const [localFiles, setLocalFiles]   = useState<string[]>([])
+  const [localFiles, setLocalFiles]   = useSessionState<string[]>(PUB + 'localFiles', [])
   // Autogroup: derive each file's INSTANCE (map token) from its filename so a
   // whole texture set publishes into one folder per map. Off = one instance for all.
-  const [autoGroup, setAutoGroup]     = useState(true)
-  const [description, setDescription] = useState('')
+  const [autoGroup, setAutoGroup]     = useSessionState(PUB + 'autoGroup', true)
+  const [description, setDescription] = useSessionState(PUB + 'description', '')
   const [publishing, setPublishing]   = useState(false)
   // Optional published-name override (local file). null = follow the token composer.
-  const [nameOverride, setNameOverride] = useState<string | null>(null)
+  const [nameOverride, setNameOverride] = useSessionState<string | null>(PUB + 'nameOverride', null)
 
   // ZBrush-specific
   const [zbrushConnected, setZbrushConnected] = useState(false)
@@ -699,24 +725,24 @@ export function Publisher() {
   const [zbrushPluginInstalled, setZbrushPluginInstalled] = useState<boolean | null>(null)
   // Per-format ZBrush export options, rendered via <ExportOptions> in the right
   // panel like Maya/Houdini. Reset to the format defaults when the format changes.
-  const [zbrushExportOpts, setZbrushExportOpts] = useState<Record<string, unknown>>(
+  const [zbrushExportOpts, setZbrushExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'zbrushExportOpts',
     () => defaultZbrushOptions('.obj'),
   )
 
   // Nuke per-format export options (Write knobs), rendered via <ExportOptions>.
-  const [nukeExportOpts, setNukeExportOpts] = useState<Record<string, unknown>>(
+  const [nukeExportOpts, setNukeExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'nukeExportOpts',
     () => defaultNukeOptions('.exr'),
   )
 
   // Photoshop per-format export options (COM save-option fields).
-  const [psExportOpts, setPsExportOpts] = useState<Record<string, unknown>>(
+  const [psExportOpts, setPsExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'psExportOpts',
     () => defaultPhotoshopOptions('.psd'),
   )
 
   // Painter / Mari options (preset / bit depth / conform_tx). These map to typed
   // request fields, not a Write-knob dict; the format comes from the shared picker.
-  const [painterOpts, setPainterOpts] = useState<Record<string, unknown>>(() => defaultPainterOptions())
-  const [mariOpts, setMariOpts] = useState<Record<string, unknown>>(() => defaultMariOptions())
+  const [painterOpts, setPainterOpts] = useSessionState<Record<string, unknown>>(PUB + 'painterOpts', () => defaultPainterOptions())
+  const [mariOpts, setMariOpts] = useSessionState<Record<string, unknown>>(PUB + 'mariOpts', () => defaultMariOptions())
   // Painter texture sets / Mari channels read from the app: the ticked ones export.
   const [texItems, setTexItems]     = useState<{ name: string; detail: string }[]>([])
   const [texChecked, setTexChecked] = useState<Set<string>>(new Set())
@@ -726,9 +752,9 @@ export function Publisher() {
   // map by map like Mari, bit depth and size per map, only the ticked maps publish).
   const [painterPresets, setPainterPresets] = useState<PainterPreset[]>([])
   const [mapChecked, setMapChecked] = useState<Set<string>>(new Set())
-  const [mapOpts, setMapOpts] = useState<Record<string, MapOpts>>({})
+  const [mapOpts, setMapOpts] = useSessionState<Record<string, MapOpts>>(PUB + 'mapOpts', {})
   // Mari: format / bit depth / size per channel (same table as Painter's maps).
-  const [chanOpts, setChanOpts] = useState<Record<string, MapOpts>>({})
+  const [chanOpts, setChanOpts] = useSessionState<Record<string, MapOpts>>(PUB + 'chanOpts', {})
   // The project's Painter export presets (project.json, picked at creation): only those
   // are offered; none chosen = every preset of Painter (2026-09-26).
   const [projectPresets, setProjectPresets] = useState<string[]>([])
@@ -764,12 +790,12 @@ export function Publisher() {
   const mapRows = [...presetRows, ...channelRows]
 
   // Designer: the graphs of the open packages (ticked ones export) and their outputs.
-  const [designerOpts, setDesignerOpts] = useState<Record<string, unknown>>(() => defaultDesignerOptions())
+  const [designerOpts, setDesignerOpts] = useSessionState<Record<string, unknown>>(PUB + 'designerOpts', () => defaultDesignerOptions())
   const [designerPkgs, setDesignerPkgs] = useState<DesignerPackage[]>([])
   const [graphChecked, setGraphChecked] = useState<Set<string>>(new Set())
   const [outputChecked, setOutputChecked] = useState<Set<string>>(new Set())
   // Marvelous: the open project and the formats this Marvelous can export.
-  const [marvelousOpts, setMarvelousOpts] = useState<Record<string, unknown>>(() => defaultMarvelousOptions())
+  const [marvelousOpts, setMarvelousOpts] = useSessionState<Record<string, unknown>>(PUB + 'marvelousOpts', () => defaultMarvelousOptions())
   const [marvelousFormats, setMarvelousFormats] = useState<string[]>([])
   const [marvelousScript, setMarvelousScript] = useState<string | null>(null)
   const designerGraphs = designerPkgs.flatMap(p => p.graphs.map(g => ({ key: graphKey(p.path, g.id), pkg: p, graph: g })))
@@ -783,14 +809,14 @@ export function Publisher() {
 
 
   // Houdini-specific
-  const [ropNodePath, setRopNodePath]             = useState('')
+  const [ropNodePath, setRopNodePath]             = useSessionState(PUB + 'ropNodePath', '')
   const [houdiniConnected, setHoudiniConnected]   = useState(false)
   const [houdiniVersion, setHoudiniVersion]       = useState<string | null>(null)
   const [detectedNodeType, setDetectedNodeType]   = useState<string | null>(null)
 
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
-  const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
+  const [mayaScope, setMayaScope]                   = useSessionState<'scene' | 'selection'>(PUB + 'mayaScope', 'selection')
   // Several Maya / Houdini open (2026-09-26): each one's scene and selection, the
   // artist picks which one publishes (and, in Houdini, which selected node).
   const [openInstances, setOpenInstances] = useState<{ port: number; pid?: number | null; label: string; scene: string | null; selection?: string[] }[]>([])
@@ -802,7 +828,7 @@ export function Publisher() {
   const [charLoading, setCharLoading]     = useState(false)
   // Who writes the USD of an asset task: null = the default for this task (FLUX when
   // the task has a department), true/false = the artist's explicit choice.
-  const [fluxWriter, setFluxWriter]                 = useState<boolean | null>(null)
+  const [fluxWriter, setFluxWriter]                 = useSessionState<boolean | null>(PUB + 'fluxWriter', null)
   const [usdDepartments, setUsdDepartments] = useState(USD_DEPARTMENTS_FALLBACK)
   const [usdShotDepartments, setUsdShotDepartments] = useState(USD_SHOT_DEPARTMENTS_FALLBACK)
   useEffect(() => {
@@ -826,7 +852,7 @@ export function Publisher() {
   // (or the selection) as usual, with that format's own options.
   const usdPreset: UsdPreset | null = usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)
     ? presetForTask(mode === 'asset' ? sel.task : formatToken(sel.name), mode === 'shot') : null
-  const [usdPresetOpts, setUsdPresetOpts] = useState(defaultPresetOptions)
+  const [usdPresetOpts, setUsdPresetOpts] = useSessionState(PUB + 'usdPresetOpts', defaultPresetOptions)
   const [usdPreview, setUsdPreview] = useState<MayaUsdPreview | null>(null)
   const [usdPreviewBusy, setUsdPreviewBusy] = useState(false)
   const [usdPreviewErr, setUsdPreviewErr] = useState('')
@@ -985,8 +1011,12 @@ export function Publisher() {
     if (!formats.includes(exportExt)) setExportExt(formats[0])
   }, [dcc]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset export options to the active format's defaults whenever it changes.
+  // Reset export options to the active format's defaults whenever it changes (not at
+  // mount: options restored from the session belong to the restored format).
+  const prevExt = useRef(exportExt)
   useEffect(() => {
+    if (prevExt.current === exportExt) return
+    prevExt.current = exportExt
     setMayaExportOpts(defaultOptions(schemaForExt(exportExt)))
     setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
     setZbrushExportOpts(defaultZbrushOptions(exportExt))
@@ -1142,11 +1172,7 @@ export function Publisher() {
     setZbrushVersion(null)
   }, [])
 
-  const reset = useCallback(() => {
-    setSel(EMPTY_SEL)
-    setSourcePath('')
-    setDescription('')
-  }, [])
+  const reset = onReset
 
   const ANIM_EXTS = ['.abc', '.usd', '.usda', '.usdc']
   // model / rig / look presets are a rest state: no frame range (2026-09-26).
@@ -1205,7 +1231,10 @@ export function Publisher() {
 
   // ANIM preset (2026-09-26): animation on by default, Start 1001 (a pre-roll such
   // as 995 stays editable), End from the last key of the scene (fetch above).
+  const prevPreset = useRef(usdPreset)
   useEffect(() => {
+    if (prevPreset.current === usdPreset) return
+    prevPreset.current = usdPreset
     if (!usdPreset || !ANIMATED_PRESETS.has(usdPreset)) return
     setAnimRange(true)
     setFrameStart(1001)
@@ -1903,7 +1932,7 @@ export function Publisher() {
 
       {/* Toolbar: software (expand picker), project, connection. No page title (ADR 0044). */}
       <div className="page-toolbar">
-        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
+        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} />
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex', zIndex: 1 }}>
             <FolderIcon color="var(--accent)" />
