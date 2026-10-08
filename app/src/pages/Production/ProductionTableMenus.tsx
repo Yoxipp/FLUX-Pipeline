@@ -25,16 +25,17 @@ export function ProductionShowMenu({ filter, onChange, sequences, departments, d
     </Menu.SubContent></Menu.Portal></Menu.Sub>
     <Menu.Item className="production-menu-item" onSelect={() => onChange({ kind: 'mine' })}>Mine{filter.kind === 'mine' && <Check size={13} />}</Menu.Item>
     {departments.length > 0 && <>
-      <Menu.Separator className="production-menu-separator" />
-      <Menu.Label className="production-menu-artist">Départements</Menu.Label>
-      <Menu.Item className="production-menu-item" onSelect={e => { e.preventDefault(); onDepartmentPref(showAllDepartments(departments, departmentPref)) }}>Tous{!partial && <Check size={13} />}</Menu.Item>
-      {departments.map(d => {
-        const on = shown.includes(d)
-        return <Menu.CheckboxItem key={d.id} className="production-menu-item" checked={on} disabled={on && shown.length === 1}
-          onSelect={e => e.preventDefault()} onCheckedChange={() => onDepartmentPref(toggleDepartment(departments, departmentPref, d.name))}>
-          {d.name}{on && <Check size={13} />}
-        </Menu.CheckboxItem>
-      })}
+      <Menu.Sub><Menu.SubTrigger className="production-menu-item">Departments{partial && <span className="tracking-show-count">{shown.length}/{departments.length}</span>}<ChevronRight size={13} /></Menu.SubTrigger><Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
+        <Menu.Item className="production-menu-item" onSelect={e => { e.preventDefault(); onDepartmentPref(showAllDepartments(departments, departmentPref)) }}>Tous{!partial && <Check size={13} />}</Menu.Item>
+        <Menu.Separator className="production-menu-separator" />
+        {departments.map(d => {
+          const on = shown.includes(d)
+          return <Menu.CheckboxItem key={d.id} className="production-menu-item" checked={on} disabled={on && shown.length === 1}
+            onSelect={e => e.preventDefault()} onCheckedChange={() => onDepartmentPref(toggleDepartment(departments, departmentPref, d.name))}>
+            {d.name}{on && <Check size={13} />}
+          </Menu.CheckboxItem>
+        })}
+      </Menu.SubContent></Menu.Portal></Menu.Sub>
       <Menu.Separator className="production-menu-separator" />
       <Menu.Item className="production-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
     </>}

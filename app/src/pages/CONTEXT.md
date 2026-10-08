@@ -33,7 +33,7 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   les references versionnees existantes, sous `_production/thumbnails/<id>`.
 * Timeline est ouverte dans la bande d'onglets des Shots des le depart ; Main reste la vue
   initiale. Les onglets ouverts et filtres Main survivent a l'ouverture des retakes.
-  Show > Departements : colonnes cochees a la main, pre-reglees par le profil de travail
+  Show > Lignes > Departments (sous-menu) : colonnes cochees a la main, pre-reglees par le profil de travail
   (ADR 0043, `workPrefs.productionDepartments`, noms en majuscules, au moins une colonne,
   mode sans departement coche = toutes les colonnes). NEED calcule sur tous les departements.
   Le filtre de lignes All/Seq/Mine reste local par projet et mode.
