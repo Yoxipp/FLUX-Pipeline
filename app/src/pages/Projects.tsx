@@ -1373,17 +1373,6 @@ export function Projects() {
     <FolderManagerContext.Provider value={shared}>
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      {/* En-tête : titre + choix des vues (comme les vues de Houdini) */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Folder Manager</div>
-        <div style={{ flex: 1 }} />
-        <ViewMenu
-          layout={layout} onLayout={changeLayout}
-          tileSize={tileSize} onTileSize={changeTileSize}
-          createPanel={createPanel} onCreatePanel={setCreatePanel}
-        />
-      </div>
-
       {/* Barre commune : annuler + Token Finder (résultats dans la vue active) + presse-papier */}
       <div style={{ padding: '6px 10px 7px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
         <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title="Annuler (Ctrl+Z)" style={navBtn(undoStack.length > 0)}>
@@ -1404,6 +1393,12 @@ export function Projects() {
             <X size={10} strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => setClipboard(null)} />
           </div>
         )}
+        <div style={{ flex: 1 }} />
+        <ViewMenu
+          layout={layout} onLayout={changeLayout}
+          tileSize={tileSize} onTileSize={changeTileSize}
+          createPanel={createPanel} onCreatePanel={setCreatePanel}
+        />
       </div>
 
       {/* Corps */}

@@ -52,14 +52,6 @@ function DepartmentChips({ value, onChange }: { value: string; onChange: (v: str
   </div>
 }
 
-function Segmented<T extends string>({ value, options, onChange, label }: {
-  value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string
-}) {
-  return <div className="work-profile-seg" role="radiogroup" aria-label={label}>
-    {options.map(o => <button key={o.value} role="radio" aria-checked={value === o.value} data-on={value === o.value || undefined} onClick={() => onChange(o.value)}>{o.label}</button>)}
-  </div>
-}
-
 function ProfileGroup({ title, profiles, source, active, onApply, onDelete, empty }: {
   title: string; profiles: WorkProfile[]; source: ProfileRef['source']; active: ProfileRef
   onApply: (ref: ProfileRef) => void; onDelete?: (ref: ProfileRef) => void; empty?: string
@@ -132,11 +124,8 @@ export function WorkProfileDialog() {
                 {PUBLISHER_SOFTS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
-            <div className="work-profile-field">{PREF_LABELS.launcher}{dot('launcher')}
-              <Segmented label={PREF_LABELS.launcher} value={prefs.launcher} onChange={v => setPref('launcher', v)}
-                options={[{ value: 'compact', label: 'Compact' }, { value: 'full', label: 'Tous les boutons' }]} />
-              <small>Compact : lancer reste visible, les autres actions apparaissent au survol et au clic droit.</small>
-            </div>
+            {/* The launcher has a single mode since ADR 0044 (logo + Play menu): the old
+                compact / full pref is kept in stored profiles but no longer offered. */}
             <div className="work-profile-field">{PREF_LABELS.productionDepartments}{dot('productionDepartments')}
               <DepartmentChips value={prefs.productionDepartments} onChange={v => setPref('productionDepartments', v)} />
               <small>Un mode sans département coché affiche toutes ses colonnes.</small>

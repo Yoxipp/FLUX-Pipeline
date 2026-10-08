@@ -5,7 +5,7 @@ import {
   Home, Upload, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Settings2, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
+  Play, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
   ClipboardList, AlertTriangle, Check, X, HardDrive, CalendarDays, PanelLeft, UserRound,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
@@ -16,10 +16,8 @@ import { DCC_STATUS_KEYS, SOFTWARE } from '../../lib/dccs'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
-import { Tooltip, TooltipTrigger, TooltipContent } from './ui'
+import { DccLogo } from './DccLogo'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { createPortal } from 'react-dom'
-import { useWorkProfile } from '../../WorkProfileContext'
 import { openWorkProfile } from './WorkProfileDialog'
 
 interface Props {
@@ -137,10 +135,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
   const { isEnabled: isDccEnabled } = useEnabledDccs()
-  // ADR 0042: compact launcher = launch always visible, other actions on hover/focus
-  // and in the row's context menu; states that need action stay visible.
-  const { prefs: workPrefs, setPref: setWorkPref } = useWorkProfile()
-  const compactLauncher = workPrefs.launcher === 'compact'
   const [launcherMenu, setLauncherMenu] = useState<{ soft: string; x: number; y: number } | null>(null)
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})
@@ -149,7 +143,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [autostartInstalled, setAutostartInstalled] = useState<Record<string, boolean>>({})
   const [autostartLoading, setAutostartLoading]     = useState<Set<string>>(new Set())
   const [reapingMaya, setReapingMaya]               = useState(false)
-  const [pingResult, setPingResult]                 = useState<Record<string, string | null>>({})
   const [houdiniServerOk, setHoudiniServerOk]       = useState<boolean | null>(null)
   const [zbrushServerOk,  setZbrushServerOk]        = useState<boolean | null>(null)
   const [mayaServerOk,    setMayaServerOk]          = useState<boolean | null>(null)
@@ -165,8 +158,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   // New Scene: the active project's presets drive the per-soft menu + button colour.
   const { project: activeProject } = useProject()
   const [presets, setPresets] = useState<Preset[]>([])
-  const [newScene, setNewScene] = useState<{ soft: string; x: number; y: number } | null>(null)
-  const [hoverTask, setHoverTask] = useState<string | null>(null)
 
   // Multi-instance (cluster C): which instance each DCC targets. The selector row
   // control only appears when a DCC exposes more than one running instance.
@@ -475,19 +466,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             duration: 10000,
           })
         }
-        // Ping pour confirmer que le bridge tourne déjà (ZBrush peut-être déjà ouvert)
+        // Ping to confirm the bridge already runs (the software may already be open).
+        const name = SOFTWARE.find(x => x.key === key)?.name ?? key
         try {
           const pong = await api.pingDcc(key)
           _setServerOk(key, pong.connected)
-          const label = pong.connected
-            ? (pong.version ? `v${pong.version}` : '✓')
-            : '✓ installé'
-          setPingResult(prev => ({ ...prev, [key]: label }))
-          setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
+          if (key !== 'houdini') toast.success(pong.connected ? `${name} · bridge connecté` : `${name} · bridge installé`, { duration: 3000 })
         } catch {
           _setServerOk(key, false)
-          setPingResult(prev => ({ ...prev, [key]: '✓ installé' }))
-          setTimeout(() => setPingResult(prev => ({ ...prev, [key]: null })), 3000)
+          if (key !== 'houdini') toast.success(`${name} · bridge installé`, { duration: 3000 })
         }
       }
     } catch (e) {
@@ -566,22 +553,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     }
   }
 
-  // ── New Scene ────────────────────────────────────────────────────────────────
-  // Open the per-soft menu of tasks that have presets in the active project.
-  const openNewScene = (soft: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    openNewSceneAt(soft, rect.left, rect.top)
-  }
-  const openNewSceneAt = (soft: string, x: number, y: number) => {
-    if (!activeProject) { toast.error('Aucun projet actif — choisis-en un dans le Folder Manager'); return }
-    setHoverTask(null)
-    setNewScene({ soft, x, y })
-  }
-
   // Launch the chosen preset (or the empty default scene) in *soft*.
   const runNewScene = async (soft: string, preset: Preset | null) => {
-    setNewScene(null)
     const name = SOFTWARE.find(s => s.key === soft)?.name ?? soft
     // A FLUX render preset whose scene is not on disk yet is built first (about a minute).
     const building = preset?.builtin && !preset.exists
@@ -600,6 +573,95 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       if (building !== undefined) toast.dismiss(building)
       if (preset?.builtin) window.dispatchEvent(new Event('flux:refresh'))
     }
+  }
+
+  // Everything a software offers, in one click menu (ADR 0044).
+  const renderLauncherMenu = (soft: string) => {
+    const name = SOFTWARE.find(x => x.key === soft)?.name ?? soft
+    const statusKey = DCC_STATUS_KEYS[soft] ?? soft
+    const connected = dccDot(dccStatus, soft) === 'ok'
+    const installed = !!autostartInstalled[soft]
+    const plugOk = installed && (soft === 'houdini' ? houdiniServerOk : soft === 'zbrush' ? zbrushServerOk : soft === 'maya' ? mayaServerOk
+      : soft === 'nuke' ? nukeServerOk : soft === 'substance_painter' ? painterServerOk : soft === 'mari' ? mariServerOk
+      : soft === 'substance_designer' ? designerServerOk : soft === 'marvelous' ? marvelousServerOk : null) === true
+    const instances = dccStatus[statusKey]?.instances ?? []
+    const mayaStuck = soft === 'maya' && !!dccStatus[statusKey]?.stuck
+    // New Scene: presets of the active project for this soft, grouped by TASK token.
+    const linked = presets.filter(p => p.soft === soft && p.file)
+    const groups = new Map<string, Preset[]>()
+    for (const p of linked) {
+      const key = (p.task ?? '').toUpperCase() || 'DEFAULT'
+      groups.set(key, [...(groups.get(key) ?? []), p])
+    }
+    const tasks = [...groups.keys()].filter(k => k !== 'DEFAULT').sort()
+    const presetItem = (p: Preset) => (
+      <Menu.Item key={p.id} className="launcher-menu-item" title={p.file ?? ''} onSelect={() => void runNewScene(soft, p)}>
+        <FilePlus2 size={13} />{p.name}
+      </Menu.Item>
+    )
+    return <>
+      <Menu.Label className="launcher-menu-label">{name}</Menu.Label>
+      <Menu.Item className="launcher-menu-item launcher-menu-primary" disabled={launching.has(soft)} onSelect={() => void handleLaunch(soft)}>
+        <Play size={13} fill="currentColor" />{connected ? 'Nouvelle instance' : 'Lancer'}
+      </Menu.Item>
+      <Menu.Sub>
+        <Menu.SubTrigger className="launcher-menu-item" disabled={!activeProject}>
+          <FilePlus2 size={13} />Nouvelle scène<span className="launcher-menu-hint">{activeProject ? '' : 'aucun projet'}</span><ChevronRight size={12} />
+        </Menu.SubTrigger>
+        <Menu.Portal>
+          <Menu.SubContent className="launcher-menu" sideOffset={4} collisionPadding={10}>
+            <Menu.Item className="launcher-menu-item" onSelect={() => void runNewScene(soft, null)}><Play size={13} />Scène vide</Menu.Item>
+            {(groups.get('DEFAULT') ?? []).map(presetItem)}
+            {tasks.map(task => (
+              <Menu.Sub key={task}>
+                <Menu.SubTrigger className="launcher-menu-item"><span className="launcher-menu-token">{task}</span><span style={{ flex: 1 }} /><ChevronRight size={12} /></Menu.SubTrigger>
+                <Menu.Portal>
+                  <Menu.SubContent className="launcher-menu" sideOffset={4} collisionPadding={10}>
+                    {(groups.get(task) ?? []).map(presetItem)}
+                  </Menu.SubContent>
+                </Menu.Portal>
+              </Menu.Sub>
+            ))}
+          </Menu.SubContent>
+        </Menu.Portal>
+      </Menu.Sub>
+      {instances.length > 1 && (
+        <Menu.Item className="launcher-menu-item" onSelect={() => setInstMenu({ statusKey, name, y: launcherAnchorY(soft) })}>
+          <Layers size={13} />Instances<span className="launcher-menu-hint">{instances.length} · port {activePort(statusKey) ?? '-'}</span>
+        </Menu.Item>
+      )}
+      {mayaStuck && (
+        <Menu.Item className="launcher-menu-item launcher-menu-danger" disabled={reapingMaya} onSelect={() => void handleReapMaya()}>
+          <AlertTriangle size={13} />Fermer l'instance bloquée (port 7001)
+        </Menu.Item>
+      )}
+      <Menu.Separator className="launcher-menu-separator" />
+      <Menu.Item className="launcher-menu-item" onSelect={() => void handlePickPath(soft)} title={dccPaths[soft] ?? ''}>
+        <FolderOpen size={13} />{dccPaths[soft] ? 'Changer le chemin…' : 'Définir le chemin…'}
+        {!dccPaths[soft] && <span className="launcher-menu-hint warn">manquant</span>}
+      </Menu.Item>
+      {soft !== 'photoshop'
+        ? <Menu.Item className="launcher-menu-item" disabled={autostartLoading.has(soft)} onSelect={() => void handleToggleAutostart(soft)}>
+            <Plug size={13} />{installed ? 'Désinstaller le bridge' : 'Installer le bridge'}
+            <span className="launcher-menu-hint">{installed ? (plugOk ? 'connecté' : 'en attente') : ''}</span>
+          </Menu.Item>
+        : <Menu.Item className="launcher-menu-item" disabled={psBusy} onSelect={() => void handlePhotoshop()}>
+            {psReason === 'lib_missing' ? <ArrowDownToLine size={13} /> : <Plug size={13} />}
+            {psReason === 'lib_missing' ? 'Installer photoshop-python-api' : 'Vérifier Photoshop'}
+            <span className="launcher-menu-hint">{psReason === 'ok' ? 'connecté' : psReason === 'not_running' ? 'fermé' : ''}</span>
+          </Menu.Item>}
+      <Menu.Item className="launcher-menu-item" disabled={findingAll} onSelect={() => void handleAutoFindAll()}>
+        <Search size={13} />Auto-détecter les chemins
+      </Menu.Item>
+      <Menu.Separator className="launcher-menu-separator" />
+      <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
+    </>
+  }
+
+  // Vertical anchor of a launcher row (the instance picker opens next to it).
+  const launcherAnchorY = (soft: string): number => {
+    const el = document.querySelector(`[aria-label="${SOFTWARE.find(x => x.key === soft)?.name ?? soft} : actions"]`)
+    return el ? el.getBoundingClientRect().top : window.innerHeight / 2
   }
 
   return (
@@ -637,480 +699,57 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
+        {/* ADR 0044: the official mark (accent) + one wide Play button. A click on Play opens
+            every action of the software (launch, new scene, instances, path, bridge); nothing
+            happens on hover. Only states to act on stay visible (flag on the button). */}
         {SOFTWARE.filter(s => isDccEnabled(s.key)).map(s => {
-          const dot       = dccDot(dccStatus, s.key)
-          const connected = dot === 'ok'
-          const isLoading = launching.has(s.key)
-          const hasPreset      = presets.some(p => p.soft === s.key && p.file)
+          const statusKey      = DCC_STATUS_KEYS[s.key] ?? s.key
+          const connected      = dccDot(dccStatus, s.key) === 'ok'
+          const isLoading      = launching.has(s.key)
           const hasPath        = !!dccPaths[s.key]
           const findOk         = findResult[s.key]
-          const isHoudini      = s.key === 'houdini'
-          const isZBrush       = s.key === 'zbrush'
-          const isMaya         = s.key === 'maya'
-          const isNuke         = s.key === 'nuke'
-          const isPainter      = s.key === 'substance_painter'
-          const isMari         = s.key === 'mari'
-          const isDesigner     = s.key === 'substance_designer'
-          const isMarvelous    = s.key === 'marvelous'
-          const isPhotoshop    = s.key === 'photoshop'
-          // Plug slot has two kinds: a 'toggle' installs/removes an in-app bridge
-          // (Houdini/Maya/Nuke/ZBrush/Painter/Mari/Designer/Marvelous); Photoshop has no
-          // plugin (external COM) so it shows a one-line hint instead.
-          const hasPlug        = isHoudini || isZBrush || isMaya || isNuke || isPainter || isMari || isDesigner || isMarvelous
-          const autoInstalled  = !!autostartInstalled[s.key]
-          const autoLoading    = autostartLoading.has(s.key)
-          const serverOk       = isHoudini ? houdiniServerOk : isZBrush ? zbrushServerOk : isMaya ? mayaServerOk : isNuke ? nukeServerOk : isPainter ? painterServerOk : isMari ? mariServerOk : isDesigner ? designerServerOk : isMarvelous ? marvelousServerOk : null
-          // AutoStart state colors: ORANGE = autostart installed but the software isn't
-          // launched/connected yet · GREEN = launched + connected. No red state anymore.
-          const plugConnected  = hasPlug && autoInstalled && serverOk === true
-          const plugWaiting    = hasPlug && autoInstalled && !plugConnected
-          // Zombie Maya still holding the commandPort (continuous detection). Shown
-          // as a persistent reap control on the Maya row, not just at launch time.
-          const mayaStuck      = isMaya && !!dccStatus[DCC_STATUS_KEYS[s.key] ?? s.key]?.stuck
-          // Multi-instance: running instances of this DCC + the one currently targeted.
-          const statusKey      = DCC_STATUS_KEYS[s.key] ?? s.key
+          const mayaStuck      = s.key === 'maya' && !!dccStatus[statusKey]?.stuck
           const instances      = dccStatus[statusKey]?.instances ?? []
-          const activeP        = activePort(statusKey)
           const statusBusy     = !!dccStatus[statusKey]?.busy
           const statusNoBridge = !!dccStatus[statusKey]?.no_bridge
-
+          const state = mayaStuck ? 'err' : statusBusy || (statusNoBridge && !connected) ? 'warn' : connected ? 'ok' : ''
+          const stateText = mayaStuck ? 'Instance bloquée sur le port 7001'
+            : statusBusy ? 'Occupé (un export tourne)'
+            : statusNoBridge && !connected ? 'Ouvert sans le bridge FLUX'
+            : connected ? `Connecté${instances.length === 1 && instances[0].scene != null ? ` · ${instances[0].label}` : ''}`
+            : 'Fermé'
+          const flag = mayaStuck ? 'err' : (!hasPath || findOk === false) ? 'warn' : ''
+          const open = launcherMenu?.soft === s.key
           return (
-            <div key={s.key} className="launcher-row" data-compact={compactLauncher || undefined}
-              tabIndex={0} aria-label={`${s.name} : clic droit pour toutes les actions`}
-              onContextMenu={e => { e.preventDefault(); setLauncherMenu({ soft: s.key, x: e.clientX, y: e.clientY }) }}
-              onKeyDown={e => {
-                if (e.target !== e.currentTarget) return
-                if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-                  e.preventDefault()
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  setLauncherMenu({ soft: s.key, x: rect.left + 18, y: rect.bottom })
-                } else if (e.key === 'Enter' && !isLoading) { e.preventDefault(); void handleLaunch(s.key) }
-              }}
-              style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '5px 10px 5px 18px',
-              fontSize: 11, color: connected ? 'var(--ink-2)' : 'var(--ink-4)',
-            }}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className={`dot${statusBusy || (statusNoBridge && !connected) ? ' warn' : connected ? ' ok' : ''}`}
-                    style={{ width: 5, height: 5, flexShrink: 0 }}
-                  />
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {statusBusy ? 'Occupé (un export tourne) : il répondra quand il aura fini'
-                    : statusNoBridge && !connected ? "Ouvert, mais le bridge FLUX ne tourne pas (installe l'autostart, puis relance le logiciel)"
-                    : connected ? `Connecté${instances.length === 1 && instances[0].scene != null ? ` · ${instances[0].label}` : ''}`
-                      + (statusNoBridge ? ` · +${dccStatus[statusKey]?.no_bridge_count ?? 1} ouvert(s) sans bridge` : '')
-                    : 'Fermé'}
-                </TooltipContent>
-              </Tooltip>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-
-              {/* feedback badge — find/ping éphémères (la coche verte permanente a été retirée) */}
-              {findOk === false
-                ? <span style={{ fontSize: 8, color: 'var(--err)' }}>✗</span>
-                : pingResult[s.key]
-                  ? <span style={{ fontSize: 8, color: pingResult[s.key] === '✗' ? 'var(--err)' : 'var(--ok)' }}>
-                      {pingResult[s.key]}
-                    </span>
-                  : null
-              }
-
-              {/* path picker — indicateur visuel : accent = path défini */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-              <div
-                onClick={() => void handlePickPath(s.key)}
-                className="scale-hover-lg launcher-secondary" data-attention={!hasPath || undefined}
-                style={{
-                  width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (hasPath ? 'var(--accent)' : 'var(--rule-2)'),
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                  background: hasPath ? 'var(--accent-soft)' : 'transparent',
-                  color: hasPath ? 'var(--accent-hi)' : 'var(--ink-4)',
-                  cursor: 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
-                }}
-              >
-                <FolderOpen size={8} strokeWidth={2} />
-              </div>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {hasPath ? dccPaths[s.key] : 'Définir le chemin…'}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* port local — bridge toggle (Houdini/Maya/Nuke/ZBrush/Painter/Mari/Designer/Marvelous) */}
-              {hasPlug && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-              <div
-                onClick={() => { if (!autoLoading) void handleToggleAutostart(s.key) }}
-                className="scale-hover-lg launcher-secondary" data-attention={autoLoading || undefined}
-                style={{
-                  width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--rule-2)'),
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                  background: plugConnected ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : plugWaiting ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
-                  color: plugConnected ? 'var(--ok)' : plugWaiting ? '#e8912a' : 'var(--ink-4)',
-                  cursor: autoLoading ? 'default' : 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
-                }}
-              >
-                {autoLoading
-                  ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                  : isZBrush
-                    ? <ArrowDownToLine size={8} strokeWidth={2} />
-                    : <Plug size={8} strokeWidth={2} />
-                }
-              </div>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {autoLoading ? '…' :
-                   isHoudini
-                     ? (autoInstalled ? 'Autostart installé · clic pour désinstaller' : "Installer l'autostart dans 123.py")
-                   : isMaya
-                     ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · commandPort 7001 actif' : 'Autostart installé · clic pour désinstaller')
-                         : 'Installer flux_bridge dans userSetup.py')
-                   : isNuke
-                     ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · bridge Nuke 7003' : 'Autostart installé · clic pour désinstaller')
-                         : 'Installer le bridge Nuke (init.py)')
-                   : isPainter
-                     ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · bridge Painter' : 'Bridge installé · clic pour désinstaller')
-                         : 'Installer le bridge Painter (dossier plugins)')
-                   : isMari
-                     ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · bridge Mari' : 'Bridge installé · clic pour désinstaller')
-                         : 'Installer le bridge Mari (dossier Scripts)')
-                   : isDesigner
-                     ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · bridge Designer' : 'Bridge installé · clic pour désinstaller')
-                         : 'Installer le bridge Designer (sduserplugins)')
-                   : isMarvelous
-                     ? (autoInstalled
-                         ? (serverOk === true ? 'Connecté · bridge Marvelous' : 'Bridge installé · à lancer dans Marvelous (voir Publisher) · clic pour désinstaller')
-                         : 'Installer le bridge Marvelous (menu Plugins > Plug-in, Marvelous fermé)')
-                     : (autoInstalled
-                         ? (serverOk === true ? 'Freeze actif · publication en cours' : 'Plugin installé · clic pour désinstaller')
-                         : 'Installer le plugin ZBrush')}
-                </TooltipContent>
-              </Tooltip>
-              )}
-
-              {/* Photoshop — no in-app plugin (external COM). Actionable state:
-                  GREEN = connected · ORANGE = lib present but PS not running ·
-                  grey = lib missing (click installs it). */}
-              {isPhotoshop && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    onClick={() => { if (!psBusy) void handlePhotoshop() }}
-                    className="scale-hover-lg launcher-secondary" data-attention={psBusy || undefined}
-                    style={{
-                      width: 16, height: 16, borderRadius: 4,
-                      border: '1px solid ' + (psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--rule-2)'),
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0,
-                      background: psReason === 'ok' ? 'color-mix(in oklch, var(--ok) 12%, transparent)' : psReason === 'not_running' ? 'color-mix(in oklch, #e8912a 14%, transparent)' : 'transparent',
-                      color: psReason === 'ok' ? 'var(--ok)' : psReason === 'not_running' ? '#e8912a' : 'var(--ink-4)',
-                      cursor: psBusy ? 'default' : 'pointer',
-                      transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
-                    }}
-                  >
-                    {psBusy
-                      ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                      : psReason === 'lib_missing'
-                        ? <ArrowDownToLine size={8} strokeWidth={2} />
-                        : <Plug size={8} strokeWidth={2} />
-                    }
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {psBusy ? '…' :
-                   psReason === 'ok' ? 'Photoshop connecté (COM)'
-                   : psReason === 'not_running' ? 'Lib OK · ouvre Photoshop pour connecter'
-                   : psReason === 'lib_missing' ? 'Clic : installer photoshop-python-api'
-                   : 'Vérifier Photoshop'}
-                </TooltipContent>
-              </Tooltip>
-              )}
-
-              {/* zombie Maya — instance bloquée occupant le port 7001, reap au clic */}
-              {mayaStuck && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      onClick={() => { if (!reapingMaya) void handleReapMaya() }}
-                      className="scale-hover-lg"
-                      style={{
-                        width: 16, height: 16, borderRadius: 4,
-                        border: '1px solid var(--err)',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0,
-                        background: 'color-mix(in oklch, var(--err) 14%, transparent)',
-                        color: 'var(--err)',
-                        cursor: reapingMaya ? 'default' : 'pointer',
-                        transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
-                      }}
-                    >
-                      {reapingMaya
-                        ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                        : <AlertTriangle size={8} strokeWidth={2} />
-                      }
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    {reapingMaya ? 'Fermeture…' : 'Instance Maya bloquée sur le port 7001 · cliquer pour la fermer'}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-
-              {/* instance selector — visible seulement quand plusieurs instances tournent.
-                  Affiche le nb d'instances ; clic ouvre le menu de choix de la cible. */}
-              {instances.length > 1 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                        setInstMenu(instMenu?.statusKey === statusKey ? null : { statusKey, name: s.name, y: rect.top })
-                      }}
-                      className="scale-hover-lg"
-                      style={{
-                        minWidth: 16, height: 16, padding: '0 3px', borderRadius: 4,
-                        border: '1px solid var(--accent)',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 2,
-                        flexShrink: 0,
-                        background: 'var(--accent-soft)', color: 'var(--accent-hi)',
-                        fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 600, cursor: 'pointer',
-                        transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
-                      }}
-                    >
-                      <Layers size={7} strokeWidth={2} />{instances.length}
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    {instances.length} instances · cible : port {activeP ?? '—'}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-
-              {/* launch — toujours actif, relance une nouvelle instance si déjà connecté */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-              <div
-                onClick={() => { if (!isLoading) void handleLaunch(s.key) }}
-                className="scale-hover-lg"
-                style={{
-                  width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (isLoading ? 'var(--rule-2)' : 'var(--accent)'),
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                  background: isLoading ? 'var(--paper-2)' : 'var(--accent-soft)',
-                  color: isLoading ? 'var(--ink-4)' : 'var(--accent-hi)',
-                  boxShadow: 'var(--shadow-xs)',
-                  cursor: isLoading ? 'default' : 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
-                }}
-              >
-                {isLoading
-                  ? <Loader size={8} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                  : connected
-                    ? <Settings2 size={8} strokeWidth={2} />
-                    : <Play size={8} strokeWidth={2} />
-                }
-              </div>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {isLoading ? 'Lancement…' : connected ? 'Nouvelle instance' : 'Lancer'}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* New Scene — pick a task/preset (or default) to launch this soft with.
-                  Accent-coloured as soon as this soft has at least one linked preset. */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-              <div
-                onClick={(e) => openNewScene(s.key, e)}
-                className="scale-hover-lg launcher-secondary"
-                style={{
-                  width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (hasPreset ? 'var(--accent)' : 'var(--rule-2)'),
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                  background: hasPreset ? 'var(--accent-soft)' : 'transparent',
-                  color: hasPreset ? 'var(--accent-hi)' : 'var(--ink-3)', cursor: 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s',
-                }}
-              >
-                <FilePlus2 size={9} strokeWidth={2} />
-              </div>
-                </TooltipTrigger>
-                <TooltipContent side="top">New Scene</TooltipContent>
-              </Tooltip>
+            <div key={s.key} className="dcc-row"
+              onContextMenu={e => { e.preventDefault(); setLauncherMenu({ soft: s.key, x: e.clientX, y: e.clientY }) }}>
+              <span className="dcc-logo-slot" title={`${s.name} · ${stateText}`} style={{ opacity: connected ? 1 : 0.62 }}>
+                <DccLogo dcc={s.key} size={18} title={s.name} />
+                {state && <span className={`dcc-state ${state}`} />}
+              </span>
+              <Menu.Root open={open} onOpenChange={o => setLauncherMenu(o ? { soft: s.key, x: 0, y: 0 } : null)} modal={false}>
+                <Menu.Trigger asChild>
+                  <button type="button" className={`dcc-play${connected ? ' live' : ''}`}
+                    aria-label={`${s.name} : actions`} title={`${s.name} · ${stateText}`}>
+                    {isLoading
+                      ? <Loader size={11} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+                      : <Play size={11} strokeWidth={2} fill="currentColor" />}
+                    {instances.length > 1 && <span className="dcc-count">×{instances.length}</span>}
+                    {flag && <span className={`dcc-flag ${flag}`} />}
+                  </button>
+                </Menu.Trigger>
+                <Menu.Portal>
+                  <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
+                    {renderLauncherMenu(s.key)}
+                  </Menu.Content>
+                </Menu.Portal>
+              </Menu.Root>
             </div>
           )
         })}
-
-        {/* Bouton global auto-detection des chemins (compact : seulement s'il manque un chemin,
-            sinon dans le clic droit d'un logiciel) */}
-        {(!compactLauncher || findingAll || SOFTWARE.some(x => isDccEnabled(x.key) && !dccPaths[x.key])) &&
-        <div style={{ padding: '5px 10px 6px' }}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-          <div
-            onClick={() => { if (!findingAll) void handleAutoFindAll() }}
-            className="scale-hover"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '5px 8px',
-              borderRadius: 5,
-              border: '1px solid var(--rule-2)',
-              background: 'var(--paper-2)',
-              color: findingAll ? 'var(--ink-3)' : 'var(--ink-2)',
-              cursor: findingAll ? 'default' : 'pointer',
-              fontSize: 10, fontFamily: 'var(--sans)',
-              transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
-            }}
-          >
-            {findingAll
-              ? <Loader size={9} strokeWidth={2} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
-              : <Search size={9} strokeWidth={2} style={{ flexShrink: 0 }} />
-            }
-            <span>{findingAll ? 'Détection en cours…' : 'Auto-détecter les chemins'}</span>
-          </div>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              Détecter automatiquement tous les chemins .exe
-            </TooltipContent>
-          </Tooltip>
-        </div>}
-        {compactLauncher && <div className="launcher-hint">Clic droit sur un logiciel pour toutes les actions</div>}
-        {launcherMenu && (() => {
-          const soft = launcherMenu.soft
-          const name = SOFTWARE.find(x => x.key === soft)?.name ?? soft
-          const connected = dccDot(dccStatus, soft) === 'ok'
-          const plug = soft !== 'photoshop'
-          const installed = !!autostartInstalled[soft]
-          return <Menu.Root open onOpenChange={o => { if (!o) setLauncherMenu(null) }} modal={false}>
-            {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: launcherMenu.x, top: launcherMenu.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
-            <Menu.Portal><Menu.Content className="launcher-menu" side="bottom" align="start" collisionPadding={10}>
-              <Menu.Label className="launcher-menu-label">{name}</Menu.Label>
-              <Menu.Item className="launcher-menu-item" disabled={launching.has(soft)} onSelect={() => void handleLaunch(soft)}><Play size={13} />{connected ? 'Nouvelle instance' : 'Lancer'}</Menu.Item>
-              <Menu.Item className="launcher-menu-item" onSelect={() => openNewSceneAt(soft, launcherMenu.x, launcherMenu.y)}><FilePlus2 size={13} />New Scene…</Menu.Item>
-              <Menu.Separator className="launcher-menu-separator" />
-              <Menu.Item className="launcher-menu-item" onSelect={() => void handlePickPath(soft)}><FolderOpen size={13} />{dccPaths[soft] ? 'Changer le chemin…' : 'Définir le chemin…'}</Menu.Item>
-              {plug && <Menu.Item className="launcher-menu-item" disabled={autostartLoading.has(soft)} onSelect={() => void handleToggleAutostart(soft)}><Plug size={13} />{installed ? 'Désinstaller le bridge' : 'Installer le bridge'}</Menu.Item>}
-              {!plug && <Menu.Item className="launcher-menu-item" disabled={psBusy} onSelect={() => void handlePhotoshop()}><Plug size={13} />Vérifier Photoshop</Menu.Item>}
-              <Menu.Item className="launcher-menu-item" disabled={findingAll} onSelect={() => void handleAutoFindAll()}><Search size={13} />Auto-détecter tous les chemins</Menu.Item>
-              <Menu.Separator className="launcher-menu-separator" />
-              <Menu.CheckboxItem className="launcher-menu-item" checked={!compactLauncher} onCheckedChange={v => setWorkPref('launcher', v ? 'full' : 'compact')}>
-                <span style={{ width: 13, display: 'inline-flex' }}>{!compactLauncher && <Check size={13} />}</span>Afficher tous les boutons
-              </Menu.CheckboxItem>
-              <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
-            </Menu.Content></Menu.Portal>
-          </Menu.Root>
-        })()}
       </NavGroup>
 
       <div style={{ flex: 1 }} />
-
-      {/* New Scene menu — one row per TASK token; hover a token to list its templates
-          (like "Open In >" in the folder manager). DEFAULT also offers the empty scene. */}
-      {newScene && (() => {
-        const soft = newScene.soft
-        const softName = SOFTWARE.find(s => s.key === soft)?.name ?? soft
-        const linked = presets.filter(p => p.soft === soft && p.file)
-        // Group linked presets by their TASK token (null → DEFAULT bucket).
-        const groups = new Map<string, Preset[]>()
-        for (const p of linked) {
-          const key = (p.task ?? '').toUpperCase() || 'DEFAULT'
-          groups.set(key, [...(groups.get(key) ?? []), p])
-        }
-        if (!groups.has('DEFAULT')) groups.set('DEFAULT', [])   // DEFAULT is always offered
-        const tasks = ['DEFAULT', ...[...groups.keys()].filter(k => k !== 'DEFAULT').sort()]
-
-        const row: React.CSSProperties = {
-          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-          padding: '6px 9px', background: 'transparent', border: 'none',
-          fontSize: 11, fontFamily: 'var(--sans)', cursor: 'pointer', borderRadius: 5,
-        }
-        const item: React.CSSProperties = { ...row, color: 'var(--ink-2)' }
-
-        return (
-          <>
-            <div onClick={() => setNewScene(null)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-            <div style={{
-              position: 'fixed', left: 8, bottom: Math.max(8, window.innerHeight - newScene.y),
-              width: 184, zIndex: 61, background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
-              borderRadius: 8, boxShadow: 'var(--shadow-md)', padding: 5,
-            }}>
-              <div style={{ padding: '4px 9px 6px', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-                New Scene · {softName}
-              </div>
-              {tasks.map(task => {
-                const assigned = groups.get(task) ?? []
-                const items: { label: string; preset: Preset | null }[] =
-                  task === 'DEFAULT'
-                    ? [{ label: 'Scène vide', preset: null }, ...assigned.map(p => ({ label: p.name, preset: p }))]
-                    : assigned.map(p => ({ label: p.name, preset: p }))
-                const open = hoverTask === task
-                return (
-                  <div
-                    key={task}
-                    style={{ position: 'relative' }}
-                    onMouseEnter={() => setHoverTask(task)}
-                    onMouseLeave={() => setHoverTask(h => (h === task ? null : h))}
-                  >
-                    <div style={{ ...row, background: open ? 'var(--accent-soft)' : 'transparent', color: open ? 'var(--ink)' : 'var(--ink-2)' }}>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)', flexShrink: 0 }}>{task}</span>
-                      <span style={{ flex: 1 }} />
-                      <ChevronRight size={11} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0 }} />
-                    </div>
-                    {open && (
-                      <div style={{
-                        // Flush against the row (no gap) + a transparent left bridge so the
-                        // pointer never crosses dead space between token and submenu.
-                        position: 'absolute', left: '100%', top: -1, minWidth: 150, maxWidth: 240,
-                        paddingLeft: 6, marginLeft: -2, zIndex: 62,
-                      }}>
-                        <div style={{
-                          background: 'var(--paper-2)', border: '1px solid var(--rule-2)', borderRadius: 8,
-                          boxShadow: 'var(--shadow-md)', padding: 5,
-                        }}>
-                        {items.map((it, i) => (
-                          <button
-                            key={i}
-                            onClick={() => void runNewScene(soft, it.preset)}
-                            title={it.preset?.file ?? ''}
-                            style={item}
-                            onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--ink)' }}
-                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-2)' }}
-                          >
-                            {it.preset
-                              ? <FilePlus2 size={11} strokeWidth={2} color="var(--accent)" style={{ flexShrink: 0 }} />
-                              : <Play size={10} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0 }} />}
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
-                          </button>
-                        ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        )
-      })()}
 
       {/* Instance picker — choose which running instance of a DCC the pipeline targets,
           or close one (X: like the window's close button; "Forcer" only if it stays). */}

@@ -3,7 +3,7 @@
 // see which files weigh the most on the drive.
 
 import { useCallback, useEffect, useState } from 'react'
-import { RotateCcw, HardDrive, FolderOpen } from 'lucide-react'
+import { RotateCcw, FolderOpen } from 'lucide-react'
 import { api } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
 import { useProject } from '../ProjectContext'
@@ -66,10 +66,6 @@ export function DiskUsage() {
   return (
     <div style={{ padding: '16px 20px', overflow: 'auto', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <HardDrive size={16} strokeWidth={1.75} color="var(--ink-2)" />
-        <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-          Gestionnaire de disque
-        </div>
         <div style={{ flex: 1 }} />
         <select
           value={scope}

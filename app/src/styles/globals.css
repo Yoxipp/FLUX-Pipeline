@@ -375,20 +375,20 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .flux-toast-warn { border-color: var(--warn) !important; color: var(--warn) !important; background: color-mix(in oklch, var(--warn) 8%, var(--paper-2)) !important; }
 .flux-toast-err  { border-color: var(--err)  !important; color: var(--err)  !important; background: color-mix(in oklch, var(--err)  8%, var(--paper-2)) !important; }
 
-/* Launcher compact (ADR 0042): secondary actions on hover/focus, attention states always. */
-.launcher-row { border-radius: 5px; outline: none; }
-.launcher-row:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
-.launcher-row[data-compact] .launcher-secondary:not([data-attention]) { display: none !important; }
-.launcher-row[data-compact]:hover .launcher-secondary,
-.launcher-row[data-compact]:focus-within .launcher-secondary { display: inline-flex !important; }
-.launcher-row[data-compact]:hover { background: var(--paper-2); }
-.launcher-hint { padding: 2px 18px 6px; font-size: 9.5px; color: var(--ink-4); }
+/* Launcher menu (ADR 0044): every action of a software behind its Play button. */
 .launcher-menu { min-width: 210px; padding: 5px; background: var(--paper-2); border: 1px solid var(--rule-2); border-radius: 8px; box-shadow: var(--shadow-md); z-index: 1000; font: 12px var(--sans); color: var(--ink); }
 .launcher-menu-label { padding: 5px 8px 4px; font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .launcher-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; cursor: pointer; outline: none; color: var(--ink-2); }
 .launcher-menu-item[data-highlighted] { background: var(--paper); color: var(--ink); }
 .launcher-menu-item[data-disabled] { opacity: .45; cursor: default; }
 .launcher-menu-separator { height: 1px; margin: 4px 2px; background: var(--rule); }
+.launcher-menu-item[data-state="open"] { background: var(--paper); color: var(--ink); }
+.launcher-menu-primary { color: var(--accent-hi); font-weight: 500; }
+.launcher-menu-primary[data-highlighted] { background: var(--accent-soft); color: var(--accent-hi); }
+.launcher-menu-danger { color: var(--err); }
+.launcher-menu-hint { margin-left: auto; padding-left: 12px; font-size: 10px; color: var(--ink-4); }
+.launcher-menu-hint.warn { color: var(--warn); }
+.launcher-menu-token { font: 600 10px var(--mono); color: var(--accent-hi); }
 
 /* Folder Manager: "Affichage" menu and foldable creation forms (ADR 0042). */
 .fm-view-trigger { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid var(--rule-2); border-radius: 5px; background: transparent; color: var(--ink-3); font: 11px var(--sans); cursor: pointer; }
@@ -397,3 +397,85 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .fm-create-toggle { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--rule); background: var(--paper-2); color: var(--ink-3); cursor: pointer; text-align: left; flex-shrink: 0; }
 .fm-create-toggle:hover { color: var(--ink); }
 .fm-create-hint { margin-left: auto; font-size: 9.5px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Expand picker (ADR 0044): current choice + chevron, the others slide out to the right ── */
+.xpick {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 8px 0 9px;
+  border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent-soft); color: var(--accent-hi);
+  font: 500 11px var(--sans); cursor: pointer; white-space: nowrap;
+  box-shadow: var(--shadow-xs); outline: none;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.xpick.mono { font-family: var(--mono); font-size: 10.5px; }
+.xpick.empty { border-color: var(--rule-2); background: var(--bg-deep); color: var(--ink-4); font-style: italic; box-shadow: var(--shadow-inset); }
+.xpick:hover:not(:disabled) { background: var(--hl); }
+.xpick.empty:hover { background: var(--paper-2); }
+.xpick:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
+.xpick:disabled { cursor: default; }
+.xpick-label { overflow: hidden; text-overflow: ellipsis; }
+.xpick-chev { color: currentColor; opacity: .7; transition: transform 0.16s ease; flex-shrink: 0; }
+.xpick.open .xpick-chev { transform: rotate(180deg); }
+
+.xpick-strip {
+  display: flex; align-items: center; gap: 3px; padding: 3px;
+  max-width: min(640px, calc(100vw - 24px)); flex-wrap: wrap;
+  background: var(--paper-2); border: 1px solid var(--rule-2); border-radius: 8px;
+  box-shadow: var(--shadow-md); z-index: 9999;
+}
+.xpick-strip[data-state='open'] { animation: xpick-strip-in 0.14s ease; }
+@keyframes xpick-strip-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+.xpick-opt {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 26px; padding: 0 9px; border: 1px solid transparent; border-radius: 5px;
+  background: transparent; color: var(--ink-2); font: 11px var(--sans); cursor: pointer; white-space: nowrap;
+  animation: xpick-opt-in 0.16s ease both;
+}
+.xpick-opt.mono { font-family: var(--mono); font-size: 10.5px; }
+.xpick-opt.muted { opacity: .5; }
+.xpick-opt:hover, .xpick-opt:focus-visible { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hi); outline: none; opacity: 1; }
+@keyframes xpick-opt-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+
+/* ── Connection pill (ADR 0044): one dot + one word, details on click ── */
+.conn-pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px;
+  border: 1px solid var(--rule-2); border-radius: 999px; background: var(--paper-2);
+  font: 10.5px var(--sans); color: var(--ink-3); cursor: default; white-space: nowrap;
+}
+.conn-pill[data-state] { cursor: pointer; }
+.conn-pill[data-state]:hover { color: var(--ink); border-color: var(--ink-4); }
+.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); flex-shrink: 0; }
+.conn-pill.ok   { color: var(--ink-2); }
+.conn-pill.ok   .conn-dot { background: var(--ok); }
+.conn-pill.off  .conn-dot { background: var(--err); }
+.conn-pill.warn .conn-dot { background: var(--warn); }
+.conn-pill.checking .conn-dot { animation: conn-pulse 1s ease-in-out infinite; }
+@keyframes conn-pulse { 50% { opacity: .35; } }
+
+/* ── Page toolbar (ADR 0044): no page title (the sidebar already says where you are) ── */
+.page-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 16px; border-bottom: 1px solid var(--rule); flex-shrink: 0; min-height: 44px;
+}
+
+/* ── Launcher (ADR 0044): logo + one wide play button, every action behind a click ── */
+.dcc-row { display: flex; align-items: center; gap: 8px; padding: 3px 10px 3px 14px; }
+.dcc-logo-slot { position: relative; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.dcc-logo-slot .dcc-state { position: absolute; right: -2px; bottom: -2px; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--paper); background: var(--ink-4); }
+.dcc-logo-slot .dcc-state.ok { background: var(--ok); }
+.dcc-logo-slot .dcc-state.warn { background: var(--warn); }
+.dcc-logo-slot .dcc-state.err { background: var(--err); }
+.dcc-play {
+  flex: 1; min-width: 0; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--rule-2); border-radius: 6px; background: var(--paper-2); color: var(--ink-3);
+  cursor: pointer; position: relative; outline: none; font: 10px var(--sans);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.dcc-play:hover, .dcc-play[data-state='open'] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hi); }
+.dcc-play:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
+.dcc-play.live { color: var(--accent-hi); border-color: color-mix(in oklch, var(--accent) 55%, var(--rule-2)); }
+.dcc-play .dcc-flag { position: absolute; top: 50%; right: 7px; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; }
+.dcc-play .dcc-flag.warn { background: var(--warn); }
+.dcc-play .dcc-flag.err { background: var(--err); }
+.dcc-play .dcc-count { font: 600 9px var(--mono); }

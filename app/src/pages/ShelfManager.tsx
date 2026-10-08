@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, Pill, Check } from '../components/shared/ui'
+import { Btn, SecTitle, Check } from '../components/shared/ui'
+import { ExpandPicker } from '../components/shared/ExpandPicker'
+import { ConnectionPill } from '../components/shared/ConnectionPill'
 import { FluxLogo } from '../components/shared/Logo'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
@@ -35,19 +37,6 @@ const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: strin
     <div className="lbl" style={{ fontSize: 9 }}>{label}</div>
   </div>
 )
-
-type StatusBadge = { ok: boolean; label: string }
-
-function Badge({ ok, label }: StatusBadge) {
-  const Icon = ok ? CheckCircle2 : XCircle
-  const color = ok ? 'var(--ok)' : 'var(--err)'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10 }}>
-      <Icon size={11} strokeWidth={2} color={color} style={{ flexShrink: 0 }} />
-      <span style={{ color: ok ? 'var(--ink-2)' : 'var(--err)' }}>{label}</span>
-    </div>
-  )
-}
 
 type ShelfData = {
   versions: string[]
@@ -196,47 +185,41 @@ export function ShelfManager() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      <div style={{ padding: '12px 20px 10px', borderBottom: '1px solid var(--rule)', flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Gestion du Shelf</div>
+      {/* One toolbar: software, target version, state, actions (ADR 0044). */}
+      <div className="page-toolbar">
+        <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false}
+          isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
+        {!isPainter && (versions.length === 0
+          ? <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucune version {dcc} détectée</span>
+          : <ExpandPicker mono title="Version cible" placeholder="Version" value={version}
+              options={versions.map(v => ({ value: v, label: v }))} onChange={setVersion} />)}
+        {version && !isPainter && (
+          <>
+            <ConnectionPill state={shelfOk ? 'ok' : 'off'} label={isZBrush ? (shelfOk ? 'UI FLUX installée' : 'UI FLUX absente') : shelfOk ? 'Shelf installé' : 'Shelf absent'} />
+            {isHoudini && <ConnectionPill state={hdaOk ? 'ok' : 'off'} label={hdaOk ? 'HDAs installés' : 'HDAs absents'} />}
+          </>
+        )}
+        <div style={{ flex: 1 }} />
+        {!isPainter && (
+          <>
+            <Btn ghost disabled={busy} title="Mettre à jour" onClick={handleRefresh}><RefreshCw size={12} strokeWidth={2} /></Btn>
+            <Btn ghost disabled={!version || busy} title={isHoudini ? "Retirer la shelf (l'Autostart garde les HDAs)" : isZBrush ? 'Remettre ton interface ZBrush' : 'Retirer le shelf'} onClick={handleRemove}>
+              <Trash2 size={12} strokeWidth={2} />
+            </Btn>
+            <Btn primary disabled={!version || busy} style={{ gap: 6 }} onClick={handleInstall}
+              title={isHoudini ? 'Copie la shelf et les HDAs (reconstruits si Houdini est ouvert)'
+                : isZBrush ? "Remplace l'interface de ZBrush par l'UI FLUX (la tienne est gardée) et installe le bridge : menu FLUX avec Export FLUX et Save +1. Relance ZBrush."
+                : undefined}>
+              <Zap size={12} strokeWidth={2} />
+              {isHoudini ? 'Installer shelf + HDAs' : isZBrush ? 'Installer UI FLUX' : 'Installer'}
+            </Btn>
+          </>
+        )}
       </div>
-
-      <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false}
-        isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
         <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
-
-          {/* version */}
-          {!isPainter && <div>
-            <SecTitle>Version cible</SecTitle>
-            {versions.length === 0 ? (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
-                Aucune version {dcc} détectée
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 6 }}>
-                {versions.map(v => (
-                  <Pill key={v} active={version === v} style={{ cursor: 'pointer' }}>
-                    <span onClick={() => setVersion(v)}>{v}</span>
-                  </Pill>
-                ))}
-              </div>
-            )}
-          </div>}
-
-          {/* status badges */}
-          {version && !isPainter && (
-            <div>
-              <SecTitle>État</SecTitle>
-              <div style={{ display: 'flex', gap: 16 }}>
-                <Badge ok={shelfOk} label={isZBrush ? (shelfOk ? 'UI FLUX installée' : 'UI FLUX absente') : shelfOk ? 'Shelf installé' : 'Shelf absent'} />
-                {isHoudini && (
-                  <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés' : 'HDAs absents'} />
-                )}
-              </div>
-            </div>
-          )}
 
           {/* aperçu shelf: only the DCCs that really have a FLUX shelf (2026-09-30) */}
           {hasPreview && <div>
@@ -298,38 +281,6 @@ export function ShelfManager() {
             </div>
           )}
 
-          {/* actions. Houdini: installing the shelf also installs (or rebuilds, when
-              Houdini is connected) the FLUX HDAs; removing it keeps them (Autostart). */}
-          {!isPainter && <div>
-            <SecTitle>Actions</SecTitle>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
-                <Zap size={12} strokeWidth={2} />
-                {isHoudini ? 'Installer shelf + HDAs' : isZBrush ? 'Installer UI FLUX + bridge' : 'Installer le shelf'}
-              </Btn>
-              <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
-                <RefreshCw size={11} strokeWidth={2} />
-                Màj
-              </Btn>
-              <Btn ghost disabled={!version || busy} style={{ height: 32, gap: 5 }} onClick={handleRemove}>
-                <Trash2 size={11} strokeWidth={2} />
-                Retirer
-              </Btn>
-            </div>
-            {isHoudini && (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
-                Installer copie la shelf et les HDAs (reconstruits si Houdini est ouvert).
-                Retirer enlève la shelf seulement : l'Autostart garde les HDAs.
-              </div>
-            )}
-            {isZBrush && (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
-                Installer remplace l'interface de ZBrush par l'UI FLUX (la tienne est gardée une fois de côté)
-                et installe le bridge : menu FLUX avec Export FLUX et Save +1. Retirer remet ton interface. Relance ZBrush.
-              </div>
-            )}
-          </div>}
-
           {/* Catalogue de tools Maya (rig toolbox / anim tool / flux) — Maya only.
               Rigging/Anim toolboxes are Maya-specific; Houdini has no equivalent. */}
           {dcc === 'Maya' && (
@@ -341,10 +292,9 @@ export function ShelfManager() {
               </div>
             ) : (
               <>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                  {toolVersions.map(v => (
-                    <Pill key={v} active={toolVersion === v} onClick={() => setToolVersion(v)} style={{ cursor: 'pointer' }}>{v}</Pill>
-                  ))}
+                <div style={{ marginBottom: 10 }}>
+                  <ExpandPicker mono title="Version de Maya" value={toolVersion}
+                    options={toolVersions.map(v => ({ value: v, label: v }))} onChange={setToolVersion} />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tools.map(t => (
@@ -374,9 +324,6 @@ export function ShelfManager() {
                   <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
                     {toolVersion && (toolsInstalled[toolVersion] ? `Shelf Flux installée · ${toolVersion}` : `Non installée · ${toolVersion}`)}
                   </div>
-                </div>
-                <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 6 }}>
-                  Une seule shelf « Flux » regroupe les tools cochés. Ton choix est conservé pour les réinstallations.
                 </div>
               </>
             )}
@@ -410,19 +357,6 @@ export function ShelfManager() {
               })
             )}
             <div style={{ flex: 1 }} />
-            {version && (
-              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', color: 'var(--ink-4)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="dot" style={{ width: 5, height: 5, background: shelfOk ? 'var(--ok)' : 'var(--err)', borderRadius: '50%' }} />
-                {shelfOk ? `Shelf actif · ${version}` : `Shelf inactif · ${version}`}
-                {isHoudini && (
-                  <>
-                    <span style={{ margin: '0 4px' }}>·</span>
-                    <span className="dot" style={{ width: 5, height: 5, background: hdaOk ? 'var(--ok)' : 'var(--err)', borderRadius: '50%' }} />
-                    {hdaOk ? 'HDAs OK' : 'HDAs manquants'}
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </div>
 

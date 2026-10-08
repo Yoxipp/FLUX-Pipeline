@@ -21,7 +21,6 @@ const LS_KEY = 'flux.lang'
 // Add keys here as strings are migrated. { fr, en } per key.
 export const STRINGS: Record<string, { fr: string; en: string }> = {
   // titlebar
-  'titlebar.tagline':        { fr: 'Pipeline Tool',            en: 'Pipeline Tool' },
   'titlebar.refresh':        { fr: 'Rafraîchir les données',   en: 'Refresh data' },
   'titlebar.pin':            { fr: 'Garder FLUX au premier plan', en: 'Keep FLUX on top' },
   'titlebar.unpin':          { fr: 'Ne plus garder au premier plan', en: 'Stop keeping on top' },
@@ -153,17 +152,8 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'hub.chatNoProject':       { fr: 'Aucun projet actif : choisis-en un pour voir son chat.', en: 'No active project: pick one to see its chat.' },
   'hub.noMessage':           { fr: 'Aucun message',            en: 'No message' },
   'hub.messagePlaceholder':  { fr: 'Message…  (@ pour mentionner)', en: 'Message…  (@ to mention)' },
-  'hub.shortcuts':           { fr: 'RACCOURCIS',               en: 'SHORTCUTS' },
-  'hub.sc.folderManager':    { fr: 'Naviguer & importer',      en: 'Browse & import' },
-  'hub.sc.publisher':        { fr: 'Exporter un asset',        en: 'Export an asset' },
-  'hub.sc.usd':              { fr: 'Composer des layers',      en: 'Compose layers' },
-  'hub.sc.shelf':            { fr: 'Installer / màj',          en: 'Install / update' },
-  'hub.sc.activity':         { fr: 'Historique équipe',        en: 'Team history' },
-  'hub.dccConnection':       { fr: 'CONNEXION DCC',            en: 'DCC CONNECTION' },
-  'hub.noDcc':               { fr: 'Aucun DCC connecté',       en: 'No DCC connected' },
 
   // activity page
-  'activity.title':          { fr: 'Activité & Notifications', en: 'Activity & Notifications' },
   'activity.markAllRead':    { fr: 'Tout marquer lu',          en: 'Mark all read' },
   'activity.loadOlder':      { fr: 'Charger l’historique plus ancien', en: 'Load older history' },
   'activity.historyLoading': { fr: 'Chargement…',              en: 'Loading…' },
@@ -174,7 +164,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'activity.filter.imports': { fr: 'Imports',                  en: 'Imports' },
   'activity.filter.updates': { fr: 'Updates',                  en: 'Updates' },
   'activity.filter.errors':  { fr: 'Erreurs',                  en: 'Errors' },
-  'activity.entries':        { fr: '{n} entrées',              en: '{n} entries' },
   'activity.empty':          { fr: 'Aucune activité pour le moment.', en: 'No activity yet.' },
   'activity.openContext':    { fr: 'Ouvrir le contexte',       en: 'Open context' },
   'activity.copyPath':       { fr: 'Copier le chemin',         en: 'Copy path' },
@@ -184,8 +173,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'activity.pathCopyFail':   { fr: 'Impossible de copier le chemin', en: 'Could not copy path' },
 
   // usd assembler — header + sections
-  'usd.title':               { fr: 'USD',                       en: 'USD' },
-  'usd.subtitle':            { fr: 'Assets et décors publiés du projet · départements, versions et composition.', en: 'Published assets and sets of the project · departments, versions and composition.' },
   'usd.sec.target':          { fr: 'Cible',                     en: 'Target' },
   'usd.sec.identity':        { fr: 'Identité',                  en: 'Identity' },
   'usd.sec.layers':          { fr: 'Layers',                    en: 'Layers' },

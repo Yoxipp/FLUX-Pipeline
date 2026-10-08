@@ -616,10 +616,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
         <FluxLogo size={24} />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</span>
-        <span style={{ fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>{t('titlebar.tagline')}</span>
-      </div>
+      <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</span>
 
       <div style={{ flex: 1 }} />
 
@@ -736,13 +733,14 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
         </PopoverContent>
       </Popover>
 
-      {/* user pill */}
+      {/* user: avatar only (ADR 0044), the name is the tooltip; click = change user */}
       <div
         className="no-drag"
         onClick={() => onUserChange()}
+        title={user}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '3px 10px 3px 4px',
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '3px 6px 3px 4px',
           border: '1px solid var(--rule-2)',
           borderRadius: 999,
           background: 'var(--paper-2)',
@@ -754,7 +752,6 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--rule-2)'; (e.currentTarget as HTMLElement).style.background = 'var(--paper-2)' }}
       >
         <Avatar ch={user[0].toUpperCase()} size={20} />
-        <span style={{ fontSize: 11, color: 'var(--ink)', fontWeight: 500 }}>{user}</span>
         <ChevronDown size={10} strokeWidth={2} color="var(--ink-3)" />
       </div>
 

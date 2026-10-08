@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react'
+import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { ExpandPicker } from '../components/shared/ExpandPicker'
+import { ConnectionPill } from '../components/shared/ConnectionPill'
+import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem, Popover, PopoverTrigger, PopoverContent } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
@@ -387,51 +389,19 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
 
 // ── PublishComposer ───────────────────────────────────────────────────────────
 
-// Circled "i" with a click popover — explanation / expected value / concrete example.
-function InfoDot({ info }: { info: TokenInfo }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [open])
-  return (
-    <div ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
-      <div
-        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
-        title="Infos"
-        style={{
-          width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-          border: '1px solid ' + (open ? 'var(--accent)' : 'var(--rule-2)'),
-          color: open ? 'var(--accent-hi)' : 'var(--ink-4)',
-          background: open ? 'var(--accent-soft)' : 'transparent',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 700, fontStyle: 'italic',
-          cursor: 'pointer', lineHeight: 1,
-        }}
-      >i</div>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 600, width: 210,
-          padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
-          borderRadius: 8, boxShadow: 'var(--shadow-md)', fontFamily: 'var(--sans)',
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>{info.title}</div>
-          <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45, marginBottom: 6 }}>{info.desc}</div>
-          <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>Attendu : <span style={{ color: 'var(--ink-2)' }}>{info.expected}</span></div>
-          <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>Ex. : <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent-hi)' }}>{info.example}</span></div>
-        </div>
-      )}
-    </div>
-  )
+// Tooltip text of a token field: what it is, what is expected, an example (ADR 0044:
+// the explanation is no longer printed above every field).
+function tokenTip(info: TokenInfo): string {
+  return `${info.title} : ${info.desc}
+Attendu : ${info.expected}
+Ex. : ${info.example}`
 }
 
-// A composer module: label + info dot, then a value box — a fixed dropdown or a
-// free-text combobox whose dropdown lists contextual suggestions (`options`).
-function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, onArchiveOption }: {
-  label: string; info: TokenInfo; value: string; placeholder?: string
+// A composer module: a value box whose greyed placeholder is the token name (Type,
+// Name, Task...) — a fixed dropdown or a free-text combobox listing contextual
+// suggestions (`options`). The explanation is the tooltip.
+function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOption }: {
+  label: string; info: TokenInfo; value: string
   options: string[]; fixed?: boolean; onChange: (v: string) => void
   // When set, each option gets a small cross that archives that token (ghost or
   // not) into ARCHIVE/ after confirmation. Only wired on per-project dropdowns.
@@ -449,33 +419,33 @@ function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, 
   const shown = fixed ? options : (q ? options.filter(o => o.toLowerCase().includes(q)) : options)
   const filled = !!value
   return (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 2 }}>
-        <span style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</span>
-        <InfoDot info={info} />
-      </div>
+    <div style={{ flex: '1 1 96px', minWidth: 96 }} title={tokenTip(info)}>
       <div ref={ref} style={{ position: 'relative' }}>
         {fixed ? (
           <div
             onClick={() => setOpen(o => !o)}
             className="scale-hover"
             style={{
-              height: 30, padding: '0 8px', display: 'flex', alignItems: 'center', cursor: 'pointer',
-              borderRadius: 5, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', cursor: 'pointer',
+              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
               background: filled ? 'var(--accent-soft)' : 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
-              fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink-4)',
+              fontFamily: filled ? 'var(--mono)' : 'var(--sans)', fontSize: filled ? 10 : 11,
+              color: filled ? 'var(--accent-hi)' : 'var(--ink-4)', fontStyle: filled ? 'normal' : 'italic',
               fontWeight: filled ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}
-          >{value || placeholder || '-'}</div>
+          >
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || label}</span>
+            <ChevronDown size={11} strokeWidth={2} style={{ flexShrink: 0, opacity: 0.6 }} />
+          </div>
         ) : (
           <input
             value={value}
-            placeholder={placeholder}
+            placeholder={label}
             onChange={e => { onChange(e.target.value); setOpen(true) }}
             onFocus={() => setOpen(true)}
             style={{
-              width: '100%', height: 30, padding: '0 8px', boxSizing: 'border-box',
-              borderRadius: 5, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              width: '100%', height: 28, padding: '0 8px', boxSizing: 'border-box',
+              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
               background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', outline: 'none',
               fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
               fontWeight: filled ? 600 : 400,
@@ -570,53 +540,46 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, dcc, onModeS
   }, [mode, project, cls, sel.category, sel.name, sel.task, sel.instance, sel.seq, sel.shot])
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-      {/* Asset / Shot toggle */}
-      <div onClick={onModeSwitch} className="scale-hover" style={{
-        width: 52, flexShrink: 0, height: 30,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        border: '1px solid var(--rule-2)', borderRadius: 5,
-        background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)',
-        cursor: 'pointer', fontSize: 8, fontFamily: 'var(--mono)',
-        color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)',
-        fontWeight: 700, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)',
-      }}>{mode === 'asset' ? 'ASSET' : 'SHOT'}</div>
-
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <ExpandPicker
+        value={mode}
+        options={[{ value: 'asset', label: 'Asset' }, { value: 'shot', label: 'Shot' }]}
+        onChange={v => { if (v !== mode) onModeSwitch() }}
+      />
       {mode === 'asset' ? (
         <>
-          <ModuleBox label="Catégorie" info={TOKEN_INFO.category} value={sel.category} fixed options={[...ASSET_CATEGORIES]} placeholder="—" onChange={v => onSelect('category', v)} />
+          <ModuleBox label="Catégorie" info={TOKEN_INFO.category} value={sel.category} fixed options={[...ASSET_CATEGORIES]} onChange={v => onSelect('category', v)} />
           <ModuleBox
-            label="Name" info={TOKEN_INFO.name} value={sel.name} options={names}
-            placeholder={sel.category ? 'nom…' : 'catégorie ?'} onChange={v => onSelect('name', v)}
+            label="Name" info={TOKEN_INFO.name} value={sel.name} options={names} onChange={v => onSelect('name', v)}
             onArchiveOption={sel.category ? (v => onArchiveToken('name', v)) : undefined}
           />
-          <ModuleBox label="Task" info={TOKEN_INFO.task} value={sel.task} fixed options={ASSET_TASKS.map(t => t.value)} placeholder="—" onChange={v => onSelect('task', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.task} value={sel.task} fixed options={ASSET_TASKS.map(t => t.value)} onChange={v => onSelect('task', v)} />
           <ModuleBox
             label="Instance" info={TOKEN_INFO.instance} value={sel.instance} options={instanceSug}
-            placeholder="null" onChange={v => onSelect('instance', v)}
+            onChange={v => onSelect('instance', v)}
             onArchiveOption={(sel.category && sel.name && sel.task) ? (v => onArchiveToken('instance', v)) : undefined}
           />
-          <ModuleBox label="Variante" info={TOKEN_INFO.variante} value={sel.variante} options={varianteSug} placeholder="(option)" onChange={v => onSelect('variante', v)} />
+          <ModuleBox label="Variante" info={TOKEN_INFO.variante} value={sel.variante} options={varianteSug} onChange={v => onSelect('variante', v)} />
         </>
       ) : (
         <>
           <ModuleBox
-            label="Sequence" info={TOKEN_INFO.seq} value={sel.seq} options={seqs}
-            placeholder="SEQ001" onChange={v => onSelect('seq', v)}
+            label="Séquence" info={TOKEN_INFO.seq} value={sel.seq} options={seqs}
+            onChange={v => onSelect('seq', v)}
             onArchiveOption={v => onArchiveToken('seq', v)}
           />
           <ModuleBox
             label="Shot" info={TOKEN_INFO.shot} value={sel.shot} options={shots}
-            placeholder="SHOT010" onChange={v => onSelect('shot', v)}
+            onChange={v => onSelect('shot', v)}
             onArchiveOption={sel.seq ? (v => onArchiveToken('shot', v)) : undefined}
           />
-          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} fixed options={shotTasksFor(dcc)} placeholder="—" onChange={v => onSelect('name', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} fixed options={shotTasksFor(dcc)} onChange={v => onSelect('name', v)} />
           {formatToken(sel.name) === 'ANIM' ? (
             <ModuleBox label="Perso" info={TOKEN_INFO.shotCharacter} value={sel.variante}
-              options={Object.keys(tokens.NAME ?? {}).sort()} placeholder="DINGO"
+              options={Object.keys(tokens.NAME ?? {}).sort()}
               onChange={v => onSelect('variante', v)} />
           ) : (
-            <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
+            <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} onChange={v => onSelect('variante', v)} />
           )}
         </>
       )}
@@ -1875,43 +1838,96 @@ export function Publisher() {
 
   const filename = buildFilename()
 
+  // One connection indicator in the toolbar (ADR 0044). Ports, versions and setup steps
+  // are in its tooltip / click popover, only shown when there is something to do.
+  const connectionPill = dcc === 'Fichier local' ? null
+    : dcc === 'ZBrush' ? (
+      <ConnectionPill
+        state={zbrushConnected ? 'ok' : zbrushChecking ? 'checking' : 'off'}
+        detail={zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
+        help={zbrushConnected ? undefined : zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
+      />
+    ) : dcc === 'Maya' ? (
+      <ConnectionPill
+        state={mayaConnected ? 'ok' : mayaAutostartInstalled === null ? 'checking' : 'off'}
+        detail={mayaConnected ? `commandPort ${activeInstPort ?? 7001}` : 'Le pont FLUX (commandPort 7001) est injoignable'}
+        help={mayaConnected || mayaAutostartInstalled === null ? undefined : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <MayaStep
+              n={1}
+              done={!!mayaAutostartInstalled}
+              title={mayaAutostartInstalled ? 'Autostart installé' : "Installer l'autostart Maya"}
+              desc={mayaAutostartInstalled ? (mayaStartupFile ?? 'userSetup.py mis à jour') : 'Launcher : bouton Play de Maya, puis Installer le bridge'}
+            />
+            {mayaAutostartInstalled && (
+              <MayaStep n={2} done={false} title="Redémarre Maya" desc="Le commandPort s'ouvre au lancement." />
+            )}
+            {mayaConnectCmd && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span>Ou tout de suite, dans le Script Editor (Python) de Maya :</span>
+                <CopyBlock text={mayaConnectCmd} />
+              </div>
+            )}
+          </div>
+        )}
+      />
+    ) : dcc === 'Houdini' ? (
+      <ConnectionPill
+        state={houdiniConnected ? 'ok' : 'off'}
+        detail={houdiniConnected && houdiniVersion ? `Houdini ${houdiniVersion}` : undefined}
+        help={houdiniConnected ? undefined : 'Lance le serveur FLUX dans Houdini : Launcher, bouton Play de Houdini, Installer le bridge, puis relance Houdini.'}
+      />
+    ) : DCC_PING_KEY[dcc] ? (
+      <ConnectionPill
+        state={bridgeStatus.connected ? 'ok' : bridgeStatus.checking ? 'checking' : 'off'}
+        detail={bridgeStatus.version ?? undefined}
+        help={bridgeStatus.connected || bridgeStatus.checking ? undefined : dcc === 'Marvelous' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span>Marvelous 2024.1+ : Plugins &gt; Plug-in &gt; FLUX Bridge.</span>
+            {marvelousScript
+              ? <>
+                  <span>Sinon, colle cette ligne dans Script &gt; Python (Plugins &gt; Python Editor en 2024.1+) puis Run :</span>
+                  {/* No " and no \ : the Marvelous 2024 editor mangles them (SyntaxError). */}
+                  <CopyBlock text={`exec(open('${marvelousScript.replace(/\\/g, '/')}').read())`} />
+                </>
+              : <span>Script absent : Launcher, bouton Play de Marvelous, Installer le bridge.</span>}
+          </div>
+        ) : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (Launcher, bouton Play, Installer le bridge).`}
+      />
+    ) : <ConnectionPill state="warn" label="Depuis le logiciel" detail={`La publication depuis ${dcc} se déclenche dans le logiciel`} />
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      {/* Header */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Publish</div>
+      {/* Toolbar: software (expand picker), project, connection. No page title (ADR 0044). */}
+      <div className="page-toolbar">
+        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex', zIndex: 1 }}>
+            <FolderIcon color="var(--accent)" />
+          </span>
+          <Select value={project} onValueChange={setProject}>
+            <SelectTrigger style={{ width: 190, paddingLeft: 26 }} title="Projet" />
+            <SelectContent>
+              {projects.length === 0
+                ? <SelectItem value="__none__">Aucun projet</SelectItem>
+                : projects.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)
+              }
+            </SelectContent>
+          </Select>
+        </div>
+        <div style={{ flex: 1 }} />
+        {connectionPill}
       </div>
-
-      <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={name => { const key = SOFTWARE.find(x => x.name === name)?.key; return !key || isDccEnabled(key) }} />
 
       <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* ── Left: Composer + source + description ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
-          <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', minHeight: 0 }}>
-
-            {/* Project selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div className="cap">PROJET</div>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex', zIndex: 1 }}>
-                  <FolderIcon color="var(--accent)" />
-                </span>
-                <Select value={project} onValueChange={setProject}>
-                  <SelectTrigger style={{ width: 200, paddingLeft: 26 }} />
-                  <SelectContent>
-                    {projects.length === 0
-                      ? <SelectItem value="__none__">Aucun projet</SelectItem>
-                      : projects.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+          <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0 }}>
 
             {/* Publish Composer */}
             <PublishComposer
@@ -1973,115 +1989,38 @@ export function Publisher() {
               </div>
             )}
 
-            {/* Source / DCC info */}
-            {dcc === 'ZBrush' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {/* Connection status */}
-                <div>
-                  <div className="cap" style={{ marginBottom: 6 }}>CONNEXION ZBRUSH</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{
-                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                      background: zbrushConnected ? 'var(--ok)' : zbrushChecking ? 'var(--ink-4)' : 'var(--err)',
-                    }} />
-                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                      {zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            ) : dcc === 'Maya' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-                {/* Maya connection — coherent card, UI sans font (matches Launcher naming) */}
-                {mayaConnected ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0, boxShadow: '0 0 6px var(--ok)' }} />
-                    <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>Maya connecté</span>
-                    <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)' }}>· commandPort {activeInstPort ?? 7001}</span>
-                  </div>
-                ) : mayaAutostartInstalled !== null && (
-                  <div style={{ borderRadius: 10, border: '1px solid var(--accent)', background: 'var(--accent-soft)', overflow: 'hidden' }}>
-                    {/* Header */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--rule-2)' }}>
-                      <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--err)', flexShrink: 0, marginTop: 4 }} />
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                        <span style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Maya n'est pas connecté</span>
-                        <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45 }}>
-                          Le pont FLUX (commandPort 7001) est injoignable. Suis les étapes pour l'activer.
-                        </span>
-                      </div>
-                    </div>
-                    {/* Steps */}
-                    <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--paper)' }}>
-                      <MayaStep
-                        n={1}
-                        done={!!mayaAutostartInstalled}
-                        title={mayaAutostartInstalled ? 'Autostart installé' : "Installer l'autostart Maya"}
-                        desc={mayaAutostartInstalled ? (mayaStartupFile ?? 'userSetup.py mis à jour') : 'Sidebar → bouton ⬡ à côté de Maya'}
-                      />
-                      {mayaAutostartInstalled && (
-                        <MayaStep n={2} done={false} title="Redémarre Maya" desc="Le commandPort s'ouvre automatiquement au lancement." />
-                      )}
-                      {mayaConnectCmd && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                          <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)' }}>
-                            Ou ouvre le port immédiatement — colle ceci dans le Script Editor (Python) de Maya :
-                          </span>
-                          <CopyBlock text={mayaConnectCmd} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {mayaConnected && instanceChooser}
-              </div>
-            ) : dcc === 'Houdini' ? (
-              <div>
-                <div className="cap" style={{ marginBottom: 6 }}>NODE ROP</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
-                  <div style={{
-                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                    background: houdiniConnected ? 'var(--ok)' : 'var(--err)',
-                  }} />
-                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                    {houdiniConnected
-                      ? `Connecté${houdiniVersion ? ` · Houdini ${houdiniVersion}` : ''}`
-                      : 'Houdini non connecté : lance le serveur FLUX dans Houdini'}
-                  </div>
-                </div>
-                {houdiniConnected && instanceChooser && <div style={{ marginBottom: 8 }}>{instanceChooser}</div>}
+            {/* Source: only what the artist has to act on (instance, ROP node, local file). */}
+            {(dcc === 'Maya' && mayaConnected) && instanceChooser}
+            {dcc === 'Houdini' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {houdiniConnected && instanceChooser}
                 <input
                   value={ropNodePath}
                   onChange={e => setRopNodePath(e.target.value)}
-                  placeholder="/out/rop_alembic1  (auto-rempli depuis la sélection)"
+                  placeholder="Node ROP (rempli depuis la sélection)"
+                  title="Node ROP exporté, ex. /out/rop_alembic1"
                   style={{
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
+                    borderRadius: 6, padding: '0 8px',
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
-                {detectedNodeType && (
-                  <div style={{ marginTop: 4, fontSize: 9, fontFamily: 'var(--mono)', color: resolveNodeExt(detectedNodeType) ? 'var(--ok)' : 'var(--ink-4)' }}>
-                    {resolveNodeExt(detectedNodeType)
-                      ? `→ ${resolveNodeExt(detectedNodeType)} (${detectedNodeType})`
-                      : `type non reconnu : ${detectedNodeType}`}
+                {detectedNodeType && !resolveNodeExt(detectedNodeType) && (
+                  <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                    type non reconnu : {detectedNodeType}
                   </div>
                 )}
               </div>
-            ) : dcc === 'Fichier local' ? (
+            )}
+            {dcc === 'Fichier local' && (
               <div>
-                <div className="cap" style={{ marginBottom: 6 }}>
-                  FICHIER SOURCE
-                </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
                     value={sourcePath}
                     onChange={e => setSourcePath(e.target.value)}
-                    placeholder="Chemin absolu vers le fichier à publier…  (tout type)"
+                    placeholder="Fichier à publier (tout type)"
                     style={{
                       flex: 1, minWidth: 0, height: 28,
                       background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
@@ -2179,87 +2118,40 @@ export function Publisher() {
 
                 {/* Published name — single file only; multi-file names are auto per file.
                     Must stay token-parseable (it drives the destination folder). */}
-                {localFiles.length <= 1 && (<>
-                <div className="cap" style={{ margin: '10px 0 6px' }}>NOM PUBLIÉ</div>
-                <input
-                  value={nameOverride ?? filename}
-                  onChange={e => setNameOverride(e.target.value)}
-                  spellCheck={false}
-                  placeholder={filename}
-                  style={{
-                    width: '100%', height: 28,
-                    background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
-                    boxShadow: 'var(--shadow-inset)', outline: 'none',
-                  }}
-                />
-                <div style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 4, fontFamily: 'var(--mono)' }}>
-                  Extension conservée depuis le fichier source. {nameOverride !== null && (
-                    <span onClick={() => setNameOverride(null)} style={{ color: 'var(--accent-hi)', cursor: 'pointer' }}>
-                      Réinitialiser
-                    </span>
-                  )}
-                </div>
-                </>)}
-              </div>
-            ) : DCC_PING_KEY[dcc] ? (
-              <div>
-                <div className="cap" style={{ marginBottom: 6 }}>CONNEXION {dcc.toUpperCase()}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                    background: bridgeStatus.connected ? 'var(--ok)' : bridgeStatus.checking ? 'var(--ink-4)' : 'var(--err)',
-                  }} />
-                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                    {bridgeStatus.connected
-                      ? `Connecté${bridgeStatus.version ? ` · ${bridgeStatus.version}` : ''}`
-                      : bridgeStatus.checking
-                        ? 'Vérification...'
-                        : dcc === 'Marvelous'
-                          ? 'Marvelous ne répond pas : dans Marvelous 2024.1+, Plugins > Plug-in > FLUX Bridge ; en 2024, la ligne ci-dessous (une fois par session)'
-                          : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
-                  </div>
-                </div>
-                {dcc === 'Marvelous' && !bridgeStatus.connected && !bridgeStatus.checking && (
-                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {marvelousScript
-                      ? <>
-                          <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-                            Pas de menu Plugins &gt; Plug-in (Marvelous 2024) ou pas de FLUX Bridge dedans : colle cette ligne dans Script &gt; Python (Plugins &gt; Python Editor en 2024.1+) puis Run.
-                          </span>
-                          {/* No " and no \ : the Marvelous 2024 editor mangles them (SyntaxError). */}
-                          <CopyBlock text={`exec(open('${marvelousScript.replace(/\\/g, '/')}').read())`} />
-                        </>
-                      : <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>Script absent : bouton Plug de Marvelous dans la sidebar pour l'écrire.</span>}
+                {localFiles.length <= 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <input
+                      value={nameOverride ?? filename}
+                      onChange={e => setNameOverride(e.target.value)}
+                      spellCheck={false}
+                      placeholder={filename}
+                      title="Nom publié (l'extension du fichier source est conservée)"
+                      style={{
+                        flex: 1, minWidth: 0, height: 28,
+                        background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                        borderRadius: 6, padding: '0 8px',
+                        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                        boxShadow: 'var(--shadow-inset)', outline: 'none',
+                      }}
+                    />
+                    {nameOverride !== null && (
+                      <span onClick={() => setNameOverride(null)} title="Revenir au nom des tokens"
+                        style={{ color: 'var(--ink-3)', cursor: 'pointer', display: 'flex' }}>
+                        <RotateCcw size={12} strokeWidth={2} />
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ink-4)', flexShrink: 0 }} />
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                  La publication depuis <span style={{ color: 'var(--ink-2)' }}>{dcc}</span> se déclenche directement depuis le logiciel
-                </div>
-              </div>
             )}
-
-            {/* Published by */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>PUBLIÉ PAR</div>
-              <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {settings?.username ?? '-'}
-              </div>
-            </div>
           </div>
 
-          {/* Description + result */}
+          {/* Description */}
           <div style={{ padding: '0 20px 16px', flexShrink: 0 }}>
-            <SecTitle>Description</SecTitle>
             <textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="Décris la modification effectuée…"
+              placeholder="Description de la modification…"
               style={{
                 width: '100%', height: 90, resize: 'none',
                 background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
@@ -2283,10 +2175,29 @@ export function Publisher() {
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
         <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
 
+          {/* FORMAT + SCOPE: one picker each (ADR 0044). Hidden for a local file: the format is
+              the picked file's own extension (backend infers it from source_path). */}
+          {dcc !== 'Fichier local' && (
+            <div style={{ padding: '16px 20px 4px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
+              <ExpandPicker mono title="Format"
+                value={exportExt}
+                options={formatsForDcc(dcc).map(ext => ({ value: ext, label: ext }))}
+                onChange={setExportExt}
+              />
+              {dcc === 'Maya' && (
+                <ExpandPicker title="Ce qui est exporté"
+                  value={mayaScope}
+                  options={[{ value: 'scene', label: 'Scène' }, { value: 'selection', label: 'Sélection' }]}
+                  onChange={v => setMayaScope(v as 'scene' | 'selection')}
+                />
+              )}
+            </div>
+          )}
+
           {/* PRESETS — one click = the USD department to publish (task + format), asset
               and shot alike (2026-09-26: the shot anim uses the same anim preset). */}
           {(dcc === 'Maya' || dcc === 'Houdini') && ['.usd', '.usda', '.usdc'].includes(exportExt) && (
-            <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+            <div style={{ padding: '4px 20px 0', flexShrink: 0 }}>
               <SecTitle>PRESETS USD</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {presetEntries(mode === 'asset' ? usdDepartments : usdShotDepartments).map(([task, info]) => (
@@ -2312,26 +2223,6 @@ export function Publisher() {
                 </Pill>
               </div>
             </div>
-          )}
-
-          {/* FORMAT — hidden for a local file: the format is the picked file's own
-              extension (backend infers it from source_path), so we never ask. */}
-          {dcc !== 'Fichier local' && (
-          <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
-            <SecTitle>FORMAT</SecTitle>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {formatsForDcc(dcc).map(ext => (
-                <div key={ext} onClick={() => setExportExt(ext)} className="scale-hover" style={{
-                  padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
-                  fontFamily: 'var(--mono)', fontWeight: exportExt === ext ? 600 : 400,
-                  border: exportExt === ext ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                  background: exportExt === ext ? 'var(--accent-soft)' : 'var(--paper-2)',
-                  color: exportExt === ext ? 'var(--accent-hi)' : 'var(--ink-3)',
-                  transition: 'all 0.1s',
-                }}>{ext}</div>
-              ))}
-            </div>
-          </div>
           )}
 
           {/* ANIMATION (one animated file: abc / USD) or SÉQUENCE (one file per frame, $F4) */}
@@ -2440,29 +2331,6 @@ export function Publisher() {
               </div>
             )
           })()}
-
-          {/* SCOPE — Maya only */}
-          {dcc === 'Maya' && (
-            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>SCOPE</SecTitle>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {(['scene', 'selection'] as const).map(s => (
-                  <div
-                    key={s}
-                    onClick={() => setMayaScope(s)}
-                    style={{
-                      padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
-                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: mayaScope === s ? 600 : 400,
-                      border: mayaScope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                      background: mayaScope === s ? 'var(--accent-soft)' : 'var(--paper-2)',
-                      color: mayaScope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
-                      transition: 'all 0.1s',
-                    }}
-                  >{s}</div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* OPTIONS du preset USD — Maya, FLUX writes: only what makes sense for it (ADR 0034). */}
           {dcc === 'Maya' && usdPreset && USD_PRESET_SCHEMAS[usdPreset].length > 0 && (
@@ -2876,8 +2744,14 @@ export function Publisher() {
                   <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
                     {on ? 'Écrit par FLUX (layers USD)' : `Écrit par ${dcc}`}
                   </span>
-                </div>
-                <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <span onClick={e => e.stopPropagation()} title="Ce qui est écrit"
+                        style={{ display: 'flex', color: 'var(--ink-4)', cursor: 'pointer' }}>
+                        <Info size={12} strokeWidth={2} />
+                      </span>
+                    </PopoverTrigger>
+                    <PopoverContent side="bottom" align="start" style={{ width: 320, fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.5, display: 'block' }}>
                   {usdOk && mode === 'shot' && (usdPreset === 'camera' || usdPreset === 'light') ? (<>
                     TASK {formatToken(sel.name)} du plan : {contribution.what}, avec la plage d'images et les fps.
                     {on
@@ -2911,50 +2785,29 @@ export function Publisher() {
                       ? `TASK ${formatToken(sel.name) || '—'} : FLUX écrit l'ANIM, les caméras (LAYOUT) et les lumières (LIGHT) d'un plan. ${dcc} écrit le fichier.`
                       : `TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`
                   )}
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
             )
           })()}
 
-          {/* APERÇU OUTPUT */}
-          <div style={{ padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <SecTitle>APERÇU OUTPUT</SecTitle>
-            <div className="subcard" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 90, maxHeight: 200, overflowY: 'auto' }}>
-              {(seqCapable && isSequence) ? (<>
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{filename}_v001/</div>
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)', paddingLeft: 12 }}>
-                  {filename}_v001.$F4{exportExt}
-                </div>
-              </>) : (
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)' }}>
-                  {filename}_LAST{exportExt}
-                </div>
-              )}
-              {dcc === 'Houdini' && ropNodePath && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                  ROP : {ropNodePath}
-                </div>
-              )}
-              {dcc === 'ZBrush' && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : zbrushChecking ? 'var(--ink-4)' : 'var(--err)' }}>
-                  {zbrushConnected
-                    ? `● ZBrush connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}`
-                    : `${zbrushChecking ? '…' : '✕'} ${zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}`}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
-        <Btn ghost onClick={reset}>Réinitialiser</Btn>
+      {/* Bottom bar: where it lands + actions */}
+      <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+        <div title="Fichier publié" style={{ flex: 1, minWidth: 0, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {dcc === 'Fichier local' && localFiles.length > 1
+            ? `${localFiles.length} fichiers`
+            : (seqCapable && isSequence) ? `${filename}_v001/${filename}_v001.$F4${exportExt}` : `${filename}_LAST${dcc === 'Fichier local' ? '' : exportExt}`}
+        </div>
+        <Btn ghost onClick={reset} title="Réinitialiser"><RotateCcw size={12} strokeWidth={2} /></Btn>
         {dcc === 'ZBrush' && (
           <Btn ghost onClick={handleCancelZBrush}>Annuler</Btn>
         )}
         <Btn primary onClick={() => void requestPublish()}>
-          {publishing ? 'Publication…' : 'Publish →'}
+          {publishing ? 'Publication…' : 'Publish'}
         </Btn>
       </div>
 

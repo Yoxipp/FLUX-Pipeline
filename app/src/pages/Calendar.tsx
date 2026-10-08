@@ -7,6 +7,7 @@
 // progress, green = done. Month and week views, filter by person, FR / EN.
 // Backend: features/calendar/calendar_store.py, routers/team_calendar.py.
 
+import { ExpandPicker } from '../components/shared/ExpandPicker'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -701,16 +702,13 @@ export function Calendar() {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{tr('Calendrier', 'Calendar')}</div>
           {shotScope && <button style={btn(true)} onClick={() => { setParams({}); setPicked(null); setCreating(null) }} title={tr('Afficher tout le calendrier', 'Show the whole calendar')}>{sequence} · {shot}<X size={11} /></button>}
           <button style={{ ...btn(), padding: 4 }} onClick={() => move(-1)}><ChevronLeft size={13} /></button>
           <button style={btn()} onClick={goToday}>{tr("Aujourd'hui", 'Today')}</button>
           <button style={{ ...btn(), padding: 4 }} onClick={() => move(1)}><ChevronRight size={13} /></button>
           <div style={{ fontSize: 12, color: 'var(--ink-2)', minWidth: 150, textTransform: view === 'month' ? 'capitalize' : undefined }}>{title}</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button style={btn(view === 'month')} onClick={() => setView('month')}>{tr('Mois', 'Month')}</button>
-            <button style={btn(view === 'week')} onClick={() => setView('week')}>{tr('Semaine', 'Week')}</button>
-          </div>
+          <ExpandPicker value={view} onChange={v => setView(v as typeof view)}
+            options={[{ value: 'month', label: tr('Mois', 'Month') }, { value: 'week', label: tr('Semaine', 'Week') }]} />
           <select style={{ ...input, width: 150 }} value={who} onChange={e => setWho(e.target.value)}>
             <option value="">{tr('Tout le monde', 'Everyone')}</option>
             {[...new Set([me, ...users, ...items.map(i => i.owner)].filter(Boolean))].map(u => (
