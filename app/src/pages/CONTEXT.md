@@ -33,7 +33,10 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   les references versionnees existantes, sous `_production/thumbnails/<id>`.
 * Timeline est ouverte dans la bande d'onglets des Shots des le depart ; Main reste la vue
   initiale. Les onglets ouverts et filtres Main survivent a l'ouverture des retakes.
-  Les profils de travail (ADR 0042) ne touchent pas a Production, sauf la page de demarrage.
+  Show > Departements : colonnes cochees a la main, pre-reglees par le profil de travail
+  (ADR 0043, `workPrefs.productionDepartments`, noms en majuscules, au moins une colonne,
+  mode sans departement coche = toutes les colonnes). NEED calcule sur tous les departements.
+  Le filtre de lignes All/Seq/Mine reste local par projet et mode.
 * `TrackingMenus.tsx` + `tableRows.ts` : sequences en blocs repliables, clic droit du nom
   pour Edit ; clic droit du titre de departement pour prioriser un statut. Tri local a
   la vue, par sequence, sans changer l'ordre sauvegarde. Icone artiste accent sous les
@@ -79,7 +82,8 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 ## Folder Manager (`Projects.tsx` + `folder_manager/`, B2 2026-09-28)
 
 * `Projects.tsx` : la page. Barre laterale (listes sauvegardees, presets), menu Affichage (vues, taille des tuiles,
-  formulaires de creation repliables ; prefs de travail ADR 0042, Ctrl + molette = taille), Token Finder, onglets de creation,
+  formulaires de creation repliables ; preferences de page dans le navigateur, hors profils ADR 0043,
+  Ctrl + molette = taille), Token Finder, onglets de creation,
   panneau droit, choix des vues (1 / 2 empilees / 2 cote a cote / 4), et l'etat partage par les vues
   (`FolderManagerContext` : favoris, presse-papier, undo, `transfer` = tout deplacement / copie, `fsTick` = relecture
   de toutes les vues apres une ecriture). La vue active (dernier clic, cadre accent) pilote le panneau droit, le projet
@@ -89,3 +93,8 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   d'une vue a l'autre : Ctrl = copie, sinon deplacement, meme projet seulement.
 * `folder_manager/shared.ts` (types, helpers, contexte), `open_in.ts` (actions "Open in" DCC), `ItemModals.tsx`,
   `icons.tsx`.
+
+## Activity
+
+* Menu Notifications (en-tete) : mentions, taches suivies, publishs / commentaires / erreurs
+  des autres artistes du projet actif. Pre-regle par le profil de travail (ADR 0043).
