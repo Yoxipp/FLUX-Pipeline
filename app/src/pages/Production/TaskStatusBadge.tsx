@@ -2,7 +2,7 @@ import { useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowDown, ArrowUp, Check, ChevronRight, Flag, FolderOpen, Trash2, Upload, UserRound, X } from 'lucide-react'
+import { ArrowDown, Check, ChevronRight, Flag, FolderOpen, Trash2, Upload, UserRound, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -91,6 +91,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
       onClick={selectionControl.onClick}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }} />}
+    {status && priority === 'high' && <span className="tracking-priority-high" aria-label="Priorité haute" title="Priorité haute">!</span>}
     <Tooltip scale={tooltipScale}><TooltipTrigger asChild><button ref={button} className="tracking-status" data-status={STATUS_TOKENS.includes(status) ? status : 'UNKNOWN'} disabled={disabled}
       aria-label={`${task.name} : ${status || 'Aucun statut - clic droit'}`}
       data-empty={!status || undefined}
@@ -104,7 +105,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
         else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}{status && priority !== 'normal' && <span className="tracking-priority" data-priority={priority} aria-label={`Priorité ${PRIORITY_LABEL[priority].toLowerCase()}`}>{priority === 'high' ? <ArrowUp size={9} strokeWidth={2.6} /> : <ArrowDown size={9} strokeWidth={2.6} />}</span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}{status && priority === 'low' && <span className="tracking-priority" data-priority="low" aria-label="Priorité basse"><ArrowDown size={9} strokeWidth={2.6} /></span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" side="bottom" align="start" collisionPadding={10} onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>

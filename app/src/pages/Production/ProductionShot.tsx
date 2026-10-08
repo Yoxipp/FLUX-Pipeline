@@ -15,15 +15,16 @@
 //   get an `order` that places them right before the next-higher SEQ number.
 // - Mouse (retake 05): wheel = scroll along the edit, Shift+wheel = scroll the page,
 //   Ctrl+wheel = zoom anchored under the cursor, Ctrl+Shift+wheel = row height,
-//   middle-button drag = pan. "Tout voir" fits the whole edit. Sliders stay for
-//   touch screens / no wheel. A wheel over a field never moves the timeline.
+//   middle-button drag = pan. "Tout voir" fits the whole edit. No on-screen help
+//   (2026-10-08). Sliders stay for touch screens / no wheel. A wheel over a
+//   field never moves the timeline.
 // - Create (top of the toolbar) opens the Shot or Sequence form (CreateMenu).
 // - Clip width = duration (2026-09-27): a shot is as wide as its frame range, a
 //   sequence is the sum of its shots, the ruler counts the frames of the edit. Dragging
 //   the right edge of a shot sets its duration (frame_end), the next shots follow.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical, X } from 'lucide-react'
+import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical } from 'lucide-react'
 import { CreateMenu, type CreateKind } from './CreateMenu'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
@@ -43,8 +44,6 @@ interface Props {
   onCreate?:       (kind: CreateKind) => void
 }
 
-const LS_HINT = 'flux.production.shot.gestureHint'
-const GESTURES = 'Molette : défiler · Maj + molette : page · Ctrl + molette : zoom · Ctrl + Maj + molette : hauteur · clic milieu glissé : déplacer'
 
 const isField = (el: EventTarget | null) =>
   el instanceof HTMLElement && !!el.closest('input, select, textarea, [contenteditable="true"]')
@@ -444,8 +443,6 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     setZoom(Math.floor(Math.max(1, avail) / total * DEFAULT_SHOT_FRAMES))
     el.scrollLeft = 0
   }
-  const [showHint, setShowHint] = useState(() => { try { return !localStorage.getItem(LS_HINT) } catch { return false } })
-  const hideHint = () => { setShowHint(false); try { localStorage.setItem(LS_HINT, '1') } catch { /* blocked */ } }
 
   return (
     <div data-timeline-page style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}
@@ -468,7 +465,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
         </div>
 
-        <button onClick={fitAll} disabled={sequences.length === 0} title={`Tout voir · ${GESTURES}`}
+        <button onClick={fitAll} disabled={sequences.length === 0} title="Tout voir"
           style={{ ..._zoomBtn, width: 'auto', padding: '0 8px', gap: 5, fontSize: 10 }}>
           <Maximize2 size={11} strokeWidth={2} /> Tout voir
         </button>
@@ -512,14 +509,6 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
           </span>
         </div>
       </div>
-
-      {showHint && sequences.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: 'var(--ink-3)' }}>
-          <span>{GESTURES}</span>
-          <button onClick={hideHint} aria-label="Masquer l'aide" title="Masquer (toujours dans l'infobulle de Tout voir)"
-            style={{ display: 'inline-flex', border: 0, background: 'transparent', color: 'var(--ink-4)', cursor: 'pointer', padding: 2 }}><X size={11} /></button>
-        </div>
-      )}
 
       {sequences.length === 0 && (
         <div style={{ padding: '32px 4px', fontSize: 11, color: 'var(--ink-4)' }}>

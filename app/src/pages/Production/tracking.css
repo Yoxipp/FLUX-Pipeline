@@ -161,7 +161,7 @@
 .tracking-deadline[data-deadline="Done"] { --deadline-color: #61e0a1; }
 .tracking-show-count { margin-left:4px; padding:1px 5px; border-radius:4px; background:var(--accent-soft); color:var(--accent-hi); font:10px var(--mono); }
 
-/* Task priority marker on a status badge (retake 07): high = accent, low = muted. */
+/* Task priority (retake 07): high = bold red "!" left of the badge, low = muted arrow in it. */
 .tracking-priority { display:inline-flex; margin-left:2px; vertical-align:middle; }
-.tracking-priority[data-priority="high"] { color:var(--accent-hi); }
 .tracking-priority[data-priority="low"] { color:var(--ink-4); }
+.tracking-priority-high { display:inline-block; width:8px; margin-right:3px; color:var(--err); font:800 13px var(--sans); line-height:1; text-align:center; vertical-align:middle; }

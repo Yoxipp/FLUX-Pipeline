@@ -95,7 +95,7 @@ export function entityDeadline(seq: string, name: string, items: CalendarItem[])
 
 export type MyTaskSort = 'smart' | 'deadline' | 'priority' | 'status' | 'updated' | 'name'
 export const SORT_LABEL: Record<MyTaskSort, string> = {
-  smart: 'Recommandé', deadline: 'Deadline', priority: 'Priorité', status: 'Statut (RTK d’abord)', updated: 'Mise à jour', name: 'Nom',
+  smart: 'Recommandé', deadline: 'Deadline', priority: 'Priorité', status: 'Statut', updated: 'Mise à jour', name: 'Nom',
 }
 
 const done = (t: MyTask) => t.status === 'APPROVED'

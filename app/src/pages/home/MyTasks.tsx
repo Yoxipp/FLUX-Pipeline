@@ -4,7 +4,7 @@
 // opens the task in Production. Validated tasks stay at the end, long lists load by page.
 
 import { useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, CalendarClock } from 'lucide-react'
+import { ArrowDown, CalendarClock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { ExpandPicker } from '../../components/shared/ExpandPicker'
 import { Btn } from '../../components/shared/ui'
@@ -62,10 +62,12 @@ export function MyTasks({ project, username }: { project: string | null | undefi
               title={`${t.label} · ${t.task.name}${t.subtask ? ` · ${t.subtask}` : ''} · ${STATUS_LABELS[status] ?? status} · priorité ${PRIORITY_LABEL[t.priority].toLowerCase()}`}
               onClick={() => navigate('/production', { state: { openFavorite: { project, class: t.seq, name: t.entity.name, task: t.task.name, subtask: t.subtask || undefined } } })}
               onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLElement).click() }}>
-              <span className="tracking-status" data-status={STATUS_TOKENS.includes(status) ? status : 'UNKNOWN'} style={{ flexShrink: 0 }}>{status}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                {t.priority === 'high' ? <span className="tracking-priority-high" aria-label="Priorité haute">!</span> : <span style={{ width: 11 }} />}
+              <span className="tracking-status" data-status={STATUS_TOKENS.includes(status) ? status : 'UNKNOWN'} >{status}</span>
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {t.priority === 'high' && <ArrowUp size={11} strokeWidth={2.4} color="var(--accent-hi)" aria-label="Priorité haute" />}
                   {t.priority === 'low' && <ArrowDown size={11} strokeWidth={2.4} color="var(--ink-4)" aria-label="Priorité basse" />}
                   <span style={{ fontFamily: 'var(--mono)' }}>{t.label}</span>
                   <span style={{ color: 'var(--ink-3)' }}>· {t.task.name}{t.subtask ? ` · ${t.subtask}` : ''}</span>
