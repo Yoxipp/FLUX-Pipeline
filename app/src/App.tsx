@@ -5,7 +5,7 @@ import { StartPageRedirect, WorkProfileProvider, useWorkProfile } from './WorkPr
 import { notificationReason, REASON_LABEL } from './lib/activityNotify'
 import { useProject } from './ProjectContext'
 import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
-import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
 import { StatusBar } from './components/shared/StatusBar'
@@ -24,11 +24,9 @@ import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
-import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
 import { Calendar }      from './pages/Calendar'
-import { AdvancedSettings } from './pages/AdvancedSettings'
-import { DiskUsage } from './pages/DiskUsage'
+import { SettingsPage } from './pages/settings/SettingsPage'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
@@ -154,11 +152,13 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
               <Route path="/usd"       element={<UsdPage />} />
-              <Route path="/templates" element={<TemplateEditor />} />
+              {/* Template Editor and Disk live in Settings > Avance (retake 06); old links redirect. */}
+              <Route path="/templates" element={<Navigate to="/settings?tab=advanced&sub=templates" replace />} />
               <Route path="/production" element={<Production />} />
               <Route path="/calendar"  element={<Calendar />} />
-              <Route path="/advanced"  element={<AdvancedSettings />} />
-              <Route path="/disk"      element={<DiskUsage />} />
+              <Route path="/settings"  element={<SettingsPage />} />
+              <Route path="/advanced"  element={<Navigate to="/settings?tab=advanced" replace />} />
+              <Route path="/disk"      element={<Navigate to="/settings?tab=advanced&sub=disk" replace />} />
             </Routes>
             </PageErrorBoundary>
           </main>

@@ -1,8 +1,8 @@
 // Login.tsx — popover de sélection / création d'utilisateur (déclenché depuis la TitleBar).
+// Renommer / supprimer : Paramètres > User (son compte) et > Avancé (les autres), retake 06.
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Pencil, Trash2, Check } from 'lucide-react'
-import { toast } from 'sonner'
+import { X } from 'lucide-react'
 import { api } from '../api/client'
 import { Avatar } from '../components/shared/ui'
 
@@ -17,9 +17,6 @@ export function Login({ onDone }: Props) {
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
   const [hovered, setHovered]   = useState<string | null>(null)
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [renameVal, setRenameVal] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const refreshUsers = () => api.listUsers().then(d => setUsers(d.users)).catch(() => {})
@@ -27,32 +24,6 @@ export function Login({ onDone }: Props) {
   useEffect(() => {
     void refreshUsers()
   }, [])
-
-  const doRename = async (old: string) => {
-    const next = renameVal.trim().toUpperCase()
-    if (!next || next === old) { setRenaming(null); return }
-    try {
-      const res = await api.renameUser(old, next)
-      toast.success(res.message)
-      setRenaming(null)
-      if (selected === old) setSelected(next)
-      await refreshUsers()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Échec du renommage')
-    }
-  }
-
-  const doDelete = async (name: string) => {
-    try {
-      const res = await api.deleteUser(name)
-      toast.success(res.message)
-      setConfirmDelete(null)
-      if (selected === name) setSelected(null)
-      await refreshUsers()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Échec de la suppression')
-    }
-  }
 
   const enter = async () => {
     const name = newName.trim() || selected
@@ -116,12 +87,10 @@ export function Login({ onDone }: Props) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
               {users.map(u => {
                 const isActive = u === selected
-                const isRenaming = renaming === u
-                const isConfirming = confirmDelete === u
                 return (
                   <div
                     key={u}
-                    onClick={() => { if (!isRenaming && !isConfirming) { setSelected(u); setNewName('') } }}
+                    onClick={() => { setSelected(u); setNewName('') }}
                     onMouseEnter={() => setHovered(u)}
                     onMouseLeave={() => setHovered(h => (h === u ? null : h))}
                     style={{
@@ -129,50 +98,15 @@ export function Login({ onDone }: Props) {
                       padding: '6px 8px', borderRadius: 7,
                       background: isActive ? 'var(--accent-soft)' : (hovered === u ? 'var(--paper)' : 'transparent'),
                       border: '1px solid ' + (isActive ? 'var(--accent)' : 'transparent'),
-                      cursor: isRenaming || isConfirming ? 'default' : 'pointer',
+                      cursor: 'pointer',
                       transition: 'border-color 0.12s, background 0.12s',
                     }}
                   >
                     <Avatar ch={u[0].toUpperCase()} size={20} />
 
-                    {isRenaming ? (
-                      <input
-                        autoFocus
-                        value={renameVal}
-                        onClick={e => e.stopPropagation()}
-                        onChange={e => setRenameVal(e.target.value.toUpperCase())}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') void doRename(u)
-                          else if (e.key === 'Escape') setRenaming(null)
-                        }}
-                        style={{
-                          flex: 1, minWidth: 0, height: 22, padding: '0 6px',
-                          background: 'var(--bg-deep)', border: '1px solid var(--accent)',
-                          borderRadius: 5, outline: 'none', fontSize: 11, color: 'var(--ink)',
-                          textTransform: 'uppercase',
-                        }}
-                      />
-                    ) : (
-                      <span style={{ flex: 1, fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{u}</span>
-                    )}
+                    <span style={{ flex: 1, fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{u}</span>
 
-                    {/* row actions */}
-                    {isRenaming ? (
-                      <IconBtn title="Valider" onClick={e => { e.stopPropagation(); void doRename(u) }}><Check size={12} /></IconBtn>
-                    ) : isConfirming ? (
-                      <>
-                        <span style={{ fontSize: 9, color: 'var(--err)', fontFamily: 'var(--mono)' }}>Supprimer ?</span>
-                        <IconBtn title="Confirmer" danger onClick={e => { e.stopPropagation(); void doDelete(u) }}><Check size={12} /></IconBtn>
-                        <IconBtn title="Annuler" onClick={e => { e.stopPropagation(); setConfirmDelete(null) }}><X size={12} /></IconBtn>
-                      </>
-                    ) : hovered === u ? (
-                      <>
-                        <IconBtn title="Renommer" onClick={e => { e.stopPropagation(); setRenaming(u); setRenameVal(u); setConfirmDelete(null) }}><Pencil size={11} /></IconBtn>
-                        <IconBtn title="Supprimer" danger onClick={e => { e.stopPropagation(); setConfirmDelete(u); setRenaming(null) }}><Trash2 size={11} /></IconBtn>
-                      </>
-                    ) : isActive ? (
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--accent-hi)', textTransform: 'uppercase' }}>✓</span>
-                    ) : null}
+                    {isActive && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--accent-hi)', textTransform: 'uppercase' }}>✓</span>}
                   </div>
                 )
               })}
@@ -242,29 +176,5 @@ export function Login({ onDone }: Props) {
         </div>
       </div>
     </>
-  )
-}
-
-function IconBtn({ children, title, danger, onClick }: {
-  children: React.ReactNode
-  title: string
-  danger?: boolean
-  onClick: (e: React.MouseEvent) => void
-}) {
-  return (
-    <div
-      onClick={onClick}
-      title={title}
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        width: 20, height: 20, borderRadius: 5, flexShrink: 0, cursor: 'pointer',
-        color: danger ? 'var(--err)' : 'var(--ink-3)',
-        border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-      }}
-      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--paper)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--paper-2)' }}
-    >
-      {children}
-    </div>
   )
 }

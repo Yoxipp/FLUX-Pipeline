@@ -5,8 +5,8 @@ import {
   Home, Upload, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Loader, Search, Plug, ArrowDownToLine, LayoutTemplate, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, HardDrive, CalendarDays, PanelLeft, UserRound,
+  Play, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, PanelLeft, UserRound,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -694,8 +694,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
-        <NavItem icon={LayoutTemplate} label={t('nav.templateEditor')} active={pathname === '/templates'} indent route="/templates" onClick={() => navigate('/templates')} />
-        <NavItem icon={HardDrive}      label="Disque"                  active={pathname === '/disk'}       indent route="/disk" onClick={() => navigate('/disk')} />
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
