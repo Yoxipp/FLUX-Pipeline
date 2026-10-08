@@ -472,10 +472,18 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
   cursor: pointer; position: relative; outline: none; font: 10px var(--sans);
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.dcc-play:hover, .dcc-play[data-state='open'] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hi); }
+.dcc-play:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hi); }
 .dcc-play:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
 .dcc-play.live { color: var(--accent-hi); border-color: color-mix(in oklch, var(--accent) 55%, var(--rule-2)); }
-.dcc-play .dcc-flag { position: absolute; top: 50%; right: 7px; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; }
-.dcc-play .dcc-flag.warn { background: var(--warn); }
-.dcc-play .dcc-flag.err { background: var(--err); }
+.dcc-play:disabled { cursor: default; opacity: .7; }
+.dcc-gear {
+  flex: 1; min-width: 0; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+  position: relative; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--paper-2); color: var(--ink-3);
+  cursor: pointer; outline: none; transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.dcc-gear:hover, .dcc-gear[data-state='open'] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hi); }
+.dcc-gear:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
+.dcc-gear .dcc-flag { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--paper); box-sizing: content-box; }
+.dcc-gear .dcc-flag.warn { background: var(--warn); }
+.dcc-gear .dcc-flag.err { background: var(--err); }
 .dcc-play .dcc-count { font: 600 9px var(--mono); }

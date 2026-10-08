@@ -5,7 +5,7 @@ import {
   Home, Upload, Layers,
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
-  Play, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
+  Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
   ClipboardList, AlertTriangle, Check, X, CalendarDays, PanelLeft, UserRound,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
@@ -725,14 +725,19 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                 <DccLogo dcc={s.key} size={18} title={s.name} />
                 {state && <span className={`dcc-state ${state}`} />}
               </span>
+              {/* Launch = starts the software at once; the gear opens every other action. */}
+              <button type="button" className={`dcc-play${connected ? ' live' : ''}`} disabled={isLoading}
+                aria-label={`Lancer ${s.name}`} title={`${connected ? 'Nouvelle instance' : 'Lancer'} · ${stateText}`}
+                onClick={() => void handleLaunch(s.key)}>
+                {isLoading
+                  ? <Loader size={11} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <Play size={11} strokeWidth={2} fill="currentColor" />}
+                {instances.length > 1 && <span className="dcc-count">×{instances.length}</span>}
+              </button>
               <Menu.Root open={open} onOpenChange={o => setLauncherMenu(o ? { soft: s.key, x: 0, y: 0 } : null)} modal={false}>
                 <Menu.Trigger asChild>
-                  <button type="button" className={`dcc-play${connected ? ' live' : ''}`}
-                    aria-label={`${s.name} : actions`} title={`${s.name} · ${stateText}`}>
-                    {isLoading
-                      ? <Loader size={11} strokeWidth={2} style={{ animation: 'spin 1s linear infinite' }} />
-                      : <Play size={11} strokeWidth={2} fill="currentColor" />}
-                    {instances.length > 1 && <span className="dcc-count">×{instances.length}</span>}
+                  <button type="button" className="dcc-gear" aria-label={`${s.name} : actions`} title="Plus d'actions">
+                    <Settings size={13} strokeWidth={1.8} />
                     {flag && <span className={`dcc-flag ${flag}`} />}
                   </button>
                 </Menu.Trigger>
