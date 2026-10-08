@@ -1,6 +1,6 @@
 // UsdLibrary.tsx — the USD page content: everything already published in the project.
 // Left: assets (components created by hand, ADR 0023, links in blocks ADR 0024) and decors
-// (assemblies), with search.
+// (assemblies), with search, sort and filter by classification tokens (retake 03, lib/usdTokenSort).
 // Right: one entity in four views, like a documented USD pipeline tool (AYON scene
 // inventory / Solaris stage manager): Content (departments or instances, editable),
 // Versions, Composition (what the file really gives) and Dependencies.
@@ -20,6 +20,9 @@ import type {
 } from '../../api/client'
 import { useI18n } from '../../i18n'
 import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
+import { ExpandPicker } from '../../components/shared/ExpandPicker'
+import { useSessionState } from '../../hooks/useSessionState'
+import { NO_TOKEN, SORT_NAME, sortAndFilter, tokenValue, tokenValues } from '../../lib/usdTokenSort'
 
 type Tab = 'components' | 'assemblies'
 type DetailTab = 'content' | 'versions' | 'composition' | 'deps'
@@ -39,6 +42,9 @@ export function UsdLibrary({ project, projects, onProject }: {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState<Tab>('components')
   const [query, setQuery] = useState('')
+  // Sort key and token filter survive page changes for the session (like the Publisher).
+  const [sortKey, setSortKey] = useSessionState<string>('usd.lib.sort', SORT_NAME)
+  const [tokenFilter, setTokenFilter] = useSessionState<Record<string, string[]>>('usd.lib.tokenFilter', {})
   const [sel, setSel] = useState<Selection>(null)
   const [legacy, setLegacy] = useState<{ name: string; rel_path: string }[]>([])
 
@@ -58,10 +64,28 @@ export function UsdLibrary({ project, projects, onProject }: {
   useEffect(() => { load() }, [load])
 
   const q = query.trim().toLowerCase()
+  const tokenKeys = lib?.token_keys ?? []
+  // A sort key gone from the project (token category removed) falls back to the name.
+  const activeSort = sortKey === SORT_NAME || tokenKeys.includes(sortKey) ? sortKey : SORT_NAME
+  const selected = useMemo(() => activeSort === SORT_NAME ? [] : (tokenFilter[activeSort] ?? []), [activeSort, tokenFilter])
   const components = useMemo(
-    () => (lib?.components ?? []).filter(c => !q || c.name.toLowerCase().includes(q)), [lib, q])
+    () => sortAndFilter((lib?.components ?? []).filter(c => !q || c.name.toLowerCase().includes(q)), activeSort, selected),
+    [lib, q, activeSort, selected])
   const assemblies = useMemo(
-    () => (lib?.assemblies ?? []).filter(a => !q || a.name.toLowerCase().includes(q)), [lib, q])
+    () => sortAndFilter((lib?.assemblies ?? []).filter(a => !q || a.name.toLowerCase().includes(q)), activeSort, selected),
+    [lib, q, activeSort, selected])
+  // Values offered as filter chips: those of the current tab, plus selected ones that
+  // no longer exist (shown as obsolete so the artist can drop them).
+  const tabEntries = tab === 'components' ? (lib?.components ?? []) : (lib?.assemblies ?? [])
+  const presentValues = activeSort === SORT_NAME ? [] : tokenValues(tabEntries, activeSort)
+  const obsoleteValues = lib ? selected.filter(v => !presentValues.includes(v)) : []
+  function toggleValue(v: string) {
+    setTokenFilter(f => {
+      const cur = f[activeSort] ?? []
+      return { ...f, [activeSort]: cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v] }
+    })
+  }
+  const groupLabel = (v: string) => v === NO_TOKEN ? tr('usd.lib.noToken') : v
 
   const selComponent = sel?.tab === 'components' ? lib?.components.find(c => c.name === sel.name) : undefined
   const selAssembly = sel?.tab === 'assemblies' ? lib?.assemblies.find(a => a.name === sel.name) : undefined
@@ -130,7 +154,8 @@ export function UsdLibrary({ project, projects, onProject }: {
               <RefreshCw size={11} strokeWidth={2} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
             </Btn>
           </div>
-          <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
             <Search size={11} strokeWidth={2} color="var(--ink-4)" style={{ position: 'absolute', left: 8, top: 8 }} />
             <input
               value={query}
@@ -141,7 +166,32 @@ export function UsdLibrary({ project, projects, onProject }: {
                 background: 'var(--bg-deep)', color: 'var(--ink)', fontSize: 11, outline: 'none', boxSizing: 'border-box',
               }}
             />
+            </div>
+            {tokenKeys.length > 0 && (
+              <ExpandPicker title={tr('usd.lib.sortBy')} mono value={activeSort} onChange={setSortKey}
+                options={[{ value: SORT_NAME, label: tr('usd.lib.sortName') },
+                  ...tokenKeys.map(k => ({ value: k, label: k, title: `${tr('usd.lib.sortBy')} ${k}` }))]} />
+            )}
           </div>
+          {activeSort !== SORT_NAME && (presentValues.length > 1 || selected.length > 0) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+              {presentValues.map(v => (
+                <Pill key={v} active={selected.includes(v)} onClick={() => toggleValue(v)}
+                  style={{ cursor: 'pointer', fontFamily: v === NO_TOKEN ? undefined : 'var(--mono)' }}>
+                  {groupLabel(v)} {tabEntries.filter(e => tokenValue(e, activeSort) === v).length}
+                </Pill>
+              ))}
+              {obsoleteValues.map(v => (
+                <span key={v} title={tr('usd.lib.obsoleteToken')} onClick={() => toggleValue(v)}
+                  style={{ ...mono, cursor: 'pointer', color: 'var(--warn)', textDecoration: 'line-through', padding: '0 4px' }}>
+                  {groupLabel(v)} <X size={9} strokeWidth={2} />
+                </span>
+              ))}
+              {selected.length > 0 && (
+                <Btn sm ghost onClick={() => setTokenFilter(f => ({ ...f, [activeSort]: [] }))}>{tr('usd.lib.clearFilter')}</Btn>
+              )}
+            </div>
+          )}
         </div>
 
         {tab === 'components' && lib && (
@@ -153,8 +203,12 @@ export function UsdLibrary({ project, projects, onProject }: {
             onCreated={name => { load(); goTo('assemblies', name) }} />
         )}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {tab === 'components' && components.map(c => (
-            <ListRow key={c.name} active={sel?.tab === 'components' && sel.name === c.name}
+          {tab === 'components' && components.map((c, i) => (
+            <div key={c.name} style={{ display: 'contents' }}>
+            {activeSort !== SORT_NAME && (i === 0 || tokenValue(components[i - 1], activeSort) !== tokenValue(c, activeSort)) && (
+              <GroupHeader label={groupLabel(tokenValue(c, activeSort))} />
+            )}
+            <ListRow active={sel?.tab === 'components' && sel.name === c.name}
               onClick={() => setSel({ tab: 'components', name: c.name })}
               icon={<Box size={12} strokeWidth={1.75} />}
               title={c.name}
@@ -164,9 +218,14 @@ export function UsdLibrary({ project, projects, onProject }: {
               </>}
               sub={`${c.blocks.map(b => b.name).join(' · ') || '-'}  ·  ${c.files.length} link${c.files.length > 1 ? 's' : ''}${c.used_by.length ? `  ·  ${c.used_by.length} asm` : ''}`}
             />
+            </div>
           ))}
-          {tab === 'assemblies' && assemblies.map(a => (
-            <ListRow key={a.file} active={sel?.tab === 'assemblies' && sel.name === a.name}
+          {tab === 'assemblies' && assemblies.map((a, i) => (
+            <div key={a.file} style={{ display: 'contents' }}>
+            {activeSort !== SORT_NAME && (i === 0 || tokenValue(assemblies[i - 1], activeSort) !== tokenValue(a, activeSort)) && (
+              <GroupHeader label={groupLabel(tokenValue(a, activeSort))} />
+            )}
+            <ListRow active={sel?.tab === 'assemblies' && sel.name === a.name}
               onClick={() => setSel({ tab: 'assemblies', name: a.name })}
               icon={<Boxes size={12} strokeWidth={1.75} />}
               title={a.name}
@@ -176,6 +235,7 @@ export function UsdLibrary({ project, projects, onProject }: {
               </>}
               sub={`${a.instances.length} ${tr('usd.lib.instances').toLowerCase()}`}
             />
+            </div>
           ))}
           {tab === 'assemblies' && legacy.length > 0 && (
             <div style={{ marginTop: 10, padding: '8px 6px', borderTop: '1px solid var(--rule)' }}>
@@ -219,6 +279,14 @@ export function UsdLibrary({ project, projects, onProject }: {
           <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.lib.pick')}</div>
         )}
       </div>
+    </div>
+  )
+}
+
+function GroupHeader({ label }: { label: string }) {
+  return (
+    <div className="lbl" style={{ ...mono, fontSize: 9.5, color: 'var(--ink-4)', padding: '8px 6px 2px', letterSpacing: '.04em' }}>
+      {label}
     </div>
   )
 }

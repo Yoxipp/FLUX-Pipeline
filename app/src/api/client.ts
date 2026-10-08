@@ -1087,6 +1087,7 @@ export interface UsdProposedFile {
 export interface UsdComponentInfo {
   name: string
   class: string | null   // CLASS token (deep link to Production)
+  tokens: Record<string, string>   // classification tokens from tokens.json (UI sort / filter, retake 03)
   state: 'ok' | 'stale' | 'empty'
   legacy: boolean        // written before ADR 0023: saved again in the new format on the next update
   version: string | null
@@ -1110,6 +1111,7 @@ export interface UsdAssemblyInstance {
 }
 export interface UsdAssemblyInfo {
   name: string; class?: string; file: string; instances: UsdAssemblyInstance[]; broken: number
+  tokens: Record<string, string>   // {} for a legacy flat file
   version: string | null      // current vNNN (null = legacy flat file)
   versions: string[]
   legacy: boolean             // old builder file, converted on first edit
@@ -1130,6 +1132,7 @@ export interface UsdLibrary {
   project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[]
   creatable: string[]      // asset NAMEs without a component (created by hand, ADR 0023)
   departments: string[]    // asset TYPE tokens of the project
+  token_keys: string[]     // token categories present (CLASS first), for sort / filter
   rules: UsdComponentRules
 }
 export interface UsdComponentRules {

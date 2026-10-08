@@ -43,6 +43,39 @@ def _class_of(tokens: dict, name: str) -> str | None:
     return best
 
 
+# Token categories that never classify an asset in the UI: the asset itself, its
+# departments (relative sub-paths), instances, shots and free-form custom tokens.
+_NOT_SORT_TOKENS = {"NAME", "TYPE", "TYPE_SHOT", "INSTANCE", "SEQ", "SHOT", "custom"}
+
+
+def _tokens_of(tokens: dict, name: str) -> dict[str, str]:
+    """{category: value} of every token whose folder contains the NAME folder (longest
+    match per category), e.g. {"CLASS": "CHAR"}. UI sorting / filtering only (retake 03):
+    never a prim name, a vNNN or a LAST pointer. Empty when NAME is unknown to tokens.json."""
+    name_path = str(tokens.get("NAME", {}).get(name, "")).replace("\\", "/").strip("/")
+    out: dict[str, str] = {}
+    if not name_path:
+        return out
+    for category, values in tokens.items():
+        if category in _NOT_SORT_TOKENS or not isinstance(values, dict):
+            continue
+        best, best_len = None, -1
+        for value, value_path in values.items():
+            vp = str(value_path).replace("\\", "/").strip("/")
+            if vp and "{" not in vp and (name_path == vp or name_path.startswith(vp + "/")) \
+                    and (len(vp) > best_len or (len(vp) == best_len and str(value) < str(best))):
+                best, best_len = value, len(vp)
+        if best is not None:
+            out[str(category)] = str(best)
+    return out
+
+
+def token_keys(entries: list[dict]) -> list[str]:
+    """Categories present on at least one entry, CLASS first then alphabetical."""
+    keys = {k for e in entries for k in (e.get("tokens") or {})}
+    return sorted(keys, key=lambda k: (k != "CLASS", k))
+
+
 def _is_assembly_entry(entry: Path | None) -> bool:
     """True when this <NAME>/usd entry is a decor (kind=assembly), not a component."""
     if entry is None or not entry.is_file():
@@ -104,7 +137,7 @@ def _component_info(project: Path, tokens: dict, name: str, parent: Path, versio
     stale = legacy or any(f["found"] and (f["resolved_version"] != f["composed_version"] or f["prim_changed"])
                           for f in files)         or set(composed) - set(resolved)
     return {
-        "name": name, "class": _class_of(tokens, name),
+        "name": name, "class": _class_of(tokens, name), "tokens": _tokens_of(tokens, name),
         "state": "stale" if stale else ("ok" if files else "empty"),
         "legacy": legacy, "version": current, "versions": versions,
         "blocks": recipe.get("blocks") or [],
@@ -223,6 +256,7 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
         layout = layout_file(project, name)
         seen.add(name)
         out.append({"name": name, "class": _class_of(tokens, name) or "",
+                    "tokens": _tokens_of(tokens, name),
                     "file": str(last if last.is_file() else entry),
                     "version": entry.parent.name.rsplit("_", 1)[-1],
                     "versions": assembly_versions(parent, name), "legacy": False,
@@ -242,7 +276,7 @@ def list_assemblies(project_path: str | Path, subdir: str = DEFAULT_ASSEMBLY_SUB
         if layer.defaultPrim in seen:
             continue
         instances = _instances(layer, file, comp_dirs)
-        out.append({"name": layer.defaultPrim, "file": str(file), "version": None, "versions": [],
+        out.append({"name": layer.defaultPrim, "tokens": {}, "file": str(file), "version": None, "versions": [],
                     "legacy": True, "dir": str(file.parent),
                     "layout": None, "layout_version": None, "instances": instances,
                     "broken": sum(1 for i in instances if i["broken"])})
@@ -266,6 +300,8 @@ def build_library(project_path: str | Path, assembly_subdir: str = DEFAULT_ASSEM
     return {"components": components, "assemblies": assemblies,
             "creatable": creatable_components(project_path, components, assemblies),
             "departments": available_departments(project_path),
+            # Token categories the UI can sort / filter by (retake 03).
+            "token_keys": token_keys(components + assemblies),
             # The UI offers only what the backend accepts (one source of truth).
             "rules": {"kinds": list(cr.KINDS),
                       "default_kind": dict(cr.DEFAULT_KIND),
