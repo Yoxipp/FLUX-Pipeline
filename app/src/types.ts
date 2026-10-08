@@ -286,6 +286,7 @@ export interface ProductionTaskDetail {
   notes?:      string
   completion?: number             // 0-100
   comments?:   ProductionComment[]
+  priority?:   'high' | 'low'     // absent = normal (retake 07, Production/taskPriority.ts)
 }
 
 export interface ProductionTask {

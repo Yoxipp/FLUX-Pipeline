@@ -43,11 +43,15 @@ export function Production() {
   useEffect(() => {
     if (!favorite || favorite.project !== project) return
     const asset = prod.state.assets.find(a => a.class.toUpperCase() === favorite.class.toUpperCase() && a.name.toUpperCase() === favorite.name.toUpperCase())
-    if (!asset) return
-    setStoredMode('asset'); setSelection({ kind: 'asset', id: asset.id })
+    // A shot target (home "Mes tâches", retake 07): class = sequence name, name = shot name.
+    const seq = asset ? undefined : prod.state.sequences.find(s => s.name.toUpperCase() === favorite.class.toUpperCase())
+    const shot = seq ? prod.state.shots.find(s => s.seq_id === seq.id && s.name.toUpperCase() === favorite.name.toUpperCase()) : undefined
+    if (!asset && !shot) return
+    const kind = asset ? 'asset' : 'shot'
+    setStoredMode(kind); setSelection({ kind, id: (asset ?? shot)!.id })
     setPendingSpec({ task: favorite.task, subtask: favorite.subtask })
-    navigate('/production?mode=asset', { replace: true, state: null })
-  }, [favorite, project, prod.state.assets])
+    navigate(`/production?mode=${kind}`, { replace: true, state: null })
+  }, [favorite, project, prod.state.assets, prod.state.shots, prod.state.sequences])
   const openEntity = (sel: Selection) => {
     setSelection(sel)
     if (sel.kind === 'asset' || sel.kind === 'shot') navigate(`/production?mode=${sel.kind}`, { replace: true })

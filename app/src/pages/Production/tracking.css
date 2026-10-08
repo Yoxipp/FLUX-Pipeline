@@ -160,3 +160,8 @@
 .tracking-deadline[data-deadline="Extra-late"] { --deadline-color: #ff6376; }
 .tracking-deadline[data-deadline="Done"] { --deadline-color: #61e0a1; }
 .tracking-show-count { margin-left:4px; padding:1px 5px; border-radius:4px; background:var(--accent-soft); color:var(--accent-hi); font:10px var(--mono); }
+
+/* Task priority marker on a status badge (retake 07): high = accent, low = muted. */
+.tracking-priority { display:inline-flex; margin-left:2px; vertical-align:middle; }
+.tracking-priority[data-priority="high"] { color:var(--accent-hi); }
+.tracking-priority[data-priority="low"] { color:var(--ink-4); }

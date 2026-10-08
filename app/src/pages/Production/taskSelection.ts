@@ -1,4 +1,5 @@
 import type { ProductionDepartment, ProductionState, ProductionTask } from '../../types'
+import { patchTaskPriority, type Priority } from './taskPriority'
 import { clearTaskBadge, patchTaskArtist, setTaskStatus, type TaskEntity } from './taskActions'
 import { departmentTasks, taskAssignedTo, type TrackingEntity } from './tracking'
 
@@ -59,6 +60,7 @@ export function selectProductionTask(selection: TaskSelection, targets: TaskActi
 }
 
 export type TaskBatchAction = { kind: 'artist'; value: string } | { kind: 'status'; value: string } | { kind: 'clear' }
+  | { kind: 'priority'; value: Priority }
 
 /** One state patch/save for the whole selection, without overwriting other review fields. */
 export function applyTaskSelection(state: ProductionState, targets: TaskActionTarget[], action: TaskBatchAction): ProductionState {
@@ -71,6 +73,7 @@ export function applyTaskSelection(state: ProductionState, targets: TaskActionTa
     if (!entity) return next
     if (action.kind === 'artist') return patchTaskArtist(next, entity.id, target.task, target.subtask ?? '', action.value)
     if (action.kind === 'clear') return clearTaskBadge(next, entity.id, target.task, target.subtask ?? '')
+    if (action.kind === 'priority') return patchTaskPriority(next, entity.id, target.task, target.subtask ?? '', action.value)
     if (target.statuses && !target.statuses.includes(action.value)) return next
     return setTaskStatus(next, entity, target.task, target.subtask ?? '', action.value)
   }, state)

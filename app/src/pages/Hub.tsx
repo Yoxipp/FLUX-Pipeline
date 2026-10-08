@@ -7,6 +7,7 @@ import { Avatar, Tag } from '../components/shared/ui'
 import { api } from '../api/client'
 import { HUB_CHAT_POLL_INTERVAL_MS } from '../lib/pollIntervals'
 import { useI18n } from '../i18n'
+import { MyTasks } from './home/MyTasks'
 
 
 // Render chat text with @mentions. Only the mention of the CURRENT user stands out
@@ -224,6 +225,11 @@ export function Hub() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* ── mes tâches (retake 07): the right column, sorted like Production ── */}
+        <div style={{ width: 380, flexShrink: 0, borderLeft: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <MyTasks project={project} username={settings?.username ?? ''} />
         </div>
 
       </div>

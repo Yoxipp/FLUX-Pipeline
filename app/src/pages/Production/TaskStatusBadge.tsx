@@ -2,7 +2,7 @@ import { useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, ChevronRight, FolderOpen, Trash2, Upload, UserRound, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronRight, Flag, FolderOpen, Trash2, Upload, UserRound, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared
 import { expandFluxPath } from './util'
 import './tracking.css'
 import { viewportRect } from '../../components/shared/tooltipPosition'
+import { PRIORITIES, PRIORITY_LABEL, priorityOf } from './taskPriority'
 
 interface Props {
   project: string; state: ProductionState; setState: (patch: (prev: ProductionState) => ProductionState) => void
@@ -41,10 +42,14 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
   const key = `${task.name.toUpperCase()}${subtask ? `|${subtask.toUpperCase()}` : ''}`
   const artist = entity.task_details?.[key]?.assignee ?? entity.task_details?.[task.name.toUpperCase()]?.assignee ?? ''
   const hoverArtists = [...new Set([artist, ...(!subtask ? task.known_subtasks.map(sub => entity.task_details?.[`${task.name.toUpperCase()}|${sub.toUpperCase()}`]?.assignee ?? '') : [])].filter(Boolean))].join(', ')
+  // Priority (retake 07): only high / low are marked on the badge, normal stays quiet.
+  const priority = priorityOf(entity.task_details?.[key])
   const status = suppliedStatus ?? (subtask ? detailStatus(entity.task_details?.[key]) : taskStatus({ ...entity, class: 'class' in entity ? entity.class : 'SEQ', group_id: null }, task))
   const targets = actionTargets?.length && (open || assignOpen || removeOpen) ? actionTargets : [{ entity, task, subtask, status, statuses }]
   const multiple = targets.length > 1
   const availableStatuses = multiple ? statuses.filter(token => targets.every(target => !target.statuses || target.statuses.includes(token))) : statuses
+  const targetPriorities = [...new Set(targets.map(target =>
+    priorityOf(target.entity.task_details?.[`${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`])))]
   const targetArtists = [...new Set(targets.map(target => {
     const targetKey = `${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`
     return target.entity.task_details?.[targetKey]?.assignee ?? target.entity.task_details?.[target.task.name.toUpperCase()]?.assignee ?? ''
@@ -99,7 +104,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
         else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}</TooltipContent></Tooltip>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}{status && priority !== 'normal' && <span className="tracking-priority" data-priority={priority} aria-label={`Priorité ${PRIORITY_LABEL[priority].toLowerCase()}`}>{priority === 'high' ? <ArrowUp size={9} strokeWidth={2.6} /> : <ArrowDown size={9} strokeWidth={2.6} />}</span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" side="bottom" align="start" collisionPadding={10} onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>
@@ -114,6 +119,12 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
           <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
             <Menu.Item className="production-menu-item" onSelect={() => void takeTask()}>{multiple ? 'Prendre les tasks' : 'Prendre la task'}</Menu.Item>
             <Menu.Item className="production-menu-item" onSelect={() => void pickArtist()}>Assigner artiste</Menu.Item>
+          </Menu.SubContent></Menu.Portal></Menu.Sub>
+        <Menu.Sub><Menu.SubTrigger className="production-menu-item"><Flag size={14} />Priorité<ChevronRight size={13} className="production-menu-chevron" /></Menu.SubTrigger>
+          <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
+            {PRIORITIES.map(p => <Menu.Item key={p} className="production-menu-item" onSelect={() => setState(prev => applyTaskSelection(prev, targets, { kind: 'priority', value: p }))}>
+              {PRIORITY_LABEL[p]}{targetPriorities.length === 1 && targetPriorities[0] === p && <Check size={13} />}
+            </Menu.Item>)}
           </Menu.SubContent></Menu.Portal></Menu.Sub>
         {!multiple && <><Menu.Item className="production-menu-item" onSelect={() => navigate('/publisher', { state: { prefill: taskPublisherPrefill(project, state, entity, task) } })}><Upload size={14} />Publish here</Menu.Item>
         <Menu.Item className="production-menu-item" onSelect={() => void folder()}><FolderOpen size={14} />Folder manager</Menu.Item></>}

@@ -22,6 +22,14 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * Production est a 90% par defaut ; boutons de zoom retires, Ctrl+molette reste disponible.
 * `NewProductionDialog.tsx` : creation asset/groupe ou sequence/shots, choix de sequence,
   creation multiple validee avant sauvegarde. Assets/Shots sont sous Production dans la sidebar.
+* `taskPriority.ts` (retake 07) : seule logique de priorite des taches. `task_details[<TASK>|<SUB>].priority`
+  = `high` | `low` (absent = normale), reglee au clic droit d'un badge > Priorite (aussi en selection
+  multiple), marquee par une fleche sur le badge. `myTasks` (taches assignees a un artiste), deadline =
+  entree Calendrier ouverte la plus proche liee au shot (meme regle que le badge deadline) ou au NAME
+  de l'asset, `sortMyTasks` : Recommande (deadline > priorite > statut RTK d'abord), Deadline, Priorite,
+  Statut, Mise a jour (dernier publish ou commentaire), Nom ; validees toujours a la fin, nom en
+  departage. Accueil : colonne droite `home/MyTasks.tsx` (projet actif, pages de 30, clic = la tache
+  dans Production, shots compris via `openFavorite`).
 * `CreateMenu.tsx` (retake 05) : un bouton Create en haut du tableau et de la Timeline, menu
   Shot / Sequence (ou Asset / Groupe) qui ouvre `NewProductionDialog` sur ce type ; Shot grise
   sans sequence. Timeline (`ProductionShot.tsx`) : molette = defiler, Maj+molette = page,
