@@ -14,6 +14,8 @@ import { DepartmentSortMenu, SequenceEditMenu } from './TrackingMenus'
 import { productionRowGroups, type DepartmentSort } from './tableRows'
 import { ProductionShowMenu, ProductionRelatedMenu } from './ProductionTableMenus'
 import { useProductionShow } from './useProductionShow'
+import { useWorkProfile } from '../../WorkProfileContext'
+import { visibleDepartments } from '../../lib/workProfiles'
 import { emptyTaskSelection, pruneTaskSelection, selectProductionTask, taskSelectionKey, trackingCellTasks, type TaskActionTarget } from './taskSelection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
 import './tracking.css'
@@ -46,7 +48,10 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   const { settings } = useSettings()
   const username = settings?.username ?? ''
   const calendar = useShotCalendar(project, mode === 'shot')
-  const departments = useMemo(() => trackingDepartments(state, mode), [state, mode])
+  const { prefs: workPrefs, setPref: setWorkPref } = useWorkProfile()
+  // Every department of the mode (dependencies, Show menu) vs. the columns ticked in Show.
+  const allDepartments = useMemo(() => trackingDepartments(state, mode), [state, mode])
+  const departments = useMemo(() => visibleDepartments(allDepartments, workPrefs.productionDepartments), [allDepartments, workPrefs.productionDepartments])
   const changeZoom = (next: number) => setZoom(Math.round(Math.max(0.65, Math.min(1.4, next)) * 100) / 100)
   useEffect(() => {
     const node = scrollRef.current
@@ -107,7 +112,8 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       <span className="tracking-count">{entities.length} / {mode === 'shot' ? state.shots.length : state.assets.length}</span>
       {selectedTargets.length > 0 && <div className="tracking-selection-summary"><span role="status">{selectedTargets.length} tâche{selectedTargets.length > 1 ? 's' : ''} sélectionnée{selectedTargets.length > 1 ? 's' : ''}</span><button aria-label="Effacer la sélection de tâches" onClick={() => setTaskSelection(emptyTaskSelection())}><X size={12} /></button></div>}
       <div className="tracking-spacer" />
-      <ProductionShowMenu filter={filter} onChange={setFilter} sequences={state.sequences} />
+      <ProductionShowMenu filter={filter} onChange={setFilter} sequences={state.sequences}
+        departments={allDepartments} departmentPref={workPrefs.productionDepartments} onDepartmentPref={v => setWorkPref('productionDepartments', v)} />
       <button onClick={onSettings}><Settings2 size={13} /> Settings</button>
       <button onClick={beginCreate}><Plus size={13} /> New</button>
     </div>
@@ -146,7 +152,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
             <td className="tracking-relations"><ProductionRelatedMenu items={relatedItems} onOpen={onOpenEntity} /></td>
             {departments.map(dep => {
               const visible = trackingCellTasks(state, entity, dep, filter.kind === 'mine', username)
-              const blocked = blockers(state, entity, dep, departments)
+              const blocked = blockers(state, entity, dep, allDepartments)
               return <td key={dep.id} className="tracking-status-cell" onClick={event => {
                 if (!event.currentTarget.contains(event.target as Node) || (event.target as HTMLElement).closest('button')) return
                 const additive = event.ctrlKey || event.metaKey

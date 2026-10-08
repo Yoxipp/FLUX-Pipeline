@@ -1,7 +1,9 @@
 // App.tsx — shell principal : routing, TitleBar, Sidebar, StatusBar.
 
 import { useEffect, useRef, useState } from 'react'
-import { StartPageRedirect, WorkProfileProvider } from './WorkProfileContext'
+import { StartPageRedirect, WorkProfileProvider, useWorkProfile } from './WorkProfileContext'
+import { notificationReason } from './lib/activityNotify'
+import { useProject } from './ProjectContext'
 import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
 import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
@@ -42,6 +44,9 @@ import { Toaster, toast } from 'sonner'
 function MentionWatcher() {
   const navigate = useNavigate()
   const { mentions, loaded } = useMentionsFeed()
+  const { prefs } = useWorkProfile()
+  const enabled = useRef(prefs.notifyMention)
+  enabled.current = prefs.notifyMention
   const seen = useRef<Set<string> | null>(null)
   useEffect(() => {
     if (!loaded) return
@@ -51,6 +56,7 @@ function MentionWatcher() {
       if (seen.current.has(m.id)) continue
       seen.current.add(m.id)
       if (m.read) continue   // already-read history that scrolled in — don't toast
+      if (!enabled.current) continue   // turned off in the work profile (ADR 0043)
       toast(`${m.from_user} t'a mentionné`, {
         description: m.text,
         position: 'bottom-right',
@@ -66,15 +72,21 @@ function MentionWatcher() {
 }
 
 // Polls the activity feed and pops a floating toast + native notification for
-// every NEW event whose parsed target matches one of the user's Production
-// favorites. Silent on the very first poll so the backlog isn't replayed.
+// every NEW event the work profile asks for (ADR 0043): followed (favorite) tasks,
+// and optionally publishes / comments / errors of other artists in the active
+// project. Silent on the very first poll so the backlog isn't replayed.
 function FavoriteWatcher() {
   const navigate = useNavigate()
   const { favorites } = useFavorites()
   const { events, loaded } = useActivityFeed()
+  const { prefs } = useWorkProfile()
+  const { project } = useProject()
+  const { settings } = useSettings()
   const seen = useRef<Set<string> | null>(null)
   const favRef = useRef<string[]>(favorites)
   useEffect(() => { favRef.current = favorites }, [favorites])
+  const ctxRef = useRef({ prefs, project, username: settings?.username ?? '' })
+  ctxRef.current = { prefs, project, username: settings?.username ?? '' }
   useEffect(() => {
     if (!loaded) return
     // First real snapshot seeds `seen` silently so the backlog isn't replayed.
@@ -84,16 +96,16 @@ function FavoriteWatcher() {
       seen.current.add(e.id)
       if (!e.file || !e.project) continue
       const parsed = parseFluxFilename(e.file)
-      if (!parsed) continue
       const favs = favRef.current
-      const match = favs.some(k => eventMatchesFavorite(k, {
+      const match = !!parsed && favs.some(k => eventMatchesFavorite(k, {
         project: e.project!, class: parsed.class, name: parsed.name,
         task: parsed.task, instance: parsed.instance,
       }))
-      if (!match) continue
-      const title = e.action === 'comment'
-        ? `${e.user} · commentaire sur favori`
-        : `${e.user} · ${e.action} sur favori`
+      const reason = notificationReason(e, { ...ctxRef.current, followed: match })
+      if (!reason) continue
+      const title = reason === 'followed'
+        ? e.action === 'comment' ? `${e.user} · commentaire sur favori` : `${e.user} · ${e.action} sur favori`
+        : reason === 'error' ? `${e.user} · erreur` : `${e.user} · ${e.action}`
       const body  = e.file
       toast(title, {
         description: body,

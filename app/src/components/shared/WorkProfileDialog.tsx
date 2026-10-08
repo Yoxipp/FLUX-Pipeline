@@ -37,12 +37,14 @@ const DEPARTMENT_GROUPS = (['shot', 'asset'] as const).map(scope => ({
   names: DEFAULT_DEPARTMENTS.filter(d => d.scope === scope).map(d => d.name.toUpperCase()),
 }))
 
+const DISPLAY_NAMES: Record<string, string> = Object.fromEntries(DEFAULT_DEPARTMENTS.map(d => [d.name.toUpperCase(), d.name]))
+
 function DepartmentChips({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const picked = splitDepartments(value)
   const known = DEPARTMENT_GROUPS.flatMap(g => g.names)
   const extra = picked.filter(n => !known.includes(n))
   const toggle = (name: string) => onChange(joinDepartments(picked.includes(name) ? picked.filter(n => n !== name) : [...picked, name]))
-  const chip = (name: string) => <button key={name} role="checkbox" aria-checked={picked.includes(name)} data-on={picked.includes(name) || undefined} onClick={() => toggle(name)}>{name.charAt(0) + name.slice(1).toLowerCase()}</button>
+  const chip = (name: string) => <button key={name} role="checkbox" aria-checked={picked.includes(name)} data-on={picked.includes(name) || undefined} onClick={() => toggle(name)}>{DISPLAY_NAMES[name] ?? name.charAt(0) + name.slice(1).toLowerCase()}</button>
   return <div className="work-profile-departments">
     <div className="work-profile-seg"><button role="checkbox" aria-checked={!picked.length} data-on={!picked.length || undefined} onClick={() => onChange('')}>Toutes</button></div>
     {DEPARTMENT_GROUPS.map(g => <div key={g.scope} className="work-profile-seg"><span className="work-profile-seg-label">{g.label}</span>{g.names.map(chip)}</div>)}

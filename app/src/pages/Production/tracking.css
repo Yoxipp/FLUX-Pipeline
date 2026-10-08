@@ -158,3 +158,4 @@
 .tracking-deadline[data-deadline="Late"] { --deadline-color: #ffce55; }
 .tracking-deadline[data-deadline="Extra-late"] { --deadline-color: #ff6376; }
 .tracking-deadline[data-deadline="Done"] { --deadline-color: #61e0a1; }
+.tracking-show-count { margin-left:4px; padding:1px 5px; border-radius:4px; background:var(--accent-soft); color:var(--accent-hi); font:10px var(--mono); }
