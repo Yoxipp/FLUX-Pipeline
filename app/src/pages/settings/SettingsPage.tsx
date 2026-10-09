@@ -1,9 +1,11 @@
 // SettingsPage.tsx - /settings, three scopes never mixed (retake 06, ADR 0046):
 //   User    : the artist and this machine (UserSettings).
-//   Projet  : the active project, shared by every artist (scope said before editing).
+//   Projet  : the active project, shared by every artist (scope said before editing),
+//             plus the pipe artists (create / rename / delete, moved from Avance and
+//             from the TitleBar profile popover).
 //   Avance  : risky settings behind "Understand" (N8): project technique + publish
 //             switches, Disque, Editeur de Template (moved from the Pipeline sidebar),
-//             other pipe users, uninstall.
+//             uninstall.
 //   Doc     : the FLUX manual (FLUX_DOC, ADR 0049), embedded.
 // Deep links: ?tab=user|project|advanced|doc&sub=settings|disk|templates. The old routes
 // /advanced, /disk and /templates redirect here (App.tsx).
@@ -11,7 +13,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ClipboardList, Check, Pencil, Trash2, Users, X } from 'lucide-react'
+import { ClipboardList, Check, Pencil, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { Btn, SecTitle } from '../../components/shared/ui'
@@ -74,8 +76,8 @@ export function SettingsPage() {
       ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px 24px' }}>
           {tab === 'user' && <UserSettings username={settings?.username ?? 'USER'} />}
-          {tab === 'project' && <ProjectTab />}
-          {tab === 'advanced' && unlocked && <AdvancedTab currentUser={settings?.username ?? ''} />}
+          {tab === 'project' && <ProjectTab currentUser={settings?.username ?? ''} />}
+          {tab === 'advanced' && unlocked && <AdvancedTab />}
           {tab === 'advanced' && !unlocked && !asking && (
             <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
               Réglages avancés verrouillés. <Btn sm ghost onClick={() => setAsking(true)}>Déverrouiller</Btn>
@@ -93,7 +95,7 @@ export function SettingsPage() {
   )
 }
 
-function ProjectTab() {
+function ProjectTab({ currentUser }: { currentUser: string }) {
   const { project } = useProject()
   const navigate = useNavigate()
   if (!project) return <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucun projet actif : choisis-en un pour voir ses réglages.</div>
@@ -115,21 +117,45 @@ function ProjectTab() {
         <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)' }}>Colonnes, statuts et dépendances du suivi : Production &gt; Settings.</span>
         <Btn sm ghost onClick={() => navigate('/production')}>Production</Btn>
       </div>
+      <SecTitle>Artistes du pipe</SecTitle>
+      <NewArtist />
+      <OtherUsers currentUser={currentUser} />
       <div style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>Unités USD, OCIO, variables d'env et stockage des versions : onglet Avancé.</div>
     </div>
   )
 }
 
-function AdvancedTab({ currentUser }: { currentUser: string }) {
+function AdvancedTab() {
   const [uninstall, setUninstall] = useState(false)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 }}>
       <AdvancedSettings part="advanced" />
-      <SecTitle>Utilisateurs du pipe</SecTitle>
-      <OtherUsers currentUser={currentUser} />
       <SecTitle>Désinstaller</SecTitle>
       <div><Btn sm ghost onClick={() => setUninstall(true)} style={{ color: 'var(--err)' }}><Trash2 size={11} /> Désinstaller FLUX</Btn></div>
       {uninstall && createPortal(<UninstallConfirm onCancel={() => setUninstall(false)} />, document.body)}
+    </div>
+  )
+}
+
+// Create an artist: the backend creates a user on first switch to it, so this switches
+// to the new name and reloads (same call the TitleBar popover uses).
+function NewArtist() {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const create = async () => {
+    const target = name.trim().toUpperCase()
+    if (!target) return
+    setBusy(true)
+    try { await api.updateSettings({ username: target }); window.location.reload() }
+    catch (e) { toast.error(e instanceof Error ? e.message : String(e)); setBusy(false) }
+  }
+  return (
+    <div className="card" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <UserPlus size={14} strokeWidth={1.75} color="var(--ink-3)" />
+      <input value={name} onChange={e => setName(e.target.value.toUpperCase())} placeholder="NOUVEL ARTISTE"
+        onKeyDown={e => { if (e.key === 'Enter') void create() }}
+        style={{ flex: 1, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--rule-2)', borderRadius: 5, textTransform: 'uppercase' }} />
+      <Btn sm ghost disabled={busy || !name.trim()} title="Crée l'artiste et bascule dessus" onClick={() => void create()}>Créer et basculer</Btn>
     </div>
   )
 }

@@ -16,11 +16,12 @@ import { useDccStatus } from '../hooks/useDccStatus'
 import { PublishNote } from '../components/shared/PublishNote'
 import { FileLog } from '../components/shared/FileLog'
 import { useSessionState } from '../hooks/useSessionState'
+import { useTr } from '../i18n'
 import { FileSvg, FolderSvg, getExt } from './folder_manager/icons'
 import { ExplorerPane } from './folder_manager/ExplorerPane'
 import type { PaneHandle } from './folder_manager/ExplorerPane'
 import {
-  FolderManagerContext, PANE_COUNT, itemKey, makeSavedItem, navigateTargetFor, resolveOpenPath, savedKey, uniqueName,
+  FolderManagerContext, PANE_COUNT, itemKey, makeSavedItem, navigateTargetFor, resolveOpenPath, savedKey, trNow, uniqueName,
 } from './folder_manager/shared'
 import type {
   Clip, DragPayload, ExplorerItem, FindResult, FolderManagerShared, NavLevel, PaneLayout, PaneReport,
@@ -53,17 +54,17 @@ function useLocalPref<T extends string>(key: string, fallback: T, valid: readonl
 }
 
 const TILE_ORDER: TileSize[] = ['sm', 'md', 'lg']
-const TILE_CHOICES: { id: TileSize; icon: typeof Square; title: string }[] = [
-  { id: 'sm', icon: Grid3x3, title: 'Petites tuiles' },
-  { id: 'md', icon: Grid2x2, title: 'Tuiles moyennes' },
-  { id: 'lg', icon: Square,  title: 'Grandes tuiles' },
+const TILE_CHOICES: { id: TileSize; icon: typeof Square; title: string; titleEn: string }[] = [
+  { id: 'sm', icon: Grid3x3, title: 'Petites tuiles',  titleEn: 'Small tiles' },
+  { id: 'md', icon: Grid2x2, title: 'Tuiles moyennes', titleEn: 'Medium tiles' },
+  { id: 'lg', icon: Square,  title: 'Grandes tuiles',  titleEn: 'Large tiles' },
 ]
 
-const LAYOUTS: { id: PaneLayout; icon: typeof Square; title: string }[] = [
-  { id: 'single',  icon: Square,   title: 'Une vue' },
-  { id: 'stacked', icon: Rows2,    title: 'Deux vues empilées' },
-  { id: 'side',    icon: Columns2, title: 'Deux vues côte à côte' },
-  { id: 'quad',    icon: Grid2x2,  title: 'Quatre vues' },
+const LAYOUTS: { id: PaneLayout; icon: typeof Square; title: string; titleEn: string }[] = [
+  { id: 'single',  icon: Square,   title: 'Une vue',               titleEn: 'One view' },
+  { id: 'stacked', icon: Rows2,    title: 'Deux vues empilées',    titleEn: 'Two views stacked' },
+  { id: 'side',    icon: Columns2, title: 'Deux vues côte à côte', titleEn: 'Two views side by side' },
+  { id: 'quad',    icon: Grid2x2,  title: 'Quatre vues',           titleEn: 'Four views' },
 ]
 
 const EMPTY_REPORT: PaneReport = { nav: { kind: 'root' }, selectedNames: new Set(), items: [] }
@@ -74,11 +75,11 @@ interface TokenSel { category: string; name: string; task: string; instance: str
 const EMPTY_TOKEN_SEL: TokenSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '', mode: 'asset' }
 
 type Tab = 'project' | 'asset' | 'shot' | 'directory'
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'project',   label: 'Projet' },
-  { id: 'asset',     label: 'Asset' },
-  { id: 'shot',      label: 'Shot' },
-  { id: 'directory', label: 'Dossier' },
+const TABS: { id: Tab; label: string; labelEn: string }[] = [
+  { id: 'project',   label: 'Projet',  labelEn: 'Project' },
+  { id: 'asset',     label: 'Asset',   labelEn: 'Asset' },
+  { id: 'shot',      label: 'Shot',    labelEn: 'Shot' },
+  { id: 'directory', label: 'Dossier', labelEn: 'Folder' },
 ]
 
 const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'FXRIG']
@@ -91,11 +92,11 @@ const FINDER_CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 
 // One task = one USD department (ADR 0019); MULT is kept on disk for old publishes only.
 const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'ANIM']
 
-const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: typeof Star }[] = [
-  { id: 'favoris',  label: 'Favoris',  icon: Star },
-  { id: 'tous',     label: 'Home',     icon: LayoutGrid },
-  { id: 'recents',  label: 'Récents',  icon: Clock },
-  { id: 'archives', label: 'Archivés', icon: Archive },
+const SIDEBAR_TABS: { id: SidebarTab; label: string; labelEn: string; icon: typeof Star }[] = [
+  { id: 'favoris',  label: 'Favoris',  labelEn: 'Favorites', icon: Star },
+  { id: 'tous',     label: 'Home',     labelEn: 'Home',      icon: LayoutGrid },
+  { id: 'recents',  label: 'Récents',  labelEn: 'Recent',    icon: Clock },
+  { id: 'archives', label: 'Archivés', labelEn: 'Archived',  icon: Archive },
 ]
 
 // ── Token Finder ──────────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@ function TokenFinder({ project, onChange }: {
   const [varSug,  setVarSug]          = useState<string[]>([])
   const [shotNameSug, setShotNameSug] = useState<string[]>([])
   const rootRef           = useRef<HTMLDivElement>(null)
+  const { tr }            = useTr()
 
   const cls = FINDER_CATEGORY_TO_CLASS[sel.category] ?? ''
 
@@ -201,7 +203,7 @@ function TokenFinder({ project, onChange }: {
 
   const MODULES: { key: keyof TokenSel; label: string; opts: string[] }[] = mode === 'asset'
     ? [
-        { key: 'category', label: 'CATÉGORIE', opts: FINDER_CATEGORIES },
+        { key: 'category', label: tr('CATÉGORIE', 'CATEGORY'), opts: FINDER_CATEGORIES },
         { key: 'name',     label: 'NAME',      opts: nameSug },
         { key: 'task',     label: 'TASK',      opts: FINDER_TASKS },
         { key: 'instance', label: 'INSTANCE',  opts: instSug },
@@ -246,12 +248,12 @@ function TokenFinder({ project, onChange }: {
               <div style={{ position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: 110, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
                 {value && (
                   <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
-                    effacer
+                    {tr('effacer', 'clear')}
                   </div>
                 )}
                 {opts.length === 0 ? (
                   <div style={{ padding: '6px 8px', fontSize: 10.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-                    {project ? 'Vide' : 'Projet requis'}
+                    {project ? tr('Vide', 'Empty') : tr('Projet requis', 'Project required')}
                   </div>
                 ) : opts.map(o => (
                   <div
@@ -280,6 +282,7 @@ function Spinner({ value, onChange }: { value: number; onChange: (v: number) => 
   const main = Math.floor(value / 10)
   const sub = value % 10
   const [draft, setDraft] = useState(String(main).padStart(3, '0'))
+  const { tr } = useTr()
 
   useEffect(() => { setDraft(String(main).padStart(3, '0')) }, [main])
 
@@ -314,7 +317,7 @@ function Spinner({ value, onChange }: { value: number; onChange: (v: number) => 
         inputMode="numeric"
         maxLength={1}
         placeholder="+"
-        title="Numero secondaire : 1 et 5 -> 0015"
+        title={tr('Numero secondaire : 1 et 5 -> 0015', 'Secondary number: 1 and 5 -> 0015')}
         value={sub ? String(sub) : ''}
         onChange={e => { const d = parseInt(e.target.value.replace(/[^0-9]/g, '').slice(-1) || '0', 10); if (main * 10 + d >= 1) onChange(main * 10 + d) }}
         style={{ width: 28, height: 28, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)', borderRadius: 5, outline: 'none', boxShadow: 'var(--shadow-inset)' }}
@@ -360,14 +363,15 @@ function PanelBtn({ primary, children, onClick, disabled, danger }: { primary?: 
 }
 
 function NavContext({ project }: { project: string }) {
+  const { tr } = useTr()
   if (!project) return (
     <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-      Naviguez dans un projet
+      {tr('Naviguez dans un projet', 'Browse into a project')}
     </div>
   )
   return (
     <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)' }}>
-      <span style={{ color: 'var(--ink-4)' }}>Projet : </span>
+      <span style={{ color: 'var(--ink-4)' }}>{tr('Projet : ', 'Project: ')}</span>
       <span style={{ fontWeight: 600 }}>{project}</span>
     </div>
   )
@@ -378,23 +382,24 @@ function NavContext({ project }: { project: string }) {
 function TabProject({ onCreateProject }: { onCreateProject: (name: string, painterPresets: string[]) => Promise<void> }) {
   const [name, setName]     = useState('')
   const [status, setStatus] = useState('')
+  const { tr } = useTr()
   // Painter export presets are picked per project in the Shelf Manager (Painter shelf).
 
   const handleCreate = async () => {
     if (!name.trim()) return
     try {
       await onCreateProject(name.trim(), [])
-      setStatus('✓ Créé')
+      setStatus(tr('✓ Créé', '✓ Created'))
       setName('')
     } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
+      setStatus('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
     }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
       <div>
-        <div className="cap" style={{ marginBottom: 4 }}>NOM</div>
+        <div className="cap" style={{ marginBottom: 4 }}>{tr('NOM', 'NAME')}</div>
         <InputField value={name} onChange={setName} placeholder="ex: NEW_PROJECT" />
       </div>
       {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
@@ -409,6 +414,7 @@ function TabAsset({ currentProject, onCreateAsset }: {
   onCreateAsset: (project: string, cls: string, name: string) => Promise<void>
 }) {
   const [token, setToken]   = useState('CHAR')
+  const { tr } = useTr()
   const [name, setName]     = useState('')
   const [status, setStatus] = useState('')
 
@@ -416,10 +422,10 @@ function TabAsset({ currentProject, onCreateAsset }: {
     if (!currentProject || !name.trim()) return
     try {
       await onCreateAsset(currentProject, token, name.trim())
-      setStatus('✓ Créé')
+      setStatus(tr('✓ Créé', '✓ Created'))
       setName('')
     } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
+      setStatus('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
     }
   }
 
@@ -453,6 +459,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
   const [seq, setSeq]               = useState('')
   const [statusSeq, setStatusSeq]   = useState('')
   const [statusShot, setStatusShot] = useState('')
+  const { tr } = useTr()
 
   useEffect(() => { setSeq(sequences[0] ?? '') }, [sequences])
 
@@ -463,7 +470,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
       setStatusSeq('✓ SEQ' + String(seqN).padStart(4, '0'))
       onRefreshSequences()
     } catch (e) {
-      setStatusSeq('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
+      setStatusSeq('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
     }
   }
 
@@ -474,7 +481,7 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
       await onCreateShot(currentProject, seqNum, shotN)
       setStatusShot(`✓ SEQ${String(seqNum).padStart(4, '0')}_SHOT${String(shotN).padStart(4, '0')}`)
     } catch (e) {
-      setStatusShot('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
+      setStatusShot('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
     }
   }
 
@@ -515,6 +522,7 @@ function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
   const [tokenType, setTokenType] = useState('CLASS')
   const [status, setStatus]       = useState('')
   const [busy, setBusy]           = useState(false)
+  const { tr } = useTr()
 
   const handleAdd = async () => {
     if (!name.trim() || !currentProject) return
@@ -534,7 +542,7 @@ function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
       setToken('')
       onSuccess()
     } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
+      setStatus('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
     } finally {
       setBusy(false)
     }
@@ -548,7 +556,7 @@ function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
         <InputField value={name} onChange={setName} placeholder="ex: NEW_FOLDER" />
       </div>
       <div>
-        <div className="cap" style={{ marginBottom: 4 }}>TOKEN (optionnel)</div>
+        <div className="cap" style={{ marginBottom: 4 }}>{tr('TOKEN (optionnel)', 'TOKEN (optional)')}</div>
         <InputField value={token} onChange={setToken} placeholder="ex: SLA" />
       </div>
       {token.trim() && (
@@ -585,6 +593,7 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
 }) {
   const [typed, setTyped] = useState('')
   const match = typed === DELETE_PROJECT_PHRASE
+  const { tr } = useTr()
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
@@ -598,19 +607,19 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <Trash2 size={16} strokeWidth={1.75} color="var(--err)" />
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-            Supprimer le projet «&nbsp;{project}&nbsp;» ?
+            {tr(`Supprimer le projet «\u00a0${project}\u00a0» ?`, `Delete project "${project}"?`)}
           </div>
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
-          Le dossier du projet et tout son contenu seront retirés définitivement du workspace.
-          Cette action est irréversible.
+          {tr('Le dossier du projet et tout son contenu seront retirés définitivement du workspace. Cette action est irréversible.',
+            'The project folder and all its contents will be permanently removed from the workspace. This cannot be undone.')}
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 8, lineHeight: 1.5 }}>
-          Tape{' '}
+          {tr('Tape', 'Type')}{' '}
           <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>
             {DELETE_PROJECT_PHRASE}
           </code>{' '}
-          pour confirmer.
+          {tr('pour confirmer.', 'to confirm.')}
         </div>
         <input
           autoFocus
@@ -629,7 +638,7 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
           }}
         />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>{tr('Annuler', 'Cancel')}</div>
           <div
             className="btn primary"
             onClick={() => { if (match) onConfirm() }}
@@ -640,7 +649,7 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
               opacity: match ? 1 : 0.5,
             }}
           >
-            Supprimer
+            {tr('Supprimer', 'Delete')}
           </div>
         </div>
       </div>
@@ -662,6 +671,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   const [selected, setSelected]   = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting]   = useState(false)
+  const { tr } = useTr()
 
   useEffect(() => {
     let ok = true
@@ -684,7 +694,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
           ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
         ])
       })
-      .catch(() => { if (ok) { setEntries([]); setErr('Aucune archive pour ce projet.') } })
+      .catch(() => { if (ok) { setEntries([]); setErr(trNow('Aucune archive pour ce projet.', 'No archive for this project.')) } })
       .finally(() => { if (ok) setLoading(false) })
     return () => { ok = false }
   }, [cur])
@@ -703,10 +713,10 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   if (!cur) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <div style={_hdr}>ARCHIVÉS · {projects.length} projet{projects.length > 1 ? 's' : ''}</div>
+        <div style={_hdr}>{tr(`ARCHIVÉS · ${projects.length} projet${projects.length > 1 ? 's' : ''}`, `ARCHIVED · ${projects.length} project${projects.length > 1 ? 's' : ''}`)}</div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {projects.length === 0 ? (
-            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Aucun projet</div>
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Aucun projet', 'No projects')}</div>
           ) : projects.map(p => (
             <div
               key={p}
@@ -758,9 +768,9 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
         ...d.folders.map(f => ({ name: f.name, isDir: true })),
         ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
       ])
-      toast.success(`${removed} élément${removed > 1 ? 's' : ''} supprimé${removed > 1 ? 's' : ''}`)
+      toast.success(tr(`${removed} élément${removed > 1 ? 's' : ''} supprimé${removed > 1 ? 's' : ''}`, `${removed} item${removed > 1 ? 's' : ''} deleted`))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Suppression échouée')
+      toast.error(e instanceof Error ? e.message : tr('Suppression échouée', 'Delete failed'))
     } finally {
       setDeleting(false)
     }
@@ -769,14 +779,14 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={_hdr}>
-        <span onClick={goUp} style={{ cursor: 'pointer', color: 'var(--accent-hi)' }}>‹ Retour</span>
+        <span onClick={goUp} style={{ cursor: 'pointer', color: 'var(--accent-hi)' }}>{tr('‹ Retour', '‹ Back')}</span>
         <span style={{ color: 'var(--ink-2)' }}>{cur.project}</span>
         {relStr && <span style={{ color: 'var(--ink-4)' }}>/ {relStr}</span>}
       </div>
       {selected.size > 0 && (
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
           <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-            {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
+            {tr(`${selected.size} sélectionné${selected.size > 1 ? 's' : ''}`, `${selected.size} selected`)}
           </span>
           <span style={{ flex: 1 }} />
           {confirming ? (
@@ -784,12 +794,12 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
               <span
                 onClick={() => !deleting && setConfirming(false)}
                 style={{ fontSize: 11, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
-              >Annuler</span>
+              >{tr('Annuler', 'Cancel')}</span>
               <span
                 onClick={doDelete}
                 style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
               >
-                <Trash2 size={11} strokeWidth={1.75} /> {deleting ? 'Suppression…' : 'Confirmer la suppression définitive'}
+                <Trash2 size={11} strokeWidth={1.75} /> {deleting ? tr('Suppression…', 'Deleting…') : tr('Confirmer la suppression définitive', 'Confirm permanent delete')}
               </span>
             </>
           ) : (
@@ -797,18 +807,18 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
               onClick={() => setConfirming(true)}
               style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
             >
-              <Trash2 size={11} strokeWidth={1.75} /> Supprimer
+              <Trash2 size={11} strokeWidth={1.75} /> {tr('Supprimer', 'Delete')}
             </span>
           )}
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
         {loading ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Chargement…</div>
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Chargement…', 'Loading…')}</div>
         ) : err ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{err}</div>
         ) : entries.length === 0 ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Vide</div>
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Vide', 'Empty')}</div>
         ) : entries.map((it, i) => {
           const isSel = selected.has(it.name)
           return (
@@ -830,9 +840,9 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
             <span style={{ flex: 1, fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
             <span
               onClick={e => { e.stopPropagation(); onOpen(cur.project, it.isDir ? [...cur.sub, it.name] : cur.sub) }}
-              title="Ouvrir dans l'explorateur"
+              title={tr("Ouvrir dans l'explorateur", 'Open in the explorer')}
               style={{ flexShrink: 0, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
-            >Ouvrir</span>
+            >{tr('Ouvrir', 'Open')}</span>
           </div>
           )
         })}
@@ -855,6 +865,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
   // A root-level project is identified by project === label && empty subpath.
   const isProjectRoot = (s: SavedItem) => s.project === s.label && s.subpath.length === 0
   const [ctx, setCtx] = useState<{ x: number; y: number; item: SavedItem } | null>(null)
+  const { tr } = useTr()
 
   useEffect(() => {
     if (!ctx) return
@@ -878,7 +889,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
     <>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>
-          {label} · {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
+          {label} · {items.length === 0 ? emptyMsg : tr(`${items.length} élément${items.length > 1 ? 's' : ''}`, `${items.length} item${items.length > 1 ? 's' : ''}`)}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {items.length === 0 ? (
@@ -920,12 +931,12 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
           onMouseDown={e => e.stopPropagation()}
           style={{ position: 'fixed', top: ctx.y, left: ctx.x, zIndex: 1000, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 170, overflow: 'hidden', paddingBlock: 4 }}
         >
-          {menuRow('Ouvrir', false, () => { onNavigate(ctx.item); setCtx(null) })}
+          {menuRow(tr('Ouvrir', 'Open'), false, () => { onNavigate(ctx.item); setCtx(null) })}
           {menuRow(removeLabel, false, () => { onRemove(ctx.item); setCtx(null) })}
           {onDeleteProject && isProjectRoot(ctx.item) && (
             <>
               <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-              {menuRow('Supprimer définitivement', true, () => { onDeleteProject(ctx.item); setCtx(null) })}
+              {menuRow(tr('Supprimer définitivement', 'Delete permanently'), true, () => { onDeleteProject(ctx.item); setCtx(null) })}
             </>
           )}
         </div>
@@ -948,6 +959,7 @@ export function Projects() {
   const { settings } = useSettings()
   const dccStatus = useDccStatus()
   const location = useLocation()
+  const { tr } = useTr()
 
   // ── Views (B2) ─────────────────────────────────────────────────────────────
 
@@ -1099,7 +1111,7 @@ export function Projects() {
 
   const undoLast = useCallback(async () => {
     const op = undoStack[undoStack.length - 1]
-    if (!op) { toast('Rien à annuler'); return }
+    if (!op) { toast(trNow('Rien à annuler', 'Nothing to undo')); return }
     setUndoStack(prev => prev.slice(0, -1))
     let ok = 0
     for (const a of [...op.actions].reverse()) {
@@ -1109,30 +1121,30 @@ export function Projects() {
         else if (a.kind === 'copy')   await api.deleteItem(a.project, a.sub, a.name)
         ok++
       } catch (e) {
-        toast.error(`Annulation : ${e instanceof Error ? e.message : 'échec'}`)
+        toast.error(trNow(`Annulation : ${e instanceof Error ? e.message : 'échec'}`, `Undo: ${e instanceof Error ? e.message : 'failed'}`))
       }
     }
-    if (ok > 0) { toast.success(`Annulé : ${op.label}`); bumpFs() }
+    if (ok > 0) { toast.success(trNow(`Annulé : ${op.label}`, `Undone: ${op.label}`)); bumpFs() }
   }, [undoStack, bumpFs])
 
   // One path for every move / copy, inside a view or from one view to another.
   const transfer = useCallback(async (src: TransferSource, dest: TransferDest, op: 'move' | 'copy'): Promise<number> => {
     if (src.names.length === 0) return 0
-    if (src.project !== dest.project) { toast.error('Déplacement / copie entre projets non supporté'); return 0 }
+    if (src.project !== dest.project) { toast.error(trNow('Déplacement / copie entre projets non supporté', 'Move / copy between projects is not supported')); return 0 }
     const srcKey  = src.subpath.join('/')
     const destKey = dest.subpath.join('/')
     if (op === 'move' && srcKey === destKey) return 0   // same folder → no-op
     // The backend reads an empty destination as "keep the parent": no move to the project root.
     if (op === 'move' && dest.subpath.length === 0) {
-      toast.error('Déplacer à la racine du projet : pas encore possible (copier fonctionne)')
+      toast.error(trNow('Déplacer à la racine du projet : pas encore possible (copier fonctionne)', 'Moving to the project root is not possible yet (copy works)'))
       return 0
     }
     const into = src.names.find(n => (destKey + '/').startsWith([...src.subpath, n].join('/') + '/'))
-    if (into) { toast.error(`"${into}" ne peut pas aller dans son propre dossier`); return 0 }
+    if (into) { toast.error(trNow(`"${into}" ne peut pas aller dans son propre dossier`, `"${into}" cannot go into its own folder`)); return 0 }
     let names = src.names
     if (op === 'move' && src.locked?.size) {
       names = names.filter(n => !src.locked!.has(n))
-      if (names.length < src.names.length) toast.error(`${src.names.length - names.length} verrouillé(s) — non déplacé(s)`)
+      if (names.length < src.names.length) toast.error(trNow(`${src.names.length - names.length} verrouillé(s) : non déplacé(s)`, `${src.names.length - names.length} locked: not moved`))
       if (names.length === 0) return 0
     }
     // Copy: free name in the destination ("x (2).ext").
@@ -1161,13 +1173,15 @@ export function Projects() {
         }
         ok++
       } catch (e) {
-        toast.error(`${name} : ${e instanceof Error ? e.message : 'échec'}`)
+        toast.error(trNow(`${name} : ${e instanceof Error ? e.message : 'échec'}`, `${name}: ${e instanceof Error ? e.message : 'failed'}`))
       }
     }
     if (moved.length) forgetSaved(moved)
-    pushUndo({ label: op === 'move' ? `déplacement (${undoActions.length})` : `copie (${undoActions.length})`, actions: undoActions })
+    pushUndo({ label: op === 'move'
+      ? trNow(`déplacement (${undoActions.length})`, `move (${undoActions.length})`)
+      : trNow(`copie (${undoActions.length})`, `copy (${undoActions.length})`), actions: undoActions })
     if (ok > 0) {
-      toast.success(`${ok} élément(s) ${op === 'move' ? 'déplacé(s)' : 'copié(s)'}`)
+      toast.success(trNow(`${ok} élément(s) ${op === 'move' ? 'déplacé(s)' : 'copié(s)'}`, `${ok} item(s) ${op === 'move' ? 'moved' : 'copied'}`))
       bumpFs()
     }
     return ok
@@ -1204,10 +1218,10 @@ export function Projects() {
     if (nav.kind !== 'inside') return
     try {
       const r = await api.dropPreset(nav.project, p.id, nav.subpath.join('/'))
-      toast.success(`${r.name} déposé ici`)
+      toast.success(trNow(`${r.name} déposé ici`, `${r.name} dropped here`))
       bumpFs()
     } catch (e) {
-      toast.error(`Dépôt : ${e instanceof Error ? e.message : 'échec'}`)
+      toast.error(trNow(`Dépôt : ${e instanceof Error ? e.message : 'échec'}`, `Drop: ${e instanceof Error ? e.message : 'failed'}`))
     }
   }, [nav, bumpFs])
 
@@ -1351,9 +1365,9 @@ export function Projects() {
         setActiveProject(remaining[0] ?? '')
       }
       bumpFs()
-      toast.success(`Projet "${name}" supprimé`)
+      toast.success(trNow(`Projet "${name}" supprimé`, `Project "${name}" deleted`))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Suppression du projet échouée')
+      toast.error(e instanceof Error ? e.message : trNow('Suppression du projet échouée', 'Project delete failed'))
     } finally {
       setDeleteProjectTarget(null)
     }
@@ -1375,7 +1389,7 @@ export function Projects() {
 
       {/* Barre commune : annuler + Token Finder (résultats dans la vue active) + presse-papier */}
       <div style={{ padding: '6px 10px 7px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title="Annuler (Ctrl+Z)" style={navBtn(undoStack.length > 0)}>
+        <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title={tr('Annuler (Ctrl+Z)', 'Undo (Ctrl+Z)')} style={navBtn(undoStack.length > 0)}>
           <RotateCcw size={12} strokeWidth={2} />
         </div>
         <TokenFinder project={navProject || activeProject} onChange={setTokenSel} />
@@ -1389,7 +1403,7 @@ export function Projects() {
         {clipboard && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '0 8px', height: 30, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', boxShadow: 'var(--shadow-inset)' }}>
             <Copy size={10} strokeWidth={1.75} color="var(--ink-4)" />
-            <span>{clipboard.items.length} {clipboard.op === 'cut' ? 'coupé(s)' : 'copié(s)'}</span>
+            <span>{clipboard.items.length} {clipboard.op === 'cut' ? tr('coupé(s)', 'cut') : tr('copié(s)', 'copied')}</span>
             <X size={10} strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => setClipboard(null)} />
           </div>
         )}
@@ -1407,7 +1421,7 @@ export function Projects() {
         {/* Sidebar gauche */}
         <div style={{ width: 170, borderRight: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', background: 'var(--paper-2)', flexShrink: 0 }}>
           <div style={{ padding: '8px 0 4px' }}>
-            {SIDEBAR_TABS.map(({ id, label, icon: Icon }) => {
+            {SIDEBAR_TABS.map(({ id, label, labelEn, icon: Icon }) => {
               const active = sidebarTab === id
               return (
                 <div
@@ -1416,7 +1430,7 @@ export function Projects() {
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', margin: '1px 8px 1px 0', background: active ? 'var(--accent-soft)' : 'transparent', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent', borderRadius: '0 6px 6px 0', fontSize: 11, color: active ? 'var(--ink)' : 'var(--ink-3)', fontWeight: active ? 500 : 400, cursor: 'pointer', userSelect: 'none' }}
                 >
                   <Icon size={12} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
-                  <span>{label}</span>
+                  <span>{tr(label, labelEn)}</span>
                   {id === 'favoris' && favorites.length > 0 && (
                     <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
                       {favorites.length}
@@ -1444,7 +1458,7 @@ export function Projects() {
                     <button
                       key={p.id}
                       onClick={() => void dropPresetHere(p)}
-                      title={`Déposer "${p.file}" dans le dossier courant`}
+                      title={tr(`Déposer "${p.file}" dans le dossier courant`, `Drop "${p.file}" into the current folder`)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
                         padding: '6px 8px', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
@@ -1466,9 +1480,9 @@ export function Projects() {
 
           {/* Récents rapides */}
           <div style={{ padding: '2px 12px 0' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>RÉCENTS</div>
+            <div className="cap" style={{ marginBottom: 6 }}>{tr('RÉCENTS', 'RECENT')}</div>
             {recentSidebarItems.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic', padding: '3px 0' }}>Aucun</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic', padding: '3px 0' }}>{tr('Aucun', 'None')}</div>
             ) : recentSidebarItems.map((s, i) => (
               <div
                 key={i}
@@ -1490,7 +1504,7 @@ export function Projects() {
               <div className="cap">WORKSPACE</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-              <span style={{ color: 'var(--ink-3)' }}>Projets</span>
+              <span style={{ color: 'var(--ink-3)' }}>{tr('Projets', 'Projects')}</span>
               <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', fontSize: 11 }}>{projects.length}</span>
             </div>
           </div>
@@ -1502,16 +1516,16 @@ export function Projects() {
           {/* Listes sauvegardées (Favoris / Récents / Archivés) : ouvrent dans la vue active */}
           {sidebarTab === 'favoris' && (
             <SavedList
-              items={favorites} label="FAVORIS" emptyMsg="Aucun favori"
-              removeLabel="Retirer des Favoris"
+              items={favorites} label={tr('FAVORIS', 'FAVORITES')} emptyMsg={tr('Aucun favori', 'No favorites')}
+              removeLabel={tr('Retirer des Favoris', 'Remove from Favorites')}
               onNavigate={navigateToSaved}
               onRemove={s => removeFromSaved(s, 'favorites')}
             />
           )}
           {sidebarTab === 'recents' && (
             <SavedList
-              items={recents} label="RÉCENTS" emptyMsg="Aucun élément récent"
-              removeLabel="Retirer des Récents"
+              items={recents} label={tr('RÉCENTS', 'RECENT')} emptyMsg={tr('Aucun élément récent', 'No recent items')}
+              removeLabel={tr('Retirer des Récents', 'Remove from Recent')}
               onNavigate={navigateToSaved}
               onRemove={s => removeFromSaved(s, 'recents')}
             />
@@ -1526,7 +1540,7 @@ export function Projects() {
           )}
 
           {/* Vues d'exploration : restent montées (état gardé) quand une liste est affichée */}
-          <div ref={viewsRef} title="Ctrl + molette : taille des tuiles" style={{
+          <div ref={viewsRef} title={tr('Ctrl + molette : taille des tuiles', 'Ctrl + wheel: tile size')} style={{
             flex: 1, minHeight: 0, minWidth: 0,
             display: sidebarTab === 'tous' ? 'grid' : 'none',
             gridTemplateColumns: twoCols ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)',
@@ -1555,8 +1569,8 @@ export function Projects() {
             onClick={() => setCreatePanel(!createPanel)}
           >
             {createPanel ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-            <span className="cap">Créer</span>
-            {!createPanel && <span className="fm-create-hint">Projet, asset, shot, dossier</span>}
+            <span className="cap">{tr('Créer', 'Create')}</span>
+            {!createPanel && <span className="fm-create-hint">{tr('Projet, asset, shot, dossier', 'Project, asset, shot, folder')}</span>}
           </button>
           {createPanel && <>
           <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)' }}>
@@ -1566,7 +1580,7 @@ export function Projects() {
                 onClick={() => setTab(t.id)}
                 style={{ flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent-hi)' : 'var(--ink-4)', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === t.id ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}
               >
-                {t.label}
+                {tr(t.label, t.labelEn)}
               </div>
             ))}
           </div>
@@ -1604,13 +1618,13 @@ export function Projects() {
 
           {/* Projet actif + Set Project */}
           <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
+            <div className="cap" style={{ marginBottom: 6 }}>{tr('PROJET ACTIF', 'ACTIVE PROJECT')}</div>
             <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--accent-hi)' }}>
                 {activeProject || '-'}
               </div>
               <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>
-                {sequences.length > 0 ? `${sequences.length} séquences` : 'Aucune séquence'}
+                {sequences.length > 0 ? tr(`${sequences.length} séquences`, `${sequences.length} sequences`) : tr('Aucune séquence', 'No sequences')}
               </div>
             </div>
             {contextProject && contextProject !== activeProject && (
@@ -1645,37 +1659,38 @@ function ViewMenu({ layout, onLayout, tileSize, onTileSize, createPanel, onCreat
   createPanel: boolean; onCreatePanel: (v: boolean) => void
 }) {
   const Current = LAYOUTS.find(l => l.id === layout)?.icon ?? Square
+  const { tr } = useTr()
   return (
     <Menu.Root modal={false}>
-      <Menu.Trigger className="fm-view-trigger" aria-label="Affichage">
+      <Menu.Trigger className="fm-view-trigger" aria-label={tr('Affichage', 'View')}>
         <Current size={13} strokeWidth={1.75} />
-        <span>Affichage</span>
+        <span>{tr('Affichage', 'View')}</span>
         <ChevronDown size={11} />
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Content className="launcher-menu" side="bottom" align="end" sideOffset={4} collisionPadding={10}>
-          <Menu.Label className="launcher-menu-label">Vues</Menu.Label>
+          <Menu.Label className="launcher-menu-label">{tr('Vues', 'Views')}</Menu.Label>
           <Menu.RadioGroup value={layout} onValueChange={v => onLayout(v as PaneLayout)}>
-            {LAYOUTS.map(({ id, icon: Icon, title }) => (
+            {LAYOUTS.map(({ id, icon: Icon, title, titleEn }) => (
               <Menu.RadioItem key={id} value={id} className="launcher-menu-item">
-                <Icon size={13} strokeWidth={1.75} />{title}
+                <Icon size={13} strokeWidth={1.75} />{tr(title, titleEn)}
                 <Menu.ItemIndicator style={{ marginLeft: 'auto', display: 'inline-flex' }}><Check size={13} /></Menu.ItemIndicator>
               </Menu.RadioItem>
             ))}
           </Menu.RadioGroup>
           <Menu.Separator className="launcher-menu-separator" />
-          <Menu.Label className="launcher-menu-label">Taille · Ctrl + molette</Menu.Label>
+          <Menu.Label className="launcher-menu-label">{tr('Taille · Ctrl + molette', 'Size · Ctrl + wheel')}</Menu.Label>
           <Menu.RadioGroup value={tileSize} onValueChange={v => onTileSize(v as TileSize)}>
-            {TILE_CHOICES.map(({ id, icon: Icon, title }) => (
+            {TILE_CHOICES.map(({ id, icon: Icon, title, titleEn }) => (
               <Menu.RadioItem key={id} value={id} className="launcher-menu-item">
-                <Icon size={13} strokeWidth={1.75} />{title}
+                <Icon size={13} strokeWidth={1.75} />{tr(title, titleEn)}
                 <Menu.ItemIndicator style={{ marginLeft: 'auto', display: 'inline-flex' }}><Check size={13} /></Menu.ItemIndicator>
               </Menu.RadioItem>
             ))}
           </Menu.RadioGroup>
           <Menu.Separator className="launcher-menu-separator" />
           <Menu.CheckboxItem className="launcher-menu-item" checked={createPanel} onCheckedChange={v => onCreatePanel(v === true)}>
-            <span style={{ width: 13, display: 'inline-flex' }}>{createPanel && <Check size={13} />}</span>Formulaires de création
+            <span style={{ width: 13, display: 'inline-flex' }}>{createPanel && <Check size={13} />}</span>{tr('Formulaires de création', 'Creation forms')}
           </Menu.CheckboxItem>
         </Menu.Content>
       </Menu.Portal>

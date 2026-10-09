@@ -14,6 +14,7 @@ import type { TaskEntity } from './taskActions'
 export type Priority = 'high' | 'normal' | 'low'
 export const PRIORITIES: Priority[] = ['high', 'normal', 'low']
 export const PRIORITY_LABEL: Record<Priority, string> = { high: 'Haute', normal: 'Normale', low: 'Basse' }
+export const PRIORITY_LABEL_EN: Record<Priority, string> = { high: 'High', normal: 'Normal', low: 'Low' }
 const PRIORITY_RANK: Record<Priority, number> = { high: 0, normal: 1, low: 2 }
 // What needs the artist first: a retake, work in progress, not started, waiting, done.
 const STATUS_RANK: Record<string, number> = { RTK: 0, WIP: 1, TODO: 2, WFA: 3, APPROVED: 5 }
@@ -98,6 +99,10 @@ export type MyTaskSort = 'smart' | 'concern' | 'deadline' | 'priority' | 'status
 export const SORT_LABEL: Record<MyTaskSort, string> = {
   smart: 'Recommandé', concern: 'Deadline + Me concerne', deadline: 'Deadline', priority: 'Priorité',
   status: 'Statut', updated: 'Mise à jour', name: 'Nom',
+}
+export const SORT_LABEL_EN: Record<MyTaskSort, string> = {
+  smart: 'Recommended', concern: 'Deadline + Mine', deadline: 'Deadline', priority: 'Priority',
+  status: 'Status', updated: 'Updated', name: 'Name',
 }
 
 /** What the "Deadline + Me concerne" sort needs: any task row (home or Production table). */

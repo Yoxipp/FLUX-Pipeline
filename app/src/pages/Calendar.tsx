@@ -1037,7 +1037,9 @@ export function Calendar() {
                    style={{
                      userSelect: 'none',
                      boxShadow: inSpan ? 'inset 0 0 0 1px var(--accent)' : undefined,
-                     borderRight: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: 5,
+                     // Light cells sit almost on --rule, so their grid lines go dark grey (2026-10-09).
+                     borderRight: `1px solid ${dark ? 'var(--rule)' : 'var(--bg-deep)'}`,
+                     borderBottom: `1px solid ${dark ? 'var(--rule)' : 'var(--bg-deep)'}`, padding: 5,
                      display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, cursor: 'copy',
                      background: cellBg, overflow: 'hidden', position: 'relative',
                    }}>

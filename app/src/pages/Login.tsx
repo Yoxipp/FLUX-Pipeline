@@ -1,5 +1,6 @@
-// Login.tsx — popover de sélection / création d'utilisateur (déclenché depuis la TitleBar).
-// Renommer / supprimer : Paramètres > User (son compte) et > Avancé (les autres), retake 06.
+// Login.tsx — popover de sélection d'utilisateur (déclenché depuis la TitleBar).
+// Créer / renommer / supprimer les artistes : Paramètres > Projet > Artistes ; son propre
+// compte : Paramètres > User. Le champ de création ne reste ici que si aucun artiste n'existe.
 
 import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
@@ -114,8 +115,8 @@ export function Login({ onDone }: Props) {
           </div>
         )}
 
-        {/* champ nouvel artiste */}
-        <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+        {/* champ nouvel artiste : premier lancement seulement (aucun artiste) */}
+        {users.length === 0 && <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
             Nouvel artiste
           </div>
@@ -136,7 +137,7 @@ export function Login({ onDone }: Props) {
               boxSizing: 'border-box',
             }}
           />
-        </div>
+        </div>}
 
         {/* erreur */}
         {error && (

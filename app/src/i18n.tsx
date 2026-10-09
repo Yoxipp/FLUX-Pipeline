@@ -509,3 +509,14 @@ export function useI18n(): I18nContextValue {
   if (!ctx) throw new Error('useI18n must be used within a LanguageProvider')
   return ctx
 }
+
+/** Inline FR/EN pair for one-off UI strings: `tr('Tout', 'All')`. Prefer a STRINGS key when the
+ *  text is shared between pages. `locale` is the BCP 47 tag for dates and numbers. */
+export function useTr() {
+  const { lang } = useI18n()
+  return {
+    lang,
+    tr: (fr: string, en: string) => (lang === 'en' ? en : fr),
+    locale: lang === 'en' ? 'en-GB' : 'fr-FR',
+  }
+}

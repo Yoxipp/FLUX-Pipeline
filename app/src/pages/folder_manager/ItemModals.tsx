@@ -5,6 +5,7 @@ import { ChevronRight, Trash2 } from 'lucide-react'
 import { api } from '../../api/client'
 import { FolderSvg } from './icons'
 import type { ExplorerItem } from './shared'
+import { useTr } from '../../i18n'
 
 export function RenameModal({ item, onConfirm, onCancel }: {
   item: ExplorerItem
@@ -15,6 +16,7 @@ export function RenameModal({ item, onConfirm, onCancel }: {
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
   const inputRef          = useRef<HTMLInputElement>(null)
+  const { tr }            = useTr()
 
   useEffect(() => { inputRef.current?.focus(); inputRef.current?.select() }, [])
   useEffect(() => {
@@ -29,13 +31,13 @@ export function RenameModal({ item, onConfirm, onCancel }: {
     if (!canConfirm) return
     setBusy(true); setError('')
     try { await onConfirm(name.trim()) }
-    catch (e) { setError(e instanceof Error ? e.message : 'Erreur'); setBusy(false) }
+    catch (e) { setError(e instanceof Error ? e.message : tr('Erreur', 'Error')); setBusy(false) }
   }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '20px 22px', width: 320, boxShadow: 'var(--shadow)' }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 14, color: 'var(--ink)' }}>Renommer "{item.name}"</div>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 14, color: 'var(--ink)' }}>{tr(`Renommer "${item.name}"`, `Rename "${item.name}"`)}</div>
         <input
           ref={inputRef}
           value={name}
@@ -45,9 +47,9 @@ export function RenameModal({ item, onConfirm, onCancel }: {
         />
         {error && <div style={{ fontSize: 11, color: 'var(--err)', fontFamily: 'var(--mono)', marginTop: 6 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>{tr('Annuler', 'Cancel')}</div>
           <div className="btn primary" onClick={() => void handleConfirm()} style={{ cursor: canConfirm ? 'pointer' : 'default', opacity: canConfirm ? 1 : 0.5 }}>
-            {busy ? '…' : 'Renommer'}
+            {busy ? '…' : tr('Renommer', 'Rename')}
           </div>
         </div>
       </div>
@@ -68,6 +70,7 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
   const [busy, setBusy]             = useState(false)
   const [error, setError]           = useState('')
   const itemNames = new Set(items.map(i => i.name))
+  const { tr } = useTr()
 
   useEffect(() => {
     setLoading(true)
@@ -97,7 +100,7 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
     if (!canConfirm) return
     setBusy(true); setError('')
     try { await onConfirm(browsePath) }
-    catch (e) { setError(e instanceof Error ? e.message : 'Erreur'); setBusy(false) }
+    catch (e) { setError(e instanceof Error ? e.message : tr('Erreur', 'Error')); setBusy(false) }
   }
 
   const breadcrumb = [project, ...browsePath]
@@ -106,9 +109,11 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 10, padding: '20px 22px', width: 360, boxShadow: 'var(--shadow)' }}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: 'var(--ink)' }}>
-          {items.length === 1 ? `Déplacer "${items[0].name}"` : `Déplacer ${items.length} éléments`}
+          {items.length === 1
+            ? tr(`Déplacer "${items[0].name}"`, `Move "${items[0].name}"`)
+            : tr(`Déplacer ${items.length} éléments`, `Move ${items.length} items`)}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 12 }}>Double-clic pour naviguer dans un dossier</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 12 }}>{tr('Double-clic pour naviguer dans un dossier', 'Double-click to open a folder')}</div>
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'var(--mono)', fontSize: 10.5, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -128,9 +133,9 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
         {/* Folder list */}
         <div style={{ height: 180, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--bg-deep)', overflowY: 'auto', marginBottom: 10 }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }}>Chargement…</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }}>{tr('Chargement…', 'Loading…')}</div>
           ) : folders.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }}>Aucun sous-dossier</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }}>{tr('Aucun sous-dossier', 'No subfolders')}</div>
           ) : folders.map((f, i) => (
             <div
               key={i}
@@ -148,17 +153,17 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
 
         {/* Destination */}
         <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, marginBottom: 10 }}>
-          <span style={{ color: 'var(--ink-4)' }}>Destination : </span>
+          <span style={{ color: 'var(--ink-4)' }}>{tr('Destination : ', 'Destination: ')}</span>
           <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{breadcrumb.join(' / ')}</span>
-          {isSameLocation && <span style={{ color: 'var(--err)', marginLeft: 6 }}>= emplacement actuel</span>}
-          {isInsideItself && <span style={{ color: 'var(--err)', marginLeft: 6 }}>dossier enfant interdit</span>}
+          {isSameLocation && <span style={{ color: 'var(--err)', marginLeft: 6 }}>{tr('= emplacement actuel', '= current location')}</span>}
+          {isInsideItself && <span style={{ color: 'var(--err)', marginLeft: 6 }}>{tr('dossier enfant interdit', 'cannot move into a child folder')}</span>}
         </div>
 
         {error && <div style={{ fontSize: 11, color: 'var(--err)', fontFamily: 'var(--mono)', marginBottom: 8 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>{tr('Annuler', 'Cancel')}</div>
           <div className="btn primary" onClick={() => void handleConfirm()} style={{ cursor: canConfirm ? 'pointer' : 'default', opacity: canConfirm ? 1 : 0.5 }}>
-            {busy ? '…' : 'Déplacer ici'}
+            {busy ? '…' : tr('Déplacer ici', 'Move here')}
           </div>
         </div>
       </div>
@@ -187,6 +192,7 @@ export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, ca
   onClose:          () => void
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
+  const { tr } = useTr()
   const [openInHovered, setOpenInHovered] = useState(false)
   // "Open in" submenu: opens on the left / moves up when the window has no room
   // (2026-09-26: half of it was off screen, right of the Folder Manager).
@@ -239,33 +245,33 @@ export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, ca
       }}
     >
       {row(
-        isFavorited ? '★ Retirer des Favoris' : '☆ Ajouter aux Favoris',
+        isFavorited ? tr('★ Retirer des Favoris', '★ Remove from Favorites') : tr('☆ Ajouter aux Favoris', '☆ Add to Favorites'),
         false,
         () => { onFavorite(); onClose() },
       )}
       {row(
-        isArchived ? 'Désarchiver' : 'Archiver',
+        isArchived ? tr('Désarchiver', 'Unarchive') : tr('Archiver', 'Archive'),
         false,
         () => { onArchive(); onClose() },
       )}
       {onToggleLock && count === 1 && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-          {row(locked ? '🔓 Déverrouiller' : '🔒 Verrouiller', false, () => { onToggleLock(); onClose() })}
+          {row(locked ? tr('🔓 Déverrouiller', '🔓 Unlock') : tr('🔒 Verrouiller', '🔒 Lock'), false, () => { onToggleLock(); onClose() })}
         </>
       )}
       {onCopyPath && count === 1 && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-          {row('Copier le chemin', false, () => { onCopyPath(); onClose() })}
-          {onCopyHoudiniPath && row('Copier le chemin Houdini ($FLUX)', false, () => { onCopyHoudiniPath(); onClose() })}
+          {row(tr('Copier le chemin', 'Copy path'), false, () => { onCopyPath(); onClose() })}
+          {onCopyHoudiniPath && row(tr('Copier le chemin Houdini ($FLUX)', 'Copy Houdini path ($FLUX)'), false, () => { onCopyHoudiniPath(); onClose() })}
         </>
       )}
       {canEdit && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-          {count === 1 && row('Renommer', false, () => { onRename(); onClose() })}
-          {!locked && row(count > 1 ? `Déplacer (${count})` : 'Déplacer', false, () => { onMove(); onClose() })}
+          {count === 1 && row(tr('Renommer', 'Rename'), false, () => { onRename(); onClose() })}
+          {!locked && row(count > 1 ? tr(`Déplacer (${count})`, `Move (${count})`) : tr('Déplacer', 'Move'), false, () => { onMove(); onClose() })}
         </>
       )}
       {openInTargets && openInTargets.length > 0 && (
@@ -319,7 +325,7 @@ export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, ca
       {canDelete && !locked && (
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-          {row(count > 1 ? `Supprimer (${count})` : 'Supprimer', true, () => { onDelete(); onClose() })}
+          {row(count > 1 ? tr(`Supprimer (${count})`, `Delete (${count})`) : tr('Supprimer', 'Delete'), true, () => { onDelete(); onClose() })}
         </>
       )}
     </div>
@@ -339,6 +345,7 @@ export function DeleteModal({ items, onConfirm, onCancel }: {
     return () => document.removeEventListener('keydown', h)
   }, [onCancel])
 
+  const { tr } = useTr()
   const single = items.length === 1
   const allDirs = items.every(i => i.isDir)
 
@@ -348,27 +355,29 @@ export function DeleteModal({ items, onConfirm, onCancel }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <Trash2 size={16} strokeWidth={1.75} color="var(--err)" />
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-            {single ? `Supprimer "${items[0].name}" ?` : `Supprimer ${items.length} éléments ?`}
+            {single
+              ? tr(`Supprimer "${items[0].name}" ?`, `Delete "${items[0].name}"?`)
+              : tr(`Supprimer ${items.length} éléments ?`, `Delete ${items.length} items?`)}
           </div>
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 20, lineHeight: 1.5 }}>
           {single
             ? items[0].isDir
-              ? 'Ce dossier et tout son contenu seront supprimés définitivement.'
-              : 'Ce fichier sera supprimé définitivement.'
+              ? tr('Ce dossier et tout son contenu seront supprimés définitivement.', 'This folder and all its contents will be permanently deleted.')
+              : tr('Ce fichier sera supprimé définitivement.', 'This file will be permanently deleted.')
             : allDirs
-              ? 'Ces dossiers et tout leur contenu seront supprimés définitivement.'
-              : 'Ces éléments seront supprimés définitivement.'}
-          {' '}Cette action est irréversible.
+              ? tr('Ces dossiers et tout leur contenu seront supprimés définitivement.', 'These folders and all their contents will be permanently deleted.')
+              : tr('Ces éléments seront supprimés définitivement.', 'These items will be permanently deleted.')}
+          {' '}{tr('Cette action est irréversible.', 'This cannot be undone.')}
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>{tr('Annuler', 'Cancel')}</div>
           <div
             className="btn primary"
             onClick={onConfirm}
             style={{ cursor: 'pointer', background: 'var(--err)', borderColor: 'var(--err)' }}
           >
-            Supprimer
+            {tr('Supprimer', 'Delete')}
           </div>
         </div>
       </div>

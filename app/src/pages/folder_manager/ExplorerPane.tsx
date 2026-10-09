@@ -17,8 +17,9 @@ import { FileSvg, FolderSvg, getExt, parseVersionMeta } from './icons'
 import { ContextMenu, DeleteModal, MoveModal, RenameModal } from './ItemModals'
 import { buildOpenInTargets } from './open_in'
 import {
-  TILE_SIZES, USD_EXTS, currentItemKey, resolveOpenPath, sameNav, savedKey, useFolderManager,
+  TILE_SIZES, USD_EXTS, currentItemKey, resolveOpenPath, sameNav, savedKey, trNow, useFolderManager,
 } from './shared'
+import { useTr } from '../../i18n'
 import type { ExplorerItem, FindResult, NavLevel, PaneReport } from './shared'
 
 interface CtxMenu { x: number; y: number; items: ExplorerItem[] }
@@ -49,6 +50,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
   { paneId, active, framed, initialNav, onFocus, onReport }, ref,
 ) {
   const fm = useFolderManager()
+  const { tr } = useTr()
   const { project: activeProject, refreshProjects } = useProject()
 
   // Session-kept (U3): coming back to the Folder Manager reopens the same folder.
@@ -94,7 +96,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
   const lastClickedRef = useRef<string | null>(null)
 
   const navProject = nav.kind === 'inside' ? nav.project : ''
-  const breadcrumb: string[] = nav.kind === 'root' ? ['PROJETS'] : ['PROJETS', nav.project, ...nav.subpath]
+  const breadcrumb: string[] = nav.kind === 'root' ? [tr('PROJETS', 'PROJECTS')] : [tr('PROJETS', 'PROJECTS'), nav.project, ...nav.subpath]
   const canBack    = navIdx > 0
   const canForward = navIdx < navStack.length - 1
 
@@ -206,9 +208,11 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
       const d = await api.setLock(nav.project, nav.subpath, item.name, willLock)
       setLocks(new Set(d.locked))
       fm.bumpFs()   // other views of the same project redraw the lock badge
-      toast.success(willLock ? `"${item.name}" verrouillé` : `"${item.name}" déverrouillé`)
+      toast.success(willLock
+        ? trNow(`"${item.name}" verrouillé`, `"${item.name}" locked`)
+        : trNow(`"${item.name}" déverrouillé`, `"${item.name}" unlocked`))
     } catch (e) {
-      toast.error(`Verrou : ${e instanceof Error ? e.message : 'échec'}`)
+      toast.error(trNow(`Verrou : ${e instanceof Error ? e.message : 'échec'}`, `Lock: ${e instanceof Error ? e.message : 'failed'}`))
     }
   }, [nav, locks, lockRelOf, fm])
 
@@ -248,7 +252,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     const idx = norm.toUpperCase().indexOf(mk)
     if (idx !== -1) norm = norm.slice(idx + mk.length)
     const parts = norm.split('/').filter(Boolean)
-    if (parts.length && parts[0].toUpperCase() === 'PROJETS') parts.shift()  // breadcrumb prefix
+    if (parts.length && (parts[0].toUpperCase() === 'PROJETS' || parts[0].toUpperCase() === 'PROJECTS')) parts.shift()  // breadcrumb prefix
     if (parts.length === 0) return { kind: 'root' }
     const [project, ...subpath] = parts
     return { kind: 'inside', project, subpath }
@@ -256,23 +260,23 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
 
   const commitPathValue = useCallback(async (raw: string) => {
     const target = parsePathToNav(raw)
-    if (!target) { setPathError('Chemin invalide (hors du workspace FLUX ?)'); return }
+    if (!target) { setPathError(trNow('Chemin invalide (hors du workspace FLUX ?)', 'Invalid path (outside the FLUX workspace?)')); return }
     if (target.kind === 'root') { setEditingPath(false); setPathError(''); navigateTo({ kind: 'root' }); return }
     try {
       await api.browseProject(target.project, target.subpath.join('/') || undefined)  // throws on 404
       setEditingPath(false); setPathError(''); navigateTo(target)
     } catch {
-      setPathError('Chemin introuvable dans le workspace FLUX')
+      setPathError(trNow('Chemin introuvable dans le workspace FLUX', 'Path not found in the FLUX workspace'))
     }
   }, [parsePathToNav, navigateTo])
 
   const copyText = (text: string, ok: string) => {
-    navigator.clipboard.writeText(text).then(() => toast.success(ok), () => toast.error('Copie impossible'))
+    navigator.clipboard.writeText(text).then(() => toast.success(ok), () => toast.error(trNow('Copie impossible', 'Copy failed')))
   }
 
   const copyCurrentPath = useCallback(() => {
     const p = currentAbsPath()
-    if (p) copyText(p, 'Chemin copié')
+    if (p) copyText(p, trNow('Chemin copié', 'Path copied'))
   }, [currentAbsPath])
 
   const startEditPath = useCallback(() => {
@@ -368,7 +372,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
   const handleRename = useCallback(async (item: ExplorerItem, newName: string) => {
     if (nav.kind !== 'inside') return
     await api.patchItem(nav.project, nav.subpath, item.name, newName)
-    fm.pushUndo({ label: `renommage "${item.name}"`, actions: [{ kind: 'rename', project: nav.project, sub: nav.subpath, oldName: item.name, newName }] })
+    fm.pushUndo({ label: trNow(`renommage "${item.name}"`, `rename "${item.name}"`), actions: [{ kind: 'rename', project: nav.project, sub: nav.subpath, oldName: item.name, newName }] })
     fm.renameSaved(currentItemKey(item, nav), newName)
     setRenameTarget(null)
     fm.bumpFs()
@@ -393,7 +397,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
       }
       setSelectedNames(new Set())
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Erreur lors de la suppression')
+      setDeleteError(e instanceof Error ? e.message : trNow('Erreur lors de la suppression', 'Delete failed'))
     } finally {
       fm.bumpFs()
     }
@@ -406,7 +410,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     const parts = nav.kind === 'root'
       ? [ws, 'DOSSIER_PROJETS', item.name]
       : [ws, 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
-    copyText(parts.join(sep), 'Chemin copié')
+    copyText(parts.join(sep), trNow('Chemin copié', 'Path copied'))
   }, [nav, fm.workspace])
 
   // Copy the path as $FLUX/DOSSIER_PROJETS/... — pasteable directly in any
@@ -415,7 +419,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     const parts = nav.kind === 'root'
       ? ['$FLUX', 'DOSSIER_PROJETS', item.name]
       : ['$FLUX', 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
-    copyText(parts.join('/'), 'Chemin Houdini copié')
+    copyText(parts.join('/'), trNow('Chemin Houdini copié', 'Houdini path copied'))
   }, [nav])
 
   // ── Clipboard (copy / cut / paste) ──────────────────────────────────────────
@@ -424,14 +428,14 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     if (nav.kind !== 'inside' || selectedNames.size === 0) return
     const sel = items.filter(i => selectedNames.has(i.name))
     fm.setClipboard({ op: 'copy', project: nav.project, subpath: nav.subpath, items: sel })
-    toast.success(`${sel.length} élément(s) copié(s)`)
+    toast.success(trNow(`${sel.length} élément(s) copié(s)`, `${sel.length} item(s) copied`))
   }, [nav, selectedNames, items, fm])
 
   const cutSelection = useCallback(() => {
     if (nav.kind !== 'inside' || selectedNames.size === 0) return
     const sel = items.filter(i => selectedNames.has(i.name))
     const cuttable = sel.filter(i => !isItemLocked(i))
-    if (cuttable.length < sel.length) toast.error(`${sel.length - cuttable.length} verrouillé(s) — non coupé(s)`)
+    if (cuttable.length < sel.length) toast.error(trNow(`${sel.length - cuttable.length} verrouillé(s) : non coupé(s)`, `${sel.length - cuttable.length} locked: not cut`))
     if (cuttable.length === 0) return
     fm.setClipboard({ op: 'cut', project: nav.project, subpath: nav.subpath, items: cuttable })
   }, [nav, selectedNames, items, isItemLocked, fm])
@@ -461,7 +465,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
       if (e.key === 'Delete') {
         if (selectedNames.size === 0 || nav.kind !== 'inside') return
         const targets = items.filter(it => selectedNames.has(it.name))
-        if (targets.some(isItemLocked)) { toast.error('Élément verrouillé — déverrouillez d’abord'); return }
+        if (targets.some(isItemLocked)) { toast.error(trNow('Élément verrouillé : déverrouillez d’abord', 'Item locked: unlock it first')); return }
         if (targets.length > 0) setDeleteConfirm(targets)
         return
       }
@@ -554,12 +558,12 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
             onDragOver={upDroppable ? (e => { if (acceptDrag(e) && !dragOverUp) setDragOverUp(true) }) : undefined}
             onDragLeave={upDroppable ? (() => setDragOverUp(false)) : undefined}
             onDrop={upDroppable ? (e => { setDragOverUp(false); dropInto(e, (nav.kind === 'inside' ? nav.subpath : []).slice(0, -1)) }) : undefined}
-            title={upDroppable ? 'Retour · déposer ici pour monter d’un niveau' : 'Retour'}
+            title={upDroppable ? tr('Retour · déposer ici pour monter d’un niveau', 'Back · drop here to move up one level') : tr('Retour', 'Back')}
             style={{ ...navBtn(canBack || upDroppable), ...(dragOverUp ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-hi)' } : {}) }}
           >
             <ChevronLeft size={13} strokeWidth={2} />
           </div>
-          <div onClick={canForward ? goForward : undefined} title="Suivant" style={navBtn(canForward)}>
+          <div onClick={canForward ? goForward : undefined} title={tr('Suivant', 'Forward')} style={navBtn(canForward)}>
             <ChevronRight size={13} strokeWidth={2} />
           </div>
 
@@ -575,14 +579,14 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               }}
               onBlur={() => { if (!pathError) setEditingPath(false) }}
               spellCheck={false}
-              placeholder="Coller un chemin (C:\… ou PROJET/sous-dossier) puis Entrée"
+              placeholder={tr('Coller un chemin (C:\\… ou PROJET/sous-dossier) puis Entrée', 'Paste a path (C:\\… or PROJECT/subfolder) then Enter')}
               style={{ flex: 1, minWidth: 0, height: 24, border: '1px solid ' + (pathError ? 'var(--err)' : 'var(--accent)'), padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }}
             />
           ) : (
             <div
               data-flux-pathbar
               tabIndex={0}
-              title="Cliquer pour éditer · Ctrl+C copier le chemin · Ctrl+V coller un chemin pour y naviguer"
+              title={tr('Cliquer pour éditer · Ctrl+C copier le chemin · Ctrl+V coller un chemin pour y naviguer', 'Click to edit · Ctrl+C copy the path · Ctrl+V paste a path to go there')}
               onClick={startEditPath}
               onKeyDown={e => {
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { e.preventDefault(); copyCurrentPath() }
@@ -612,7 +616,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               </div>
               <div
                 onClick={e => { e.stopPropagation(); copyCurrentPath() }}
-                title="Copier le chemin"
+                title={tr('Copier le chemin', 'Copy path')}
                 style={{ flexShrink: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4, color: 'var(--ink-4)', cursor: 'pointer' }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-soft)'; e.currentTarget.style.color = 'var(--accent-hi)' }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-4)' }}
@@ -629,7 +633,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null) }}
               onKeyDown={e => { if (e.key === 'Enter') void handleSearch(searchQuery) }}
-              placeholder="Rechercher…"
+              placeholder={tr('Rechercher…', 'Search…')}
               style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--sans)' }}
             />
             {searchQuery && (
@@ -660,9 +664,13 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
           <>
             <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--paper-2)' }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)', flex: 1 }}>
-                <span style={{ color: 'var(--ink-4)', fontSize: 10.5 }}>RÉSULTATS · </span>
+                <span style={{ color: 'var(--ink-4)', fontSize: 10.5 }}>{tr('RÉSULTATS · ', 'RESULTS · ')}</span>
                 {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} · </span>}
-                {findLoading ? 'Recherche…' : searchResults.length === 0 ? 'Aucun résultat' : `${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`}
+                {findLoading
+                  ? tr('Recherche…', 'Searching…')
+                  : searchResults.length === 0
+                    ? tr('Aucun résultat', 'No results')
+                    : tr(`${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`, `${searchResults.length} found`)}
               </div>
               <div
                 onClick={e => { e.stopPropagation(); setSearchResults(null) }}
@@ -695,11 +703,11 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
           </>
         ) : loading && items.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
-            Chargement…
+            {tr('Chargement…', 'Loading…')}
           </div>
         ) : items.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
-            Vide
+            {tr('Vide', 'Empty')}
           </div>
         ) : (
           <div style={{ flex: 1, padding: '10px 12px', overflowY: 'auto', minHeight: 0 }}>
@@ -779,7 +787,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                     )}
                     {locked && (
                       <div
-                        title="Verrouillé"
+                        title={tr('Verrouillé', 'Locked')}
                         style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: 3, background: 'var(--paper-2)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-hi)', zIndex: 1, boxShadow: 'var(--shadow-xs)' }}
                       >
                         <Lock size={9} strokeWidth={2} />
@@ -796,9 +804,9 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                       {item.name}
                     </div>
                     {item.legacy && (
-                      <span title="Ancien fichier du Constructeur : plus propose a l'import (clic droit pour le supprimer)"
+                      <span title={tr("Ancien fichier du Constructeur : plus propose a l'import (clic droit pour le supprimer)", 'Old Builder file: no longer offered for import (right-click to delete it)')}
                         style={{ fontSize: 10.5, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--rule-2)', color: 'var(--ink-3)', background: 'var(--paper-2)' }}>
-                        ancien
+                        {tr('ancien', 'old')}
                       </span>
                     )}
                   </div>

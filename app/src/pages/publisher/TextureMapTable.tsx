@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { Btn, Select, SelectContent, SelectItem, SelectTrigger } from '../../components/shared/ui'
+import { useTr } from '../../i18n'
 
 export type MapOpts = { format: string; bit_depth: string; size: string }
 export type MapRow = { id: string; label: string; detail?: string }
@@ -58,6 +59,7 @@ export function TextureMapTable({
   sizeDefaultLabel: string              // "Taille Mari" / "Taille du texture set"
   header?: React.ReactNode
 }) {
+  const { tr } = useTr()
   const formats = useTextureFormats()
   const fmtNames = Object.keys(formats)
   const empty: MapOpts = { format: '', bit_depth: '', size: '' }
@@ -89,7 +91,7 @@ export function TextureMapTable({
         <Select value={o.bit_depth || DEFAULT} onValueChange={v => setRow(ids, { bit_depth: v === DEFAULT ? '' : v })} disabled={disabled}>
           <SelectTrigger style={{ height: 24, width: 92, fontSize: 11 }} />
           <SelectContent>
-            <SelectItem value={DEFAULT}>Défaut</SelectItem>
+            <SelectItem value={DEFAULT}>{tr('Défaut', 'Default')}</SelectItem>
             {depths.map(d => <SelectItem key={d} value={d}>{DEPTH_LABEL[d] ?? d}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -109,21 +111,21 @@ export function TextureMapTable({
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         {header}
-        <Btn ghost style={{ height: 26 }} onClick={() => setChecked(() => new Set(rows.map(r => r.id)))}>Tout</Btn>
-        <Btn ghost style={{ height: 26 }} onClick={() => setChecked(() => new Set())}>Aucun</Btn>
+        <Btn ghost style={{ height: 26 }} onClick={() => setChecked(() => new Set(rows.map(r => r.id)))}>{tr('Tout', 'All')}</Btn>
+        <Btn ghost style={{ height: 26 }} onClick={() => setChecked(() => new Set())}>{tr('Aucun', 'None')}</Btn>
         <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{checked.size} / {rows.length}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10.5, color: 'var(--ink-4)',
                     textTransform: 'uppercase', letterSpacing: '0.06em' }}>
         <span style={{ flex: 1 }}>Map</span>
         <span style={{ width: 74 }}>Format</span>
-        <span style={{ width: 92 }}>Profondeur</span>
-        <span style={{ width: 92 }}>Taille</span>
+        <span style={{ width: 92 }}>{tr('Profondeur', 'Depth')}</span>
+        <span style={{ width: 92 }}>{tr('Taille', 'Size')}</span>
       </div>
       {/* Same settings for every ticked map at once. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid var(--rule)' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-          title="Réglage appliqué à toutes les maps cochées">Toutes</span>
+          title={tr('Réglage appliqué à toutes les maps cochées', 'Setting applied to every ticked map')}>{tr('Toutes', 'All')}</span>
         {selects(empty, ticked, ticked.length === 0)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
