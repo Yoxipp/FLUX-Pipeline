@@ -71,7 +71,8 @@ async def publish(req: PublishRequest) -> PublishResult:
         )
 
     if dest is None:
-        return PublishResult(success=False, dest_path=None, message="Publish échoué, voir les logs")
+        return PublishResult(success=False, dest_path=None,
+                             message=_failure_reason(source, project_path, req.target_name))
 
     # Post-publish optimisation hooks (both opt-in, both best-effort: a failure
     # here never fails the publish itself).
@@ -84,6 +85,21 @@ async def publish(req: PublishRequest) -> PublishResult:
         success=True, dest_path=str(dest), message="Publish réussi",
         tx_paths=tx_paths, proxy_path=proxy_path,
     )
+
+
+def _failure_reason(source: Path, project_path: Path, target_name: str | None) -> str:
+    """Readable reason of a failed publish for the UI toast: an unresolved destination
+    (unknown task token...) is named; anything else points to the logs."""
+    from features.publisher.publish_core import (
+        explain_unresolved_publish, resolve_publish_filename, resolve_publish_path,
+    )
+    try:
+        filename = resolve_publish_filename(source, target_name)
+        if resolve_publish_path(project_path, filename) is None:
+            return explain_unresolved_publish(project_path, filename)
+    except Exception:  # noqa: BLE001 - the reason is best-effort, never a second error
+        log.exception("Cannot explain failed publish of %s", source)
+    return "Publish échoué, voir les logs"
 
 
 async def _maybe_conform_texture(dest: Path, loop) -> list[str] | None:

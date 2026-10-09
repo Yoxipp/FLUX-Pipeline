@@ -7,6 +7,11 @@
 
 Zone a risque (tous les DCC + projets existants). Le layout par sous-dossier de format decrit dans l'ancienne fiche est OBSOLETE.
 
+## Departements de plan (TYPE_SHOT)
+
+* `resolve_publish_path` d'un plan : token `TYPE_SHOT[<task>]` puis `CLASS[<task>]` (anciens noms CLASS_SEQ_SHOT). `load_tokens` fusionne les defauts de `core/constants.py` dans le `tokens.json` du projet : un departement ajoute aux defauts (ex. RENDER, 2026-10-09, `render/{seq}/{shot}`) marche aussi dans les projets existants, une valeur du projet garde la priorite.
+* Echec de resolution : `explain_unresolved_publish` donne la raison lisible (task inconnue...), renvoyee par `POST /publish` dans `message` et affichee dans le toast du Publisher.
+
 ## LAST (ADR 0017, U3a)
 
 * `publish_into_layout` : archive un ancien LAST sans metadonnee en `vNNN`, ecrit `<base>_vNNN.ext` (temp + rename, jamais d'ecrasement, NNN+1 si la cible existe), puis derive LAST.

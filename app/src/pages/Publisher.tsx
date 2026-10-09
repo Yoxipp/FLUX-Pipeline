@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw } from 'lucide-react'
+import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw, Archive } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { ExpandPicker } from '../components/shared/ExpandPicker'
 import { ConnectionPill } from '../components/shared/ConnectionPill'
@@ -151,16 +151,27 @@ function formatToken(raw: string): string {
     .replace(/^_|_$/g, '')
 }
 
-function formatSeqLabel(raw: string): string {
-  const n = parseInt(raw.replace(/[^0-9]/g, ''), 10)
-  if (isNaN(n)) return raw.toUpperCase()
-  return `SEQ${String(n).padStart(3, '0')}`
+// SEQ / SHOT label from what the artist typed. One source of truth: an existing label
+// (from the project's tokens) is kept as is, also when matched by number (old SEQ010 for
+// "10"); a new one is padded like the backend creates it (SEQ_SHOT_PADDING, default 4).
+const DEFAULT_SEQ_SHOT_PADDING = 4
+function formatSeqShotLabel(prefix: string, raw: string, known: string[], pad: number): string {
+  const typed = raw.trim().toUpperCase()
+  const exact = known.find(k => k.toUpperCase() === typed)
+  if (exact) return exact
+  const n = parseInt(typed.replace(/[^0-9]/g, ''), 10)
+  if (isNaN(n)) return typed
+  const sameNumber = known.find(k => k.toUpperCase().startsWith(prefix) && parseInt(k.slice(prefix.length), 10) === n)
+  if (sameNumber) return sameNumber
+  return `${prefix}${String(n).padStart(pad, '0')}`
 }
 
-function formatShotLabel(raw: string): string {
-  const n = parseInt(raw.replace(/[^0-9]/g, ''), 10)
-  if (isNaN(n)) return raw.toUpperCase()
-  return `SHOT${String(n).padStart(3, '0')}`
+function formatSeqLabel(raw: string, known: string[] = [], pad = DEFAULT_SEQ_SHOT_PADDING): string {
+  return formatSeqShotLabel('SEQ', raw, known, pad)
+}
+
+function formatShotLabel(raw: string, known: string[] = [], pad = DEFAULT_SEQ_SHOT_PADDING): string {
+  return formatSeqShotLabel('SHOT', raw, known, pad)
 }
 
 // Houdini ROP node type → export extension.
@@ -333,9 +344,10 @@ function presetEntries(table: Record<string, UsdTaskContribution>): [string, Usd
 }
 
 // Shot tasks the Publisher offers (2026-09-26): anim, camera (LAYOUT carries the
-// shot camera, shot_stage), FX and light; COMP only from Nuke. No rig / model in a shot.
+// shot camera, shot_stage), FX, light and render (frames, render/{seq}/{shot},
+// 2026-10-09); COMP only from Nuke. No rig / model in a shot.
 function shotTasksFor(dcc: string): string[] {
-  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT']
+  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT', 'RENDER']
   return dcc === 'Nuke' ? [...base, 'COMP'] : base
 }
 
@@ -383,7 +395,7 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
   variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
   seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ#### (de 10 en 10)', example: 'SEQ0010' },
   shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT#### (de 10 en 10, 0015 pour intercaler)', example: 'SHOT0010' },
-  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT (COMP depuis Nuke)', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
+  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT, RENDER (COMP depuis Nuke)', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
   shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
   shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ0010_SHOT0010_ANIM_block_LAST' },
 }
@@ -419,6 +431,23 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
   const q = value.trim().toLowerCase()
   const shown = fixed ? options : (q ? options.filter(o => o.toLowerCase().includes(q)) : options)
   const filled = !!value
+  // Empties the field only (2026-10-09): nothing is deleted on disk or in Production,
+  // another value can then be picked. Archiving a token stays in the dropdown rows.
+  const clearBtn = filled && (
+    <button
+      title="Vider le champ"
+      aria-label="Vider le champ"
+      onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
+      onClick={e => { e.stopPropagation(); onChange(''); setOpen(false) }}
+      style={{
+        flexShrink: 0, width: 16, height: 16, borderRadius: 3, border: 'none', padding: 0,
+        background: 'transparent', color: 'var(--ink-4)', cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.color = 'var(--ink)')}
+      onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
+    ><X size={11} strokeWidth={2} /></button>
+  )
   return (
     <div style={{ flex: '1 1 96px', minWidth: 96 }} title={tokenTip(info)}>
       <div ref={ref} style={{ position: 'relative' }}>
@@ -427,7 +456,7 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
             onClick={() => setOpen(o => !o)}
             className="scale-hover"
             style={{
-              height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', cursor: 'pointer',
+              height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
               borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
               background: filled ? 'var(--accent-soft)' : 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
               fontFamily: filled ? 'var(--mono)' : 'var(--sans)', fontSize: filled ? 10 : 11,
@@ -436,22 +465,28 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
             }}
           >
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || label}</span>
+            {clearBtn}
             <ChevronDown size={11} strokeWidth={2} style={{ flexShrink: 0, opacity: 0.6 }} />
           </div>
         ) : (
+          <>
           <input
             value={value}
             placeholder={label}
             onChange={e => { onChange(e.target.value); setOpen(true) }}
             onFocus={() => setOpen(true)}
             style={{
-              width: '100%', height: 28, padding: '0 8px', boxSizing: 'border-box',
+              width: '100%', height: 28, padding: filled ? '0 24px 0 8px' : '0 8px', boxSizing: 'border-box',
               borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
               background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', outline: 'none',
               fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
               fontWeight: filled ? 600 : 400,
             }}
           />
+          {clearBtn && (
+            <span style={{ position: 'absolute', right: 6, top: 6, display: 'inline-flex' }}>{clearBtn}</span>
+          )}
+          </>
         )}
         {open && shown.length > 0 && (
           <div style={{
@@ -473,7 +508,8 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o}</span>
                 {onArchiveOption && (
                   <button
-                    title="Archiver ce token (déplace le dossier vers ARCHIVE/)"
+                    title="Archiver ce token (déplace son dossier vers ARCHIVE/, après confirmation). Pour seulement vider le champ, utilise la croix du champ."
+                    aria-label="Archiver ce token"
                     onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setOpen(false); onArchiveOption(o) }}
                     style={{
                       flexShrink: 0, width: 15, height: 15, borderRadius: 3, border: 'none',
@@ -482,7 +518,7 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
                     }}
                     onMouseEnter={e => (e.currentTarget.style.color = 'var(--err)')}
                     onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
-                  ><X size={10} strokeWidth={2} /></button>
+                  ><Archive size={10} strokeWidth={2} /></button>
                 )}
               </div>
             ))}
@@ -641,6 +677,10 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   const [sel, setSel]         = useSessionState<ComposerSel>(PUB + 'sel', EMPTY_SEL)
   const [seqs, setSeqs]   = useState<string[]>([])
   const [shots, setShots] = useState<string[]>([])
+  // Padding of new SEQ/SHOT labels, exposed by GET .../sequences (backend SEQ_SHOT_PADDING).
+  const [seqPad, setSeqPad] = useState(DEFAULT_SEQ_SHOT_PADDING)
+  const seqLabelOf  = useCallback((raw: string) => formatSeqLabel(raw, seqs, seqPad), [seqs, seqPad])
+  const shotLabelOf = useCallback((raw: string) => formatShotLabel(raw, shots, seqPad), [shots, seqPad])
 
   // Export config (shared for all DCCs)
   const [exportExt, setExportExt]   = useSessionState(PUB + 'exportExt', '.abc')
@@ -920,7 +960,9 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   // Sequences (shot mode)
   useEffect(() => {
     if (!project || mode !== 'shot') { setSeqs([]); return }
-    api.getSequences(project).then(d => setSeqs(d.sequences)).catch(() => setSeqs([]))
+    api.getSequences(project)
+      .then(d => { setSeqs(d.sequences); if (d.padding && d.padding > 0) setSeqPad(d.padding) })
+      .catch(() => setSeqs([]))
   }, [project, mode])
 
   // Shots for selected SEQ
@@ -1131,19 +1173,19 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     }
     const varr = formatToken(sel.variante) || 'null'
     // ADR 0019: SEQ_SHOT_TASK[_VARIANTE] — the department sits where an asset has its TYPE.
-    return `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${varr}`
-  }, [mode, sel])
+    return `${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${formatToken(sel.name)}_${varr}`
+  }, [mode, sel, seqLabelOf, shotLabelOf])
 
   // ── Token / folder pre-creation before publish ─────────────────────────────
 
   const createNewTokens = useCallback(async () => {
     if (mode === 'shot') {
-      const seqLabel = formatSeqLabel(sel.seq)
+      const seqLabel = seqLabelOf(sel.seq)
       const seqNum   = parseInt(seqLabel.replace(/[^0-9]/g, ''), 10)
       if (!isNaN(seqNum) && !seqs.includes(seqLabel)) {
         try { await api.createSequence(project, seqNum); const d = await api.getSequences(project); setSeqs(d.sequences) } catch { /* may exist */ }
       }
-      const shotLabel = formatShotLabel(sel.shot)
+      const shotLabel = shotLabelOf(sel.shot)
       const shotNum   = parseInt(shotLabel.replace(/[^0-9]/g, ''), 10)
       if (!isNaN(seqNum) && !isNaN(shotNum) && !shots.includes(shotLabel)) {
         try { await api.createShot(project, seqNum, shotNum); const d = await api.getShots(project, seqLabel); setShots(d.shots.map(s => s.split('/')[1] ?? s)) } catch { /* may exist */ }
@@ -1156,7 +1198,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     if (name && cls) {
       try { await api.createAsset(project, cls, name) } catch { /* may already exist */ }
     }
-  }, [mode, project, sel, seqs, shots])
+  }, [mode, project, sel, seqs, shots, seqLabelOf, shotLabelOf])
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
@@ -1315,7 +1357,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             const charName = characterBase(assetName)
             for (const it of picked) {
               const token = it.instance === 1 ? charName : `${charName}_${String(it.instance).padStart(2, '0')}`
-              const fn = `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${token}`
+              const fn = `${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${formatToken(sel.name)}_${token}`
               try {
                 const r = await api.exportMayaLightUsd({
                   project_name: project, asset: charName, filename: fn, root: it.node,
@@ -1613,24 +1655,25 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             const varr = formatToken(sel.variante)
             return `${cls}_${sel.task}_${formatToken(sel.name)}_${inst}_${distinct}` + (varr ? `_${varr}` : '')
           }
-          return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
+          return `${formatToken(sel.name)}_${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${distinct}`
         }
         // Publish one file; ok + what the publish also wrote (.tx, USD proxy).
-        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean }> => {
+        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean; message: string }> => {
           const r = await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
                    target_name: target })
-          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path }
+          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path, message: r.message }
         }
         let okCount = 0, txCount = 0, proxyCount = 0
+        // Each failure keeps the backend's reason (unknown task token, missing file...).
         const failed: string[] = []
         for (const f of files) {
           try {
             const r = await publishOne(f, targetFor(f))
             if (r.ok) { okCount++; txCount += r.tx; if (r.proxy) proxyCount++ }
-            else failed.push(fileStem(f))
-          } catch {
-            failed.push(fileStem(f))
+            else failed.push(`${fileStem(f)} : ${r.message || 'raison inconnue'}`)
+          } catch (e) {
+            failed.push(`${fileStem(f)} : ${e instanceof Error ? e.message : String(e)}`)
           }
         }
         if (okCount) {
@@ -1642,7 +1685,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
               : `Publié → ${dcc}${extras}`,
           )
         }
-        if (failed.length && !okCount) toast.error(`Échec : ${failed.join(', ')}`)
+        if (failed.length) toast.error(`Échec : ${failed.join(' · ')}`)
       } else {
         toast.error(`Publication depuis ${dcc} non encore disponible`)
         return
@@ -1661,6 +1704,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
     mapRows, mapChecked, mapOpts, painterChannels, channelRows,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, usdPreset, usdPresetOpts, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
+    seqLabelOf, shotLabelOf,
   ])
 
   // The app a texture list belongs to: a slow answer (Mari busy exporting) that lands
@@ -2133,7 +2177,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                         const distinct = (mode === 'asset' && autoGroup) ? mapSuffix(f) : formatToken(fileStem(f))
                         const instLabel = mode === 'asset'
                           ? (formatToken(sel.instance) || 'null')
-                          : `${formatSeqLabel(sel.seq)}/${formatShotLabel(sel.shot)}`
+                          : `${seqLabelOf(sel.seq)}/${shotLabelOf(sel.shot)}`
                         return (
                           <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileStem(f)}</span>

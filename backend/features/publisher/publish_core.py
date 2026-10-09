@@ -68,6 +68,27 @@ def resolve_publish_path(project_path: Path, filename: str) -> Path | None:
     return project_path / name_rel / type_sub / instance
 
 
+def explain_unresolved_publish(project_path: Path, filename: str) -> str:
+    """Human readable (French, shown in the UI) reason why ``resolve_publish_path``
+    returned None for *filename*. Read-only: it never changes the resolution."""
+    parsed = parse_filename(filename)
+    if parsed is None:
+        return f"Nom de fichier non conforme aux tokens FLUX : {filename}"
+    tokens = load_tokens(project_path)
+    if parsed["is_shot"]:
+        dept = parsed.get("TYPE") or parsed["CLASS"]
+        if not dept:
+            return f"Task du plan manquante dans {filename}"
+        if (get_path_for_token(tokens, "TYPE_SHOT", dept) is None
+                and get_path_for_token(tokens, "CLASS", dept) is None):
+            return f"Task de plan inconnue : {dept}. Ajoute-la aux tokens TYPE_SHOT du projet."
+        return f"Dossier de la task {dept} invalide pour {parsed['SEQ']} / {parsed['SHOT']}"
+    if (get_path_for_token(tokens, "NAME", parsed["NAME"]) is None
+            and get_path_for_token(tokens, "CLASS", parsed["CLASS"]) is None):
+        return f"Catégorie inconnue : {parsed['CLASS']} (ni NAME {parsed['NAME']} ni CLASS dans les tokens)"
+    return f"Chemin de publication introuvable pour {filename}"
+
+
 # ── logical filename ─────────────────────────────────────────────────────────
 
 def resolve_publish_filename(source_path: Path, target_name: str | None = None) -> str:

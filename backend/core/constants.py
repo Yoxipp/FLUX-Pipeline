@@ -129,6 +129,7 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
+    "RENDER": "render/{seq}/{shot}",
 }
 
 # Default TYPE token map for a SHOT (ADR 0019: the department of a shot is its TYPE,
@@ -142,6 +143,9 @@ DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
     "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
+    # Rendered frames of a shot (2026-10-09), own root like LIGHT / COMP. Projects
+    # whose tokens.json predates it get it from load_tokens (defaults merged in).
+    "RENDER": "render/{seq}/{shot}",
 }
 
 # Default TYPE token map (Task → asset-relative top-level sub-folder).

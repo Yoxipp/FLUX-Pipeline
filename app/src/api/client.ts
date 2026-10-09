@@ -693,7 +693,7 @@ export const api = {
     apiCall<{ name: string; path: string }>('POST', '/folder/assets', { project, class_token, name }),
 
   getSequences: (project: string) =>
-    apiCall<{ sequences: string[] }>('GET', `/folder/projects/${project}/sequences`),
+    apiCall<{ sequences: string[]; padding?: number }>('GET', `/folder/projects/${project}/sequences`),
 
   createSequence: (project: string, seq_number: number) =>
     apiCall<{ seq_number: number; path: string }>('POST', '/folder/sequences', { project, seq_number }),
