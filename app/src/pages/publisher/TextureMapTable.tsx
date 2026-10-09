@@ -80,21 +80,21 @@ export function TextureMapTable({
     return (
       <>
         <Select value={o.format || DEFAULT} onValueChange={v => setRow(ids, { format: v === DEFAULT ? '' : v })} disabled={disabled}>
-          <SelectTrigger style={{ height: 24, width: 74, fontSize: 10 }} />
+          <SelectTrigger style={{ height: 24, width: 74, fontSize: 11 }} />
           <SelectContent>
             <SelectItem value={DEFAULT}>{`.${defaultFormat}`}</SelectItem>
             {fmtNames.map(f => <SelectItem key={f} value={f}>{`.${f}`}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={o.bit_depth || DEFAULT} onValueChange={v => setRow(ids, { bit_depth: v === DEFAULT ? '' : v })} disabled={disabled}>
-          <SelectTrigger style={{ height: 24, width: 92, fontSize: 10 }} />
+          <SelectTrigger style={{ height: 24, width: 92, fontSize: 11 }} />
           <SelectContent>
             <SelectItem value={DEFAULT}>Défaut</SelectItem>
             {depths.map(d => <SelectItem key={d} value={d}>{DEPTH_LABEL[d] ?? d}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={o.size || DEFAULT} onValueChange={v => setRow(ids, { size: v === DEFAULT ? '' : v })} disabled={disabled}>
-          <SelectTrigger style={{ height: 24, width: 92, fontSize: 10 }} />
+          <SelectTrigger style={{ height: 24, width: 92, fontSize: 11 }} />
           <SelectContent>
             <SelectItem value={DEFAULT}>{sizeDefaultLabel}</SelectItem>
             {Object.entries(SIZE_LABEL).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
@@ -111,9 +111,9 @@ export function TextureMapTable({
         {header}
         <Btn ghost style={{ height: 26 }} onClick={() => setChecked(() => new Set(rows.map(r => r.id)))}>Tout</Btn>
         <Btn ghost style={{ height: 26 }} onClick={() => setChecked(() => new Set())}>Aucun</Btn>
-        <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{checked.size} / {rows.length}</span>
+        <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{checked.size} / {rows.length}</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 9, color: 'var(--ink-4)',
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10.5, color: 'var(--ink-4)',
                     textTransform: 'uppercase', letterSpacing: '0.06em' }}>
         <span style={{ flex: 1 }}>Map</span>
         <span style={{ width: 74 }}>Format</span>

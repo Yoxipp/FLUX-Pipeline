@@ -219,7 +219,7 @@ function TokenFinder({ project, onChange }: {
       {/* Mode toggle ASSET / SHOT */}
       <div
         onClick={switchMode}
-        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 9, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
+        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
       >
         {mode === 'asset' ? 'ASSET' : 'SHOT'}
       </div>
@@ -237,27 +237,27 @@ function TokenFinder({ project, onChange }: {
               onClick={() => setOpen(isOpen ? null : i)}
               style={{ height: 30, padding: '0 6px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1, cursor: 'pointer', background: value ? 'var(--accent-soft)' : 'transparent', transition: 'background 0.08s', borderRadius: i === 0 ? '4px 0 0 4px' : i === MODULES.length - 1 ? '0 4px 4px 0' : 0 }}
             >
-              <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
-              <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+              <span style={{ fontSize: 9, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
+              <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
                 {value || '-'}
               </span>
             </div>
             {isOpen && (
               <div style={{ position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: 110, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
                 {value && (
-                  <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
+                  <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
                     effacer
                   </div>
                 )}
                 {opts.length === 0 ? (
-                  <div style={{ padding: '6px 8px', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+                  <div style={{ padding: '6px 8px', fontSize: 10.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
                     {project ? 'Vide' : 'Projet requis'}
                   </div>
                 ) : opts.map(o => (
                   <div
                     key={o}
                     onClick={() => update(key, o)}
-                    style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)', background: o === value ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ padding: '5px 8px', fontSize: 10.5, fontFamily: 'var(--mono)', color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)', background: o === value ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', whiteSpace: 'nowrap' }}
                   >
                     {o}
                   </div>
@@ -342,7 +342,7 @@ function InputField({ value, onChange, placeholder }: { value: string; onChange:
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      style={{ width: '100%', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 10, padding: '0 8px', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
+      style={{ width: '100%', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 11, padding: '0 8px', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
     />
   )
 }
@@ -361,12 +361,12 @@ function PanelBtn({ primary, children, onClick, disabled, danger }: { primary?: 
 
 function NavContext({ project }: { project: string }) {
   if (!project) return (
-    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
       Naviguez dans un projet
     </div>
   )
   return (
-    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-2)' }}>
+    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)' }}>
       <span style={{ color: 'var(--ink-4)' }}>Projet : </span>
       <span style={{ fontWeight: 600 }}>{project}</span>
     </div>
@@ -397,7 +397,7 @@ function TabProject({ onCreateProject }: { onCreateProject: (name: string, paint
         <div className="cap" style={{ marginBottom: 4 }}>NOM</div>
         <InputField value={name} onChange={setName} placeholder="ex: NEW_PROJECT" />
       </div>
-      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
+      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
       <div style={{ flex: 1 }} />
       <PanelBtn primary onClick={() => void handleCreate()} disabled={!name.trim()}>Create Project</PanelBtn>
     </div>
@@ -434,7 +434,7 @@ function TabAsset({ currentProject, onCreateAsset }: {
         <div className="cap" style={{ marginBottom: 4 }}>NAME</div>
         <InputField value={name} onChange={setName} placeholder="ex: HorseRig" />
       </div>
-      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
+      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
       <div style={{ flex: 1 }} />
       <PanelBtn primary onClick={() => void handleCreate()} disabled={!currentProject || !name.trim()}>Create Asset</PanelBtn>
     </div>
@@ -484,20 +484,20 @@ function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, on
       <div style={{ padding: '10px', border: '1px solid var(--rule-2)', borderRadius: 7, background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: 'var(--shadow-inset)' }}>
         <div className="cap">SEQ</div>
         <Spinner value={seqN} onChange={setSeqN} />
-        {statusSeq && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusSeq.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusSeq}</div>}
+        {statusSeq && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: statusSeq.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusSeq}</div>}
         <PanelBtn primary onClick={() => void handleCreateSeq()} disabled={!currentProject}>Create Sequence</PanelBtn>
       </div>
       <div style={{ padding: '10px', border: '1px solid var(--rule-2)', borderRadius: 7, background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: 'var(--shadow-inset)' }}>
         <div className="cap">SHOT</div>
         <div>
-          <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>IN SEQUENCE</div>
+          <div className="cap" style={{ marginBottom: 4, fontSize: 10 }}>IN SEQUENCE</div>
           <SelectEl options={sequences.length > 0 ? sequences : ['-']} value={seq} onChange={setSeq} />
         </div>
         <div>
-          <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>SHOT NO.</div>
+          <div className="cap" style={{ marginBottom: 4, fontSize: 10 }}>SHOT NO.</div>
           <Spinner value={shotN} onChange={setShotN} />
         </div>
-        {statusShot && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusShot.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusShot}</div>}
+        {statusShot && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: statusShot.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusShot}</div>}
         <PanelBtn primary onClick={() => void handleCreateShot()} disabled={!currentProject || !seq}>Create Shot</PanelBtn>
       </div>
       <div style={{ flex: 1 }} />
@@ -558,7 +558,7 @@ function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
         </div>
       )}
       {status && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)', lineHeight: 1.4 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)', lineHeight: 1.4 }}>
           {status}
         </div>
       )}
@@ -691,7 +691,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
 
   const _hdr: React.CSSProperties = {
     padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0,
-    background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+    background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)',
     display: 'flex', alignItems: 'center', gap: 8,
   }
   const _row: React.CSSProperties = {
@@ -775,7 +775,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
       </div>
       {selected.size > 0 && (
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
-          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+          <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
             {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
           </span>
           <span style={{ flex: 1 }} />
@@ -783,11 +783,11 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
             <>
               <span
                 onClick={() => !deleting && setConfirming(false)}
-                style={{ fontSize: 10, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
+                style={{ fontSize: 11, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
               >Annuler</span>
               <span
                 onClick={doDelete}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
               >
                 <Trash2 size={11} strokeWidth={1.75} /> {deleting ? 'Suppression…' : 'Confirmer la suppression définitive'}
               </span>
@@ -795,7 +795,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
           ) : (
             <span
               onClick={() => setConfirming(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
             >
               <Trash2 size={11} strokeWidth={1.75} /> Supprimer
             </span>
@@ -831,7 +831,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
             <span
               onClick={e => { e.stopPropagation(); onOpen(cur.project, it.isDir ? [...cur.sub, it.name] : cur.sub) }}
               title="Ouvrir dans l'explorateur"
-              style={{ flexShrink: 0, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+              style={{ flexShrink: 0, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
             >Ouvrir</span>
           </div>
           )
@@ -877,7 +877,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
   return (
     <>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
+        <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>
           {label} · {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
@@ -897,7 +897,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
               {s.isDir ? <FolderSvg size={24} /> : <FileSvg size={20} ext={getExt(s.label)} />}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div title={s.label} style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
-                <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {s.project}{s.subpath.length > 0 ? ' / ' + s.subpath.join(' / ') : ''}
                 </div>
               </div>
@@ -1382,12 +1382,12 @@ export function Projects() {
         <div
           onClick={() => void handleFind()}
           className="btn primary"
-          style={{ height: 30, padding: '0 14px', flexShrink: 0, display: 'flex', alignItems: 'center', fontSize: 10, cursor: findLoading ? 'wait' : 'pointer' }}
+          style={{ height: 30, padding: '0 14px', flexShrink: 0, display: 'flex', alignItems: 'center', fontSize: 11, cursor: findLoading ? 'wait' : 'pointer' }}
         >
           {findLoading ? '…' : 'Find'}
         </div>
         {clipboard && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '0 8px', height: 30, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', boxShadow: 'var(--shadow-inset)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '0 8px', height: 30, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', boxShadow: 'var(--shadow-inset)' }}>
             <Copy size={10} strokeWidth={1.75} color="var(--ink-4)" />
             <span>{clipboard.items.length} {clipboard.op === 'cut' ? 'coupé(s)' : 'copié(s)'}</span>
             <X size={10} strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => setClipboard(null)} />
@@ -1418,12 +1418,12 @@ export function Projects() {
                   <Icon size={12} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
                   <span>{label}</span>
                   {id === 'favoris' && favorites.length > 0 && (
-                    <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
+                    <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
                       {favorites.length}
                     </span>
                   )}
                   {id === 'archives' && archived.length > 0 && (
-                    <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
+                    <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
                       {archived.length}
                     </span>
                   )}
@@ -1448,7 +1448,7 @@ export function Projects() {
                       style={{
                         display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
                         padding: '6px 8px', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                        borderRadius: 6, color: 'var(--ink-2)', fontSize: 10, fontFamily: 'var(--sans)',
+                        borderRadius: 6, color: 'var(--ink-2)', fontSize: 11, fontFamily: 'var(--sans)',
                         cursor: 'pointer', boxShadow: 'var(--shadow-xs)',
                       }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--ink)' }}
@@ -1468,7 +1468,7 @@ export function Projects() {
           <div style={{ padding: '2px 12px 0' }}>
             <div className="cap" style={{ marginBottom: 6 }}>RÉCENTS</div>
             {recentSidebarItems.length === 0 ? (
-              <div style={{ fontSize: 10, color: 'var(--ink-4)', fontStyle: 'italic', padding: '3px 0' }}>Aucun</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic', padding: '3px 0' }}>Aucun</div>
             ) : recentSidebarItems.map((s, i) => (
               <div
                 key={i}
@@ -1489,9 +1489,9 @@ export function Projects() {
               <HardDrive size={10} strokeWidth={1.75} color="var(--ink-4)" />
               <div className="cap">WORKSPACE</div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
               <span style={{ color: 'var(--ink-3)' }}>Projets</span>
-              <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', fontSize: 10 }}>{projects.length}</span>
+              <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', fontSize: 11 }}>{projects.length}</span>
             </div>
           </div>
         </div>
@@ -1564,7 +1564,7 @@ export function Projects() {
               <div
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                style={{ flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 8.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent-hi)' : 'var(--ink-4)', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === t.id ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}
+                style={{ flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent-hi)' : 'var(--ink-4)', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === t.id ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}
               >
                 {t.label}
               </div>
@@ -1606,15 +1606,15 @@ export function Projects() {
           <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
             <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
             <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--accent-hi)' }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--accent-hi)' }}>
                 {activeProject || '-'}
               </div>
-              <div style={{ fontSize: 9, color: 'var(--ink-3)', marginTop: 2 }}>
+              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>
                 {sequences.length > 0 ? `${sequences.length} séquences` : 'Aucune séquence'}
               </div>
             </div>
             {contextProject && contextProject !== activeProject && (
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 → {contextProject}
               </div>
             )}

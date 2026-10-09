@@ -22,7 +22,7 @@ interface Props {
 const numInputStyle: React.CSSProperties = {
   width: 60, height: 24, padding: '0 6px', borderRadius: 5,
   border: '1px solid var(--rule-2)', background: 'var(--bg-deep)',
-  color: 'var(--ink-2)', fontFamily: 'var(--mono)', fontSize: 10,
+  color: 'var(--ink-2)', fontFamily: 'var(--mono)', fontSize: 11,
   outline: 'none', boxShadow: 'var(--shadow-inset)', textAlign: 'center',
 }
 
@@ -55,7 +55,7 @@ function Row({ opt, values, onChange }: { opt: ExportOption; values: Values; onC
         <span style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap', flexShrink: 0 }}>{opt.label}</span>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
           <Select value={val} onValueChange={v => onChange(opt.key, v === EMPTY ? '' : v)}>
-            <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 200, fontSize: 10 }} />
+            <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 200, fontSize: 11 }} />
             <SelectContent>
               {(opt.choices ?? []).map(c => <SelectItem key={c.value} value={toSel(c.value)}>{c.label}</SelectItem>)}
             </SelectContent>
@@ -122,7 +122,7 @@ export function ExportOptions({ schema, values, onChange }: Props) {
               style={{ transform: showAdvanced ? 'rotate(90deg)' : 'none', transition: 'transform 0.12s' }}
             />
             <span className="cap">Avancé</span>
-            <span style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>({advanced.length})</span>
+            <span style={{ fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>({advanced.length})</span>
           </div>
           {showAdvanced && (
             <div style={{

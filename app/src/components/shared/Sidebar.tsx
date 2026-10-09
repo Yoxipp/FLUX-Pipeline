@@ -67,7 +67,7 @@ function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRe
           background: notifRed ? 'color-mix(in oklch, var(--err) 18%, transparent)' : 'var(--accent-soft)',
           border: '1px solid ' + (notifRed ? 'var(--err)' : 'var(--accent)'),
           color: notifRed ? 'var(--err)' : 'var(--accent-hi)',
-          fontFamily: 'var(--sans)', fontSize: 8, fontWeight: 600,
+          fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: 'var(--shadow-xs)',
         }}>{notif}</span>
@@ -792,7 +792,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               width: 184, zIndex: 61, background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
               borderRadius: 8, boxShadow: 'var(--shadow-md)', padding: 5,
             }}>
-              <div style={{ padding: '4px 9px 6px', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+              <div style={{ padding: '4px 9px 6px', fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
                 Instance · {instMenu.name}
               </div>
               {insts.map((inst) => {
@@ -812,15 +812,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                     onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--accent-soft)' }}
                     onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
                   >
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)', flexShrink: 0 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--accent-hi)', flexShrink: 0 }}>
                       {inst.port}
                     </span>
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {inst.scene != null ? inst.label : inst.pid ? `pid ${inst.pid}` : inst.label}
-                      {inst.version && <span style={{ color: 'var(--ink-4)', fontSize: 9 }}> · {inst.version}</span>}
+                      {inst.version && <span style={{ color: 'var(--ink-4)', fontSize: 10.5 }}> · {inst.version}</span>}
                     </span>
                     {inst.state === 'busy' && (
-                      <span title="Occupé : un export tourne" style={{ fontSize: 8, color: 'var(--warn)', flexShrink: 0 }}>occupé</span>
+                      <span title="Occupé : un export tourne" style={{ fontSize: 10, color: 'var(--warn)', flexShrink: 0 }}>occupé</span>
                     )}
                     {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
                     <span

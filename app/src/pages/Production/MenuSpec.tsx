@@ -772,7 +772,7 @@ function AssetsLanding({ state, entity, entityKind, seqOfShot, onOpenAsset }: {
               display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8,
               padding: '3px 10px', borderRadius: 5,
               background: color, color: 'var(--paper)',
-              fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
+              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.08em',
             }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
               {cls}
@@ -801,7 +801,7 @@ function AssetsLanding({ state, entity, entityKind, seqOfShot, onOpenAsset }: {
                   {asset.name}
                   {inh && (
                     <span style={{
-                      fontSize: 8, padding: '1px 5px', borderRadius: 3,
+                      fontSize: 10, padding: '1px 5px', borderRadius: 3,
                       background: 'rgba(0,0,0,0.25)', letterSpacing: '0.05em',
                     }}>hérité</span>
                   )}
@@ -813,7 +813,7 @@ function AssetsLanding({ state, entity, entityKind, seqOfShot, onOpenAsset }: {
                       <span title={pin ? (newer ? t('prod.versionNewer').replace('{v}', last) : t('prod.versionPinned').replace('{v}', pin))
                                        : t('prod.versionLast')}
                             style={{
-                              fontSize: 8, padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em',
+                              fontSize: 10, padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em',
                               background: pin ? 'var(--paper)' : 'rgba(0,0,0,0.25)',
                               color: pin ? 'var(--ink)' : 'var(--paper)',
                             }}>
@@ -960,7 +960,7 @@ function UsdAssembledNode({ name }: { name: string }) {
   const color = 'var(--accent)'
   const line: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
-    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', lineHeight: '18px',
+    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)', lineHeight: '18px',
   }
   const dim: React.CSSProperties = { color: 'var(--ink-4)', flexShrink: 0 }
   const cut: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }
@@ -981,15 +981,15 @@ function UsdAssembledNode({ name }: { name: string }) {
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>USD assemblé</span>
         <span style={{ flex: 1 }} />
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
           background: version ? 'var(--accent-soft)' : 'var(--paper)', color: version ? 'var(--accent-hi)' : 'var(--ink-4)',
         }}>{version ?? '—'}</span>
       </div>
       {open && (
         <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {err && <div style={{ fontSize: 10, color: 'var(--err)' }}>{err}</div>}
+          {err && <div style={{ fontSize: 11, color: 'var(--err)' }}>{err}</div>}
           {!err && info && !comp && !asm && (
-            <div style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5 }}>
               Pas encore de component pour {name} : il se crée dans la page USD (Bibliothèque).
             </div>
           )}
@@ -1099,12 +1099,12 @@ function SeqRenderSceneNode({ seq }: { seq: string }) {
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Scène de rendu</span>
         <span style={{ flex: 1 }} />
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
           background: exists ? 'var(--accent-soft)' : 'var(--paper)', color: exists ? 'var(--accent-hi)' : 'var(--ink-4)',
         }}>{exists ? 'prête' : 'à créer'}</span>
       </div>
       <div style={{ padding: '0 14px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
           title={file ?? ''}>{file ?? `${seq}_render.hip`}</div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={() => { void open() }} disabled={busy || !project} style={_miniBtn}>
@@ -1118,7 +1118,7 @@ function SeqRenderSceneNode({ seq }: { seq: string }) {
 
 const _miniBtn: React.CSSProperties = {
   padding: '4px 10px', borderRadius: 6, border: '1px solid var(--rule-2)', background: 'var(--paper)',
-  color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 10, cursor: 'pointer',
+  color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 11, cursor: 'pointer',
 }
 
 // ── one task node ────────────────────────────────────────────────────────────
@@ -1236,7 +1236,7 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
         <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--paper)' }}>{task.name}</span>
         {inherited && (
           <span style={{
-            fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 500,
+            fontFamily: 'var(--sans)', fontSize: 10.5, fontWeight: 500,
             padding: '1px 6px', borderRadius: 3,
             background: 'rgba(255,255,255,0.18)', color: 'var(--paper)',
           }}>hérité</span>
@@ -1247,7 +1247,7 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
         )}
         {publishCount > 0 && (
           <span style={{
-            fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600,
+            fontFamily: 'var(--sans)', fontSize: 10.5, fontWeight: 600,
             padding: '1px 6px', borderRadius: 3,
             background: 'rgba(0,0,0,0.3)', color: 'var(--paper)',
           }}>{publishCount}</span>
@@ -1289,7 +1289,7 @@ function TaskNode({ task, asset, publishCount, onOpenHeader, onOpenSubtask, comp
                     padding: '5px 10px', borderRadius: 6,
                     border: `1px solid color-mix(in oklch, ${color} 75%, black 25%)`,
                     background: color, color: 'var(--paper)',
-                    fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
+                    fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600,
                     cursor: inherited ? 'default' : 'pointer',
                     transition: 'filter 0.12s',
                     minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -1334,7 +1334,7 @@ function TaskStrip({ task, activeSub, publishCount, onOpenTask, onOpenSubtask, a
     <button key={label} onClick={onClick} title={title}
       style={{
         flexShrink: 0, padding: '3px 9px', borderRadius: 5, cursor: 'pointer',
-        fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+        fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
         border: on ? '1px solid var(--paper)' : `1px solid color-mix(in oklch, ${color} 70%, black 25%)`,
         background: on ? color : `color-mix(in oklch, ${color} 45%, var(--paper-2) 55%)`,
         color: 'var(--paper)',
@@ -1349,7 +1349,7 @@ function TaskStrip({ task, activeSub, publishCount, onOpenTask, onOpenSubtask, a
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
       <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', flexShrink: 0 }}>{task.name}</span>
       {publishCount > 0 && (
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', flexShrink: 0 }}>{publishCount}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', flexShrink: 0 }}>{publishCount}</span>
       )}
       {task.known_subtasks.length > 0 && (
         <>

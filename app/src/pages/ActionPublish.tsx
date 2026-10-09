@@ -112,7 +112,7 @@ export function ActionPublish() {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '12px 20px 10px', borderBottom: '1px solid var(--rule)', flexShrink: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Publish (action)</div>
-        <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>
+        <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>
           Formulaire généré depuis l'action publish
         </div>
       </div>
@@ -120,7 +120,7 @@ export function ActionPublish() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
         <div style={{ maxWidth: 620 }}>
           {!project && (
-            <div className="lbl" style={{ fontSize: 10, color: 'var(--err)', marginBottom: 10 }}>
+            <div className="lbl" style={{ fontSize: 11, color: 'var(--err)', marginBottom: 10 }}>
               Aucun projet actif. Choisis un projet dans la barre de gauche.
             </div>
           )}

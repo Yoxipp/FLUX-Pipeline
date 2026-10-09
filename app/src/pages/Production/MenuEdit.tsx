@@ -374,7 +374,7 @@ export function MenuEdit({
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid var(--rule)' }}>
-        <div className="cap" style={{ fontSize: 9, letterSpacing: '0.09em', color: 'var(--ink-3)' }}>Edit</div>
+        <div className="cap" style={{ fontSize: 10.5, letterSpacing: '0.09em', color: 'var(--ink-3)' }}>Edit</div>
       </div>
 
       {mode === 'asset' && selection.kind === 'none' && (
@@ -487,7 +487,7 @@ function CreateSection({ setState, setSelection, activeCategory }: {
             display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 6,
             padding: '4px 10px', borderRadius: 5,
             background: categoryColor(activeCategory), color: 'var(--paper)',
-            fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+            fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
           }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
             {activeCategory}
@@ -1251,7 +1251,7 @@ function AssetsPicker({ state, setState, entityKind, entity, title, project }: {
     <div style={_pad}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <div style={_lbl}>{title ?? t('prod.tabAssets')}</div>
-        <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>· {linked.length}</span>
+        <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>· {linked.length}</span>
         <span style={{ flex: 1 }} />
         <ProdBtn size="sm" variant="ghost" onClick={() => setModalOpen(true)}>
           <Plus size={10} strokeWidth={2} /> Ajouter
@@ -1259,7 +1259,7 @@ function AssetsPicker({ state, setState, entityKind, entity, title, project }: {
       </div>
 
       {linked.length === 0 && (
-        <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>—</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</div>
       )}
       {linked.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -1273,7 +1273,7 @@ function AssetsPicker({ state, setState, entityKind, entity, title, project }: {
                       display: 'inline-flex', alignItems: 'center', gap: 4,
                       padding: '3px 9px', borderRadius: 999,
                       background: color, color: 'var(--paper)',
-                      fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
+                      fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600,
                     }}>
                 {a?.name ?? l.ref}
                 {(l.count ?? 1) > 1 && <span style={{ opacity: 0.85 }}>x{l.count}</span>}
@@ -1337,7 +1337,7 @@ function VersionPin({ project, name, value, onChange }: {
             title={value ? t('prod.versionPinned').replace('{v}', value) : t('prod.versionLast')}
             onClick={e => e.stopPropagation()}
             style={{
-              fontSize: 9, fontWeight: 600, fontFamily: 'var(--sans)', cursor: 'pointer',
+              fontSize: 10.5, fontWeight: 600, fontFamily: 'var(--sans)', cursor: 'pointer',
               border: 'none', borderRadius: 999, padding: '0 4px',
               background: value ? 'var(--paper)' : 'transparent',
               color: value ? 'var(--ink)' : 'var(--paper)',
@@ -1412,7 +1412,7 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
           padding: '14px 18px', borderBottom: '1px solid var(--rule)',
         }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
-          <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
             {t('prod.tabAssets')} · {linkedIds.size} lié{linkedIds.size > 1 ? 's' : ''}
           </span>
           <span style={{ flex: 1 }} />
@@ -1453,7 +1453,7 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
                   display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8,
                   padding: '4px 10px', borderRadius: 5,
                   background: color, color: 'var(--paper)',
-                  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                  fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
                 }}>
                   <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
                   {t(categoryLabelKey(cls)) || cls}
@@ -1540,7 +1540,7 @@ function parseFrame(raw: string): number | undefined {
 }
 
 const _lbl: React.CSSProperties = {
-  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
+  fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600,
   letterSpacing: '0.05em', color: 'var(--ink-3)',
   textTransform: 'uppercase', marginBottom: 5,
 }

@@ -41,7 +41,7 @@ export function StatusBar({ dccStatus }: Props) {
       {version && (
         <span
           title={`FLUX ${version}`}
-          style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', userSelect: 'text' }}
+          style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', userSelect: 'text' }}
         >
           v{version}
         </span>

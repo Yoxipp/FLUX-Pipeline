@@ -34,7 +34,7 @@ const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: strin
     }}>
       {icon}
     </div>
-    <div className="lbl" style={{ fontSize: 9 }}>{label}</div>
+    <div className="lbl" style={{ fontSize: 10.5 }}>{label}</div>
   </div>
 )
 
@@ -241,7 +241,7 @@ export function ShelfManager() {
                   <ShelfBtn icon={<FluxLogo size={20} color={CAM_COLOR} />} label="SAVE +1" />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 6, paddingLeft: 16, borderLeft: '1px solid var(--rule-2)' }}>
                     <div style={{ fontSize: 11, color: 'var(--ink)', fontFamily: 'var(--mono)' }}>flux_ui_zbrush</div>
-                    <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>UI FLUX (template Rongeart) · menu FLUX · .ztl à chaque clic FLUX + QuickSave 10 min</div>
+                    <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-3)' }}>UI FLUX (template Rongeart) · menu FLUX · .ztl à chaque clic FLUX + QuickSave 10 min</div>
                   </div>
                 </>
               ) : dcc === 'Maya' ? (
@@ -267,7 +267,7 @@ export function ShelfManager() {
             <div>
               <SecTitle>Presets d'export Painter{project ? ` · ${project}` : ''}</SecTitle>
               {!project ? (
-                <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>Choisis un projet pour régler ses presets.</div>
+                <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>Choisis un projet pour régler ses presets.</div>
               ) : (
                 <div className="card" style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {painterBundled.map(p => {
@@ -284,7 +284,7 @@ export function ShelfManager() {
                   })}
                 </div>
               )}
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
+              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
                 Le Publisher ne propose que les presets cochés pour ce projet ; aucun coché : tous.
                 Les presets FLUX sont copiés dans Painter à l'installation du bridge (Autostart).
               </div>
@@ -297,7 +297,7 @@ export function ShelfManager() {
           <div>
             <SecTitle>Tools de la shelf Flux</SecTitle>
             {toolVersions.length === 0 ? (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
                 Aucune version Maya détectée
               </div>
             ) : (
@@ -320,7 +320,7 @@ export function ShelfManager() {
                         background: checked[t.id] ? 'var(--accent)' : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        {checked[t.id] && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                        {checked[t.id] && <span style={{ color: 'white', fontSize: 11, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                       </div>
                       <div style={{ flex: 1, fontSize: 12, color: 'var(--ink)' }}>{t.label}</div>
                     </div>
@@ -331,7 +331,7 @@ export function ShelfManager() {
                     <Zap size={12} strokeWidth={2} />
                     Installer les tools cochés
                   </Btn>
-                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+                  <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>
                     {toolVersion && (toolsInstalled[toolVersion] ? `Shelf Flux installée · ${toolVersion}` : `Non installée · ${toolVersion}`)}
                   </div>
                 </div>
@@ -347,7 +347,7 @@ export function ShelfManager() {
           <SecTitle>Log</SecTitle>
           <div className="card" style={{
             flex: 1, padding: '10px 14px', minHeight: 0, overflowY: 'auto',
-            fontFamily: 'var(--mono)', fontSize: 10, lineHeight: 2.0,
+            fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 2.0,
             color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', gap: 2,
           }}>
             {log.length === 0 ? (

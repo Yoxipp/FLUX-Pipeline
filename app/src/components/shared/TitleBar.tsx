@@ -26,7 +26,7 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
       onMouseLeave={() => setHov(false)}
       style={{
         width: 13, height: 13, borderRadius: '50%',
-        background: hov ? hoverBg : 'var(--ink-4)',
+        background: hov ? hoverBg : 'var(--rule-3)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'default', flexShrink: 0,
         transition: 'background 0.12s',
@@ -95,7 +95,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
         <span
           className="no-drag"
           style={{
-            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)',
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent-hi)',
             whiteSpace: 'nowrap', animation: 'fadeIn 0.15s ease-out',
           }}
         >
@@ -170,7 +170,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
             position: 'absolute', top: 2, right: 2,
             minWidth: 14, height: 14, padding: '0 3px',
             background: 'var(--accent-soft)', border: '1px solid var(--accent)',
-            borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 8,
+            borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 10,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'var(--accent-hi)', fontWeight: 600,
             boxShadow: 'var(--shadow-xs)', pointerEvents: 'none',

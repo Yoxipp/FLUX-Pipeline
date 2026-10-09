@@ -165,7 +165,7 @@ function BuiltinRow({ preset }: { preset: Preset }) {
           {preset.task} · Houdini · un FLUX Shot et un ROP Karma par shot. Launcher : Houdini, New Scene, {preset.task}.
         </div>
       </div>
-      <span style={{ fontSize: 10, color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 5, padding: '2px 6px' }}>
+      <span style={{ fontSize: 11, color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 5, padding: '2px 6px' }}>
         FLUX
       </span>
     </div>

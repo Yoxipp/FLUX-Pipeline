@@ -198,7 +198,7 @@ function GroupBox({ group, assets, color, selection, onSelect, onAssetClicked, o
     >
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8,
-        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', color: 'var(--ink-2)',
+        fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink-2)',
       }}>
         <span style={{ width: 6, height: 6, borderRadius: 3, background: color }} />
         <span style={{ textTransform: 'uppercase' }}>{group.name}</span>

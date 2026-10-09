@@ -65,7 +65,7 @@ export function Login({ onDone }: Props) {
 
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
             Changer d'utilisateur
           </div>
           <div
@@ -81,7 +81,7 @@ export function Login({ onDone }: Props) {
         {/* liste des utilisateurs existants */}
         {users.length > 0 && (
           <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
               Artistes
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
@@ -106,7 +106,7 @@ export function Login({ onDone }: Props) {
 
                     <span style={{ flex: 1, fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{u}</span>
 
-                    {isActive && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--accent-hi)', textTransform: 'uppercase' }}>✓</span>}
+                    {isActive && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)', textTransform: 'uppercase' }}>✓</span>}
                   </div>
                 )
               })}
@@ -116,7 +116,7 @@ export function Login({ onDone }: Props) {
 
         {/* champ nouvel artiste */}
         <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
             Nouvel artiste
           </div>
           <input
@@ -140,7 +140,7 @@ export function Login({ onDone }: Props) {
 
         {/* erreur */}
         {error && (
-          <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)' }}>{error}</div>
+          <div style={{ fontSize: 11, color: 'var(--err)', fontFamily: 'var(--mono)' }}>{error}</div>
         )}
 
         {/* actions */}

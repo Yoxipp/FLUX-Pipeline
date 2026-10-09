@@ -107,14 +107,14 @@ export function UserSettings({ username }: { username: string }) {
         onClick={openWorkProfile} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWorkProfile() } }}>
         <UserRound size={13} strokeWidth={1.75} />
         <span style={{ flex: 1, fontSize: 11 }}>{workProfile.activeProfile?.name ?? 'Profil'}</span>
-        {workProfile.modified.length > 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--warn)' }}>modifié</span>}
+        {workProfile.modified.length > 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--warn)' }}>modifié</span>}
         <ChevronRight size={12} strokeWidth={1.75} color="var(--ink-4)" />
       </div>
 
       <SecTitle>{t('settings.workspace')}</SecTitle>
       <div className="card" style={{ ...card, flexDirection: 'row', alignItems: 'center' }}>
         <FolderOpen size={13} strokeWidth={1.75} color="var(--ink-4)" />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, fontFamily: 'var(--mono)', color: workspace ? 'var(--ink-2)' : 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace}>{workspace || '-'}</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontFamily: 'var(--mono)', color: workspace ? 'var(--ink-2)' : 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace}>{workspace || '-'}</span>
         <Btn sm ghost disabled={changing} onClick={() => void handleChangeWorkspace()}>
           {changing ? <RefreshCw size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <FolderOpen size={11} />}
           {changing ? t('settings.changing') : t('settings.changeDir')}
@@ -179,7 +179,7 @@ export function UserSettings({ username }: { username: string }) {
       <SecTitle>{t('settings.interface')}</SecTitle>
       <div><Btn sm ghost onClick={handleResetUi}><RotateCcw size={11} /> {t('settings.resetUi')}</Btn></div>
 
-      {version && <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{t('settings.version')} {version}</div>}
+      {version && <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{t('settings.version')} {version}</div>}
     </div>
   )
 }

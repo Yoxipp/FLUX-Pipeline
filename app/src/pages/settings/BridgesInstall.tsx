@@ -51,7 +51,7 @@ export function BridgesInstall() {
       {results && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {results.map(r => (
-            <div key={r.dcc} style={{ display: 'flex', gap: 8, fontSize: 10.5, alignItems: 'baseline' }}>
+            <div key={r.dcc} style={{ display: 'flex', gap: 8, fontSize: 11.5, alignItems: 'baseline' }}>
               <span style={{ width: 80, color: 'var(--ink-2)' }}>{nameOf(r.dcc)}</span>
               <span style={{ width: 70, color: COLOR[r.status] }}>{t(`settings.bridges.${r.status}`)}</span>
               {r.status !== 'skip' && (
@@ -62,7 +62,7 @@ export function BridgesInstall() {
             </div>
           ))}
           {results.some(r => r.status === 'ok') && (
-            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 4 }}>{t('settings.bridges.restart')}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 4 }}>{t('settings.bridges.restart')}</div>
           )}
         </div>
       )}

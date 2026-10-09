@@ -229,7 +229,7 @@ export function TaskDetail({
                 style={{ flex: 1, accentColor: color }}
               />
               <span style={{
-                fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                 minWidth: 34, textAlign: 'right',
               }}>{detail.completion ?? 0}%</span>
             </div>
@@ -244,7 +244,7 @@ export function TaskDetail({
                   </span>
                 ))}
                 {task.known_subtasks.length === 0 && (
-                  <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>—</span>
+                  <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</span>
                 )}
               </div>
               <input
@@ -271,11 +271,11 @@ export function TaskDetail({
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
             }}>
-              <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>Ctrl+Enter</span>
+              <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Ctrl+Enter</span>
               <span style={{ flex: 1 }} />
               <label title={t('prod.commentRetakeHint')} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-                fontSize: 10, color: asRetake ? 'var(--err)' : 'var(--ink-3)', userSelect: 'none',
+                fontSize: 11, color: asRetake ? 'var(--err)' : 'var(--ink-3)', userSelect: 'none',
               }}>
                 <input type="checkbox" checked={asRetake} onChange={e => setAsRetake(e.target.checked)} style={{ margin: 0 }} />
                 {t('prod.commentRetake')}
@@ -299,13 +299,13 @@ export function TaskDetail({
                       display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2,
                     }}>
                       <span style={{
-                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                         color: 'var(--accent-hi)', letterSpacing: '0.04em',
                       }}>{c.author}</span>
-                      <span style={{ fontSize: 8, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
+                      <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
                       {c.kind === 'retake' && (
                         <span style={{
-                          fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em',
+                          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
                           color: 'var(--err)', border: '1px solid color-mix(in oklch, var(--err) 45%, var(--rule-2))',
                           borderRadius: 3, padding: '0 4px',
                         }}>RETAKE</span>
@@ -377,7 +377,7 @@ export function TaskDetail({
             )}
           </div>
           {!latestPublish && (
-            <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</div>
           )}
           {latestPublish && (
             <PublishRow
@@ -438,24 +438,24 @@ function PublishRow({ p, onOpen, onCopy, onExplorer }: {
           position: 'fixed', left: tip.x + 14, top: tip.y + 14, zIndex: 4000,
           maxWidth: 320, padding: '7px 10px', borderRadius: 6, pointerEvents: 'none',
           background: 'var(--paper)', border: '1px solid var(--rule-2)', boxShadow: 'var(--shadow-md)',
-          fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink)', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+          fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink)', lineHeight: 1.45, whiteSpace: 'pre-wrap',
         }}>
           <span style={{
-            display: 'block', marginBottom: 2, fontFamily: 'var(--mono)', fontSize: 8,
+            display: 'block', marginBottom: 2, fontFamily: 'var(--mono)', fontSize: 10,
             color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em',
           }}>Commentaire</span>
           {comment}
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 10, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>
+        <div style={{ fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>
           {p.file}
         </div>
-        <div style={{ fontSize: 8, color: 'var(--ink-4)', marginTop: 1 }}>
+        <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 1 }}>
           {p.user} · {p.date} {p.time}
         </div>
         {comment && (
-          <div style={{ fontSize: 8.5, color: 'var(--ink-2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 10, color: 'var(--ink-2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {comment}
           </div>
         )}
@@ -509,7 +509,7 @@ function PublishListModal({ title, publishes, color, onClose, onOpen, onCopy, on
         }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
-          <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>· {publishes.length}</span>
+          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>· {publishes.length}</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} title="Fermer" style={{
             width: 26, height: 22, borderRadius: 4, border: '1px solid var(--rule-2)',
@@ -726,7 +726,7 @@ function Slot({ label, locked, children }: { label: string; locked?: boolean; ch
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
       <span style={{
-        fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.08em',
+        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em',
         color: locked ? 'var(--ink-4)' : 'var(--ink-3)', textTransform: 'uppercase',
       }}>{label}</span>
       {children}
@@ -737,14 +737,14 @@ function Slot({ label, locked, children }: { label: string; locked?: boolean; ch
 const _slotSelect: React.CSSProperties = {
   background: 'var(--paper)', color: 'var(--ink)',
   border: '1px solid var(--rule-2)', borderRadius: 5,
-  padding: '4px 6px', fontSize: 10, fontFamily: 'var(--mono)',
+  padding: '4px 6px', fontSize: 11, fontFamily: 'var(--mono)',
   letterSpacing: '0.03em', outline: 'none',
   minWidth: 0, width: '100%',
 }
 const _slotLocked: React.CSSProperties = {
   padding: '4px 8px', borderRadius: 5,
   background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
-  color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontSize: 10,
+  color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontSize: 11,
   letterSpacing: '0.04em',
   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
 }
@@ -891,7 +891,7 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
     <>
       <div style={{ ..._lbl, marginTop: 14, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
         <span>Références</span>
-        {uploading && <span style={{ fontSize: 8, color: 'var(--ink-4)', textTransform: 'none' }}>envoi…</span>}
+        {uploading && <span style={{ fontSize: 10, color: 'var(--ink-4)', textTransform: 'none' }}>envoi…</span>}
       </div>
 
       <div
@@ -963,7 +963,7 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
             padding: '5px 8px', border: `1px solid ${shown?.old || lostVersion ? 'var(--warn)' : 'var(--rule-2)'}`, borderTop: 'none',
             borderRadius: listOpen ? 0 : '0 0 8px 8px',
             background: shown?.old || lostVersion ? 'color-mix(in oklch, var(--warn) 10%, var(--paper-2))' : 'var(--paper-2)',
-            fontSize: 10, color: 'var(--ink-2)',
+            fontSize: 11, color: 'var(--ink-2)',
           }}>
             {lostVersion ? (
               <span style={{ color: 'var(--warn)', fontWeight: 600 }}>Version {watched?.version ?? viewing} inaccessible</span>
@@ -1057,11 +1057,11 @@ function VersionList({ project, relPath, versions, current, onPick, onKeyframe, 
               <VersionThumb src={v.available && v.playable ? api.refFileUrl(project, relPath, v.file) : ''} kind={v.kind} />
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700 }}>{v.version}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700 }}>{v.version}</span>
                   {status && <span style={{ ..._chip, color: v.latest && v.available ? 'var(--ok)' : 'var(--warn)' }}>{status}</span>}
                   {isCurrent && <span style={{ ..._chip, color: 'var(--accent-hi)' }}>affichée</span>}
                 </span>
-                <span style={{ fontSize: 9, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 10.5, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {v.logged ? `${v.user || '?'} · ${v.date} ${v.time}` : 'avant le journal (auteur et date inconnus)'}
                   {v.source_name ? ` · ${v.source_name}` : ''}
                 </span>
@@ -1157,15 +1157,15 @@ function FullscreenMedia({ src, kind, onClose }: { src: string; kind: string; on
 
 const _placeholder: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-  color: 'var(--ink-4)', fontSize: 10, padding: 12, textAlign: 'center',
+  color: 'var(--ink-4)', fontSize: 11, padding: 12, textAlign: 'center',
 }
 const _stripBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4, height: 20, padding: '0 7px',
   borderRadius: 4, border: '1px solid var(--rule-2)', background: 'var(--paper)',
-  color: 'var(--ink-2)', fontSize: 9.5, cursor: 'pointer', whiteSpace: 'nowrap',
+  color: 'var(--ink-2)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
 }
 const _chip: React.CSSProperties = {
-  fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
   textTransform: 'uppercase',
 }
 const _dropHint: React.CSSProperties = {
@@ -1186,7 +1186,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 }
 
 const _lbl: React.CSSProperties = {
-  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
+  fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.08em',
   color: 'var(--ink-3)', textTransform: 'uppercase', marginBottom: 4,
 }
 const _textarea: React.CSSProperties = {
@@ -1198,14 +1198,14 @@ const _textarea: React.CSSProperties = {
 const _input: React.CSSProperties = {
   background: 'var(--paper)', color: 'var(--ink)',
   border: '1px solid var(--rule-2)', borderRadius: 5,
-  padding: '4px 8px', fontSize: 10, fontFamily: 'var(--mono)',
+  padding: '4px 8px', fontSize: 11, fontFamily: 'var(--mono)',
   outline: 'none',
 }
 const _tag: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4,
   padding: '2px 7px', borderRadius: 999,
   border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-  color: 'var(--ink-2)', fontSize: 9, fontFamily: 'var(--mono)',
+  color: 'var(--ink-2)', fontSize: 10.5, fontFamily: 'var(--mono)',
   letterSpacing: '0.05em',
 }
 const _headerBtn: React.CSSProperties = {
@@ -1219,7 +1219,7 @@ const _miniIconBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
 }
 const _postBtn: React.CSSProperties = {
-  padding: '4px 12px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+  padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600,
   border: '1px solid var(--accent)', background: 'var(--accent)',
   color: 'var(--paper)', cursor: 'pointer',
 }

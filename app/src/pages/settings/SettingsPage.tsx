@@ -115,7 +115,7 @@ function ProjectTab() {
         <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)' }}>Colonnes, statuts et dépendances du suivi : Production &gt; Settings.</span>
         <Btn sm ghost onClick={() => navigate('/production')}>Production</Btn>
       </div>
-      <div style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Unités USD, OCIO, variables d'env et stockage des versions : onglet Avancé.</div>
+      <div style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>Unités USD, OCIO, variables d'env et stockage des versions : onglet Avancé.</div>
     </div>
   )
 }
@@ -160,7 +160,7 @@ function OtherUsers({ currentUser }: { currentUser: string }) {
             <Btn sm ghost title="Valider" onClick={() => void run(() => api.renameUser(u, value.trim()))}><Check size={11} /></Btn>
             <Btn sm ghost title="Annuler" onClick={() => setRenaming(null)}><X size={11} /></Btn>
           </> : confirm === u ? <>
-            <span style={{ fontSize: 10, color: 'var(--err)' }}>Supprimer {u} et ses données ?</span>
+            <span style={{ fontSize: 11, color: 'var(--err)' }}>Supprimer {u} et ses données ?</span>
             <Btn sm ghost title="Confirmer" onClick={() => void run(() => api.deleteUser(u))} style={{ color: 'var(--err)' }}><Check size={11} /></Btn>
             <Btn sm ghost title="Annuler" onClick={() => setConfirm(null)}><X size={11} /></Btn>
           </> : <>

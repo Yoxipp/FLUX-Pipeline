@@ -95,7 +95,7 @@ const input: CSSProperties = {
   border: '1px solid var(--rule-2)', background: 'var(--paper-2)', color: 'var(--ink)', outline: 'none',
   fontFamily: 'var(--sans)',
 }
-const lbl: CSSProperties = { fontSize: 9.5, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }
+const lbl: CSSProperties = { fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }
 
 // ── FLUX range picker (replaces the native date inputs) ──────────────────────
 // 2026-09-30: press a day and drag to another (30 -> 2), the span turns orange and
@@ -168,7 +168,7 @@ function DateRange({ start, end, onChange, min }: {
             <button type="button" style={{ ...btn(), padding: 3 }} onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}><ChevronRight size={12} /></button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', rowGap: 2 }}>
-            {WEEKDAYS[l].map(d => <div key={d} style={{ fontSize: 8.5, color: 'var(--ink-4)', textAlign: 'center', paddingBottom: 2 }}>{d.slice(0, 2)}</div>)}
+            {WEEKDAYS[l].map(d => <div key={d} style={{ fontSize: 10, color: 'var(--ink-4)', textAlign: 'center', paddingBottom: 2 }}>{d.slice(0, 2)}</div>)}
             {cells.map(d => {
               const day = iso(d)
               const off = !!min && day < min
@@ -190,7 +190,7 @@ function DateRange({ start, end, onChange, min }: {
                        else setDragging(false)   // plain click: wait for the second click
                      }}
                      style={{
-                       fontSize: 10, padding: '4px 0', textAlign: 'center', cursor: off ? 'default' : 'pointer',
+                       fontSize: 11, padding: '4px 0', textAlign: 'center', cursor: off ? 'default' : 'pointer',
                        background: inSpan ? (edge ? 'color-mix(in oklch, var(--accent) 45%, transparent)' : 'var(--accent-soft)') : 'transparent',
                        borderRadius: edge ? 4 : 0,
                        outline: day === today && !inSpan ? '1px solid var(--rule-2)' : undefined, outlineOffset: -1,
@@ -202,7 +202,7 @@ function DateRange({ start, end, onChange, min }: {
               )
             })}
           </div>
-          <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>
             {anchor
               ? tr('Clique ou relâche sur le dernier jour', 'Click or release on the last day')
               : tr('Clique-glisse du premier au dernier jour', 'Click and drag from the first to the last day')}
@@ -258,7 +258,7 @@ function Chip({ it, selected, onClick, full, noteLines = 0 }: { it: CalendarItem
       title={`${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}${late ? tr(' · en retard', ' · late') : ''}`}
       style={{
         display: 'flex', alignItems: full || showNote ? 'flex-start' : 'center', gap: 5, flexShrink: 0,
-        fontSize: 10.5, lineHeight: 1.3, padding: full ? '5px 7px' : '2px 5px', borderRadius: 4, cursor: 'pointer',
+        fontSize: 11.5, lineHeight: 1.3, padding: full ? '5px 7px' : '2px 5px', borderRadius: 4, cursor: 'pointer',
         background: proposed ? 'transparent' : `color-mix(in oklch, ${c} 18%, transparent)`,
         border: proposed ? '1px dashed var(--ink-3)' : '1px solid transparent',
         borderLeft: proposed ? '1px dashed var(--ink-3)' : `3px solid ${c}`,
@@ -273,10 +273,10 @@ function Chip({ it, selected, onClick, full, noteLines = 0 }: { it: CalendarItem
           {it.status === 'done' && <Check size={9} strokeWidth={2.4} style={{ marginRight: 3, verticalAlign: -1 }} />}
           {it.title}
         </div>
-        {full && <div style={{ fontSize: 9.5, color: 'var(--ink-2)' }}>{it.owner}{it.link ? ` · ${it.link}` : ''}</div>}
+        {full && <div style={{ fontSize: 11, color: 'var(--ink-2)' }}>{it.owner}{it.link ? ` · ${it.link}` : ''}</div>}
         {showNote && (
           <div style={{
-            fontSize: 9.5, color: 'var(--ink-2)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: 1,
+            fontSize: 11, color: 'var(--ink-2)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: 1,
             ...(Number.isFinite(noteLines)
               ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: noteLines, overflow: 'hidden' }
               : {}),
@@ -342,7 +342,7 @@ function PublishBand({ pubs }: { pubs: CalendarPublish[] }) {
              background: at ? PUB_COLOR : `color-mix(in oklch, ${PUB_COLOR} 45%, var(--paper-2))`,
              border: `1px solid ${PUB_COLOR}`, boxShadow: 'var(--shadow-sm)',
              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2,
-             fontSize: 9, fontWeight: 600, lineHeight: 1,
+             fontSize: 10.5, fontWeight: 600, lineHeight: 1,
            }}>
         <Upload size={9} strokeWidth={2.2} />
         {pubs.length > 1 && <span>{pubs.length}</span>}
@@ -359,10 +359,10 @@ function PublishBand({ pubs }: { pubs: CalendarPublish[] }) {
              }}>
           {pubs.map(p => (
             <div key={p.id} title={`${p.file}${p.dest_folder ? `\n${p.dest_folder}` : ''}`}
-                 style={{ fontSize: 10, color: 'var(--ink-2)', lineHeight: 1.35, minWidth: 0,
+                 style={{ fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.35, minWidth: 0,
                           borderLeft: `2px solid ${PUB_COLOR}`, paddingLeft: 6 }}>
               <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>{p.time}</span> · {p.user}
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', overflowWrap: 'anywhere' }}>{p.file}</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', overflowWrap: 'anywhere' }}>{p.file}</div>
             </div>
           ))}
         </div>
@@ -374,7 +374,7 @@ function PublishBand({ pubs }: { pubs: CalendarPublish[] }) {
 function Legend() {
   const { l } = useTr()
   const row = (key: CalendarStatus) => (
-    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--ink-2)' }}>
+    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink-2)' }}>
       <span style={{
         width: 14, height: 9, borderRadius: 2, flexShrink: 0,
         background: key === 'proposed' ? 'transparent' : `color-mix(in oklch, ${STATE_COLOR[key]} 18%, transparent)`,
@@ -417,7 +417,7 @@ function LinkPicker({ project, value, onChange }: { project: string; value: stri
     <button key={k} type="button" style={{ ...btn(slots.kind === k && !legacy), flex: 1, justifyContent: 'center', padding: '3px 6px' }}
             onClick={() => set({ ...EMPTY_SLOTS, kind: k })}>{label}</button>
   )
-  if (!loaded) return <div style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{tr('Chargement des tokens…', 'Loading tokens…')}</div>
+  if (!loaded) return <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{tr('Chargement des tokens…', 'Loading tokens…')}</div>
   const preview = legacy || composeLink(production, slots)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -448,7 +448,7 @@ function LinkPicker({ project, value, onChange }: { project: string; value: stri
             const on = slots.task === t && !legacy
             return (
               <button key={t} type="button" onClick={() => set({ task: on ? '' : t })}
-                      style={{ fontSize: 9.5, fontFamily: 'var(--mono)', padding: '1px 6px', borderRadius: 10, cursor: 'pointer',
+                      style={{ fontSize: 11, fontFamily: 'var(--mono)', padding: '1px 6px', borderRadius: 10, cursor: 'pointer',
                                border: `1px solid ${on ? 'var(--accent)' : 'var(--rule-2)'}`,
                                background: on ? 'color-mix(in oklch, var(--accent) 22%, var(--paper))' : 'var(--paper)',
                                color: on ? 'var(--ink)' : 'var(--ink-2)' }}>{t}</button>
@@ -456,12 +456,12 @@ function LinkPicker({ project, value, onChange }: { project: string; value: stri
           })}
         </div>
       )}
-      {slots.kind === 'shot' && !sequences.length && <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>{tr('Aucune séquence dans la Production.', 'No sequence in Production.')}</div>}
-      {slots.kind === 'asset' && !assets.length && <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>{tr('Aucun asset dans la Production.', 'No asset in Production.')}</div>}
+      {slots.kind === 'shot' && !sequences.length && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{tr('Aucune séquence dans la Production.', 'No sequence in Production.')}</div>}
+      {slots.kind === 'asset' && !assets.length && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{tr('Aucun asset dans la Production.', 'No asset in Production.')}</div>}
       {preview && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>
           <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{preview}</span>
-          {legacy && <span style={{ fontFamily: 'inherit', fontSize: 9.5, color: 'var(--ink-3)' }}>{tr('(lien libre)', '(free link)')}</span>}
+          {legacy && <span style={{ fontFamily: 'inherit', fontSize: 11, color: 'var(--ink-3)' }}>{tr('(lien libre)', '(free link)')}</span>}
           <button type="button" style={{ ...btn(), padding: 2 }} title={tr('Retirer le lien', 'Remove the link')}
                   onClick={() => set({ ...EMPTY_SLOTS })}><X size={10} /></button>
         </div>
@@ -509,7 +509,7 @@ function CreateForm({ project, me, users, range, initialLink = '', onDone, onCan
         <select style={input} value={owner} onChange={e => setOwner(e.target.value)}>
           {[me, ...users.filter(u => !same(u, me))].map(u => <option key={u} value={u}>{same(u, me) ? `${u} (${tr('moi', 'me')})` : u}</option>)}
         </select>
-        {forOther && <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 4 }}>
+        {forOther && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
           {tr(`${owner} sera notifié et pourra accepter, décaler ou refuser.`, `${owner} is notified and can accept, postpone or decline.`)}</div>}
       </div>
       <DateRange start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e) }} />
@@ -559,13 +559,13 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{it.title}</div>
-          <div style={{ fontSize: 10.5, color: 'var(--ink-2)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--ink-2)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
             {it.owner} · {span(it, l)}
           </div>
         </div>
         <button style={{ ...btn(), padding: 3 }} onClick={onClose}><X size={12} /></button>
       </div>
-      <div style={{ fontSize: 10.5, color: isLate(it) ? 'var(--err)' : 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ fontSize: 11.5, color: isLate(it) ? 'var(--err)' : 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 8, height: 8, borderRadius: 2, background: STATE_COLOR[it.status], display: 'inline-block' }} />
         {STATUS_LABEL[l][it.status]}{isLate(it) ? tr(' · en retard', ' · late') : ''}
         {!same(it.created_by, it.owner) && ` · ${tr('proposée par', 'proposed by')} ${it.created_by}`}
@@ -607,7 +607,7 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
               <button key={s} disabled={busy || s === it.status}
                       onClick={() => { void run(() => api.updateCalendarItem(project, it.id, { status: s }), STATUS_LABEL[l][s]) }}
                       style={{
-                        ...btn(), flex: 1, padding: '5px 4px', fontSize: 10.5,
+                        ...btn(), flex: 1, padding: '5px 4px', fontSize: 11.5,
                         border: `1px solid ${s === it.status ? STATE_COLOR[s] : 'var(--rule-2)'}`,
                         background: s === it.status ? `color-mix(in oklch, ${STATE_COLOR[s]} 18%, transparent)` : 'var(--paper-2)',
                         cursor: s === it.status ? 'default' : 'pointer',
@@ -642,7 +642,7 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
         <div>
           <div style={lbl}>{tr('Historique', 'History')}</div>
           {[...it.history].reverse().map((h, i) => (
-            <div key={i} style={{ fontSize: 10, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+            <div key={i} style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.6 }}>
               {h.at.slice(0, 10)} · {h.by} {ACTION_LABEL[l][h.action] ?? h.action}
               {h.start ? ` (${h.start === (h.end ?? h.start) ? shortDate(h.start, l) : `${shortDate(h.start, l)} ${l === 'en' ? 'to' : 'au'} ${shortDate(h.end ?? h.start, l)}`})` : ''}
             </div>
@@ -863,7 +863,7 @@ export function Calendar() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} title={tr('Zoom (Ctrl + molette)', 'Zoom (Ctrl + wheel)')}>
             <button style={{ ...btn(), padding: 4 }} disabled={zoom <= ZOOM_MIN} onClick={() => setZoom(z => z - ZOOM_STEP)}
                     aria-label={tr('Dézoomer', 'Zoom out')}><ZoomOut size={12} /></button>
-            <button style={{ ...btn(), padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 10, minWidth: 42 }}
+            <button style={{ ...btn(), padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 11, minWidth: 42 }}
                     onClick={() => setZoom(() => 1)} title={tr('Revenir à 100 %', 'Back to 100 %')}>{Math.round(zoom * 100)}%</button>
             <button style={{ ...btn(), padding: 4 }} disabled={zoom >= ZOOM_MAX} onClick={() => setZoom(z => z + ZOOM_STEP)}
                     aria-label={tr('Zoomer', 'Zoom in')}><ZoomIn size={12} /></button>
@@ -914,7 +914,7 @@ export function Calendar() {
                    }}>
                 {lineTop && <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
                 {lineLeft && <span style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
-                <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500, paddingRight: dayPubs.length ? 30 : 0,
+                <div style={{ fontSize: 11.5, fontWeight: day === today ? 700 : 500, paddingRight: dayPubs.length ? 30 : 0,
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0,
                               color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
@@ -930,7 +930,7 @@ export function Calendar() {
                   <Chip key={it.id} it={it} full={view === 'week'} noteLines={noteLines} selected={it.id === picked}
                         onClick={() => { setCreating(null); setPicked(it.id) }} />
                 ))}
-                {list.length > max && <div style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>+{list.length - max} {tr('(vue semaine)', '(week view)')}</div>}
+                {list.length > max && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>+{list.length - max} {tr('(vue semaine)', '(week view)')}</div>}
               </div>
             )
           })}
@@ -952,11 +952,11 @@ export function Calendar() {
         <div>
           <div style={lbl}>{tr('À valider', 'To answer')} ({toAnswer.length})</div>
           {toAnswer.length === 0
-            ? <div style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>{tr('Aucune proposition pour toi.', 'No proposal for you.')}</div>
+            ? <div style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>{tr('Aucune proposition pour toi.', 'No proposal for you.')}</div>
             : toAnswer.map(it => (
               <div key={it.id} style={{ marginBottom: 4 }}>
                 <Chip it={it} full selected={it.id === picked} onClick={() => { setCreating(null); setPicked(it.id) }} />
-                <div style={{ fontSize: 9.5, color: 'var(--ink-3)', margin: '2px 0 0 4px' }}>{span(it, l)} · {tr('de', 'from')} {it.created_by}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', margin: '2px 0 0 4px' }}>{span(it, l)} · {tr('de', 'from')} {it.created_by}</div>
               </div>
             ))}
         </div>

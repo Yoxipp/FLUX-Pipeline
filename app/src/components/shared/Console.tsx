@@ -156,7 +156,7 @@ export function Console() {
             position: 'absolute', top: 2, right: 2,
             minWidth: 14, height: 14, padding: '0 3px',
             background: 'rgba(229,72,77,0.18)', border: '1px solid #e5484d',
-            borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 8,
+            borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 10,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#ff8a86', fontWeight: 600, pointerEvents: 'none',
           }}>{errorCount > 99 ? '99+' : errorCount}</div>
@@ -186,7 +186,7 @@ export function Console() {
             }}>
               <Terminal size={13} strokeWidth={1.75} color="var(--accent-hi)" />
               <span style={{
-                fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.11em',
+                fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.11em',
                 textTransform: 'uppercase', color: 'var(--ink-2)',
               }}>Console</span>
 
@@ -199,7 +199,7 @@ export function Console() {
                     key={f.key}
                     onClick={() => setFilter(f.key)}
                     style={{
-                      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.05em',
+                      fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.05em',
                       padding: '3px 7px', borderRadius: 5, cursor: 'pointer',
                       color: active ? 'var(--ink)' : 'var(--ink-4)',
                       background: active ? 'var(--paper-2)' : 'transparent',
@@ -227,7 +227,7 @@ export function Console() {
               onScroll={onScroll}
               style={{
                 flex: 1, overflowY: 'auto', padding: '8px 0',
-                fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5,
+                fontFamily: 'var(--code)', fontSize: 11, lineHeight: 1.5,
                 userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text',
               }}
             >

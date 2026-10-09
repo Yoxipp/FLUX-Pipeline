@@ -193,7 +193,7 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
                     title={i.target ? `${i.path} -> ${i.target}` : i.path}>
                     {i.path}/{i.target && i.action === 'move' ? <span style={{ color: 'var(--accent-hi)' }}>{'  →  '}{i.target}/</span> : null}
                   </div>
-                  <div style={{ color: i.safe ? 'var(--ink-3)' : 'var(--warn)', fontSize: 10 }}>
+                  <div style={{ color: i.safe ? 'var(--ink-3)' : 'var(--warn)', fontSize: 11 }}>
                     {i.reason}{i.warning ? ` · ${i.warning}` : ''}
                     {i.names.length > 0 && <span style={{ fontFamily: 'var(--mono)' }}>{' · '}{i.names.join(', ')}{i.files > i.names.length ? '…' : ''}</span>}
                   </div>
@@ -205,7 +205,7 @@ export function CleanupPanel({ activeProject }: { activeProject: string | null }
             )
           })}
           {scan.unknown.length > 0 && (
-            <div style={{ padding: '6px 10px', fontSize: 10, color: 'var(--ink-3)' }}>
+            <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--ink-3)' }}>
               <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setShowUnknown(v => !v)}>
                 {showUnknown ? 'Masquer' : 'Voir'} les fichiers non FLUX (fichiers de travail, jamais déplacés)
               </span>
