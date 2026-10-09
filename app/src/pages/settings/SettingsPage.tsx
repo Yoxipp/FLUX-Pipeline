@@ -4,7 +4,8 @@
 //   Avance  : risky settings behind "Understand" (N8): project technique + publish
 //             switches, Disque, Editeur de Template (moved from the Pipeline sidebar),
 //             other pipe users, uninstall.
-// Deep links: ?tab=user|project|advanced&sub=settings|disk|templates. The old routes
+//   Doc     : the FLUX manual (FLUX_DOC, ADR 0049), embedded.
+// Deep links: ?tab=user|project|advanced|doc&sub=settings|disk|templates. The old routes
 // /advanced, /disk and /templates redirect here (App.tsx).
 
 import { useEffect, useState } from 'react'
@@ -22,15 +23,17 @@ import { useProject } from '../../ProjectContext'
 import { AdvancedSettings } from '../AdvancedSettings'
 import { DiskUsage } from '../DiskUsage'
 import { TemplateEditor } from '../TemplateEditor'
+import { DocTab } from './DocTab'
 import { AdvancedConfirm, UninstallConfirm } from './SettingsDialogs'
 import { UserSettings } from './UserSettings'
 
-type Tab = 'user' | 'project' | 'advanced'
+type Tab = 'user' | 'project' | 'advanced' | 'doc'
 type Sub = 'settings' | 'disk' | 'templates'
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'user',     label: 'User',   hint: 'Toi et ce poste' },
   { key: 'project',  label: 'Projet', hint: 'Le projet actif, pour tous ses artistes' },
   { key: 'advanced', label: 'Avancé', hint: 'Réglages à risque (confirmation)' },
+  { key: 'doc',      label: 'Doc',    hint: 'Manuel de FLUX' },
 ]
 const SUBS: { key: Sub; label: string }[] = [
   { key: 'settings', label: 'Réglages' }, { key: 'disk', label: 'Disque' }, { key: 'templates', label: 'Editeur de Template' },
@@ -61,7 +64,9 @@ export function SettingsPage() {
         </>}
       </div>
 
-      {tab === 'advanced' && unlocked && sub !== 'settings' ? (
+      {tab === 'doc' ? (
+        <DocTab />
+      ) : tab === 'advanced' && unlocked && sub !== 'settings' ? (
         // Disk and Template Editor keep their own full-page layout.
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {sub === 'disk' ? <DiskUsage /> : <TemplateEditor />}

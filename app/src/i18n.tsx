@@ -60,7 +60,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'settings.bridges.error':   { fr: 'erreur',                   en: 'error' },
   'settings.bridges.summary': { fr: '{ok} installé(s), {skip} ignoré(s), {error} erreur(s)', en: '{ok} installed, {skip} skipped, {error} error(s)' },
   'settings.bridges.restart': { fr: 'Relance les logiciels ouverts pour charger le bridge.', en: 'Restart open software to load the bridge.' },
-  'settings.tab.doc':         { fr: 'Doc',                      en: 'Doc' },
   'settings.doc.hint':        { fr: 'Manuel de FLUX',           en: 'FLUX manual' },
   'settings.doc.open':        { fr: 'Ouvrir dans le navigateur', en: 'Open in the browser' },
   'settings.doc.folder':      { fr: 'Dossier FLUX_DOC',         en: 'FLUX_DOC folder' },

@@ -72,7 +72,8 @@ async def lifespan(app: FastAPI):
             log.info("[FLUX] Advanced switches applied: %s", applied)
     except Exception as exc:  # never block startup on a prefs hiccup
         log.warning("[FLUX] Advanced switches skipped: %s", exc)
-    # The manual ships with each FLUX version into FLUX_UPDATE (next to the installers).
+    # The manual ships with each FLUX version into FLUX_DOC (ADR 0049); the old copy in
+    # FLUX_UPDATE (next to the installers) is removed.
     try:
         from features.system.manual import ensure_manual_in_flux_root
         ensure_manual_in_flux_root()

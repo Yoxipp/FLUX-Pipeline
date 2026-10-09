@@ -43,7 +43,7 @@ _AUTOSTART_MODULES: dict[str, tuple[str, str]] = {
 KEPT = [
     "Python et ses paquets (FLUX n'installe pas Python, rien n'y est retire)",
     "Les logiciels eux-memes (Maya, Houdini, Nuke, ZBrush, Substance, Mari, Marvelous...)",
-    "Les projets et le dossier FLUX (DOSSIER_PROJETS, USER, CONFIG)",
+    "Les projets et le dossier FLUX (DOSSIER_PROJETS, USER, CONFIG, FLUX_UPDATE, FLUX_DOC avec le manuel)",
     "Ton propre contenu dans userSetup.py, 123.py, init.py... (seul le bloc FLUX est retire)",
     "Un preset Painter FLUX que tu as modifie",
 ]
