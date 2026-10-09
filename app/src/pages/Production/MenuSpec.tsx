@@ -27,6 +27,7 @@ import type { UsdAssetInfo } from '../../api/client'
 import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
+import { assetUsdVersions } from './MenuEdit'
 import type {
   ProductionAsset as Asset, ProductionPublish, ProductionSequence,
   ProductionShot, ProductionState, ProductionTask, ProductionTaskDetail,
@@ -725,6 +726,31 @@ function AssetsLanding({ state, entity, entityKind, seqOfShot, onOpenAsset }: {
     return m
   }, [own, inherited, state.assets])
 
+  // Pinned USD version per asset id (ADR 0048): the shot's pin wins over the sequence's.
+  const { t } = useI18n()
+  const { project } = useProject()
+  const pins = useMemo(() => {
+    const out = new Map<string, string>()
+    const seqLinks = entityKind === 'shot' && (entity as ProductionShot).inherit_assets ? (seqOfShot?.assets ?? []) : []
+    for (const l of seqLinks) if (l.version) out.set(l.id, l.version)
+    for (const l of own) if (l.version) out.set(l.id, l.version)
+    return out
+  }, [entityKind, entity, seqOfShot, own])
+  // Newest published version of each pinned asset, to signal a newer one.
+  const [newest, setNewest] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!project) return
+    let alive = true
+    for (const id of pins.keys()) {
+      const a = state.assets.find(x => x.id === id)
+      if (!a) continue
+      assetUsdVersions(project, a.name).then(vs => {
+        if (alive && vs.length) setNewest(prev => ({ ...prev, [id]: vs[vs.length - 1] }))
+      })
+    }
+    return () => { alive = false }
+  }, [project, pins, state.assets])
+
   const total = own.length + inherited.length
   if (total === 0) {
     return (
@@ -779,6 +805,23 @@ function AssetsLanding({ state, entity, entityKind, seqOfShot, onOpenAsset }: {
                       background: 'rgba(0,0,0,0.25)', letterSpacing: '0.05em',
                     }}>hérité</span>
                   )}
+                  {(() => {
+                    const pin = pins.get(asset.id)
+                    const last = newest[asset.id]
+                    const newer = !!(pin && last && parseInt(last.slice(1), 10) > parseInt(pin.slice(1), 10))
+                    return (
+                      <span title={pin ? (newer ? t('prod.versionNewer').replace('{v}', last) : t('prod.versionPinned').replace('{v}', pin))
+                                       : t('prod.versionLast')}
+                            style={{
+                              fontSize: 8, padding: '1px 5px', borderRadius: 3, letterSpacing: '0.05em',
+                              background: pin ? 'var(--paper)' : 'rgba(0,0,0,0.25)',
+                              color: pin ? 'var(--ink)' : 'var(--paper)',
+                            }}>
+                        {pin ? t('prod.versionPinned').replace('{v}', pin) : 'LAST'}
+                        {newer && <span style={{ marginLeft: 4, fontWeight: 700 }}>↑ {last}</span>}
+                      </span>
+                    )
+                  })()}
                 </button>
               ))}
             </div>

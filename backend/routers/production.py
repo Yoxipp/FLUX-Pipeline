@@ -211,7 +211,8 @@ async def get_production(project: str) -> dict:
 
 
 def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
-    """(SEQ, SHOT) -> what the shot stage reads from Production (casting + frame range)."""
+    """(SEQ, SHOT) -> what the shot stage reads from Production (casting with its pinned
+    versions, ADR 0048, + frame range)."""
     from features.usd_assembler.shot_stage import read_casting, read_frame_range
 
     seqs = {s.get("id"): s.get("name") for s in production.get("sequences", [])}
@@ -219,7 +220,8 @@ def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
     for sh in production.get("shots", []):
         seq = seqs.get(sh.get("seq_id"))
         if seq and sh.get("name"):
-            cast = sorted((c["name"], c["count"]) for c in read_casting(production, seq, sh["name"]))
+            cast = sorted((c["name"], c["count"], c.get("version") or "")
+                          for c in read_casting(production, seq, sh["name"]))
             out[(seq, sh["name"])] = (tuple(cast), read_frame_range(production, seq, sh["name"]))
     return out
 

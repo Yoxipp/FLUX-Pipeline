@@ -344,6 +344,8 @@ export interface CastingLink {
   ref: string
   count?: number
   origin?: 'user' | 'auto'
+  // ADR 0048: pinned USD version of the asset ("v003"); absent or "" = follows LAST.
+  version?: string
 }
 
 export interface ProductionShot {

@@ -295,5 +295,87 @@ class ShotStage(unittest.TestCase):
             publish_shot_light(src, self.project, "SEQ001", "SHOT010")
 
 
+_LINK = {"id": "asset_dingo", "ref": "CHAR/DINGO"}
+
+
+class CastingVersionPin(unittest.TestCase):
+    """ADR 0048: a casting link may pin the asset's USD to a vNNN."""
+
+    setUp = ShotStage.setUp
+    _write = ShotStage._write
+
+    def _casting_ref(self, res: dict, prim: str = "/assets/CHAR/DINGO_01") -> str:
+        layer = Sdf.Layer.FindOrOpen(str(res["entry"].parent / "SEQ001_SHOT010_casting.usda"))
+        return layer.GetPrimAtPath(prim).referenceList.prependedItems[0].assetPath
+
+    def test_setup_has_three_component_versions(self) -> None:
+        self.assertEqual(ss.asset_versions(self.project, "DINGO"), ["v001", "v002", "v003"])
+
+    def test_old_links_without_the_field_follow_last(self) -> None:
+        res = self._write(_production([dict(_LINK)]))
+        self.assertIn("DINGO_LAST.usda", self._casting_ref(res))
+        self.assertEqual(ss.read_casting(_production([dict(_LINK)]), "SEQ001", "SHOT010")[0]["version"], "")
+
+    def test_a_sequence_pin_reaches_every_instance(self) -> None:
+        res = self._write(_production([{**_LINK, "count": 2, "version": "v003"}]))
+        for n in ("01", "02"):
+            ref = self._casting_ref(res, f"/assets/CHAR/DINGO_{n}")
+            self.assertTrue(ref.endswith("DINGO_v003/DINGO.usda"), ref)
+            self.assertFalse(os.path.isabs(ref))
+            self.assertNotIn("\\", ref)
+        stage = Usd.Stage.Open(str(res["last"]))
+        prim = stage.GetPrimAtPath("/assets/CHAR/DINGO_02")
+        self.assertTrue(prim.IsA(UsdSkel.Root))
+        self.assertTrue(Usd.ModelAPI(prim).IsModel())
+        self.assertEqual(prim.GetCustomDataByKey("flux:pinned_version"), "v003")
+
+    def test_the_shot_pin_wins_over_the_sequence_pin(self) -> None:
+        prod = _production([{**_LINK, "version": "v001"}], [{**_LINK, "version": "v002"}])
+        self.assertEqual(ss.read_casting(prod, "SEQ001", "SHOT010")[0]["version"], "v002")
+        self.assertIn("DINGO_v002/", self._casting_ref(self._write(prod)))
+        # A shot link without pin (auto-cast) keeps the sequence's.
+        prod = _production([{**_LINK, "version": "v001"}], [{**_LINK, "count": 2, "origin": "auto"}])
+        self.assertEqual(ss.read_casting(prod, "SEQ001", "SHOT010")[0]["version"], "v001")
+
+    def test_a_missing_pin_falls_back_on_last_with_a_warning(self) -> None:
+        res = self._write(_production([{**_LINK, "version": "v009"}]))
+        self.assertIn("DINGO_LAST.usda", self._casting_ref(res))
+        self.assertTrue(any("v009" in w and "LAST" in w for w in res["warnings"]), res["warnings"])
+
+    def test_changing_the_pin_writes_a_new_stage_version(self) -> None:
+        prod = _production([{**_LINK, "version": "v001"}])
+        self.assertEqual(self._write(prod)["version"], "v001")
+        self.assertIsNone(self._write(prod)["version"])            # nothing changed
+        prod["sequences"][0]["assets"][0]["version"] = "v002"
+        self.assertEqual(self._write(prod)["version"], "v002")
+        prod["sequences"][0]["assets"][0]["version"] = ""           # back to LAST
+        self.assertEqual(self._write(prod)["version"], "v003")
+
+    def test_a_new_asset_publish_does_not_move_a_pinned_actor(self) -> None:
+        prod = _production([{**_LINK, "version": "v001"}])
+        self.assertEqual(self._write(prod)["version"], "v001")
+        publish_light_asset(_rig(), self.project, fmt="usda",           # a new GEO publish
+                            dest_dir=self.project / _REL / "model" / "null",
+                            base_name="CHAR_GEO_DINGO_null", user="adam")
+        add_proposed(self.project, "DINGO")                        # component v004, LAST moves
+        self.assertEqual(ss.asset_versions(self.project, "DINGO")[-1], "v004")
+        self.assertIsNone(self._write(prod)["version"])
+        summary = ss.shot_summary(self.project, "SEQ001", "SHOT010", prod)
+        self.assertEqual((summary["casting"][0]["version"], summary["casting"][0]["latest_version"]),
+                         ("v001", "v004"))
+
+    def test_frozen_stage_keeps_the_pin(self) -> None:
+        res = self._write(_production([{**_LINK, "version": "v001"}]), frozen=True)
+        self.assertIn("DINGO_v001/DINGO.usda", self._casting_ref(res))
+
+    def test_production_edit_of_a_pin_alone_changes_the_shot_keys(self) -> None:
+        from routers.production import _shot_keys
+
+        before = _production([dict(_LINK)])
+        after = _production([{**_LINK, "version": "v001"}])
+        self.assertNotEqual(_shot_keys(before), _shot_keys(after))
+        self.assertEqual(_shot_keys(after), _shot_keys(_production([{**_LINK, "version": "v001"}])))
+
+
 if __name__ == "__main__":
     unittest.main()

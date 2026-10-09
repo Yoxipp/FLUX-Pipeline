@@ -76,7 +76,14 @@ export function effectiveCasting(state: ProductionState, shot: ProductionShot): 
   const own = shot.assets ?? []
   const ids = new Set(own.map(l => l.id))
   const seq = state.sequences.find(s => s.id === shot.seq_id)
-  return [...own, ...(shot.inherit_assets ? (seq?.assets ?? []).filter(l => !ids.has(l.id)) : [])]
+  const inherited = shot.inherit_assets ? (seq?.assets ?? []) : []
+  // Pinned version (ADR 0048): the shot's pin wins, a shot link without pin keeps the sequence's.
+  const withPin = own.map(l => {
+    if (l.version) return l
+    const pin = inherited.find(s => s.id === l.id)?.version
+    return pin ? { ...l, version: pin } : l
+  })
+  return [...withPin, ...inherited.filter(l => !ids.has(l.id))]
 }
 
 export function detailStatus(detail?: ProductionTaskDetail): string {

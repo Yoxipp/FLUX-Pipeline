@@ -981,6 +981,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
         setState={setState}
         entityKind="seq"
         entity={seq}
+        project={project}
       />
       </fieldset>
 
@@ -1181,7 +1182,7 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
         </label>
       </div>
 
-      <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot}
+      <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot} project={project}
                     title={shot.inherit_assets ? 'Casting du shot (en plus de la sequence)' : undefined} />
 
       {!shot.inherit_tasks && (
@@ -1215,7 +1216,8 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
 }
 
 // ── assets picker (button + modal box) ──────────────────────────────────────
-function AssetsPicker({ state, setState, entityKind, entity, title }: {
+function AssetsPicker({ state, setState, entityKind, entity, title, project }: {
+  project:    string
   state:      ProductionState
   setState:   (patch: (prev: ProductionState) => ProductionState) => void
   entityKind: 'seq' | 'shot'
@@ -1238,6 +1240,12 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
   // Number of instances in the shot stage (ADR 0020): DINGO_01, DINGO_02...
   const setCount = (id: string, delta: number) => editLinks(arr => arr.map(x => x.id === id
     ? { ...x, count: Math.max(1, (x.count ?? 1) + delta) } : x))
+  // Pinned USD version (ADR 0048): "" = follows LAST, the key is dropped.
+  const setVersion = (id: string, version: string) => editLinks(arr => arr.map(x => {
+    if (x.id !== id) return x
+    const { version: _old, ...rest } = x
+    return version ? { ...rest, version } : rest
+  }))
 
   return (
     <div style={_pad}>
@@ -1273,6 +1281,8 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
                       style={{ cursor: 'pointer', opacity: 0.75, padding: '0 2px' }}>-</span>
                 <span title="Une instance de plus" onClick={() => setCount(l.id, 1)}
                       style={{ cursor: 'pointer', opacity: 0.75, padding: '0 2px' }}>+</span>
+                {a && <VersionPin project={project} name={a.name} value={l.version ?? ''}
+                                  onChange={v => setVersion(l.id, v)} />}
                 <span title="Retirer" onClick={() => removeChip(l.id)}
                       style={{ cursor: 'pointer', opacity: 0.75 }}>×</span>
               </span>
@@ -1291,6 +1301,50 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
         />
       )}
     </div>
+  )
+}
+
+// Published USD versions of an asset, cached for the session (one GET per asset).
+const _versionsCache = new Map<string, Promise<string[]>>()
+export function assetUsdVersions(project: string, name: string): Promise<string[]> {
+  const key = `${project}/${name}`
+  let hit = _versionsCache.get(key)
+  if (!hit) {
+    hit = api.getUsdAsset(project, name)
+      .then(info => info.component?.versions ?? info.assembly?.versions ?? [])
+      .catch(() => [])
+    _versionsCache.set(key, hit)
+  }
+  return hit
+}
+
+// Version selector of a casting link (ADR 0048): LAST or one published vNNN.
+function VersionPin({ project, name, value, onChange }: {
+  project: string; name: string; value: string; onChange: (v: string) => void
+}) {
+  const { t } = useI18n()
+  const [versions, setVersions] = useState<string[] | null>(null)
+  const load = () => {
+    if (versions === null) {
+      _versionsCache.delete(`${project}/${name}`)     // fresh list when the menu opens
+      assetUsdVersions(project, name).then(setVersions)
+    }
+  }
+  const options = [...new Set([...(versions ?? []), ...(value ? [value] : [])])].reverse()
+  return (
+    <select value={value} onMouseDown={load} onFocus={load}
+            onChange={e => onChange(e.target.value)}
+            title={value ? t('prod.versionPinned').replace('{v}', value) : t('prod.versionLast')}
+            onClick={e => e.stopPropagation()}
+            style={{
+              fontSize: 9, fontWeight: 600, fontFamily: 'var(--sans)', cursor: 'pointer',
+              border: 'none', borderRadius: 999, padding: '0 4px',
+              background: value ? 'var(--paper)' : 'transparent',
+              color: value ? 'var(--ink)' : 'var(--paper)',
+            }}>
+      <option value="">LAST</option>
+      {options.map(v => <option key={v} value={v}>{t('prod.versionPinned').replace('{v}', v)}</option>)}
+    </select>
   )
 }
 
