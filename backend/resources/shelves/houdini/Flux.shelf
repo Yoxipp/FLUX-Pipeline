@@ -183,6 +183,41 @@ if pane is not None and pane.pwd() != parent:
     pane.setPwd(parent)
 ]]></script>
   </tool>
+  <tool name="flux_tool_work" label="FLUX Work" icon="opdef:/Sop/flux_work?IconSVG">
+    <helpText><![CDATA[Versioned work of a shot / sequence task (CFX, FX...): Charger, Sauver, never overwritten (ADR 0051). SOP, in a geo network.]]></helpText>
+    <script scriptType="python"><![CDATA[
+import hou
+
+TYPE_NAME = "flux_work"
+pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+here = pane.pwd() if pane else None
+cats = [c for c in (hou.lopNodeTypeCategory(), hou.sopNodeTypeCategory(), hou.objNodeTypeCategory())
+        if hou.nodeType(c, TYPE_NAME) is not None]
+if not cats:
+    hou.ui.displayMessage(
+        "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
+        severity=hou.severityType.Error)
+    raise hou.InterruptedError()
+# Placed where the network editor is: /stage (LOP), a geo network (SOP), /obj (OBJ).
+# A context without this node: /obj gets a geo holding the SOP one, else /stage.
+if here is not None and here.childTypeCategory() in cats:
+    parent = here
+elif (here is not None and here.childTypeCategory() == hou.objNodeTypeCategory()
+      and hou.sopNodeTypeCategory() in cats):
+    parent = here.createNode("geo", TYPE_NAME + "_geo")
+elif hou.lopNodeTypeCategory() in cats:
+    parent = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+elif hou.sopNodeTypeCategory() in cats:
+    parent = hou.node("/obj").createNode("geo", TYPE_NAME + "_geo")
+else:
+    parent = hou.node("/obj")
+node = parent.createNode(TYPE_NAME)
+node.moveToGoodPosition()
+node.setSelected(True, clear_all_selected=True)
+if pane is not None and pane.pwd() != parent:
+    pane.setPwd(parent)
+]]></script>
+  </tool>
 
   <tool name="flux_tool_lighting" label="FLUX Lighting" icon="opdef:/Lop/flux_lighting?IconSVG">
     <helpText><![CDATA[Sequence / shot light rig (ADR 0021).]]></helpText>
@@ -226,6 +261,7 @@ if pane is not None and pane.pwd() != parent:
     <memberTool name="flux_tool_anim"/>
     <memberTool name="flux_tool_shot"/>
     <memberTool name="flux_tool_crowd"/>
+    <memberTool name="flux_tool_work"/>
     <memberTool name="flux_tool_lighting"/>
   </toolshelf>
 </shelfDocument>
