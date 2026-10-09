@@ -263,8 +263,10 @@ for _n, _l in (("project", "Projet"), ("seq", "Sequence"), ("shot", "Shot"), ("c
     _t = hou.StringParmTemplate(_n, _l, 1, default_value=("",))
     _t.setConditional(hou.parmCondType.DisableWhen, '{{ shot_node != "" }}')
     _ptg.append(_t)
-_rng = hou.IntParmTemplate("frame_range", "Plage", 2, default_value=(1, 0))
-_rng.setConditional(hou.parmCondType.DisableWhen, '{{ shot_node != "" }}')
+# Follows the FLUX Shot Import by expression; typing a value overrides it for this shot
+# (render Work: the range goes to the Production Timeline at Save, 2026-10-10).
+_rng = hou.IntParmTemplate("frame_range", "Plage", 2, default_value=(1, 0),
+                           help="Shot range. Edit it to change the shot length: the FLUX Work Save sends it to the Timeline")
 _ptg.append(_rng)
 _ptg.append(hou.SeparatorParmTemplate("sep_render"))
 _ptg.append(hou.StringParmTemplate("render_picture", "Images du shot", 1, default_value=({RENDER_PICTURE!r},),

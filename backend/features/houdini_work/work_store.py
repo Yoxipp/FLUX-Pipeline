@@ -203,7 +203,7 @@ def reserve_version(folder: str | Path, *, author: str, host: str = "", based_on
 
 def commit_version(folder: str | Path, version: str, *, hash: str = "", size: int = 0,
                    node_types: list | None = None, external_deps: list | None = None,
-                   embedded_hdas: list | None = None) -> dict:
+                   embedded_hdas: list | None = None, render_blocks: list | None = None) -> dict:
     """Mark a reservation ``ok`` once Houdini has renamed the cpio in place. The hash is
     recomputed from the file: a mismatch with the one Houdini sent is refused."""
     from dcc.houdini.hda.flux_work_io import file_hash
@@ -227,6 +227,8 @@ def commit_version(folder: str | Path, version: str, *, hash: str = "", size: in
         "node_types": node_types or [], "external_deps": external_deps or [],
         "embedded_hdas": embedded_hdas or [], "committed": _now(),
     })
+    if render_blocks is not None:
+        manifest["render_blocks"] = render_blocks
     _write_json(path, manifest)
     return {**manifest, "version": version}
 

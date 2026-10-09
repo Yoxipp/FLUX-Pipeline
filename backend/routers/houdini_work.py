@@ -47,6 +47,17 @@ class CommitRequest(TaskRef):
     node_types: list = []
     external_deps: list = []
     embedded_hdas: list = []
+    render_blocks: list | None = None    # RENDER: base of the Timeline sync
+
+
+class RenderPlanRequest(TaskRef):
+    base_version: str = ""
+    blocks: list = []                     # [{block, shot, range}] of the scene
+
+
+class RenderApplyRequest(TaskRef):
+    push: list = []
+    create: list = []
 
 
 class VersionRequest(TaskRef):
@@ -108,7 +119,14 @@ def _render_setup(project_path, project: str, seq: str, shot: str) -> dict:
     from dcc.houdini.hda.flux_sequence_hda import MODULE_FUNCTIONS
     from features.folder_manager import houdini_render_scene as rs
 
+    from features.houdini_work import render_sync
+    from features.production import production_store
+
+    ranges = render_sync.production_ranges(production_store.load_production(project), seq)
     shots = [{"shot": shot.upper()}] if shot else rs.sequence_shots(project_path, seq)
+    for item in shots:
+        rng = ranges.get(str(item.get("shot", "")).upper())
+        item["range"] = list(rng) if rng else None
     return {"kind": "render_sequence", "project": project, "seq": seq.upper(), "shots": shots,
             "blocks": max(rs.MIN_SHOT_BLOCKS, len(shots)), "resolution": rs._resolution(project_path),
             "sequence_module": MODULE_FUNCTIONS}
@@ -177,7 +195,8 @@ async def work_commit(req: CommitRequest) -> dict:
     folder = _folder(req)
     return await _run(lambda: work_store.commit_version(
         folder, req.version, hash=req.hash, size=req.size, node_types=req.node_types,
-        external_deps=req.external_deps, embedded_hdas=req.embedded_hdas))
+        external_deps=req.external_deps, embedded_hdas=req.embedded_hdas,
+        render_blocks=req.render_blocks))
 
 
 @router.post("/abort")
@@ -198,3 +217,44 @@ async def work_unlock(req: LockRequest) -> dict:
     folder = _folder(req)
     return {"released": await _run(lambda: work_store.release_lock(
         folder, author=_author(req.author), host=req.host))}
+
+
+# ── RENDER <-> Production Timeline (features/houdini_work/render_sync.py) ─────────
+
+@router.post("/render-sync/plan")
+async def render_sync_plan(req: RenderPlanRequest) -> dict:
+    """Three-way compare scene / base version / Production for the render Work."""
+    from features.houdini_work import render_sync
+    from features.production import production_store
+
+    folder = _folder(req)
+    base_blocks = None
+    if req.base_version:
+        manifest = next((v for v in work_store.list_versions(folder) if v["version"] == req.base_version), None)
+        if manifest is not None and "render_blocks" in manifest:
+            base_blocks = manifest.get("render_blocks") or []
+    production = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: production_store.load_production(req.project))
+    return render_sync.plan(req.blocks, base_blocks, production, req.seq)
+
+
+@router.post("/render-sync/apply")
+async def render_sync_apply(req: RenderApplyRequest) -> dict:
+    """Write the pushed ranges / created shots into Production through the normal save
+    (stages regenerated, open Houdini notified, folders of new shots created)."""
+    from features.houdini_work import render_sync
+    from features.production import production_store
+    from routers.production import ProductionPayload, put_production
+
+    _project_path(req.project)
+    production = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: production_store.load_production(req.project))
+    try:
+        done = render_sync.apply(production, req.seq, req.push, req.create)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if done["updated"] or done["created"]:
+        saved = await put_production(req.project, ProductionPayload(production=production))
+        done["shot_stages"] = saved.get("shot_stages", [])
+    log.info("Render Work -> Production %s %s: %s", req.project, req.seq, done)
+    return done

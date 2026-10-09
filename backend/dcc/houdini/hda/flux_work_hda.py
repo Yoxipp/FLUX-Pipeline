@@ -300,6 +300,7 @@ def _render_setup(stage, plan):
     real = [s["shot"] for s in plan["shots"]]
     for n in ns["shot_numbers"](stage):
         shot = real[n - 1] if n - 1 < len(real) else ""
+        rng = plan["shots"][n - 1].get("range") if n - 1 < len(real) else None
         for prefix in ("IMPORT_ENV_", "IMPORT_CHAR_", "FLUX_RENDER_"):
             block = stage.node("%sSHOT%03d" % (prefix, n))
             if block is None:
@@ -307,6 +308,8 @@ def _render_setup(stage, plan):
             for pname, pval in (("project", plan["project"]), ("seq", seq), ("shot", shot)):
                 if block.parm(pname) is not None and (pval or pname != "shot"):
                     block.parm(pname).set(pval)
+        if rng:
+            _set_block_range(stage, "SHOT%03d" % n, rng)
     if top.parm("status_msg") is not None:
         top.parm("status_msg").set("%d shot(s)" % plan["blocks"])
     for rs in stage.children():
@@ -336,7 +339,7 @@ def _build_template(ref, subnet):
         _render_setup(subnet, setup)
     return ""
 
-def _save_version(ref, subnet, based_on, comment, template=False):
+def _save_version(ref, subnet, based_on, comment, template=False, render_blocks=None):
     """Reserve -> write the cpio -> commit. Returns (result, error)."""
     import hou
     r = _post(_API + "/reserve", dict(ref, author="", host=_host(), based_on=based_on, comment=comment,
@@ -352,11 +355,126 @@ def _save_version(ref, subnet, based_on, comment, template=False):
         return None, "Ecriture Houdini echouee : %s" % exc
     c = _post(_API + "/commit", dict(ref, version=r["version"], hash=saved["hash"], size=saved["size"],
                                      node_types=saved["node_types"], external_deps=saved["external_deps"],
-                                     embedded_hdas=saved["embedded_hdas"]))
+                                     embedded_hdas=saved["embedded_hdas"], render_blocks=render_blocks))
     if c.get("state") != "ok":
         _post(_API + "/abort", dict(ref, version=r["version"]))
         return None, "Commit refuse : %s" % (c.get("error") or c)
     return {"version": r["version"], "hash": saved["hash"]}, ""
+
+# ── RENDER <-> Production Timeline (features/houdini_work/render_sync.py) ──
+
+def _is_render(ref):
+    return ref.get("task") == "RENDER"
+
+def _render_blocks(stage):
+    """[{block, shot, range}] of the render Work: one per FLUX_RENDER_SHOTnnn."""
+    out = []
+    for fr in stage.children():
+        if not fr.name().startswith("FLUX_RENDER_SHOT") or fr.parm("frame_rangex") is None:
+            continue
+        try:
+            rng = [int(fr.evalParm("frame_rangex")), int(fr.evalParm("frame_rangey"))]
+        except Exception:
+            rng = None
+        shot = fr.parm("shot").evalAsString().upper() if fr.parm("shot") is not None else ""
+        out.append({"block": fr.name()[len("FLUX_RENDER_"):], "shot": shot, "range": rng})
+    return sorted(out, key=lambda b: b["block"])
+
+def _set_block_range(stage, block, rng):
+    """The block's range as plain values on FLUX Render (stops following the import)."""
+    fr = stage.node("FLUX_RENDER_" + block)
+    if fr is None or not rng:
+        return False
+    for comp, value in zip(("x", "y"), rng):
+        p = fr.parm("frame_range" + comp)
+        if p is not None:
+            p.deleteAllKeyframes()
+            p.set(int(value))
+    return True
+
+def _add_blocks(node, ref, stage, missing):
+    """Shots of the Timeline without a block: new blocks through FLUX Sequence."""
+    tpl = _get(_API + "/template", **ref)
+    module = (tpl.get("setup") or {}).get("sequence_module")
+    if not module or not missing:
+        return []
+    ns = {}
+    exec(module, ns)
+    before = list(ns["shot_numbers"](stage))
+    ns["grow_to"](stage, len(before) + len(missing), ref["project"], ref["seq"])
+    new = [n for n in ns["shot_numbers"](stage) if n not in before]
+    added = []
+    for n, item in zip(new, missing):
+        for prefix in ("IMPORT_ENV_", "IMPORT_CHAR_", "FLUX_RENDER_"):
+            block = stage.node("%sSHOT%03d" % (prefix, n))
+            if block is None:
+                continue
+            for pname, pval in (("project", ref["project"]), ("seq", ref["seq"]), ("shot", item["shot"])):
+                if block.parm(pname) is not None:
+                    block.parm(pname).set(pval)
+        _set_block_range(stage, "SHOT%03d" % n, item.get("range"))
+        added.append(item["shot"])
+    top = stage.node("FLUX_SEQUENCE")
+    if top is not None and top.parm("shot_count") is not None:
+        top.parm("shot_count").set(len(ns["shot_numbers"](stage)))
+    return added
+
+def _follow_timeline(node, ref, stage, version):
+    """Opening: the Timeline changes made since *version* go into the blocks."""
+    plan = _post(_API + "/render-sync/plan", dict(ref, base_version=version, blocks=_render_blocks(stage)))
+    if "pull" not in plan:
+        return "Timeline non lue : %s" % plan.get("error", "")
+    pulled = [p["shot"] for p in plan["pull"] if _set_block_range(stage, p["block"], p["range"])]
+    added = _add_blocks(node, ref, stage, plan["missing"]) if not ref["shot"] else []
+    parts = []
+    if pulled:
+        parts.append("plage(s) suivie(s) : " + ", ".join(pulled))
+    if added:
+        parts.append("shot(s) ajoute(s) : " + ", ".join(added))
+    return ("Timeline FLUX : " + " ; ".join(parts) + " (a sauver)") if parts else ""
+
+def _push_timeline(ref, stage, loaded):
+    """Save: the blocks changed in Houdini go to Production (asked when both sides
+    changed, confirmed for new shots). Returns (blocks to store, error, report)."""
+    plan = _post(_API + "/render-sync/plan", dict(ref, base_version=loaded, blocks=_render_blocks(stage)))
+    if "push" not in plan:
+        return None, "Timeline non lue : %s" % plan.get("error", ""), ""
+    push, create = list(plan["push"]), list(plan["create"])
+    pull = list(plan["pull"])
+    for c in plan["conflicts"]:
+        flux = c.get("flux")
+        choice = _ask("Shot %s modifie dans Houdini ET dans la Timeline FLUX.\\nHoudini : %d-%d\\nFLUX : %s\\n"
+                      "Quelle plage garder ?" % (c["shot"], c["houdini"][0], c["houdini"][1],
+                                                 "%d-%d" % tuple(flux) if flux else "aucune"),
+                      ("Garder Houdini", "Garder FLUX"), default=1, close=1)
+        if choice == 0 or not flux:
+            push.append({"block": c["block"], "shot": c["shot"], "range": c["houdini"]})
+        else:
+            pull.append({"block": c["block"], "shot": c["shot"], "range": flux})
+    if create:
+        choice = _ask("Creer dans Production %d shot(s) absent(s) de la Timeline ?\\n%s"
+                      % (len(create), ", ".join("%s (%d-%d)" % (c["shot"], c["range"][0], c["range"][1]) for c in create)),
+                      ("Creer", "Ne pas creer", "Annuler"), default=0, close=2)
+        if choice == 2:
+            return None, "Sauvegarde annulee", ""
+        if choice == 1:
+            create = []
+    for p in pull:
+        _set_block_range(stage, p["block"], p["range"])
+    report = []
+    if push or create:
+        done = _post(_API + "/render-sync/apply", dict(ref, push=push, create=create))
+        if "updated" not in done:
+            return None, "Timeline non mise a jour : %s" % (done.get("error") or done), ""
+        if done["updated"]:
+            report.append("Timeline mise a jour : " + ", ".join(done["updated"]))
+        if done["created"]:
+            report.append("shot(s) cree(s) : " + ", ".join(done["created"]))
+        if done["locked"]:
+            report.append("verrouille(s), non change(s) : " + ", ".join(done["locked"]))
+    if pull:
+        report.append("plage(s) FLUX gardee(s) : " + ", ".join(p["shot"] for p in pull))
+    return _render_blocks(stage), "", "  ".join(report)
 
 # ── buttons ──
 
@@ -403,7 +521,8 @@ def load(node):
         err = _build_template(ref, sub)
         if not err:
             set_context(sub, ref["seq"], ref["shot"], ref["task"])
-            res, err = _save_version(ref, sub, "", "template", template=True)
+            res, err = _save_version(ref, sub, "", "template", template=True,
+                                     render_blocks=_render_blocks(sub) if _is_render(ref) else None)
         if err:
             if is_new:
                 sub.destroy()
@@ -427,6 +546,7 @@ def load(node):
         set_context(sub, ref["seq"], ref["shot"], ref["task"])
         version, baseline = target["version"], res["baseline_hash"]
         missing_deps = [d for d in target.get("external_deps", []) if not os.path.exists(d.get("path", ""))]
+    timeline = _follow_timeline(node, ref, sub, version) if _is_render(ref) and target is not None else ""
     # The previous Work: lock freed, content removed (saved or abandoned above).
     if old_ref["task"] and old_ref != ref:
         if not _ro(node):
@@ -439,6 +559,8 @@ def load(node):
         msg += "  LECTURE SEULE (verrou %s@%s, Reprendre pour sauver)" % (holder.get("author"), holder.get("host"))
     if missing_deps:
         msg += "  fichiers absents : " + ", ".join(d["node"] + "/" + d["parm"] for d in missing_deps[:5])
+    if timeline:
+        msg += "  " + timeline
     _status(node, msg)
     return True
 
@@ -466,13 +588,20 @@ def save(node):
                       ("Sauver quand meme", "Annuler"), default=1, close=1)
         if choice != 0:
             _status(node, "Sauvegarde annulee : %s plus recente que %s" % (st["latest"], loaded)); return False
-    res, err = _save_version(ref, sub, loaded, _pval(node, "comment"))
+    blocks, report = None, ""
+    if _is_render(ref):
+        # Production first: a failed save after it never makes the next opening undo
+        # the artist's ranges (scene == Production then, nothing to pull).
+        blocks, err, report = _push_timeline(ref, sub, loaded)
+        if err:
+            _status(node, err); return False
+    res, err = _save_version(ref, sub, loaded, _pval(node, "comment"), render_blocks=blocks)
     if res is None:
         _status(node, err); return False
     _set(node, "loaded_version", res["version"])
     _set(node, "baseline_hash", res["hash"])
     _set(node, "comment", "")
-    _status(node, "Sauve : %s %s" % (_label(ref), res["version"]))
+    _status(node, ("Sauve : %s %s  " % (_label(ref), res["version"]) + report).strip())
     return True
 
 def take_over(node):
