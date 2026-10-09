@@ -136,13 +136,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const openingProduction = useRef(false)
   useEffect(() => {
     if (openingProduction.current) { openingProduction.current = false; return }
-    if (!productionPinned) setProductionExpanded(false)
+    // Unpinned: the group closes when leaving Production, never when moving inside it (Assets / Shots).
+    if (!productionPinned && pathname !== '/production') setProductionExpanded(false)
   }, [pathname, search, productionPinned])
-  useEffect(() => {
-    const close = () => { if (!productionPinned) setProductionExpanded(false) }
-    window.addEventListener('flux:production-tab-change', close)
-    return () => window.removeEventListener('flux:production-tab-change', close)
-  }, [productionPinned])
   const productionMode = new URLSearchParams(search).get('mode') ?? localStorage.getItem('flux.production.mode') ?? 'shot'
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
@@ -705,9 +701,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       <NavGroup title="PIPELINE">
         <div className="production-nav-row">
           <NavItem icon={ClipboardList} label={t('nav.production')} active={pathname === '/production'} indent route="/production" onClick={() => { setProductionExpanded(v => !v); if (pathname !== '/production') { openingProduction.current = true; navigate('/production') } }} />
-          <button className="production-nav-pin" aria-label={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} title={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} aria-pressed={productionPinned} onClick={() => { if (productionPinned) setProductionExpanded(false); toggleProductionPinned() }}><Pin size={12} /></button>
+          <button className="production-nav-pin" aria-label={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} title={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} aria-pressed={productionPinned} onClick={() => { if (productionPinned && pathname !== '/production') setProductionExpanded(false); toggleProductionPinned() }}><Pin size={13} strokeWidth={1.75} fill={productionPinned ? 'currentColor' : 'none'} style={{ transform: 'rotate(45deg)' }} /></button>
         </div>
-        {(productionPinned || productionExpanded) && <div className="production-nav-children" aria-label={t('nav.production.modes')}>{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => { if (!productionPinned) setProductionExpanded(false); navigate(`/production?mode=${mode}`) }}>{t(mode === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>)}</div>}
+        {(productionPinned || productionExpanded) && <div className="production-nav-children" aria-label={t('nav.production.modes')}>{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => navigate(`/production?mode=${mode}`)}>{t(mode === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>)}</div>}
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
