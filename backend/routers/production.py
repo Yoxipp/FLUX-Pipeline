@@ -226,9 +226,10 @@ def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
     return out
 
 
-def _refresh_changed_shot_stages(project: str, before: dict, after: dict) -> list[str]:
+def _refresh_changed_shot_stages(project: str, before: dict, after: dict,
+                                 changed: list | None = None) -> list[str]:
     """Regenerate the stage of every shot whose casting or range changed. Returns the
-    ``SEQ_SHOT vNNN`` written."""
+    ``SEQ_SHOT vNNN`` written; *changed* (optional) receives their (seq, shot)."""
     from features.usd_assembler.shot_stage import stage_versions, write_stage
 
     old, new = _shot_keys(before or {}), _shot_keys(after or {})
@@ -242,6 +243,8 @@ def _refresh_changed_shot_stages(project: str, before: dict, after: dict) -> lis
                           save_casting=False)
         if res.get("version"):
             written.append(f"{key[0]}_{key[1]} {res['version']}")
+            if changed is not None:
+                changed.append(key)
     return written
 
 @router.put("/{project}")
@@ -268,11 +271,19 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
 
     # A4 (ADR 0020): a casting or frame range edit regenerates that shot's stage.
     stages: list[str] = []
+    changed_shots: list = []
     try:
         stages = await loop.run_in_executor(
-            None, lambda: _refresh_changed_shot_stages(project, previous, payload.production))
+            None, lambda: _refresh_changed_shot_stages(project, previous, payload.production,
+                                                       changed_shots))
     except Exception as e:  # noqa: BLE001 — the save already succeeded
         log.warning("Shot stage refresh after Production save failed for %r: %s", project, e)
+    # P0 Houdini Work: an open Houdini follows the new stages (range + layer reload).
+    try:
+        from dcc.houdini.shot_sync import notify_shot_stages_async
+        notify_shot_stages_async(project, changed_shots)
+    except Exception as e:  # noqa: BLE001 — best effort
+        log.warning("Houdini shot stage sync failed for %r: %s", project, e)
 
     synced = {}
     try:
