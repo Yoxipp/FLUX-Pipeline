@@ -18,6 +18,7 @@ import type {
 } from '../../types'
 import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, expandFluxPath, shotColorFromSeqColor } from './util'
 import { ProdBtn } from './ProdButtons'
+import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
 import type { Selection } from './Production'
 
 interface Props {
@@ -60,8 +61,10 @@ interface PendingArchive {
   busy:      boolean
 }
 
-// A sequence / shot is only deleted after typing this word (2026-09-27).
-const DELETE_PHRASE = 'Understand'
+// Deleting a sequence / shot and unlocking ask for a slide to confirm (2026-10-09,
+// was typing Understand). The unlock still sends this phrase: the backend guard
+// (features/production/lock.py UNLOCK_PHRASE) checks it.
+export const UNLOCK_PHRASE = 'Understand'
 
 // Open a Production entity's folder in the Folder Manager (B1, 2026-09-28).
 // The folder is resolved by the backend (SEQ / SHOT tokens, else shot/<SEQ>/<SHOT>),
@@ -121,7 +124,7 @@ export function useArchiveDelete(project: string) {
   const modal = pending ? (
     <ArchiveConfirm
       label={pending.label} info={pending.info} busy={pending.busy}
-      phrase={pending.desc.kind === 'asset' ? '' : DELETE_PHRASE}
+      slide={pending.desc.kind !== 'asset'}
       onCancel={cancel} onConfirm={confirm}
     />
   ) : null
@@ -185,15 +188,15 @@ function SplitNumberField({ value, onCommit, busy }: {
   )
 }
 
-function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
+function ArchiveConfirm({ label, info, busy, slide, onCancel, onConfirm }: {
   label:     string
   info:      { rel_path: string; exists: boolean; file_count: number } | null
   busy:      boolean
-  phrase:    string                  // '' = no word to type
+  slide:     boolean                 // seq / shot: slide to confirm instead of a button
   onCancel:  () => void
-  onConfirm: () => void
+  onConfirm: () => Promise<void>
 }) {
-  const [typed, setTyped] = useState('')
+  const { t } = useI18n()
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
     document.addEventListener('keydown', h)
@@ -203,8 +206,7 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
   const analyzing = info === null
   const count = info?.file_count ?? 0
   const nonEmpty = !!info?.exists && count > 0
-  const unlocked = !phrase || typed === phrase
-  const canConfirm = !busy && !analyzing && unlocked
+  const canConfirm = !busy && !analyzing
 
   return (
     <div
@@ -226,7 +228,7 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
           <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
           Archiver {label} ?
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: phrase ? 12 : 16, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: slide ? 12 : 16, lineHeight: 1.5 }}>
           {analyzing
             ? 'Analyse du dossier…'
             : nonEmpty
@@ -234,30 +236,21 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
               : info?.exists
                 ? 'Le dossier (vide) sera déplacé vers ARCHIVE/.'
                 : "Aucun dossier sur disque : seule l'entrée logique sera retirée."}
-          {phrase && !analyzing && ' Ses autres dossiers (comp, et lighting pour une séquence) partent aussi dans ARCHIVE/.'}
+          {slide && !analyzing && ' Ses autres dossiers (comp, et lighting pour une séquence) partent aussi dans ARCHIVE/.'}
         </div>
-        {phrase && (
-          <>
-            <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 6 }}>
-              Tape <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>{phrase}</code> pour confirmer.
-            </div>
-            <input
-              autoFocus value={typed} onChange={e => setTyped(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && canConfirm) onConfirm() }}
-              placeholder={phrase} spellCheck={false} autoCapitalize="off" autoCorrect="off"
-              style={{
-                width: '100%', boxSizing: 'border-box', marginBottom: 14, padding: '6px 9px', fontSize: 12,
-                fontFamily: 'var(--mono)', background: 'var(--paper-2)', color: 'var(--ink)', borderRadius: 6, outline: 'none',
-                border: `1px solid ${unlocked ? 'var(--err)' : 'var(--rule-2)'}`,
-              }}
-            />
-          </>
+        {slide && (
+          <div style={{ marginBottom: 14 }}>
+            <SlideToConfirm width="fill" height={40} tone="danger" disabled={!canConfirm}
+              label={busy ? 'Archivage…' : t('confirm.slideToArchive')} onConfirm={onConfirm} />
+          </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <ProdBtn variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Annuler</ProdBtn>
-          <ProdBtn variant="danger" size="sm" onClick={onConfirm} disabled={!canConfirm}>
-            <Trash2 size={10} strokeWidth={1.75} /> {busy ? 'Archivage…' : 'Archiver'}
-          </ProdBtn>
+          {!slide && (
+            <ProdBtn variant="danger" size="sm" onClick={() => { void onConfirm() }} disabled={!canConfirm}>
+              <Trash2 size={10} strokeWidth={1.75} /> {busy ? 'Archivage…' : 'Archiver'}
+            </ProdBtn>
+          )}
         </div>
       </div>
     </div>
@@ -265,7 +258,7 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
 }
 
 // Lock of a sequence / shot (2026-09-30): anyone locks in one click, unlocking asks
-// to type Understand. A locked record cannot be edited, renamed or deleted (the backend
+// for a slide to confirm (2026-10-09). A locked record cannot be edited, renamed or deleted (the backend
 // enforces it too); task progress and comments stay open.
 const _lockedFieldset: CSSProperties = { border: 0, padding: 0, margin: 0, minWidth: 0 }
 
@@ -279,14 +272,14 @@ function LockControl({ project, kind, seqName, shotName, own, inherited, onChang
   onChange:  (lock: ProductionLock | undefined) => void
 }) {
   const [asking, setAsking] = useState(false)
-  const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
+  const { t } = useI18n()
   const call = async (locked: boolean, phrase = '') => {
     setBusy(true)
     try {
       const r = await api.lockSeqShot(project, kind, seqName, shotName, locked, phrase)
       onChange(r.locked ?? undefined)
-      setAsking(false); setTyped('')
+      setAsking(false)
       toast.success(locked ? `${shotName || seqName} verrouillé` : `${shotName || seqName} déverrouillé`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
@@ -318,18 +311,13 @@ function LockControl({ project, kind, seqName, shotName, own, inherited, onChang
           <LockOpen size={11} strokeWidth={1.75} /> Déverrouiller
         </ProdBtn>
       ) : (
-        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-          <input
-            autoFocus value={typed} onChange={e => setTyped(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && typed === DELETE_PHRASE) void call(false, typed)
-              if (e.key === 'Escape') { setAsking(false); setTyped('') }
-            }}
-            placeholder={`Tape ${DELETE_PHRASE}`} spellCheck={false}
-            style={{ ..._input, flex: 1, fontFamily: 'var(--mono)' }}
-          />
-          <ProdBtn size="sm" onClick={() => { void call(false, typed) }} disabled={busy || typed !== DELETE_PHRASE}>
-            <LockOpen size={10} strokeWidth={1.75} /> OK
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SlideToConfirm width="fill" height={34} label={t('confirm.slideToUnlock')} disabled={busy}
+              onConfirm={() => call(false, UNLOCK_PHRASE)} />
+          </div>
+          <ProdBtn variant="ghost" size="sm" onClick={() => setAsking(false)} disabled={busy} title="Annuler">
+            <X size={10} strokeWidth={1.75} />
           </ProdBtn>
         </div>
       )}
@@ -386,7 +374,7 @@ export function MenuEdit({
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid var(--rule)' }}>
-        <div className="cap" style={{ fontSize: 9, letterSpacing: '0.09em', color: 'var(--ink-3)' }}>Edit</div>
+        <div className="cap" style={{ fontSize: 10.5, letterSpacing: '0.09em', color: 'var(--ink-3)' }}>Edit</div>
       </div>
 
       {mode === 'asset' && selection.kind === 'none' && (
@@ -499,7 +487,7 @@ function CreateSection({ setState, setSelection, activeCategory }: {
             display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 6,
             padding: '4px 10px', borderRadius: 5,
             background: categoryColor(activeCategory), color: 'var(--paper)',
-            fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+            fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
           }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
             {activeCategory}
@@ -993,6 +981,7 @@ function SeqSection({ project, seq, state, setState, setSelection, shotClassToke
         setState={setState}
         entityKind="seq"
         entity={seq}
+        project={project}
       />
       </fieldset>
 
@@ -1193,7 +1182,7 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
         </label>
       </div>
 
-      <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot}
+      <AssetsPicker state={state} setState={setState} entityKind="shot" entity={shot} project={project}
                     title={shot.inherit_assets ? 'Casting du shot (en plus de la sequence)' : undefined} />
 
       {!shot.inherit_tasks && (
@@ -1227,7 +1216,8 @@ function ShotSection({ project, shot, state, setState, setSelection, shotClassTo
 }
 
 // ── assets picker (button + modal box) ──────────────────────────────────────
-function AssetsPicker({ state, setState, entityKind, entity, title }: {
+function AssetsPicker({ state, setState, entityKind, entity, title, project }: {
+  project:    string
   state:      ProductionState
   setState:   (patch: (prev: ProductionState) => ProductionState) => void
   entityKind: 'seq' | 'shot'
@@ -1250,12 +1240,18 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
   // Number of instances in the shot stage (ADR 0020): DINGO_01, DINGO_02...
   const setCount = (id: string, delta: number) => editLinks(arr => arr.map(x => x.id === id
     ? { ...x, count: Math.max(1, (x.count ?? 1) + delta) } : x))
+  // Pinned USD version (ADR 0048): "" = follows LAST, the key is dropped.
+  const setVersion = (id: string, version: string) => editLinks(arr => arr.map(x => {
+    if (x.id !== id) return x
+    const { version: _old, ...rest } = x
+    return version ? { ...rest, version } : rest
+  }))
 
   return (
     <div style={_pad}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <div style={_lbl}>{title ?? t('prod.tabAssets')}</div>
-        <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>· {linked.length}</span>
+        <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>· {linked.length}</span>
         <span style={{ flex: 1 }} />
         <ProdBtn size="sm" variant="ghost" onClick={() => setModalOpen(true)}>
           <Plus size={10} strokeWidth={2} /> Ajouter
@@ -1263,7 +1259,7 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
       </div>
 
       {linked.length === 0 && (
-        <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>—</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>—</div>
       )}
       {linked.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -1277,7 +1273,7 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
                       display: 'inline-flex', alignItems: 'center', gap: 4,
                       padding: '3px 9px', borderRadius: 999,
                       background: color, color: 'var(--paper)',
-                      fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
+                      fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600,
                     }}>
                 {a?.name ?? l.ref}
                 {(l.count ?? 1) > 1 && <span style={{ opacity: 0.85 }}>x{l.count}</span>}
@@ -1285,6 +1281,8 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
                       style={{ cursor: 'pointer', opacity: 0.75, padding: '0 2px' }}>-</span>
                 <span title="Une instance de plus" onClick={() => setCount(l.id, 1)}
                       style={{ cursor: 'pointer', opacity: 0.75, padding: '0 2px' }}>+</span>
+                {a && <VersionPin project={project} name={a.name} value={l.version ?? ''}
+                                  onChange={v => setVersion(l.id, v)} />}
                 <span title="Retirer" onClick={() => removeChip(l.id)}
                       style={{ cursor: 'pointer', opacity: 0.75 }}>×</span>
               </span>
@@ -1303,6 +1301,50 @@ function AssetsPicker({ state, setState, entityKind, entity, title }: {
         />
       )}
     </div>
+  )
+}
+
+// Published USD versions of an asset, cached for the session (one GET per asset).
+const _versionsCache = new Map<string, Promise<string[]>>()
+export function assetUsdVersions(project: string, name: string): Promise<string[]> {
+  const key = `${project}/${name}`
+  let hit = _versionsCache.get(key)
+  if (!hit) {
+    hit = api.getUsdAsset(project, name)
+      .then(info => info.component?.versions ?? info.assembly?.versions ?? [])
+      .catch(() => [])
+    _versionsCache.set(key, hit)
+  }
+  return hit
+}
+
+// Version selector of a casting link (ADR 0048): LAST or one published vNNN.
+function VersionPin({ project, name, value, onChange }: {
+  project: string; name: string; value: string; onChange: (v: string) => void
+}) {
+  const { t } = useI18n()
+  const [versions, setVersions] = useState<string[] | null>(null)
+  const load = () => {
+    if (versions === null) {
+      _versionsCache.delete(`${project}/${name}`)     // fresh list when the menu opens
+      assetUsdVersions(project, name).then(setVersions)
+    }
+  }
+  const options = [...new Set([...(versions ?? []), ...(value ? [value] : [])])].reverse()
+  return (
+    <select value={value} onMouseDown={load} onFocus={load}
+            onChange={e => onChange(e.target.value)}
+            title={value ? t('prod.versionPinned').replace('{v}', value) : t('prod.versionLast')}
+            onClick={e => e.stopPropagation()}
+            style={{
+              fontSize: 10.5, fontWeight: 600, fontFamily: 'var(--sans)', cursor: 'pointer',
+              border: 'none', borderRadius: 999, padding: '0 4px',
+              background: value ? 'var(--paper)' : 'transparent',
+              color: value ? 'var(--ink)' : 'var(--paper)',
+            }}>
+      <option value="">LAST</option>
+      {options.map(v => <option key={v} value={v}>{t('prod.versionPinned').replace('{v}', v)}</option>)}
+    </select>
   )
 }
 
@@ -1370,7 +1412,7 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
           padding: '14px 18px', borderBottom: '1px solid var(--rule)',
         }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
-          <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
             {t('prod.tabAssets')} · {linkedIds.size} lié{linkedIds.size > 1 ? 's' : ''}
           </span>
           <span style={{ flex: 1 }} />
@@ -1411,7 +1453,7 @@ function AssetsPickerModal({ state, setState, entityKind, entity, onClose }: {
                   display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8,
                   padding: '4px 10px', borderRadius: 5,
                   background: color, color: 'var(--paper)',
-                  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                  fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
                 }}>
                   <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--paper)' }} />
                   {t(categoryLabelKey(cls)) || cls}
@@ -1498,7 +1540,7 @@ function parseFrame(raw: string): number | undefined {
 }
 
 const _lbl: React.CSSProperties = {
-  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
+  fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 600,
   letterSpacing: '0.05em', color: 'var(--ink-3)',
   textTransform: 'uppercase', marginBottom: 5,
 }

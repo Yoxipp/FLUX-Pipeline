@@ -484,6 +484,23 @@ async def ping_dcc(dcc_key: str) -> dict:
     return answer
 
 
+@router.post("/bridges/install-all")
+async def install_all_bridges_endpoint() -> dict:
+    """Install the FLUX bridge of every DCC detected on this machine (Settings > User,
+    "Installer tous les bridges"). Per-DCC result: ok / skip (not detected) / error."""
+    from dcc.photoshop.client import ensure_library
+    from features.launcher.bridges import install_all_bridges
+
+    def _do() -> list[dict]:
+        return install_all_bridges(get_installed_dccs(), _AUTOSTART_MODULES, ensure_library)
+
+    loop = asyncio.get_running_loop()
+    results = await loop.run_in_executor(None, _do)
+    log.info("Install all bridges: %s",
+             ", ".join(f"{r['dcc']}={r['status']}" for r in results))
+    return {"results": results}
+
+
 @router.get("/{dcc_key}/autostart")
 async def get_autostart(dcc_key: str) -> dict:
     """Check whether the FLUX autostart block is installed for a DCC."""

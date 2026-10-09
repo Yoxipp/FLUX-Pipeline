@@ -25,12 +25,12 @@
 .work-profile-icon:hover { color:var(--err) !important; }
 .work-profile-prefs { display:flex; flex-direction:column; gap:12px; min-width:0; }
 .work-profile-prefs > label, .work-profile-field { display:flex; flex-direction:column; gap:6px; color:var(--ink-2); }
-.work-profile-field small { color:var(--ink-4); font-size:10.5px; }
+.work-profile-field small { color:var(--ink-4); font-size:11.5px; }
 .work-profile-check { flex-direction:row !important; align-items:center; gap:8px !important; cursor:pointer; }
 .work-profile-check input { accent-color:var(--accent); margin:0; }
 .work-profile-current { display:flex; align-items:center; gap:8px; min-height:28px; font-weight:600; }
 .work-profile-current button { margin-left:auto; }
-.work-profile-modified { font:500 10px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--warn, #e8912a); }
+.work-profile-modified { font:500 11px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--warn, #e8912a); }
 .work-profile-dot { display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--warn, #e8912a); vertical-align:middle; }
 .work-profile-seg { display:flex; gap:4px; flex-wrap:wrap; }
 .work-profile-seg button { padding:5px 10px; color:var(--ink-3); }
@@ -44,7 +44,7 @@
 @media (prefers-reduced-motion:reduce) { .work-profile-dialog, .work-profile-overlay { animation:none; } }
 @media (max-width:640px) { .work-profile-body { grid-template-columns:1fr; } .work-profile-list { border-right:0; padding-right:0; } .work-profile-save { flex-wrap:wrap; } }
 .work-profile-departments { display:flex; flex-direction:column; gap:6px; }
-.work-profile-seg-label { align-self:center; min-width:46px; font:10px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--ink-4); }
-.work-profile-check small { margin-left:6px; color:var(--ink-4); font-size:10.5px; }
+.work-profile-seg-label { align-self:center; min-width:46px; font:11px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--ink-4); }
+.work-profile-check small { margin-left:6px; color:var(--ink-4); font-size:11.5px; }
 .work-profile-field > .work-profile-check { color:var(--ink-2); }
 .work-profile-check { display:flex; }

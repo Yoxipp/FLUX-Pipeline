@@ -43,7 +43,7 @@ export function RenameModal({ item, onConfirm, onCancel }: {
           onKeyDown={e => { if (e.key === 'Enter') void handleConfirm() }}
           style={{ width: '100%', height: 32, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 11, padding: '0 10px', outline: 'none', boxSizing: 'border-box' }}
         />
-        {error && <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)', marginTop: 6 }}>{error}</div>}
+        {error && <div style={{ fontSize: 11, color: 'var(--err)', fontFamily: 'var(--mono)', marginTop: 6 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
           <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
           <div className="btn primary" onClick={() => void handleConfirm()} style={{ cursor: canConfirm ? 'pointer' : 'default', opacity: canConfirm ? 1 : 0.5 }}>
@@ -108,10 +108,10 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: 'var(--ink)' }}>
           {items.length === 1 ? `Déplacer "${items[0].name}"` : `Déplacer ${items.length} éléments`}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 12 }}>Double-clic pour naviguer dans un dossier</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 12 }}>Double-clic pour naviguer dans un dossier</div>
 
         {/* Breadcrumb */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'var(--mono)', fontSize: 9, marginBottom: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontFamily: 'var(--mono)', fontSize: 10.5, marginBottom: 8, flexWrap: 'wrap' }}>
           {breadcrumb.map((seg, i) => (
             <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
               {i > 0 && <ChevronRight size={8} strokeWidth={1.5} color="var(--ink-4)" />}
@@ -140,21 +140,21 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <FolderSvg size={18} />
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, flex: 1 }}>{f}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, flex: 1 }}>{f}</span>
               <ChevronRight size={9} strokeWidth={1.5} color="var(--ink-4)" />
             </div>
           ))}
         </div>
 
         {/* Destination */}
-        <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, marginBottom: 10 }}>
+        <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, marginBottom: 10 }}>
           <span style={{ color: 'var(--ink-4)' }}>Destination : </span>
           <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{breadcrumb.join(' / ')}</span>
           {isSameLocation && <span style={{ color: 'var(--err)', marginLeft: 6 }}>= emplacement actuel</span>}
           {isInsideItself && <span style={{ color: 'var(--err)', marginLeft: 6 }}>dossier enfant interdit</span>}
         </div>
 
-        {error && <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)', marginBottom: 8 }}>{error}</div>}
+        {error && <div style={{ fontSize: 11, color: 'var(--err)', fontFamily: 'var(--mono)', marginBottom: 8 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
           <div className="btn primary" onClick={() => void handleConfirm()} style={{ cursor: canConfirm ? 'pointer' : 'default', opacity: canConfirm ? 1 : 0.5 }}>

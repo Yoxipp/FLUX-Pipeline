@@ -14,10 +14,24 @@
 
 ; Genere par scripts/build.cjs a chaque build.
 !include "${BUILD_RESOURCES_DIR}\flux_version.nsh"
+!include "WordFunc.nsh"
+
+; A stale flux_version.nsh (electron-builder run without scripts/build.cjs) would show
+; another version than the one installed: fail the build instead.
+!ifndef FLUX_SEMVER
+  !error "flux_version.nsh sans FLUX_SEMVER : lancer le build via scripts/build.cjs"
+!endif
+!if "${FLUX_SEMVER}" != "${VERSION}"
+  !error "flux_version.nsh (${FLUX_SEMVER}) ne correspond pas a package.json version (${VERSION})"
+!endif
 
 ; --- customInit -------------------------------------------------------------
 ; Insere dans .onInit APRES initMultiUser : SHELL_CONTEXT et la detection
 ; d'install existante sont deja resolus a ce point.
+; La comparaison se fait en numerique sur DisplayVersion (semver ecrit par
+; electron-builder, sans zero en tete : 0.8.1) contre ${VERSION} : le build atomique
+; 0.8.1 (= 0.8.001) passe toujours devant 0.8.0 (= 0.8.000). Les libelles affiches
+; sont ceux au format x.x.xxx (FluxVersion / FLUX_VERSION).
 !macro customInit
   ; En mode silencieux (/S), on ne bloque jamais avec une boite de dialogue.
   ${ifNot} ${Silent}
@@ -30,14 +44,22 @@
 
     ${if} $R6 != ""
       ; Une version de FLUX est deja presente sur la machine.
-      ${if} $R6 == "${VERSION}"
+      ; $R5 : 0 = meme version, 1 = installee plus recente, 2 = installeur plus recent.
+      ${VersionCompare} "$R6" "${VERSION}" $R5
+      ${if} $R5 == 0
         ; Meme version => reinstallation / reparation.
         MessageBox MB_OKCANCEL|MB_ICONINFORMATION \
           "FLUX ${FLUX_VERSION} est deja installe sur cette machine.$\r$\n$\r$\nContinuer va reinstaller (reparer) cette version.$\r$\n$\r$\nVos preferences et projets ne sont pas touches." \
           IDOK flux_continue
         Quit
+      ${elseif} $R5 == 1
+        ; Version installee plus recente => retour en arriere, a confirmer.
+        MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
+          "Une version plus recente de FLUX est installee : $R7$\r$\n$\r$\nContinuer va la remplacer par la version ${FLUX_VERSION}, plus ancienne.$\r$\n$\r$\nVos preferences et projets ne sont pas touches." \
+          IDOK flux_continue
+        Quit
       ${else}
-        ; Version differente => mise a jour.
+        ; Installeur plus recent => mise a jour.
         MessageBox MB_OKCANCEL|MB_ICONINFORMATION \
           "Une version de FLUX est deja installee : $R7$\r$\n$\r$\nElle va etre mise a jour vers la version ${FLUX_VERSION}.$\r$\n$\r$\nVos preferences et projets ne sont pas touches." \
           IDOK flux_continue

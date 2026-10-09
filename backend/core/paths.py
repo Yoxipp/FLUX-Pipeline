@@ -214,6 +214,11 @@ def get_update_dir() -> Path:
     return _root_subdir("FLUX_UPDATE")
 
 
+def get_doc_dir() -> Path:
+    """<FLUX_ROOT>/FLUX_DOC: the FLUX manual, kept with the workspace (ADR 0049)."""
+    return _root_subdir("FLUX_DOC")
+
+
 def _root_subdir(name: str) -> Path:
     root = get_flux_root()
     if root is None:

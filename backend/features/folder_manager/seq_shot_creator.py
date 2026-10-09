@@ -144,6 +144,8 @@ def update_sequence(
     padding: int = SEQ_SHOT_PADDING,
     *,
     seq_label: str | None = None,
+    shot_type_tokens: dict[str, str] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> Path:
     """Idempotent version of :func:`create_sequence`.
 
@@ -154,11 +156,17 @@ def update_sequence(
     * For each entry in *shots* (``[{'number': int, 'tasks': [{'token': str,
       'subtasks': [str, ...]}]}]``), ensures the shot dir and — inside it —
       each task folder plus its subtask subfolders. Task→folder resolution
-      uses *class_tokens* (e.g. ``ANIM → shot/{seq}/{shot}/anim``), falling
-      back to lowercased token names.
+      uses *shot_type_tokens* (TYPE_SHOT, ADR 0019, e.g. ``LIGHT → lighting/{seq}``),
+      then the legacy *class_tokens* (old projects), then the lowercased token
+      under the shot.
+
+    When *counts* is given, the folders really created are added to it under
+    ``sequences`` / ``shots`` / ``tasks`` / ``subtasks`` (department folders of
+    the shot base count as tasks).
 
     Never overwrites or deletes anything — only creates what is missing.
     """
+    tally = {"sequences": 0, "shots": 0, "tasks": 0, "subtasks": 0}
     seq_label = seq_label or seq_label_for(project_path, seq_number, padding)
     seq_rel   = f"shot/{seq_label}"
     seq_path  = project_path / seq_rel
@@ -167,6 +175,7 @@ def update_sequence(
     if new_seq:
         ensure_dir(seq_path)
         add_token(project_path, "SEQ", seq_label, seq_rel)
+        tally["sequences"] += 1
         log.info("Sequence created (via update): %s", seq_path)
 
     for shot in shots or []:
@@ -180,20 +189,24 @@ def update_sequence(
             _scaffold_shot(shot_path)
             token_key = f"{seq_label}/{shot_label}"
             add_token(project_path, "SHOT", token_key, f"shot/{seq_label}/{shot_label}")
+            tally["shots"] += 1
             log.info("Shot created (via seq update): %s", shot_path)
         # Same base as a shot made in the Folder Manager (create-only, old shots too).
-        ensure_shot_base(project_path, seq_label, shot_label)
+        base = ensure_shot_base(project_path, seq_label, shot_label)
+        tally["tasks"] += sum(1 for p in base if p != shot_path)
 
         # Task + subtask folders inside the shot.
         for tsk in (shot.get("tasks", []) if isinstance(shot, dict) else []):
             token = (tsk.get("token") or "").strip().upper()
             if not token:
                 continue
-            task_dir = _resolve_shot_task_dir(project_path, seq_label, shot_label, token, class_tokens)
+            task_dir = _resolve_shot_task_dir(project_path, seq_label, shot_label, token,
+                                              class_tokens, shot_type_tokens)
             if task_dir is None:
                 continue
             if not task_dir.exists():
                 ensure_dir(task_dir)
+                tally["tasks"] += 1
             for sub in tsk.get("subtasks", []) or []:
                 sub_label = str(sub).strip()
                 if not sub_label or sub_label.lower() == "null":
@@ -201,11 +214,32 @@ def update_sequence(
                 sub_dir = task_dir / sub_label.lower()
                 if not sub_dir.exists():
                     ensure_dir(sub_dir)
+                    tally["subtasks"] += 1
 
     if new_seq:
         # After the shots: the render scene gets one block per shot (at least 3, ADR 0037).
         create_sequence_render_scene_async(project_path, seq_label)
+    if counts is not None:
+        for key, value in tally.items():
+            counts[key] = counts.get(key, 0) + value
     return seq_path
+
+
+def shot_task_template(
+    task_token: str,
+    class_tokens: dict[str, str] | None = None,
+    shot_type_tokens: dict[str, str] | None = None,
+) -> str | None:
+    """Folder template of a shot task: TYPE_SHOT first (ADR 0019), then the legacy
+    shot CLASS token of old projects. None when neither knows the token."""
+    key = (task_token or "").strip().upper()
+    if not key:
+        return None
+    for mapping in (shot_type_tokens, class_tokens):
+        tpl = (mapping or {}).get(key)
+        if tpl:
+            return str(tpl)
+    return None
 
 
 def _resolve_shot_task_dir(
@@ -214,12 +248,15 @@ def _resolve_shot_task_dir(
     shot_label: str,
     task_token: str,
     class_tokens: dict[str, str] | None,
+    shot_type_tokens: dict[str, str] | None = None,
 ) -> Path | None:
     """Return the on-disk folder for a shot-level task, or None if unresolvable."""
-    tpl = (class_tokens or {}).get(task_token.upper())
+    tpl = shot_task_template(task_token, class_tokens, shot_type_tokens)
     if tpl:
-        rel = tpl.replace("{seq}", seq_label).replace("{shot}", shot_label)
-        return project_path / rel
+        rel = tpl.replace("\\", "/").replace("{seq}", seq_label).replace("{shot}", shot_label)
+        if "{" in rel:
+            return None  # unknown placeholder: never create a literal "{x}" folder
+        return project_path / rel.strip("/")
     # Fallback: assume shot/<seq>/<shot>/<token lower>
     return project_path / "shot" / seq_label / shot_label / task_token.lower()
 

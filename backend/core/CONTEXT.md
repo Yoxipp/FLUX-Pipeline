@@ -5,4 +5,9 @@
 
 Socle : `config.py`, `paths.py` (FLUX_ROOT, mode frozen, `$FLUX`), `constants.py` (plages de ports DCC), `api_auth.py` (S1), `logger.py`, `dcc_instances.py`, `socket_manager.py`, frontiere metadonnees (`json_repository`, `sqlite_repository`, `remote_repository` squelette, `repository_factory` avec garde-fou SQLite hors OneDrive/reseau, `migrate_json_to_sqlite`, `export_sqlite_to_json`, `doc_keys` = cles logiques + wrapper SQLite/remote, ADR 0016), stockage (`local_storage`, `object_storage` squelette), `json_manager.py` (I/O atomiques bas niveau).
 
+Sous-dossiers de FLUX_ROOT (`constants.FLUX_ROOT_DIRS`, crees au premier lancement et au changement de workspace) :
+`USER`, `DOSSIER_PROJETS`, `CONFIG`, `FLUX_UPDATE` (installeurs, `get_update_dir`), `FLUX_DOC` (manuel, `get_doc_dir`, ADR 0049).
+Patterns de detection des exe DCC : `DCC_EXE_PATTERN_GROUPS` (groupes de priorite, toutes les racines Program Files) et sa vue
+plate `DCC_EXE_PATTERNS`.
+
 Zone a risque : `paths.py` et bootstrap `config.py`. Les stores passent par `get_repository()`, pas par `json_manager` (`backend/.importlinter`).

@@ -8,12 +8,13 @@ import { ArrowDown, CalendarClock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { ExpandPicker } from '../../components/shared/ExpandPicker'
 import { Btn } from '../../components/shared/ui'
-import { useProduction } from '../../hooks/useProduction'
+import type { UseProductionResult } from '../../hooks/useProduction'
 import { useSessionState } from '../../hooks/useSessionState'
 import { useShotCalendar } from '../Production/ShotDeadlineBadge'
 import { myTasks, sortMyTasks, PRIORITY_LABEL, SORT_LABEL, type MyTaskSort } from '../Production/taskPriority'
 import { STATUS_LABELS, STATUS_TOKENS } from '../Production/tracking'
 import '../Production/tracking.css'
+import { useI18n } from '../../i18n'
 
 const PAGE = 30
 
@@ -24,16 +25,17 @@ function deadlineTone(deadline: string | null, today: string): string {
   return days < 5 ? 'var(--warn)' : 'var(--ink-3)'
 }
 
-export function MyTasks({ project, username }: { project: string | null | undefined; username: string }) {
+// *prod* comes from the Hub: one production load shared with "Tes retakes".
+export function MyTasks({ project, username, prod }: { project: string | null | undefined; username: string; prod: UseProductionResult }) {
   const navigate = useNavigate()
-  const prod = useProduction(project || null)
+  const { t } = useI18n()
   const calendar = useShotCalendar(project || '', Boolean(project))
   const [sort, setSort] = useSessionState<MyTaskSort>('hub.myTasks.sort', 'smart')
   const [shown, setShown] = useState(PAGE)
   const today = new Date().toISOString().slice(0, 10)
 
   const tasks = useMemo(
-    () => sortMyTasks(myTasks(prod.state, username, calendar.items, prod.publishesByTask), sort),
+    () => sortMyTasks(myTasks(prod.state, username, calendar.items, prod.publishesByTask), sort, username),
     [prod.state, username, calendar.items, prod.publishesByTask, sort])
   const open = tasks.filter(t => t.status !== 'APPROVED').length
 
@@ -42,12 +44,13 @@ export function MyTasks({ project, username }: { project: string | null | undefi
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
       <div style={{ padding: '7px 14px', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <div className="cap">Mes tâches</div>
+        <div className="cap">{t('hub.yourTasks')}</div>
         <span className="lbl" style={{ color: 'var(--ink-3)' }}>{open}{tasks.length !== open ? ` / ${tasks.length}` : ''}</span>
         <div style={{ flex: 1 }} />
         <ExpandPicker title="Trier par" value={sort} onChange={v => { setSort(v as MyTaskSort); setShown(PAGE) }}
           options={(Object.keys(SORT_LABEL) as MyTaskSort[]).map(k => ({ value: k, label: SORT_LABEL[k],
-            title: k === 'smart' ? 'Deadline du calendrier, puis priorité, puis statut' : undefined }))} />
+            title: k === 'smart' ? 'Deadline du calendrier, puis priorité, puis statut'
+              : k === 'concern' ? t('hub.sortConcernHint') : undefined }))} />
       </div>
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {prod.loading && !tasks.length && <Empty text="Chargement…" />}

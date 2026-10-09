@@ -9,7 +9,9 @@ import { api } from '../../api/client'
 import { productionSync } from '../../hooks/useProduction'
 import type { ProductionState } from '../../types'
 import type { Selection } from './Production'
-import { useArchiveDelete } from './MenuEdit'
+import { useArchiveDelete, UNLOCK_PHRASE } from './MenuEdit'
+import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
+import { useI18n } from '../../i18n'
 import { trackingLocked, type TrackingEntity } from './tracking'
 import { viewportRect } from '../../components/shared/tooltipPosition'
 import { shotFollowKey, useFavorites } from '../../hooks/useFavorites'
@@ -23,7 +25,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
   const [unlock, setUnlock] = useState(false)
-  const [phrase, setPhrase] = useState('')
+  const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   const archive = useArchiveDelete(project)
   const isShot = 'seq_id' in entity
@@ -40,9 +42,10 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
     setBusy(true)
     try {
       await productionSync.flush()
-      const result = await api.lockSeqShot(project, 'shot', seq?.name ?? '', entity.name, value, phrase)
+      // Unlocking: the slider replaces typing, the backend guard still expects the phrase.
+      const result = await api.lockSeqShot(project, 'shot', seq?.name ?? '', entity.name, value, value ? '' : UNLOCK_PHRASE)
       setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === entity.id ? { ...s, locked: result.locked ?? undefined } : s) }))
-      setUnlock(false); setPhrase('')
+      setUnlock(false)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Action impossible') }
     finally { setBusy(false) }
   }
@@ -74,8 +77,8 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
     {archive.modal}
     <Dialog.Root open={unlock} onOpenChange={value => { if (!busy) setUnlock(value) }}><Dialog.Portal><Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog">
       <div className="production-dialog-heading"><Dialog.Title>Unlock · {entity.name}</Dialog.Title><Dialog.Close disabled={busy} aria-label="Fermer"><X size={16} /></Dialog.Close></div>
-      <Dialog.Description>Tapez Understand pour déverrouiller ce shot.</Dialog.Description><input aria-label="Confirmation de déverrouillage" value={phrase} onChange={e => setPhrase(e.target.value)} />
-      <div className="production-dialog-actions"><button disabled={busy || phrase.trim() !== 'Understand'} onClick={() => void lock(false)}>{busy ? '…' : 'Unlock'}</button></div>
+      <Dialog.Description>Glisse le curseur jusqu'au bout pour déverrouiller ce shot.</Dialog.Description>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}><SlideToConfirm label={t('confirm.slideToUnlock')} disabled={busy} onConfirm={() => lock(false)} /></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </>
 }

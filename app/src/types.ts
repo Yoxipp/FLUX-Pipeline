@@ -278,6 +278,7 @@ export interface ProductionComment {
   author: string
   date:   string                  // ISO YYYY-MM-DD
   time:   string                  // HH:MM
+  kind?:  'note' | 'retake'       // absent = note (old comments); 'retake' feeds the home "Tes retakes"
 }
 
 export interface ProductionTaskDetail {
@@ -343,6 +344,8 @@ export interface CastingLink {
   ref: string
   count?: number
   origin?: 'user' | 'auto'
+  // ADR 0048: pinned USD version of the asset ("v003"); absent or "" = follows LAST.
+  version?: string
 }
 
 export interface ProductionShot {

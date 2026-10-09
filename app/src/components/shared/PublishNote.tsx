@@ -27,14 +27,14 @@ export function PublishNote({ project, relPath }: { project: string; relPath: st
     <div style={{ padding: '10px 12px', borderTop: '1px solid var(--rule)', flexShrink: 0, maxHeight: 260, overflowY: 'auto' }}>
       <div className="cap" style={{ marginBottom: 6 }}>NOTE DE PUBLISH</div>
       {latest ? <NoteCard entry={latest} strong /> : (
-        <div style={{ fontSize: 9, color: 'var(--ink-4)' }}>Pas de note pour cette version</div>
+        <div style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Pas de note pour cette version</div>
       )}
       {history.length > 1 && (
         <>
           <div
             onClick={() => setOpen(o => !o)}
             style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, cursor: 'pointer',
-                     fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-3)', textTransform: 'uppercase',
+                     fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase',
                      letterSpacing: '0.06em' }}
           >
             {open ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
@@ -54,11 +54,11 @@ function NoteCard({ entry, strong }: { entry: PublishNoteEntry; strong?: boolean
       border: '1px solid var(--rule-2)', background: strong ? 'var(--paper)' : 'transparent',
     }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600, color: 'var(--ink)' }}>{entry.version}</span>
-        <span style={{ fontSize: 8.5, color: 'var(--ink-4)' }}>{entry.user} · {entry.date} {entry.time}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--ink)' }}>{entry.version}</span>
+        <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>{entry.user} · {entry.date} {entry.time}</span>
       </div>
       {entry.modification && (
-        <div style={{ fontSize: 9.5, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <div style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 3, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {entry.modification}
         </div>
       )}

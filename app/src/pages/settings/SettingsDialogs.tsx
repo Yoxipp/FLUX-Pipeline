@@ -47,7 +47,7 @@ export function AdvancedConfirm({ onConfirm, onCancel }: { onConfirm: () => void
 }
 
 /* ── "Desinstaller FLUX": list what goes / stays, then type the phrase ── */
-const UNINSTALL_PHRASE = 'Understand and Uninstall'
+const UNINSTALL_PHRASE = 'Understand'
 type UninstallPlan = { remove: { label: string; paths: string[] }[]; keep: string[] }
 
 export function UninstallConfirm({ onCancel }: { onCancel: () => void }) {
@@ -90,27 +90,27 @@ export function UninstallConfirm({ onCancel }: { onCancel: () => void }) {
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div>
             <div className="cap" style={{ marginBottom: 4 }}>Supprime</div>
-            {!plan && !error && <div style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Analyse du poste...</div>}
+            {!plan && !error && <div style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>Analyse du poste...</div>}
             {plan && plan.remove.length === 0 && (
-              <div style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Aucune trace FLUX dans les logiciels.</div>
+              <div style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>Aucune trace FLUX dans les logiciels.</div>
             )}
             {plan?.remove.map(r => (
               <div key={r.label} style={{ marginBottom: 5 }}>
                 <div style={{ fontSize: 11, color: 'var(--ink)' }}>{r.label}</div>
                 {r.paths.slice(0, 4).map(p => (
-                  <div key={p} title={p} style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p}</div>
+                  <div key={p} title={p} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p}</div>
                 ))}
                 {r.paths.length > 4 && (
-                  <div style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>+ {r.paths.length - 4} autre(s)</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>+ {r.paths.length - 4} autre(s)</div>
                 )}
               </div>
             ))}
-            <div style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>+ l'application FLUX, ses raccourcis et son entree dans Windows</div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>+ l'application FLUX, ses raccourcis et son entree dans Windows</div>
           </div>
           {plan && (
             <div>
               <div className="cap" style={{ marginBottom: 4 }}>Garde</div>
-              {plan.keep.map(k => <div key={k} style={{ fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>{k}</div>)}
+              {plan.keep.map(k => <div key={k} style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>{k}</div>)}
             </div>
           )}
         </div>

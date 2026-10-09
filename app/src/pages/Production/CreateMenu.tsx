@@ -30,7 +30,7 @@ export function CreateMenu({ mode, hasSequences, onCreate }: {
             return (
               <Menu.Item key={kind} className="production-menu-item" disabled={blocked} onSelect={() => onCreate(kind)}
                 title={blocked ? "Crée d'abord une séquence" : undefined}>
-                {LABEL[kind]}{blocked && <span style={{ marginLeft: 'auto', color: 'var(--ink-4)', fontSize: 10 }}>séquence requise</span>}
+                {LABEL[kind]}{blocked && <span style={{ marginLeft: 'auto', color: 'var(--ink-4)', fontSize: 11 }}>séquence requise</span>}
               </Menu.Item>
             )
           })}

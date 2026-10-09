@@ -134,7 +134,7 @@ export function DiskUsage() {
                   <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', width: 90, textAlign: 'right' }}>
                     {humanSize(p.size)}
                   </span>
-                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', width: 60, textAlign: 'right', fontSize: 10 }}>
+                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', width: 60, textAlign: 'right', fontSize: 11 }}>
                     {p.file_count.toLocaleString('fr')} f.
                   </span>
                 </div>
@@ -148,7 +148,7 @@ export function DiskUsage() {
 
       <SecTitle>Fichiers les plus lourds</SecTitle>
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', gap: 12, padding: '7px 10px', fontSize: 10, fontWeight: 600,
+        <div style={{ display: 'flex', gap: 12, padding: '7px 10px', fontSize: 11, fontWeight: 600,
                       textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-2)',
                       background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
           <span style={{ width: 90, textAlign: 'right' }}>Taille</span>
@@ -189,7 +189,7 @@ export function DiskUsage() {
 function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
+      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
         {label}
       </div>
       <div style={{ fontSize: 13, fontFamily: mono ? 'var(--mono)' : 'var(--sans)',

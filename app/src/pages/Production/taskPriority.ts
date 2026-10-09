@@ -46,6 +46,7 @@ export interface MyTask {
   seq: string                       // sequence name for a shot, class for an asset
   task: ProductionTask
   subtask: string
+  assignee: string                  // task_details[KEY].assignee as stored
   status: string
   priority: Priority
   deadline: string | null           // YYYY-MM-DD
@@ -76,7 +77,7 @@ export function myTasks(state: ProductionState, username: string, items: Calenda
       ].sort()
       out.push({
         id: `${entity.id}|${key.toUpperCase()}`, entity, kind: isShot ? 'shot' : 'asset',
-        label: `${seq} ${entity.name}`.trim(), seq, task, subtask, status,
+        label: `${seq} ${entity.name}`.trim(), seq, task, subtask, assignee: detail.assignee ?? '', status,
         priority: priorityOf(detail), deadline, updated: stamps[stamps.length - 1] ?? '',
       })
     }
@@ -93,9 +94,31 @@ export function entityDeadline(seq: string, name: string, items: CalendarItem[])
   return ends[0] ?? null
 }
 
-export type MyTaskSort = 'smart' | 'deadline' | 'priority' | 'status' | 'updated' | 'name'
+export type MyTaskSort = 'smart' | 'concern' | 'deadline' | 'priority' | 'status' | 'updated' | 'name'
 export const SORT_LABEL: Record<MyTaskSort, string> = {
-  smart: 'Recommandé', deadline: 'Deadline', priority: 'Priorité', status: 'Statut', updated: 'Mise à jour', name: 'Nom',
+  smart: 'Recommandé', concern: 'Deadline + Me concerne', deadline: 'Deadline', priority: 'Priorité',
+  status: 'Statut', updated: 'Mise à jour', name: 'Nom',
+}
+
+/** What the "Deadline + Me concerne" sort needs: any task row (home or Production table). */
+export interface ConcernSortable { assignee?: string; status?: string; deadline: string | null }
+
+/**
+ * How much a task concerns *username*: 0 = assigned to them and sent back in retake
+ * (RTK, waiting for their action), 1 = assigned to them, 2 = someone else's / nobody's.
+ * On the home page every task is mine, so the sort reduces to "my retakes first".
+ */
+export function concernRank(t: ConcernSortable, username: string): number {
+  const who = username.trim().toUpperCase()
+  if (!who || (t.assignee ?? '').trim().toUpperCase() !== who) return 2
+  return t.status === 'RTK' ? 0 : 1
+}
+
+/** Reusable comparator: tasks that concern *username* first, then the nearest deadline. */
+export function compareDeadlineConcern(username: string) {
+  return (a: ConcernSortable, b: ConcernSortable): number =>
+    (concernRank(a, username) - concernRank(b, username))
+    || (a.deadline ?? '9999').localeCompare(b.deadline ?? '9999')
 }
 
 const done = (t: MyTask) => t.status === 'APPROVED'
@@ -109,10 +132,12 @@ const byName = (a: MyTask, b: MyTask) => `${a.label} ${a.task.name} ${a.subtask}
  * Stable, deterministic order. Validated tasks always go last; missing deadline,
  * priority or status sort after the known ones, the name breaks every tie.
  * 'smart' = deadline, then priority, then status: what is due first and matters most.
+ * 'concern' = compareDeadlineConcern(username), then priority.
  */
-export function sortMyTasks(tasks: MyTask[], sort: MyTaskSort): MyTask[] {
+export function sortMyTasks(tasks: MyTask[], sort: MyTaskSort, username = ''): MyTask[] {
   const chain: ((a: MyTask, b: MyTask) => number)[] = {
     smart: [byDeadline, byPriority, byStatus],
+    concern: [compareDeadlineConcern(username), byPriority],
     deadline: [byDeadline, byPriority],
     priority: [byPriority, byDeadline],
     status: [byStatus, byDeadline],

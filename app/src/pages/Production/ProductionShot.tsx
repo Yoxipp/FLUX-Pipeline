@@ -33,7 +33,8 @@ import * as Dropdown from '@radix-ui/react-dropdown-menu'
 import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical } from 'lucide-react'
 import { CreateMenu, type CreateKind } from './CreateMenu'
 import { TimelinePreview } from './TimelinePreview'
-import { buildMontage, pickMedia, previewCandidates, type PreviewMedia, type PreviewSource } from './previewEdit'
+import { buildMontage, pickMedia, previewCandidates, type PreviewMedia } from './previewEdit'
+import { usePreviewSource } from './previewSourceStore'
 import { openInKeyframe } from '../../lib/keyframe'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
@@ -91,7 +92,7 @@ const VZOOM_MIN = 0.6
 const VZOOM_MAX = 3.0
 const VZOOM_DEF = 1.0
 const LS_VZOOM = 'flux.production.shot.vzoom'
-const LS_PREVIEW_SOURCE = 'flux.production.timeline.previewSource'
+// Preview source: shared with the Production table thumbnails (previewSourceStore.ts).
 
 // Bookmarks are per-user (stored in User.json via /settings/user-data under
 // `production.bookmarks.<project>`). Not scoped to the machine.
@@ -217,10 +218,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   const framesOf = (shot: Shot) => (resizing && resizing.id === shot.id ? resizing.frames : shotFrames(shot))
 
   // ── preview + auto edit (TimelinePreview) ─────────────────────────────────
-  const [source, setSourceState] = useState<PreviewSource>(() => {
-    try { return localStorage.getItem(LS_PREVIEW_SOURCE) || 'auto' } catch { return 'auto' }
-  })
-  const setSource = (v: PreviewSource) => { setSourceState(v); try { localStorage.setItem(LS_PREVIEW_SOURCE, v) } catch { /* blocked */ } }
+  const [source, setSource] = usePreviewSource()
   const [montage, setMontage] = useState<{ seqId?: string } | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [previews, setPreviews] = useState<Record<string, PreviewMedia[]>>({})
@@ -521,21 +519,21 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         {onCreate && <div className="production-timeline-toolbar"><CreateMenu mode="shot" hasSequences={sequences.length > 0} onCreate={onCreate} /></div>}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <ArrowDownUp size={11} strokeWidth={1.75} color="var(--ink-3)" style={{ transform: 'rotate(90deg)' }} />
-          <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
+          <span className="cap" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
           <input type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={1} value={pxPerBlock}
                  onChange={e => setZoom(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{pxPerBlock}px</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', minWidth: 34 }}>{pxPerBlock}px</span>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <MoveVertical size={11} strokeWidth={1.75} color="var(--ink-3)" />
-          <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>V</span>
+          <span className="cap" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>V</span>
           <input type="range" min={VZOOM_MIN} max={VZOOM_MAX} step={0.05} value={vZoom}
                  onChange={e => setVZ(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
         </div>
 
         <button onClick={fitAll} disabled={sequences.length === 0} title="Tout voir"
-          style={{ ..._zoomBtn, width: 'auto', padding: '0 8px', gap: 5, fontSize: 10 }}>
+          style={{ ..._zoomBtn, width: 'auto', padding: '0 8px', gap: 5, fontSize: 11 }}>
           <Maximize2 size={11} strokeWidth={2} /> Tout voir
         </button>
 
@@ -573,7 +571,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
             <Bookmark size={12} strokeWidth={2}
                       fill={bookmarkActive ? 'var(--accent)' : 'none'} />
           </button>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', minWidth: 18, textAlign: 'right' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)', minWidth: 18, textAlign: 'right' }}>
             {bookmarks.length || ''}
           </span>
         </div>
@@ -623,8 +621,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                   borderRight: '1px solid var(--rule)',
                   background: 'var(--paper-2)',
                   display: 'flex', alignItems: 'center', padding: '0 12px',
-                  fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600,
-                  letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)',
+                  fontFamily: 'var(--sans)', fontSize: 11.5, fontWeight: 600,
+                  letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-2)',
                 }}>Timeline</div>
                 <div style={{ display: 'flex', padding: '0 10px' }}>
                   {sequences.map((seq, i) => {
@@ -650,8 +648,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                     return (
                       <div key={seq.id} title={`${seq.name} : ${seqFrames[i]} images, ${formatSeconds(seqFrames[i], fps)} a ${fps} fps`} style={{
                         width: colWidths[i] - gap, marginRight: gap, position: 'relative', overflow: 'hidden',
-                        borderLeft: i === 0 ? 'none' : '2px solid var(--ink-4)',
-                        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                        borderLeft: i === 0 ? 'none' : '2px solid var(--rule-3)',
+                        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                       }}>
                         <span style={{
                           position: 'absolute', top: 2, left: 5, fontFamily: 'var(--sans)', fontSize: 11,
@@ -668,7 +666,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                           <div key={f} style={{ position: 'absolute', left: xOf(f), bottom: 0, height: 13, borderLeft: '1px solid var(--ink-3)' }}>
                             <span style={{ position: 'absolute', left: 3, bottom: 1, lineHeight: 1, whiteSpace: 'nowrap', fontWeight: 600 }}>
                               {f}
-                              <span style={{ fontWeight: 400, color: 'var(--ink-4)', fontSize: 9 }}> {formatSeconds(f, fps)}</span>
+                              <span style={{ fontWeight: 400, color: 'var(--ink-4)', fontSize: 10.5 }}> {formatSeconds(f, fps)}</span>
                             </span>
                           </div>
                         ))}
@@ -851,7 +849,7 @@ function TrackRow({ title, color, subtitle, height, children, colWidths, gap, no
           {subtitle && (
             <span style={{
               fontFamily: 'var(--sans)', fontWeight: 500,
-              fontSize: 9, color: 'var(--ink-4)', marginTop: 1,
+              fontSize: 10.5, color: 'var(--ink-4)', marginTop: 1,
             }}>{subtitle}</span>
           )}
         </div>
@@ -1054,7 +1052,7 @@ function Clip({ width, height, color, big, small, active, playing, dot, onClick,
       {badge && showBig && (
         <span style={{
           position: 'absolute', top: 3, right: 4,
-          fontFamily: 'var(--mono)', fontSize: 7, fontWeight: 700,
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
           padding: '1px 4px', borderRadius: 3,
           background: 'rgba(0,0,0,0.35)', color: 'var(--paper)',
           letterSpacing: '0.06em', pointerEvents: 'none',

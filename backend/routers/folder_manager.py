@@ -346,7 +346,9 @@ async def get_sequences(project_name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_running_loop()
     seqs = await loop.run_in_executor(None, lambda: list_sequences(project_path))
-    return {"sequences": seqs}   # ["SEQ001", "SEQ002", ...]
+    from core.constants import SEQ_SHOT_PADDING
+    # padding: digits of NEW SEQ/SHOT labels, so the UI pads like the backend creates.
+    return {"sequences": seqs, "padding": SEQ_SHOT_PADDING}   # ["SEQ0010", ...], 4
 
 
 @router.post("/sequences")

@@ -576,7 +576,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               onBlur={() => { if (!pathError) setEditingPath(false) }}
               spellCheck={false}
               placeholder="Coller un chemin (C:\… ou PROJET/sous-dossier) puis Entrée"
-              style={{ flex: 1, minWidth: 0, height: 24, border: '1px solid ' + (pathError ? 'var(--err)' : 'var(--accent)'), padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)', outline: 'none' }}
+              style={{ flex: 1, minWidth: 0, height: 24, border: '1px solid ' + (pathError ? 'var(--err)' : 'var(--accent)'), padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }}
             />
           ) : (
             <div
@@ -588,7 +588,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { e.preventDefault(); copyCurrentPath() }
                 else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { e.preventDefault(); void pasteNavigate() }
               }}
-              style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, fontFamily: 'var(--mono)', fontSize: 10, height: 24, border: '1px solid var(--rule)', padding: '0 4px 0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', overflow: 'hidden', cursor: 'text', outline: 'none' }}
+              style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, fontFamily: 'var(--mono)', fontSize: 11, height: 24, border: '1px solid var(--rule)', padding: '0 4px 0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', overflow: 'hidden', cursor: 'text', outline: 'none' }}
             >
               <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 2, overflow: 'hidden' }}>
                 {breadcrumb.map((seg, i) => {
@@ -630,7 +630,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) setSearchResults(null) }}
               onKeyDown={e => { if (e.key === 'Enter') void handleSearch(searchQuery) }}
               placeholder="Rechercher…"
-              style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', fontSize: 10, color: 'var(--ink-2)', fontFamily: 'var(--sans)' }}
+              style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--sans)' }}
             />
             {searchQuery && (
               <X size={9} strokeWidth={2} color="var(--ink-4)" style={{ flexShrink: 0, cursor: 'pointer' }}
@@ -642,7 +642,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
 
         {/* Erreur de chemin (coller/naviguer) */}
         {pathError && (
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--err)', padding: '0 2px' }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--err)', padding: '0 2px' }}>
             {pathError}
           </div>
         )}
@@ -659,14 +659,14 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
         {searchResults !== null ? (
           <>
             <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--paper-2)' }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', flex: 1 }}>
-                <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>RÉSULTATS · </span>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)', flex: 1 }}>
+                <span style={{ color: 'var(--ink-4)', fontSize: 10.5 }}>RÉSULTATS · </span>
                 {resultLabel && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{resultLabel} · </span>}
                 {findLoading ? 'Recherche…' : searchResults.length === 0 ? 'Aucun résultat' : `${searchResults.length} trouvé${searchResults.length > 1 ? 's' : ''}`}
               </div>
               <div
                 onClick={e => { e.stopPropagation(); setSearchResults(null) }}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--ink-4)', fontSize: 9, fontFamily: 'var(--mono)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--rule-2)' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--ink-4)', fontSize: 10.5, fontFamily: 'var(--mono)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--rule-2)' }}
               >
                 <X size={9} strokeWidth={2} /> Fermer
               </div>
@@ -687,7 +687,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                   <FolderSvg size={24} />
                   <div style={{ minWidth: 0 }}>
                     <div title={r.label} style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
-                    <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.project} / {r.pathStr}</div>
+                    <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.project} / {r.pathStr}</div>
                   </div>
                 </div>
               ))}
@@ -704,7 +704,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
         ) : (
           <div style={{ flex: 1, padding: '10px 12px', overflowY: 'auto', minHeight: 0 }}>
             {deleteError && (
-              <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 5, background: 'rgba(var(--err-rgb),0.1)', border: '1px solid var(--err)', fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--err)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 5, background: 'rgba(var(--err-rgb),0.1)', border: '1px solid var(--err)', fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--err)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{deleteError}</span>
                 <X size={10} strokeWidth={2} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setDeleteError('')} />
               </div>
@@ -774,7 +774,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                         }}
                         style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSel ? 'var(--accent)' : 'var(--ink-4)'}`, background: isSel ? 'var(--accent)' : 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
                       >
-                        {isSel && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                        {isSel && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                       </div>
                     )}
                     {locked && (
@@ -797,7 +797,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                     </div>
                     {item.legacy && (
                       <span title="Ancien fichier du Constructeur : plus propose a l'import (clic droit pour le supprimer)"
-                        style={{ fontSize: 9, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--rule-2)', color: 'var(--ink-3)', background: 'var(--paper-2)' }}>
+                        style={{ fontSize: 10.5, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--rule-2)', color: 'var(--ink-3)', background: 'var(--paper-2)' }}>
                         ancien
                       </span>
                     )}

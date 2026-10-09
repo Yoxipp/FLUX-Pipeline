@@ -95,7 +95,7 @@ export function CategoryTile({
       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.filter = 'brightness(1)' }}
     >
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '0.02em' }}>{label}</div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, opacity: 0.85 }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, opacity: 0.85 }}>
         {count === 0 ? '—' : `${count} asset${count > 1 ? 's' : ''}`}
       </div>
     </button>

@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, PanelLeft, UserRound,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -67,7 +67,7 @@ function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRe
           background: notifRed ? 'color-mix(in oklch, var(--err) 18%, transparent)' : 'var(--accent-soft)',
           border: '1px solid ' + (notifRed ? 'var(--err)' : 'var(--accent)'),
           color: notifRed ? 'var(--err)' : 'var(--accent-hi)',
-          fontFamily: 'var(--sans)', fontSize: 8, fontWeight: 600,
+          fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: 'var(--shadow-xs)',
         }}>{notif}</span>
@@ -116,21 +116,29 @@ function NavGroup({ title, children, defaultOpen = true }: {
   )
 }
 
+const LS_PRODUCTION_PINNED = 'flux.sidebar.productionPinned'
+
 export function Sidebar({ dccStatus, unreadCount }: Props) {
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [productionExpanded, setProductionExpanded] = useState(false)
-  const [productionPinned, setProductionPinned] = useState(false)
+  // Retake B1 (2026-10-09): pin only on Production, persisted per machine.
+  const [productionPinned, setProductionPinned] = useState<boolean>(() => {
+    try { return localStorage.getItem(LS_PRODUCTION_PINNED) === '1' } catch { return false }
+  })
+  const toggleProductionPinned = () => {
+    setProductionPinned(prev => {
+      const next = !prev
+      try { localStorage.setItem(LS_PRODUCTION_PINNED, next ? '1' : '0') } catch { /* storage unavailable */ }
+      return next
+    })
+  }
   const openingProduction = useRef(false)
   useEffect(() => {
     if (openingProduction.current) { openingProduction.current = false; return }
-    if (!productionPinned) setProductionExpanded(false)
+    // Unpinned: the group closes when leaving Production, never when moving inside it (Assets / Shots).
+    if (!productionPinned && pathname !== '/production') setProductionExpanded(false)
   }, [pathname, search, productionPinned])
-  useEffect(() => {
-    const close = () => { if (!productionPinned) setProductionExpanded(false) }
-    window.addEventListener('flux:production-tab-change', close)
-    return () => window.removeEventListener('flux:production-tab-change', close)
-  }, [productionPinned])
   const productionMode = new URLSearchParams(search).get('mode') ?? localStorage.getItem('flux.production.mode') ?? 'shot'
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
@@ -251,6 +259,19 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('marvelous').then(p => setMarvelousServerOk(p.connected)).catch(() => setMarvelousServerOk(false))
       }
     }).catch(() => {})
+  }, [])
+
+  // "Installer tous les bridges" (Settings) changed the bridges: refresh the plug icons.
+  useEffect(() => {
+    const onBridges = () => {
+      for (const key of ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous']) {
+        api.getDccAutostart(key)
+          .then(r => setAutostartInstalled(prev => ({ ...prev, [key]: r.installed })))
+          .catch(() => {})
+      }
+    }
+    window.addEventListener('flux:bridges-changed', onBridges)
+    return () => window.removeEventListener('flux:bridges-changed', onBridges)
   }, [])
 
   // Poll Houdini server every 5 s when autostart is installed
@@ -414,6 +435,24 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     else if (mayaServerOk === true && prev !== true)
       toast.success('Maya · commandPort connecté', { duration: 3000 })
   }, [mayaServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Installer tous les bridges" (2026-10-09), same endpoint as the Settings button.
+  const [installingAll, setInstallingAll] = useState(false)
+  const handleInstallAllBridges = async () => {
+    setInstallingAll(true)
+    try {
+      const { results } = await api.installAllBridges()
+      const count = (s: string) => results.filter(r => r.status === s).length
+      const summary = t('settings.bridges.summary', { ok: count('ok'), skip: count('skip'), error: count('error') })
+      if (count('error')) toast.error(summary)
+      else toast.success(summary)
+      window.dispatchEvent(new CustomEvent('flux:bridges-changed'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setInstallingAll(false)
+    }
+  }
 
   const handleAutoFindAll = async () => {
     setFindingAll(true)
@@ -653,6 +692,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       <Menu.Item className="launcher-menu-item" disabled={findingAll} onSelect={() => void handleAutoFindAll()}>
         <Search size={13} />Auto-détecter les chemins
       </Menu.Item>
+      <Menu.Item className="launcher-menu-item" disabled={installingAll} onSelect={() => void handleInstallAllBridges()}>
+        <Plug size={13} />{installingAll ? 'Installation des bridges…' : 'Installer tous les bridges'}
+      </Menu.Item>
       <Menu.Separator className="launcher-menu-separator" />
       <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
     </>
@@ -680,10 +722,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       <NavGroup title="PIPELINE">
         <div className="production-nav-row">
           <NavItem icon={ClipboardList} label={t('nav.production')} active={pathname === '/production'} indent route="/production" onClick={() => { setProductionExpanded(v => !v); if (pathname !== '/production') { openingProduction.current = true; navigate('/production') } }} />
-          <button className="production-nav-control" aria-label="Maintenir le menu Production ouvert" aria-pressed={productionPinned} onClick={() => { setProductionPinned(v => !v); setProductionExpanded(!productionPinned) }}><PanelLeft size={12} /></button>
-          <button className="production-nav-control" aria-label={productionExpanded ? 'Replier Production' : 'Déplier Production'} aria-expanded={productionExpanded} onClick={() => setProductionExpanded(v => !v)}>{productionExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
+          <button className="production-nav-pin" aria-label={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} title={productionPinned ? t('nav.production.unpin') : t('nav.production.pin')} aria-pressed={productionPinned} onClick={() => { if (productionPinned && pathname !== '/production') setProductionExpanded(false); toggleProductionPinned() }}><Pin size={13} strokeWidth={1.75} fill={productionPinned ? 'currentColor' : 'none'} style={{ transform: 'rotate(45deg)' }} /></button>
         </div>
-        {productionExpanded && <div className="production-nav-children" aria-label="Modes de production">{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => { if (!productionPinned) setProductionExpanded(false); navigate(`/production?mode=${mode}`) }}>{mode === 'asset' ? 'Assets' : 'Shots'}</button>)}</div>}
+        {(productionPinned || productionExpanded) && <div className="production-nav-children" aria-label={t('nav.production.modes')}>{(['asset', 'shot'] as const).map(mode => <button key={mode} className={`nav production-mode${pathname === '/production' && productionMode === mode ? ' active' : ''}`} style={{ paddingLeft: 14, width: '100%', border: 0, textAlign: 'left' }} onClick={() => navigate(`/production?mode=${mode}`)}>{t(mode === 'asset' ? 'prod.mode.asset' : 'prod.mode.shot')}</button>)}</div>}
         <NavItem icon={FolderOpen} label={t('nav.folderManager')} active={pathname === '/projects'}  indent route="/projects" onClick={() => navigate('/projects')} />
         <NavItem icon={CalendarDays}   label={t('nav.calendar')}       active={pathname === '/calendar'}  indent route="/calendar" onClick={() => navigate('/calendar')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
@@ -768,7 +809,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
               width: 184, zIndex: 61, background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
               borderRadius: 8, boxShadow: 'var(--shadow-md)', padding: 5,
             }}>
-              <div style={{ padding: '4px 9px 6px', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+              <div style={{ padding: '4px 9px 6px', fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
                 Instance · {instMenu.name}
               </div>
               {insts.map((inst) => {
@@ -788,15 +829,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
                     onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--accent-soft)' }}
                     onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
                   >
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--accent-hi)', flexShrink: 0 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--accent-hi)', flexShrink: 0 }}>
                       {inst.port}
                     </span>
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {inst.scene != null ? inst.label : inst.pid ? `pid ${inst.pid}` : inst.label}
-                      {inst.version && <span style={{ color: 'var(--ink-4)', fontSize: 9 }}> · {inst.version}</span>}
+                      {inst.version && <span style={{ color: 'var(--ink-4)', fontSize: 10.5 }}> · {inst.version}</span>}
                     </span>
                     {inst.state === 'busy' && (
-                      <span title="Occupé : un export tourne" style={{ fontSize: 8, color: 'var(--warn)', flexShrink: 0 }}>occupé</span>
+                      <span title="Occupé : un export tourne" style={{ fontSize: 10, color: 'var(--warn)', flexShrink: 0 }}>occupé</span>
                     )}
                     {active && <Check size={11} strokeWidth={2.5} color="var(--accent-hi)" style={{ flexShrink: 0 }} />}
                     <span

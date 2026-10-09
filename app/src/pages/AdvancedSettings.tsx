@@ -178,7 +178,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
         <Workflow size={14} strokeWidth={1.75} color="var(--ink-3)" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: 'var(--ink)' }}>Graph YAML</div>
-          <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1 }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
             Node flow des actions (publish...), en lecture seule : le YAML reste la source.
           </div>
         </div>
@@ -200,8 +200,8 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
             <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--rule)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--ink)' }}>{meta.label}</div>
-                <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1 }}>
-                  {meta.help} <span style={{ ...mono, fontSize: 9 }}>{sw.env}</span> · {SOURCE_LABEL[sw.source] ?? sw.source}
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
+                  {meta.help} <span style={{ ...mono, fontSize: 10.5 }}>{sw.env}</span> · {SOURCE_LABEL[sw.source] ?? sw.source}
                 </div>
               </div>
               {isBool ? (

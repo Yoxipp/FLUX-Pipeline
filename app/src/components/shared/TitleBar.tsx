@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, RefreshCw, ChevronsRight, Pin } from 'lucide-react'
+import { Bell, Settings2, ChevronDown, X, Minus, Maximize2, RefreshCw, Pin } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Avatar } from './ui'
 import { FluxLogo } from './Logo'
 import { Console } from './Console'
+import { SlideToConfirm } from './SlideToConfirm'
 import { useI18n } from '../../i18n'
 
 interface Props {
@@ -25,7 +26,7 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
       onMouseLeave={() => setHov(false)}
       style={{
         width: 13, height: 13, borderRadius: '50%',
-        background: hov ? hoverBg : 'var(--ink-4)',
+        background: hov ? hoverBg : 'var(--rule-3)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'default', flexShrink: 0,
         transition: 'background 0.12s',
@@ -39,61 +40,6 @@ function WinBtn({ hoverBg, icon: Icon, action }: {
 
 const IS_DETACHED_WINDOW = new URLSearchParams(window.location.search).get('detached') === '1'
 
-/* ── slide-to-confirm quit ── */
-function SlideToConfirm({ onConfirm }: { onConfirm: () => void }) {
-  const { t } = useI18n()
-  const trackW = 300
-  const handleW = 50
-  const maxX = trackW - handleW - 6
-  const [x, setX] = useState(0)
-  const [done, setDone] = useState(false)
-
-  const startDrag = (e: React.MouseEvent) => {
-    e.preventDefault()
-    const origin = e.clientX - x
-    const move = (ev: MouseEvent) => setX(Math.min(Math.max(ev.clientX - origin, 0), maxX))
-    const up = (ev: MouseEvent) => {
-      document.removeEventListener('mousemove', move)
-      document.removeEventListener('mouseup', up)
-      const nx = Math.min(Math.max(ev.clientX - origin, 0), maxX)
-      if (nx >= maxX - 4) { setX(maxX); setDone(true); setTimeout(onConfirm, 120) }
-      else setX(0)
-    }
-    document.addEventListener('mousemove', move)
-    document.addEventListener('mouseup', up)
-  }
-
-  const pct = maxX > 0 ? x / maxX : 0
-  return (
-    <div style={{
-      position: 'relative', width: trackW, height: 50, borderRadius: 25,
-      background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-      boxShadow: 'var(--shadow-inset)', overflow: 'hidden', userSelect: 'none',
-    }}>
-      <div style={{
-        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 12, color: 'var(--ink-4)', opacity: 1 - pct, pointerEvents: 'none',
-      }}>
-        {t('titlebar.slideToClose')}
-      </div>
-      <div style={{
-        position: 'absolute', top: 0, bottom: 0, left: 0, width: x + handleW,
-        background: 'var(--accent-soft)', borderRadius: 25, transition: done ? 'width 0.12s' : 'none',
-      }} />
-      <div
-        onMouseDown={startDrag}
-        style={{
-          position: 'absolute', top: 3, left: x + 3, width: handleW - 6, height: 44,
-          borderRadius: '50%', background: 'var(--accent)', cursor: 'grab',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: 'var(--shadow-sm)', transition: x === 0 && !done ? 'left 0.12s' : 'none',
-        }}
-      >
-        <ChevronsRight size={18} strokeWidth={2.5} color="var(--accent-hi)" />
-      </div>
-    </div>
-  )
-}
 
 export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const [settingsHov,  setSettingsHov]  = useState(false)
@@ -149,7 +95,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
         <span
           className="no-drag"
           style={{
-            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)',
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent-hi)',
             whiteSpace: 'nowrap', animation: 'fadeIn 0.15s ease-out',
           }}
         >
@@ -224,7 +170,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
             position: 'absolute', top: 2, right: 2,
             minWidth: 14, height: 14, padding: '0 3px',
             background: 'var(--accent-soft)', border: '1px solid var(--accent)',
-            borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 8,
+            borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 10,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'var(--accent-hi)', fontWeight: 600,
             boxShadow: 'var(--shadow-xs)', pointerEvents: 'none',
@@ -301,7 +247,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
             <div style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'center', maxWidth: 300, lineHeight: 1.5 }}>
               {t('titlebar.closeHint')}
             </div>
-            <SlideToConfirm onConfirm={() => window.electronAPI?.windowClose()} />
+            <SlideToConfirm label={t('titlebar.slideToClose')} onConfirm={() => { window.electronAPI?.windowClose() }} />
             <div
               onClick={() => setConfirmClose(false)}
               style={{ fontSize: 11, color: 'var(--ink-4)', cursor: 'pointer', padding: '4px 8px' }}

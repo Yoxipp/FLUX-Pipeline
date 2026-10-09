@@ -143,9 +143,19 @@ def _link_name(production: dict, link: dict) -> tuple[str, str] | None:
     return ("", ref) if ref else None
 
 
+def link_version(link: dict) -> str:
+    """Pinned version of a casting link (ADR 0048): ``"vNNN"``, or ``""`` (follows LAST)."""
+    raw = str(link.get("version") or "").strip()
+    m = re.fullmatch(r"[vV](\d+)", raw)
+    return f"v{m.group(1)}" if m else ""
+
+
 def read_casting(production: dict, seq: str, shot: str) -> list[dict]:
     """Casting of a shot (ADR 0020 point 1): the sequence links (when the shot inherits)
-    plus the shot's own, merged by asset. ``[{"class", "name", "count", "source"}]``."""
+    plus the shot's own, merged by asset. ``[{"class", "name", "count", "source", "version"}]``.
+
+    ``version`` (ADR 0048): ``""`` follows LAST, ``"vNNN"`` pins it. A shot link that pins
+    wins over the sequence's pin; a link without pin (old links, auto-cast) changes nothing."""
     seq_entry = _find_seq(production, seq)
     shot_entry = _find_shot(production, seq_entry, shot)
     links: list[tuple[dict, str]] = []
@@ -160,12 +170,16 @@ def read_casting(production: dict, seq: str, shot: str) -> list[dict]:
             continue
         cls, name = named
         count = max(1, int(link.get("count") or 1))
+        version = link_version(link)
         item = out.get(name.upper())
         if item is None:
             out[name.upper()] = {"class": cls.upper(), "name": name.upper(), "count": count,
-                                 "source": source}
+                                 "source": source, "version": version}
         else:
             item["count"] = max(item["count"], count)
+            # Links come sequence first, then shot: a later pin is the shot's, it wins.
+            if version and (not item["version"] or source == "shot"):
+                item["version"] = version
     return list(out.values())
 
 
@@ -290,24 +304,45 @@ def _project_units(project: Path) -> dict:
 
 # ── plan ─────────────────────────────────────────────────────────────────────
 
-def _asset_target(project: Path, name: str) -> tuple[str, Path] | None:
-    """("component" | "assembly", LAST entry) of an asset's USD, or None."""
-    from .assembly_v2 import _entry_in, _kind_of
+def asset_versions(project: Path, name: str) -> list[str]:
+    """Published versions ``vNNN`` of an asset's USD entry (component or assembly), oldest first."""
+    from .assembly_v2 import assembly_versions
+
+    parent = component_dir(project, name)
+    return assembly_versions(parent, name) if parent is not None else []
+
+
+def _asset_target(project: Path, name: str, version: str = "",
+                  warnings: list[str] | None = None) -> tuple[str, Path, str] | None:
+    """("component" | "assembly", entry, pinned version) of an asset's USD, or None.
+
+    Without *version* the entry is ``<NAME>_LAST.usda`` (pinned ""). With ``"vNNN"``
+    (ADR 0048) it is ``<NAME>_vNNN/<NAME>.usda``; a version not found falls back on LAST
+    with a warning."""
+    from .assembly_v2 import _entry_in, _kind_of, _version_entry
 
     parent = component_dir(project, name)
     if parent is None:
         return None
     last = parent / f"{name}_LAST{COMPONENT_EXT}"
+    if version:
+        # Match by number: "v3" and "v003" are the same version, the folder name is the truth.
+        found = next((v for v in asset_versions(project, name) if int(v[1:]) == int(version[1:])), None)
+        if found is not None:
+            entry = _version_entry(parent, name, found)
+            return (_kind_of(entry) or "component"), entry, found
+        if warnings is not None:
+            warnings.append(f"{name} : version epinglee {version} introuvable, suit LAST")
     if not last.is_file():
         return None
     kind = _kind_of(_entry_in(parent, name)) or "component"
-    return kind, last
+    return kind, last, ""
 
 
 def collect(project_path: str | Path, seq: str, shot: str, production: dict) -> dict:
     """What the shot stage holds, without writing anything.
 
-    {"casting": [{"class", "name", "prim", "kind", "path"}], "departments": [{"task",
+    {"casting": [{"class", "name", "prim", "kind", "path", "version"}], "departments": [{"task",
     "department", "files"}], "anims": [{"character", "instance", "prim", "path"}],
     "range", "fps", "units", "auto_cast": [(class, name, count)], "warnings"}
     """
@@ -348,20 +383,22 @@ def collect(project_path: str | Path, seq: str, shot: str, production: dict) -> 
 
     casting: list[dict] = []
     for c in cast:
-        target = _asset_target(project, c["name"])
+        target = _asset_target(project, c["name"], c.get("version") or "", warnings)
         if target is None:
             warnings.append(f"{c['name']} : pas d'USD d'asset (component) publie, ignore")
             continue
-        kind, path = target
+        kind, path, version = target
         if kind == "assembly":
             casting.append({"class": c["class"], "name": c["name"], "kind": kind,
-                            "prim": f"/{SETS_ROOT}/{sanitize_token(c['name'])}", "path": path})
+                            "prim": f"/{SETS_ROOT}/{sanitize_token(c['name'])}", "path": path,
+                            "version": version})
             continue
         cls = sanitize_token(c["class"]) or DEFAULT_CLASS
+        # Every _NN instance of an asset shares the pinned version (ADR 0048).
         for n in range(1, c["count"] + 1):
             casting.append({"class": cls, "name": c["name"], "kind": kind,
                             "prim": f"/{ASSETS_ROOT}/{cls}/{sanitize_token(c['name'])}_{n:02d}",
-                            "path": path})
+                            "path": path, "version": version})
 
     anim_items: list[dict] = []
     by_inst: dict[str, dict] = {}
@@ -521,6 +558,9 @@ def _author(folder: Path, project: Path, seq: str, shot: str, version: str, plan
         prim = Sdf.PrimSpec(parent, parts[-1], Sdf.SpecifierDef)
         prim.kind = "component" if c["kind"] == "component" else "assembly"
         prim.referenceList.prependedItems = [Sdf.Reference(rel(c["path"]))]
+        if c.get("version"):
+            # Readable trace of the pin (ADR 0048); the reference path is what composes.
+            prim.SetInfo("customData", {"flux": {"pinned_version": c["version"]}})
     casting.Save()
 
     # 2. animation: each character's motion referenced onto its casting prim.
@@ -724,6 +764,13 @@ def shot_summary(project_path: str | Path, seq: str, shot: str, production: dict
     state = "none" if not versions else ("frozen" if frozen else
                                          ("up_to_date" if latest == current else "outdated"))
     legacy = parent / f"{name}{STAGE_EXT}"
+    newest: dict[str, str] = {}
+
+    def _newest(asset: str) -> str:
+        if asset not in newest:
+            newest[asset] = (asset_versions(project, asset) or [""])[-1]
+        return newest[asset]
+
     return {
         "seq": seq, "shot": shot, "entity": name, "state": state,
         "versions": versions,
@@ -732,7 +779,11 @@ def shot_summary(project_path: str | Path, seq: str, shot: str, production: dict
         # Project-relative (forward slashes): what "Ouvrir dans Houdini" sends to the importer.
         "rel_last": last.relative_to(project).as_posix() if last.is_file() else None,
         "legacy": str(legacy) if legacy.is_file() else None,
-        "casting": [{"prim": c["prim"], "name": c["name"], "kind": c["kind"]} for c in plan["casting"]],
+        # version: pinned "vNNN" or "" (LAST); latest_version: newest published (ADR 0048).
+        "casting": [{"prim": c["prim"], "name": c["name"], "kind": c["kind"],
+                     "version": c.get("version") or "",
+                     "latest_version": _newest(c["name"])}
+                    for c in plan["casting"]],
         "anims": [{"instance": a["instance"], "character": a["character"], "prim": a["prim"],
                    "range": list(a["range"]) if a["range"] else None} for a in plan["anims"]],
         "departments": [{"department": d["department"], "task": d["task"],

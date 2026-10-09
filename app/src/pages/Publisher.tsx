@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw } from 'lucide-react'
+import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw, Archive } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { ExpandPicker } from '../components/shared/ExpandPicker'
 import { ConnectionPill } from '../components/shared/ConnectionPill'
@@ -110,7 +110,7 @@ function CopyBlock({ text }: { text: string }) {
       }}
       title="Cliquer pour copier"
       style={{
-        fontFamily: 'var(--mono)', fontSize: 8,
+        fontFamily: 'var(--code)', fontSize: 10,
         color: copied ? 'var(--ok)' : 'var(--accent-hi)',
         background: 'var(--bg-deep)', border: `1px solid ${copied ? 'var(--ok)' : 'var(--rule-2)'}`,
         borderRadius: 4, padding: '5px 8px', cursor: 'pointer',
@@ -131,7 +131,7 @@ function MayaStep({ n, done, title, desc }: { n: number; done: boolean; title: s
         width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: done ? 'var(--ok)' : 'var(--accent)', color: 'white',
-        fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 700,
+        fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 700,
       }}>{done ? '✓' : n}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
         <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{title}</span>
@@ -151,16 +151,27 @@ function formatToken(raw: string): string {
     .replace(/^_|_$/g, '')
 }
 
-function formatSeqLabel(raw: string): string {
-  const n = parseInt(raw.replace(/[^0-9]/g, ''), 10)
-  if (isNaN(n)) return raw.toUpperCase()
-  return `SEQ${String(n).padStart(3, '0')}`
+// SEQ / SHOT label from what the artist typed. One source of truth: an existing label
+// (from the project's tokens) is kept as is, also when matched by number (old SEQ010 for
+// "10"); a new one is padded like the backend creates it (SEQ_SHOT_PADDING, default 4).
+const DEFAULT_SEQ_SHOT_PADDING = 4
+function formatSeqShotLabel(prefix: string, raw: string, known: string[], pad: number): string {
+  const typed = raw.trim().toUpperCase()
+  const exact = known.find(k => k.toUpperCase() === typed)
+  if (exact) return exact
+  const n = parseInt(typed.replace(/[^0-9]/g, ''), 10)
+  if (isNaN(n)) return typed
+  const sameNumber = known.find(k => k.toUpperCase().startsWith(prefix) && parseInt(k.slice(prefix.length), 10) === n)
+  if (sameNumber) return sameNumber
+  return `${prefix}${String(n).padStart(pad, '0')}`
 }
 
-function formatShotLabel(raw: string): string {
-  const n = parseInt(raw.replace(/[^0-9]/g, ''), 10)
-  if (isNaN(n)) return raw.toUpperCase()
-  return `SHOT${String(n).padStart(3, '0')}`
+function formatSeqLabel(raw: string, known: string[] = [], pad = DEFAULT_SEQ_SHOT_PADDING): string {
+  return formatSeqShotLabel('SEQ', raw, known, pad)
+}
+
+function formatShotLabel(raw: string, known: string[] = [], pad = DEFAULT_SEQ_SHOT_PADDING): string {
+  return formatSeqShotLabel('SHOT', raw, known, pad)
 }
 
 // Houdini ROP node type → export extension.
@@ -333,9 +344,10 @@ function presetEntries(table: Record<string, UsdTaskContribution>): [string, Usd
 }
 
 // Shot tasks the Publisher offers (2026-09-26): anim, camera (LAYOUT carries the
-// shot camera, shot_stage), FX and light; COMP only from Nuke. No rig / model in a shot.
+// shot camera, shot_stage), FX, light and render (frames, render/{seq}/{shot},
+// 2026-10-09); COMP only from Nuke. No rig / model in a shot.
 function shotTasksFor(dcc: string): string[] {
-  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT']
+  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT', 'RENDER']
   return dcc === 'Nuke' ? [...base, 'COMP'] : base
 }
 
@@ -383,7 +395,7 @@ const TOKEN_INFO: Record<string, TokenInfo> = {
   variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
   seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ#### (de 10 en 10)', example: 'SEQ0010' },
   shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT#### (de 10 en 10, 0015 pour intercaler)', example: 'SHOT0010' },
-  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT (COMP depuis Nuke)', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
+  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT, RENDER (COMP depuis Nuke)', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
   shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
   shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ0010_SHOT0010_ANIM_block_LAST' },
 }
@@ -419,6 +431,23 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
   const q = value.trim().toLowerCase()
   const shown = fixed ? options : (q ? options.filter(o => o.toLowerCase().includes(q)) : options)
   const filled = !!value
+  // Empties the field only (2026-10-09): nothing is deleted on disk or in Production,
+  // another value can then be picked. Archiving a token stays in the dropdown rows.
+  const clearBtn = filled && (
+    <button
+      title="Vider le champ"
+      aria-label="Vider le champ"
+      onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
+      onClick={e => { e.stopPropagation(); onChange(''); setOpen(false) }}
+      style={{
+        flexShrink: 0, width: 16, height: 16, borderRadius: 3, border: 'none', padding: 0,
+        background: 'transparent', color: 'var(--ink-4)', cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.color = 'var(--ink)')}
+      onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
+    ><X size={11} strokeWidth={2} /></button>
+  )
   return (
     <div style={{ flex: '1 1 96px', minWidth: 96 }} title={tokenTip(info)}>
       <div ref={ref} style={{ position: 'relative' }}>
@@ -427,31 +456,37 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
             onClick={() => setOpen(o => !o)}
             className="scale-hover"
             style={{
-              height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', cursor: 'pointer',
+              height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
               borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
               background: filled ? 'var(--accent-soft)' : 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
-              fontFamily: filled ? 'var(--mono)' : 'var(--sans)', fontSize: filled ? 10 : 11,
+              fontFamily: filled ? 'var(--mono)' : 'var(--sans)', fontSize: 11,
               color: filled ? 'var(--accent-hi)' : 'var(--ink-4)', fontStyle: filled ? 'normal' : 'italic',
               fontWeight: filled ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}
           >
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || label}</span>
+            {clearBtn}
             <ChevronDown size={11} strokeWidth={2} style={{ flexShrink: 0, opacity: 0.6 }} />
           </div>
         ) : (
+          <>
           <input
             value={value}
             placeholder={label}
             onChange={e => { onChange(e.target.value); setOpen(true) }}
             onFocus={() => setOpen(true)}
             style={{
-              width: '100%', height: 28, padding: '0 8px', boxSizing: 'border-box',
+              width: '100%', height: 28, padding: filled ? '0 24px 0 8px' : '0 8px', boxSizing: 'border-box',
               borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
               background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', outline: 'none',
-              fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
+              fontFamily: 'var(--mono)', fontSize: 11, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
               fontWeight: filled ? 600 : 400,
             }}
           />
+          {clearBtn && (
+            <span style={{ position: 'absolute', right: 6, top: 6, display: 'inline-flex' }}>{clearBtn}</span>
+          )}
+          </>
         )}
         {open && shown.length > 0 && (
           <div style={{
@@ -464,7 +499,7 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
                 key={o}
                 onMouseDown={e => { e.preventDefault(); onChange(o); setOpen(false) }}
                 style={{
-                  padding: '5px 8px', fontSize: 10, fontFamily: 'var(--mono)', cursor: 'pointer', whiteSpace: 'nowrap',
+                  padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)', cursor: 'pointer', whiteSpace: 'nowrap',
                   color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)',
                   background: o === value ? 'var(--accent-soft)' : 'transparent',
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -473,7 +508,8 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o}</span>
                 {onArchiveOption && (
                   <button
-                    title="Archiver ce token (déplace le dossier vers ARCHIVE/)"
+                    title="Archiver ce token (déplace son dossier vers ARCHIVE/, après confirmation). Pour seulement vider le champ, utilise la croix du champ."
+                    aria-label="Archiver ce token"
                     onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setOpen(false); onArchiveOption(o) }}
                     style={{
                       flexShrink: 0, width: 15, height: 15, borderRadius: 3, border: 'none',
@@ -482,7 +518,7 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
                     }}
                     onMouseEnter={e => (e.currentTarget.style.color = 'var(--err)')}
                     onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
-                  ><X size={10} strokeWidth={2} /></button>
+                  ><Archive size={10} strokeWidth={2} /></button>
                 )}
               </div>
             ))}
@@ -641,6 +677,10 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   const [sel, setSel]         = useSessionState<ComposerSel>(PUB + 'sel', EMPTY_SEL)
   const [seqs, setSeqs]   = useState<string[]>([])
   const [shots, setShots] = useState<string[]>([])
+  // Padding of new SEQ/SHOT labels, exposed by GET .../sequences (backend SEQ_SHOT_PADDING).
+  const [seqPad, setSeqPad] = useState(DEFAULT_SEQ_SHOT_PADDING)
+  const seqLabelOf  = useCallback((raw: string) => formatSeqLabel(raw, seqs, seqPad), [seqs, seqPad])
+  const shotLabelOf = useCallback((raw: string) => formatShotLabel(raw, shots, seqPad), [shots, seqPad])
 
   // Export config (shared for all DCCs)
   const [exportExt, setExportExt]   = useSessionState(PUB + 'exportExt', '.abc')
@@ -920,7 +960,9 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   // Sequences (shot mode)
   useEffect(() => {
     if (!project || mode !== 'shot') { setSeqs([]); return }
-    api.getSequences(project).then(d => setSeqs(d.sequences)).catch(() => setSeqs([]))
+    api.getSequences(project)
+      .then(d => { setSeqs(d.sequences); if (d.padding && d.padding > 0) setSeqPad(d.padding) })
+      .catch(() => setSeqs([]))
   }, [project, mode])
 
   // Shots for selected SEQ
@@ -1131,19 +1173,19 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     }
     const varr = formatToken(sel.variante) || 'null'
     // ADR 0019: SEQ_SHOT_TASK[_VARIANTE] — the department sits where an asset has its TYPE.
-    return `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${varr}`
-  }, [mode, sel])
+    return `${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${formatToken(sel.name)}_${varr}`
+  }, [mode, sel, seqLabelOf, shotLabelOf])
 
   // ── Token / folder pre-creation before publish ─────────────────────────────
 
   const createNewTokens = useCallback(async () => {
     if (mode === 'shot') {
-      const seqLabel = formatSeqLabel(sel.seq)
+      const seqLabel = seqLabelOf(sel.seq)
       const seqNum   = parseInt(seqLabel.replace(/[^0-9]/g, ''), 10)
       if (!isNaN(seqNum) && !seqs.includes(seqLabel)) {
         try { await api.createSequence(project, seqNum); const d = await api.getSequences(project); setSeqs(d.sequences) } catch { /* may exist */ }
       }
-      const shotLabel = formatShotLabel(sel.shot)
+      const shotLabel = shotLabelOf(sel.shot)
       const shotNum   = parseInt(shotLabel.replace(/[^0-9]/g, ''), 10)
       if (!isNaN(seqNum) && !isNaN(shotNum) && !shots.includes(shotLabel)) {
         try { await api.createShot(project, seqNum, shotNum); const d = await api.getShots(project, seqLabel); setShots(d.shots.map(s => s.split('/')[1] ?? s)) } catch { /* may exist */ }
@@ -1156,7 +1198,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     if (name && cls) {
       try { await api.createAsset(project, cls, name) } catch { /* may already exist */ }
     }
-  }, [mode, project, sel, seqs, shots])
+  }, [mode, project, sel, seqs, shots, seqLabelOf, shotLabelOf])
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
@@ -1315,7 +1357,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             const charName = characterBase(assetName)
             for (const it of picked) {
               const token = it.instance === 1 ? charName : `${charName}_${String(it.instance).padStart(2, '0')}`
-              const fn = `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${token}`
+              const fn = `${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${formatToken(sel.name)}_${token}`
               try {
                 const r = await api.exportMayaLightUsd({
                   project_name: project, asset: charName, filename: fn, root: it.node,
@@ -1613,24 +1655,25 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             const varr = formatToken(sel.variante)
             return `${cls}_${sel.task}_${formatToken(sel.name)}_${inst}_${distinct}` + (varr ? `_${varr}` : '')
           }
-          return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
+          return `${formatToken(sel.name)}_${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${distinct}`
         }
         // Publish one file; ok + what the publish also wrote (.tx, USD proxy).
-        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean }> => {
+        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean; message: string }> => {
           const r = await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
                    target_name: target })
-          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path }
+          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path, message: r.message }
         }
         let okCount = 0, txCount = 0, proxyCount = 0
+        // Each failure keeps the backend's reason (unknown task token, missing file...).
         const failed: string[] = []
         for (const f of files) {
           try {
             const r = await publishOne(f, targetFor(f))
             if (r.ok) { okCount++; txCount += r.tx; if (r.proxy) proxyCount++ }
-            else failed.push(fileStem(f))
-          } catch {
-            failed.push(fileStem(f))
+            else failed.push(`${fileStem(f)} : ${r.message || 'raison inconnue'}`)
+          } catch (e) {
+            failed.push(`${fileStem(f)} : ${e instanceof Error ? e.message : String(e)}`)
           }
         }
         if (okCount) {
@@ -1642,7 +1685,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
               : `Publié → ${dcc}${extras}`,
           )
         }
-        if (failed.length && !okCount) toast.error(`Échec : ${failed.join(', ')}`)
+        if (failed.length) toast.error(`Échec : ${failed.join(' · ')}`)
       } else {
         toast.error(`Publication depuis ${dcc} non encore disponible`)
         return
@@ -1661,6 +1704,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
     mapRows, mapChecked, mapOpts, painterChannels, channelRows,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, usdPreset, usdPresetOpts, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
+    seqLabelOf, shotLabelOf,
   ])
 
   // The app a texture list belongs to: a slow answer (Mari busy exporting) that lands
@@ -1800,13 +1844,13 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
               display: 'flex', flexDirection: 'column', gap: 5,
             }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--ink-4)' }} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--rule-3)' }} />
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{scene}</span>
-              <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', flexShrink: 0 }}>:{it.port}</span>
+              <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', flexShrink: 0 }}>:{it.port}</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {sel.length === 0 && (
-                <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>{dcc === 'Houdini' ? 'aucun node sélectionné' : 'rien de sélectionné'}</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{dcc === 'Houdini' ? 'aucun node sélectionné' : 'rien de sélectionné'}</span>
               )}
               {sel.slice(0, 12).map(n => {
                 const picked = on && (dcc === 'Houdini' ? ropNodePath === n : mayaScope === 'selection')
@@ -1814,7 +1858,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   <span key={n} title={n}
                     onClick={e => { e.stopPropagation(); chooseInstance(it.port, dcc === 'Houdini' ? n : undefined, dcc === 'Maya' ? 'selection' : undefined) }}
                     style={{
-                      fontSize: 10, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
+                      fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       border: '1px solid ' + (picked ? 'var(--accent)' : 'var(--rule-2)'),
                       background: picked ? 'var(--accent-soft)' : 'var(--paper-2)',
@@ -1822,7 +1866,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     }}>{dcc === 'Houdini' ? n.split('/').filter(Boolean).slice(-2).join('/') : n.split('|').pop()}</span>
                 )
               })}
-              {sel.length > 12 && <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>+{sel.length - 12}</span>}
+              {sel.length > 12 && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>+{sel.length - 12}</span>}
             </div>
           </div>
         )
@@ -2032,12 +2076,12 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                     borderRadius: 6, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
                 {detectedNodeType && !resolveNodeExt(detectedNodeType) && (
-                  <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                  <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
                     type non reconnu : {detectedNodeType}
                   </div>
                 )}
@@ -2054,7 +2098,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                       flex: 1, minWidth: 0, height: 28,
                       background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                       borderRadius: 5, padding: '0 8px',
-                      fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
+                      fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)',
                       boxShadow: 'var(--shadow-inset)', outline: 'none',
                     }}
                   />
@@ -2077,7 +2121,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                       display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
                       height: 28, padding: '0 10px', borderRadius: 5,
                       border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 10,
+                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 11,
                       boxShadow: 'var(--shadow-xs)',
                     }}
                   >
@@ -2102,7 +2146,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                       display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
                       height: 28, padding: '0 10px', borderRadius: 5,
                       border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 10,
+                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 11,
                       boxShadow: 'var(--shadow-xs)',
                     }}
                   >
@@ -2119,13 +2163,13 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span className="cap">{localFiles.length} FICHIERS</span>
                       <span style={{ flex: 1 }} />
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 10, color: 'var(--ink-2)' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, color: 'var(--ink-2)' }}>
                         <input type="checkbox" checked={autoGroup} onChange={e => setAutoGroup(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
                         Autogroup par map
                       </label>
                       <span
                         onClick={() => { setLocalFiles([]); setSourcePath('') }}
-                        style={{ color: 'var(--accent-hi)', cursor: 'pointer', fontSize: 10 }}
+                        style={{ color: 'var(--accent-hi)', cursor: 'pointer', fontSize: 11 }}
                       >Vider</span>
                     </div>
                     <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -2133,9 +2177,9 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                         const distinct = (mode === 'asset' && autoGroup) ? mapSuffix(f) : formatToken(fileStem(f))
                         const instLabel = mode === 'asset'
                           ? (formatToken(sel.instance) || 'null')
-                          : `${formatSeqLabel(sel.seq)}/${formatShotLabel(sel.shot)}`
+                          : `${seqLabelOf(sel.seq)}/${shotLabelOf(sel.shot)}`
                         return (
-                          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileStem(f)}</span>
                             <span style={{ color: 'var(--accent-hi)', flexShrink: 0 }}>→ {instLabel} · {distinct}</span>
                           </div>
@@ -2159,7 +2203,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                         flex: 1, minWidth: 0, height: 28,
                         background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                         borderRadius: 6, padding: '0 8px',
-                        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                         boxShadow: 'var(--shadow-inset)', outline: 'none',
                       }}
                     />
@@ -2288,7 +2332,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {fields.map(([lbl, val, set]) => (
                       <div key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
                         <input type="number" value={val} onChange={e => { set(Number(e.target.value)); setRangeInfo('') }} style={{
                           width: 56, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                           borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
@@ -2298,7 +2342,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     ))}
                     {animCapable && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-                        <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>&nbsp;</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>&nbsp;</div>
                         <Btn ghost style={{ height: 26, gap: 5 }} onClick={() => { void fetchAnimRange() }}>
                           <RefreshCw size={11} strokeWidth={2} />
                           Clés
@@ -2308,7 +2352,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   </div>
                 )}
                 {on && animCapable && rangeInfo && (
-                  <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 6 }}>{rangeInfo}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 6 }}>{rangeInfo}</div>
                 )}
               </div>
             )
@@ -2325,7 +2369,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     <RefreshCw size={11} strokeWidth={2} />
                     {charLoading ? 'Lecture…' : `Relire ${charName}`}
                   </Btn>
-                  <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0 }}>
                     {charInstances.length
                       ? `${charChecked.size} / ${charInstances.length} coché(s) · une anim par instance`
                       : 'Sans liste : une seule anim (scope ci-dessous)'}
@@ -2460,7 +2504,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   <>
                     <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set(texItems.map(t => t.name)))}>Tout</Btn>
                     <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set())}>Aucun</Btn>
-                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{texChecked.size} / {texItems.length}</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{texChecked.size} / {texItems.length}</span>
                   </>
                 )}
               </div>
@@ -2509,11 +2553,11 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   {bundledPresets.map(n => (
                     <Pill key={n} active={projectPresets.includes(n)} onClick={() => toggleProjectPreset(n)} style={{ cursor: 'pointer' }}>{n}</Pill>
                   ))}
-                  {projectPresets.length === 0 && <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>aucun : tous les presets de Painter</span>}
+                  {projectPresets.length === 0 && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>aucun : tous les presets de Painter</span>}
                 </div>
               )}
               {missingPresets.length > 0 && (
-                <div style={{ fontSize: 10, color: 'var(--warn)', marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--warn)', marginBottom: 8 }}>
                   Preset du projet absent de Painter : {missingPresets.join(', ')}. Réinstalle le bridge Painter
                   (bouton Plug) puis relance Painter.
                 </div>
@@ -2524,7 +2568,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
                     <Select value={curPreset ? (curPreset.url || curPreset.name) : undefined}
                       onValueChange={v => setPainterOpts(prev => ({ ...prev, preset: v }))}>
-                      <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 260, fontSize: 10 }} />
+                      <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 260, fontSize: 11 }} />
                       <SelectContent>
                         {offeredPresets.map(p => <SelectItem key={p.url || p.name} value={p.url || p.name}>{p.name}</SelectItem>)}
                       </SelectContent>
@@ -2582,17 +2626,17 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   <>
                     <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set(designerGraphs.map(g => g.key)))}>Tout</Btn>
                     <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set())}>Aucun</Btn>
-                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{graphChecked.size} / {designerGraphs.length}</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{graphChecked.size} / {designerGraphs.length}</span>
                   </>
                 )}
                 {dcc === 'Marvelous' && marvelousFormats.length > 0 && (
-                  <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
                     exports : {marvelousFormats.map(f => `.${f}`).join(' ')}
                   </span>
                 )}
               </div>
               {dcc === 'Marvelous' && marvelousFormats.length > 0 && !marvelousFormats.includes(exportExt.replace('.', '').replace(/^usd[ac]$/, 'usd')) && (
-                <div style={{ fontSize: 10, color: 'var(--warn, #e8912a)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--warn, #e8912a)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
                   {exportExt} absent de ce Marvelous : choisis un autre format
                 </div>
               )}
@@ -2634,7 +2678,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                       <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>{g.graph.id}</span>
                       <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev, ...keys]))}>Tout</Btn>
                       <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev].filter(k => !keys.includes(k))))}>Aucun</Btn>
-                      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{nOn} / {keys.length}</span>
+                      <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{nOn} / {keys.length}</span>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {g.graph.outputs.map(o => {
@@ -2678,7 +2722,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
               <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               {exportExt === '.zprj'
-                ? <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>Le projet Marvelous est publié tel quel (aucune option).</div>
+                ? <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>Le projet Marvelous est publié tel quel (aucune option).</div>
                 : <ExportOptions
                     schema={MARVELOUS_OPTIONS}
                     values={marvelousOpts}
@@ -2718,7 +2762,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     <Btn sm onClick={() => setHouAttrNames(prev => [...prev, ''])}>+ attribut</Btn>
                   </div>
                   {houAttrNames.length === 0 && (
-                    <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
+                    <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
                       {houAttrMode === 'keep' ? 'Aucun attribut listé (P toujours conservé)' : 'Aucun attribut à supprimer'}
                     </div>
                   )}
@@ -2734,7 +2778,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                       </div>
                     </div>
                   ))}
-                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+                  <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>
                     Attributs point uniquement (curveu, masks, boneCapture…). Renommage : bientôt.
                   </div>
                 </div>
@@ -2770,7 +2814,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                       transition: 'left 0.15s',
                     }} />
                   </div>
-                  <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
                     {on ? 'Écrit par FLUX (layers USD)' : `Écrit par ${dcc}`}
                   </span>
                   <Popover>
@@ -2826,7 +2870,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
 
       {/* Bottom bar: where it lands + actions */}
       <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-        <div title="Fichier publié" style={{ flex: 1, minWidth: 0, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div title="Fichier publié" style={{ flex: 1, minWidth: 0, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {dcc === 'Fichier local' && localFiles.length > 1
             ? `${localFiles.length} fichiers`
             : (seqCapable && isSequence) ? `${filename}_v001/${filename}_v001.$F4${exportExt}` : `${filename}_LAST${dcc === 'Fichier local' ? '' : exportExt}`}
@@ -2868,11 +2912,11 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scene}</div>
-                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       port {it.port}{it.scene ? ` · ${it.scene}` : ''}
                     </div>
                   </div>
-                  {active && <span style={{ fontSize: 10, color: 'var(--accent-hi)', flexShrink: 0 }}>actif</span>}
+                  {active && <span style={{ fontSize: 11, color: 'var(--accent-hi)', flexShrink: 0 }}>actif</span>}
                 </div>
               )
             })}
@@ -2904,7 +2948,7 @@ function PresetTreeNode({ node, depth }: { node: MayaUsdTreeNode; depth: number 
         style={{
           display: 'flex', alignItems: 'center', gap: 4, paddingLeft: depth * 12, minWidth: 0,
           cursor: has ? 'pointer' : 'default', lineHeight: '18px',
-          fontFamily: 'var(--mono)', fontSize: 10,
+          fontFamily: 'var(--mono)', fontSize: 11,
           color: node.type === 'joint' ? 'var(--ink-2)' : 'var(--ink-3)',
         }}
       >
@@ -2912,7 +2956,7 @@ function PresetTreeNode({ node, depth }: { node: MayaUsdTreeNode; depth: number 
           ? (open ? <ChevronDown size={11} strokeWidth={2} /> : <ChevronRight size={11} strokeWidth={2} />)
           : <span style={{ width: 11, flexShrink: 0 }} />}
         <span style={{
-          fontSize: 8, padding: '0 4px', borderRadius: 3, flexShrink: 0,
+          fontSize: 10, padding: '0 4px', borderRadius: 3, flexShrink: 0,
           background: node.type === 'joint' ? 'var(--accent-soft)' : 'var(--paper-2)',
           color: node.type === 'joint' ? 'var(--accent-hi)' : 'var(--ink-4)',
         }}>{node.type === 'joint' ? 'jnt' : 'grp'}</span>
@@ -2961,7 +3005,7 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
 
   const row: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, lineHeight: '18px',
-    fontFamily: 'var(--mono)', fontSize: 10,
+    fontFamily: 'var(--mono)', fontSize: 11,
   }
   const dim: React.CSSProperties = { color: 'var(--ink-4)', flexShrink: 0 }
   const name: React.CSSProperties = {
@@ -2976,10 +3020,10 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
           <RefreshCw size={11} strokeWidth={2} />
           {busy ? 'Lecture…' : 'Relire la scène'}
         </Btn>
-        <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0,
+        <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
       </div>
-      {error && <div style={{ fontSize: 10, color: 'var(--err)', marginBottom: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 11, color: 'var(--err)', marginBottom: 6 }}>{error}</div>}
       {preview && (items.length > 0 || (preview.tree?.length ?? 0) > 0) && (
         <div className="subcard" style={{ padding: '6px 10px', maxHeight: 240, overflowY: 'auto' }}>
           {preset === 'model' && items.map(i => (
@@ -3031,7 +3075,7 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
         </div>
       )}
       {preset === 'anim' && preview && (
-        <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 4 }}>
+        <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>
           Aperçu sur {preview.sampled ?? 0} images ; l'export lit chaque image.
         </div>
       )}
@@ -3050,15 +3094,15 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: '4px 8px', alignItems: 'center' }}>
-        <span className="cap" style={{ fontSize: 9 }}>USD</span>
-        <span className="cap" style={{ fontSize: 9 }}>Nom exporté</span>
-        <span className="cap" style={{ fontSize: 9 }}>Dans Houdini</span>
+        <span className="cap" style={{ fontSize: 10.5 }}>USD</span>
+        <span className="cap" style={{ fontSize: 10.5 }}>Nom exporté</span>
+        <span className="cap" style={{ fontSize: 10.5 }}>Dans Houdini</span>
         {attrs.map(a => {
           const key = a.key ?? a.usd
           const value = renames[key] ?? ''
           return (
             <div key={a.usd} style={{ display: 'contents' }}>
-              <span title={a.what} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+              <span title={a.what} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
                                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.usd}</span>
               {a.rename ? (
                 <input
@@ -3067,14 +3111,14 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
                   onChange={e => onRenames({ ...renames, [key]: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })}
                   style={{
                     height: 22, minWidth: 0, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 10,
+                    borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
                     color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
               ) : (
-                <span style={{ fontSize: 9, color: 'var(--ink-4)' }} title={a.what}>fixe</span>
+                <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }} title={a.what}>fixe</span>
               )}
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)',
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent-hi)',
                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {a.rename && value ? value : a.houdini}
               </span>
@@ -3082,7 +3126,7 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
           )
         })}
       </div>
-      <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+      <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
         {preset === 'rig'
           ? "Houdini reconstruit boneCapture à partir de skel:jointIndices / jointWeights et du Skeleton (USD Skin Import, UsdSkel Character Import) : ces noms restent fixes. Les poids se posent sur la géo du GEO publié (et sur son proxy)."
           : preset === 'model'
