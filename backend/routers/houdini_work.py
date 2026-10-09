@@ -97,6 +97,32 @@ async def work_tasks(project: str) -> dict:
     return {"tasks": [t for t in WORK_TASKS if t in known]}
 
 
+@router.get("/module")
+async def work_module() -> dict:
+    """PythonModule of the FLUX Work HDA, exec()'d by its bootstrap (no rebuild on fix)."""
+    from dcc.houdini.hda.flux_work_hda import module_code
+
+    return {"code": module_code()}
+
+
+@router.get("/shots")
+async def work_shots(project: str) -> dict:
+    """Sequences of the Production planning and their shots, for the FLUX Work menus."""
+    from features.production import production_store
+
+    _project_path(project)
+    production = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: production_store.load_production(project))
+    names = {s.get("id"): str(s.get("name") or "").upper() for s in production.get("sequences", [])}
+    out: dict[str, list[str]] = {name: [] for name in names.values() if name}
+    for shot in production.get("shots", []):
+        seq = names.get(shot.get("seq_id"))
+        name = str(shot.get("name") or "").upper()
+        if seq and name:
+            out.setdefault(seq, []).append(name)
+    return {"sequences": [{"seq": seq, "shots": sorted(shots)} for seq, shots in sorted(out.items())]}
+
+
 @router.get("/status")
 async def work_status(project: str, seq: str, task: str, shot: str = "", based_on: str = "",
                       author: str = "", host: str = "") -> dict:

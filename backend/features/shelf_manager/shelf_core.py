@@ -508,6 +508,7 @@ _HDA_BUILDS: tuple[tuple[str, str, str, str], ...] = (
     ("flux_render_hda:build_hda",       "flux_render.hda",       "hou.lopNodeTypeCategory()", "flux_render"),
     ("flux_sequence_hda:build_hda",     "flux_sequence.hda",     "hou.lopNodeTypeCategory()", "flux_sequence"),
     ("flux_crowd_hda:build_hda",        "flux_crowd.hda",        "hou.lopNodeTypeCategory()", "flux_crowd"),
+    ("flux_work_hda:build_hda",         "flux_work.hda",         "hou.sopNodeTypeCategory()", "flux_work"),
 )
 
 # Runs inside Houdini after the build: makes the definition FLUX just wrote the one

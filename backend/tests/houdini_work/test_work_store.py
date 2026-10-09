@@ -195,6 +195,19 @@ class Routes(unittest.TestCase):
         manifest = json.loads((cpio.parent / "w001.json").read_text(encoding="utf-8"))
         self.assertEqual((manifest["author"], manifest["category"], manifest["state"]), ("adam", "Sop", "ok"))
 
+    def test_served_module_and_production_shots(self) -> None:
+        code = self.client.get("/dcc/houdini/work/module").json()["code"]
+        compile(code, "<flux_work module>", "exec")
+        for name in ("def load(", "def save(", "def take_over(", "def normalized_hash(", "def load_work("):
+            self.assertIn(name, code)
+        production = {"sequences": [{"id": "s1", "name": "seq010"}, {"id": "s2", "name": "SEQ020"}],
+                      "shots": [{"seq_id": "s1", "name": "sh030"}, {"seq_id": "s1", "name": "SH010"},
+                                {"seq_id": "zz", "name": "ORPHAN"}]}
+        with mock.patch("features.production.production_store.load_production", return_value=production):
+            got = self.client.get("/dcc/houdini/work/shots", params={"project": "PROJ"}).json()
+        self.assertEqual(got["sequences"], [{"seq": "SEQ010", "shots": ["SH010", "SH030"]},
+                                            {"seq": "SEQ020", "shots": []}])
+
     def test_errors_are_http_errors(self) -> None:
         bad = self.client.post("/dcc/houdini/work/reserve", json={**self.ref, "task": "NOPE"})
         self.assertEqual(bad.status_code, 400)
