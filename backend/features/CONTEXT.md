@@ -15,3 +15,8 @@ Metadonnees via `core.repository_factory.get_repository()`, octets via filesyste
 entete 10 caracteres + JSON), projet = une timeline dans l'ordre + autres videos du dossier ; repli
 ligne de commande (premiere video) en mode Demo. `production/ref_media.py` : chaque depot `/ref` est
 journalise dans `ref/modif_logs.json` (versions, auteur), `versions()` et `shot_previews()`.
+Racine d'une tache de plan (`resolve_ref_root`, bug A5 2026-10-09) : TYPE_SHOT, puis CLASS (anciens
+projets), puis `shot/{seq}/{shot}/<token>` ; un `/ref` deja present sous une ancienne resolution gagne.
+`production/sync.py` (Production -> disque, create-only) : le resume renvoye/loggue compte ce qui est
+vraiment cree (`assets`, `sequences`, `shots`, `tasks`, `subtasks`, 0 partout si rien) ; le token
+d'une tache de plan = `type_tokens[0]` s'il est connu des maps, sinon `name`.

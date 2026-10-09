@@ -65,14 +65,16 @@ def resolve_ref_root(
     """Resolve the project-relative root of a task/subtask, where /ref lives.
 
     Mirrors the folder creators so /ref lands beside the task's real folder:
-      * shot/seq tasks resolve through the templated CLASS token
-        (e.g. ANIM → shot/{seq}/{shot}/anim), with {seq}/{shot} filled in;
+      * shot/seq tasks resolve through the templated TYPE_SHOT token, else the
+        legacy CLASS one (e.g. ANIM → shot/{seq}/{shot}/anim), with {seq}/{shot}
+        filled in; an existing /ref under an older resolution wins (compat);
       * asset tasks resolve through NAME (or CLASS+name) + TYPE + INSTANCE.
     The subtask, when present, is a lowercased folder under the task root.
     """
     tokens = load_tokens(project_path)                 # already merges CLASS/TYPE/INSTANCE defaults
     class_map: dict = tokens.get("CLASS") or {}
     type_map:  dict = tokens.get("TYPE") or {}
+    shot_type_map: dict = tokens.get("TYPE_SHOT") or {}
     inst_map:  dict = tokens.get("INSTANCE") or {}
 
     task_u = (task or "").strip().upper()
@@ -82,16 +84,28 @@ def resolve_ref_root(
     if kind in ("shot", "seq"):
         seq_label  = (seq or "").strip()
         shot_label = (shot or "").strip()
-        tpl = class_map.get(task_u)
-        if tpl:
-            rel = tpl.replace("{seq}", seq_label).replace("{shot}", shot_label)
-        elif shot_label:
-            rel = f"shot/{seq_label}/{shot_label}/{task_u.lower()}"
+        if shot_label:
+            plain = f"shot/{seq_label}/{shot_label}/{task_u.lower()}"
         else:
-            rel = f"shot/{seq_label}/{task_u.lower()}"
-        if sub_ok:
-            rel = f"{rel}/{sub.lower()}"
-        return _norm(rel)
+            plain = f"shot/{seq_label}/{task_u.lower()}"
+        # Same order as the folder creator: TYPE_SHOT (ADR 0019), then the legacy
+        # shot CLASS token, then the lowercased token under the shot.
+        candidates: list[str] = []
+        for tpl in (shot_type_map.get(task_u), class_map.get(task_u)):
+            if tpl:
+                rel = str(tpl).replace("{seq}", seq_label).replace("{shot}", shot_label)
+                if sub_ok:
+                    rel = f"{rel}/{sub.lower()}"
+                candidates.append(_norm(rel))
+        candidates.append(_norm(f"{plain}/{sub.lower()}" if sub_ok else plain))
+        candidates = list(dict.fromkeys(candidates))
+        # Backward compat: a /ref already deposited under an older resolution
+        # (custom CLASS token, or the plain folder) keeps being found; new
+        # deposits go to the TYPE_SHOT location.
+        for rel in candidates:
+            if (project_path / rel / REF_DIRNAME).is_dir():
+                return rel
+        return candidates[0]
 
     # asset
     class_rel = _norm(get_path_for_token(tokens, "CLASS", (class_token or "").upper()) or "")

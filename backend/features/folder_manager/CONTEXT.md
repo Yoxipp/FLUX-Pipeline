@@ -9,6 +9,14 @@ Creation projet / assets / seq / shots : `project_init.py`, `asset_creator.py`, 
 
 Les cles de `locks.py` sont des chemins absolus (ADR 0004 proposee).
 
+`update_sequence` (appele par la sync Production) : dossier d'une tache de plan = TYPE_SHOT (ADR 0019),
+repli CLASS pour les anciens projets, puis `shot/{seq}/{shot}/<token>` (`shot_task_template`). Un template
+avec un placeholder inconnu ne cree rien. Avec `counts=`, il ajoute ce qu'il a vraiment cree
+(`sequences`, `shots`, `tasks` dont dossiers de departement de la base, `subtasks`). Create-only : un
+dossier deja cree a l'ancien emplacement n'est ni deplace ni supprime.
+
+Tokens : `load_tokens` fusionne toujours les defauts (`core/constants.py` : CLASS, TYPE, TYPE_SHOT, INSTANCE) sous les valeurs du projet. Departements de plan par defaut : LAYOUT, ANIM, FX, CFX, CROWD (dans `shot/{seq}/{shot}`), LIGHT (`lighting/{seq}`), COMP (`comp/{seq}/{shot}`), RENDER (`render/{seq}/{shot}`, 2026-10-09). `GET /folder/projects/{p}/sequences` renvoie aussi `padding` (`SEQ_SHOT_PADDING`) pour que le Publisher numerote les nouveaux SEQ/SHOT comme le backend.
+
 `asset_cleanup.py` (ADR 0033) : nettoyage d'un asset / du projet et clone propre. Les regles viennent du code
 courant (`resolve_publish_path`, parseur de noms, `MAP_ALIASES`), jamais d'une liste d'anciens formats : ne pas
 en ajouter. Seul ce qui est sur se fait (remise a sa place, doublon identique retire), annulable par le journal
