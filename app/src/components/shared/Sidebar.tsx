@@ -436,6 +436,24 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       toast.success('Maya · commandPort connecté', { duration: 3000 })
   }, [mayaServerOk]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Installer tous les bridges" (2026-10-09), same endpoint as the Settings button.
+  const [installingAll, setInstallingAll] = useState(false)
+  const handleInstallAllBridges = async () => {
+    setInstallingAll(true)
+    try {
+      const { results } = await api.installAllBridges()
+      const count = (s: string) => results.filter(r => r.status === s).length
+      const summary = t('settings.bridges.summary', { ok: count('ok'), skip: count('skip'), error: count('error') })
+      if (count('error')) toast.error(summary)
+      else toast.success(summary)
+      window.dispatchEvent(new CustomEvent('flux:bridges-changed'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setInstallingAll(false)
+    }
+  }
+
   const handleAutoFindAll = async () => {
     setFindingAll(true)
     await Promise.allSettled(
@@ -673,6 +691,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
           </Menu.Item>}
       <Menu.Item className="launcher-menu-item" disabled={findingAll} onSelect={() => void handleAutoFindAll()}>
         <Search size={13} />Auto-détecter les chemins
+      </Menu.Item>
+      <Menu.Item className="launcher-menu-item" disabled={installingAll} onSelect={() => void handleInstallAllBridges()}>
+        <Plug size={13} />{installingAll ? 'Installation des bridges…' : 'Installer tous les bridges'}
       </Menu.Item>
       <Menu.Separator className="launcher-menu-separator" />
       <Menu.Item className="launcher-menu-item" onSelect={openWorkProfile}><UserRound size={13} />Profil de travail…</Menu.Item>
