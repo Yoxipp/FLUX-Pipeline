@@ -265,6 +265,19 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     }).catch(() => {})
   }, [])
 
+  // "Installer tous les bridges" (Settings) changed the bridges: refresh the plug icons.
+  useEffect(() => {
+    const onBridges = () => {
+      for (const key of ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous']) {
+        api.getDccAutostart(key)
+          .then(r => setAutostartInstalled(prev => ({ ...prev, [key]: r.installed })))
+          .catch(() => {})
+      }
+    }
+    window.addEventListener('flux:bridges-changed', onBridges)
+    return () => window.removeEventListener('flux:bridges-changed', onBridges)
+  }, [])
+
   // Poll Houdini server every 5 s when autostart is installed
   useEffect(() => {
     if (!autostartInstalled.houdini) { setHoudiniServerOk(null); return }
