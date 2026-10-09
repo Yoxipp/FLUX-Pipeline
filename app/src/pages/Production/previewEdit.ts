@@ -45,11 +45,41 @@ export function previewCandidates(state: ProductionState, shot: ProductionShot):
   return out
 }
 
-/** Source choices of the preview selector: Auto, Tout, then each stage once. */
-export function previewSources(candidates: PreviewCandidate[]): Array<{ id: PreviewSource; label: string }> {
+/** Source choices of the preview selector: Auto, Tout, then each stage once.
+ *  With `media`, only the stages that hold something are offered (no empty
+ *  Storyboard / Animatique entries when nothing was ever published there). */
+export function previewSources(candidates: PreviewCandidate[], media?: PreviewMedia[]): Array<{ id: PreviewSource; label: string }> {
+  const present = media ? new Set(media.map(m => m.task.toUpperCase())) : null
   const groups: Array<{ id: string; label: string }> = []
-  for (const c of candidates) if (!groups.some(g => g.id === c.group)) groups.push({ id: c.group, label: c.label })
+  for (const c of candidates) {
+    if (present && !present.has(c.token)) continue
+    if (!groups.some(g => g.id === c.group)) groups.push({ id: c.group, label: c.label })
+  }
   return [{ id: 'auto', label: 'Auto' }, { id: 'all', label: 'Tout' }, ...groups]
+}
+
+/** Stages that hold media for these shots, in stage order (shared across shots). */
+export function mediaGroups(state: ProductionState, shots: ProductionShot[], previews: Record<string, PreviewMedia[]>): Array<{ id: string; label: string }> {
+  const out: Array<{ id: string; label: string }> = []
+  for (const shot of shots) {
+    for (const o of previewSources(previewCandidates(state, shot), previews[shot.id] ?? []).slice(2)) {
+      if (!out.some(g => g.id === o.id)) out.push(o)
+    }
+  }
+  return out
+}
+
+/** The media a shot shows in the edit: its own department choice (shared in the
+ *  project, `shot.preview_source`) when that stage holds something, else the
+ *  global source ("Tout" has no single media: Auto). */
+export function pickShotMedia(state: ProductionState, shot: ProductionShot, previews: Record<string, PreviewMedia[]>, source: PreviewSource) {
+  const media = previews[shot.id] ?? []
+  const candidates = previewCandidates(state, shot)
+  if (shot.preview_source) {
+    const own = pickMedia(media, candidates, shot.preview_source)[0]
+    if (own) return own
+  }
+  return pickMedia(media, candidates, source === 'all' ? 'auto' : source)[0] ?? null
 }
 
 /** Media of a shot for a source, in stage order (Auto: the most advanced one). */
@@ -79,9 +109,8 @@ export function buildMontage(state: ProductionState, previews: Record<string, Pr
     const shots = state.shots.filter(s => s.seq_id === seq.id).sort((a, b) => a.order - b.order)
     for (const shot of shots) {
       const frames = framesOf(shot)
-      // "Tout" has no single media per shot: the edit then uses Auto.
-      const picked = pickMedia(previews[shot.id] ?? [], previewCandidates(state, shot), source === 'all' ? 'auto' : source)
-      out.push({ shotId: shot.id, seq: seq.name, shot: shot.name, frames, seconds: frames / (fps > 0 ? fps : 24), media: picked[0] ?? null })
+      out.push({ shotId: shot.id, seq: seq.name, shot: shot.name, frames, seconds: frames / (fps > 0 ? fps : 24),
+        media: pickShotMedia(state, shot, previews, source) })
     }
   }
   return out

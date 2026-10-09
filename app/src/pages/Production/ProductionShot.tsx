@@ -33,7 +33,7 @@ import * as Dropdown from '@radix-ui/react-dropdown-menu'
 import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical } from 'lucide-react'
 import { CreateMenu, type CreateKind } from './CreateMenu'
 import { TimelinePreview } from './TimelinePreview'
-import { buildMontage, pickMedia, previewCandidates, type PreviewMedia } from './previewEdit'
+import { buildMontage, pickShotMedia, previewCandidates, type PreviewMedia } from './previewEdit'
 import { usePreviewSource } from './previewSourceStore'
 import { openInKeyframe } from '../../lib/keyframe'
 import { api } from '../../api/client'
@@ -261,7 +261,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   }
   const keyframeShot = (shot: Shot) => {
     const seq = state.sequences.find(s => s.id === shot.seq_id)
-    const m = pickMedia(previews[shot.id] ?? [], previewCandidates(state, shot), source === 'all' ? 'auto' : source)[0]
+    const m = pickShotMedia(state, shot, previews, source)
     const label = `${seq?.name ?? ''} ${shot.name}`
     if (!m) { void openInKeyframe(project || '', []); return }
     void openInKeyframe(project || '', [{ path: m.abs_path, label: `${label} · ${m.label} · ${m.version || 'LAST'}` }], { title: label, fallbackPath: m.abs_path })
@@ -782,7 +782,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
       {sequences.length > 0 && (
         <TimelinePreview project={project || ''} state={state} selection={selection} previews={previews} loading={previewsLoading}
           source={source} setSource={setSource} fps={fps} framesOf={stableFrames}
-          montage={montage} setMontage={setMontage} onPlayingShot={setPlayingId} />
+          montage={montage} setMontage={setMontage} onPlayingShot={setPlayingId}
+          setShotSource={(id, group) => setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === id ? { ...s, preview_source: group || undefined } : s) }))} />
       )}
 
       <Dropdown.Root open={!!ctx} onOpenChange={o => { if (!o) setCtx(null) }} modal={false}>

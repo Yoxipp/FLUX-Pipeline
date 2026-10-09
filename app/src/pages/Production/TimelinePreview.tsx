@@ -5,23 +5,26 @@
 // sequence / of the whole edit, played here shot after shot (each shot keeps its
 // duration; a shot without media is a gap). "Keyframe" sends the same edit to
 // Keyframe Pro as one timeline (licensed API; otherwise the first video only).
+// Each shot can pick its own department for the edit ("Plan", shared in the
+// project); "Exporter" writes the edit as one H.264 .mov plus media + .otio/.edl.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Clapperboard, Film, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Clapperboard, Download, Film, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { openInKeyframe } from '../../lib/keyframe'
 import type { ProductionShot, ProductionState } from '../../types'
 import type { Selection } from './Production'
 import './tracking.css'
 import {
-  buildMontage, pickMedia, previewCandidates, previewSources,
+  buildMontage, mediaGroups, pickMedia, previewCandidates,
   type MontageClip, type PreviewMedia, type PreviewSource,
 } from './previewEdit'
 
 const PLAYABLE = ['mp4', 'webm', 'ogv', 'ogg', 'm4v', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg']
 const playable = (file: string) => PLAYABLE.includes(file.split('.').pop()?.toLowerCase() ?? '')
 
-export function TimelinePreview({ project, state, selection, previews, loading, source, setSource, fps, framesOf, montage, setMontage, onPlayingShot }: {
+export function TimelinePreview({ project, state, selection, previews, loading, source, setSource, fps, framesOf, montage, setMontage, onPlayingShot, setShotSource }: {
   project:   string
   state:     ProductionState
   selection: Selection
@@ -34,18 +37,21 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
   montage:   { seqId?: string } | null          // null = shot preview
   setMontage: (m: { seqId?: string } | null) => void
   onPlayingShot: (id: string | null) => void
+  setShotSource: (shotId: string, group: string | null) => void   // per-shot department of the edit (shared)
 }) {
   const shot = selection.kind === 'shot' ? state.shots.find(s => s.id === selection.id) : undefined
   const seq = selection.kind === 'seq' ? state.sequences.find(s => s.id === selection.id) : undefined
   const shotSeq = shot ? state.sequences.find(s => s.id === shot.seq_id) : undefined
 
-  // Source choices: the stages of the selected shot, else of the whole edit.
+  // Source choices: only the stages that hold media, for the selected shot, else
+  // for the whole edit (no Storyboard / Animatique entry when nothing is there).
   const sources = useMemo(() => {
-    const shots = shot ? [shot] : state.shots
-    const all = shots.flatMap(s => previewCandidates(state, s))
-    const seen = new Set<string>()
-    return previewSources(all).filter(o => !seen.has(o.id) && !!seen.add(o.id))
-  }, [state, shot])
+    const groups = mediaGroups(state, shot ? [shot] : state.shots, previews)
+    const out: Array<{ id: PreviewSource; label: string }> = [{ id: 'auto', label: 'Auto' }, { id: 'all', label: 'Tout' }, ...groups]
+    if (!out.some(o => o.id === source)) out.push({ id: source, label: `${source} (vide)` })
+    return out
+  }, [state, shot, previews, source])
+  const groupsOf = (s: ProductionShot) => mediaGroups(state, [s], previews)
 
   const clips = useMemo(
     () => (montage ? buildMontage(state, previews, source, fps, framesOf, montage.seqId) : []),
@@ -59,11 +65,35 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
       path: c.media!.abs_path, label: `${c.seq} ${c.shot} · ${c.media!.label} · ${c.media!.version || 'LAST'}`,
     })), { title, siblings: false, fallbackPath: withMedia[0].media!.abs_path })
   }
-  const keyframeScope = () => {
-    const seqId = montage?.seqId ?? seq?.id
+  // Montage open: its scope; else the selected sequence (or the shot's), else the film.
+  const scope = () => {
+    const seqId = montage ? montage.seqId : (seq?.id ?? shotSeq?.id)
     const list = buildMontage(state, previews, source, fps, framesOf, seqId)
     const name = seqId ? state.sequences.find(s => s.id === seqId)?.name ?? 'Montage' : `${project} montage`
-    sendToKeyframe(list, name)
+    return { list, name }
+  }
+  const keyframeScope = () => { const { list, name } = scope(); sendToKeyframe(list, name) }
+
+  const [exporting, setExporting] = useState(false)
+  const exportScope = async () => {
+    const { list, name } = scope()
+    const dest = await window.electronAPI?.openFolder()
+    if (!dest) return
+    setExporting(true)
+    const id = toast.loading(`Export du montage ${name} (${list.length} plans)…`)
+    try {
+      const r = await api.exportMontage(project, {
+        name, dest_dir: dest, fps, mov: true, folder: true,
+        clips: list.map(c => ({ seq: c.seq, shot: c.shot, frames: c.frames,
+          media: c.media ? { task: c.media.task, label: c.media.label, rel_path: c.media.rel_path, file: c.media.file, source: c.media.source } : null })),
+      })
+      toast.success(r.mov ? 'Montage exporté (.mov + timeline)' : 'Montage exporté (timeline seulement)', {
+        id, description: r.dir, action: { label: 'Ouvrir', onClick: () => void window.electronAPI?.openPath(r.dir) },
+      })
+      for (const w of r.warnings) toast.warning(w)
+    } catch (e) {
+      toast.error(`Export impossible : ${e instanceof Error ? e.message : String(e)}`, { id })
+    } finally { setExporting(false) }
   }
 
   return (
@@ -96,19 +126,49 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
           title="Ouvrir le montage dans Keyframe Pro (une timeline, shots dans l’ordre)">
           <Clapperboard size={11} /> Keyframe
         </button>
+        <button className="timeline-preview-btn" disabled={state.shots.length === 0 || exporting} onClick={() => void exportScope()}
+          title="Exporter le montage : un .mov H.264 + les médias et une timeline .otio / .edl (Resolve, Premiere)">
+          <Download size={11} /> {exporting ? 'Export…' : 'Exporter'}
+        </button>
       </div>
 
       {montage ? (
-        <MontagePlayer project={project} clips={clips} loading={loading} onPlayingShot={onPlayingShot} />
-      ) : shot ? (
+        <MontagePlayer project={project} clips={clips} loading={loading} onPlayingShot={onPlayingShot}
+          shotPicker={c => {
+            const s = state.shots.find(x => x.id === c.shotId)
+            return s ? <ShotSourcePicker shot={s} groups={groupsOf(s)} onPick={g => setShotSource(s.id, g)} /> : null
+          }} />
+      ) : shot ? (<>
+        <div className="timeline-preview-shotpick">
+          <ShotSourcePicker shot={shot} groups={groupsOf(shot)} onPick={g => setShotSource(shot.id, g)} />
+        </div>
         <ShotPreview project={project} label={`${shotSeq?.name ?? ''} ${shot.name}`} loading={loading}
           media={pickMedia(previews[shot.id] ?? [], previewCandidates(state, shot), source)}
           empty={source === 'auto' || source === 'all' ? 'Rien de publié en Production pour ce shot'
             : `Rien de publié en ${sources.find(o => o.id === source)?.label ?? source} pour ce shot`} />
-      ) : (
+      </>) : (
         <div className="timeline-preview-empty">{seq ? `${seq.name} : lancez son montage ou choisissez un shot.` : 'Choisissez un shot pour voir son aperçu.'}</div>
       )}
     </div>
+  )
+}
+
+// Department this shot uses in the edit, whatever the global source (shared in
+// the project). Only the stages that hold media for the shot are offered.
+function ShotSourcePicker({ shot, groups, onPick }: {
+  shot: ProductionShot; groups: Array<{ id: string; label: string }>; onPick: (group: string | null) => void
+}) {
+  const value = shot.preview_source ?? ''
+  const missing = !!value && !groups.some(g => g.id === value)
+  return (
+    <label className="timeline-preview-source" title="Département utilisé pour ce plan dans le montage (partagé avec l'équipe)">
+      <span>Plan</span>
+      <select value={value} onChange={e => onPick(e.target.value || null)} aria-label={`Département de ${shot.name} dans le montage`}>
+        <option value="">Source globale</option>
+        {groups.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}
+        {missing && <option value={value}>{value} (vide, source globale)</option>}
+      </select>
+    </label>
   )
 }
 
@@ -147,8 +207,9 @@ function ShotPreview({ project, label, media, loading, empty }: {
 
 // Shots one after the other. A video plays up to the shot duration (cut if longer);
 // an image, a gap or an unreadable file holds for the shot duration.
-function MontagePlayer({ project, clips, loading, onPlayingShot }: {
+function MontagePlayer({ project, clips, loading, onPlayingShot, shotPicker }: {
   project: string; clips: MontageClip[]; loading: boolean; onPlayingShot: (id: string | null) => void
+  shotPicker: (clip: MontageClip) => ReactNode
 }) {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(true)
@@ -195,6 +256,7 @@ function MontagePlayer({ project, clips, loading, onPlayingShot }: {
         <span className="timeline-montage-label">
           <strong>{clip.seq} {clip.shot}</strong> {clip.media ? `· ${clip.media.label} · ${clip.media.version || 'LAST'}` : ''} · {index + 1}/{clips.length}
         </span>
+        {shotPicker(clip)}
         {missing > 0 && <span className="timeline-montage-missing">{missing} shot{missing > 1 ? 's' : ''} sans média</span>}
       </div>
       {/* Edit strip: one segment per shot, width = duration. Click = jump there. */}

@@ -26,7 +26,7 @@ from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import archive as prod_archive
 from features.production import lock as prod_lock
 from features.production import production_store as store
-from features.production import ref_media
+from features.production import montage_export, ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
 from features.production.sync import sync_production_to_disk
@@ -730,6 +730,38 @@ async def shot_previews(project: str, payload: ShotPreviewsRequest) -> dict:
         ]
 
     return {"shots": await loop.run_in_executor(None, _do)}
+
+
+class MontageClipIn(BaseModel):
+    seq: str = ""
+    shot: str = ""
+    frames: int = 1
+    media: dict | None = None        # {task, label, rel_path, file, source} as shot-previews gave it
+
+
+class MontageExportRequest(BaseModel):
+    name: str = "montage"
+    dest_dir: str
+    fps: float = 24
+    mov: bool = True
+    folder: bool = True
+    clips: list[MontageClipIn]
+
+
+@router.post("/{project}/montage/export")
+async def export_montage(project: str, payload: MontageExportRequest) -> dict:
+    """Export the Timeline auto edit: media + .otio + .edl and/or one H.264 .mov."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: montage_export.export_montage(
+            project_path, [c.model_dump() for c in payload.clips], payload.fps,
+            payload.dest_dir, payload.name, payload.mov, payload.folder))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{project}/ref/file")

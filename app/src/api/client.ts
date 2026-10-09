@@ -1081,6 +1081,14 @@ export const api = {
     apiCall<{ shots: Array<{ seq: string; shot: string; media: ShotPreviewMedia[] }> }>(
       'POST', `/production/${encodeURIComponent(project)}/shot-previews`, { shots }),
 
+  // Export of the Timeline auto edit: media + .otio + .edl and/or one H.264 .mov (ffmpeg).
+  exportMontage: (project: string, body: {
+    name: string; dest_dir: string; fps: number; mov?: boolean; folder?: boolean
+    clips: Array<{ seq: string; shot: string; frames: number; media: { task: string; label: string; rel_path: string; file: string; source?: string } | null }>
+  }) =>
+    apiCall<{ dir: string; mov: string | null; otio: string | null; edl: string | null; shots: number; missing: number; warnings: string[] }>(
+      'POST', `/production/${encodeURIComponent(project)}/montage/export`, body, 30 * 60 * 1000),
+
   // Keyframe Pro (retake 09): status of this machine, open pipeline videos.
   keyframeStatus: () => apiCall<KeyframeStatus>('GET', '/review/keyframe/status', undefined, 8000),
   keyframeOpen: (project: string, items: Array<{ rel_path?: string; path?: string; label?: string }>, title = 'FLUX', siblings = true) =>

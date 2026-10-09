@@ -365,6 +365,7 @@ export interface ProductionShot {
   frame_start?: number            // shot frame range (ADR 0020), written on the shot stage
   frame_end?: number
   locked?: ProductionLock
+  preview_source?: string         // department shown for this shot in the Timeline edit (group id); unset = global source
 }
 
 export interface ProductionState {
