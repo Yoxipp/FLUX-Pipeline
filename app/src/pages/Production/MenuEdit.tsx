@@ -18,6 +18,7 @@ import type {
 } from '../../types'
 import { CATEGORY_ORDER, categoryColor, categoryLabelKey, defaultSeqColor, expandFluxPath, shotColorFromSeqColor } from './util'
 import { ProdBtn } from './ProdButtons'
+import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
 import type { Selection } from './Production'
 
 interface Props {
@@ -60,8 +61,10 @@ interface PendingArchive {
   busy:      boolean
 }
 
-// A sequence / shot is only deleted after typing this word (2026-09-27).
-const DELETE_PHRASE = 'Understand'
+// Deleting a sequence / shot and unlocking ask for a slide to confirm (2026-10-09,
+// was typing Understand). The unlock still sends this phrase: the backend guard
+// (features/production/lock.py UNLOCK_PHRASE) checks it.
+export const UNLOCK_PHRASE = 'Understand'
 
 // Open a Production entity's folder in the Folder Manager (B1, 2026-09-28).
 // The folder is resolved by the backend (SEQ / SHOT tokens, else shot/<SEQ>/<SHOT>),
@@ -121,7 +124,7 @@ export function useArchiveDelete(project: string) {
   const modal = pending ? (
     <ArchiveConfirm
       label={pending.label} info={pending.info} busy={pending.busy}
-      phrase={pending.desc.kind === 'asset' ? '' : DELETE_PHRASE}
+      slide={pending.desc.kind !== 'asset'}
       onCancel={cancel} onConfirm={confirm}
     />
   ) : null
@@ -185,15 +188,15 @@ function SplitNumberField({ value, onCommit, busy }: {
   )
 }
 
-function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
+function ArchiveConfirm({ label, info, busy, slide, onCancel, onConfirm }: {
   label:     string
   info:      { rel_path: string; exists: boolean; file_count: number } | null
   busy:      boolean
-  phrase:    string                  // '' = no word to type
+  slide:     boolean                 // seq / shot: slide to confirm instead of a button
   onCancel:  () => void
-  onConfirm: () => void
+  onConfirm: () => Promise<void>
 }) {
-  const [typed, setTyped] = useState('')
+  const { t } = useI18n()
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
     document.addEventListener('keydown', h)
@@ -203,8 +206,7 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
   const analyzing = info === null
   const count = info?.file_count ?? 0
   const nonEmpty = !!info?.exists && count > 0
-  const unlocked = !phrase || typed === phrase
-  const canConfirm = !busy && !analyzing && unlocked
+  const canConfirm = !busy && !analyzing
 
   return (
     <div
@@ -226,7 +228,7 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
           <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
           Archiver {label} ?
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: phrase ? 12 : 16, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: slide ? 12 : 16, lineHeight: 1.5 }}>
           {analyzing
             ? 'Analyse du dossier…'
             : nonEmpty
@@ -234,30 +236,21 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
               : info?.exists
                 ? 'Le dossier (vide) sera déplacé vers ARCHIVE/.'
                 : "Aucun dossier sur disque : seule l'entrée logique sera retirée."}
-          {phrase && !analyzing && ' Ses autres dossiers (comp, et lighting pour une séquence) partent aussi dans ARCHIVE/.'}
+          {slide && !analyzing && ' Ses autres dossiers (comp, et lighting pour une séquence) partent aussi dans ARCHIVE/.'}
         </div>
-        {phrase && (
-          <>
-            <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 6 }}>
-              Tape <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>{phrase}</code> pour confirmer.
-            </div>
-            <input
-              autoFocus value={typed} onChange={e => setTyped(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && canConfirm) onConfirm() }}
-              placeholder={phrase} spellCheck={false} autoCapitalize="off" autoCorrect="off"
-              style={{
-                width: '100%', boxSizing: 'border-box', marginBottom: 14, padding: '6px 9px', fontSize: 12,
-                fontFamily: 'var(--mono)', background: 'var(--paper-2)', color: 'var(--ink)', borderRadius: 6, outline: 'none',
-                border: `1px solid ${unlocked ? 'var(--err)' : 'var(--rule-2)'}`,
-              }}
-            />
-          </>
+        {slide && (
+          <div style={{ marginBottom: 14 }}>
+            <SlideToConfirm width="fill" height={40} tone="danger" disabled={!canConfirm}
+              label={busy ? 'Archivage…' : t('confirm.slideToArchive')} onConfirm={onConfirm} />
+          </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <ProdBtn variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Annuler</ProdBtn>
-          <ProdBtn variant="danger" size="sm" onClick={onConfirm} disabled={!canConfirm}>
-            <Trash2 size={10} strokeWidth={1.75} /> {busy ? 'Archivage…' : 'Archiver'}
-          </ProdBtn>
+          {!slide && (
+            <ProdBtn variant="danger" size="sm" onClick={() => { void onConfirm() }} disabled={!canConfirm}>
+              <Trash2 size={10} strokeWidth={1.75} /> {busy ? 'Archivage…' : 'Archiver'}
+            </ProdBtn>
+          )}
         </div>
       </div>
     </div>
@@ -265,7 +258,7 @@ function ArchiveConfirm({ label, info, busy, phrase, onCancel, onConfirm }: {
 }
 
 // Lock of a sequence / shot (2026-09-30): anyone locks in one click, unlocking asks
-// to type Understand. A locked record cannot be edited, renamed or deleted (the backend
+// for a slide to confirm (2026-10-09). A locked record cannot be edited, renamed or deleted (the backend
 // enforces it too); task progress and comments stay open.
 const _lockedFieldset: CSSProperties = { border: 0, padding: 0, margin: 0, minWidth: 0 }
 
@@ -279,14 +272,14 @@ function LockControl({ project, kind, seqName, shotName, own, inherited, onChang
   onChange:  (lock: ProductionLock | undefined) => void
 }) {
   const [asking, setAsking] = useState(false)
-  const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
+  const { t } = useI18n()
   const call = async (locked: boolean, phrase = '') => {
     setBusy(true)
     try {
       const r = await api.lockSeqShot(project, kind, seqName, shotName, locked, phrase)
       onChange(r.locked ?? undefined)
-      setAsking(false); setTyped('')
+      setAsking(false)
       toast.success(locked ? `${shotName || seqName} verrouillé` : `${shotName || seqName} déverrouillé`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
@@ -318,18 +311,13 @@ function LockControl({ project, kind, seqName, shotName, own, inherited, onChang
           <LockOpen size={11} strokeWidth={1.75} /> Déverrouiller
         </ProdBtn>
       ) : (
-        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-          <input
-            autoFocus value={typed} onChange={e => setTyped(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && typed === DELETE_PHRASE) void call(false, typed)
-              if (e.key === 'Escape') { setAsking(false); setTyped('') }
-            }}
-            placeholder={`Tape ${DELETE_PHRASE}`} spellCheck={false}
-            style={{ ..._input, flex: 1, fontFamily: 'var(--mono)' }}
-          />
-          <ProdBtn size="sm" onClick={() => { void call(false, typed) }} disabled={busy || typed !== DELETE_PHRASE}>
-            <LockOpen size={10} strokeWidth={1.75} /> OK
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SlideToConfirm width="fill" height={34} label={t('confirm.slideToUnlock')} disabled={busy}
+              onConfirm={() => call(false, UNLOCK_PHRASE)} />
+          </div>
+          <ProdBtn variant="ghost" size="sm" onClick={() => setAsking(false)} disabled={busy} title="Annuler">
+            <X size={10} strokeWidth={1.75} />
           </ProdBtn>
         </div>
       )}

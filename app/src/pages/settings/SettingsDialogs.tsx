@@ -47,7 +47,7 @@ export function AdvancedConfirm({ onConfirm, onCancel }: { onConfirm: () => void
 }
 
 /* ── "Desinstaller FLUX": list what goes / stays, then type the phrase ── */
-const UNINSTALL_PHRASE = 'Understand and Uninstall'
+const UNINSTALL_PHRASE = 'Understand'
 type UninstallPlan = { remove: { label: string; paths: string[] }[]; keep: string[] }
 
 export function UninstallConfirm({ onCancel }: { onCancel: () => void }) {

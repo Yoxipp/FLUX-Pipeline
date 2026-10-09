@@ -32,6 +32,10 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'titlebar.slideToClose':   { fr: 'Glisse pour fermer FLUX',  en: 'Slide to close FLUX' },
   'titlebar.cancel':         { fr: 'Annuler',                  en: 'Cancel' },
 
+  // slide-to-confirm (Production lock / archive, 2026-10-09)
+  'confirm.slideToUnlock':   { fr: 'Glisse pour déverrouiller', en: 'Slide to unlock' },
+  'confirm.slideToArchive':  { fr: 'Glisse pour archiver',      en: 'Slide to archive' },
+
   // backend status / reconnect banner
   'backend.starting':        { fr: 'Démarrage du service FLUX…', en: 'Starting the FLUX service…' },
   'backend.retrying':        { fr: 'Reconnexion au service FLUX…', en: 'Reconnecting to the FLUX service…' },
