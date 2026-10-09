@@ -26,10 +26,17 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   = `high` | `low` (absent = normale), reglee au clic droit d'un badge > Priorite (aussi en selection
   multiple), marquee par une fleche sur le badge. `myTasks` (taches assignees a un artiste), deadline =
   entree Calendrier ouverte la plus proche liee au shot (meme regle que le badge deadline) ou au NAME
-  de l'asset, `sortMyTasks` : Recommande (deadline > priorite > statut RTK d'abord), Deadline, Priorite,
+  de l'asset, `sortMyTasks` : Recommande (deadline > priorite > statut RTK d'abord), Deadline + Me
+  concerne (`compareDeadlineConcern(user)` reutilisable : assignee a moi en RTK, puis assignee a moi,
+  puis le reste, puis deadline ; a l'accueil = mes RTK d'abord), Deadline, Priorite,
   Statut, Mise a jour (dernier publish ou commentaire), Nom ; validees toujours a la fin, nom en
-  departage. Accueil : colonne droite `home/MyTasks.tsx` (projet actif, pages de 30, clic = la tache
-  dans Production, shots compris via `openFavorite`).
+  departage. Accueil (`Hub.tsx`, un seul `useProduction` partage) : colonne gauche `home/MyTasks.tsx`
+  (Tes taches, projet actif, pages de 30, clic = la tache dans Production, shots compris via
+  `openFavorite`) puis `home/MyRetakes.tsx` (Tes retakes : commentaires `kind: 'retake'` ecrits par
+  un autre sur une tache / sous-tache assignee a moi, ou sur la tache parente d'une sous-tache a moi,
+  plus recent d'abord, lus grises via `useCommentReadState`) ; chat d'equipe a droite
+  (`home/TeamChat.tsx`). Le flux "Activite recente" a quitte l'accueil (page Activite).
+  Commentaire de tache : case Retake dans `TaskDetail` (`ProductionComment.kind`, absent = note).
 * `CreateMenu.tsx` (retake 05) : un bouton Create en haut du tableau et de la Timeline, menu
   Shot / Sequence (ou Asset / Groupe) qui ouvre `NewProductionDialog` sur ce type ; Shot grise
   sans sequence. Timeline (`ProductionShot.tsx`) : molette = defiler, Maj+molette = page,
@@ -44,6 +51,9 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * `TaskDetail.tsx` > `MediaEmbed` (retake 10, ADR 0047) : bandeau sous la video (version affichee,
   Derniere version, Versions (n), Keyframe), liste des versions depuis le modif log du dossier `ref/`
   (auteur, date, statut, miniature, fleches / Entree / Echap), choix garde pour la session par zone.
+  Depot (A6) : dragover / drop toujours acceptes dans la zone ; si le chemin n'est pas resolu
+  (pas de projet, sequence du shot introuvable, erreur `/ref/resolve`), la raison s'affiche dans la
+  zone, pendant le survol et en toast au lieu d'un drop ignore en silence.
   `lib/keyframe.ts` : appel `/review/keyframe/open` + toasts + lecteur systeme si Keyframe absent.
 * `TaskStatusBadge.tsx` + `taskActions.ts` : meme menu clic droit Main/retakes, statuts,
   artiste courant/prise/assignation via les utilisateurs du pipe, Publisher (Instance vide)
@@ -64,6 +74,14 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   pour Edit ; clic droit du titre de departement pour prioriser un statut. Tri local a
   la vue, par sequence, sans changer l'ordre sauvegarde. Icone artiste accent sous les
   badges assignes a l'utilisateur ; tooltip affiche uniquement les artistes concernes.
+  Retakes 2026-10-09 : mode Assets groupe par classe (CHAR, PROPS, ENV puis les autres ;
+  libelles Charas/Props/Enviros), groupes repliables. Chevron d'une ligne asset = une ligne
+  par sous-tache (known_subtasks + cles `TASK|SUB` de task_details) sous la colonne de sa
+  tache, badge editable (TaskStatusBadge avec `subtask`). Bouton "Deadline + Me concerne"
+  (localStorage `flux.production.sort.deadlineMine`) : lignes avec une tache assignee
+  d'abord, puis deadline Calendar la plus proche (`entityDeadline`). Clic droit sur la
+  miniature d'un shot : source de l'apercu (Auto, Tout, etapes), partagee avec la Timeline
+  via `previewSourceStore.ts` (cle localStorage + evenement `flux:preview-source-change`).
 * `taskSelection.ts` : Ctrl/Meta + clic autour du badge ajoute/retire une tache, Shift + clic selectionne
   un rectangle de lignes/departements visibles. Clic droit sur la selection : assignation,
   prise en charge, statut commun ou suppression des badges avec confirmation. Une seule
@@ -90,8 +108,10 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   Un badge fixe efface ne suffit pas a faire passer le shot en Done.
 * Retakes : `TaskDetail.renderHeader` insere le statut et les actions dans le seul bandeau
   colore `TaskStrip`. Aucune suppression de tache/sous-tache depuis cette page.
-  Sidebar Production : fleche, trait continu vers Assets/Shots, fermeture aux changements
-  d'onglet (`flux:production-tab-change`) ou de page sauf maintien via l'icone de fenetre.
+  Sidebar Production : clic sur Production = deplie Assets/Shots, fermeture aux changements
+  d'onglet (`flux:production-tab-change`) ou de page sauf si l'epingle (seul controle, contour
+  accent quand active, gris sinon, localStorage `flux.sidebar.productionPinned`) est active.
+  Arbre gris : trait vertical + branche horizontale par enfant (CSS `::before`).
 * Timing concerne les shots seulement. Les badges de statut restent editables sur les shots
   verrouilles : seuls les `task_details` changent, aucune tache structurelle n'est ajoutee.
 * `shotCalendar.ts` + `ShotDeadlineBadge.tsx` : badge de delai a droite du label, calendrier

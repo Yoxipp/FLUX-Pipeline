@@ -64,9 +64,12 @@ export function TaskDetail({
   const detail: ProductionTaskDetail = asset.task_details?.[detailKey] || { notes: '', completion: 0, comments: [] }
   const [subtaskInput, setSubtaskInput] = useState('')
   const [commentInput, setCommentInput] = useState('')
+  // "Retake" toggle: the next comment is stored with kind 'retake' (home "Tes retakes").
+  const [asRetake, setAsRetake] = useState(false)
   // Project-relative root of this task/subtask (from PathBrowser) — the /ref
-  // embed folder lives under it. Empty until tokens resolve.
+  // embed folder lives under it. Empty until tokens resolve; refError says why.
   const [refBasePath, setRefBasePath] = useState('')
+  const [refError, setRefError] = useState('')
   const [publishListOpen, setPublishListOpen] = useState(false)
   // Current TASK/INSTANCE selection mirrored up from PathBrowser — feeds "Publish here".
   const [sel, setSel] = useState<{ task: string; instance: string }>({ task: '', instance: '' })
@@ -94,9 +97,11 @@ export function TaskDetail({
       author: (settings?.username || 'unknown').toUpperCase(),
       date: now.toISOString().slice(0, 10),
       time: now.toTimeString().slice(0, 5),
+      ...(asRetake ? { kind: 'retake' as const } : {}),   // absent = note
     }
     onPatchDetail({ comments: [...(detail.comments || []), comment] })
     setCommentInput('')
+    setAsRetake(false)
     // Fan out an activity event so anyone with this task in their favorites
     // sees it in Activity under the "Fav" filter.
     if (project) {
@@ -268,6 +273,13 @@ export function TaskDetail({
             }}>
               <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>Ctrl+Enter</span>
               <span style={{ flex: 1 }} />
+              <label title={t('prod.commentRetakeHint')} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                fontSize: 10, color: asRetake ? 'var(--err)' : 'var(--ink-3)', userSelect: 'none',
+              }}>
+                <input type="checkbox" checked={asRetake} onChange={e => setAsRetake(e.target.checked)} style={{ margin: 0 }} />
+                {t('prod.commentRetake')}
+              </label>
               <button
                 onClick={postComment}
                 disabled={!commentInput.trim()}
@@ -291,6 +303,13 @@ export function TaskDetail({
                         color: 'var(--accent-hi)', letterSpacing: '0.04em',
                       }}>{c.author}</span>
                       <span style={{ fontSize: 8, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
+                      {c.kind === 'retake' && (
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, letterSpacing: '0.06em',
+                          color: 'var(--err)', border: '1px solid color-mix(in oklch, var(--err) 45%, var(--rule-2))',
+                          borderRadius: 3, padding: '0 4px',
+                        }}>RETAKE</span>
+                      )}
                       <span style={{ flex: 1 }} />
                       <button
                         onClick={() => void readState.setRead(c.id, !read)}
@@ -332,7 +351,7 @@ export function TaskDetail({
             entityKind={entityKind}
             subtaskFilter={subtaskFilter}
             onPatchTask={onPatchTask}
-            onResolvedPath={setRefBasePath}
+            onResolvedPath={(p, err) => { setRefBasePath(p); setRefError(err || '') }}
             onSelChange={(task, instance) => setSel({ task, instance })}
           />
 
@@ -369,7 +388,7 @@ export function TaskDetail({
             />
           )}
 
-          <MediaEmbed project={project || ''} relPath={refBasePath} color={color}
+          <MediaEmbed project={project || ''} relPath={refBasePath} unresolved={refError} color={color}
             context={`${entityKind === 'shot' ? `${asset.class} ${asset.name}` : asset.name} · ${task.name}${subtaskFilter ? ` · ${subtaskFilter}` : ''}`} />
         </div>
       </div>
@@ -563,9 +582,10 @@ function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchT
   entityKind:     'asset' | 'shot' | 'seq'
   subtaskFilter:  string | null
   onPatchTask:    (patch: Partial<ProductionTask>) => void
-  onResolvedPath: (path: string) => void
+  onResolvedPath: (path: string, error?: string) => void   // '' + error = unresolved, and why
   onSelChange:    (task: string, instance: string) => void
 }) {
+  const { t } = useI18n()
   const [tokens, setTokens] = useState<{
     CLASS?:    Record<string, string>
     TYPE?:     Record<string, string>
@@ -643,16 +663,21 @@ function PathBrowser({ project, asset, task, entityKind, subtaskFilter, onPatchT
   // CLASS tokens the client-side composer above can't reproduce). Driven by the
   // current TASK/INSTANCE selection so the embed follows the selector.
   useEffect(() => {
-    if (!project) { onResolvedPath(''); return }
+    if (!project) { onResolvedPath('', t('prod.refNoProject')); return }
+    // A shot carries its sequence name in asset.class (MenuSpec toAssetShim). Empty =
+    // the shot's sequence was not found: resolving would give shot//SHOT (collapsed to
+    // shot/SHOT), a wrong folder, so refuse with a clear reason instead.
+    const seqName = (asset.class || '').trim()
+    if (entityKind === 'shot' && !seqName) { onResolvedPath('', t('prod.refNoSeq')); return }
     let ok = true
     const params = entityKind === 'asset'
       ? { kind: 'asset' as const, class_token: asset.class, name: asset.name, task: selTask, subtask: selInstance }
       : entityKind === 'shot'
-        ? { kind: 'shot' as const, seq: asset.class, shot: asset.name, task: selTask, subtask: selInstance }
+        ? { kind: 'shot' as const, seq: seqName, shot: asset.name, task: selTask, subtask: selInstance }
         : { kind: 'seq' as const,  seq: asset.name, task: selTask, subtask: selInstance }
     api.resolveRefPath(project, params)
-      .then(r => { if (ok) onResolvedPath(r.rel_path || '') })
-      .catch(() => { if (ok) onResolvedPath('') })
+      .then(r => { if (ok) onResolvedPath(r.rel_path || '', r.rel_path ? '' : t('prod.refUnresolved')) })
+      .catch(e => { if (ok) onResolvedPath('', t('prod.refResolveFailed', { err: e instanceof Error ? e.message : String(e) })) })
     return () => { ok = false }
   }, [project, entityKind, asset.class, asset.name, selTask, selInstance])   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -746,12 +771,14 @@ function isAcceptedMedia(file: File): boolean {
 
 const viewKey = (project: string, relPath: string) => `ref.view:${project}:${relPath}`
 
-function MediaEmbed({ project, relPath, color, context }: {
+function MediaEmbed({ project, relPath, unresolved, color, context }: {
   project: string
   relPath: string
+  unresolved: string       // why relPath is empty ('' while resolving or when resolved)
   color:   string
   context: string          // "SEQ010 SHOT020 · ANIM": the Keyframe source names
 }) {
+  const { t } = useI18n()
   const [latest, setLatest] = useState<{ file: string; kind: string } | null>(null)
   const [versions, setVersions] = useState<RefVersion[]>([])
   const [rev, setRev]       = useState(0)          // cache-buster: LAST.* is overwritten in place
@@ -769,6 +796,8 @@ function MediaEmbed({ project, relPath, color, context }: {
   }
 
   const canUse = !!project && !!relPath
+  // Shown (placeholder, drag hint, toast) when a drop can't land: never fail silently.
+  const blockedReason = canUse ? '' : (unresolved || (project ? t('prod.refUnresolved') : t('prod.refNoProject')))
 
   const refresh = useCallback((): (() => void) | undefined => {
     if (!canUse) { setLatest(null); setVersions([]); return undefined }
@@ -785,7 +814,7 @@ function MediaEmbed({ project, relPath, color, context }: {
   useEffect(() => refresh(), [refresh])
 
   const doUpload = useCallback(async (files: FileList | File[]) => {
-    if (!canUse) { toast.error('Chemin non résolu, impossible de déposer'); return }
+    if (!canUse) { toast.error(blockedReason); return }
     const list = Array.from(files).filter(isAcceptedMedia)
     if (list.length === 0) { toast.error('Formats acceptés : images et vidéos (pas d’audio)'); return }
     setUploading(true)
@@ -801,12 +830,21 @@ function MediaEmbed({ project, relPath, color, context }: {
     } finally {
       setUploading(false)
     }
-  }, [project, relPath, canUse, refresh])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [project, relPath, canUse, blockedReason, refresh])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Always accept the drag inside the zone (A6): when dragover is not cancelled,
+  // Chromium never fires drop, so an unresolved path used to make the drop vanish
+  // with no feedback. The drop then explains why it can't land.
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+    if (!dragOver) setDragOver(true)
+  }
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation()
     setDragOver(false)
     if (e.dataTransfer.files?.length) void doUpload(e.dataTransfer.files)
+    else toast.error(t('prod.refNoFile'))
   }
 
   const newest = versions.find(v => v.latest) ?? null
@@ -857,7 +895,8 @@ function MediaEmbed({ project, relPath, color, context }: {
       </div>
 
       <div
-        onDragOver={e => { if (canUse) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!dragOver) setDragOver(true) } }}
+        onDragEnter={onDragOver}
+        onDragOver={onDragOver}
         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
         onDrop={onDrop}
       >
@@ -911,10 +950,10 @@ function MediaEmbed({ project, relPath, color, context }: {
               </div>
               {canUse
                 ? <span><UploadCloud size={11} style={{ verticalAlign: '-2px' }} strokeWidth={1.75} /> Glissez une image ou une vidéo</span>
-                : <span>Chemin non résolu</span>}
+                : <span style={{ color: 'var(--warn)', textAlign: 'center' }}>{blockedReason}</span>}
             </div>
           )}
-          {dragOver && <div style={_dropHint}>{shown ? `Déposer : nouvelle version ${nextVersion}` : 'Déposer pour créer v001'}</div>}
+          {dragOver && <div style={_dropHint}>{!canUse ? blockedReason : shown ? `Déposer : nouvelle version ${nextVersion}` : 'Déposer pour créer v001'}</div>}
         </div>
 
         {/* Strip under the media: which version, the way back, the version list, Keyframe. */}
