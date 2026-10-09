@@ -1,19 +1,17 @@
 // MyRetakes.tsx - home page "Tes retakes": the comments marked as retake
-// (ProductionComment.kind === 'retake', TaskDetail) written by someone else on a
-// task / subtask assigned to the current artist. Source = the task_details comments
-// of the production store, no second store. Newest first; a click opens the task in
+// (ProductionComment.kind === 'retake', TaskDetail) on a task / subtask assigned to the
+// current artist, whoever wrote it (2026-10-09: a retake you note yourself counts too). Source = the task_details comments
+// of the production store, no second store. Newest first, the whole list scrolls; a click opens the task in
 // Production like "Tes tâches". A retake on a parent task (ANIM) also reaches the
 // artist assigned to one of its subtasks (ANIM|BLOCK), same as the activity "mine" logic.
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Btn } from '../../components/shared/ui'
+import { ScrollMore } from '../../components/shared/ScrollMore'
 import type { UseProductionResult } from '../../hooks/useProduction'
 import { useCommentReadState } from '../../hooks/useCommentReadState'
 import { useI18n } from '../../i18n'
 import type { ProductionAsset, ProductionShot, ProductionState } from '../../types'
-
-const PAGE = 20
 
 export interface MyRetake {
   id:      string                 // comment id
@@ -27,7 +25,7 @@ export interface MyRetake {
   subtask: string
 }
 
-/** Retake comments by other users on the tasks / subtasks assigned to *username*, newest first. */
+/** Retake comments on the tasks / subtasks assigned to *username*, newest first. */
 export function myRetakes(state: ProductionState, username: string): MyRetake[] {
   const who = username.trim().toUpperCase()
   if (!who) return []
@@ -45,7 +43,7 @@ export function myRetakes(state: ProductionState, username: string): MyRetake[] 
       const concerned = mine.includes(upper) || (!subtask && mine.some(k => k.startsWith(`${upper}|`)))
       if (!concerned) continue
       for (const c of detail.comments ?? []) {
-        if (c.kind !== 'retake' || (c.author ?? '').trim().toUpperCase() === who) continue
+        if (c.kind !== 'retake') continue
         out.push({
           id: c.id, text: c.text, author: c.author, stamp: `${c.date} ${(c.time ?? '').slice(0, 5)}`.trim(),
           label: `${seq} ${entity.name}`.trim(), seq, name: entity.name, task, subtask,
@@ -60,7 +58,6 @@ export function MyRetakes({ project, username, prod }: { project: string | null 
   const navigate = useNavigate()
   const { t } = useI18n()
   const readState = useCommentReadState()
-  const [shown, setShown] = useState(PAGE)
   const retakes = useMemo(() => myRetakes(prod.state, username), [prod.state, username])
   const unread = retakes.filter(r => !readState.isRead(r.id)).length
 
@@ -70,11 +67,11 @@ export function MyRetakes({ project, username, prod }: { project: string | null 
         <div className="cap">{t('hub.yourRetakes')}</div>
         {retakes.length > 0 && <span className="lbl" style={{ color: 'var(--ink-3)' }}>{unread}{unread !== retakes.length ? ` / ${retakes.length}` : ''}</span>}
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+      <ScrollMore>
         {project && !prod.loading && !retakes.length && (
           <div style={{ padding: '10px 14px', fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5 }}>{t('hub.noRetake')}</div>
         )}
-        {project && retakes.slice(0, shown).map(r => {
+        {project && retakes.map(r => {
           const read = readState.isRead(r.id)
           const where = `${r.label} · ${r.task}${r.subtask ? ` · ${r.subtask}` : ''}`
           return (
@@ -98,12 +95,7 @@ export function MyRetakes({ project, username, prod }: { project: string | null 
             </div>
           )
         })}
-        {project && retakes.length > shown && (
-          <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'center' }}>
-            <Btn sm ghost onClick={() => setShown(n => n + PAGE)}>{t('hub.showMore', { n: retakes.length - shown })}</Btn>
-          </div>
-        )}
-      </div>
+      </ScrollMore>
     </div>
   )
 }

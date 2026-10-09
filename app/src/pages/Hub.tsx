@@ -34,14 +34,12 @@ export function Hub() {
       {/* body */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
-        {/* ── tes tâches / tes retakes ── */}
+        {/* ── three columns (2026-10-09): tes tâches | tes retakes | team chat, each scrolls ── */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid var(--rule)' }}>
-          <div style={{ flex: 3, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <MyTasks project={project} username={username} prod={prod} />
-          </div>
-          <div style={{ flex: 2, display: 'flex', flexDirection: 'column', minHeight: 0, borderTop: '1px solid var(--rule)' }}>
-            <MyRetakes project={project} username={username} prod={prod} />
-          </div>
+          <MyTasks project={project} username={username} prod={prod} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid var(--rule)' }}>
+          <MyRetakes project={project} username={username} prod={prod} />
         </div>
 
         {/* ── team chat ── */}

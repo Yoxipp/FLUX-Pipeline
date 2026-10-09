@@ -183,7 +183,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'hub.yourTasks':           { fr: 'TES TÂCHES',               en: 'YOUR TASKS' },
   'hub.yourRetakes':         { fr: 'TES RETAKES',              en: 'YOUR RETAKES' },
   'hub.noRetake':            { fr: 'Aucun retake sur tes tâches.', en: 'No retake on your tasks.' },
-  'hub.showMore':            { fr: 'Afficher plus ({n})',      en: 'Show more ({n})' },
   'hub.sortConcernHint':     { fr: 'Tes tâches en retake (RTK) d’abord, puis la deadline la plus proche, puis la priorité', en: 'Your tasks in retake (RTK) first, then the nearest deadline, then priority' },
   'prod.commentRetake':      { fr: 'Retake',                   en: 'Retake' },
   'prod.commentRetakeHint':  { fr: 'Marquer ce commentaire comme retake : il apparaît dans « Tes retakes » de l’artiste assigné', en: 'Mark this comment as a retake: it shows in the assigned artist’s "Your retakes"' },

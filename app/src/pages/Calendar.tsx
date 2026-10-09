@@ -13,7 +13,7 @@ import type { CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calendarLinksShot } from './Production/shotCalendar'
 import { toast } from 'sonner'
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronRight, Plus, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useI18n } from '../i18n'
@@ -22,9 +22,8 @@ import type { LinkKind, LinkSlots } from '../hooks/useCalendarLinkTokens'
 import type { CalendarItem, CalendarPublish, CalendarStatus } from '../types'
 
 const POLL_MS = 30_000
-const MONTH_CHIPS = 4
 // Month view = one continuous scroll of weeks (2026-09-30), 6 months back to 12 ahead.
-const ROW_H = 128
+const ROW_H = 180   // tall rectangles: room for more stacked tasks (2026-10-09)
 const ZOOM_KEY = 'flux.calendar.zoom'
 const ZOOM_MIN = 0.75
 const ZOOM_MAX = 3
@@ -47,7 +46,7 @@ const MONTHS: Record<Lang, string[]> = {
   fr: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
   en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
 }
-const STATUS_LABEL: Record<Lang, Record<CalendarStatus, string>> = {
+export const STATUS_LABEL: Record<Lang, Record<CalendarStatus, string>> = {
   fr: { proposed: 'Proposée, en attente', accepted: 'Pas commencée', in_progress: 'En cours', done: 'Finie', declined: 'Refusée' },
   en: { proposed: 'Proposed, waiting', accepted: 'Not started', in_progress: 'In progress', done: 'Done', declined: 'Declined' },
 }
@@ -65,7 +64,7 @@ function useTr() {
 }
 
 // ── state colors (flat, no glow) ─────────────────────────────────────────────
-const STATE_COLOR: Record<CalendarStatus, string> = {
+export const STATE_COLOR: Record<CalendarStatus, string> = {
   proposed: 'var(--ink-3)', accepted: 'var(--err)', in_progress: 'var(--warn)', done: 'var(--ok)', declined: 'var(--ink-4)',
 }
 
@@ -247,12 +246,27 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
 // A task over several days is one continuous thin line in month view: it runs edge to edge
 // through the cells (negative margins over the cell padding) and only stops inside the
 // start and end days. Two small tabs hang under the line with an arrow (head and end); the
-// head tab follows today once the task has started. A tab unfolds the task into full chips.
+// head tab follows today once the task has started. A tab unfolds the task into a lighter band
+// under the line. Every task starts folded, one-day tasks too (a short line in their cell).
 function spanHead(it: CalendarItem, today: string) {
   return it.start < today && today <= it.end ? today : it.start
 }
 
 const CELL_PAD = 5   // padding of a day cell, crossed by the line so it stays continuous
+const NOTE_ROW = 13  // one note line in an unfolded band
+const BAND_BASE = 34 // unfolded band: title + owner rows
+
+// Note rows shown in an unfolded band (zoom shows more of the note, capped so a band stays readable).
+function bandNoteRows(it: CalendarItem, noteLines: number) {
+  return it.note && noteLines > 0 ? Math.min(noteLines, 6) : 0
+}
+
+// Height of a span mark in a cell: the same on every day of an unfolded task, so its band
+// stays continuous from cell to cell.
+function spanMarkHeight(it: CalendarItem, day: string, today: string, open: boolean, noteLines: number) {
+  if (open) return 4 + BAND_BASE + bandNoteRows(it, noteLines) * NOTE_ROW
+  return day === spanHead(it, today) ? 26 : 14
+}
 
 function SpanTab({ color, side, open, onExpand, label }: { color: string; side: 'left' | 'right'; open: boolean; onExpand: () => void; label: string }) {
   return (
@@ -268,8 +282,8 @@ function SpanTab({ color, side, open, onExpand, label }: { color: string; side: 
   )
 }
 
-function SpanMark({ it, day, today, selected, open, onClick, onExpand }: {
-  it: CalendarItem; day: string; today: string; selected: boolean; open: boolean; onClick: () => void; onExpand: () => void
+function SpanMark({ it, day, today, selected, open, noteLines, onClick, onExpand }: {
+  it: CalendarItem; day: string; today: string; selected: boolean; open: boolean; noteLines: number; onClick: () => void; onExpand: () => void
 }) {
   const { l, tr } = useTr()
   const proposed = it.status === 'proposed'
@@ -282,19 +296,20 @@ function SpanMark({ it, day, today, selected, open, onClick, onExpand }: {
   const inset = { left: 0, right: 0 }
   // Unfolded: a lighter band glued under the line, continuous like it; the head day writes
   // the task in it. The tabs stay where they are, the arrow turns up.
-  const BAND = 34
+  const noteRows = bandNoteRows(it, noteLines)
+  const height = spanMarkHeight(it, day, today, open, noteLines)
   return (
     <div onMouseDown={e => e.stopPropagation()}
          onClick={e => { e.stopPropagation(); onClick() }}
          title={title}
-         style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height: open ? 4 + BAND : head ? 26 : 14,
+         style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height,
                   marginLeft: isStart ? 0 : -CELL_PAD, marginRight: isEnd ? 0 : -CELL_PAD,
                   opacity: it.status === 'declined' ? 0.45 : 1 }}>
       <span style={{ position: 'absolute', top: 2, left: 0, right: 0, height: 2, background: color,
                      borderRadius: `${isStart ? 1 : 0}px ${isEnd ? 1 : 0}px ${isEnd ? 1 : 0}px ${isStart ? 1 : 0}px`,
                      boxShadow: selected ? '0 0 0 1px var(--accent)' : undefined }} />
       {open && (
-        <span style={{ position: 'absolute', top: 4, ...inset, height: BAND,
+        <span style={{ position: 'absolute', top: 4, ...inset, bottom: 0,
                        background: `color-mix(in oklch, ${color} 20%, transparent)` }} />
       )}
       {open && head && (
@@ -304,6 +319,12 @@ function SpanMark({ it, day, today, selected, open, onClick, onExpand }: {
           <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--ink-2)' }}>
             {it.owner}{it.link ? ` · ${it.link}` : ''}
           </span>
+          {noteRows > 0 && (
+            <span style={{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: noteRows, overflow: 'hidden',
+                           fontSize: 10.5, lineHeight: `${NOTE_ROW}px`, color: 'var(--ink-3)', whiteSpace: 'pre-wrap' }}>
+              {it.note}
+            </span>
+          )}
         </span>
       )}
       {head && <SpanTab color={color} side="left" open={open} onExpand={onExpand} label={unfold} />}
@@ -815,6 +836,14 @@ export function Calendar() {
       setPicked(null); setCreating({ start: todayIso(), end: todayIso() })
     }
   }, [shotScope, project, sequence, shot, items, loadedProject])
+  // ?item=<id> (Home "Tes tâches"): open that commitment in the week view, then drop the param.
+  const itemParam = params.get('item') ?? ''
+  useEffect(() => {
+    if (!itemParam || loadedProject !== project) return
+    const it = items.find(x => x.id === itemParam)
+    if (it) { setWho(''); setView('week'); setCursor(fromIso(it.start)); setCreating(null); setPicked(it.id) }
+    setParams(prev => { const next = new URLSearchParams(prev); next.delete('item'); return next }, { replace: true })
+  }, [itemParam, items, loadedProject, project]) // eslint-disable-line react-hooks/exhaustive-deps
   const toAnswer = useMemo(() => items.filter(it => it.status === 'proposed' && same(it.owner, me)), [items, me])
   const waiting = useMemo(() => items.filter(it => it.status === 'proposed' && same(it.created_by, me) && !same(it.owner, me)), [items, me])
   const pickedItem = items.find(it => it.id === picked) ?? null
@@ -980,8 +1009,25 @@ export function Calendar() {
             const cellBg = inSpan ? 'color-mix(in oklch, var(--accent) 22%, var(--paper))'
               : dark ? 'var(--bg-deep)'
               : 'color-mix(in oklch, var(--ink) 7%, var(--paper-2))'
-            // More zoom: more chips per day (notes take room, so the count grows slower then).
-            const max = view === 'month' ? Math.max(1, Math.floor(MONTH_CHIPS * zoom / (noteLines ? 1.6 : 1))) : list.length
+            // Month view: as many marks as the cell height holds, keeping room for the "+N" line
+            // so it is never pushed out of the cell (2026-10-09). Unfolded tasks get the
+            // room first: opening a second task hides folded ones, never the open one.
+            let visible = list
+            if (view === 'month') {
+              const GAP = 3, MORE_H = 14
+              const room = rowH - 2 * CELL_PAD - 17   // cell padding + day number
+              const h = (it: CalendarItem) => spanMarkHeight(it, day, today, unfolded.has(it.id), noteLines) + GAP
+              if (list.reduce((s, it) => s + h(it), 0) > room) {
+                const keep = new Set<string>()
+                let used = MORE_H
+                for (const it of [...list.filter(x => unfolded.has(x.id)), ...list.filter(x => !unfolded.has(x.id))]) {
+                  if (used + h(it) > room && !unfolded.has(it.id)) continue
+                  used += h(it); keep.add(it.id)
+                }
+                visible = list.filter(it => keep.has(it.id))
+              }
+            }
+            const hidden = list.length - visible.length
             const dayPubs = showPub ? pubsOn(day) : []
             return (
               <div key={day}
@@ -1009,31 +1055,29 @@ export function Calendar() {
                   )}
                 </div>
                 {dayPubs.length > 0 && <PublishBand pubs={dayPubs} />}
-                {list.slice(0, max).map(it => {
+                {visible.map(it => {
                   const pick = () => { setCreating(null); setPicked(it.id) }
-                  const multi = view === 'month' && it.start !== it.end
-                  if (multi && !unfolded.has(it.id)) {
+                  // Month view: every task starts folded on its line (one day or several);
+                  // its tab unfolds it into a band under the line, the tab does not move.
+                  if (view === 'month') {
                     return <SpanMark key={it.id} it={it} day={day} today={today} selected={it.id === picked}
+                                     open={unfolded.has(it.id)} noteLines={noteLines}
                                      onClick={pick} onExpand={() => toggleUnfolded(it.id)} />
                   }
-                  return (
-                    <div key={it.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 2, minWidth: 0, flexShrink: 0 }}>
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                        <Chip it={it} full={view === 'week'} noteLines={noteLines} selected={it.id === picked} onClick={pick} />
-                      </div>
-                      {multi && (day === spanHead(it, today) || day === it.end) && (
-                        <button onMouseDown={e => e.stopPropagation()}
-                                onClick={e => { e.stopPropagation(); toggleUnfolded(it.id) }}
-                                title={tr('Replier la tâche', 'Fold the task')}
-                                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 18,
-                                         padding: 0, border: 0, borderRadius: 3, background: 'transparent', color: 'var(--ink-2)', cursor: 'pointer', flexShrink: 0 }}>
-                          <ChevronUp size={12} strokeWidth={2} />
-                        </button>
-                      )}
-                    </div>
-                  )
+                  return <Chip key={it.id} it={it} full noteLines={noteLines} selected={it.id === picked} onClick={pick} />
                 })}
-                {list.length > max && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>+{list.length - max} {tr('(vue semaine)', '(week view)')}</div>}
+                {hidden > 0 && (
+                  // Opens the week of this day, where every task shows in full.
+                  <button onMouseDown={e => e.stopPropagation()}
+                          onClick={e => { e.stopPropagation(); setView('week'); setCursor(d) }}
+                          title={tr('Voir toute la semaine de ce jour', 'Show the whole week of this day')}
+                          style={{ alignSelf: 'flex-start', maxWidth: '100%', padding: '0 4px', border: 0, borderRadius: 3,
+                                   background: 'transparent', cursor: 'pointer',
+                                   fontSize: 11, lineHeight: '14px', height: 14, flexShrink: 0, color: 'var(--ink-2)',
+                                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    +{hidden} {tr('(vue semaine)', '(week view)')}
+                  </button>
+                )}
               </div>
             )
           })}
