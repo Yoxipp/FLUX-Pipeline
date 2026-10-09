@@ -33,7 +33,8 @@ import * as Dropdown from '@radix-ui/react-dropdown-menu'
 import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical } from 'lucide-react'
 import { CreateMenu, type CreateKind } from './CreateMenu'
 import { TimelinePreview } from './TimelinePreview'
-import { buildMontage, pickMedia, previewCandidates, type PreviewMedia, type PreviewSource } from './previewEdit'
+import { buildMontage, pickMedia, previewCandidates, type PreviewMedia } from './previewEdit'
+import { usePreviewSource } from './previewSourceStore'
 import { openInKeyframe } from '../../lib/keyframe'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
@@ -91,7 +92,7 @@ const VZOOM_MIN = 0.6
 const VZOOM_MAX = 3.0
 const VZOOM_DEF = 1.0
 const LS_VZOOM = 'flux.production.shot.vzoom'
-const LS_PREVIEW_SOURCE = 'flux.production.timeline.previewSource'
+// Preview source: shared with the Production table thumbnails (previewSourceStore.ts).
 
 // Bookmarks are per-user (stored in User.json via /settings/user-data under
 // `production.bookmarks.<project>`). Not scoped to the machine.
@@ -217,10 +218,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   const framesOf = (shot: Shot) => (resizing && resizing.id === shot.id ? resizing.frames : shotFrames(shot))
 
   // ── preview + auto edit (TimelinePreview) ─────────────────────────────────
-  const [source, setSourceState] = useState<PreviewSource>(() => {
-    try { return localStorage.getItem(LS_PREVIEW_SOURCE) || 'auto' } catch { return 'auto' }
-  })
-  const setSource = (v: PreviewSource) => { setSourceState(v); try { localStorage.setItem(LS_PREVIEW_SOURCE, v) } catch { /* blocked */ } }
+  const [source, setSource] = usePreviewSource()
   const [montage, setMontage] = useState<{ seqId?: string } | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [previews, setPreviews] = useState<Record<string, PreviewMedia[]>>({})

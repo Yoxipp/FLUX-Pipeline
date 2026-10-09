@@ -258,10 +258,15 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 
 .production-nav-row { display: flex; align-items: center; padding-right: 9px; }
 .production-nav-row > .nav { flex: 1; min-width: 0; }
-.production-nav-control { display: inline-flex; align-items: center; justify-content: center; padding: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--ink-3); cursor: pointer; }
-.production-nav-control:hover { color: var(--ink); background: var(--paper-2); }
-.production-nav-control[aria-pressed="true"] { color: var(--accent-hi); background: var(--accent-soft); }
-.production-nav-children { margin: 2px 12px 6px 30px; padding-left: 0; border-left: 1px solid var(--rule-2); }
+/* Retake B1: a single pin keeps the Production group open (grey off, orange outline on). */
+.production-nav-pin { display: inline-flex; align-items: center; justify-content: center; padding: 3px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-4); cursor: pointer; }
+.production-nav-pin:hover { color: var(--ink-2); background: var(--paper-2); }
+.production-nav-pin[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: transparent; }
+/* Tree: one vertical grey line plus a horizontal branch per child. */
+.production-nav-children { position: relative; margin: 2px 12px 6px 22px; padding-left: 14px; }
+.production-nav-children::before { content: ''; position: absolute; left: 0; top: -4px; bottom: 15px; width: 1px; background: var(--ink-4); }
+.production-nav-children > .nav { position: relative; }
+.production-nav-children > .nav::before { content: ''; position: absolute; left: -16px; top: 50%; width: 13px; height: 1px; background: var(--ink-4); }
 .production-nav-row > .nav:hover, .production-nav-children > .nav:hover { transform: none; }
 .nav:hover .glyph { color: var(--ink-2); }
 .nav.active {
