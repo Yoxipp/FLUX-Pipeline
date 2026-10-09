@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import subprocess
 from pathlib import Path
 
 from core import config
-from core.constants import DCC_EXE_PATTERNS, DEFAULT_FRAME_END, DEFAULT_FRAME_START
+from core.constants import DCC_EXE_PATTERN_GROUPS, DEFAULT_FRAME_END, DEFAULT_FRAME_START
 from core.logger import get_logger
 
 log = get_logger(__name__)
@@ -58,7 +59,7 @@ def _child_env() -> dict[str, str]:
         env.pop("HOME", None)
     return env
 
-# Map frontend lowercase keys → DCC_EXE_PATTERNS keys
+# Map frontend lowercase keys → DCC_EXE_PATTERN_GROUPS keys
 _FRONTEND_KEY_MAP: dict[str, str] = {
     "maya":               "Maya",
     "houdini":            "Houdini",
@@ -80,21 +81,52 @@ DCC_FRONTEND_KEYS: frozenset[str] = frozenset(_FRONTEND_KEY_MAP)
 def get_installed_dccs() -> dict[str, str]:
     """Return {frontend_key: exe_path} — keys are lowercase (e.g. 'houdini', 'maya').
 
-    Checks user-configured custom paths first, then glob-scans default install dirs.
+    Checks user-configured custom paths first, then the Windows registry and the
+    default install dirs of every Program Files root; the newest version wins.
     """
     found: dict[str, str] = {}
-    for frontend_key, internal_key in _FRONTEND_KEY_MAP.items():
-        patterns = DCC_EXE_PATTERNS.get(internal_key, [])
-        custom = config.get_dcc_exe(frontend_key)
-        if custom and Path(custom).is_file():
+    for frontend_key in _FRONTEND_KEY_MAP:
+        custom = _valid_custom_exe(frontend_key)
+        if custom:
             found[frontend_key] = custom
             continue
-        for pattern in patterns:
-            matches = glob.glob(pattern)
-            if matches:
-                found[frontend_key] = sorted(matches)[-1]
-                break
+        candidates = list_dcc_candidates(frontend_key)
+        if candidates:
+            found[frontend_key] = candidates[0]
     return found
+
+
+def list_dcc_candidates(dcc_key: str) -> list[str]:
+    """Every install of *dcc_key* found on this machine, newest version first.
+
+    Sources: the Windows registry (Maya, Photoshop) then the glob patterns of
+    DCC_EXE_PATTERN_GROUPS (all Program Files roots). Only existing files are kept.
+    Order: priority group first (registry entries join the first group), then the
+    newest version inside a group.
+    """
+    internal = _FRONTEND_KEY_MAP.get(dcc_key)
+    if not internal:
+        return []
+    seen: set[str] = set()
+
+    def _collect(paths: list[str], into: list[str]) -> None:
+        for path in paths:
+            norm = os.path.normcase(os.path.normpath(path))
+            if norm not in seen and os.path.isfile(path):
+                seen.add(norm)
+                into.append(os.path.normpath(path))
+
+    result: list[str] = []
+    groups = DCC_EXE_PATTERN_GROUPS.get(internal, []) or [[]]
+    for index, group in enumerate(groups):
+        found: list[str] = []
+        if index == 0:
+            _collect(_registry_candidates(dcc_key), found)
+        for pattern in group:
+            _collect(glob.glob(pattern), found)
+        # Stable sort: equal versions keep the discovery order (registry, then patterns).
+        result.extend(sorted(found, key=_version_key, reverse=True))
+    return result
 
 
 # Characters cmd.exe still interprets inside double quotes: a quote ends the quoting
@@ -173,14 +205,13 @@ def find_dcc_exe(dcc_key: str) -> str | None:
     if not internal:
         log.warning("find_dcc_exe: unknown key '%s'", dcc_key)
         return None
-    patterns = DCC_EXE_PATTERNS.get(internal, [])
-    for pattern in patterns:
-        matches = glob.glob(pattern)
-        if matches:
-            path = sorted(matches)[-1]
-            config.set_dcc_exe(dcc_key, path)
-            log.info("Auto-found %s → %s", dcc_key, path)
-            return path
+    candidates = list_dcc_candidates(dcc_key)
+    if candidates:
+        path = candidates[0]
+        config.set_dcc_exe(dcc_key, path)
+        others = f" (autres versions : {', '.join(candidates[1:])})" if len(candidates) > 1 else ""
+        log.info("Auto-found %s → %s%s", dcc_key, path, others)
+        return path
     log.info("Auto-find: no exe found for '%s'", dcc_key)
     return None
 
@@ -201,8 +232,110 @@ def _frame_range_args(dcc_name: str) -> tuple[str, ...]:
 
 def _resolve_exe(dcc_name: str) -> str | None:
     """Return exe path: custom setting first, then auto-detected, then None."""
-    custom = config.get_dcc_exe(dcc_name)
-    if custom and Path(custom).is_file():
+    custom = _valid_custom_exe(dcc_name)
+    if custom:
         return custom
     return get_installed_dccs().get(dcc_name)
+
+
+# Custom paths already reported missing (warn once per path, the scan is polled).
+_warned_missing: set[str] = set()
+
+
+def _valid_custom_exe(dcc_key: str) -> str | None:
+    """The configured exe of *dcc_key* when it still exists. A configured path that
+    vanished (DCC uninstalled, upgraded to a new version folder) is logged once and
+    ignored, so auto-detection takes over."""
+    custom = config.get_dcc_exe(dcc_key)
+    if not custom:
+        return None
+    if Path(custom).is_file():
+        return custom
+    if custom not in _warned_missing:
+        _warned_missing.add(custom)
+        log.warning("Chemin configure introuvable pour %s : %s (detection automatique utilisee)",
+                    dcc_key, custom)
+    return None
+
+
+_VERSION_RE = re.compile(r"\d+")
+
+
+def _version_key(path: str) -> tuple:
+    """Sort key: the numbers of the deepest folder holding digits.
+
+    Maya2025 -> (2025,), "Adobe Photoshop 2025" -> (2025,) > "Adobe Photoshop CC 2019"
+    -> (2019,), "Houdini 20.5.332" -> (20, 5, 332), Nuke15.1v3 -> (15, 1, 3).
+    """
+    for part in reversed(Path(path).parent.parts):
+        numbers = _VERSION_RE.findall(part)
+        if numbers:
+            return tuple(int(n) for n in numbers)
+    return ()
+
+
+# ── Windows registry (guarded: absent off Windows, mocked in tests) ─────────────
+
+try:  # pragma: no cover - platform dependent
+    import winreg as _winreg
+except ImportError:  # pragma: no cover
+    _winreg = None
+
+_MAYA_KEY = r"SOFTWARE\Autodesk\Maya"
+_PHOTOSHOP_KEY = r"SOFTWARE\Adobe\Photoshop"
+_APP_PATHS_PHOTOSHOP = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Photoshop.exe"
+
+
+def _reg_subkeys(key_path: str) -> list[str]:
+    """Names of the subkeys of HKLM\\<key_path> (64-bit view), [] when absent."""
+    if _winreg is None:
+        return []
+    try:
+        with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, key_path, 0,
+                             _winreg.KEY_READ | getattr(_winreg, "KEY_WOW64_64KEY", 0)) as key:
+            names: list[str] = []
+            index = 0
+            while True:
+                try:
+                    names.append(_winreg.EnumKey(key, index))
+                except OSError:
+                    return names
+                index += 1
+    except OSError:
+        return []
+
+
+def _reg_value(key_path: str, name: str = "") -> str | None:
+    """A string value of HKLM\\<key_path> ("" = default value), None when absent."""
+    if _winreg is None:
+        return None
+    try:
+        with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, key_path, 0,
+                             _winreg.KEY_READ | getattr(_winreg, "KEY_WOW64_64KEY", 0)) as key:
+            value, _kind = _winreg.QueryValueEx(key, name)
+    except OSError:
+        return None
+    return str(value) if value else None
+
+
+def _registry_candidates(dcc_key: str) -> list[str]:
+    """Exe paths the registry declares for *dcc_key* (may not exist: filtered later)."""
+    out: list[str] = []
+    if dcc_key == "maya":
+        # HKLM\SOFTWARE\Autodesk\Maya\2025\Setup\InstallPath  MAYA_INSTALL_LOCATION
+        for version in _reg_subkeys(_MAYA_KEY):
+            loc = _reg_value(rf"{_MAYA_KEY}\{version}\Setup\InstallPath", "MAYA_INSTALL_LOCATION")
+            if loc:
+                out.append(os.path.join(loc, "bin", "maya.exe"))
+    elif dcc_key == "photoshop":
+        # HKLM\SOFTWARE\Adobe\Photoshop\<ver>  ApplicationPath (folder holding Photoshop.exe)
+        for version in _reg_subkeys(_PHOTOSHOP_KEY):
+            app = _reg_value(rf"{_PHOTOSHOP_KEY}\{version}", "ApplicationPath")
+            if app:
+                out.append(os.path.join(app, "Photoshop.exe"))
+        # App Paths\Photoshop.exe default value = the exe itself
+        exe = _reg_value(_APP_PATHS_PHOTOSHOP)
+        if exe:
+            out.append(exe.strip('"'))
+    return out
 

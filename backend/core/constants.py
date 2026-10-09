@@ -61,39 +61,78 @@ DCC_COLORS: dict[str, str] = {
 
 # ── DCC display names + default exe search patterns ──────────────────────────
 
-def _build_dcc_patterns() -> dict[str, list[str]]:
+def _program_files_roots() -> list[str]:
+    """Every Program Files root of this machine, deduplicated, 64-bit first.
+
+    %ProgramFiles% is "Program Files (x86)" for a 32-bit process, so %ProgramW6432%
+    is checked too (school installs: C:\\Program Files\\Autodesk\\Maya2025)."""
+    pf = _os.environ.get("PROGRAMFILES", r"C:\Program Files")
+    candidates = [
+        _os.environ.get("PROGRAMW6432") or "",
+        pf,
+        _os.environ.get("PROGRAMFILES(X86)") or rf"{pf} (x86)",
+    ]
+    roots: list[str] = []
+    for root in candidates:
+        if root and _os.path.normcase(root) not in {_os.path.normcase(r) for r in roots}:
+            roots.append(root)
+    return roots
+
+
+def _build_dcc_pattern_groups() -> dict[str, list[list[str]]]:
+    """Exe glob patterns per DCC, in priority groups, expanded on every Program Files root.
+
+    Inside a group the newest version wins (launcher_core sorts by version); an earlier
+    group wins over a later one (e.g. the Adobe Painter over an old Allegorithmic one)."""
     pf   = _os.environ.get("PROGRAMFILES",      r"C:\Program Files")
     pf86 = _os.environ.get("PROGRAMFILES(X86)", rf"{pf} (x86)")
     lad  = _os.environ.get("LOCALAPPDATA",       _os.path.expanduser(r"~\AppData\Local"))
+    roots = _program_files_roots()
+    out: dict[str, list[list[str]]] = {}
+    for key, groups in _patterns_for_root("{pf}", pf86, lad).items():
+        out[key] = [
+            # Patterns outside a Program Files root (Steam, LOCALAPPDATA) come out once
+            # per root: dict.fromkeys keeps the first occurrence only.
+            list(dict.fromkeys(p.replace("{pf}", root) for root in roots for p in group))
+            for group in groups
+        ]
+    return out
+
+
+def _patterns_for_root(pf: str, pf86: str, lad: str) -> dict[str, list[list[str]]]:
     return {
-        "Maya":       [rf"{pf}\Autodesk\Maya*\bin\maya.exe"],
-        "Houdini":    [
-            # houdini.exe est le launcher générique SideFX (adapte la licence automatiquement)
-            # houdinifx.exe en fallback pour les installs qui n'ont pas houdini.exe
-            rf"{pf}\Side Effects Software\Houdini*\bin\houdini.exe",
-            rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe",
-        ],
-        "Nuke":       [rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"],   # [0-9] exclut CrashFeedback
-        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter*\Adobe Substance 3D Painter.exe",
-                       rf"{pf86}\Steam\steamapps\common\Substance 3D Painter*\Adobe Substance 3D Painter.exe",
-                       rf"{pf}\Allegorithmic\Substance Painter*\Substance Painter.exe"],
+        "Maya":       [[rf"{pf}\Autodesk\Maya*\bin\maya.exe"]],
+        # houdini.exe est le launcher générique SideFX (adapte la licence automatiquement)
+        # houdinifx.exe en fallback pour les installs qui n'ont pas houdini.exe
+        # (same group: the newest version wins, houdini.exe first at equal version).
+        "Houdini":    [[rf"{pf}\Side Effects Software\Houdini*\bin\houdini.exe",
+                        rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe"]],
+        "Nuke":       [[rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"]],   # [0-9] exclut CrashFeedback
+        "SubstanceP": [[rf"{pf}\Adobe\Adobe Substance 3D Painter*\Adobe Substance 3D Painter.exe"],
+                       [rf"{pf86}\Steam\steamapps\common\Substance 3D Painter*\Adobe Substance 3D Painter.exe"],
+                       [rf"{pf}\Allegorithmic\Substance Painter*\Substance Painter.exe"]],
         # Designer: Adobe install, Steam build, older Allegorithmic install.
-        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer*\Adobe Substance 3D Designer.exe",
-                       rf"{pf86}\Steam\steamapps\common\Substance 3D Designer*\Adobe Substance 3D Designer.exe",
-                       rf"{pf}\Allegorithmic\Substance Designer*\Substance Designer.exe"],
-        "ZBrush":     [rf"{pf}\Maxon ZBrush*\ZBrush.exe",
-                       rf"{pf86}\Maxon ZBrush*\ZBrush.exe"],
+        "SubstanceD": [[rf"{pf}\Adobe\Adobe Substance 3D Designer*\Adobe Substance 3D Designer.exe"],
+                       [rf"{pf86}\Steam\steamapps\common\Substance 3D Designer*\Adobe Substance 3D Designer.exe"],
+                       [rf"{pf}\Allegorithmic\Substance Designer*\Substance Designer.exe"]],
+        "ZBrush":     [[rf"{pf}\Maxon ZBrush*\ZBrush.exe",
+                        rf"{pf86}\Maxon ZBrush*\ZBrush.exe"]],
         # Marvelous: school Enterprise build (Marvelous Designer Enterprise OnlineAuth /
         # MarvelousDesigner_Enterprise_Online.exe) and the CLO-SET personal install.
-        "Marvelous":  [rf"{pf}\Marvelous Designer*\MarvelousDesigner*.exe",
-                       rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner*.exe",
-                       rf"{pf}\CLO Virtual Fashion\MarvelousDesigner*\MarvelousDesigner*.exe"],
-        "Photoshop":  [rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
-                       rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"],
-        "Mari":       [rf"{pf}\Mari*\Bundle\bin\Mari*.exe"],
+        "Marvelous":  [[rf"{pf}\Marvelous Designer*\MarvelousDesigner*.exe"],
+                       [rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner*.exe"],
+                       [rf"{pf}\CLO Virtual Fashion\MarvelousDesigner*\MarvelousDesigner*.exe"]],
+        # One group: "Adobe Photoshop 2025" beats "Adobe Photoshop CC 2019" wherever it is.
+        "Photoshop":  [[rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
+                        rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"]],
+        "Mari":       [[rf"{pf}\Mari*\Bundle\bin\Mari*.exe"]],
     }
 
-DCC_EXE_PATTERNS: dict[str, list[str]] = _build_dcc_patterns()
+DCC_EXE_PATTERN_GROUPS: dict[str, list[list[str]]] = _build_dcc_pattern_groups()
+# Flat view (priority order), for callers that only need "every pattern".
+DCC_EXE_PATTERNS: dict[str, list[str]] = {
+    key: [p for group in groups for p in group] for key, groups in DCC_EXE_PATTERN_GROUPS.items()
+}
 
 # ── Naming / token system ─────────────────────────────────────────────────────
 TOKEN_TYPES: tuple[str, ...] = ("CLASS", "TYPE", "NAME", "INSTANCE", "VARIANTE", "ITER")
@@ -225,7 +264,8 @@ JSON_USER_SETTINGS: str = "User.json"      # USER/<name>/UserSettings/User.json
 FLUX_MARKER_FILENAME: str = ".flux"   # presence = directory already initialised
 
 # ── FLUX_ROOT required top-level directories ──────────────────────────────────
-FLUX_ROOT_DIRS: tuple[str, ...] = ("USER", "DOSSIER_PROJETS", "CONFIG", "FLUX_UPDATE")
+# FLUX_DOC holds the manual (ADR 0049), next to FLUX_UPDATE (installers only).
+FLUX_ROOT_DIRS: tuple[str, ...] = ("USER", "DOSSIER_PROJETS", "CONFIG", "FLUX_UPDATE", "FLUX_DOC")
 
 # ── Theme defaults ────────────────────────────────────────────────────────────
 # ── 4-color theme system ──────────────────────────────────────────────────────
