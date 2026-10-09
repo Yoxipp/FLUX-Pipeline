@@ -27,7 +27,7 @@ from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
-from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, review, settings, shelf, system, team_calendar, usd_assembler
+from routers import actions, activity, dcc, files, folder_manager, houdini_work, logs, production, project, publish, review, settings, shelf, system, team_calendar, usd_assembler
 
 log = get_logger("main")
 
@@ -165,6 +165,7 @@ async def health() -> dict:
 
 
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])
+app.include_router(houdini_work.router,   prefix="/dcc/houdini/work", tags=["HoudiniWork"])
 app.include_router(publish.router,        prefix="/publish",        tags=["Publisher"])
 app.include_router(actions.router,        prefix="/actions",        tags=["Actions"])
 app.include_router(activity.router,       prefix="/activity",       tags=["Activity"])
