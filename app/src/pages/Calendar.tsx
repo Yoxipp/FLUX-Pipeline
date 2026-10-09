@@ -254,7 +254,7 @@ function spanHead(it: CalendarItem, today: string) {
 
 const CELL_PAD = 5   // padding of a day cell, crossed by the line so it stays continuous
 
-function SpanTab({ color, side, onExpand, label }: { color: string; side: 'left' | 'right'; onExpand: () => void; label: string }) {
+function SpanTab({ color, side, open, onExpand, label }: { color: string; side: 'left' | 'right'; open: boolean; onExpand: () => void; label: string }) {
   return (
     <button onMouseDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); onExpand() }}
@@ -263,13 +263,13 @@ function SpanTab({ color, side, onExpand, label }: { color: string; side: 'left'
                      width: 16, height: 9, padding: 0, border: 0, borderRadius: '0 0 8px 8px',
                      background: color, color: 'var(--bg-deep)', cursor: 'pointer',
                      display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
-      <ChevronDown size={9} strokeWidth={3} style={{ marginTop: -1 }} />
+      <ChevronDown size={9} strokeWidth={3} style={{ marginTop: -1, transform: open ? 'rotate(180deg)' : undefined }} />
     </button>
   )
 }
 
-function SpanMark({ it, day, today, selected, onClick, onExpand }: {
-  it: CalendarItem; day: string; today: string; selected: boolean; onClick: () => void; onExpand: () => void
+function SpanMark({ it, day, today, selected, open, onClick, onExpand }: {
+  it: CalendarItem; day: string; today: string; selected: boolean; open: boolean; onClick: () => void; onExpand: () => void
 }) {
   const { l, tr } = useTr()
   const proposed = it.status === 'proposed'
@@ -278,20 +278,37 @@ function SpanMark({ it, day, today, selected, onClick, onExpand }: {
   const isEnd = day === it.end
   const head = day === spanHead(it, today)
   const title = `${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}`
-  const unfold = tr('Déplier la tâche', 'Unfold the task')
+  const unfold = open ? tr('Replier la tâche', 'Fold the task') : tr('Déplier la tâche', 'Unfold the task')
+  const inset = { left: 0, right: 0 }
+  // Unfolded: a lighter band glued under the line, continuous like it; the head day writes
+  // the task in it. The tabs stay where they are, the arrow turns up.
+  const BAND = 34
   return (
     <div onMouseDown={e => e.stopPropagation()}
          onClick={e => { e.stopPropagation(); onClick() }}
          title={title}
-         style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height: head ? 26 : 14,
+         style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height: open ? 4 + BAND : head ? 26 : 14,
                   marginLeft: isStart ? 0 : -CELL_PAD, marginRight: isEnd ? 0 : -CELL_PAD,
                   opacity: it.status === 'declined' ? 0.45 : 1 }}>
       <span style={{ position: 'absolute', top: 2, left: 0, right: 0, height: 2, background: color,
                      borderRadius: `${isStart ? 1 : 0}px ${isEnd ? 1 : 0}px ${isEnd ? 1 : 0}px ${isStart ? 1 : 0}px`,
                      boxShadow: selected ? '0 0 0 1px var(--accent)' : undefined }} />
-      {head && <SpanTab color={color} side="left" onExpand={onExpand} label={unfold} />}
-      {isEnd && !head && <SpanTab color={color} side="right" onExpand={onExpand} label={unfold} />}
-      {head && (
+      {open && (
+        <span style={{ position: 'absolute', top: 4, ...inset, height: BAND,
+                       background: `color-mix(in oklch, ${color} 20%, transparent)` }} />
+      )}
+      {open && head && (
+        <span style={{ position: 'absolute', top: 6, left: (isStart ? 0 : CELL_PAD) + 22, right: isEnd ? 4 : CELL_PAD,
+                       fontSize: 11, lineHeight: '14px', color: 'var(--ink)', overflow: 'hidden' }}>
+          <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>{it.title}</span>
+          <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--ink-2)' }}>
+            {it.owner}{it.link ? ` · ${it.link}` : ''}
+          </span>
+        </span>
+      )}
+      {head && <SpanTab color={color} side="left" open={open} onExpand={onExpand} label={unfold} />}
+      {isEnd && !head && <SpanTab color={color} side="right" open={open} onExpand={onExpand} label={unfold} />}
+      {head && !open && (
         <span style={{ position: 'absolute', top: 12, left: (isStart ? 0 : CELL_PAD) + 20, right: isEnd ? 0 : CELL_PAD,
                        fontSize: 11, lineHeight: '13px', color: 'var(--ink-2)',
                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
