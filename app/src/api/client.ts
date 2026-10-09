@@ -133,6 +133,13 @@ export interface CleanupItem {
 }
 export interface CleanupScan { scope: string; items: CleanupItem[]; unknown: string[] }
 
+// One DCC of "Installer tous les bridges" (backend features/launcher/bridges.py).
+export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'error'; message: string }
+
+// The manual as HTML, for the Settings > Doc iframe (the Electron main process adds
+// the X-Flux-Token header to every request to the backend, frames included).
+export const MANUAL_URL = `${BASE_URL}/system/manual`
+
 export const api = {
   // Settings
   getSettings: () =>
@@ -189,6 +196,14 @@ export const api = {
   photoshopInstall: () =>
     apiCall<{ ok: boolean; already: boolean; installed: boolean; frozen: boolean; message: string }>(
       'POST', '/dcc/photoshop/install'),
+
+  // Settings > User: install the FLUX bridge of every DCC detected on this machine.
+  installAllBridges: () =>
+    apiCall<{ results: BridgeInstallResult[] }>('POST', '/dcc/bridges/install-all', undefined, 180000),
+
+  // Settings > Doc: where the manual lives (FLUX_DOC copy, else the bundled one).
+  getManualInfo: () =>
+    apiCall<{ path: string; doc_dir: string }>('GET', '/system/manual-info'),
 
   photoshopOpen: (project_name: string, rel_path: string) =>
     apiCall<{ ok: boolean; error: string | null }>('POST', '/dcc/photoshop/open', { project_name, rel_path }),

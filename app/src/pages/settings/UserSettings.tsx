@@ -15,6 +15,7 @@ import { SOFTWARE } from '../../lib/dccs'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { useWorkProfile } from '../../WorkProfileContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
+import { BridgesInstall } from './BridgesInstall'
 
 // Console log levels the user can recolor + a theme-neutral swatch default shown
 // when there is no override yet (picking one writes the override).
@@ -166,6 +167,7 @@ export function UserSettings({ username }: { username: string }) {
           </label>
         ))}
       </div>
+      <BridgesInstall />
 
       <SecTitle>{t('settings.language')}</SecTitle>
       <div style={{ display: 'flex', gap: 6 }}>
