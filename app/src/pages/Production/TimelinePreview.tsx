@@ -125,8 +125,8 @@ function ShotPreview({ project, label, media, loading, empty }: {
             {!playable(m.file)
               ? <div className="timeline-preview-gap"><Film size={16} /> Format non lisible dans FLUX</div>
               : m.kind === 'video'
-                ? <video key={m.rel_path + m.version} src={api.refFileUrl(project, m.rel_path, m.file)} controls muted playsInline preload="metadata" />
-                : <img src={api.refFileUrl(project, m.rel_path, m.file)} alt={`${label} ${m.label}`} />}
+                ? <video key={m.rel_path + m.version} src={api.refFileUrl(project, m.rel_path, m.file, m.source)} controls muted playsInline preload="metadata" />
+                : <img src={api.refFileUrl(project, m.rel_path, m.file, m.source)} alt={`${label} ${m.label}`} />}
           </div>
           <figcaption>
             <strong>{m.label}</strong>
@@ -178,12 +178,12 @@ function MontagePlayer({ project, clips, loading, onPlayingShot }: {
     <div className="timeline-montage">
       <div className="timeline-preview-media montage">
         {isVideo ? (
-          <video ref={videoRef} key={clip.shotId} src={api.refFileUrl(project, clip.media!.rel_path, clip.media!.file)}
+          <video ref={videoRef} key={clip.shotId} src={api.refFileUrl(project, clip.media!.rel_path, clip.media!.file, clip.media!.source)}
             autoPlay={playing} muted playsInline
             onTimeUpdate={e => { if (e.currentTarget.currentTime >= clip.seconds) next() }}
             onEnded={next} onError={next} />
         ) : clip.media && playable(clip.media.file) ? (
-          <img key={clip.shotId} src={api.refFileUrl(project, clip.media.rel_path, clip.media.file)} alt={clip.shot} />
+          <img key={clip.shotId} src={api.refFileUrl(project, clip.media.rel_path, clip.media.file, clip.media.source)} alt={clip.shot} />
         ) : (
           <div className="timeline-preview-gap">{clip.media ? 'Format non lisible dans FLUX' : 'Rien de publié'}</div>
         )}

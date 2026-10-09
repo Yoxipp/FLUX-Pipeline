@@ -66,6 +66,34 @@ class RefVersions(unittest.TestCase):
         self.assertEqual([m["task"] for m in media], ["LAYOUT", "ANIM"])
         self.assertEqual(media[1]["version"], "v001")
         self.assertTrue(Path(media[1]["abs_path"]).is_file())
+        self.assertEqual(media[1]["source"], "ref")
+
+    def test_shot_previews_fall_back_to_published_media(self):
+        pub = self.root / "shot/SEQ010/SHOT020/anim/capture"
+        pub.mkdir(parents=True)
+        for name in ("ANIM_SHOT020_CAP_v001.png", "ANIM_SHOT020_CAP_v002.png", "ANIM_SHOT020_CAP_LAST.png", "scene_LAST.ma"):
+            (pub / name).write_bytes(b"x")
+        media = ref_media.shot_previews(self.root, "SEQ010", "SHOT020", ["ANIM"])
+        self.assertEqual(len(media), 1)
+        m = media[0]
+        self.assertEqual((m["source"], m["rel_path"], m["file"], m["version"], m["version_count"], m["kind"]),
+                         ("publish", "shot/SEQ010/SHOT020/anim/capture", "ANIM_SHOT020_CAP_LAST.png", "v002", 2, "image"))
+        self.assertEqual(ref_media.resolve_publish_file(self.root, m["rel_path"], m["file"]), (pub / m["file"]).resolve())
+
+    def test_ref_drop_wins_over_publish(self):
+        pub = self.root / "shot/SEQ010/SHOT020/anim/main"
+        pub.mkdir(parents=True)
+        (pub / "A_LAST.mp4").write_bytes(b"x")
+        ref_media.deposit(self.root, "shot/SEQ010/SHOT020/anim", "a.png", b"a", "TOM")
+        media = ref_media.shot_previews(self.root, "SEQ010", "SHOT020", ["ANIM"])
+        self.assertEqual(media[0]["source"], "ref")
+
+    def test_publish_stream_refuses_other_files(self):
+        (self.root / "shot").mkdir()
+        (self.root / "shot" / "scene_LAST.ma").write_bytes(b"x")
+        for rel, name in (("shot", "scene_LAST.ma"), ("..", "x_LAST.png"), ("shot", "../x_LAST.png")):
+            with self.assertRaises(ValueError):
+                ref_media.resolve_publish_file(self.root, rel, name)
 
 
 if __name__ == "__main__":

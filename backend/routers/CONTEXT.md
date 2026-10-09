@@ -10,4 +10,4 @@ Nouvelle logique = dans `features/`, le router reste mince.
 Ajouts : `review` (ADR 0047, `features/review/keyframe.py`) : `GET /review/keyframe/status`,
 `POST /review/keyframe/open` (echecs attendus renvoyes en `mode: none` + `code`, pas en HTTP 4xx).
 `production` : `GET /{p}/ref/versions` (versions d'une zone `/ref` depuis son modif log) et
-`POST /{p}/shot-previews` (LAST des zones `/ref` des taches des shots, apercu Timeline).
+`POST /{p}/shot-previews` (LAST des zones `/ref` des taches des shots, apercu Timeline ; repli sur le dernier publish image/video de la tache). `GET /{p}/ref/file?scope=publish` streame ce publish.

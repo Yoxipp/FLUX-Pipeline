@@ -15,6 +15,7 @@ import { effectiveTasks, trackingDepartments } from './tracking'
 export interface PreviewMedia {
   task: string; rel_path: string; file: string; ext: string; kind: string
   version: string; version_file: string; version_count: number; abs_path: string
+  source?: 'ref' | 'publish'
 }
 export interface PreviewCandidate { token: string; group: string; label: string }
 export type PreviewSource = 'auto' | 'all' | string      // string = group id

@@ -722,14 +722,19 @@ async def shot_previews(project: str, payload: ShotPreviewsRequest) -> dict:
 
 
 @router.get("/{project}/ref/file")
-async def stream_ref(project: str, rel_path: str = "", name: str = "") -> FileResponse:
-    """Stream a ref file (Range-enabled by FileResponse) for the <img>/<video> src."""
+async def stream_ref(project: str, rel_path: str = "", name: str = "", scope: str = "ref") -> FileResponse:
+    """Stream a ref file (Range-enabled by FileResponse) for the <img>/<video> src.
+
+    scope="publish": a published image/video (`*_LAST.ext`) in the folder
+    `rel_path` itself (Timeline preview fallback), not in its /ref zone.
+    """
     _ensure_project(project)
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
+    resolver = ref_media.resolve_publish_file if scope == "publish" else ref_media.resolve_file
     try:
         path = await loop.run_in_executor(
-            None, lambda: ref_media.resolve_file(project_path, rel_path, name)
+            None, lambda: resolver(project_path, rel_path, name)
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

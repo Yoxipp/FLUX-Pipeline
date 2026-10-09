@@ -241,12 +241,83 @@ def versions(project_path: Path, rel_path: str) -> list[dict]:
     return result
 
 
+_PUBLISH_LAST_RE = re.compile(r"^(?P<prefix>.+)_LAST$")
+_PUBLISH_VERSION_RE = re.compile(r"^(?P<prefix>.+)_v(?P<num>\d+)$", re.IGNORECASE)
+
+
+def _latest_publish_media(project_path: Path, task_rel: str) -> dict | None:
+    """Newest published image/video (`<name>_LAST.<ext>`) of a task folder.
+
+    Publishes land flat in the task folder or one instance folder below it
+    (e.g. anim/capture/ANIM_..._LAST.png). The /ref zone is skipped: it has its
+    own LAST. Returns the shot_previews fields, with `source: "publish"` and
+    `rel_path` = the publish folder (what /ref/file?scope=publish streams from).
+    """
+    task_dir = _safe_ref_dir(project_path, task_rel).parent
+    if not task_dir.is_dir():
+        return None
+    folders = [task_dir] + sorted(d for d in task_dir.iterdir() if d.is_dir() and d.name.lower() != REF_DIRNAME)
+    best: Path | None = None
+    best_mtime = -1.0
+    for folder in folders:
+        try:
+            entries = list(folder.iterdir())
+        except OSError:
+            continue
+        for f in entries:
+            if not f.is_file() or f.suffix.lower() not in ALLOWED_EXTS or not _PUBLISH_LAST_RE.match(f.stem):
+                continue
+            mtime = f.stat().st_mtime
+            if mtime > best_mtime:
+                best, best_mtime = f, mtime
+    if best is None:
+        return None
+    prefix = _PUBLISH_LAST_RE.match(best.stem).group("prefix")
+    nums = []
+    for f in best.parent.iterdir():
+        m = _PUBLISH_VERSION_RE.match(f.stem)
+        if f.is_file() and m and m.group("prefix") == prefix and f.suffix.lower() == best.suffix.lower():
+            nums.append(int(m.group("num")))
+    ext = best.suffix.lower()
+    top = max(nums) if nums else 0
+    return {
+        "rel_path": best.parent.resolve().relative_to(project_path.resolve()).as_posix(),
+        "file": best.name, "ext": ext, "kind": kind_for_ext(ext),
+        "version": f"v{top:03d}" if top else "",
+        "version_file": f"{prefix}_v{top:03d}{ext}" if top else "",
+        "version_count": len(nums),
+        "abs_path": str(best),
+        "source": "publish",
+    }
+
+
+def resolve_publish_file(project_path: Path, rel_dir: str, name: str) -> Path:
+    """Resolve a published image/video (`*_LAST.ext` / `*_vNNN.ext`) for streaming."""
+    if not name or "/" in name or "\\" in name:
+        raise ValueError("Nom de fichier invalide")
+    stem, ext = Path(name).stem, Path(name).suffix.lower()
+    if ext not in ALLOWED_EXTS or not (_PUBLISH_LAST_RE.match(stem) or _PUBLISH_VERSION_RE.match(stem)):
+        raise ValueError("Nom de fichier invalide")
+    root = project_path.resolve()
+    folder = (project_path / _norm(rel_dir)).resolve()
+    if not is_subpath(folder, root):
+        raise ValueError("Chemin non autorisé")
+    target = (folder / name).resolve()
+    if target.parent != folder:
+        raise ValueError("Chemin non autorisé")
+    if not target.is_file():
+        raise FileNotFoundError(name)
+    return target
+
+
 def shot_previews(project_path: Path, seq: str, shot: str, tasks: list[str]) -> list[dict]:
-    """The LAST media of each task /ref zone of a shot, in the order of *tasks*.
+    """The LAST media of each task of a shot, in the order of *tasks*.
 
     Used by the Production Timeline (click on a shot) and the auto edit: one
     entry per task that holds an image or a video, with its project-relative
-    ref root (to stream it) and its absolute path (for Keyframe Pro).
+    root (to stream it) and its absolute path (for Keyframe Pro). The /ref drop
+    zone wins; without one, the task's newest published image/video is used
+    (`source: "publish"`), so playblasts published from a DCC show up too.
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -261,6 +332,12 @@ def shot_previews(project_path: Path, seq: str, shot: str, tasks: list[str]) -> 
         except ValueError:
             continue
         if not info:
+            try:
+                published = _latest_publish_media(project_path, rel)
+            except (ValueError, OSError):
+                published = None
+            if published:
+                out.append({"task": task_u, **published})
             continue
         vers = versions(project_path, rel)
         top = next((v for v in vers if v["latest"]), None)
@@ -270,6 +347,7 @@ def shot_previews(project_path: Path, seq: str, shot: str, tasks: list[str]) -> 
             "version_file": top["file"] if top else "",
             "version_count": len(vers),
             "abs_path": str(_safe_ref_dir(project_path, rel) / info["file"]),
+            "source": "ref",
         })
     return out
 

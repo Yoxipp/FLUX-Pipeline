@@ -1087,8 +1087,8 @@ export const api = {
     apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
 
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
-  refFileUrl: (project: string, relPath: string, name: string) => {
-    const qs = new URLSearchParams({ rel_path: relPath, name })
+  refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref') => {
+    const qs = new URLSearchParams({ rel_path: relPath, name, ...(scope === 'publish' ? { scope } : {}) })
     return `${BASE_URL}/production/${encodeURIComponent(project)}/ref/file?${qs}`
   },
 
@@ -1284,6 +1284,7 @@ export interface RefVersion {
 export interface ShotPreviewMedia {
   task: string; rel_path: string; file: string; ext: string; kind: string
   version: string; version_file: string; version_count: number; abs_path: string
+  source?: 'ref' | 'publish'      // publish = DCC publish in the task folder (no /ref drop)
 }
 // Keyframe Pro (retake 09, backend features/review/keyframe.py).
 export interface KeyframeStatus {
