@@ -8,21 +8,30 @@
 // Backend: features/calendar/calendar_store.py, routers/team_calendar.py.
 
 import { ExpandPicker } from '../components/shared/ExpandPicker'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calendarLinksShot } from './Production/shotCalendar'
 import { toast } from 'sonner'
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X } from 'lucide-react'
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useI18n } from '../i18n'
+import { EMPTY_SLOTS, composeLink, parseLink, taskOptions, useCalendarLinkTokens } from '../hooks/useCalendarLinkTokens'
+import type { LinkKind, LinkSlots } from '../hooks/useCalendarLinkTokens'
 import type { CalendarItem, CalendarPublish, CalendarStatus } from '../types'
 
 const POLL_MS = 30_000
 const MONTH_CHIPS = 4
 // Month view = one continuous scroll of weeks (2026-09-30), 6 months back to 12 ahead.
 const ROW_H = 128
+const ZOOM_KEY = 'flux.calendar.zoom'
+const ZOOM_MIN = 0.75
+const ZOOM_MAX = 3
+const ZOOM_STEP = 0.125
+const clampZoom = (z: number) => Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 1000) / 1000
+// 1x: no note; then 1, 2, 3... lines; from 2.5x the whole note.
+const noteLinesFor = (z: number) => (z >= 2.5 ? Infinity : z <= 1 ? 0 : Math.max(1, Math.round((z - 1) * 4)))
 const MONTHS_BACK = 6
 const MONTHS_AHEAD = 12
 const DAY_MS = 86_400_000
@@ -235,18 +244,20 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
 }
 
 // ── chip ─────────────────────────────────────────────────────────────────────
-function Chip({ it, selected, onClick, full }: { it: CalendarItem; selected: boolean; onClick: () => void; full?: boolean }) {
+// noteLines (zoom, 2026-10-09): 0 hides the note, Infinity shows all of it.
+function Chip({ it, selected, onClick, full, noteLines = 0 }: { it: CalendarItem; selected: boolean; onClick: () => void; full?: boolean; noteLines?: number }) {
   const { l, tr } = useTr()
   const c = STATE_COLOR[it.status]
   const late = isLate(it)
   const proposed = it.status === 'proposed'
+  const showNote = noteLines > 0 && !!it.note
   return (
     <div
       onMouseDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onClick() }}
       title={`${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}${late ? tr(' · en retard', ' · late') : ''}`}
       style={{
-        display: 'flex', alignItems: full ? 'flex-start' : 'center', gap: 5,
+        display: 'flex', alignItems: full || showNote ? 'flex-start' : 'center', gap: 5, flexShrink: 0,
         fontSize: 10.5, lineHeight: 1.3, padding: full ? '5px 7px' : '2px 5px', borderRadius: 4, cursor: 'pointer',
         background: proposed ? 'transparent' : `color-mix(in oklch, ${c} 18%, transparent)`,
         border: proposed ? '1px dashed var(--ink-3)' : '1px solid transparent',
@@ -257,10 +268,20 @@ function Chip({ it, selected, onClick, full }: { it: CalendarItem; selected: boo
         color: 'var(--ink)', minWidth: 0,
       }}
     >
-      <div style={{ minWidth: 0, overflow: 'hidden', whiteSpace: full ? 'normal' : 'nowrap', textOverflow: 'ellipsis' }}>
-        {it.status === 'done' && <Check size={9} strokeWidth={2.4} style={{ marginRight: 3, verticalAlign: -1 }} />}
-        {it.title}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ overflow: 'hidden', whiteSpace: full ? 'normal' : 'nowrap', textOverflow: 'ellipsis' }}>
+          {it.status === 'done' && <Check size={9} strokeWidth={2.4} style={{ marginRight: 3, verticalAlign: -1 }} />}
+          {it.title}
+        </div>
         {full && <div style={{ fontSize: 9.5, color: 'var(--ink-2)' }}>{it.owner}{it.link ? ` · ${it.link}` : ''}</div>}
+        {showNote && (
+          <div style={{
+            fontSize: 9.5, color: 'var(--ink-2)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', marginTop: 1,
+            ...(Number.isFinite(noteLines)
+              ? { display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: noteLines, overflow: 'hidden' }
+              : {}),
+          }}>{it.note}</div>
+        )}
       </div>
     </div>
   )
@@ -305,22 +326,26 @@ function PublishBand({ pubs }: { pubs: CalendarPublish[] }) {
     if (at) { setAt(null); return }
     const r = bandRef.current?.getBoundingClientRect()
     if (!r) return
-    const x = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
+    const x = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8))
     setAt({ x, y: r.bottom + 4 })
   }
+  // 2026-10-09: a small round badge in the top-right corner of the day, not a full band.
+  const label = `${pubs.length} ${pubs.length > 1 ? tr('publishs', 'publishes') : 'publish'}`
   return (
     <>
       <div ref={bandRef} onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); toggle() }}
+           title={label}
            style={{
-             fontSize: 10, borderRadius: 4, cursor: 'pointer', color: 'var(--ink)',
-             background: `color-mix(in oklch, ${PUB_COLOR} 30%, var(--paper-2))`, borderLeft: `3px solid ${PUB_COLOR}`,
-             padding: '2px 5px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 4,
+             position: 'absolute', top: 4, right: 4, zIndex: 2,
+             minWidth: 18, height: 18, padding: pubs.length > 1 ? '0 5px 0 4px' : 0, boxSizing: 'border-box',
+             borderRadius: 9, cursor: 'pointer', color: 'var(--ink)',
+             background: at ? PUB_COLOR : `color-mix(in oklch, ${PUB_COLOR} 45%, var(--paper-2))`,
+             border: `1px solid ${PUB_COLOR}`, boxShadow: 'var(--shadow-sm)',
+             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2,
+             fontSize: 9, fontWeight: 600, lineHeight: 1,
            }}>
-        <Upload size={9} strokeWidth={2} color="var(--ink)" />
-        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {pubs.length} {pubs.length > 1 ? tr('publishs', 'publishes') : 'publish'}
-        </span>
-        <ChevronDown size={9} style={{ transform: at ? 'rotate(180deg)' : undefined, flexShrink: 0 }} />
+        <Upload size={9} strokeWidth={2.2} />
+        {pubs.length > 1 && <span>{pubs.length}</span>}
       </div>
       {at && (
         <div ref={cardRef} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}
@@ -359,6 +384,90 @@ function Legend() {
     </div>
   )
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{(['proposed', 'accepted', 'in_progress', 'done'] as CalendarStatus[]).map(row)}</div>
+}
+
+// ── link picker (2026-10-09): the link is built from project tokens, never typed ──
+// Output "SEQ SHOT TASK" / "CLASS ASSET TASK", read by calendarLinksShot / entityDeadline.
+function LinkPicker({ project, value, onChange }: { project: string; value: string; onChange: (v: string) => void }) {
+  const { tr } = useTr()
+  const { loaded, production, taskTypes } = useCalendarLinkTokens(project)
+  const [slots, setSlots] = useState<LinkSlots>(EMPTY_SLOTS)
+  // A link that does not match the project tokens (older free text) is kept as is until replaced.
+  const [legacy, setLegacy] = useState('')
+  const parsedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loaded || parsedFor.current === value) return
+    if (value === composeLink(production, slots)) { parsedFor.current = value; return }
+    const p = parseLink(production, taskTypes, value)
+    if (p) { setSlots(p); setLegacy('') } else { setLegacy(value) }
+    parsedFor.current = value
+  }, [loaded, production, taskTypes, value]) // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (patch: Partial<LinkSlots>) => {
+    const next = { ...slots, ...patch }
+    setSlots(next); setLegacy('')
+    const text = composeLink(production, next)
+    parsedFor.current = text
+    onChange(text)
+  }
+  const sequences = useMemo(() => [...(production?.sequences ?? [])].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)), [production])
+  const shots = useMemo(() => (production?.shots ?? []).filter(s => s.seq_id === slots.seqId).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)), [production, slots.seqId])
+  const assets = useMemo(() => [...(production?.assets ?? [])].sort((a, b) => a.class.localeCompare(b.class) || a.name.localeCompare(b.name)), [production])
+  const tasks = useMemo(() => taskOptions(production, taskTypes, slots), [production, taskTypes, slots])
+  const kindBtn = (k: LinkKind, label: string) => (
+    <button key={k} type="button" style={{ ...btn(slots.kind === k && !legacy), flex: 1, justifyContent: 'center', padding: '3px 6px' }}
+            onClick={() => set({ ...EMPTY_SLOTS, kind: k })}>{label}</button>
+  )
+  if (!loaded) return <div style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>{tr('Chargement des tokens…', 'Loading tokens…')}</div>
+  const preview = legacy || composeLink(production, slots)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {kindBtn('none', tr('Aucun', 'None'))}{kindBtn('shot', tr('Plan', 'Shot'))}{kindBtn('asset', 'Asset')}
+      </div>
+      {slots.kind === 'shot' && (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <select style={input} value={slots.seqId} onChange={e => set({ seqId: e.target.value, shotId: '' })}>
+            <option value="">{tr('Séquence', 'Sequence')}</option>
+            {sequences.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select style={input} value={slots.shotId} disabled={!slots.seqId} onChange={e => set({ shotId: e.target.value })}>
+            <option value="">{tr('Plan', 'Shot')}</option>
+            {shots.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+      {slots.kind === 'asset' && (
+        <select style={input} value={slots.assetId} onChange={e => set({ assetId: e.target.value })}>
+          <option value="">{tr('Asset', 'Asset')}</option>
+          {assets.map(a => <option key={a.id} value={a.id}>{a.class} {a.name}</option>)}
+        </select>
+      )}
+      {(slots.kind === 'none' || (slots.kind === 'shot' ? !!slots.shotId : !!slots.assetId)) && tasks.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+          {tasks.map(t => {
+            const on = slots.task === t && !legacy
+            return (
+              <button key={t} type="button" onClick={() => set({ task: on ? '' : t })}
+                      style={{ fontSize: 9.5, fontFamily: 'var(--mono)', padding: '1px 6px', borderRadius: 10, cursor: 'pointer',
+                               border: `1px solid ${on ? 'var(--accent)' : 'var(--rule-2)'}`,
+                               background: on ? 'color-mix(in oklch, var(--accent) 22%, var(--paper))' : 'var(--paper)',
+                               color: on ? 'var(--ink)' : 'var(--ink-2)' }}>{t}</button>
+            )
+          })}
+        </div>
+      )}
+      {slots.kind === 'shot' && !sequences.length && <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>{tr('Aucune séquence dans la Production.', 'No sequence in Production.')}</div>}
+      {slots.kind === 'asset' && !assets.length && <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>{tr('Aucun asset dans la Production.', 'No asset in Production.')}</div>}
+      {preview && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-2)' }}>
+          <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{preview}</span>
+          {legacy && <span style={{ fontFamily: 'inherit', fontSize: 9.5, color: 'var(--ink-3)' }}>{tr('(lien libre)', '(free link)')}</span>}
+          <button type="button" style={{ ...btn(), padding: 2 }} title={tr('Retirer le lien', 'Remove the link')}
+                  onClick={() => set({ ...EMPTY_SLOTS })}><X size={10} /></button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── create form ──────────────────────────────────────────────────────────────
@@ -405,7 +514,7 @@ function CreateForm({ project, me, users, range, initialLink = '', onDone, onCan
       </div>
       <DateRange start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e) }} />
       <div><div style={lbl}>{tr('Lien (optionnel)', 'Link (optional)')}</div>
-        <input style={input} value={link} onChange={e => setLink(e.target.value)} placeholder="SEQ010 SHOT020 ANIM, CHAR_HORSE RIG…" /></div>
+        <LinkPicker project={project} value={link} onChange={setLink} /></div>
       <div><div style={lbl}>{tr('Note (optionnel)', 'Note (optional)')}</div>
         <textarea style={{ ...input, minHeight: 54, resize: 'vertical' }} value={note} onChange={e => setNote(e.target.value)} /></div>
       <button style={btn(true)} disabled={busy || !title.trim() || !start} onClick={() => { void submit() }}>
@@ -572,6 +681,17 @@ export function Calendar() {
     setShowPub(on)
     try { localStorage.setItem(PUB_KEY, on ? '1' : '0') } catch { /* private mode */ }
   }
+  // Zoom (2026-10-09): Ctrl+wheel scales the rows; the more zoom, the more of each note shows.
+  const [zoom, setZoomRaw] = useState<number>(() => {
+    try { const z = Number(localStorage.getItem(ZOOM_KEY)); return Number.isFinite(z) && z > 0 ? clampZoom(z) : 1 } catch { return 1 }
+  })
+  const setZoom = (fn: (z: number) => number) => setZoomRaw(prev => {
+    const next = clampZoom(fn(prev))
+    try { localStorage.setItem(ZOOM_KEY, String(next)) } catch { /* private mode */ }
+    return next
+  })
+  const rowH = Math.round(ROW_H * zoom)
+  const noteLines = noteLinesFor(zoom)
   useEffect(() => {
     if (!drag) return
     const up = () => {
@@ -634,7 +754,7 @@ export function Calendar() {
   const scrollToRow = (row: number, smooth: boolean) => {
     const el = scrollRef.current
     if (!el) return
-    el.scrollTo({ top: Math.max(0, Math.min(row, range.weeks - 1)) * ROW_H, behavior: smooth ? 'smooth' : 'auto' })
+    el.scrollTo({ top: Math.max(0, Math.min(row, range.weeks - 1)) * rowH, behavior: smooth ? 'smooth' : 'auto' })
   }
   const scrollToMonth = (m: Date, smooth: boolean) => {
     const now = new Date()
@@ -647,11 +767,32 @@ export function Calendar() {
   const onGridScroll = () => {
     const el = scrollRef.current
     if (!el || view !== 'month') return
-    const row = Math.min(range.weeks - 1, Math.floor(el.scrollTop / ROW_H + 0.5))
+    const row = Math.min(range.weeks - 1, Math.floor(el.scrollTop / rowH + 0.5))
     const sunday = addDays(range.start, row * 7 + 6)
     const m = new Date(sunday.getFullYear(), sunday.getMonth(), 1)
     setVisibleMonth(v => (v.getTime() === m.getTime() ? v : m))
   }
+  // Ctrl+wheel zoom (same gesture as Production tracking), passive: false to stop the page zoom.
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node) return
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      setZoom(z => z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
+    }
+    node.addEventListener('wheel', wheel, { passive: false })
+    return () => node.removeEventListener('wheel', wheel)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Keep the same week at the top of the grid when the rows grow or shrink.
+  const prevRowH = useRef(rowH)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const old = prevRowH.current
+    prevRowH.current = rowH
+    if (!el || old === rowH || view !== 'month') return
+    el.scrollTop = el.scrollTop * rowH / old
+  }, [rowH, view])
   // Entering the month view lands on the current month.
   useEffect(() => {
     if (view !== 'month') return
@@ -719,6 +860,14 @@ export function Calendar() {
             <input type="checkbox" checked={showPub} onChange={e => togglePub(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
             {tr('Publishs', 'Publishes')}
           </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} title={tr('Zoom (Ctrl + molette)', 'Zoom (Ctrl + wheel)')}>
+            <button style={{ ...btn(), padding: 4 }} disabled={zoom <= ZOOM_MIN} onClick={() => setZoom(z => z - ZOOM_STEP)}
+                    aria-label={tr('Dézoomer', 'Zoom out')}><ZoomOut size={12} /></button>
+            <button style={{ ...btn(), padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 10, minWidth: 42 }}
+                    onClick={() => setZoom(() => 1)} title={tr('Revenir à 100 %', 'Back to 100 %')}>{Math.round(zoom * 100)}%</button>
+            <button style={{ ...btn(), padding: 4 }} disabled={zoom >= ZOOM_MAX} onClick={() => setZoom(z => z + ZOOM_STEP)}
+                    aria-label={tr('Zoomer', 'Zoom in')}><ZoomIn size={12} /></button>
+          </div>
           <button style={{ ...btn(true), marginLeft: 'auto' }} onClick={() => { setPicked(null); setCreating({ start: today, end: today }) }}>
             <Plus size={11} /> {tr('Ajouter une tâche', 'Add a task')}</button>
         </div>
@@ -729,7 +878,7 @@ export function Calendar() {
         </div>
         <div ref={scrollRef} onScroll={onGridScroll} style={{
           flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-          gridAutoRows: view === 'month' ? `${ROW_H}px` : 'minmax(100%, auto)', alignContent: 'start',
+          gridAutoRows: view === 'month' ? `${rowH}px` : 'minmax(100%, auto)', alignContent: 'start',
         }}>
           {days.map((d, i) => {
             const day = iso(d)
@@ -748,7 +897,9 @@ export function Calendar() {
             const cellBg = inSpan ? 'color-mix(in oklch, var(--accent) 22%, var(--paper))'
               : dark ? 'var(--bg-deep)'
               : 'color-mix(in oklch, var(--ink) 7%, var(--paper-2))'
-            const max = view === 'month' ? MONTH_CHIPS : list.length
+            // More zoom: more chips per day (notes take room, so the count grows slower then).
+            const max = view === 'month' ? Math.max(1, Math.floor(MONTH_CHIPS * zoom / (noteLines ? 1.6 : 1))) : list.length
+            const dayPubs = showPub ? pubsOn(day) : []
             return (
               <div key={day}
                    onMouseDown={e => { if (e.button === 0) { e.preventDefault(); setDrag({ a: day, b: day }) } }}
@@ -763,7 +914,8 @@ export function Calendar() {
                    }}>
                 {lineTop && <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
                 {lineLeft && <span style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
-                <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500,
+                <div style={{ fontSize: 10.5, fontWeight: day === today ? 700 : 500, paddingRight: dayPubs.length ? 30 : 0,
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0,
                               color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
                   {/* The 1st of each month carries its name: you see where a month starts while scrolling. */}
@@ -773,11 +925,9 @@ export function Calendar() {
                     </span>
                   )}
                 </div>
-                {showPub && pubsOn(day).length > 0 && (
-                  <PublishBand pubs={pubsOn(day)} />
-                )}
+                {dayPubs.length > 0 && <PublishBand pubs={dayPubs} />}
                 {list.slice(0, max).map(it => (
-                  <Chip key={it.id} it={it} full={view === 'week'} selected={it.id === picked}
+                  <Chip key={it.id} it={it} full={view === 'week'} noteLines={noteLines} selected={it.id === picked}
                         onClick={() => { setCreating(null); setPicked(it.id) }} />
                 ))}
                 {list.length > max && <div style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>+{list.length - max} {tr('(vue semaine)', '(week view)')}</div>}
