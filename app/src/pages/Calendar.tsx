@@ -13,7 +13,7 @@ import type { CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { calendarLinksShot } from './Production/shotCalendar'
 import { toast } from 'sonner'
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronUp, ChevronRight, Plus, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useI18n } from '../i18n'
@@ -239,6 +239,55 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
           <button style={btn(false, true)} onClick={onConfirm}><Trash2 size={11} /> {tr('Supprimer', 'Delete')}</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── span mark (2026-10-09) ───────────────────────────────────────────────
+// A task over several days takes one thin line per day in month view. Two thicker notches
+// with an arrow mark its head and its end; the head notch follows today once the task has
+// started. The arrow unfolds the task into full chips on every day.
+function spanHead(it: CalendarItem, today: string) {
+  return it.start < today && today <= it.end ? today : it.start
+}
+
+function SpanMark({ it, day, today, selected, onClick, onExpand }: {
+  it: CalendarItem; day: string; today: string; selected: boolean; onClick: () => void; onExpand: () => void
+}) {
+  const { l, tr } = useTr()
+  const c = STATE_COLOR[it.status]
+  const proposed = it.status === 'proposed'
+  const head = day === spanHead(it, today)
+  const notch = head || day === it.end
+  const title = `${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}`
+  const lineColor = proposed ? 'var(--ink-3)' : c
+  return (
+    <div onMouseDown={e => e.stopPropagation()}
+         onClick={e => { e.stopPropagation(); onClick() }}
+         title={title}
+         style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: notch ? 14 : 6, flexShrink: 0, cursor: 'pointer',
+                  opacity: it.status === 'declined' ? 0.45 : 1,
+                  outline: selected ? '1px solid var(--accent)' : undefined, borderRadius: 3 }}>
+      {notch ? (
+        <>
+          <span style={{ width: 4, height: 12, borderRadius: 2, background: lineColor, flexShrink: 0 }} />
+          {head && (
+            <span style={{ fontSize: 11, color: 'var(--ink-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+              {it.title}
+            </span>
+          )}
+          <span style={{ flex: 1, minWidth: 6, height: 2, borderRadius: 1, background: lineColor,
+                         opacity: proposed ? 0.6 : 0.8 }} />
+          <button onClick={e => { e.stopPropagation(); onExpand() }}
+                  title={tr('Déplier la tâche', 'Unfold the task')}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14,
+                           padding: 0, border: 0, borderRadius: 3, background: 'transparent', color: 'var(--ink-2)', cursor: 'pointer', flexShrink: 0 }}>
+            <ChevronDown size={12} strokeWidth={2} />
+          </button>
+        </>
+      ) : (
+        <span style={{ flex: 1, height: 2, borderRadius: 1, background: lineColor, opacity: proposed ? 0.6 : 0.8 }} />
+      )}
     </div>
   )
 }
@@ -672,6 +721,13 @@ export function Calendar() {
   const [who, setWho] = useState('')                 // '' = everyone
   const [picked, setPicked] = useState<string | null>(null)
   const [creating, setCreating] = useState<{ start: string; end: string } | null>(null)   // span of the new task
+  // Multi-day tasks unfolded from their thin line into full chips (month view).
+  const [unfolded, setUnfolded] = useState<Set<string>>(() => new Set())
+  const toggleUnfolded = (id: string) => setUnfolded(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
   // Click-drag over the grid (2026-09-30): the span turns orange, release opens New task.
   const [drag, setDrag] = useState<{ a: string; b: string } | null>(null)
   // Publishes on the calendar: a checkbox (remembered on this machine), one band per day.
@@ -926,10 +982,30 @@ export function Calendar() {
                   )}
                 </div>
                 {dayPubs.length > 0 && <PublishBand pubs={dayPubs} />}
-                {list.slice(0, max).map(it => (
-                  <Chip key={it.id} it={it} full={view === 'week'} noteLines={noteLines} selected={it.id === picked}
-                        onClick={() => { setCreating(null); setPicked(it.id) }} />
-                ))}
+                {list.slice(0, max).map(it => {
+                  const pick = () => { setCreating(null); setPicked(it.id) }
+                  const multi = view === 'month' && it.start !== it.end
+                  if (multi && !unfolded.has(it.id)) {
+                    return <SpanMark key={it.id} it={it} day={day} today={today} selected={it.id === picked}
+                                     onClick={pick} onExpand={() => toggleUnfolded(it.id)} />
+                  }
+                  return (
+                    <div key={it.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 2, minWidth: 0, flexShrink: 0 }}>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <Chip it={it} full={view === 'week'} noteLines={noteLines} selected={it.id === picked} onClick={pick} />
+                      </div>
+                      {multi && (day === spanHead(it, today) || day === it.end) && (
+                        <button onMouseDown={e => e.stopPropagation()}
+                                onClick={e => { e.stopPropagation(); toggleUnfolded(it.id) }}
+                                title={tr('Replier la tâche', 'Fold the task')}
+                                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 18,
+                                         padding: 0, border: 0, borderRadius: 3, background: 'transparent', color: 'var(--ink-2)', cursor: 'pointer', flexShrink: 0 }}>
+                          <ChevronUp size={12} strokeWidth={2} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
                 {list.length > max && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>+{list.length - max} {tr('(vue semaine)', '(week view)')}</div>}
               </div>
             )
