@@ -208,6 +208,27 @@ class Routes(unittest.TestCase):
         self.assertEqual(got["sequences"], [{"seq": "SEQ010", "shots": ["SH010", "SH030"]},
                                             {"seq": "SEQ020", "shots": []}])
 
+    def test_tasks_by_network_and_templates(self) -> None:
+        lop = self.client.get("/dcc/houdini/work/tasks", params={"project": "PROJ", "category": "Lop"}).json()
+        self.assertEqual(lop["tasks"], ["LIGHT", "RENDER"])
+        sop = self.client.get("/dcc/houdini/work/tasks", params={"project": "PROJ", "category": "Sop"}).json()
+        self.assertEqual(sop["tasks"], ["CFX", "FX"])
+        with mock.patch("features.folder_manager.houdini_render_scene.sequence_shots",
+                        return_value=[{"shot": "SH010"}, {"shot": "SH020"}, {"shot": "SH030"}, {"shot": "SH040"}]):
+            tpl = self.client.get("/dcc/houdini/work/template",
+                                  params={"project": "PROJ", "task": "RENDER", "seq": "seq010"}).json()
+        self.assertEqual(tpl["source"], "flux")              # the maintainer's render scene, shipped
+        self.assertTrue(tpl["cpio"].endswith("resources/scenes/houdini/work/RENDER.cpio"))
+        self.assertEqual((tpl["setup"]["seq"], tpl["setup"]["blocks"]), ("SEQ010", 4))
+        self.assertIn("def grow_to", tpl["setup"]["sequence_module"])
+        cfx = self.client.get("/dcc/houdini/work/template", params={"project": "PROJ", "task": "CFX"}).json()
+        self.assertEqual((cfx["cpio"], cfx["setup"]), ("", None))
+        own = self.project / "template" / "houdini_work" / "CFX.cpio"
+        own.parent.mkdir(parents=True)
+        own.write_bytes(b"x")
+        cfx = self.client.get("/dcc/houdini/work/template", params={"project": "PROJ", "task": "CFX"}).json()
+        self.assertEqual(cfx["source"], "project")
+
     def test_errors_are_http_errors(self) -> None:
         bad = self.client.post("/dcc/houdini/work/reserve", json={**self.ref, "task": "NOPE"})
         self.assertEqual(bad.status_code, 400)

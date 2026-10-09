@@ -39,6 +39,26 @@ STALE_WRITING_S = 15 * 60
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
+# Network a task's content lives in (ADR 0051): SOP for CFX / FX, LOP for LIGHT / RENDER.
+TASK_CATEGORY = {"CFX": "Sop", "FX": "Sop", "LIGHT": "Lop", "RENDER": "Lop"}
+# Templates (w000 source) shipped with FLUX; a project overrides one with
+# <project>/template/houdini_work/<TASK>.cpio (built by dcc/houdini/work_template_build.py).
+BUNDLED_TEMPLATES = Path(__file__).resolve().parents[2] / "resources" / "scenes" / "houdini" / "work"
+PROJECT_TEMPLATES = ("template", "houdini_work")
+
+
+def template_cpio(project_path: str | Path, task: str) -> tuple[Path | None, str]:
+    """(template cpio of *task*, "project" | "flux"), (None, "") when there is none."""
+    name = (task or "").strip().upper() + ".cpio"
+    own = Path(project_path).joinpath(*PROJECT_TEMPLATES, name)
+    if own.is_file():
+        return own, "project"
+    bundled = BUNDLED_TEMPLATES / name
+    if bundled.is_file():
+        return bundled, "flux"
+    return None, ""
+
+
 class WorkError(ValueError):
     """Bad request on the work store (unknown task, bad name, wrong state)."""
 

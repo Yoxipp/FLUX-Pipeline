@@ -89,12 +89,43 @@ async def _run(fn):
 
 
 @router.get("/tasks")
-async def work_tasks(project: str) -> dict:
-    """Departments a FLUX Work can open in this project."""
+async def work_tasks(project: str, category: str = "") -> dict:
+    """Departments a FLUX Work can open in this project; *category* (Sop / Lop) keeps
+    the ones whose content lives in that network."""
     from features.folder_manager.tokens import load_tokens
 
     known = (load_tokens(_project_path(project)) or {}).get("TYPE_SHOT") or {}
-    return {"tasks": [t for t in WORK_TASKS if t in known]}
+    tasks = [t for t in WORK_TASKS if t in known]
+    if category:
+        tasks = [t for t in tasks if work_store.TASK_CATEGORY.get(t, "").lower() == category.lower()]
+    return {"tasks": tasks, "categories": {t: work_store.TASK_CATEGORY.get(t, "") for t in tasks}}
+
+
+def _render_setup(project_path, project: str, seq: str, shot: str) -> dict:
+    """What FLUX fills after loading the RENDER template (same steps as the render scene
+    of ADR 0037): FLUX Sequence, shot blocks, each block's imports and FLUX Render,
+    the project resolution."""
+    from dcc.houdini.hda.flux_sequence_hda import MODULE_FUNCTIONS
+    from features.folder_manager import houdini_render_scene as rs
+
+    shots = [{"shot": shot.upper()}] if shot else rs.sequence_shots(project_path, seq)
+    return {"kind": "render_sequence", "project": project, "seq": seq.upper(), "shots": shots,
+            "blocks": max(rs.MIN_SHOT_BLOCKS, len(shots)), "resolution": rs._resolution(project_path),
+            "sequence_module": MODULE_FUNCTIONS}
+
+
+@router.get("/template")
+async def work_template(project: str, task: str, seq: str = "", shot: str = "") -> dict:
+    """Source of the w000 of a task: the project's template cpio, else FLUX's, else none
+    (the Work builds its default content). RENDER also gets its setup plan."""
+    project_path = _project_path(project)
+    path, source = work_store.template_cpio(project_path, task)
+    setup = None
+    if task.strip().upper() == "RENDER" and seq.strip():
+        setup = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: _render_setup(project_path, project, seq, shot))
+    return {"cpio": str(path).replace("\\", "/") if path else "", "source": source,
+            "category": work_store.TASK_CATEGORY.get(task.strip().upper(), ""), "setup": setup}
 
 
 @router.get("/module")

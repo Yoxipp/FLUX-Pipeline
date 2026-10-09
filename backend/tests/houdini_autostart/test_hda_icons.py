@@ -34,6 +34,7 @@ class HdaIcons(unittest.TestCase):
             "crowd": flux_crowd_hda._build_code("x.hda"),
             "render": flux_render_hda._build_code("x.hda"),
             "work": flux_work_hda._build_code("x.hda"),
+            "work_lop": flux_work_hda._build_code("x.hda", "Lop"),
         }
         for name, code in codes.items():
             with self.subTest(name):

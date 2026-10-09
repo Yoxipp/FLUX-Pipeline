@@ -197,9 +197,10 @@ def menu_task(node):
     if not project:
         return ["", "choisis un projet"]
     def _fetch():
-        r = _get(_API + "/tasks", project=project)
+        r = _get(_API + "/tasks", project=project, category=category)
         return r.get("tasks", []), "tasks" in r
-    return _flat(_cached("tasks:" + project, _fetch)) or ["", "aucune tache"]
+    category = node.type().category().name()        # Sop: CFX / FX, Lop: LIGHT / RENDER
+    return _flat(_cached("tasks:%s:%s" % (project, category), _fetch)) or ["", "aucune tache"]
 
 def _task_status(ref, based_on=""):
     return _get(_API + "/status", based_on=based_on, host=_host(), **ref)
@@ -260,21 +261,80 @@ def _version_tuple(text):
             break
     return tuple(out)
 
-def _template_content(subnet, task):
-    """Default template of a task (version w000). Replace it by saving a better w000."""
+def _default_content(subnet, task):
+    """Content of a task without any template cpio (project or FLUX)."""
     import hou
-    if subnet.childTypeCategory() != hou.sopNodeTypeCategory():
-        return
-    merge = subnet.createNode("object_merge", "IN_ANIM")
-    merge.parm("xformtype").set(1)                  # into this object
-    out = subnet.createNode("null", "OUT_" + task)
-    out.setInput(0, merge)
+    note = subnet.createStickyNote("flux_template_note")
+    if subnet.childTypeCategory() == hou.sopNodeTypeCategory():
+        merge = subnet.createNode("object_merge", "IN_ANIM")
+        merge.parm("xformtype").set(1)              # into this object
+        out = subnet.createNode("null", "OUT_" + task)
+        out.setInput(0, merge)
+        note.setText("Template FLUX %s : IN_ANIM = objet de l'anim du shot, travail entre IN et OUT." % task)
+    else:
+        out = subnet.createNode("null", "OUT_" + task)
+        out.setInput(0, subnet.indirectInputs()[0])
+        note.setText("Template FLUX %s : pose un FLUX Shot Import en tete, travail jusqu'a OUT." % task)
     end = subnet.createNode("output", "output0")
     end.setInput(0, out)
     end.setDisplayFlag(True)
-    note = subnet.createStickyNote("flux_template_note")
-    note.setText("Template FLUX %s : IN_ANIM = objet de l'anim du shot, travail entre IN et OUT." % task)
     subnet.layoutChildren()
+
+def _render_setup(stage, plan):
+    """RENDER template = the maintainer's render scene (ADR 0037): FLUX Sequence, shot blocks, each
+    block's imports and FLUX Render, the project resolution. Same steps as the render
+    scene generator (features/folder_manager/houdini_render_scene.py), on the Work subnet."""
+    import hou
+    ns = {}
+    exec(plan["sequence_module"], ns)
+    seq = plan["seq"]
+    top = stage.node("FLUX_SEQUENCE") or stage.createNode("flux_sequence", "FLUX_SEQUENCE")
+    for name, value in (("project", plan["project"]), ("seq", seq), ("shot_count", plan["blocks"])):
+        if top.parm(name) is not None:
+            top.parm(name).set(value)
+    structure = stage.node("STRUCTURE")
+    if structure is not None and not top.outputs() and not structure.inputs():
+        structure.setInput(0, top)
+        top.setPosition(structure.position() + hou.Vector2(0, 1.5))
+    ns["grow_to"](stage, plan["blocks"], plan["project"], seq)
+    real = [s["shot"] for s in plan["shots"]]
+    for n in ns["shot_numbers"](stage):
+        shot = real[n - 1] if n - 1 < len(real) else ""
+        for prefix in ("IMPORT_ENV_", "IMPORT_CHAR_", "FLUX_RENDER_"):
+            block = stage.node("%sSHOT%03d" % (prefix, n))
+            if block is None:
+                continue
+            for pname, pval in (("project", plan["project"]), ("seq", seq), ("shot", shot)):
+                if block.parm(pname) is not None and (pval or pname != "shot"):
+                    block.parm(pname).set(pval)
+    if top.parm("status_msg") is not None:
+        top.parm("status_msg").set("%d shot(s)" % plan["blocks"])
+    for rs in stage.children():
+        if rs.type().name().startswith("karmarendersettings") and rs.parmTuple("resolution") is not None:
+            if rs.parm("res_mode") is not None:
+                rs.parm("res_mode").set("manual")
+            for p, v in zip(rs.parmTuple("resolution"), plan["resolution"]):
+                p.lock(False)
+                p.deleteAllKeyframes()
+                p.set(v)
+
+def _build_template(ref, subnet):
+    """Fill *subnet* with the template of the task (becomes w000). Returns an error or ""."""
+    tpl = _get(_API + "/template", **ref)
+    if "cpio" not in tpl:
+        return "FLUX injoignable : %s" % tpl.get("error", "")
+    clear_work(subnet)
+    if tpl["cpio"]:
+        res = load_work(subnet, tpl["cpio"])
+        if not res["ok"]:
+            clear_work(subnet)
+            return "Template refuse, types absents : %s (reconstruis les HDA)" % ", ".join(res["missing_types"])
+    else:
+        _default_content(subnet, ref["task"])
+    setup = tpl.get("setup") or {}
+    if setup.get("kind") == "render_sequence":
+        _render_setup(subnet, setup)
+    return ""
 
 def _save_version(ref, subnet, based_on, comment, template=False):
     """Reserve -> write the cpio -> commit. Returns (result, error)."""
@@ -340,11 +400,16 @@ def load(node):
     is_new = hou.node(node.parent().path() + "/" + _work_name(ref)) is None
     sub = _ensure_work_node(node, ref)
     if target is None:
-        clear_work(sub)
-        _template_content(sub, ref["task"])
-        set_context(sub, ref["seq"], ref["shot"], ref["task"])
-        res, err = _save_version(ref, sub, "", "template", template=True)
-        if res is None:
+        err = _build_template(ref, sub)
+        if not err:
+            set_context(sub, ref["seq"], ref["shot"], ref["task"])
+            res, err = _save_version(ref, sub, "", "template", template=True)
+        if err:
+            if is_new:
+                sub.destroy()
+                _set(node, "work_path", old_sub.path() if old_sub is not None else "")
+            if ref != old_ref:
+                _post(_API + "/unlock", dict(ref, author="", host=_host()))
             _status(node, err); return False
         version, baseline, missing_deps = res["version"], res["hash"], []
     else:
@@ -468,11 +533,48 @@ def module_code() -> str:
     return io_src + "\n" + MODULE_FUNCTIONS
 
 
-def _build_code(hda_path: str) -> str:
+# Body of the build: the subnet that becomes the HDA (_sub) and what holds it (_holder,
+# destroyed after). Output of the HDA = the work subnet (object_merge in SOP, fetch in LOP).
+_CONTAINER = {
+    "Sop": '''
+_obj = hou.node("/obj")
+_old = _obj.node("__flux_work_build__")
+if _old is not None:
+    _old.destroy()
+_holder = _obj.createNode("geo", "__flux_work_build__")
+for _c in _holder.children():
+    _c.destroy()
+_sub = _holder.createNode("subnet", "flux_work")
+_res = _sub.createNode("object_merge", "work_result")
+_res.parm("objpath1").set('`chs("../work_path")`')
+_res.parm("xformtype").set(1)
+_out = _sub.createNode("output", "output0")
+''',
+    "Lop": '''
+_holder = None
+_stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+_old = _stage.node("__flux_work_build__")
+if _old is not None:
+    _old.destroy()
+_sub = _stage.createNode("subnet", "__flux_work_build__")
+for _c in _sub.children():
+    if _c.type().name() != "output":
+        _c.destroy()
+_out = next((c for c in _sub.children() if c.type().name() == "output"), None) \
+    or _sub.createNode("output", "output0")
+_res = _sub.createNode("fetch", "work_result")
+_res.parm("loppath").set('`chs("../work_path")`')
+''',
+}
+_CATEGORY_EXPR = {"Sop": "hou.sopNodeTypeCategory()", "Lop": "hou.lopNodeTypeCategory()"}
+
+
+def _build_code(hda_path: str, category: str = "Sop") -> str:
     from dcc.houdini.hda.hda_common import FINALIZE as _finalize, ICON_PATH as icon_path
     from dcc.houdini.hda.preserve_instances import RESTORE as _restore, snapshot
 
-    _snapshot = snapshot('hou.sopNodeTypeCategory()', NODE_NAME).replace("{{", "{").replace("}}", "}")
+    _snapshot = snapshot(_CATEGORY_EXPR[category], NODE_NAME).replace("{{", "{").replace("}}", "}")
+    _container = _CONTAINER[category]
     return f'''
 import hou
 {_snapshot}
@@ -526,37 +628,31 @@ for _n in ("loaded_project", "loaded_seq", "loaded_shot", "loaded_task", "loaded
     _ptg.append(hou.StringParmTemplate(_n, _n, 1, default_value=("",), is_hidden=True))
 _ptg.append(hou.ToggleParmTemplate("read_only", "read_only", default_value=False, is_hidden=True))
 
-_obj = hou.node("/obj")
-_old = _obj.node("__flux_work_build__")
-if _old is not None:
-    _old.destroy()
-_geo = _obj.createNode("geo", "__flux_work_build__")
-for _c in _geo.children():
-    _c.destroy()
-_sub = _geo.createNode("subnet", "flux_work")
-# Output of the HDA = the display of the work subnet (wire it like any SOP).
-_om = _sub.createNode("object_merge", "work_result")
-_om.parm("objpath1").set('`chs("../work_path")`')
-_om.parm("xformtype").set(1)
-_out = _sub.createNode("output", "output0")
-_out.setInput(0, _om)
+{_container}
+_out.setInput(0, _res)
 _sub.layoutChildren()
 
 _asset = _sub.createDigitalAsset(name=_NAME, hda_file_name=_HDA_PATH, description={LABEL!r},
                                  min_num_inputs=0, max_num_inputs=0, version="1.0")
 {_finalize}
-_geo.destroy()
+if _holder is not None:
+    _holder.destroy()
 {_restore}
-result = {{"ok": True, "path": _HDA_PATH, "node_type": "Sop/" + _NAME}}
+result = {{"ok": True, "path": _HDA_PATH, "node_type": {category!r} + "/" + _NAME}}
 '''
 
 
-def build_hda(hda_path: str) -> dict:
-    """Build the FLUX Work SOP HDA in the running Houdini."""
-    log.info("Building FLUX Work HDA -> %s", hda_path)
-    resp = houdini_client.run(_build_code(hda_path))
+def build_hda(hda_path: str, category: str = "Sop") -> dict:
+    """Build the FLUX Work HDA (SOP by default) in the running Houdini."""
+    log.info("Building FLUX Work HDA (%s) -> %s", category, hda_path)
+    resp = houdini_client.run(_build_code(hda_path, category))
     if resp.get("ok"):
-        log.info("FLUX Work HDA built: %s", hda_path)
+        log.info("FLUX Work HDA built (%s): %s", category, hda_path)
     else:
-        log.error("FLUX Work HDA build failed: %s", resp.get("error"))
+        log.error("FLUX Work HDA build failed (%s): %s", category, resp.get("error"))
     return resp
+
+
+def build_hda_lop(hda_path: str) -> dict:
+    """FLUX Work in /stage: LIGHT and RENDER tasks (content = a LOP subnet)."""
+    return build_hda(hda_path, "Lop")
