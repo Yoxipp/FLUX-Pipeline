@@ -19,6 +19,37 @@ class HoudiniShelfHdas(unittest.TestCase):
         patcher = mock.patch.object(shelf_core, "get_dcc_shelf_dir", return_value=self.toolbar)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Never reach a real open Houdini from the tests.
+        self.reload = mock.patch.object(shelf_core, "_reload_houdini_shelf", return_value=[]).start()
+        self.addCleanup(mock.patch.stopall)
+
+    def test_install_reloads_the_shelf_in_open_houdini(self) -> None:
+        self.reload.return_value = [48885]
+        with mock.patch.object(shelf_core, "install_hdas", return_value=(True, "ok")):
+            ok, msg = shelf_core.install_shelf("Houdini", "21.0")
+        self.reload.assert_called_once_with(self.toolbar / "Flux.shelf")
+        self.assertIn("shelf rechargee dans Houdini :48885", msg)
+
+    def test_reload_targets_only_connected_sessions(self) -> None:
+        mock.patch.stopall()
+        sent = []
+
+        class _Client:
+            def __init__(self, port):
+                self.port = port
+
+            def run(self, code, timeout):
+                sent.append((self.port, code))
+                return {"ok": True, "result": self.port == 48885}
+        with mock.patch("core.dcc_instances.scan_instances",
+                        return_value=[{"port": 48884, "connected": True}, {"port": 48885, "connected": True},
+                                      {"port": 48886, "connected": False}]), \
+             mock.patch("dcc.houdini.client.HoudiniClient", _Client):
+            done = shelf_core._reload_houdini_shelf(Path(r"C:\prefs\houdini22.0\toolbar\Flux.shelf"))
+        self.assertEqual(done, [48885])
+        self.assertEqual([p for p, _ in sent], [48884, 48885])
+        self.assertIn("_FLUX_SHELF = 'C:/prefs/houdini22.0/toolbar/Flux.shelf'", sent[0][1])
+        compile(sent[0][1], "<reload>", "exec")
 
     def test_install_also_installs_hdas(self) -> None:
         with mock.patch.object(shelf_core, "install_hdas", return_value=(True, "HDAs installed → otls")) as hdas:

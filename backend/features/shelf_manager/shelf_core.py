@@ -203,8 +203,48 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
         if not hda_ok:
             log.warning("HDA install failed (non-fatal): %s", hda_msg)
         msg += f" | HDA : {hda_msg}" if hda_ok else f" | HDA non installes : {hda_msg}"
+        reloaded = _reload_houdini_shelf(dest)
+        if reloaded:
+            msg += " | shelf rechargee dans Houdini " + ", ".join(f":{p}" for p in reloaded)
 
     return True, msg
+
+
+# Houdini reads its shelf files at startup only: an open session kept the old FLUX
+# shelf after a reinstall (2026-10-10, no FLUX Work button). Reloaded in place in
+# each connected Houdini whose user pref dir holds the installed file.
+_RELOAD_SHELF_CODE = """
+import os
+_dir = os.path.dirname(os.path.dirname(_FLUX_SHELF))
+_mine = os.path.normcase(os.path.abspath(hou.homeHoudiniDirectory())) == os.path.normcase(os.path.abspath(_dir))
+if _mine:
+    hou.shelves.loadFile(_FLUX_SHELF)
+result = _mine
+"""
+
+
+def _reload_houdini_shelf(shelf_file: Path) -> list[int]:
+    """Reload *shelf_file* in the open Houdini sessions; returns the ports done."""
+    try:
+        from core.dcc_instances import scan_instances
+        from dcc.houdini.client import HoudiniClient
+
+        ports = [i["port"] for i in scan_instances("Houdini") if i.get("connected")]
+    except Exception as exc:  # noqa: BLE001 — best effort
+        log.debug("Houdini scan for shelf reload failed: %s", exc)
+        return []
+    done = []
+    code = "_FLUX_SHELF = %r\n" % str(shelf_file).replace("\\", "/") + _RELOAD_SHELF_CODE
+    for port in ports:
+        try:
+            resp = HoudiniClient(port=port).run(code, timeout=20.0)
+        except Exception as exc:  # noqa: BLE001
+            resp = {"ok": False, "error": str(exc)}
+        if resp.get("ok") and resp.get("result"):
+            done.append(port)
+        elif not resp.get("ok"):
+            log.warning("Shelf reload in Houdini :%s failed: %s", port, resp.get("error"))
+    return done
 
 
 # ── Maya tools → single Flux shelf ────────────────────────────────────────────
