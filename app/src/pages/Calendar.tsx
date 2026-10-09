@@ -244,49 +244,59 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
 }
 
 // ── span mark (2026-10-09) ───────────────────────────────────────────────
-// A task over several days takes one thin line per day in month view. Two thicker notches
-// with an arrow mark its head and its end; the head notch follows today once the task has
-// started. The arrow unfolds the task into full chips on every day.
+// A task over several days is one continuous thin line in month view: it runs edge to edge
+// through the cells (negative margins over the cell padding) and only stops inside the
+// start and end days. Two small tabs hang under the line with an arrow (head and end); the
+// head tab follows today once the task has started. A tab unfolds the task into full chips.
 function spanHead(it: CalendarItem, today: string) {
   return it.start < today && today <= it.end ? today : it.start
+}
+
+const CELL_PAD = 5   // padding of a day cell, crossed by the line so it stays continuous
+
+function SpanTab({ color, side, onExpand, label }: { color: string; side: 'left' | 'right'; onExpand: () => void; label: string }) {
+  return (
+    <button onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onExpand() }}
+            title={label}
+            style={{ position: 'absolute', top: 3, [side]: side === 'left' ? CELL_PAD : CELL_PAD + 2,
+                     width: 16, height: 9, padding: 0, border: 0, borderRadius: '0 0 8px 8px',
+                     background: color, color: 'var(--bg-deep)', cursor: 'pointer',
+                     display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+      <ChevronDown size={9} strokeWidth={3} style={{ marginTop: -1 }} />
+    </button>
+  )
 }
 
 function SpanMark({ it, day, today, selected, onClick, onExpand }: {
   it: CalendarItem; day: string; today: string; selected: boolean; onClick: () => void; onExpand: () => void
 }) {
   const { l, tr } = useTr()
-  const c = STATE_COLOR[it.status]
   const proposed = it.status === 'proposed'
+  const color = proposed ? 'var(--ink-3)' : STATE_COLOR[it.status]
+  const isStart = day === it.start
+  const isEnd = day === it.end
   const head = day === spanHead(it, today)
-  const notch = head || day === it.end
   const title = `${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}`
-  const lineColor = proposed ? 'var(--ink-3)' : c
+  const unfold = tr('Déplier la tâche', 'Unfold the task')
   return (
     <div onMouseDown={e => e.stopPropagation()}
          onClick={e => { e.stopPropagation(); onClick() }}
          title={title}
-         style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: notch ? 14 : 6, flexShrink: 0, cursor: 'pointer',
-                  opacity: it.status === 'declined' ? 0.45 : 1,
-                  outline: selected ? '1px solid var(--accent)' : undefined, borderRadius: 3 }}>
-      {notch ? (
-        <>
-          <span style={{ width: 4, height: 12, borderRadius: 2, background: lineColor, flexShrink: 0 }} />
-          {head && (
-            <span style={{ fontSize: 11, color: 'var(--ink-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
-              {it.title}
-            </span>
-          )}
-          <span style={{ flex: 1, minWidth: 6, height: 2, borderRadius: 1, background: lineColor,
-                         opacity: proposed ? 0.6 : 0.8 }} />
-          <button onClick={e => { e.stopPropagation(); onExpand() }}
-                  title={tr('Déplier la tâche', 'Unfold the task')}
-                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14,
-                           padding: 0, border: 0, borderRadius: 3, background: 'transparent', color: 'var(--ink-2)', cursor: 'pointer', flexShrink: 0 }}>
-            <ChevronDown size={12} strokeWidth={2} />
-          </button>
-        </>
-      ) : (
-        <span style={{ flex: 1, height: 2, borderRadius: 1, background: lineColor, opacity: proposed ? 0.6 : 0.8 }} />
+         style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height: head ? 26 : 14,
+                  marginLeft: isStart ? 0 : -CELL_PAD, marginRight: isEnd ? 0 : -CELL_PAD,
+                  opacity: it.status === 'declined' ? 0.45 : 1 }}>
+      <span style={{ position: 'absolute', top: 2, left: 0, right: 0, height: 2, background: color,
+                     borderRadius: `${isStart ? 1 : 0}px ${isEnd ? 1 : 0}px ${isEnd ? 1 : 0}px ${isStart ? 1 : 0}px`,
+                     boxShadow: selected ? '0 0 0 1px var(--accent)' : undefined }} />
+      {head && <SpanTab color={color} side="left" onExpand={onExpand} label={unfold} />}
+      {isEnd && !head && <SpanTab color={color} side="right" onExpand={onExpand} label={unfold} />}
+      {head && (
+        <span style={{ position: 'absolute', top: 12, left: (isStart ? 0 : CELL_PAD) + 20, right: isEnd ? 0 : CELL_PAD,
+                       fontSize: 11, lineHeight: '13px', color: 'var(--ink-2)',
+                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {it.title}
+        </span>
       )}
     </div>
   )
