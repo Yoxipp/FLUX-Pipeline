@@ -17,6 +17,7 @@ import { app, dialog, type NativeImage } from 'electron'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
+import { compareVersions, currentVersion, displayVersion, formatVersion, parseVersion, type Version } from './version'
 
 const UPDATE_DIR_NAME = 'FLUX_UPDATE'
 const INSTALLER_RE = /^FLUX-Setup-(\d+)\.(\d+)\.(\d+)\.exe$/i
@@ -24,30 +25,13 @@ const INSTALLER_RE = /^FLUX-Setup-(\d+)\.(\d+)\.(\d+)\.exe$/i
 // check delay FLUX opening for more than this.
 const LIST_TIMEOUT_MS = 3_000
 
-export type Version = [number, number, number]
+// Version helpers live in version.ts (shared with the renderer IPC); re-exported here.
+export { parseVersion, compareVersions, formatVersion, type Version }
 
 export interface InstallerCandidate {
   path: string
   version: Version
   label: string   // display form x.x.xxx
-}
-
-/** Parse "0.4.0" / "0.4.000" into [0, 4, 0], or null if not x.y.z. */
-export function parseVersion(text: string): Version | null {
-  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(text).trim())
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
-}
-
-/** Negative if a < b, 0 if equal, positive if a > b. */
-export function compareVersions(a: Version, b: Version): number {
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i]
-  }
-  return 0
-}
-
-export function formatVersion(v: Version): string {
-  return `${v[0]}.${v[1]}.${String(v[2]).padStart(3, '0')}`
 }
 
 /** Highest-versioned FLUX installer among *fileNames* (in *dir*), or null. */
@@ -87,7 +71,7 @@ async function listWithTimeout(dir: string): Promise<string[]> {
 
 /** Return the newer installer available in FLUX_UPDATE, or null. Never throws. */
 export async function findNewerInstaller(): Promise<InstallerCandidate | null> {
-  const current = parseVersion(app.getVersion())
+  const current = currentVersion()
   const workspace = readWorkspace()
   if (!current || !workspace) return null
   const dir = path.join(workspace, UPDATE_DIR_NAME)
@@ -112,13 +96,12 @@ export async function promptUpdateAtLaunch(icon?: NativeImage): Promise<boolean>
   }
   if (!candidate) return false
 
-  const current = parseVersion(app.getVersion())
   const { response } = await dialog.showMessageBox({
     type: 'info',
     icon: icon && !icon.isEmpty() ? icon : undefined,
     title: 'Mise a jour FLUX',
     message: `Une nouvelle version de FLUX est disponible : ${candidate.label}`,
-    detail: `Version installee : ${current ? formatVersion(current) : app.getVersion()}\n\n`
+    detail: `Version installee : ${displayVersion()}\n\n`
       + 'Mettre a jour ferme FLUX et lance l\'installeur. '
       + 'Vos preferences et projets ne sont pas touches.',
     buttons: ['Mettre a jour', 'Plus tard'],

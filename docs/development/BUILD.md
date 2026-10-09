@@ -47,6 +47,18 @@ electron-builder refuse les zeros en tete. Le script reecrit aussi `backend/core
 et `scripts/flux_version.nsh` (inclus par `installer.nsh`, cle registre `FluxVersion`). Si le build echoue,
 ces fichiers sont remis a la version precedente. Committer ces 3 fichiers apres un build publie.
 
+Lecture de la version :
+
+* App : `app/electron/version.ts` lit `fluxVersion` dans le `package.json` embarque (fallback `app.getVersion()`
+  normalise) ; IPC `app:getVersion` renvoie `x.x.xxx`, affiche en bas a droite (`StatusBar`) et dans Parametres.
+  L'updater (`FLUX_UPDATE`) compare en numerique (`0.8.001` > `0.8.000`, `0.8.1` == `0.8.001`).
+* Installeur : `flux_version.nsh` definit `FLUX_VERSION` (affichage) et `FLUX_SEMVER`. `installer.nsh` refuse de
+  compiler si `FLUX_SEMVER` != `${VERSION}` (nsh perime), compare `DisplayVersion` (semver) a `${VERSION}` avec
+  `VersionCompare` (meme version / mise a jour / retour arriere) et n'affiche que des libelles `x.x.xxx`.
+  Consequence : `npx electron-builder` seul echoue si `package.json` a change sans `build.cjs`.
+* Tests : `node --test scripts/build_version.test.cjs` et `backend/tests/system/test_app_version.py`
+  (sync `package.json` / `APP_VERSION` / `flux_version.nsh`).
+
 ### Etapes individuelles (debug)
 
 ```powershell
@@ -87,7 +99,7 @@ En mode frozen, `shelf_core.py` retrouve `resources/` via `sys._MEIPASS` ; `conf
 Cible `nsis` x64, `oneClick: false`, `perMachine: false`, hooks `scripts/installer.nsh` (detection MAJ vs installation neuve).
 
 Desinstallation : `Uninstall FLUX.exe` (pose par NSIS a cote de `FLUX.exe`, aussi lance par Reglages > Desinstaller FLUX,
-phrase `Understand and Uninstall`). Hook `customUnInstall` de `installer.nsh`, saute pendant une MAJ : tue
+phrase `Understand`). Hook `customUnInstall` de `installer.nsh`, saute pendant une MAJ : tue
 `flux_backend.exe`, lance `flux_backend.exe --uninstall-cleanup` (`backend/features/system/uninstall.py` : blocs FLUX
 dans 123.py / 456.py / pythonrc.py / userSetup.py / init.py, fichier supprime s'il ne contenait que FLUX, bridges,
 plugins, HDA `flux_*`, shelves, package `flux.json`, entree PYTHONPATH ZBrush, UI ZBrush, presets Painter non modifies,

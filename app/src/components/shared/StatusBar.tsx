@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { DccStatusMap } from '../../types'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { DCC_FRONTEND_KEYS, SOFTWARE } from '../../lib/dccs'
@@ -8,9 +9,13 @@ interface Props {
 }
 
 // Connected software, their mark only (ADR 0044): the name is the tooltip. The FLUX
-// version lives in the settings popover, not here.
+// version (x.x.xxx, package.json fluxVersion via electron main) sits bottom-right.
 export function StatusBar({ dccStatus }: Props) {
   const { isEnabled } = useEnabledDccs()
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
+  }, [])
 
   const items = Object.entries(dccStatus)
     .filter(([key, entry]) => entry?.connected && isEnabled(DCC_FRONTEND_KEYS[key] ?? key))
@@ -33,6 +38,14 @@ export function StatusBar({ dccStatus }: Props) {
           <span className="dot ok" style={{ width: 4, height: 4, position: 'absolute', right: -3, bottom: -1 }} />
         </span>
       ))}
+      {version && (
+        <span
+          title={`FLUX ${version}`}
+          style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', userSelect: 'text' }}
+        >
+          v{version}
+        </span>
+      )}
     </div>
   )
 }
