@@ -32,6 +32,14 @@ class _TmpProject(unittest.TestCase):
 
 
 class HostProject(_TmpProject):
+    def test_default_location_is_not_appdata(self):
+        # Microsoft Store Python redirects AppData writes: Unreal never saw the .uproject.
+        with mock.patch.dict(os.environ, {"USERPROFILE": r"C:\Users\x"}):
+            os.environ.pop("FLUX_UNREAL_PROJECT_DIR", None)
+            path = autostart.project_dir()
+        self.assertEqual(path, Path(r"C:\Users\x") / "FluxPipeline" / "unreal" / "FluxRender")
+        self.assertNotIn("appdata", str(path).lower())
+
     def test_engine_association_from_exe(self):
         self.assertEqual(autostart.engine_association(UE56), "5.6")
         self.assertEqual(autostart.engine_association(r"D:\custom\UnrealEditor.exe"), "")

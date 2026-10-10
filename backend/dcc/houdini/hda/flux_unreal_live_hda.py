@@ -5,7 +5,7 @@ A pass-through LOP put at the end of a /stage tree: what reaches it is shown liv
 Unreal (both softs open, a change in Houdini shows in Unreal without saving the .hip).
 
   * an inner USD ROP writes ONLY the layers Houdini authored to a local live file
-    (``live_file``, %LOCALAPPDATA%/FluxPipeline/unreal/live/), files already on disk stay
+    (``live_file``, %USERPROFILE%/FluxPipeline/unreal/live/, beside the host project), files already on disk stay
     references with relative paths and are never rewritten (savefilesfromdisk = 0):
     published versions are never touched. Probe 2026-10-10 (hython 22.0.368): 1 file,
     0.9 s first write then ~0.01 s;
@@ -90,7 +90,7 @@ def _status(node, msg):
         p.set(msg)
 
 def default_live_file(node):
-    base = (os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")).replace("\\\\", "/")
+    base = (os.environ.get("USERPROFILE") or os.path.expanduser("~")).replace("\\\\", "/")
     hip = os.path.splitext(hou.hipFile.basename())[0] or "untitled"
     return "%s/FluxPipeline/unreal/live/%s_%s.usd" % (base, hip, node.name())
 

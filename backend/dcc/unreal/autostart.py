@@ -3,7 +3,7 @@
 # Unreal has no per-user startup folder like Maya / Nuke / Mari: Python startup scripts
 # are found per project (Content/Python of the project and of its plugins, init_unreal.py
 # runs at editor startup). So FLUX owns ONE Unreal project per machine, the "host" project
-# FluxRender, kept local (%LOCALAPPDATA%: Unreal writes heavy caches next to the .uproject,
+# FluxRender, kept local (%USERPROFILE%/FluxPipeline/unreal, see flux_unreal_root: Unreal writes heavy caches next to the .uproject,
 # never on OneDrive). The bridge lives in a content-only plugin of that project (no C++,
 # nothing to compile). Unreal is the renderer: the shots come from the FLUX USD stages, the
 # host project holds no artist work.
@@ -51,8 +51,18 @@ def project_dir() -> Path:
     override = os.environ.get("FLUX_UNREAL_PROJECT_DIR")
     if override:
         return Path(override)
-    local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(local) / "FluxPipeline" / "unreal" / _PROJECT_NAME
+    return flux_unreal_root() / _PROJECT_NAME
+
+
+def flux_unreal_root() -> Path:
+    """%USERPROFILE%/FluxPipeline/unreal: host project + Houdini live layers.
+
+    Never under AppData (2026-10-10, "Failed to open descriptor file"): the Microsoft
+    Store Python of the dev backend silently redirects its AppData writes to
+    Packages/PythonSoftwareFoundation.../LocalCache, so Unreal never saw the .uproject.
+    Never OneDrive either (Unreal caches)."""
+    home = os.environ.get("USERPROFILE") or str(Path.home())
+    return Path(home) / "FluxPipeline" / "unreal"
 
 
 def project_file() -> Path:
