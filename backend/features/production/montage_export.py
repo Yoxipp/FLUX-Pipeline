@@ -148,8 +148,11 @@ def build_otio(title: str, rows: list[dict], fps: float) -> dict:
 
 def _render_mov(ffmpeg: str, rows: list[dict], fps: float, out: Path, work: Path) -> None:
     """One H.264 .mov: each shot encoded to its exact frame count, then concatenated."""
+    # Frame size: the first video's (playblasts), else the first image's.
     size = None
-    for row in rows:
+    with_media = [r for r in rows if r.get("file")]
+    with_media.sort(key=lambda r: ref_media.kind_for_ext(Path(r["file"]).suffix) != "video")
+    for row in with_media:
         if row.get("file"):
             size = _probe_size(ffmpeg, Path(row["file"]))
             if size:

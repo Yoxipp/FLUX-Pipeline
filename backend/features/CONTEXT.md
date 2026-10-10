@@ -18,7 +18,8 @@ Metadonnees via `core.repository_factory.get_repository()`, octets via filesyste
 `review/keyframe.py` (ADR 0047) : client du protocole de l'API externe de Keyframe Pro (port 18181,
 entete 10 caracteres + JSON), projet = une timeline dans l'ordre + autres videos du dossier ; repli
 ligne de commande (premiere video) en mode Demo. `production/ref_media.py` : chaque depot `/ref` est
-journalise dans `ref/modif_logs.json` (versions, auteur), `versions()` et `shot_previews()` (zone `/ref` d'abord, sinon dernier publish image/video `*_LAST.ext` du dossier de la tache ou d'une instance, `source: publish`).
+journalise dans `ref/modif_logs.json` (versions, auteur), `versions()` et `shot_previews()` (zone `/ref` d'abord, sinon dernier publish image/video `*_LAST.ext` du dossier de la tache ou d'une instance, `source: publish`). `production/montage_export.py` : export du montage
+de la Timeline (medias + `.otio` + `.edl`, `.mov` H.264 par ffmpeg externe, ADR 0053).
 Racine d'une tache de plan (`resolve_ref_root`, bug A5 2026-10-09) : TYPE_SHOT, puis CLASS (anciens
 projets), puis `shot/{seq}/{shot}/<token>` ; un `/ref` deja present sous une ancienne resolution gagne.
 `production/sync.py` (Production -> disque, create-only) : le resume renvoye/loggue compte ce qui est

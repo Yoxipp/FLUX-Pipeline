@@ -52,6 +52,22 @@ test('source picker lists each stage once after Auto and Tout', () => {
   assert.equal(new Set(opts.map(o => o.id)).size, opts.length)
 })
 
+test('source picker only offers stages that hold media', () => {
+  const s = state()
+  const groups = m.mediaGroups(s, s.shots, { a: [media('ANIM')], c: [media('PREVIZ')] })
+  assert.ok(!groups.some(g => g.id === 'storyboard' || g.id === 'animatic'))
+  assert.equal(groups.length, 2)
+})
+
+test('a shot department choice wins in the edit, falls back when empty', () => {
+  const s = state()
+  s.shots[1].preview_source = 'storyboard'
+  const previews = { a: [media('ANIM'), media('STORYBOARD')] }
+  assert.equal(m.pickShotMedia(s, s.shots[1], previews, 'auto').task, 'STORYBOARD')
+  s.shots[1].preview_source = 'comp'
+  assert.equal(m.pickShotMedia(s, s.shots[1], previews, 'auto').task, 'ANIM')
+})
+
 test('montage follows sequence then shot order, keeps gaps and durations', () => {
   const s = state()
   const frames = sh => (typeof sh.frame_end === 'number' ? sh.frame_end - sh.frame_start + 1 : 50)
