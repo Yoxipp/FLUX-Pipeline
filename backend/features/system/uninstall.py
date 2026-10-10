@@ -37,6 +37,7 @@ _AUTOSTART_MODULES: dict[str, tuple[str, str]] = {
     "substance_designer": ("Substance Designer", "dcc.substance_designer.autostart"),
     "mari":               ("Mari", "dcc.mari.autostart"),
     "marvelous":          ("Marvelous Designer", "dcc.marvelous.autostart"),
+    "unreal":             ("Unreal Engine", "dcc.unreal.autostart"),
 }
 
 # Shown in Settings before uninstalling: what is left on the machine.

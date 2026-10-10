@@ -19,6 +19,7 @@ DCC_PORT_RANGES: dict[str, tuple[int, int]] = {
     "Marvelous":   (7050, 8),    # 7050..7057
     "Photoshop":   (7060, 8),    # 7060..7067
     "Mari":        (7070, 8),    # 7070..7077
+    "Unreal":      (7080, 8),    # 7080..7087 — FluxBridge plugin of the FLUX host project
     "ZBrush":      (9876, 8),    # 9876..9883 — flux ZBrush bridge plugin port
     "Houdini":     (48884, 8),   # 48884..48891 — flux_houdini_server HTTP port
 }
@@ -56,6 +57,7 @@ DCC_COLORS: dict[str, str] = {
     "Marvelous":   "#b34141",   # red
     "Photoshop":   "#00bcd4",   # cyan
     "Mari":        "#c17a3a",   # amber
+    "Unreal":      "#d0d0d0",   # light grey
     "disconnected": "#9a9a9a",  # grey
 }
 
@@ -126,6 +128,8 @@ def _patterns_for_root(pf: str, pf86: str, lad: str) -> dict[str, list[list[str]
         "Photoshop":  [[rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
                         rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"]],
         "Mari":       [[rf"{pf}\Mari*\Bundle\bin\Mari*.exe"]],
+        # Epic Games Launcher default location; other drives come from LauncherInstalled.dat.
+        "Unreal":     [[rf"{pf}\Epic Games\UE_*\Engine\Binaries\Win64\UnrealEditor.exe"]],
     }
 
 DCC_EXE_PATTERN_GROUPS: dict[str, list[list[str]]] = _build_dcc_pattern_groups()

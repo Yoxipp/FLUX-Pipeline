@@ -27,6 +27,7 @@ PROCESS_NAMES: dict[str, tuple[str, ...]] = {
     "Marvelous":  ("marvelous",),
     "Photoshop":  ("photoshop",),
     "Mari":       ("mari",),
+    "Unreal":     ("unrealeditor",),
     "ZBrush":     ("zbrush",),
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import subprocess
@@ -70,6 +71,7 @@ _FRONTEND_KEY_MAP: dict[str, str] = {
     "marvelous":          "Marvelous",
     "photoshop":          "Photoshop",
     "mari":               "Mari",
+    "unreal":             "Unreal",
 }
 
 # Public list of launcher keys (per-user enabled_dccs validation, V8 U10).
@@ -163,6 +165,8 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
     env = _child_env()
     # Empty Maya / Houdini session: start on the FLUX frame range (1001-1050). A scene
     # (preset, sequence render scene) keeps its own range.
+    if dcc_name == "unreal" and not scene:
+        scene = _unreal_host_project(exe)
     extra = () if scene else _frame_range_args(dcc_name)
     if extra:
         env["FLUX_FRAME_START"] = str(DEFAULT_FRAME_START)
@@ -187,6 +191,17 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
     except (OSError, ValueError) as e:
         log.error("Failed to launch %s: %s", dcc_name, e)
         return False
+
+
+def _unreal_host_project(exe: str) -> str | None:
+    """Unreal opens the FLUX host project (bridge plugin refreshed), ADR 0052."""
+    from dcc.unreal import autostart as unreal_autostart
+
+    try:
+        return str(unreal_autostart.ensure_project(exe))
+    except OSError as exc:
+        log.error("Unreal host project not written (%s): launching Unreal without it", exc)
+        return None
 
 
 def set_custom_exe_path(dcc_name: str, path: str) -> None:
@@ -259,6 +274,7 @@ def _valid_custom_exe(dcc_key: str) -> str | None:
 
 
 _VERSION_RE = re.compile(r"\d+")
+_UE_DIR_RE = re.compile(r"[\\/]UE_([\d.]+)[\\/]", re.IGNORECASE)
 
 
 def _version_key(path: str) -> tuple:
@@ -266,7 +282,11 @@ def _version_key(path: str) -> tuple:
 
     Maya2025 -> (2025,), "Adobe Photoshop 2025" -> (2025,) > "Adobe Photoshop CC 2019"
     -> (2019,), "Houdini 20.5.332" -> (20, 5, 332), Nuke15.1v3 -> (15, 1, 3).
+    Unreal: UE_5.6\\Engine\\Binaries\\Win64 -> (5, 6) (Win64 would tie every version).
     """
+    unreal = _UE_DIR_RE.search(path)
+    if unreal:
+        return tuple(int(n) for n in _VERSION_RE.findall(unreal.group(1)))
     for part in reversed(Path(path).parent.parts):
         numbers = _VERSION_RE.findall(part)
         if numbers:
@@ -337,5 +357,27 @@ def _registry_candidates(dcc_key: str) -> list[str]:
         exe = _reg_value(_APP_PATHS_PHOTOSHOP)
         if exe:
             out.append(exe.strip('"'))
+    elif dcc_key == "unreal":
+        out.extend(_epic_launcher_candidates())
+    return out
+
+
+def _epic_launcher_candidates() -> list[str]:
+    """UnrealEditor.exe of every engine the Epic Games Launcher installed (any drive).
+
+    %PROGRAMDATA%\\Epic\\UnrealEngineLauncher\\LauncherInstalled.dat is JSON:
+    {"InstallationList": [{"InstallLocation": "D:\\Epic\\UE_5.6", "AppName": "UE_5.6"}, ...]}."""
+    data_file = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Epic" / "UnrealEngineLauncher" \
+        / "LauncherInstalled.dat"
+    try:
+        installs = json.loads(data_file.read_text(encoding="utf-8")).get("InstallationList", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    out = []
+    for item in installs:
+        if isinstance(item, dict) and str(item.get("AppName", "")).upper().startswith("UE_"):
+            location = str(item.get("InstallLocation") or "")
+            if location:
+                out.append(os.path.join(location, "Engine", "Binaries", "Win64", "UnrealEditor.exe"))
     return out
 

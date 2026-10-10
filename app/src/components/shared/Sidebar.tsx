@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -159,6 +159,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const [mariServerOk,    setMariServerOk]          = useState<boolean | null>(null)
   const [designerServerOk, setDesignerServerOk]     = useState<boolean | null>(null)
   const [marvelousServerOk, setMarvelousServerOk]   = useState<boolean | null>(null)
+  const [unrealServerOk,  setUnrealServerOk]        = useState<boolean | null>(null)
+  const [unrealBusy,      setUnrealBusy]            = useState(false)
   // Photoshop (COM, no plugin): reason drives the row control state.
   const [psReason, setPsReason]                     = useState<'ok' | 'lib_missing' | 'not_running' | null>(null)
   const [psBusy,   setPsBusy]                        = useState(false)
@@ -259,12 +261,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         api.pingDcc('marvelous').then(p => setMarvelousServerOk(p.connected)).catch(() => setMarvelousServerOk(false))
       }
     }).catch(() => {})
+    api.getDccAutostart('unreal').then(r => {
+      setAutostartInstalled(prev => ({ ...prev, unreal: r.installed }))
+      if (r.installed) {
+        api.pingDcc('unreal').then(p => setUnrealServerOk(p.connected)).catch(() => setUnrealServerOk(false))
+      }
+    }).catch(() => {})
   }, [])
 
   // "Installer tous les bridges" (Settings) changed the bridges: refresh the plug icons.
   useEffect(() => {
     const onBridges = () => {
-      for (const key of ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous']) {
+      for (const key of ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous', 'unreal']) {
         api.getDccAutostart(key)
           .then(r => setAutostartInstalled(prev => ({ ...prev, [key]: r.installed })))
           .catch(() => {})
@@ -336,6 +344,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
   }, [autostartInstalled.marvelous])
+
+  // Poll the Unreal bridge every 5 s when the host project plugin is installed
+  useEffect(() => {
+    if (!autostartInstalled.unreal) { setUnrealServerOk(null); return }
+    const poll = () =>
+      api.pingDcc('unreal').then(p => setUnrealServerOk(p.connected)).catch(() => setUnrealServerOk(false))
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [autostartInstalled.unreal])
 
   // Poll Photoshop COM state every 5 s (no plugin; state = lib/running/ok).
   useEffect(() => {
@@ -484,9 +501,10 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     if (key === 'mari')    setMariServerOk(value)
     if (key === 'substance_designer') setDesignerServerOk(value)
     if (key === 'marvelous') setMarvelousServerOk(value)
+    if (key === 'unreal')  setUnrealServerOk(value)
   }
 
-  const PLUG_KEYS = ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous']
+  const PLUG_KEYS = ['houdini', 'zbrush', 'maya', 'nuke', 'substance_painter', 'mari', 'substance_designer', 'marvelous', 'unreal']
 
   const handleToggleAutostart = async (key: string) => {
     if (!PLUG_KEYS.includes(key)) return
@@ -592,6 +610,37 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     }
   }
 
+  // Unreal (ADR 0052): the FLUX stage actor shows a shot stage; reload re-reads changed layers.
+  const handleUnrealOpenStage = async () => {
+    const path = await window.electronAPI?.openFile([{ name: 'USD', extensions: ['usd', 'usda', 'usdc'] }])
+    if (!path) return
+    setUnrealBusy(true)
+    const pending = toast.loading('Unreal charge le stage…')
+    try {
+      const r = await api.unrealOpenStage(path)
+      toast.success(`Stage ouvert dans Unreal (${r.seconds} s)`, { duration: 4000 })
+    } catch (e) {
+      toast.error(`Unreal · ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
+    } finally {
+      toast.dismiss(pending)
+      setUnrealBusy(false)
+    }
+  }
+
+  const handleUnrealReload = async () => {
+    setUnrealBusy(true)
+    try {
+      const r = await api.unrealReload()
+      const count = r.changed?.length ?? 0
+      toast.success(r.mode === 'full' ? `Stage rechargé en entier (${r.seconds} s)`
+        : count ? `${count} layer(s) rechargé(s) (${r.seconds} s)` : 'Rien n’a changé sur le disque', { duration: 4000 })
+    } catch (e) {
+      toast.error(`Unreal · ${e instanceof Error ? e.message : String(e)}`, { duration: 8000 })
+    } finally {
+      setUnrealBusy(false)
+    }
+  }
+
   // Launch the chosen preset (or the empty default scene) in *soft*.
   const runNewScene = async (soft: string, preset: Preset | null) => {
     const name = SOFTWARE.find(s => s.key === soft)?.name ?? soft
@@ -622,7 +671,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     const installed = !!autostartInstalled[soft]
     const plugOk = installed && (soft === 'houdini' ? houdiniServerOk : soft === 'zbrush' ? zbrushServerOk : soft === 'maya' ? mayaServerOk
       : soft === 'nuke' ? nukeServerOk : soft === 'substance_painter' ? painterServerOk : soft === 'mari' ? mariServerOk
-      : soft === 'substance_designer' ? designerServerOk : soft === 'marvelous' ? marvelousServerOk : null) === true
+      : soft === 'substance_designer' ? designerServerOk : soft === 'marvelous' ? marvelousServerOk
+      : soft === 'unreal' ? unrealServerOk : null) === true
     const instances = dccStatus[statusKey]?.instances ?? []
     const mayaStuck = soft === 'maya' && !!dccStatus[statusKey]?.stuck
     // New Scene: presets of the active project for this soft, grouped by TASK token.
@@ -643,7 +693,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
       <Menu.Item className="launcher-menu-item launcher-menu-primary" disabled={launching.has(soft)} onSelect={() => void handleLaunch(soft)}>
         <Play size={13} fill="currentColor" />{connected ? 'Nouvelle instance' : 'Lancer'}
       </Menu.Item>
-      <Menu.Sub>
+      {soft === 'unreal' && <>
+        <Menu.Item className="launcher-menu-item" disabled={!connected || unrealBusy} onSelect={() => void handleUnrealOpenStage()}>
+          <FolderOpen size={13} />Ouvrir un stage USD…<span className="launcher-menu-hint">{connected ? '' : 'Unreal fermé'}</span>
+        </Menu.Item>
+        <Menu.Item className="launcher-menu-item" disabled={!connected || unrealBusy} onSelect={() => void handleUnrealReload()}>
+          <RefreshCw size={13} />Recharger le stage
+        </Menu.Item>
+      </>}
+      {soft !== 'unreal' && <Menu.Sub>
         <Menu.SubTrigger className="launcher-menu-item" disabled={!activeProject}>
           <FilePlus2 size={13} />Nouvelle scène<span className="launcher-menu-hint">{activeProject ? '' : 'aucun projet'}</span><ChevronRight size={12} />
         </Menu.SubTrigger>
@@ -663,7 +721,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             ))}
           </Menu.SubContent>
         </Menu.Portal>
-      </Menu.Sub>
+      </Menu.Sub>}
       {instances.length > 1 && (
         <Menu.Item className="launcher-menu-item" onSelect={() => setInstMenu({ statusKey, name, y: launcherAnchorY(soft) })}>
           <Layers size={13} />Instances<span className="launcher-menu-hint">{instances.length} · port {activePort(statusKey) ?? '-'}</span>

@@ -52,6 +52,7 @@ app_datas = [
     (str(ROOT / "backend/dcc/substance_designer/substance_designer_bridge.py"),
      "dcc/substance_designer"),
     (str(ROOT / "backend/dcc/marvelous/marvelous_bridge.py"), "dcc/marvelous"),
+    (str(ROOT / "backend/dcc/unreal/unreal_bridge.py"), "dcc/unreal"),
 ]
 
 a = Analysis(

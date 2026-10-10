@@ -14,13 +14,14 @@ const OFFICIAL: Record<string, string> = {
 }
 
 // Monogram tiles: Adobe Substance style (rounded square, two letters) for Painter and
-// Designer, a ring for Mari (Foundry, like Nuke), a plain tile for the others.
+// Designer, a ring for Mari (Foundry, like Nuke) and Unreal, a plain tile for the others.
 const MONOGRAM: Record<string, { text: string; shape: 'square' | 'ring' }> = {
   substance_painter:  { text: 'Pt', shape: 'square' },
   substance_designer: { text: 'Ds', shape: 'square' },
   mari:               { text: 'Ma', shape: 'ring' },
   zbrush:             { text: 'Z',  shape: 'square' },
   marvelous:          { text: 'MD', shape: 'square' },
+  unreal:             { text: 'UE', shape: 'ring' },
 }
 
 // Display names used by the Publisher / Shelf (SoftwareSelector) -> launcher keys.
@@ -29,6 +30,7 @@ const NAME_TO_KEY: Record<string, string> = {
   painter: 'substance_painter', designer: 'substance_designer',
   'substance painter': 'substance_painter', 'substance designer': 'substance_designer',
   mari: 'mari', zbrush: 'zbrush', marvelous: 'marvelous', 'marvelous designer': 'marvelous',
+  unreal: 'unreal', 'unreal engine': 'unreal',
 }
 
 export function dccLogoKey(nameOrKey: string): string {

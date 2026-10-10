@@ -481,6 +481,14 @@ export const api = {
       'GET', '/dcc/substance/info', undefined, 25000),
   getTextureFormats: () =>
     apiCall<{ formats: Record<string, string[]>; sizes: number[] }>('GET', '/dcc/texture/formats'),
+  // Unreal (ADR 0052): point the FLUX stage actor at a USD stage, reload changed layers.
+  unrealOpenStage: (path: string, purpose: 'proxy' | 'render' = 'proxy') =>
+    apiCall<{ ok: boolean; path: string; purpose: string; seconds: number }>(
+      'POST', '/dcc/unreal/open-stage', { path, purpose }, 600000),
+  unrealReload: () =>
+    apiCall<{ ok: boolean; mode: 'targeted' | 'full'; changed?: string[]; seconds: number }>(
+      'POST', '/dcc/unreal/reload', undefined, 600000),
+
   getMariInfo: () =>
     apiCall<{ ok: boolean; geo: string; mode?: 'channels' | 'nodes'
               channels: { name: string; size?: number; depth?: number; layers?: number
