@@ -294,8 +294,8 @@ function SpanMark({ it, day, today, selected, open, noteLines, onClick, onExpand
   const title = `${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}`
   const unfold = open ? tr('Replier la tâche', 'Fold the task') : tr('Déplier la tâche', 'Unfold the task')
   const inset = { left: 0, right: 0 }
-  // Unfolded: a lighter band glued under the line, continuous like it; the head day writes
-  // the task in it. The tabs stay where they are, the arrow turns up.
+  // Unfolded: a lighter band glued under the line, continuous like it; every day of the span
+  // writes the task in it (2026-10-10), clear of the tabs. The tabs stay, the arrow turns up.
   const noteRows = bandNoteRows(it, noteLines)
   const height = spanMarkHeight(it, day, today, open, noteLines)
   return (
@@ -312,8 +312,9 @@ function SpanMark({ it, day, today, selected, open, noteLines, onClick, onExpand
         <span style={{ position: 'absolute', top: 4, ...inset, bottom: 0,
                        background: `color-mix(in oklch, ${color} 20%, transparent)` }} />
       )}
-      {open && head && (
-        <span style={{ position: 'absolute', top: 6, left: (isStart ? 0 : CELL_PAD) + 22, right: isEnd ? 4 : CELL_PAD,
+      {open && (
+        <span style={{ position: 'absolute', top: 6, left: (isStart ? 0 : CELL_PAD) + (head ? 22 : 4),
+                       right: isEnd ? (head ? 4 : CELL_PAD + 20) : CELL_PAD,
                        fontSize: 11, lineHeight: '14px', color: 'var(--ink)', overflow: 'hidden' }}>
           <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>{it.title}</span>
           <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--ink-2)' }}>
