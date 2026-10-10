@@ -16,6 +16,7 @@ from core.constants import JSON_ACTIVITY, JSON_PRODUCTION, JSON_TOKENS
 from core.export_sqlite_to_json import _merge_log, export_to_json
 from core.json_repository import JsonFileRepository
 from core.sqlite_repository import SqliteRepository
+from core.project_setup import setup_path
 
 
 class SharedLocationReasonTests(unittest.TestCase):
@@ -118,17 +119,17 @@ class ExportTests(unittest.TestCase):
 
     def test_dry_run_writes_nothing(self):
         report = self._run(apply=False)
-        self.assertFalse((self.project / JSON_PRODUCTION).exists())
+        self.assertFalse(setup_path(self.project, JSON_PRODUCTION).exists())
         self.assertEqual(len(jm.read_jsonl(self.activity)), 1)
-        self.assertIn(str(self.project / JSON_PRODUCTION), report.written)
+        self.assertIn(str(setup_path(self.project, JSON_PRODUCTION)), report.written)
 
     def test_apply_writes_merges_and_backs_up(self):
         report = self._run(apply=True)
         jm.invalidate_cache()
-        tokens = json.loads((self.project / JSON_TOKENS).read_text(encoding="utf-8"))
+        tokens = json.loads(setup_path(self.project, JSON_TOKENS).read_text(encoding="utf-8"))
         self.assertEqual(tokens["NAME"]["HERO"], "assets/HERO")
         self.assertEqual(
-            json.loads((self.project / JSON_PRODUCTION).read_text(encoding="utf-8")),
+            json.loads(setup_path(self.project, JSON_PRODUCTION).read_text(encoding="utf-8")),
             {"shots": ["sh010"]},
         )
         ids = [e["id"] for e in jm.read_jsonl(self.activity)]

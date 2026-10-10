@@ -18,6 +18,7 @@ from features.folder_manager import locks as lk
 
 # Pin the JSON backend so a dev config flipped to sqlite does not fail these tests.
 from tests.repository._backend import setUpModule, tearDownModule  # noqa: E402,F401
+from core.project_setup import setup_path
 
 
 class LocksViaRepositoryTests(unittest.TestCase):
@@ -55,7 +56,7 @@ class LocksViaRepositoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             project = Path(d)
             lk.set_lock(project, "a/b", True)
-            raw = json.loads((project / JSON_LOCKS).read_text(encoding="utf-8"))
+            raw = json.loads(setup_path(project, JSON_LOCKS).read_text(encoding="utf-8"))
             self.assertIsInstance(raw, dict)
             self.assertEqual(raw, {"locked": ["a/b"]})
 

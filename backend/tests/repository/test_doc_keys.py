@@ -15,6 +15,7 @@ from core import repository_factory as rf
 from core.constants import JSON_ACTIVITY, JSON_PRODUCTION, JSON_TOKENS
 from core.export_sqlite_to_json import export_to_json
 from core.sqlite_repository import SqliteRepository
+from core.project_setup import setup_path
 
 _PID = "a" * 32
 
@@ -190,9 +191,9 @@ class ExportLogicalKeysTests(unittest.TestCase):
             base.append_log("activity_log", f"ws:CONFIG/{JSON_ACTIVITY}", [{"id": "a1"}])
             export_to_json(db, projects_dir=projects, users_dir=root / "USER",
                            prefs_path=root / "config.json", apply=True)
-            self.assertEqual(json.loads((project / JSON_TOKENS).read_text(encoding="utf-8")),
+            self.assertEqual(json.loads(setup_path(project, JSON_TOKENS).read_text(encoding="utf-8")),
                              {"NAME": {"HERO": "assets/HERO"}})
-            self.assertTrue((project / JSON_PRODUCTION).is_file())
+            self.assertTrue(setup_path(project, JSON_PRODUCTION).is_file())
             self.assertEqual([e["id"] for e in jm.read_jsonl(root / "CONFIG" / JSON_ACTIVITY)], ["a1"])
 
 

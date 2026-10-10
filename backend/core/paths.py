@@ -240,17 +240,20 @@ def get_project_path(project_name: str) -> Path:
 
 def get_project_tokens_path(project_name: str) -> Path:
     from core.constants import JSON_TOKENS
-    return get_project_path(project_name) / JSON_TOKENS
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_TOKENS)
 
 
 def get_project_production_path(project_name: str) -> Path:
     from core.constants import JSON_PRODUCTION
-    return get_project_path(project_name) / JSON_PRODUCTION
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_PRODUCTION)
 
 
 def get_project_calendar_path(project_name: str) -> Path:
     from core.constants import JSON_CALENDAR
-    return get_project_path(project_name) / JSON_CALENDAR
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_CALENDAR)
 
 
 # ── CONFIG / shared JSON paths ────────────────────────────────────────────────
@@ -266,8 +269,9 @@ def get_chat_path() -> Path:
 
 
 def get_project_chat_path(project_name: str) -> Path:
-    """Team chat of one project: DOSSIER_PROJETS/<project>/teamChat.json."""
-    return get_project_path(project_name) / JSON_CHAT
+    """Team chat of one project: DOSSIER_PROJETS/<project>/_flux_setup/teamChat.json."""
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_CHAT)
 
 
 def get_mentions_path() -> Path:

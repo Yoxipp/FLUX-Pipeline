@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from dcc.substance_painter import presets
+from core.project_setup import setup_path
 
 
 class PainterPresets(unittest.TestCase):
@@ -34,7 +35,7 @@ class PainterPresets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = create_project("INSECT", Path(d), painter_presets=["FLUX_BEAUTY_MAPS"])
             self.assertEqual(presets.project_presets(p), ["FLUX_BEAUTY_MAPS"])
-            cfg = json.loads((p / "project.json").read_text())
+            cfg = json.loads(setup_path(p, "project.json").read_text())
             from features.folder_manager.project_config import validate_project_config
             self.assertEqual(validate_project_config(cfg), [])
             set_painter_presets(p, ["FLUX_BEAUTY_MAPS", "FLUX_UTIL_MAPS"])

@@ -165,7 +165,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
         next = d.projects.map(name => ({ name, isDir: true }))
       } else {
         const subpath = nav.subpath.join('/')
-        const d = await api.browseProject(nav.project, subpath || undefined)
+        const d = await api.browseProject(nav.project, subpath || undefined, fm.showSetup)
         next = [
           ...d.folders.map(f => ({ name: f.name, isDir: true })),
           ...(d.files ?? []).map(f => ({ name: f.name, isDir: false, legacy: !!f.legacy })),
@@ -185,7 +185,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     } finally {
       if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [nav])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [nav, fm.showSetup])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void loadItems() }, [loadItems, fm.fsTick])
 

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 import main
 from features.folder_manager import project_config as pc
+from core.project_setup import setup_path
 
 
 class SanitizeWorkProfilesTests(unittest.TestCase):
@@ -43,7 +44,7 @@ class WorkProfilesStorageTests(unittest.TestCase):
             project.mkdir()
             config, _ = pc.ensure_project_config(project)
             pc.write_work_profiles(project, [{"id": "a", "name": "Anim", "prefs": {"launcher": "full"}}])
-            data = json.loads((project / "project.json").read_text(encoding="utf-8"))
+            data = json.loads(setup_path(project, "project.json").read_text(encoding="utf-8"))
             self.assertEqual(data["project_id"], config["project_id"])
             self.assertEqual(data["ui"]["work_profiles"][0]["prefs"], {"launcher": "full"})
             self.assertEqual(pc.validate_project_config(data), [])

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from core.logger import get_logger
 from core.paths import force_remove, force_rmtree, get_project_path, get_projects_dir, is_subpath
 from features.folder_manager.asset_creator import create_asset, heal_tokens_from_disk, list_assets
-from features.folder_manager.locks import is_locked, load_locks, set_lock
+from features.folder_manager.locks import is_locked, load_locks, set_lock, with_setup
 from features.folder_manager.project_config import (
     ensure_project_config, is_direct_project_dir, read_work_profiles, write_work_profiles,
 )
@@ -522,7 +522,7 @@ async def get_locks(project_name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_running_loop()
     locked = await loop.run_in_executor(None, lambda: load_locks(project_path))
-    return {"locked": locked}
+    return {"locked": with_setup(locked)}
 
 
 @router.post("/locks")
@@ -533,7 +533,7 @@ async def post_lock(req: LockSet) -> dict:
     rel = f"{req.subpath}/{req.name}" if req.subpath else req.name
     loop = asyncio.get_running_loop()
     locked = await loop.run_in_executor(None, lambda: set_lock(project_path, rel, req.locked))
-    return {"locked": locked}
+    return {"locked": with_setup(locked)}
 
 
 # ── Copy ──────────────────────────────────────────────────────────────────────

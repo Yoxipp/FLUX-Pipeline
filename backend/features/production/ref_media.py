@@ -21,6 +21,7 @@ import shutil
 from pathlib import Path
 
 from core.paths import is_subpath
+from core.project_setup import resolve_project_rel
 from features.folder_manager.tokens import get_path_for_token, load_tokens
 from features.publisher.modif_log import append_log, read_logs
 
@@ -138,7 +139,8 @@ def kind_for_ext(ext: str) -> str:
 def _safe_ref_dir(project_path: Path, rel_path: str) -> Path:
     """Resolve <project>/<rel_path>/ref, refusing any escape from the project."""
     rel = (rel_path or "").strip().strip("/").replace("\\", "/")
-    base = (project_path / rel) if rel else project_path
+    # resolve_project_rel: the Production thumbnails ("_production/...") live in _flux_setup/.
+    base = resolve_project_rel(project_path, rel) if rel else project_path
     ref_dir = (base / REF_DIRNAME).resolve()
     if not is_subpath(ref_dir, project_path.resolve()) and ref_dir != project_path.resolve():
         raise ValueError("Chemin non autorisé")

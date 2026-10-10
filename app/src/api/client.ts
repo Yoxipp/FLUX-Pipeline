@@ -643,8 +643,14 @@ export const api = {
   getUninstallPlan: () =>
     apiCall<{ remove: { label: string; paths: string[] }[]; keep: string[] }>('GET', '/system/uninstall-plan'),
 
-  browseProject: (project_name: string, subpath?: string) =>
-    apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
+  // setup: also list the project's setup files (_flux_setup/ and its JSON), hidden by default.
+  browseProject: (project_name: string, subpath?: string, setup = false) => {
+    const q = new URLSearchParams()
+    if (subpath) q.set('subpath', subpath)
+    if (setup) q.set('setup', 'true')
+    const qs = q.toString()
+    return apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${qs ? `?${qs}` : ''}`)
+  },
 
   // Folder Manager
   getTokens: (project: string) =>

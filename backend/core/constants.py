@@ -253,12 +253,15 @@ ARCHIVE_DIRNAME: str        = "archive"
 ARCHIVE_STEM_ACTIVITY: str  = "activite"
 ARCHIVE_STEM_MENTIONS: str  = "chatMentions"
 
-# Per-project JSON filenames
-JSON_TOKENS: str     = "tokens.json"        # project root
-JSON_PROJECT: str    = "project.json"       # project root - project config + project_id (ADR 0006)
-JSON_PRODUCTION: str = "production.json"    # project root — Production Tab store
-JSON_CALENDAR: str = "calendar.json"        # project root — team calendar (commitments)
-JSON_LOCKS: str      = "locks.json"         # project root — folder lock registry
+# Per-project JSON filenames. They live in <project>/SETUP_DIR/ (legacy projects: at
+# the root until migrated); always resolve them through core.project_setup.setup_path.
+SETUP_DIR: str       = "_flux_setup"        # project setup folder (locked, hidden in the Folder Manager)
+PRODUCTION_MEDIA_DIR: str = "_production"   # Production Tab media (thumbnails), inside SETUP_DIR
+JSON_TOKENS: str     = "tokens.json"        # setup dir
+JSON_PROJECT: str    = "project.json"       # setup dir - project config + project_id (ADR 0006)
+JSON_PRODUCTION: str = "production.json"    # setup dir - Production Tab store
+JSON_CALENDAR: str = "calendar.json"        # setup dir - team calendar (commitments)
+JSON_LOCKS: str      = "locks.json"         # setup dir - folder lock registry
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
 
 # Per-user settings

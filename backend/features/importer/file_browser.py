@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.constants import JSON_MODIF_LOG
 from core.paths import is_subpath
+from core.project_setup import is_setup_rel
 from features.publisher.modif_log import get_logs_for_file, read_logs
 from features.folder_manager.naming_validator import get_base_name
 from core.logger import get_logger
@@ -36,6 +37,8 @@ def list_files(
                 continue
             if p.suffix.lower() == ".json":
                 continue
+            if is_setup_rel(p.relative_to(project_path).as_posix()):
+                continue                         # _flux_setup/ (Production thumbnails...)
             if p.name in _EXCLUDED_NAMES:
                 continue
             if not is_subpath(p.resolve(), project_path):

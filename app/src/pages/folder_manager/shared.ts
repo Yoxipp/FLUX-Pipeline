@@ -165,6 +165,8 @@ export interface FolderManagerShared {
   // Bumped after any write on disk: every view reloads its folder.
   fsTick:        number
   bumpFs:        () => void
+  // "Setup files" box: show _flux_setup/ and the project's FLUX JSON (off by default).
+  showSetup:     boolean
   dragRef:       MutableRefObject<DragPayload | null>
   transfer:      (src: TransferSource, dest: TransferDest, op: 'move' | 'copy') => Promise<number>
 }

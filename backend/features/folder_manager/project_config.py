@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.constants import JSON_PROJECT
+from core.project_setup import setup_path
 from core.json_manager import read_json, write_json
 from core.logger import get_logger
 
@@ -74,7 +75,7 @@ def is_direct_project_dir(project_path: Path, projects_root: Path) -> bool:
 
 
 def project_config_path(project_path: Path) -> Path:
-    return Path(project_path) / JSON_PROJECT
+    return setup_path(project_path, JSON_PROJECT)
 
 
 def default_project_config() -> dict:
@@ -254,7 +255,7 @@ def _adopt_oldest_conflict_copy(project_path: Path, data: dict, warnings: list[s
     """Look for OneDrive conflict copies (project-*.json); adopt the oldest project_id."""
     stem, suffix = Path(JSON_PROJECT).stem, Path(JSON_PROJECT).suffix
     candidates: list[dict] = []
-    for copy in sorted(project_path.glob(f"{stem}-*{suffix}")):
+    for copy in sorted(project_config_path(project_path).parent.glob(f"{stem}-*{suffix}")):
         other = read_json(copy)
         if isinstance(other, dict) and isinstance(other.get("project_id"), str):
             candidates.append({"file": copy.name, **other})

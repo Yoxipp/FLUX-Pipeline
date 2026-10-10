@@ -16,7 +16,9 @@ import json
 import re
 from pathlib import Path
 
+from core.constants import JSON_PRODUCTION
 from core.logger import get_logger
+from core.project_setup import is_project_root, setup_path
 
 from .component_auto import COMPONENT_EXT, _rel, component_dir
 from .structure.naming import sanitize_token
@@ -107,7 +109,7 @@ def load_project_production(project: Path) -> tuple[dict, bool]:
 
     if _is_workspace_project(project):
         return load_production(project.name), True
-    path = project / "production.json"
+    path = setup_path(project, JSON_PRODUCTION)
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -722,7 +724,7 @@ def refresh_from_publish_folder(dest_folder: str | Path, base: str, ext: str, *,
         if task not in SHOT_DEPARTMENTS:
             return None
         folder = Path(dest_folder).resolve()
-        project = next((p for p in [folder, *folder.parents] if (p / "tokens.json").is_file()), None)
+        project = next((p for p in [folder, *folder.parents] if is_project_root(p)), None)
         if project is None:
             return None
         return write_stage(project, parsed["SEQ"], parsed["SHOT"], user=user)

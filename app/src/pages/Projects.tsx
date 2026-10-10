@@ -37,6 +37,7 @@ type SidebarTab = 'tous' | 'favoris' | 'recents' | 'archives'
 const TILE_SIZE_KEY = 'flux.folderManager.tileSize'
 const LAYOUT_KEY = 'flux.folderManager.layout'
 const CREATE_PANEL_KEY = 'flux.folderManager.createPanel'
+const SHOW_SETUP_KEY = 'flux.folderManager.showSetup'
 
 function useLocalPref<T extends string>(key: string, fallback: T, valid: readonly T[]): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -967,6 +968,8 @@ export function Projects() {
   const [createPanelValue, setCreatePanelValue] = useLocalPref(CREATE_PANEL_KEY, 'open', ['open', 'closed'])
   const createPanel = createPanelValue === 'open'
   const setCreatePanel = useCallback((open: boolean) => setCreatePanelValue(open ? 'open' : 'closed'), [setCreatePanelValue])
+  const [showSetupValue, setShowSetupValue] = useLocalPref(SHOW_SETUP_KEY, 'hidden', ['hidden', 'shown'])
+  const showSetup = showSetupValue === 'shown'
   const paneCount = PANE_COUNT[layout]
   const [activePane, setActivePane] = useSessionState('fm.activePane', 0)
   const activeIdx = Math.min(activePane, paneCount - 1)
@@ -1192,9 +1195,9 @@ export function Projects() {
     tileSize, dccStatus, favorites, archived,
     toggleFavorite, toggleArchived, addToRecents, forgetSaved, renameSaved,
     clipboard, setClipboard, pushUndo, undoLast,
-    fsTick, bumpFs, dragRef, transfer,
+    fsTick, bumpFs, dragRef, transfer, showSetup,
   }), [settings?.workspace, tileSize, dccStatus, favorites, archived, toggleFavorite, toggleArchived, addToRecents,
-       forgetSaved, renameSaved, clipboard, pushUndo, undoLast, fsTick, bumpFs, transfer])
+       forgetSaved, renameSaved, clipboard, pushUndo, undoLast, fsTick, bumpFs, transfer, showSetup])
 
   // ── Presets (quick-drop into the active view's folder) ──────────────────────
   // Reload the project's presets when entering a project, and whenever the
@@ -1408,6 +1411,10 @@ export function Projects() {
           </div>
         )}
         <div style={{ flex: 1 }} />
+        <label className="fm-setup-toggle" title={tr('Afficher le dossier _flux_setup et les fichiers de configuration du projet', 'Show the _flux_setup folder and the project configuration files')}>
+          <input type="checkbox" checked={showSetup} onChange={e => setShowSetupValue(e.target.checked ? 'shown' : 'hidden')} />
+          <span>Setup files</span>
+        </label>
         <ViewMenu
           layout={layout} onLayout={changeLayout}
           tileSize={tileSize} onTileSize={changeTileSize}

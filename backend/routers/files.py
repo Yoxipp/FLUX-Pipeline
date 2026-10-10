@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from core.logger import get_logger
 from core.paths import get_project_path, get_projects_dir, is_subpath
+from core.project_setup import SETUP_FILES, is_setup_rel
 from features.importer.file_browser import get_file_info, list_files_immediate, list_folders
 
 log = get_logger(__name__)
@@ -38,9 +39,29 @@ def _list_dir_cached(project_path: Path, subpath: str, target: Path) -> tuple[li
     return list(folders), list(files)
 
 
+def _filter_setup(project: Path, target: Path, folders: list, files: list, setup: bool) -> tuple[list, list]:
+    """Hide (default) or reveal the project setup entries (core.project_setup)."""
+    rel = target.relative_to(project).as_posix() if target != project else ""
+    if not setup:
+        if rel:
+            return folders, files
+        return ([n for n in folders if not is_setup_rel(n)],
+                [f for f in files if not is_setup_rel(Path(f).name)])
+    if rel and not is_setup_rel(rel):
+        return folders, files
+    # The listing hides every .json: add back the setup ones (all of them inside _flux_setup/).
+    try:
+        extra = [p for p in target.glob("*.json") if p.is_file() and (rel or p.name in SETUP_FILES)]
+    except OSError:
+        extra = []
+    known = {Path(f).name for f in files}
+    return folders, [*files, *sorted((p for p in extra if p.name not in known), key=lambda p: p.name.lower())]
+
+
 @router.get("/projects/{project_name}/browse")
-async def browse_project(project_name: str, subpath: str = "") -> dict:
-    """Browse files inside a project folder."""
+async def browse_project(project_name: str, subpath: str = "", setup: bool = False) -> dict:
+    """Browse files inside a project folder. *setup* (Folder Manager "Setup files" box):
+    also list _flux_setup/ and the FLUX JSON files; hidden otherwise."""
     project_path = get_project_path(project_name)
     if not project_path.exists():
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
@@ -56,6 +77,7 @@ async def browse_project(project_name: str, subpath: str = "") -> dict:
     folder_names, all_files = await loop.run_in_executor(
         None, lambda: _list_dir_cached(project_path, subpath, target)
     )
+    folder_names, all_files = _filter_setup(project_path.resolve(), target, folder_names, all_files, setup)
     # One modif_logs.json parse per folder (was one per file), off the event loop.
     logs_cache: dict = {}
     files_info = await loop.run_in_executor(
