@@ -256,7 +256,7 @@ export function ShelfManager() {
               ) : (
                 <>
                   {/* One button per FLUX node (HDA): same list as resources/shelves/houdini/Flux.shelf. */}
-                  {['Import', 'Export', 'Anim', 'Shot', 'Crowd', 'Lighting'].map(l => (
+                  {['Import', 'Export', 'Anim', 'Shot', 'Crowd', 'Work', 'Lighting', 'Render', 'Sequence'].map(l => (
                     <ShelfBtn key={l} icon={<FluxLogo size={20} color={ANIM_COLOR} />} label={l} />
                   ))}
                 </>
