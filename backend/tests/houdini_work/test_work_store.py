@@ -47,6 +47,9 @@ class WorkDir(unittest.TestCase):
                          self.project / "lighting/SEQ010/work/houdini/LIGHT")
         self.assertEqual(ws.work_dir(self.project, "SEQ010", "", "FX"),
                          self.project / "shot/SEQ010/fx/work/houdini/FX")
+        # Token ending with {shot} (render/{seq}/{shot}): the sequence folder itself.
+        self.assertEqual(ws.work_dir(self.project, "SEQ010", "", "RENDER"),
+                         self.project / "render/SEQ010/work/houdini/RENDER")
 
     def test_unknown_task_and_bad_names_are_refused(self) -> None:
         with self.assertRaises(ws.WorkError):

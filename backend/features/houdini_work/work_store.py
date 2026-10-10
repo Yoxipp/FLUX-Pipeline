@@ -96,7 +96,6 @@ def work_dir(project_path: str | Path, seq: str, shot: str, task: str) -> Path:
     a sequence task uses the sequence folder + the department name."""
     from features.folder_manager.seq_shot_creator import shot_task_template
     from features.folder_manager.tokens import load_tokens
-    from features.usd_assembler.shot_stage import seq_dir
 
     project = Path(project_path)
     seq = _check_name("Sequence", seq)
@@ -108,10 +107,10 @@ def work_dir(project_path: str | Path, seq: str, shot: str, task: str) -> Path:
         raise WorkError(f"Tache inconnue (pas de token TYPE_SHOT) : {task}")
     template = template.replace("\\", "/")
     if not shot:
-        if "{shot}" in template:
-            dept = seq_dir(project, seq) / template.rstrip("/").split("/")[-1]
-        else:
-            dept = project / template.format(seq=seq, shot="")
+        # The template without its shot level: render/{seq}/{shot} -> render/SEQ,
+        # shot/{seq}/{shot}/fx -> shot/SEQ/fx, lighting/{seq} -> lighting/SEQ.
+        parts = [p for p in template.format(seq=seq, shot="").split("/") if p]
+        dept = project.joinpath(*parts)
     else:
         dept = project / template.format(seq=seq, shot=shot)
         if "{shot}" not in template:

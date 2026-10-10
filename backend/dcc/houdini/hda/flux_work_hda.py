@@ -202,6 +202,12 @@ def menu_task(node):
     category = node.type().category().name()        # Sop: CFX / FX, Lop: LIGHT / RENDER
     return _flat(_cached("tasks:%s:%s" % (project, category), _fetch)) or ["", "aucune tache"]
 
+def _mine(node, versions):
+    """Committed versions this Work can load: same network type (a SOP work never
+    loads in a LOP subnet). Old manifests without category are kept."""
+    cat = node.type().category().name()
+    return [v for v in versions if v.get("state") == "ok" and v.get("category", cat) in ("", cat)]
+
 def _task_status(ref, based_on=""):
     return _get(_API + "/status", based_on=based_on, host=_host(), **ref)
 
@@ -211,7 +217,7 @@ def menu_version(node):
     if not (ref["project"] and ref["seq"] and ref["task"]):
         return out
     st = _task_status(ref)
-    for v in reversed([v for v in st.get("versions", []) if v.get("state") == "ok"]):
+    for v in reversed(_mine(node, st.get("versions", []))):
         if v["version"] == "w000":
             text = "w000  template"
         else:
@@ -331,7 +337,8 @@ def _build_template(ref, subnet):
         res = load_work(subnet, tpl["cpio"])
         if not res["ok"]:
             clear_work(subnet)
-            return "Template refuse, types absents : %s (reconstruis les HDA)" % ", ".join(res["missing_types"])
+            return res.get("error") or \
+                "Template refuse, types absents : %s (reconstruis les HDA)" % ", ".join(res["missing_types"])
     else:
         _default_content(subnet, ref["task"])
     setup = tpl.get("setup") or {}
@@ -496,7 +503,10 @@ def load(node):
     st = _task_status(ref)
     if "versions" not in st:
         _status(node, "FLUX injoignable : %s" % st.get("error", "")); return False
-    ok_versions = [v for v in st["versions"] if v.get("state") == "ok"]
+    ok_versions = _mine(node, st["versions"])
+    # w000 already taken (by a Work of the other network type): the template is saved
+    # as the next version, comment "template".
+    w000_taken = any(v["version"] == "w000" for v in st["versions"])
     want = _pval(node, "version") or "latest"
     if not ok_versions:
         target = None
@@ -521,7 +531,7 @@ def load(node):
         err = _build_template(ref, sub)
         if not err:
             set_context(sub, ref["seq"], ref["shot"], ref["task"])
-            res, err = _save_version(ref, sub, "", "template", template=True,
+            res, err = _save_version(ref, sub, "", "template", template=not w000_taken,
                                      render_blocks=_render_blocks(sub) if _is_render(ref) else None)
         if err:
             if is_new:
@@ -541,7 +551,8 @@ def load(node):
                 _set(node, "work_path", old_sub.path() if old_sub is not None and old_sub.path() != sub.path() else "")
             if not read_only and ref != old_ref:
                 _post(_API + "/unlock", dict(ref, author="", host=_host()))
-            _status(node, "Refus : types de nodes absents dans cette session : %s" % ", ".join(res["missing_types"]))
+            _status(node, res.get("error") or
+                    "Refus : types de nodes absents dans cette session : %s" % ", ".join(res["missing_types"]))
             return False
         set_context(sub, ref["seq"], ref["shot"], ref["task"])
         version, baseline = target["version"], res["baseline_hash"]
