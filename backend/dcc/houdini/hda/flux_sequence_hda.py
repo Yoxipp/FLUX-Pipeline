@@ -329,16 +329,75 @@ def grow_to(stage, count, project="", seq="", ranges=None):
     extra = [n for n in shot_numbers(stage) if n > count]
     return added, extra
 
+def _block_shot(stage, n):
+    fr = _find(stage, "FLUX_RENDER_SHOT", n)
+    p = fr.parm("shot") if fr is not None else None
+    return p.evalAsString().strip().upper() if p is not None else ""
+
+def _block_range(stage, n):
+    fr = _find(stage, "FLUX_RENDER_SHOT", n)
+    try:
+        rng = (int(fr.evalParm("frame_rangex")), int(fr.evalParm("frame_rangey")))
+    except Exception:
+        return None
+    return rng if rng[1] >= rng[0] else None
+
+def name_new_blocks(stage, added, default_start=1001, default_length=50):
+    """Blocks added by hand (Nombre de shots): a clone still points at the shot it was
+    copied from, so a Save of the render Work saw nothing new. Each one gets the next
+    shot name of the FLUX convention (next ten, 4 digits: SHOT0040, as Production's New
+    shot) and a range right after the previous block, same length, as plain values:
+    the Save then offers to create the shot in Production (render_sync)."""
+    used, nums = set(), []
+    for n in shot_numbers(stage):
+        if n in added:
+            continue
+        name = _block_shot(stage, n)
+        m = re.match(r"SHOT_?(\\d+)$", name)
+        if name:
+            used.add(name)
+        if m:
+            nums.append(int(m.group(1)))
+    last = max(nums) if nums else 0
+    named = []
+    for n in sorted(added):
+        k = (last // 10 + 1) * 10
+        while "SHOT%04d" % k in used:
+            k += 10
+        name = "SHOT%04d" % k
+        last = k
+        used.add(name)
+        for prefix in ("IMPORT_ENV_SHOT", "IMPORT_CHAR_SHOT", "FLUX_RENDER_SHOT"):
+            block = _find(stage, prefix, n)
+            if block is not None and block.parm("shot") is not None:
+                block.parm("shot").set(name)
+        before = [b for b in shot_numbers(stage) if b < n]
+        prev = _block_range(stage, before[-1]) if before else None
+        if prev:
+            rng = (prev[1] + 1, prev[1] + prev[1] - prev[0] + 1)
+        else:
+            rng = (default_start, default_start + default_length - 1)
+        fr = _find(stage, "FLUX_RENDER_SHOT", n)
+        for comp, value in zip(("x", "y"), rng):
+            p = fr.parm("frame_range" + comp) if fr is not None else None
+            if p is not None:
+                p.deleteAllKeyframes()
+                p.set(int(value))
+        named.append(name)
+    return named
+
 def apply_shot_count(node):
     stage = node.parent()
     count = int(node.evalParm("shot_count"))
     try:
         added, extra = grow_to(stage, count, node.evalParm("project"), node.evalParm("seq"))
+        named = name_new_blocks(stage, added) if added else []
     except Exception as exc:
         _status(node, "Impossible : %s" % exc); return
     msg = "%d shot(s)" % count
     if added:
-        msg += ", ajoutes : " + ", ".join("SHOT%03d" % n for n in added)
+        msg += ", ajoutes : " + ", ".join("SHOT%03d = %s" % (n, s) for n, s in zip(added, named))
+        msg += " (Sauver le Work RENDER pour les creer dans FLUX)"
     if extra:
         msg += "  |  en trop (gardes, a supprimer a la main) : " + ", ".join("SHOT%03d" % n for n in extra)
     _status(node, msg)
