@@ -15,7 +15,7 @@ FLUX Work (travail Houdini versionne par tache, E2 du 2026-10-10). `work_store.p
 Les manifestes vivent avec les `.cpio` dans le dossier de travail (comme les fichiers publies), pas dans le
 MetadataRepository : ils decrivent des octets ecrits par Houdini (ADR 0005).
 
-`render_sync.py` (addendum ADR 0051) : Work RENDER <-> Timeline Production, comparaison a trois scene / `render_blocks`
+`render_sync.py` (addendum ADR 0051, suivi en direct via `dcc/houdini/shot_sync.py` -> `follow_timeline_from_flux`) : Work RENDER <-> Timeline Production, comparaison a trois scene / `render_blocks`
 de la version chargee / Production (`plan` : push, pull, conflicts, create, missing ; `apply` : plages + shots crees,
 verrous respectes). Templates : `template_cpio` (projet `template/houdini_work/<TASK>.cpio` > FLUX), `TASK_CATEGORY`.
 

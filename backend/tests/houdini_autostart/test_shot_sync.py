@@ -127,6 +127,16 @@ class Notifier(unittest.TestCase):
         compile(code, "<refresh>", "exec")
         self.assertIn("[['SEQ010', 'SH020']]", code)
         self.assertIn("refresh_from_flux", code)
+        # A render Work loaded on the sequence follows too (new shots -> blocks).
+        self.assertIn("follow_timeline_from_flux", code)
+        self.assertIn('nodeTypes().get("flux_work")', code)
+
+    def test_work_and_sequence_modules_define_the_hooks(self) -> None:
+        from dcc.houdini.hda import flux_sequence_hda, flux_work_hda
+        self.assertIn("def follow_timeline_from_flux(node, project, changed):", flux_work_hda.MODULE_FUNCTIONS)
+        self.assertIn("def name_new_blocks(stage, added", flux_sequence_hda.MODULE_FUNCTIONS)
+        compile(flux_sequence_hda.MODULE_FUNCTIONS, "<flux_sequence>", "exec")
+        compile(flux_work_hda.MODULE_FUNCTIONS, "<flux_work>", "exec")
 
     def test_every_connected_houdini_is_asked_and_errors_do_not_stop(self) -> None:
         calls = []

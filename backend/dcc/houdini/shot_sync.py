@@ -45,6 +45,20 @@ for _node in (_type.instances() if _type is not None else ()):
         _res = "error: %s" % _exc
     if _res is not None:
         result.append([_node.path(), _res])
+# A render Work (FLUX Work LOP) loaded on one of these sequences follows the Timeline:
+# new shots get their block, ranges are pulled (features/houdini_work/render_sync.py).
+_wtype = hou.lopNodeTypeCategory().nodeTypes().get("flux_work")
+for _node in (_wtype.instances() if _wtype is not None else ()):
+    try:
+        _mod = _node.hdaModule()
+        if not hasattr(_mod, "follow_timeline_from_flux") and hasattr(_mod, "_load"):
+            _mod._load()
+        _fn = getattr(_mod, "follow_timeline_from_flux", None)
+        _res = _fn(_node, _project, _changed) if _fn is not None else "old_module"
+    except Exception as _exc:
+        _res = "error: %s" % _exc
+    if _res is not None:
+        result.append([_node.path(), _res])
 """
 
 

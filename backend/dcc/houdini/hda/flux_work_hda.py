@@ -440,6 +440,25 @@ def _follow_timeline(node, ref, stage, version):
         parts.append("shot(s) ajoute(s) : " + ", ".join(added))
     return ("Timeline FLUX : " + " ; ".join(parts) + " (a sauver)") if parts else ""
 
+def follow_timeline_from_flux(node, project, changed):
+    """FLUX saved the Production (dcc/houdini/shot_sync.py): a render Work loaded on one
+    of the changed sequences takes the Timeline now, as an opening would (ranges pulled,
+    blocks added for new shots, the Work then has to be saved). None = not concerned."""
+    ref = _ref(node, loaded=True)
+    if not _is_render(ref) or ref["project"] != project:
+        return None
+    if not any(str(seq) == ref["seq"] for seq, _shot in changed):
+        return None
+    if _ro(node):
+        return "read_only"
+    sub = _work_node(node)
+    if sub is None:
+        return None
+    msg = _follow_timeline(node, ref, sub, _pval(node, "loaded_version"))
+    if msg:
+        _status(node, msg)
+    return msg or "unchanged"
+
 def _push_timeline(ref, stage, loaded):
     """Save: the blocks changed in Houdini go to Production (asked when both sides
     changed, confirmed for new shots). Returns (blocks to store, error, report)."""

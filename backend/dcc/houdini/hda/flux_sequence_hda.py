@@ -346,14 +346,14 @@ def name_new_blocks(stage, added, default_start=1001, default_length=50):
     """Blocks added by hand (Nombre de shots): a clone still points at the shot it was
     copied from, so a Save of the render Work saw nothing new. Each one gets the next
     shot name of the FLUX convention (next ten, 4 digits: SHOT0040, as Production's New
-    shot) and a range right after the previous block, same length, as plain values:
+    shot) and the previous block's range, as plain values:
     the Save then offers to create the shot in Production (render_sync)."""
     used, nums = set(), []
     for n in shot_numbers(stage):
         if n in added:
             continue
         name = _block_shot(stage, n)
-        m = re.match(r"SHOT_?(\\d+)$", name)
+        m = re.search(r"(\\d+)$", name)
         if name:
             used.add(name)
         if m:
@@ -369,14 +369,19 @@ def name_new_blocks(stage, added, default_start=1001, default_length=50):
         used.add(name)
         for prefix in ("IMPORT_ENV_SHOT", "IMPORT_CHAR_SHOT", "FLUX_RENDER_SHOT"):
             block = _find(stage, prefix, n)
-            if block is not None and block.parm("shot") is not None:
-                block.parm("shot").set(name)
+            p = block.parm("shot") if block is not None else None
+            if p is None:
+                continue
+            try:
+                p.expression()                # FLUX Render following its import: keep it
+                continue
+            except hou.OperationFailed:
+                pass
+            p.set(name)
+        # Every FLUX shot has its own range (1001-...): same as the previous block.
         before = [b for b in shot_numbers(stage) if b < n]
         prev = _block_range(stage, before[-1]) if before else None
-        if prev:
-            rng = (prev[1] + 1, prev[1] + prev[1] - prev[0] + 1)
-        else:
-            rng = (default_start, default_start + default_length - 1)
+        rng = prev or (default_start, default_start + default_length - 1)
         fr = _find(stage, "FLUX_RENDER_SHOT", n)
         for comp, value in zip(("x", "y"), rng):
             p = fr.parm("frame_range" + comp) if fr is not None else None
