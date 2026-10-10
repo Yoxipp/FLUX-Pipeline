@@ -21,7 +21,8 @@ import {
   type MontageClip, type PreviewMedia, type PreviewSource,
 } from './previewEdit'
 
-const PLAYABLE = ['mp4', 'webm', 'ogv', 'ogg', 'm4v', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg']
+// mov: H.264 playblasts play in Chromium; a codec it cannot decode (ProRes) ends in onError.
+const PLAYABLE = ['mp4', 'mov', 'webm', 'ogv', 'ogg', 'm4v', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg']
 const playable = (file: string) => PLAYABLE.includes(file.split('.').pop()?.toLowerCase() ?? '')
 
 export function TimelinePreview({ project, state, selection, previews, loading, source, setSource, fps, framesOf, montage, setMontage, onPlayingShot, setShotSource }: {
@@ -176,16 +177,18 @@ function ShotPreview({ project, label, media, loading, empty }: {
   project: string; label: string; loading: boolean; empty: string
   media: Array<PreviewMedia & { group: string; label: string }>
 }) {
+  const [failed, setFailed] = useState<Set<string>>(new Set())
   if (media.length === 0) return <div className="timeline-preview-empty">{loading ? 'Chargement…' : empty}</div>
   return (
     <div className="timeline-preview-grid" data-count={media.length}>
       {media.map(m => (
         <figure key={m.task} className="timeline-preview-card">
           <div className="timeline-preview-media">
-            {!playable(m.file)
-              ? <div className="timeline-preview-gap"><Film size={16} /> Format non lisible dans FLUX</div>
+            {!playable(m.file) || failed.has(m.rel_path + m.file)
+              ? <div className="timeline-preview-gap"><Film size={16} /> Format non lisible dans FLUX (Keyframe)</div>
               : m.kind === 'video'
-                ? <video key={m.rel_path + m.version} src={api.refFileUrl(project, m.rel_path, m.file, m.source)} controls muted playsInline preload="metadata" />
+                ? <video key={m.rel_path + m.version} src={api.refFileUrl(project, m.rel_path, m.file, m.source)} controls muted playsInline preload="metadata"
+                    onError={() => setFailed(f => new Set(f).add(m.rel_path + m.file))} />
                 : <img src={api.refFileUrl(project, m.rel_path, m.file, m.source)} alt={`${label} ${m.label}`} />}
           </div>
           <figcaption>
@@ -214,9 +217,18 @@ function MontagePlayer({ project, clips, loading, onPlayingShot, shotPicker }: {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(true)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const holdRef = useRef<number | undefined>(undefined)
+  // Videos the browser could not decode: shown as unreadable, held like a gap.
+  const [failed, setFailed] = useState<Set<string>>(new Set())
   const clip = clips[Math.min(index, clips.length - 1)]
-  const isVideo = !!clip?.media && clip.media.kind === 'video' && playable(clip.media.file)
+  const isVideo = !!clip?.media && clip.media.kind === 'video' && playable(clip.media.file) && !failed.has(clip.shotId)
   const next = () => { if (index + 1 < clips.length) setIndex(index + 1); else setPlaying(false) }
+  useEffect(() => () => window.clearTimeout(holdRef.current), [index])
+  // A video shorter than its shot holds its last frame up to the shot duration (as the export).
+  const onVideoEnded = (v: HTMLVideoElement) => {
+    const rest = clip.seconds - v.currentTime
+    if (rest > 0.05) holdRef.current = window.setTimeout(next, rest * 1000); else next()
+  }
 
   useEffect(() => { onPlayingShot(clip?.shotId ?? null) }, [clip?.shotId])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onPlayingShot(null), [])                            // eslint-disable-line react-hooks/exhaustive-deps
@@ -242,11 +254,11 @@ function MontagePlayer({ project, clips, loading, onPlayingShot, shotPicker }: {
           <video ref={videoRef} key={clip.shotId} src={api.refFileUrl(project, clip.media!.rel_path, clip.media!.file, clip.media!.source)}
             autoPlay={playing} muted playsInline
             onTimeUpdate={e => { if (e.currentTarget.currentTime >= clip.seconds) next() }}
-            onEnded={next} onError={next} />
+            onEnded={e => onVideoEnded(e.currentTarget)} onError={() => setFailed(f => new Set(f).add(clip.shotId))} />
         ) : clip.media && playable(clip.media.file) ? (
           <img key={clip.shotId} src={api.refFileUrl(project, clip.media.rel_path, clip.media.file, clip.media.source)} alt={clip.shot} />
         ) : (
-          <div className="timeline-preview-gap">{clip.media ? 'Format non lisible dans FLUX' : 'Rien de publié'}</div>
+          <div className="timeline-preview-gap">{clip.media ? 'Format non lisible dans FLUX (Keyframe ou Exporter)' : 'Rien de publié'}</div>
         )}
       </div>
       <div className="timeline-montage-bar">
