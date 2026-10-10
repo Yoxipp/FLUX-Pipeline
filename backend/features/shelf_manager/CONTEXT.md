@@ -3,13 +3,13 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/backend__features__shelf_manager.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-`shelf_core.py` : installation shelves Maya/Houdini, HDA FLUX construits en live depuis le code (`_build_hdas_live`, table `_HDA_BUILDS`, definition neuve rendue preferee). Aucun `.hda` livre (2026-09-25) : la copie de secours est le dernier build (`%APPDATA%/FLUX/dcc/houdini`).
+`shelf_core.py` : installation shelves Maya/Houdini, Unreal (projet FluxRender + plugin FluxBridge, comme ZBrush = UI + bridge), HDA FLUX construits en live depuis le code (`_build_hdas_live`, table `_HDA_BUILDS`, definition neuve rendue preferee). Aucun `.hda` livre (2026-09-25) : la copie de secours est le dernier build (`%APPDATA%/FLUX/dcc/houdini`).
 
 Boutons pipeline toujours presents sur la shelf Flux Maya (`shelf_FluxPipeline.mel`) : MAJ, CAM (Camera Rig), LIGHT (Light Rig) (ADR 0023).
 
 Shelf Houdini (2026-09-24) : `install_shelf("Houdini")` copie `Flux.shelf` puis appelle `install_hdas` (build live si Houdini connecte, sinon copie stagee), non bloquant, message combine. `remove_shelf` garde les HDA (l'Autostart s'en sert, son uninstall les retire). Tests : `tests/shelf_manager`.
 
-`resources/shelves/houdini/Flux.shelf` (2026-09-24) : un bouton par node FLUX (Import, Export, Anim, Shot, Crowd, Work, Lighting, Render, Sequence ; 2026-10-10), icone = IconSVG du HDA. Le bouton cree le node dans le reseau courant s'il est du bon contexte, sinon dans `/stage` (LOP) ou un `geo` de `/obj` (SOP). L'ancien outil "Import KineFX" est retire.
+`resources/shelves/houdini/Flux.shelf` (2026-09-24) : un bouton par node FLUX (Import, Export, Anim, Shot, Crowd, Work, Lighting, Render, Sequence, Unreal Live ; 2026-10-10), icone = IconSVG du HDA. Le bouton cree le node dans le reseau courant s'il est du bon contexte, sinon dans `/stage` (LOP) ou un `geo` de `/obj` (SOP). L'ancien outil "Import KineFX" est retire.
 
 `purge_hda_backups` (2026-09-24) : supprime les `backup/flux_*_bak*.hda` que Houdini ecrit a chaque reecriture d'un HDA FLUX (otls + staging), apres un build live et au debut de `install_hdas`. Les backups d'autres HDA ne sont pas touches.
 

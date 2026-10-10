@@ -32,5 +32,9 @@ class UnrealClient:
         """Re-read the stage layers changed on disk (after a Houdini save / publish)."""
         return _send({"action": "reload"}, timeout=600.0, port=port)
 
+    def live(self, path: str, port: int | None = None) -> dict:
+        """Houdini live push: open *path* the first time, then reload what changed."""
+        return _send({"action": "live", "path": path}, timeout=600.0, port=port)
+
 
 unreal_client = UnrealClient()

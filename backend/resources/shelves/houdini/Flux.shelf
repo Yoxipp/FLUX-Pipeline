@@ -327,6 +327,41 @@ if pane is not None and pane.pwd() != parent:
 ]]></script>
   </tool>
 
+  <tool name="flux_tool_unreal_live" label="Unreal Live" icon="opdef:/Lop/flux_unreal_live?IconSVG">
+    <helpText><![CDATA[Show this /stage live in Unreal: put after the displayed LOP, Auto (every change) or Manuel (Push) (ADR 0052).]]></helpText>
+    <script scriptType="python"><![CDATA[
+import hou
+
+TYPE_NAME = "flux_unreal_live"
+if hou.nodeType(hou.lopNodeTypeCategory(), TYPE_NAME) is None:
+    hou.ui.displayMessage(
+        "HDA FLUX absent : " + TYPE_NAME + ". Installe la shelf Houdini depuis FLUX (Shelf Manager).",
+        severity=hou.severityType.Error)
+    raise hou.InterruptedError()
+pane = hou.ui.paneTabOfType(hou.paneTabType.NetworkEditor)
+here = pane.pwd() if pane else None
+# A LOP network: where the network editor is, else /stage.
+if here is None or here.childTypeCategory() != hou.lopNodeTypeCategory():
+    here = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
+# Live follows what is displayed: plugged under the display node, which it becomes.
+shown = next((n for n in here.children() if n.isDisplayFlagSet()), None)
+existing = shown if shown is not None and shown.type().name().split("::")[0] == TYPE_NAME else None
+if existing is not None:
+    node = existing
+else:
+    node = here.createNode(TYPE_NAME)
+    if shown is not None:
+        node.setFirstInput(shown)
+        node.setPosition(shown.position() + hou.Vector2(0, -1.5))
+    else:
+        node.moveToGoodPosition()
+    node.setDisplayFlag(True)
+node.setSelected(True, clear_all_selected=True)
+if pane is not None and pane.pwd() != here:
+    pane.setPwd(here)
+]]></script>
+  </tool>
+
   <toolshelf name="flux" label="FLUX">
     <memberTool name="flux_tool_import"/>
     <memberTool name="flux_tool_export"/>
@@ -337,5 +372,6 @@ if pane is not None and pane.pwd() != parent:
     <memberTool name="flux_tool_lighting"/>
     <memberTool name="flux_tool_render"/>
     <memberTool name="flux_tool_sequence"/>
+    <memberTool name="flux_tool_unreal_live"/>
   </toolshelf>
 </shelfDocument>

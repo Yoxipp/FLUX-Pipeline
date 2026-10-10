@@ -2438,6 +2438,25 @@ async def unreal_open_stage(req: UnrealOpenStageRequest) -> dict:
     return result
 
 
+class UnrealLiveRequest(BaseModel):
+    path: str                       # live layer written by the FLUX Unreal Live LOP
+
+
+@router.post("/unreal/live")
+async def unreal_live(req: UnrealLiveRequest) -> dict:
+    """Houdini live push: Unreal opens the live layer the first time, then reloads what changed."""
+    from pathlib import Path as _PLib
+    from dcc.unreal.client import unreal_client
+    if not _PLib(req.path).is_file():
+        raise HTTPException(status_code=404, detail=f"Layer live introuvable : {req.path}")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: unreal_client.live(req.path))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Unreal n'a pas pris le live", _unreal_autostart, "Unreal"))
+    return result
+
+
 @router.post("/unreal/reload")
 async def unreal_reload() -> dict:
     """Re-read in Unreal only the stage layers changed on disk."""
@@ -2821,6 +2840,13 @@ async def houdini_shot_switch_module() -> dict:
 async def houdini_flux_render_module() -> dict:
     """PythonModule of the FLUX Render HDA (render buttons at the end of a shot branch)."""
     from dcc.houdini.hda.flux_render_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/flux_unreal_live/module")
+async def houdini_flux_unreal_live_module() -> dict:
+    """PythonModule of the FLUX Unreal Live HDA (Houdini /stage shown live in Unreal, ADR 0052)."""
+    from dcc.houdini.hda.flux_unreal_live_hda import MODULE_FUNCTIONS
     return {"code": MODULE_FUNCTIONS}
 
 

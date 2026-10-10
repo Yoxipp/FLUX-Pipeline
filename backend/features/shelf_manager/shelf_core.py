@@ -106,6 +106,19 @@ def get_dcc_shelf_dir(dcc_name: str, version: str) -> Path | None:
     return None
 
 
+def _unreal_exes() -> dict[str, str]:
+    """{"5.6": UnrealEditor.exe} of every Unreal found by the launcher (newest kept per version)."""
+    from dcc.unreal.autostart import engine_association
+    from features.launcher.launcher_core import list_dcc_candidates
+
+    out: dict[str, str] = {}
+    for exe in list_dcc_candidates("unreal"):
+        version = engine_association(exe)
+        if version and version not in out:
+            out[version] = exe
+    return out
+
+
 def get_installed_versions(dcc_name: str) -> list[str]:
     """Return sorted list of DCC user-directory versions found on disk.
 
@@ -115,6 +128,8 @@ def get_installed_versions(dcc_name: str) -> list[str]:
     if dcc_name == "ZBrush":
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.get_versions()
+    if dcc_name == "Unreal":
+        return sorted(_unreal_exes(), key=lambda v: tuple(int(n) for n in v.split(".")))
 
     docs = _get_documents_dir()
     versions: list[str] = []
@@ -143,6 +158,9 @@ def is_shelf_installed(dcc_name: str, version: str) -> bool:
     if dcc_name == "ZBrush":
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.is_installed(version)
+    if dcc_name == "Unreal":
+        from dcc.unreal import autostart as unreal_autostart
+        return unreal_autostart.is_installed() and unreal_autostart.project_engine() == version
     shelf_dir = get_dcc_shelf_dir(dcc_name, version)
     filename = _SHELF_FILENAME.get(dcc_name)
     if shelf_dir is None or filename is None:
@@ -163,6 +181,14 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
         # ZBrush "shelf" = the FLUX UI (flux_ui_zbrush.cfg) + the bridge (FLUX menu).
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.install(version)
+    if dcc_name == "Unreal":
+        # Unreal "shelf" = host project FluxRender + FluxBridge plugin (FLUX menu, live).
+        from dcc.unreal import autostart as unreal_autostart
+        exe = _unreal_exes().get(version)
+        if exe is None:
+            return False, f"Unreal {version} introuvable."
+        res = unreal_autostart.install(exe)
+        return bool(res["success"]), str(res["message"])
 
     src = get_shelf_source_path(dcc_name)
     if src is None:
@@ -394,6 +420,10 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     if dcc_name == "ZBrush":
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.remove(version)
+    if dcc_name == "Unreal":
+        from dcc.unreal import autostart as unreal_autostart
+        res = unreal_autostart.uninstall()
+        return bool(res["success"]), str(res["message"])
     dest_dir = get_dcc_shelf_dir(dcc_name, version)
     filename = _SHELF_FILENAME.get(dcc_name)
     if dest_dir is None or filename is None:
@@ -550,6 +580,7 @@ _HDA_BUILDS: tuple[tuple[str, str, str, str], ...] = (
     ("flux_crowd_hda:build_hda",        "flux_crowd.hda",        "hou.lopNodeTypeCategory()", "flux_crowd"),
     ("flux_work_hda:build_hda",         "flux_work.hda",         "hou.sopNodeTypeCategory()", "flux_work"),
     ("flux_work_hda:build_hda_lop",     "flux_work_lop.hda",     "hou.lopNodeTypeCategory()", "flux_work"),
+    ("flux_unreal_live_hda:build_hda",  "flux_unreal_live.hda",  "hou.lopNodeTypeCategory()", "flux_unreal_live"),
 )
 
 # Runs inside Houdini after the build: makes the definition FLUX just wrote the one

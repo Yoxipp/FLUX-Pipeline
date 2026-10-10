@@ -158,12 +158,92 @@ def _cmd_reload(_req: dict) -> dict:
     return {"status": "ok", "mode": "targeted", "changed": changed, "seconds": seconds}
 
 
+def _same_path(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.normpath(a or "")) == os.path.normcase(os.path.normpath(b or ""))
+
+
+# Houdini live (FLUX Unreal Live LOP): paused from the FLUX menu of Unreal.
+_live = {"paused": False, "purpose": "proxy"}
+
+
+def _cmd_live(req: dict) -> dict:
+    """A Houdini live push: first push opens the live layer, the next ones reload what changed."""
+    if _live["paused"]:
+        return {"status": "ok", "paused": True}
+    path = str(req.get("path") or "").replace("\\", "/")
+    actor = _find_stage_actor()
+    if actor is None or not _same_path(_root_layer(actor), path):
+        answer = _cmd_open_stage({"path": path, "purpose": _live["purpose"]})
+        answer["mode"] = "open"
+        return answer
+    return _cmd_reload(req)
+
+
+def _cmd_live_pause(req: dict) -> dict:
+    _live["paused"] = bool(req.get("paused", not _live["paused"]))
+    return {"status": "ok", "paused": _live["paused"]}
+
+
 _COMMANDS = {
     "ping": _cmd_ping,
     "info": _cmd_info,
     "open_stage": _cmd_open_stage,
     "reload": _cmd_reload,
+    "live": _cmd_live,
+    "live_pause": _cmd_live_pause,
 }
+
+
+# ── FLUX menu in the Unreal main menu bar (the Unreal "shelf") ───────────────
+
+def menu_reload() -> None:
+    _log(f"menu reload: {_cmd_reload({})}")
+
+
+def menu_toggle_live() -> None:
+    state = _cmd_live_pause({})
+    unreal.log(f"[FLUX] Live Houdini {'en pause' if state['paused'] else 'actif'}")
+
+
+def menu_quality(purpose: str) -> None:
+    """Reload the open stage with proxy (interactive) or render geometry."""
+    _live["purpose"] = purpose
+    actor = _find_stage_actor()
+    if actor is not None and _root_layer(actor):
+        _log(f"menu quality: {_cmd_open_stage({'path': _root_layer(actor), 'purpose': purpose})}")
+
+
+def menu_open_log() -> None:
+    if os.path.isfile(LOG_PATH):
+        os.startfile(LOG_PATH)  # noqa: S606 - local log file written by this bridge
+
+
+_MENU_ENTRIES = (
+    ("flux_reload", "Recharger le stage", "Relire les layers changes sur le disque", "menu_reload()"),
+    ("flux_live", "Live Houdini : actif / pause", "Suivre ou ignorer les envois du node FLUX Unreal Live",
+     "menu_toggle_live()"),
+    ("flux_proxy", "Qualite : proxy", "Geometrie proxy (interactif)", "menu_quality('proxy')"),
+    ("flux_render", "Qualite : rendu", "Geometrie complete (avant un rendu)", "menu_quality('render')"),
+    ("flux_log", "Ouvrir le log FLUX", "Log du bridge FLUX", "menu_open_log()"),
+)
+
+
+def _install_menu() -> None:
+    """FLUX entry in the main menu bar. Best effort: the bridge works without it."""
+    try:
+        menus = unreal.ToolMenus.get()
+        main = menus.find_menu("LevelEditor.MainMenu")
+        flux = main.add_sub_menu(main.get_name(), "FLUX", "FLUX", "FLUX", "FLUX pipeline")
+        for name, label, tip, call in _MENU_ENTRIES:
+            entry = unreal.ToolMenuEntry(name=name, type=unreal.MultiBlockType.MENU_ENTRY)
+            entry.set_label(label)
+            entry.set_tool_tip(tip)
+            entry.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "",
+                                     f"import flux_unreal_bridge as _f; _f.{call}")
+            flux.add_menu_entry("FLUX", entry)
+        menus.refresh_all_widgets()
+    except Exception as exc:  # noqa: BLE001 - menu API differs between versions
+        _log(f"FLUX menu not added: {exc}")
 
 
 def handle(request: dict) -> dict:
@@ -265,3 +345,4 @@ def start() -> None:
         return
     _server = _Server()
     _server.start()
+    _install_menu()

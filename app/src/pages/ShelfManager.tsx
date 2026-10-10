@@ -207,6 +207,7 @@ export function ShelfManager() {
   const hdaOk   = version ? (currentData.hdas_installed[version] ?? false) : false
   const isHoudini = dcc === 'Houdini'
   const isZBrush = dcc === 'ZBrush'
+  const isUnreal = dcc === 'Unreal'
   const hasPreview = isHoudini || isZBrush || dcc === 'Maya'
 
   return (
@@ -215,14 +216,14 @@ export function ShelfManager() {
       {/* One toolbar: software, target version, state, actions (ADR 0044). */}
       <div className="page-toolbar">
         <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false}
-          isVisible={dccEnabled} />
+          isVisible={dccEnabled} extra={['Unreal']} />
         {!isPainter && (versions.length === 0
           ? <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr(`Aucune version ${dcc} détectée`, `No ${dcc} version found`)}</span>
           : <ExpandPicker mono title={tr('Version cible', 'Target version')} placeholder={tr('Version', 'Version')} value={version}
               options={versions.map(v => ({ value: v, label: v }))} onChange={setVersion} />)}
         {version && !isPainter && (
           <>
-            <ConnectionPill state={shelfOk ? 'ok' : 'off'} label={isZBrush ? (shelfOk ? tr('UI FLUX installée', 'FLUX UI installed') : tr('UI FLUX absente', 'FLUX UI missing')) : shelfOk ? tr('Shelf installé', 'Shelf installed') : tr('Shelf absent', 'Shelf missing')} />
+            <ConnectionPill state={shelfOk ? 'ok' : 'off'} label={isUnreal ? (shelfOk ? tr('Plugin FLUX installé', 'FLUX plugin installed') : tr('Plugin FLUX absent', 'FLUX plugin missing')) : isZBrush ? (shelfOk ? tr('UI FLUX installée', 'FLUX UI installed') : tr('UI FLUX absente', 'FLUX UI missing')) : shelfOk ? tr('Shelf installé', 'Shelf installed') : tr('Shelf absent', 'Shelf missing')} />
             {isHoudini && <ConnectionPill state={hdaOk ? 'ok' : 'off'} label={hdaOk ? tr('HDAs installés', 'HDAs installed') : tr('HDAs absents', 'HDAs missing')} />}
           </>
         )}
@@ -230,15 +231,16 @@ export function ShelfManager() {
         {!isPainter && (
           <>
             <Btn ghost disabled={busy} title={tr('Mettre à jour', 'Refresh')} onClick={handleRefresh}><RefreshCw size={12} strokeWidth={2} /></Btn>
-            <Btn ghost disabled={!version || busy} title={isHoudini ? tr("Retirer la shelf (l'Autostart garde les HDAs)", 'Remove the shelf (Autostart keeps the HDAs)') : isZBrush ? tr('Remettre ton interface ZBrush', 'Restore your ZBrush interface') : tr('Retirer le shelf', 'Remove the shelf')} onClick={handleRemove}>
+            <Btn ghost disabled={!version || busy} title={isHoudini ? tr("Retirer la shelf (l'Autostart garde les HDAs)", 'Remove the shelf (Autostart keeps the HDAs)') : isUnreal ? tr('Retirer le plugin FLUX (le projet FluxRender et ses caches restent)', 'Remove the FLUX plugin (the FluxRender project and its caches stay)') : isZBrush ? tr('Remettre ton interface ZBrush', 'Restore your ZBrush interface') : tr('Retirer le shelf', 'Remove the shelf')} onClick={handleRemove}>
               <Trash2 size={12} strokeWidth={2} />
             </Btn>
             <Btn primary disabled={!version || busy} style={{ gap: 6 }} onClick={handleInstall}
               title={isHoudini ? tr('Copie la shelf et les HDAs (reconstruits si Houdini est ouvert)', 'Copies the shelf and HDAs (rebuilt if Houdini is open)')
+                : isUnreal ? tr("Prépare le projet Unreal FluxRender (USD, Python, Movie Render Queue) avec le plugin FLUX : menu FLUX dans Unreal, live depuis Houdini. Rien à régler dans Unreal.", 'Sets up the FluxRender Unreal project (USD, Python, Movie Render Queue) with the FLUX plugin: FLUX menu in Unreal, live from Houdini. Nothing to set up in Unreal.')
                 : isZBrush ? tr("Remplace l'interface de ZBrush par l'UI FLUX (la tienne est gardée) et installe le bridge : menu FLUX avec Export FLUX et Save +1. Relance ZBrush.", 'Replaces the ZBrush interface with the FLUX UI (yours is kept) and installs the bridge: FLUX menu with Export FLUX and Save +1. Restart ZBrush.')
                 : undefined}>
               <Zap size={12} strokeWidth={2} />
-              {isHoudini ? tr('Installer shelf + HDAs', 'Install shelf + HDAs') : isZBrush ? tr('Installer UI FLUX', 'Install FLUX UI') : tr('Installer', 'Install')}
+              {isHoudini ? tr('Installer shelf + HDAs', 'Install shelf + HDAs') : isUnreal ? tr('Installer le plugin FLUX', 'Install FLUX plugin') : isZBrush ? tr('Installer UI FLUX', 'Install FLUX UI') : tr('Installer', 'Install')}
             </Btn>
           </>
         )}

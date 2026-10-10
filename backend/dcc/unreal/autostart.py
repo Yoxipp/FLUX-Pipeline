@@ -93,6 +93,14 @@ def _uplugin_data() -> dict:
     }
 
 
+def project_engine() -> str:
+    """EngineAssociation of the host project ("" when absent or unreadable)."""
+    try:
+        return str(json.loads(project_file().read_text(encoding="utf-8")).get("EngineAssociation") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
 def _write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent="\t") + "\n", encoding="utf-8")
