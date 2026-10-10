@@ -694,7 +694,12 @@ def install_hdas(version: str) -> tuple[bool, str]:
         connected = False
 
     if connected:
-        ok, msg = _build_hdas_live(otls_dirs)
+        # Houdini open in this version: it says which prefs it reads, the HDAs go there
+        # only; copies elsewhere are duplicates the Shelf Manager offers to delete
+        # (stale_cleanup). Closed / other version: every candidate dir, as before.
+        from features.shelf_manager.stale_cleanup import active_houdini_otls
+        active = active_houdini_otls(version)
+        ok, msg = _build_hdas_live([active] if active is not None else otls_dirs)
         if ok:
             return ok, msg
         # A failed live build is reported as a failure: the staged copy of the HDA

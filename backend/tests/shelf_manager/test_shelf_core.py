@@ -123,6 +123,10 @@ class LiveHdaBuild(unittest.TestCase):
         self.addCleanup(staging.stop)
         prefer = mock.patch.object(shelf_core, "_prefer_built_definitions", return_value=[])
         self.prefer = prefer.start()
+        # Never ask a real open Houdini which prefs it reads.
+        active = mock.patch("features.shelf_manager.stale_cleanup.active_houdini_otls", return_value=None)
+        active.start()
+        self.addCleanup(active.stop)
         self.addCleanup(prefer.stop)
 
     def _fake_import(self, failing: str = ""):
@@ -180,3 +184,21 @@ class LiveHdaBuild(unittest.TestCase):
             ok, msg = shelf_core._build_hdas_live([self.otls])
         self.assertIn("C:/old/otls/flux_lighting.hda", msg)
         self.assertIn("Sop/flux_importer : definition FLUX non chargee", msg)
+
+
+class InstallIntoTheReadPrefs(unittest.TestCase):
+    """2026-10-10: Houdini open -> the HDAs go only where it reads them; the copies
+    elsewhere become duplicates the Shelf Manager offers to delete."""
+
+    def test_open_houdini_gets_one_install_closed_gets_every_dir(self) -> None:
+        dirs = [Path("C:/home/houdini22.0/otls"), Path("C:/docs/houdini22.0/otls")]
+        with mock.patch.object(shelf_core, "get_dcc_otls_dirs", return_value=dirs), \
+             mock.patch.object(shelf_core, "purge_hda_backups"), \
+             mock.patch("dcc.houdini.client.houdini_client.is_connected", return_value=True), \
+             mock.patch.object(shelf_core, "_build_hdas_live", return_value=(True, "ok")) as build:
+            with mock.patch("features.shelf_manager.stale_cleanup.active_houdini_otls", return_value=dirs[1]):
+                shelf_core.install_hdas("22.0")
+            build.assert_called_with([dirs[1]])
+            with mock.patch("features.shelf_manager.stale_cleanup.active_houdini_otls", return_value=None):
+                shelf_core.install_hdas("22.0")
+            build.assert_called_with(dirs)

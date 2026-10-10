@@ -818,6 +818,13 @@ export const api = {
   installShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('POST', '/shelf/install', { dcc, version }),
 
+  // Old FLUX files of a DCC after a reinstall (only FLUX's own, with why), then remove the ticked ones.
+  getStaleShelfFiles: (dcc: string, version: string) =>
+    apiCall<{ items: { path: string; reason: string }[] }>('GET', `/shelf/stale?dcc=${encodeURIComponent(dcc)}&version=${encodeURIComponent(version)}`),
+
+  removeStaleShelfFiles: (dcc: string, version: string, paths: string[]) =>
+    apiCall<{ removed: string[]; skipped: string[]; failed: string[] }>('POST', '/shelf/stale/remove', { dcc, version, paths }),
+
   removeShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', '/shelf', { dcc, version }),
 

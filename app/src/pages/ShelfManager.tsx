@@ -10,6 +10,7 @@ import { useProject } from '../ProjectContext'
 import { useEnabledDccs } from '../hooks/useEnabledDccs'
 import { SOFTWARE } from '../lib/dccs'
 import { useTr } from '../i18n'
+import { StaleFilesDialog, type StaleItem } from './shelf_manager/StaleFilesDialog'
 
 // Shelf tool tints — ANIM (orange) / RIG (blue), matching the Maya shelf icons.
 const ANIM_COLOR = 'oklch(70% 0.15 52)'
@@ -72,6 +73,8 @@ export function ShelfManager() {
   const [toolVersion, setToolVersion] = useState('')
   const [toolsInstalled, setToolsInstalled] = useState<Record<string, boolean>>({})
   const [checked, setChecked] = useState<Record<string, boolean>>({})
+  // Old FLUX files found after an install (shelf/stale): shown in a checklist.
+  const [stale, setStale] = useState<{ dcc: string; version: string; items: StaleItem[] } | null>(null)
 
   // Painter: the export presets of the current project (project.json texturing.painter_presets).
   const { project } = useProject()
@@ -128,11 +131,22 @@ export function ShelfManager() {
     try {
       const res = await api.installShelf(dcc, version)
       addLog('ok', (res as { message: string }).message)
+      await offerStaleCleanup(dcc, version)
     } catch (err) {
       addLog('err', tr(`Échec de l'installation : ${err}`, `Install failed: ${err}`))
     } finally {
       await fetchStatus()
       setBusy(false)
+    }
+  }
+
+  // After an install: the old FLUX files of that DCC that are no longer the real ones.
+  async function offerStaleCleanup(forDcc: string, forVersion: string) {
+    try {
+      const { items } = await api.getStaleShelfFiles(forDcc, forVersion)
+      if (items.length) setStale({ dcc: forDcc, version: forVersion, items })
+    } catch (err) {
+      addLog('err', tr(`Recherche des anciens fichiers FLUX impossible : ${err}`, `Could not look for old FLUX files: ${err}`))
     }
   }
 
@@ -180,6 +194,7 @@ export function ShelfManager() {
     try {
       const res = await api.applyTools(toolVersion, ids)
       addLog('ok', res.message)
+      await offerStaleCleanup('Maya', toolVersion)
       await fetchTools()
     } catch (e: any) {
       addLog('err', String(e?.message ?? e))
@@ -373,6 +388,10 @@ export function ShelfManager() {
         </div>
 
       </div>
+      {stale && (
+        <StaleFilesDialog dcc={stale.dcc} version={stale.version} items={stale.items}
+          onDone={summary => { setStale(null); if (summary) addLog('ok', summary) }} />
+      )}
     </div>
   )
 }
