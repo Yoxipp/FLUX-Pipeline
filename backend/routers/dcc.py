@@ -489,7 +489,42 @@ async def ping_dcc(dcc_key: str) -> dict:
         if result.get("busy"):
             answer["busy"] = True          # e.g. Mari exporting: reachable, just not answering
         _ping_cache[dcc_key] = (time.monotonic(), answer)
+        if dcc_key == "houdini":
+            _on_houdini_ping(answer["connected"])
     return answer
+
+
+# FLUX HDA check per Houdini connection: "checked" once per connection, "running"
+# while it works (a busy Houdini can miss pings: that must not start a second build),
+# "failed" after a failed build (no automatic retry loop; the Shelf Manager still can).
+_houdini_hdas = {"checked": False, "running": False, "failed": False}
+
+
+def _ensure_houdini_hdas() -> None:
+    from features.shelf_manager.shelf_core import ensure_hdas_in_session
+    try:
+        res = ensure_hdas_in_session()
+        log.info("Houdini connected, FLUX HDAs: %s", res.get("message"))
+        if res.get("missing") and not res.get("built"):
+            _houdini_hdas["failed"] = True
+    except Exception as exc:  # noqa: BLE001 - never breaks the poll
+        log.warning("Houdini HDA check failed: %s", exc)
+    finally:
+        _houdini_hdas["running"] = False
+
+
+def _on_houdini_ping(connected: bool) -> None:
+    """On each new Houdini connection, build the FLUX HDAs it lacks (in background).
+    Installing with Houdini closed only copies the shelf: this is what gets the HDAs
+    into every machine's Houdini, in the prefs dir that Houdini actually reads."""
+    if not connected:
+        if not _houdini_hdas["running"]:
+            _houdini_hdas["checked"] = False
+        return
+    if _houdini_hdas["checked"] or _houdini_hdas["failed"]:
+        return
+    _houdini_hdas["checked"] = _houdini_hdas["running"] = True
+    asyncio.get_running_loop().run_in_executor(None, _ensure_houdini_hdas)
 
 
 @router.post("/bridges/install-all")

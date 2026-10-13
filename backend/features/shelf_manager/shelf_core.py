@@ -527,15 +527,16 @@ def get_dcc_otls_dirs(version: str) -> list[Path]:
 
 
 def is_hda_installed(version: str) -> bool:
-    """Return True if all FLUX HDAs are present in at least one houdiniX.Y/otls/."""
+    """Return True if every FLUX HDA (_HDA_BUILDS) is in at least one houdiniX.Y/otls/.
+
+    Checked against the full build list, not the staging dir: the staging only holds
+    what an earlier live build produced (two HDAs on old installs, none on a new
+    machine), so "installed" used to be reported with most HDAs missing."""
     otls_dirs = get_dcc_otls_dirs(version)
     if not otls_dirs:
         return False
-    staged = list(_HDA_STAGING_DIR.glob("*.hda"))
-    if not staged:
-        return False
     return any(
-        all((otls / hda.name).is_file() for hda in staged)
+        all((otls / name).is_file() for name in _hda_filenames())
         for otls in otls_dirs
     )
 
@@ -738,8 +739,13 @@ def install_hdas(version: str) -> tuple[bool, str]:
         log.warning("Live HDA build failed: %s", msg)
         return False, msg + " | les HDA en echec gardent leur ancienne version"
 
-    # Offline path — copy the staged HDAs.
-    hdas = list(_HDA_STAGING_DIR.glob("*.hda"))
+    # Offline path: copy the staged HDAs. The staging only holds what an earlier live
+    # build produced, so whatever is missing is built live the next time this Houdini
+    # connects to FLUX (ensure_hdas_in_session, called from the Houdini ping).
+    hdas = [p for p in _HDA_STAGING_DIR.glob("*.hda") if p.name in _hda_filenames()]
+    missing = sorted(_hda_filenames() - {p.name for p in hdas})
+    later = (f" | {len(missing)} HDA construits a la prochaine ouverture de Houdini"
+             if missing else "")
     if hdas:
         installed_to: list[str] = []
         try:
@@ -749,14 +755,53 @@ def install_hdas(version: str) -> tuple[bool, str]:
                     shutil.copy2(hda, otls / hda.name)
                     log.info("HDA installed: %s → %s", hda.name, otls)
                 installed_to.append(str(otls))
-            return True, f"HDAs installed → {', '.join(installed_to)}"
+            return True, f"HDAs installed → {', '.join(installed_to)}{later}"
         except OSError as exc:
             return False, f"HDA copy failed: {exc}"
 
-    return False, (
-        "No staged HDAs found and Houdini is not connected. Open Houdini (so the "
-        "HDA can be built live) or run scripts/build_hdas.py, then retry."
-    )
+    return True, "Houdini ferme : les HDA FLUX seront construits a la prochaine ouverture de Houdini"
+
+
+def _hda_filenames() -> set[str]:
+    return {filename for _, filename, _, _ in _HDA_BUILDS}
+
+
+# Runs inside Houdini: which FLUX node types this session lacks, and where it reads prefs.
+_MISSING_TYPES_CODE = '''
+_missing = []
+for _cat_expr, _name, _file in _FLUX_TYPES:
+    if hou.nodeType(eval(_cat_expr), _name) is None:
+        _missing.append(_file)
+result = {"home": hou.homeHoudiniDirectory(),
+          "version": "%d.%d" % hou.applicationVersion()[:2],
+          "missing": _missing}
+'''
+
+
+def ensure_hdas_in_session() -> dict:
+    """Build the FLUX HDAs in the connected Houdini when some node types are missing.
+
+    The Shelf Manager install copies the shelf even with Houdini closed, but the HDAs
+    are generated from source by a live build only: with Houdini closed, a new machine
+    got none and older ones only the two staged long ago (shelf visible, no HDA). The
+    Houdini ping calls this once per connection; it builds into the prefs dir that
+    Houdini reports reading, and does nothing when every FLUX type is already there.
+    Returns {"built": bool, "missing": [...], "message": str}.
+    """
+    from dcc.houdini.client import houdini_client
+
+    # Keyed by file (two LOP builds share the flux_exporter / flux_work names).
+    types = [(cat, name, filename) for _, filename, cat, name in _HDA_BUILDS]
+    resp = houdini_client.run(f"_FLUX_TYPES = {types!r}\n" + _MISSING_TYPES_CODE, timeout=30.0)
+    info = resp.get("result") if resp.get("ok") else None
+    if not isinstance(info, dict):
+        return {"built": False, "missing": [], "message": f"check failed: {resp.get('error')}"}
+    missing = sorted(set(info.get("missing") or []))
+    if not missing:
+        return {"built": False, "missing": [], "message": "all FLUX HDAs loaded"}
+    log.info("Houdini %s lacks FLUX HDAs %s: live build", info.get("version"), missing)
+    ok, msg = _build_hdas_live([Path(info["home"]) / "otls"])
+    return {"built": ok, "missing": missing, "message": msg}
 
 
 def reconcile_installed_dccs() -> dict:
