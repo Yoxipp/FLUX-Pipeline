@@ -16,6 +16,10 @@ Rules (ADR 0051):
 * Loading over unsaved changes asks Sauver / Abandonner / Annuler.
 * Lock held by another artist: read-only until "Reprendre". A newer version than the
   loaded one: warned before saving. No merge, ever.
+
+Scene variables: the project / seq / shot / asset menus set ``$PROD`` ``$SEQ`` ``$SHOT``
+``$ASSET`` (hscript ``set -g``, saved in the .hip) on change and when the scene opens.
+The Asset menu (characters) only feeds ``$ASSET``; Load / Save ignore it.
 """
 
 from __future__ import annotations
@@ -49,8 +53,16 @@ try:
     _load()
 except Exception:
     def _dead_menu(*a, **kw): return ["", "FLUX offline"]
-    for _n in ("menu_project", "menu_seq", "menu_shot", "menu_task", "menu_version"):
+    for _n in ("menu_project", "menu_seq", "menu_shot", "menu_task", "menu_version", "menu_asset"):
         globals()[_n] = _dead_menu
+    def set_scene_vars(node):
+        # Offline too: the scene variables only need the menus.
+        import hou
+        for _v, _p in (("PROD", "project"), ("SEQ", "seq"), ("SHOT", "shot"), ("ASSET", "asset")):
+            _val = "".join(c for c in (node.parm(_p).evalAsString() if node.parm(_p) else "") if c not in "\\"';")
+            hou.hscript('set -g %s = "%s"' % (_v, _val))
+        hou.hscript("varchange")
+    def on_parm_changed(node): set_scene_vars(node)
     def _offline(node, name):
         try:
             _load()
@@ -63,7 +75,7 @@ except Exception:
     def release(node): _offline(node, "release")
     def refresh(node): _offline(node, "refresh")
     def on_created(node): pass
-    def on_loaded(node): pass
+    def on_loaded(node): set_scene_vars(node)
 '''
 
 # Controller, runs inside Houdini after the flux_work_io functions (same globals).
@@ -71,6 +83,8 @@ MODULE_FUNCTIONS: str = '''
 import json, os, socket, time, urllib.error, urllib.parse, urllib.request
 
 _API = "/dcc/houdini/work"
+# Scene variable -> menu it comes from (Copy Path Relative of the Folder Manager uses them).
+SCENE_VARS = (("PROD", "project"), ("SEQ", "seq"), ("SHOT", "shot"), ("ASSET", "asset"))
 
 def _flux_port():
     try:
@@ -675,11 +689,34 @@ def refresh(node):
     parts.append("modifie" if is_dirty(node) else "a jour")
     _status(node, "  ".join(parts))
 
+def menu_asset(node):
+    project = _pval(node, "project")
+    if not project:
+        return ["", "choisis un projet"]
+    def _fetch():
+        r = _get(_API + "/assets", project=project)
+        return r.get("assets", []), "assets" in r
+    return ["", "(aucun)"] + _flat(_cached("assets:" + project, _fetch))
+
+# ── scene variables ──
+
+def set_scene_vars(node):
+    """$PROD / $SEQ / $SHOT / $ASSET of the scene (hscript set -g, saved in the .hip)
+    from the menus. Several Works in a scene: the last one changed or loaded wins."""
+    import hou
+    for var, parm in SCENE_VARS:
+        value = "".join(c for c in _pval(node, parm) if c not in "\\"';")
+        hou.hscript('set -g %s = "%s"' % (var, value))
+    hou.hscript("varchange")
+
+def on_parm_changed(node):
+    set_scene_vars(node)
+
 def on_created(node):
     pass
 
 def on_loaded(node):
-    pass
+    set_scene_vars(node)
 '''
 
 
@@ -744,11 +781,14 @@ _NAME = {NODE_NAME!r}
 _PY = hou.scriptLanguage.Python
 _PM_CODE = {BOOTSTRAP!r}
 
-def _menu(name, label, default, fn, help_txt):
+def _menu(name, label, default, fn, help_txt, scene_var=False):
     t = hou.StringParmTemplate(name, label, 1, default_value=(default,), help=help_txt,
                                menu_type=hou.menuType.Normal)
     t.setItemGeneratorScript("hou.phm()." + fn + "(kwargs['node'])")
     t.setItemGeneratorScriptLanguage(_PY)
+    if scene_var:  # sets $PROD / $SEQ / $SHOT / $ASSET of the scene
+        t.setScriptCallback("hou.phm().on_parm_changed(kwargs['node'])")
+        t.setScriptCallbackLanguage(_PY)
     return t
 
 def _button(name, label, fn, help_txt, join=False):
@@ -758,9 +798,10 @@ def _button(name, label, fn, help_txt, join=False):
     return t
 
 _ptg = hou.ParmTemplateGroup()
-_ptg.append(_menu("project", "Projet", "", "menu_project", "FLUX project"))
-_ptg.append(_menu("seq", "Sequence", "", "menu_seq", "Sequence of the task"))
-_ptg.append(_menu("shot", "Shot", "", "menu_shot", "Shot of the task (empty = sequence task)"))
+_ptg.append(_menu("project", "Projet", "", "menu_project", "FLUX project ($PROD)", True))
+_ptg.append(_menu("seq", "Sequence", "", "menu_seq", "Sequence of the task ($SEQ)", True))
+_ptg.append(_menu("shot", "Shot", "", "menu_shot", "Shot of the task, empty = sequence task ($SHOT)", True))
+_ptg.append(_menu("asset", "Asset", "", "menu_asset", "Character of the work, only sets $ASSET", True))
 _ptg.append(_menu("task", "Tache", "", "menu_task", "Department (CFX, FX, LIGHT, RENDER)"))
 _ptg.append(_menu("version", "Version", "latest", "menu_version",
                   "Version to load: latest, an older wNNN or the template w000"))

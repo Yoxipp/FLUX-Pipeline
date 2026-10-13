@@ -172,6 +172,16 @@ async def work_shots(project: str) -> dict:
     return {"sequences": [{"seq": seq, "shots": sorted(shots)} for seq, shots in sorted(out.items())]}
 
 
+@router.get("/assets")
+async def work_assets(project: str) -> dict:
+    """Characters of the project, for the Asset menu of the FLUX Work ($ASSET)."""
+    from features.folder_manager.asset_creator import list_assets
+
+    path = _project_path(project)
+    assets = await asyncio.get_running_loop().run_in_executor(None, lambda: list_assets(path, "CHAR"))
+    return {"assets": assets}
+
+
 @router.get("/status")
 async def work_status(project: str, seq: str, task: str, shot: str = "", based_on: str = "",
                       author: str = "", host: str = "") -> dict:
