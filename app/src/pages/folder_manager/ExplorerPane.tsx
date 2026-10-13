@@ -413,13 +413,18 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     copyText(parts.join(sep), trNow('Chemin copié', 'Path copied'))
   }, [nav, fm.workspace])
 
-  // Copy the path as $FLUX/DOSSIER_PROJETS/... — pasteable directly in any
-  // Houdini string parm (the flux.json / autostart sets $FLUX to the pipe root).
-  const handleCopyHoudiniPath = useCallback((item: ExplorerItem) => {
-    const parts = nav.kind === 'root'
-      ? ['$FLUX', 'DOSSIER_PROJETS', item.name]
-      : ['$FLUX', 'DOSSIER_PROJETS', nav.project, ...nav.subpath, item.name]
-    copyText(parts.join('/'), trNow('Chemin Houdini copié', 'Houdini path copied'))
+  // Copy the path fully relative: $FLUX/DOSSIER_PROJETS/$PROD/.../$SEQ/$SHOT, on the
+  // scene variables the FLUX Work HDA sets in Houdini (resolved by the backend tokens).
+  const handleCopyRelativePath = useCallback(async (item: ExplorerItem) => {
+    const project = nav.kind === 'root' ? item.name : nav.project
+    const rel = nav.kind === 'root' ? '' : [...nav.subpath, item.name].join('/')
+    try {
+      const { path } = await api.getRelativePath(project, rel)
+      copyText(path, trNow('Chemin relatif copié', 'Relative path copied'))
+    } catch (e) {
+      toast.error(trNow(`Chemin relatif indisponible : ${e instanceof Error ? e.message : e}`,
+                        `Relative path unavailable: ${e instanceof Error ? e.message : e}`))
+    }
   }, [nav])
 
   // ── Clipboard (copy / cut / paste) ──────────────────────────────────────────
@@ -837,7 +842,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
           onMove={() => setMoveTarget(ctxMenu.items)}
           onDelete={() => setDeleteConfirm(ctxMenu.items)}
           onCopyPath={ctxMenu.items.length === 1 ? () => handleCopyPath(ctxMenu.items[0]) : undefined}
-          onCopyHoudiniPath={ctxMenu.items.length === 1 ? () => handleCopyHoudiniPath(ctxMenu.items[0]) : undefined}
+          onCopyRelativePath={ctxMenu.items.length === 1 ? () => void handleCopyRelativePath(ctxMenu.items[0]) : undefined}
           openInTargets={nav.kind === 'inside'
             ? buildOpenInTargets({ project: nav.project, subpath: nav.subpath, items: ctxMenu.items,
                                    dccStatus: fm.dccStatus, loadTargets, onChanged: fm.bumpFs })

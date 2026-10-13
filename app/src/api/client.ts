@@ -653,6 +653,9 @@ export const api = {
   },
 
   // Folder Manager
+  // Copy Path Relative: $FLUX/DOSSIER_PROJETS/$PROD/.../$SEQ/$SHOT (FLUX Work scene variables).
+  getRelativePath: (project: string, rel_path: string) =>
+    apiCall<{ path: string }>('GET', `/folder/projects/${encodeURIComponent(project)}/relative-path?rel_path=${encodeURIComponent(rel_path)}`),
   getTokens: (project: string) =>
     apiCall<{ tokens: Record<string, Record<string, string>> }>('GET', `/folder/projects/${encodeURIComponent(project)}/tokens`),
 

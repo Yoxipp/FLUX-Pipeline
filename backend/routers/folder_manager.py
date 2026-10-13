@@ -45,6 +45,19 @@ class ProjectCreate(BaseModel):
     painter_presets: list[str] | None = None    # Painter export presets of the project
 
 
+@router.get("/projects/{project_name}/relative-path")
+async def get_relative_path(project_name: str, rel_path: str = "") -> dict:
+    """Houdini path of a project item on the FLUX Work scene variables (Copy Path Relative)."""
+    from features.folder_manager.relative_path import relative_path
+
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    path = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: relative_path(project_path, project_name, rel_path))
+    return {"path": path}
+
+
 @router.get("/projects/{project_name}/tokens")
 async def get_project_tokens(project_name: str) -> dict:
     project_path = get_project_path(project_name)

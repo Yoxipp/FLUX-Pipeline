@@ -171,7 +171,7 @@ export function MoveModal({ items, project, currentSubpath, onConfirm, onCancel 
   )
 }
 
-export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, onCopyHoudiniPath, openInTargets, onClose }: {
+export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, canDelete, count, onFavorite, onArchive, onToggleLock, onRename, onMove, onDelete, onCopyPath, onCopyRelativePath, openInTargets, onClose }: {
   x: number; y: number
   isFavorited: boolean
   isArchived: boolean
@@ -186,7 +186,7 @@ export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, ca
   onMove:           () => void
   onDelete:         () => void
   onCopyPath?:      () => void
-  onCopyHoudiniPath?: () => void
+  onCopyRelativePath?: () => void
   // Every currently-connected, import-capable DCC for this item (built from live status).
   openInTargets?:   { dcc: string; onClick: () => void }[]
   onClose:          () => void
@@ -264,7 +264,7 @@ export function ContextMenu({ x, y, isFavorited, isArchived, locked, canEdit, ca
         <>
           <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
           {row(tr('Copier le chemin', 'Copy path'), false, () => { onCopyPath(); onClose() })}
-          {onCopyHoudiniPath && row(tr('Copier le chemin Houdini ($FLUX)', 'Copy Houdini path ($FLUX)'), false, () => { onCopyHoudiniPath(); onClose() })}
+          {onCopyRelativePath && row(tr('Copier le chemin relatif', 'Copy Path Relative'), false, () => { onCopyRelativePath(); onClose() })}
         </>
       )}
       {canEdit && (
