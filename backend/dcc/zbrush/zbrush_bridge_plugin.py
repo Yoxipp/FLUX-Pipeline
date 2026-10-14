@@ -81,10 +81,12 @@ def _log(msg: str) -> None:
     except Exception:
         pass
 
-# Reset log at every module load so we see a fresh trace
+# Keep the previous loads in the log (a double load or an earlier session holding the
+# port must stay visible), only reset it once it grows past 256 KB.
 try:
-    with open(_LOG_FILE, "w", encoding="utf-8") as _f:
-        _f.write("")
+    if os.path.getsize(_LOG_FILE) > 256 * 1024:
+        with open(_LOG_FILE, "w", encoding="utf-8") as _f:
+            _f.write("")
 except Exception:
     pass
 
@@ -242,8 +244,11 @@ _server_sock: "socket.socket | None" = None
 FREEZE_TIMEOUT = int(os.environ.get("FLUX_ZBRUSH_TIMEOUT", "180"))  # 3 min default
 
 
-def _init_server_socket() -> bool:
-    """Bind and listen on the main thread. Reuse existing socket if alive."""
+def _init_server_socket(attempts: int = 1, delay: float = 0.5) -> bool:
+    """Bind and listen on the main thread. Reuse existing socket if alive.
+
+    Retries *attempts* times: at ZBrush startup the port can still be held for a
+    moment by a previous ZBrush that is closing (WSAEADDRINUSE 10048)."""
     global _server_sock
     existing: "socket.socket | None" = getattr(sys, "_flux_zbrush_sock", None)
     if existing is not None:
@@ -254,18 +259,35 @@ def _init_server_socket() -> bool:
             return True
         except OSError:
             _log("Existing socket dead — recreating")
-    try:
+    for attempt in range(1, attempts + 1):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((HOST, PORT))
-        sock.listen(32)
-        sock.setblocking(False)  # required for select.select(timeout=0)
-        sys._flux_zbrush_sock = sock
-        _server_sock = sock
-        _log(f"Socket bound and listening on {HOST}:{PORT}")
-        return True
-    except OSError as exc:
-        _log(f"Bind failed: {exc!r}")
-        return False
+        try:
+            sock.bind((HOST, PORT))
+            sock.listen(32)
+            sock.setblocking(False)  # required for select.select(timeout=0)
+            sys._flux_zbrush_sock = sock
+            _server_sock = sock
+            _log(f"Socket bound and listening on {HOST}:{PORT}")
+            return True
+        except OSError as exc:
+            sock.close()
+            _log(f"Bind failed (attempt {attempt}/{attempts}): {exc!r}")
+            if attempt < attempts:
+                time.sleep(delay)
+    return False
+
+
+def _start_bg_responder() -> None:
+    """Start the idle ping responder once (survives plugin reload via the sys guard)."""
+    try:
+        if not getattr(sys, "_flux_zbrush_bg_started", False):
+            threading.Thread(
+                target=_bg_accept_loop, daemon=True, name="flux-zbrush-ping"
+            ).start()
+            sys._flux_zbrush_bg_started = True
+            _log("Background ping responder thread started")
+    except Exception as _te:
+        _log(f"BG ping thread start failed (non-critical): {_te!r}")
 
 
 # ── Connection handler ────────────────────────────────────────────────────────
@@ -517,9 +539,14 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
             zbc.show_note("Publication en cours, FLUX est en train de publier.")
         return
     if _server_sock is None:
-        if _ZBRUSH_AVAILABLE:
-            zbc.show_note("Erreur : bridge FLUX non initialisé.\nRedémarre ZBrush.")
-        return
+        # The port was busy at startup: try again now that the old holder may be gone.
+        if _init_server_socket(attempts=3):
+            _start_bg_responder()
+        else:
+            if _ZBRUSH_AVAILABLE:
+                zbc.show_note(f"Bridge FLUX indisponible : le port {PORT} est pris par un autre programme.\n"
+                              "Ferme les autres ZBrush puis reclique.")
+            return
     _autosave_ztl()     # option 2: a .ztl at each FLUX click, before the publish
     _in_freeze = True
     _focus_flux_window()
@@ -686,21 +713,15 @@ def _register_zbrush_ui() -> None:
 # Singleton guards prevent double-bind if the plugin is reloaded.
 
 try:
-    if _init_server_socket():
-        _register_zbrush_ui()
-        # Start the idle ping responder once (survives plugin reload via the guard).
-        try:
-            if not getattr(sys, "_flux_zbrush_bg_started", False):
-                threading.Thread(
-                    target=_bg_accept_loop, daemon=True, name="flux-zbrush-ping"
-                ).start()
-                sys._flux_zbrush_bg_started = True
-                _log("Background ping responder thread started")
-        except Exception as _te:
-            _log(f"BG ping thread start failed (non-critical): {_te!r}")
+    # The buttons are always registered: if the port is busy now, the first click
+    # retries the bind instead of leaving ZBrush without any FLUX menu.
+    _bound = _init_server_socket(attempts=4)
+    _register_zbrush_ui()
+    if _bound:
+        _start_bg_responder()
         _log("=== PLUGIN INIT COMPLETE ===")
     else:
-        _log("=== SOCKET INIT FAILED — plugin disabled ===")
+        _log("=== SOCKET INIT FAILED — buttons registered, bind retried on click ===")
 except Exception as _e:
     _log(f"!!! PLUGIN INIT FAILED: {_e!r}")
     _log(traceback.format_exc())
