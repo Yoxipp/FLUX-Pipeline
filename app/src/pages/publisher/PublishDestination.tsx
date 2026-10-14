@@ -50,8 +50,10 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
 }) {
   const { tr } = useTr()
   const [dest, setDest] = useState<Dest | null>(null)
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
+    setShowAll(false)
     if (!project || !ready || !ext) { setDest(null); return }
     let cancelled = false
     // Debounced: the composer fires on every keystroke.
@@ -116,8 +118,15 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
             <div style={{ height: 1, background: 'var(--rule)', margin: '4px 6px' }} />
           )}
           {dest.existing.map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} note={dest.existing_versions?.[n] ?? undefined} />)}
+          {showAll && (dest.others ?? []).map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} />)}
           {dest.more > 0 && (
-            <div style={{ padding: '3px 6px', fontSize: 9.5, color: 'var(--ink-4)' }}>+ {dest.more}</div>
+            <button
+              onClick={() => setShowAll(v => !v)}
+              style={{
+                display: 'block', border: 'none', background: 'transparent', cursor: 'pointer',
+                padding: '3px 6px', fontSize: 10, fontFamily: mono, color: 'var(--ink-3)',
+              }}
+            >{showAll ? tr('Réduire', 'Collapse') : `+ ${dest.more}`}</button>
           )}
         </>))}
       </div>

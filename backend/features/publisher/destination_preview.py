@@ -13,7 +13,7 @@ from features.publisher import publish_layout as pl
 from features.publisher.publish_core import resolve_publish_path
 
 # Existing files shown by name; the rest is only counted.
-MAX_SHOWN = 2
+MAX_SHOWN = 4
 
 
 def _last_label(dest: Path, base: str, ext: str) -> str | None:
@@ -65,6 +65,10 @@ def destination_preview(project_path: Path, base: str, ext: str, sequence: bool 
 
     written = {f"{base}_{label}{ext}", f"{base}_{label}", f"{base}_{ACTIVE_VERSION_LABEL}{ext}"}
     rest = [n for n in entries if n not in picked and n not in written]
+    # Fill the preview with the rest, newest versions first (names sort by vNNN).
+    rest.sort(key=str.lower, reverse=True)
+    while rest and len(picked) < MAX_SHOWN:
+        picked.append(rest.pop(0))
 
     try:
         rel = dest.relative_to(project_path).as_posix()
@@ -82,4 +86,5 @@ def destination_preview(project_path: Path, base: str, ext: str, sequence: bool 
         "existing_versions": {n: _last_label(dest, base, n[len(base) + len(ACTIVE_VERSION_LABEL) + 1:])
                               for n in picked if f"_{ACTIVE_VERSION_LABEL}." in n},
         "more": len(rest),
+        "others": rest,                      # unfolded by the "+ N" button
     }

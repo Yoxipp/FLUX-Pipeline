@@ -39,8 +39,10 @@ class DestinationPreviewTests(unittest.TestCase):
         self.assertEqual(info["version"], "v004")
         self.assertFalse(info["first"])
         self.assertTrue(info["last_exists"])
-        self.assertEqual(info["existing"], [f"{BASE}_v002.mb", f"{BASE}_LAST.usd"])
-        self.assertEqual(info["more"], 3)
+        self.assertEqual(info["existing"], [f"{BASE}_v002.mb", f"{BASE}_LAST.usd",
+                                            "notes.txt", f"{BASE}_v001.usd"])
+        self.assertEqual(info["more"], 1)
+        self.assertEqual(info["others"], [f"{BASE}_v001.mb"])
         # The other format's LAST shows its own lineage (pre-0017 copy: its top vNNN).
         self.assertEqual(info["existing_versions"][f"{BASE}_LAST.usd"], "v001")
 
