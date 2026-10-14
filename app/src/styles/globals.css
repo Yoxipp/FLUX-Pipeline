@@ -255,11 +255,11 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 /* ── nav (sidebar items) ── */
 .nav {
   display: flex; align-items: center; gap: 9px;
-  height: 28px; padding: 0 10px;
-  margin: 1px 8px 1px 0;
+  height: 24px; padding: 0 10px;
+  margin: 3px 14px 3px 6px;
   font-size: 11px; color: var(--ink-2);
   border-left: 2px solid transparent;
-  border-radius: 0 7px 7px 0;
+  border-radius: 7px;
   cursor: pointer;
   transition: background 0.1s, color 0.1s, transform 0.1s;
 }
@@ -293,12 +293,10 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
   border-left-color: transparent;
   background: var(--accent);
   font-weight: 700;
-  border-radius: 7px;
-  height: 24px; margin: 3px 14px 3px 6px;
 }
 /* Tree children keep their left edge so the branch lines still meet them. */
-.production-nav-children > .nav.active { margin-left: 0; }
-.production-nav-row > .nav.active { margin-right: 4px; }
+.production-nav-children > .nav { margin-left: 0; }
+.production-nav-row > .nav { margin-right: 4px; }
 .nav.active .glyph, .nav.active:hover .glyph { color: var(--on-accent); }
 
 /* ─── drag regions ── */
