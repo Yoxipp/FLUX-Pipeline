@@ -35,6 +35,20 @@ class PublishResult(BaseModel):
     proxy_path: str | None = None
 
 
+@router.get("/destination")
+def publish_destination(project: str, base: str, ext: str, sequence: bool = False) -> dict:
+    """Read-only preview of the folder a publish of *base* + *ext* lands in."""
+    from features.publisher.destination_preview import destination_preview
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {project}")
+    info = destination_preview(project_path, base, ext, sequence)
+    if info is None:
+        raise HTTPException(status_code=422, detail="Destination non résolue")
+    return info
+
+
 @router.post("", response_model=PublishResult)
 async def publish(req: PublishRequest) -> PublishResult:
     """Publish a file into the pipeline folder structure."""

@@ -8,7 +8,7 @@ import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
 import type { ProductionDependency, ProductionState, ProductionTask, ProductionThumbnail } from '../../types'
 import type { Selection } from './Production'
-import { blockers, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
+import { blockers, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, assigneeIncludes, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
 import type { TrackingEntity } from './tracking'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { EntityContextMenu } from './EntityContextMenu'
@@ -64,6 +64,13 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   const [previewSource, setPreviewSource] = usePreviewSource()
   const { t } = useI18n()
   const [taskSelection, setTaskSelection] = useState(emptyTaskSelection)
+  // Shift + press and drag across badges adds every crossed task to the selection.
+  const dragSelect = useRef<{ moved: boolean; start: string; base: string[] } | null>(null)
+  useEffect(() => {
+    const stop = () => { if (dragSelect.current) setTimeout(() => { dragSelect.current = null }, 0) }
+    window.addEventListener('mouseup', stop)
+    return () => window.removeEventListener('mouseup', stop)
+  }, [])
   // New 100% baseline is 90% of the original interface. Old saved zoom is retired.
   const [zoom, setZoom] = useState(1)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -116,6 +123,22 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
     }))),
   ))
   const visibleKeys = visibleTargets.map(taskSelectionKey)
+  // Grid position of every visible task (row = entity, column = department) for rectangle drag selection.
+  const entityRows = new Map<string, number>()
+  visibleTargets.forEach(target => { if (!entityRows.has(target.entity.id)) entityRows.set(target.entity.id, entityRows.size) })
+  const dragTo = (key: string) => {
+    const drag = dragSelect.current
+    if (!drag) return
+    drag.moved = true
+    const cell = (k: string) => { const t = visibleTargets.find(target => taskSelectionKey(target) === k); return t ? { r: entityRows.get(t.entity.id) ?? 0, c: t.columnOrder ?? 0 } : null }
+    const a = cell(drag.start), b = cell(key)
+    if (!a || !b) return
+    const inside = visibleTargets.filter(t => {
+      const r = entityRows.get(t.entity.id) ?? 0, c = t.columnOrder ?? 0
+      return r >= Math.min(a.r, b.r) && r <= Math.max(a.r, b.r) && c >= Math.min(a.c, b.c) && c <= Math.max(a.c, b.c)
+    }).map(taskSelectionKey)
+    setTaskSelection({ keys: [...new Set([...drag.base, ...inside])], anchor: key })
+  }
   const visibleSignature = JSON.stringify(visibleKeys)
   useEffect(() => { setTaskSelection(prev => pruneTaskSelection(prev, visibleKeys)) }, [visibleSignature])
   const selectedKeys = new Set(taskSelection.keys)
@@ -153,7 +176,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       <table className="tracking-table" style={{ zoom, minWidth: IDENTITY_WIDTH + (mode === 'shot' ? TIMING_WIDTH : 0) + CASTING_WIDTH + departments.length * DEPARTMENT_MIN_WIDTH }}>
         {/* Fixed layout: Shot / Timing / Casting keep their width, hidden departments widen the department columns. */}
         <colgroup><col style={{ width: IDENTITY_WIDTH }} />{mode === 'shot' && <col style={{ width: TIMING_WIDTH }} />}<col style={{ width: CASTING_WIDTH }} />{departments.map(d => <col key={d.id} />)}</colgroup>
-        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Casting' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} /></th>)}</tr></thead>
+        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Casting' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} setState={setState} state={state} /></th>)}</tr></thead>
         {groups.map(group => <tbody key={group.id} className="tracking-sequence-block">
           {mode === 'asset' && <>
             <tr className="tracking-sequence-gap" aria-hidden><td colSpan={columnCount} /></tr>
@@ -209,7 +232,9 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                 const editable = !trackingLocked(state, entity) || entity.tasks.some(own => own.name.toUpperCase() === task.name.toUpperCase())
                 const taskKey = taskSelectionKey({ entity, task })
                 const taskSelected = selectedKeys.has(taskKey)
-                return <div key={task.name} className="tracking-task-slot" data-task-selected={taskSelected || undefined}>
+                return <div key={task.name} className="tracking-task-slot" data-task-selected={taskSelected || undefined}
+                  onMouseDownCapture={event => { if (event.button === 0 && event.shiftKey) { event.preventDefault(); dragSelect.current = { moved: false, start: taskKey, base: taskSelection.keys } } }}
+                  onMouseEnter={() => dragTo(taskKey)}>
                   <div className="tracking-task-meta">{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}
                     {status && blocked.length > 0 && <Tooltip scale={0.9 * zoom}><TooltipTrigger asChild><button className="tracking-need" aria-label={`Dépendances requises : ${blocked.join(', ')}`}>NEED</button></TooltipTrigger><TooltipContent>{[...new Set(blocked)].map(label => <div key={label}>{label}</div>)}</TooltipContent></Tooltip>}
                   </div>
@@ -218,6 +243,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                   actionTargets={taskSelected ? selectedTargets : undefined}
                   selectionControl={{ label: `Sélection de ${entity.name} · ${task.name}`, selected: taskSelected, onClick: event => {
                     const additive = event.ctrlKey || event.metaKey
+                    if (dragSelect.current?.moved) return
                     if (additive || event.shiftKey) setTaskSelection(prev => selectProductionTask(prev, visibleTargets, taskKey, additive, event.shiftKey))
                     else setTaskSelection(emptyTaskSelection())
                   } }}
@@ -238,7 +264,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                   <TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={row.task} subtask={row.subtask}
                     statuses={dep.statuses} tooltipScale={0.9 * zoom}
                     onClick={editable ? () => { setState(prev => ensureTrackingTask(prev, entity.id, row.task)); onOpenDetail(selectEntity(entity), row.task, row.subtask) } : undefined} />
-                  <div className="tracking-task-artist">{entity.task_details?.[`${row.task.name.toUpperCase()}|${row.subtask.toUpperCase()}`]?.assignee?.trim().toUpperCase() === username.trim().toUpperCase() && username.trim() && <UserRound size={12} className="tracking-assigned-user" aria-label="Cette sous-tâche vous est assignée" />}</div>
+                  <div className="tracking-task-artist">{assigneeIncludes(entity.task_details?.[`${row.task.name.toUpperCase()}|${row.subtask.toUpperCase()}`]?.assignee, username) && <UserRound size={12} className="tracking-assigned-user" aria-label="Cette sous-tâche vous est assignée" />}</div>
                 </div></div>}</td>)}
             </tr>
           })}

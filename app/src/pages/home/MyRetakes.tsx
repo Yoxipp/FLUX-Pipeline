@@ -12,6 +12,7 @@ import type { UseProductionResult } from '../../hooks/useProduction'
 import { useCommentReadState } from '../../hooks/useCommentReadState'
 import { useI18n } from '../../i18n'
 import type { ProductionAsset, ProductionShot, ProductionState } from '../../types'
+import { assigneeIncludes } from '../Production/tracking'
 
 export interface MyRetake {
   id:      string                 // comment id
@@ -33,7 +34,7 @@ export function myRetakes(state: ProductionState, username: string): MyRetake[] 
   const entities: (ProductionShot | ProductionAsset)[] = [...state.shots, ...state.assets]
   for (const entity of entities) {
     const details = Object.entries(entity.task_details ?? {})
-    const mine = details.filter(([, d]) => d.assignee?.trim().toUpperCase() === who).map(([k]) => k.toUpperCase())
+    const mine = details.filter(([, d]) => assigneeIncludes(d.assignee, who)).map(([k]) => k.toUpperCase())
     if (!mine.length) continue
     const isShot = 'seq_id' in entity
     const seq = isShot ? state.sequences.find(s => s.id === entity.seq_id)?.name ?? '' : entity.class

@@ -56,7 +56,7 @@ def assignments(production: dict, user: str) -> set[tuple[str, str]]:
                  for e in production.get("assets", [])]
     for entity, ent_key in entities:
         mine = {k.split("|")[0].upper() for k, d in (entity.get("task_details") or {}).items()
-                if isinstance(d, dict) and str(d.get("assignee") or "").strip().upper() == who}
+                if isinstance(d, dict) and who in {a.strip().upper() for a in str(d.get("assignee") or "").split(",")}}
         if not mine:
             continue
         for task in entity.get("tasks") or []:

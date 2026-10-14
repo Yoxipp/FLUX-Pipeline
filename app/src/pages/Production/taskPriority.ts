@@ -7,7 +7,7 @@
 // Updated   : latest publish of the task or latest comment on it.
 
 import type { CalendarItem, ProductionAsset, ProductionPublish, ProductionShot, ProductionState, ProductionTask, ProductionTaskDetail } from '../../types'
-import { ensureTrackingTask, effectiveTasks, taskStatus, detailStatus } from './tracking'
+import { ensureTrackingTask, effectiveTasks, taskStatus, detailStatus, assigneeIncludes } from './tracking'
 import { calendarLinksShot } from './shotCalendar'
 import type { TaskEntity } from './taskActions'
 
@@ -66,7 +66,7 @@ export function myTasks(state: ProductionState, username: string, items: Calenda
     const seq = isShot ? state.sequences.find(s => s.id === entity.seq_id)?.name ?? '' : entity.class
     const deadline = entityDeadline(isShot ? seq : '', entity.name, items)
     for (const [key, detail] of Object.entries(entity.task_details ?? {})) {
-      if (detail.assignee?.trim().toUpperCase() !== who) continue
+      if (!assigneeIncludes(detail.assignee, who)) continue
       const [taskName, subtask = ''] = key.split('|')
       const task = effectiveTasks(state, entity).find(t => t.name.toUpperCase() === taskName.toUpperCase())
         ?? { id: '', name: taskName, order: 0, type_tokens: [], known_subtasks: [] }
@@ -115,7 +115,7 @@ export interface ConcernSortable { assignee?: string; status?: string; deadline:
  */
 export function concernRank(t: ConcernSortable, username: string): number {
   const who = username.trim().toUpperCase()
-  if (!who || (t.assignee ?? '').trim().toUpperCase() !== who) return 2
+  if (!who || !assigneeIncludes(t.assignee, who)) return 2
   return t.status === 'RTK' ? 0 : 1
 }
 

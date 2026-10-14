@@ -3,18 +3,17 @@ import { toast } from 'sonner'
 import { useLocation } from 'react-router-dom'
 import {
   Star, LayoutGrid, Clock, Archive,
-  HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw,
-  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2, ChevronDown, ChevronRight, Check,
+  HardDrive, X, Trash2, Copy, RotateCcw,
+  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2, ChevronDown, Check,
 } from 'lucide-react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { FolderIcon } from '../components/shared/ui'
+import { PublishNote } from '../components/shared/PublishNote'
 import { api } from '../api/client'
 import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
-import { PublishNote } from '../components/shared/PublishNote'
-import { FileLog } from '../components/shared/FileLog'
 import { useSessionState } from '../hooks/useSessionState'
 import { useTr } from '../i18n'
 import { FileSvg, FolderSvg, getExt } from './folder_manager/icons'
@@ -36,7 +35,6 @@ type SidebarTab = 'tous' | 'favoris' | 'recents' | 'archives'
 // (not part of a work profile, ADR 0043). Ctrl + wheel over the views changes the tile size.
 const TILE_SIZE_KEY = 'flux.folderManager.tileSize'
 const LAYOUT_KEY = 'flux.folderManager.layout'
-const CREATE_PANEL_KEY = 'flux.folderManager.createPanel'
 const SHOW_SETUP_KEY = 'flux.folderManager.showSetup'
 
 function useLocalPref<T extends string>(key: string, fallback: T, valid: readonly T[]): [T, (value: T) => void] {
@@ -75,16 +73,7 @@ type FinderMode = 'asset' | 'shot'
 interface TokenSel { category: string; name: string; task: string; instance: string; variante: string; seq: string; shot: string; mode: FinderMode }
 const EMPTY_TOKEN_SEL: TokenSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '', mode: 'asset' }
 
-type Tab = 'project' | 'asset' | 'shot' | 'directory'
-const TABS: { id: Tab; label: string; labelEn: string }[] = [
-  { id: 'project',   label: 'Projet',  labelEn: 'Project' },
-  { id: 'asset',     label: 'Asset',   labelEn: 'Asset' },
-  { id: 'shot',      label: 'Shot',    labelEn: 'Shot' },
-  { id: 'directory', label: 'Dossier', labelEn: 'Folder' },
-]
 
-const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'FXRIG']
-const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custom']
 
 // Finder — same fixed lists as the Publisher composer (Category / Task predefined,
 // FX is the display label for the FXRIG class). Name/Instance/Variante come from disk.
@@ -271,310 +260,6 @@ function TokenFinder({ project, onChange }: {
         )
       })}
       </div>
-    </div>
-  )
-}
-
-// ── Sous-composants partagés ──────────────────────────────────────────────────
-
-// Seq / shot number (2026-10-01): main number on 3 digits (-/+ by 10) and an optional
-// secondary digit: 1 -> 0010, 1 + 5 -> 0015, to slot a shot in between.
-function Spinner({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const main = Math.floor(value / 10)
-  const sub = value % 10
-  const [draft, setDraft] = useState(String(main).padStart(3, '0'))
-  const { tr } = useTr()
-
-  useEffect(() => { setDraft(String(main).padStart(3, '0')) }, [main])
-
-  const commit = () => {
-    const n = parseInt(draft, 10)
-    if (!isNaN(n) && n >= 0 && n * 10 + sub >= 1) { onChange(n * 10 + sub); setDraft(String(n).padStart(3, '0')) }
-    else setDraft(String(main).padStart(3, '0'))
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, overflow: 'hidden', background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)' }}>
-        <div onClick={() => onChange(Math.max(10, value - 10))} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
-          <Minus size={10} strokeWidth={2} />
-        </div>
-        <input
-          type="text"
-          inputMode="numeric"
-          maxLength={3}
-          value={draft}
-          onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
-          onBlur={commit}
-          onKeyDown={e => { if (e.key === 'Enter') commit() }}
-          style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
-        />
-        <div onClick={() => onChange(value + 10)} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
-          <Plus size={10} strokeWidth={2} />
-        </div>
-      </div>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={1}
-        placeholder="+"
-        title={tr('Numero secondaire : 1 et 5 -> 0015', 'Secondary number: 1 and 5 -> 0015')}
-        value={sub ? String(sub) : ''}
-        onChange={e => { const d = parseInt(e.target.value.replace(/[^0-9]/g, '').slice(-1) || '0', 10); if (main * 10 + d >= 1) onChange(main * 10 + d) }}
-        style={{ width: 28, height: 28, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)', borderRadius: 5, outline: 'none', boxShadow: 'var(--shadow-inset)' }}
-      />
-    </div>
-  )
-}
-
-function SelectEl({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger style={{ width: '100%' }} />
-      <SelectContent>
-        {options.length === 0
-          ? <SelectItem value="__empty__">-</SelectItem>
-          : options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function InputField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  return (
-    <input
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={{ width: '100%', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 11, padding: '0 8px', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
-    />
-  )
-}
-
-function PanelBtn({ primary, children, onClick, disabled, danger }: { primary?: boolean; danger?: boolean; children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
-  return (
-    <div
-      className={`btn${primary ? ' primary' : ' ghost'}`}
-      onClick={disabled ? undefined : onClick}
-      style={{ width: '100%', justifyContent: 'center', opacity: disabled ? 0.5 : 1, cursor: disabled ? 'default' : 'pointer', ...(danger ? { background: 'var(--err)', borderColor: 'var(--err)' } : {}) }}
-    >
-      {children}
-    </div>
-  )
-}
-
-function NavContext({ project }: { project: string }) {
-  const { tr } = useTr()
-  if (!project) return (
-    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-      {tr('Naviguez dans un projet', 'Browse into a project')}
-    </div>
-  )
-  return (
-    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)' }}>
-      <span style={{ color: 'var(--ink-4)' }}>{tr('Projet : ', 'Project: ')}</span>
-      <span style={{ fontWeight: 600 }}>{project}</span>
-    </div>
-  )
-}
-
-// ── Onglets panneau droit ─────────────────────────────────────────────────────
-
-function TabProject({ onCreateProject }: { onCreateProject: (name: string, painterPresets: string[]) => Promise<void> }) {
-  const [name, setName]     = useState('')
-  const [status, setStatus] = useState('')
-  const { tr } = useTr()
-  // Painter export presets are picked per project in the Shelf Manager (Painter shelf).
-
-  const handleCreate = async () => {
-    if (!name.trim()) return
-    try {
-      await onCreateProject(name.trim(), [])
-      setStatus(tr('✓ Créé', '✓ Created'))
-      setName('')
-    } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>{tr('NOM', 'NAME')}</div>
-        <InputField value={name} onChange={setName} placeholder="ex: NEW_PROJECT" />
-      </div>
-      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
-      <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleCreate()} disabled={!name.trim()}>Create Project</PanelBtn>
-    </div>
-  )
-}
-
-function TabAsset({ currentProject, onCreateAsset }: {
-  currentProject: string
-  onCreateAsset: (project: string, cls: string, name: string) => Promise<void>
-}) {
-  const [token, setToken]   = useState('CHAR')
-  const { tr } = useTr()
-  const [name, setName]     = useState('')
-  const [status, setStatus] = useState('')
-
-  const handleCreate = async () => {
-    if (!currentProject || !name.trim()) return
-    try {
-      await onCreateAsset(currentProject, token, name.trim())
-      setStatus(tr('✓ Créé', '✓ Created'))
-      setName('')
-    } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <NavContext project={currentProject} />
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>TYPE</div>
-        <SelectEl options={ASSET_TOKENS} value={token} onChange={setToken} />
-      </div>
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>NAME</div>
-        <InputField value={name} onChange={setName} placeholder="ex: HorseRig" />
-      </div>
-      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
-      <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleCreate()} disabled={!currentProject || !name.trim()}>Create Asset</PanelBtn>
-    </div>
-  )
-}
-
-function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, onRefreshSequences }: {
-  currentProject: string; sequences: string[]
-  onCreateSequence: (project: string, seqN: number) => Promise<void>
-  onCreateShot: (project: string, seqN: number, shotN: number) => Promise<void>
-  onRefreshSequences: () => void
-}) {
-  // SEQ0010 / SHOT0010 by default, steps of 10 leave room for 0011, 0015...
-  const [seqN, setSeqN]             = useState(10)
-  const [shotN, setShotN]           = useState(10)
-  const [seq, setSeq]               = useState('')
-  const [statusSeq, setStatusSeq]   = useState('')
-  const [statusShot, setStatusShot] = useState('')
-  const { tr } = useTr()
-
-  useEffect(() => { setSeq(sequences[0] ?? '') }, [sequences])
-
-  const handleCreateSeq = async () => {
-    if (!currentProject) return
-    try {
-      await onCreateSequence(currentProject, seqN)
-      setStatusSeq('✓ SEQ' + String(seqN).padStart(4, '0'))
-      onRefreshSequences()
-    } catch (e) {
-      setStatusSeq('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
-    }
-  }
-
-  const handleCreateShot = async () => {
-    if (!currentProject || !seq) return
-    const seqNum = parseInt(seq.replace(/\D/g, ''), 10) || seqN
-    try {
-      await onCreateShot(currentProject, seqNum, shotN)
-      setStatusShot(`✓ SEQ${String(seqNum).padStart(4, '0')}_SHOT${String(shotN).padStart(4, '0')}`)
-    } catch (e) {
-      setStatusShot('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <NavContext project={currentProject} />
-      <div style={{ padding: '10px', border: '1px solid var(--rule-2)', borderRadius: 7, background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: 'var(--shadow-inset)' }}>
-        <div className="cap">SEQ</div>
-        <Spinner value={seqN} onChange={setSeqN} />
-        {statusSeq && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: statusSeq.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusSeq}</div>}
-        <PanelBtn primary onClick={() => void handleCreateSeq()} disabled={!currentProject}>Create Sequence</PanelBtn>
-      </div>
-      <div style={{ padding: '10px', border: '1px solid var(--rule-2)', borderRadius: 7, background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: 'var(--shadow-inset)' }}>
-        <div className="cap">SHOT</div>
-        <div>
-          <div className="cap" style={{ marginBottom: 4, fontSize: 10 }}>IN SEQUENCE</div>
-          <SelectEl options={sequences.length > 0 ? sequences : ['-']} value={seq} onChange={setSeq} />
-        </div>
-        <div>
-          <div className="cap" style={{ marginBottom: 4, fontSize: 10 }}>SHOT NO.</div>
-          <Spinner value={shotN} onChange={setShotN} />
-        </div>
-        {statusShot && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: statusShot.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusShot}</div>}
-        <PanelBtn primary onClick={() => void handleCreateShot()} disabled={!currentProject || !seq}>Create Shot</PanelBtn>
-      </div>
-      <div style={{ flex: 1 }} />
-    </div>
-  )
-}
-
-function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
-  currentProject: string
-  currentSubpath: string[]
-  onSuccess: () => void
-}) {
-  const [name, setName]           = useState('')
-  const [token, setToken]         = useState('')
-  const [tokenType, setTokenType] = useState('CLASS')
-  const [status, setStatus]       = useState('')
-  const [busy, setBusy]           = useState(false)
-  const { tr } = useTr()
-
-  const handleAdd = async () => {
-    if (!name.trim() || !currentProject) return
-    setBusy(true)
-    setStatus('')
-    try {
-      const res = await api.createDirectory(
-        currentProject,
-        currentSubpath,
-        name.trim(),
-        token.trim() || undefined,
-        token.trim() ? tokenType : undefined,
-      )
-      const shortPath = res.rel_path.split('/').slice(-2).join('/')
-      setStatus(`✓ ${shortPath}`)
-      setName('')
-      setToken('')
-      onSuccess()
-    } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : tr('Erreur', 'Error')))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <NavContext project={currentProject} />
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>NAME</div>
-        <InputField value={name} onChange={setName} placeholder="ex: NEW_FOLDER" />
-      </div>
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>{tr('TOKEN (optionnel)', 'TOKEN (optional)')}</div>
-        <InputField value={token} onChange={setToken} placeholder="ex: SLA" />
-      </div>
-      {token.trim() && (
-        <div>
-          <div className="cap" style={{ marginBottom: 4 }}>TOKEN TYPE</div>
-          <SelectEl options={TOKEN_TYPES} value={tokenType} onChange={setTokenType} />
-        </div>
-      )}
-      {status && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)', lineHeight: 1.4 }}>
-          {status}
-        </div>
-      )}
-      <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleAdd()} disabled={!name.trim() || !currentProject || busy}>
-        {busy ? '…' : 'Add Folder'}
-      </PanelBtn>
     </div>
   )
 }
@@ -965,9 +650,6 @@ export function Projects() {
   // ── Views (B2) ─────────────────────────────────────────────────────────────
 
   const [layout, changeLayout] = useLocalPref<PaneLayout>(LAYOUT_KEY, 'single', ['single', 'stacked', 'side', 'quad'])
-  const [createPanelValue, setCreatePanelValue] = useLocalPref(CREATE_PANEL_KEY, 'open', ['open', 'closed'])
-  const createPanel = createPanelValue === 'open'
-  const setCreatePanel = useCallback((open: boolean) => setCreatePanelValue(open ? 'open' : 'closed'), [setCreatePanelValue])
   const [showSetupValue, setShowSetupValue] = useLocalPref(SHOW_SETUP_KEY, 'hidden', ['hidden', 'shown'])
   const showSetup = showSetupValue === 'shown'
   const paneCount = PANE_COUNT[layout]
@@ -979,7 +661,6 @@ export function Projects() {
   const onReport = useCallback((id: number, r: PaneReport) => setReports(prev => ({ ...prev, [id]: r })), [])
   const report = reports[activeIdx] ?? EMPTY_REPORT
   const nav: NavLevel = report.nav
-  const selectedNames = report.selectedNames
   const navProject: string = nav.kind === 'inside' ? nav.project : ''
   const navigateActive = useCallback((level: NavLevel) => paneRefs.current[activeIdx]?.navigateTo(level), [activeIdx])
 
@@ -996,7 +677,6 @@ export function Projects() {
     if (navProject && navProject !== activeProject) setActiveProject(navProject)
   }, [navProject])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [tab, setTab]               = useSessionState<Tab>('fm.tab', 'project')
   const [sidebarTab, setSidebarTab] = useSessionState<SidebarTab>('fm.sidebarTab', 'tous')
 
   // Explorer tile size (small / medium / large), persisted per browser; Ctrl + wheel steps it.
@@ -1017,7 +697,6 @@ export function Projects() {
     return () => node.removeEventListener('wheel', wheel)
   }, [changeTileSize])
 
-  const [sequences, setSequences] = useState<string[]>([])
   // Preset quick-drop (RETAKES-3): the linked presets of the active view's project.
   const [presets, setPresets]     = useState<Preset[]>([])
 
@@ -1032,7 +711,6 @@ export function Projects() {
   // Token Finder
   const [tokenSel, setTokenSel]           = useState<TokenSel>(EMPTY_TOKEN_SEL)
   const [projectTokens, setProjectTokens] = useState<Record<string, Record<string, string>>>({})
-  const [tokenRefreshTick, setTokenRefreshTick] = useState(0)
   const [findLoading, setFindLoading]     = useState(false)
 
   // Clipboard, undo, drag payload and disk refresh, shared by every view
@@ -1228,20 +906,12 @@ export function Projects() {
     }
   }, [nav, bumpFs])
 
-  const loadSequences = useCallback(async () => {
-    if (!activeProject) return
-    try { const d = await api.getSequences(activeProject); setSequences(d.sequences) }
-    catch {}
-  }, [activeProject])
-
-  useEffect(() => { void loadSequences() }, [activeProject])
-
   // Fetch tokens.json for the active/nav project whenever project or tick changes
   const tokensProject = navProject || activeProject
   useEffect(() => {
     if (!tokensProject) { setProjectTokens({}); return }
     api.getTokens(tokensProject).then(d => setProjectTokens(d.tokens)).catch(() => setProjectTokens({}))
-  }, [tokensProject, tokenRefreshTick])
+  }, [tokensProject])
 
   // ── Token Finder (results shown in the active view) ─────────────────────────
 
@@ -1325,34 +995,6 @@ export function Projects() {
     setFindLoading(false)
   }, [tokenSel, navProject, activeProject, projectTokens, activeIdx])
 
-  // ── Creation tabs ───────────────────────────────────────────────────────────
-
-  const handleSetProject = useCallback((name: string) => {
-    setActiveProject(name)
-    void api.updateSettings({ last_project: name })
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleCreateProject = useCallback(async (name: string, painterPresets: string[] = []) => {
-    await api.createProject(name, painterPresets)
-    bumpFs()
-    setActiveProject(name)
-  }, [bumpFs])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleCreateAsset = useCallback(async (project: string, cls: string, name: string) => {
-    await api.createAsset(project, cls, name)
-    bumpFs()
-  }, [bumpFs])
-
-  const handleCreateSequence = useCallback(async (project: string, seqN: number) => {
-    await api.createSequence(project, seqN)
-    bumpFs()
-  }, [bumpFs])
-
-  const handleCreateShot = useCallback(async (project: string, seqN: number, shotN: number) => {
-    await api.createShot(project, seqN, shotN)
-    bumpFs()
-  }, [bumpFs])
-
   // Hard-delete a whole project from the Archives view (after typed confirmation).
   const handleDeleteProject = useCallback(async (s: SavedItem) => {
     const name = s.project
@@ -1375,11 +1017,6 @@ export function Projects() {
       setDeleteProjectTarget(null)
     }
   }, [refreshProjects, activeProject, projects, setActiveProject, bumpFs])
-
-  const contextProject: string | null =
-    navProject !== '' ? navProject
-    : (selectedNames.size === 1 && projects.includes([...selectedNames][0])) ? [...selectedNames][0]
-    : null
 
   const recentSidebarItems = recents.slice(0, 5)
   const navBtn = (ok: boolean): React.CSSProperties => ({ width: 24, height: 24, border: '1px solid var(--rule-2)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? 'var(--ink-2)' : 'var(--ink-4)', boxShadow: 'var(--shadow-xs)', cursor: ok ? 'pointer' : 'default', opacity: ok ? 1 : 0.4, flexShrink: 0 })
@@ -1418,7 +1055,6 @@ export function Projects() {
         <ViewMenu
           layout={layout} onLayout={changeLayout}
           tileSize={tileSize} onTileSize={changeTileSize}
-          createPanel={createPanel} onCreatePanel={setCreatePanel}
         />
       </div>
 
@@ -1567,83 +1203,13 @@ export function Projects() {
               />
             ))}
           </div>
-        </div>
 
-        {/* Panneau droit (suit la vue active) */}
-        <div style={{ width: 200, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-          <button
-            className="fm-create-toggle" aria-expanded={createPanel}
-            onClick={() => setCreatePanel(!createPanel)}
-          >
-            {createPanel ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-            <span className="cap">{tr('Créer', 'Create')}</span>
-            {!createPanel && <span className="fm-create-hint">{tr('Projet, asset, shot, dossier', 'Project, asset, shot, folder')}</span>}
-          </button>
-          {createPanel && <>
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)' }}>
-            {TABS.map(t => (
-              <div
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                style={{ flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent-hi)' : 'var(--ink-4)', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === t.id ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}
-              >
-                {tr(t.label, t.labelEn)}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ flex: 1, padding: '12px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
-            {tab === 'project' && <TabProject onCreateProject={handleCreateProject} />}
-            {tab === 'asset' && <TabAsset currentProject={navProject} onCreateAsset={handleCreateAsset} />}
-            {tab === 'shot' && (
-              <TabShot
-                currentProject={navProject}
-                sequences={sequences}
-                onCreateSequence={handleCreateSequence}
-                onCreateShot={handleCreateShot}
-                onRefreshSequences={() => void loadSequences()}
-              />
-            )}
-            {tab === 'directory' && (
-              <TabDirectory
-                currentProject={navProject}
-                currentSubpath={nav.kind === 'inside' ? nav.subpath : []}
-                onSuccess={() => { bumpFs(); setTokenRefreshTick(t => t + 1) }}
-              />
-            )}
-          </div>
-          </>}
-          {!createPanel && <div style={{ flex: 1 }} />}
-
-          {/* N7: note of the selected published file (hidden when it has none) */}
-          {nav.kind === 'inside' && selectedNames.size === 1 && (
-            <>
-              <PublishNote project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
-              <FileLog     project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
-            </>
+          {/* N7: note of the selected published file, at the bottom (hidden when it has none) */}
+          {sidebarTab === 'tous' && nav.kind === 'inside' && report.selectedNames.size === 1 && (
+            <PublishNote project={nav.project} relPath={[...nav.subpath, [...report.selectedNames][0]].join('/')} />
           )}
-
-          {/* Projet actif + Set Project */}
-          <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>{tr('PROJET ACTIF', 'ACTIVE PROJECT')}</div>
-            <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--accent-hi)' }}>
-                {activeProject || '-'}
-              </div>
-              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>
-                {sequences.length > 0 ? tr(`${sequences.length} séquences`, `${sequences.length} sequences`) : tr('Aucune séquence', 'No sequences')}
-              </div>
-            </div>
-            {contextProject && contextProject !== activeProject && (
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                → {contextProject}
-              </div>
-            )}
-            <PanelBtn primary onClick={() => contextProject && handleSetProject(contextProject)} disabled={!contextProject}>
-              Set Project
-            </PanelBtn>
-          </div>
         </div>
+
       </div>
 
       {deleteProjectTarget && (
@@ -1660,10 +1226,9 @@ export function Projects() {
 
 // "Affichage" menu of the Folder Manager header (ADR 0042, page prefs per ADR 0043): views, tile size and the
 // creation forms in one place instead of seven always-visible buttons.
-function ViewMenu({ layout, onLayout, tileSize, onTileSize, createPanel, onCreatePanel }: {
+function ViewMenu({ layout, onLayout, tileSize, onTileSize }: {
   layout: PaneLayout; onLayout: (l: PaneLayout) => void
   tileSize: TileSize; onTileSize: (s: TileSize) => void
-  createPanel: boolean; onCreatePanel: (v: boolean) => void
 }) {
   const Current = LAYOUTS.find(l => l.id === layout)?.icon ?? Square
   const { tr } = useTr()
@@ -1695,10 +1260,6 @@ function ViewMenu({ layout, onLayout, tileSize, onTileSize, createPanel, onCreat
               </Menu.RadioItem>
             ))}
           </Menu.RadioGroup>
-          <Menu.Separator className="launcher-menu-separator" />
-          <Menu.CheckboxItem className="launcher-menu-item" checked={createPanel} onCheckedChange={v => onCreatePanel(v === true)}>
-            <span style={{ width: 13, display: 'inline-flex' }}>{createPanel && <Check size={13} />}</span>{tr('Formulaires de création', 'Creation forms')}
-          </Menu.CheckboxItem>
         </Menu.Content>
       </Menu.Portal>
     </Menu.Root>

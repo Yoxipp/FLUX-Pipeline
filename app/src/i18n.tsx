@@ -128,6 +128,8 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.retakes':            { fr: 'Retakes',                  en: 'Retakes' },
   'prod.subtasks':           { fr: 'Sous-tâches',              en: 'Subtasks' },
   'prod.addSubtask':         { fr: 'Ajouter une sous-tâche',   en: 'Add a subtask' },
+  'prod.noPublishNote':      { fr: 'Pas de note pour cette version', en: 'No note for this version' },
+  'prod.pickVersion':        { fr: 'Choisir la version',      en: 'Pick the version' },
   'prod.recentPublishes':    { fr: 'Publishs récents',         en: 'Recent publishes' },
   'prod.noPublishes':        { fr: 'Aucun publish encore',     en: 'No publishes yet' },
   'prod.autoBadge':          { fr: 'auto',                     en: 'auto' },

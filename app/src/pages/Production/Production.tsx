@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { useProject } from '../../ProjectContext'
 import { useProduction } from '../../hooks/useProduction'
+import { api } from '../../api/client'
 import { useSessionState } from '../../hooks/useSessionState'
 import { ProductionShot } from './ProductionShot'
 import { MenuEdit } from './MenuEdit'
@@ -57,7 +58,7 @@ export function Production() {
     if (sel.kind === 'asset' || sel.kind === 'shot') navigate(`/production?mode=${sel.kind}`, { replace: true })
     setPendingSpec({ task: 'ENTITY' })
   }
-  if (!project) return <div style={{ padding: 24, color: 'var(--ink-3)' }}>Sélectionnez un projet.</div>
+  if (!project) return <NoProject />
   return <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, zoom: 0.9 }}>
     <MenuSpec state={prod.state} setState={prod.setState} selection={selection} publishesByTask={prod.publishesByTask} loading={prod.loading} workspaceMode={mode}
       initialOpen={pendingSpec} onInitialOpenApplied={() => setPendingSpec(null)}
@@ -80,5 +81,35 @@ export function Production() {
       <div className="production-dialog-heading"><Dialog.Title>Éditer l’entité</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div><Dialog.Description>Configuration de l’entité sélectionnée</Dialog.Description>
       <MenuEdit project={project} state={prod.state} setState={prod.setState} selection={selection} setSelection={setSelection} mode={selection.kind === 'asset' || selection.kind === 'group' ? 'asset' : 'shot'} activeCategory={null} publishesByTask={prod.publishesByTask} sequencesOnDisk={prod.sequencesOnDisk} shotsOnDisk={prod.shotsOnDisk} />
     </Dialog.Content></Dialog.Portal></Dialog.Root>
+  </div>
+}
+
+// Shown when FLUX has no active project: projects are created here (the Folder Manager only browses).
+function NoProject() {
+  const { projects, setProject, refreshProjects } = useProject()
+  const [name, setName] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const create = async () => {
+    const clean = name.trim()
+    if (!clean) return
+    setBusy(true); setError('')
+    try {
+      const r = await api.createProject(clean)
+      await refreshProjects()
+      setProject(r.name)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{projects.length ? 'Aucun projet actif' : 'Aucun projet'}</div>
+      <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+        {projects.length ? 'Choisissez un projet dans la barre latérale ou créez-en un nouveau.' : 'Créez votre premier projet pour commencer.'}
+      </div>
+      <input autoFocus style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', color: 'var(--ink)', fontSize: 12 }} value={name} placeholder="Nom du projet" onChange={e => setName(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') void create() }} />
+      {error && <div style={{ fontSize: 11, color: 'var(--err)' }}>{error}</div>}
+      <button className="btn primary" disabled={!name.trim() || busy} onClick={() => void create()}>Créer le projet</button>
+    </div>
   </div>
 }

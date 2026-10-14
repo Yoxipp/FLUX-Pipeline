@@ -19,6 +19,7 @@ import type {
   ProductionPayload,
   ProductionState,
   PublishPayload,
+  PublishDestination,
   PublishResult,
   Settings,
   ZBrushPublishPayload,
@@ -284,6 +285,9 @@ export const api = {
     apiCall<{ ok: boolean }>('DELETE', '/logs'),
 
   // Publisher
+  getPublishDestination: (project: string, base: string, ext: string, sequence = false) =>
+    apiCall<PublishDestination>('GET', `/publish/destination?${new URLSearchParams({
+      project, base, ext, sequence: String(sequence) })}`),
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
 

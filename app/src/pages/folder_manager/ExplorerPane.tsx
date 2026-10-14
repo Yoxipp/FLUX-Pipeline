@@ -8,6 +8,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Copy, Lock, Search, X } from 'lucide-react'
 import { api } from '../../api/client'
 import type { LoadTargets } from '../../api/client'
@@ -51,6 +52,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
 ) {
   const fm = useFolderManager()
   const { tr } = useTr()
+  const navigateRoute = useNavigate()
   const { project: activeProject, refreshProjects } = useProject()
 
   // Session-kept (U3): coming back to the Folder Manager reopens the same folder.
@@ -709,6 +711,11 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
         ) : loading && items.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>
             {tr('Chargement…', 'Loading…')}
+          </div>
+        ) : items.length === 0 && nav.kind === 'root' ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--ink-3)', fontSize: 12 }}>
+            {tr('Aucun projet. Les projets se créent dans Production.', 'No project yet. Projects are created in Production.')}
+            <button className="btn primary" onClick={() => navigateRoute('/production')}>{tr('Créer un projet dans Production', 'Create a project in Production')}</button>
           </div>
         ) : items.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>

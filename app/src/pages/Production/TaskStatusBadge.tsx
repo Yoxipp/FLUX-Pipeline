@@ -2,12 +2,12 @@ import { useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowDown, Check, ChevronRight, Flag, FolderOpen, Trash2, Upload, UserRound, X } from 'lucide-react'
+import { ArrowDown, Check, ChevronRight, Flag, FolderOpen, Plus, Trash2, Upload, UserRound, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { ProductionState, ProductionTask, Settings } from '../../types'
-import { detailStatus, STATUS_LABELS, STATUS_TOKENS, taskStatus } from './tracking'
+import { assigneeIncludes, detailStatus, STATUS_LABELS, STATUS_TOKENS, taskStatus } from './tracking'
 import { taskPublisherPrefill, type TaskEntity } from './taskActions'
 import { applyTaskSelection, type TaskActionTarget } from './taskSelection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
@@ -54,7 +54,10 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
     const targetKey = `${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`
     return target.entity.task_details?.[targetKey]?.assignee ?? target.entity.task_details?.[target.task.name.toUpperCase()]?.assignee ?? ''
   }))]
-  const menuArtist = targetArtists.length === 1 ? targetArtists[0] || 'Aucun artiste assigné' : 'Plusieurs artistes'
+  const menuArtist = targetArtists.length === 1 ? targetArtists[0] || 'Aucun artiste assigné' : 'Artistes différents'
+  const assignedToAll = (name: string) => targets.every(target => assigneeIncludes(target.entity.task_details?.[`${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`]?.assignee, name))
+  // Several artists per task: a click in the list toggles that artist, the dialog stays open.
+  const toggleArtist = (name: string) => setState(prev => applyTaskSelection(prev, targets, { kind: assignedToAll(name) ? 'artist_remove' : 'artist_add', value: name }))
   const description = multiple ? `${targets.length} tâches sélectionnées` : `${entity.name} · ${task.name}${subtask ? ` · ${subtask}` : ''}`
   const showMenu = (x: number, y: number) => {
     if (disabled) return
@@ -72,7 +75,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
     try {
       const current = settings ?? await api.getSettings()
       if (!current.username?.trim()) { toast.error('Renseignez votre nom d’artiste dans les paramètres.'); return }
-      assign(current.username)
+      setState(prev => applyTaskSelection(prev, targets, { kind: 'artist_add', value: current.username! }))
     } catch { toast.error('Impossible de charger votre profil.') }
   }
   const folder = async () => {
@@ -88,7 +91,11 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
   }
   return <>
     {selectionControl && <button ref={selectionButton} className="tracking-task-select" aria-label={selectionControl.label} aria-pressed={selectionControl.selected}
-      onClick={selectionControl.onClick}
+      onClick={e => {
+        // A plain click on an empty cell opens the menu so a task can be added right there.
+        if (!status && !e.ctrlKey && !e.metaKey && !e.shiftKey) { onContextTask?.(); showMenu(e.clientX, e.clientY); return }
+        selectionControl.onClick(e)
+      }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }} />}
     {status && priority === 'high' && <span className="tracking-priority-high" aria-label="Priorité haute" title="Priorité haute">!</span>}
@@ -105,7 +112,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
         else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}{status && priority === 'low' && <span className="tracking-priority" data-priority="low" aria-label="Priorité basse"><ArrowDown size={9} strokeWidth={2.6} /></span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status || <Plus size={11} className="tracking-empty-add" aria-hidden />}{status && priority === 'low' && <span className="tracking-priority" data-priority="low" aria-label="Priorité basse"><ArrowDown size={9} strokeWidth={2.6} /></span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" side="bottom" align="start" collisionPadding={10} onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>
@@ -120,6 +127,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
           <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
             <Menu.Item className="production-menu-item" onSelect={() => void takeTask()}>{multiple ? 'Prendre les tasks' : 'Prendre la task'}</Menu.Item>
             <Menu.Item className="production-menu-item" onSelect={() => void pickArtist()}>Assigner artiste</Menu.Item>
+            {targetArtists.some(Boolean) && <Menu.Item className="production-menu-item production-menu-delete" onSelect={() => assign('')}><X size={14} />Supprimer l’assignation</Menu.Item>}
           </Menu.SubContent></Menu.Portal></Menu.Sub>
         <Menu.Sub><Menu.SubTrigger className="production-menu-item"><Flag size={14} />Priorité<ChevronRight size={13} className="production-menu-chevron" /></Menu.SubTrigger>
           <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
@@ -138,10 +146,10 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
       <div className="production-dialog-actions"><Dialog.Close>Annuler</Dialog.Close><button onClick={() => { setState(prev => applyTaskSelection(prev, targets, { kind: 'clear' })); setRemoveOpen(false) }}>Supprimer</button></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
     <Dialog.Root open={assignOpen} onOpenChange={setAssignOpen}><Dialog.Portal><Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog" onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>
-      <div className="production-dialog-heading"><Dialog.Title>Assigner artiste</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div>
-      <Dialog.Description>{description}</Dialog.Description>
+      <div className="production-dialog-heading"><Dialog.Title>Assigner artistes</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div>
+      <Dialog.Description>{description}. Cliquez plusieurs artistes pour les ajouter ou les retirer.</Dialog.Description>
       <input autoFocus aria-label="Rechercher un artiste" placeholder="Rechercher un artiste…" value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="production-artist-list">{loading ? <p>Chargement…</p> : error ? <p role="alert">{error}<button onClick={() => void pickArtist()}>Réessayer</button></p> : <>{users.filter(u => u.toLowerCase().includes(search.toLowerCase())).map(user => <button key={user} onClick={() => assign(user)}><UserRound size={14} /><span>{user}</span>{targetArtists.length === 1 && targetArtists[0] === user && <Check size={14} />}</button>)}{!users.filter(u => u.toLowerCase().includes(search.toLowerCase())).length && <p>Aucun artiste trouvé.</p>}<button onClick={() => assign('')}>Retirer l’assignation</button></>}</div>
+      <div className="production-artist-list">{loading ? <p>Chargement…</p> : error ? <p role="alert">{error}<button onClick={() => void pickArtist()}>Réessayer</button></p> : <>{users.filter(u => u.toLowerCase().includes(search.toLowerCase())).map(user => <button key={user} aria-pressed={assignedToAll(user)} onClick={() => toggleArtist(user)}><UserRound size={14} /><span>{user}</span>{assignedToAll(user) && <Check size={14} />}</button>)}{!users.filter(u => u.toLowerCase().includes(search.toLowerCase())).length && <p>Aucun artiste trouvé.</p>}<button onClick={() => assign('')}>Retirer l’assignation</button></>}</div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </>
 }

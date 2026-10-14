@@ -56,11 +56,21 @@ export function trackingTaskStatus(entity: TrackingEntity, task: ProductionTask,
   return dep.fixed || reviewed ? taskStatus(entity, task) : ''
 }
 
+/** Assignee field may hold several artists separated by commas. */
+export function assigneeList(value?: string): string[] {
+  return [...new Set((value ?? '').split(',').map(v => v.trim()).filter(Boolean))]
+}
+
+export function assigneeIncludes(value: string | undefined, username: string): boolean {
+  const who = username.trim().toUpperCase()
+  return !!who && assigneeList(value).some(v => v.toUpperCase() === who)
+}
+
 export function taskAssignedTo(entity: TrackingEntity, task: ProductionTask, username: string): boolean {
   if (!username.trim()) return false
   const name = username.trim().toUpperCase(), prefix = task.name.toUpperCase()
   return Object.entries(entity.task_details ?? {}).some(([key, detail]) =>
-    (key.toUpperCase() === prefix || key.toUpperCase().startsWith(`${prefix}|`)) && detail.assignee?.trim().toUpperCase() === name)
+    (key.toUpperCase() === prefix || key.toUpperCase().startsWith(`${prefix}|`)) && assigneeIncludes(detail.assignee, name))
 }
 
 export function moveDepartment(departments: ProductionDepartment[], from: string, to: string): ProductionDepartment[] {

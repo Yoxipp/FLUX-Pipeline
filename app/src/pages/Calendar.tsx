@@ -1014,21 +1014,34 @@ export function Calendar() {
             // so it is never pushed out of the cell (2026-10-09). Unfolded tasks get the
             // room first: opening a second task hides folded ones, never the open one.
             let visible = list
+            // Month view: a task keeps the same lane on every day of the week, sized to its
+            // tallest day there (the head day carries the label), so its line stays straight.
+            const lanes = new Map<string, { top: number; h: number }>()
             if (view === 'month') {
               const GAP = 3, MORE_H = 14
               const room = rowH - 2 * CELL_PAD - 17   // cell padding + day number
-              const h = (it: CalendarItem) => spanMarkHeight(it, day, today, unfolded.has(it.id), noteLines) + GAP
-              if (list.reduce((s, it) => s + h(it), 0) > room) {
-                const keep = new Set<string>()
-                let used = MORE_H
-                for (const it of [...list.filter(x => unfolded.has(x.id)), ...list.filter(x => !unfolded.has(x.id))]) {
-                  if (used + h(it) > room && !unfolded.has(it.id)) continue
-                  used += h(it); keep.add(it.id)
-                }
-                visible = list.filter(it => keep.has(it.id))
+              const weekStart = i - (i % 7)
+              const weekDays = days.slice(weekStart, weekStart + 7).map(iso)
+              const placed: { it: CalendarItem; top: number; h: number; a: string; b: string }[] = []
+              const weekItems = shown.filter(it => it.start <= weekDays[6] && weekDays[0] <= it.end)
+                .sort((a, b) => a.start.localeCompare(b.start) || a.owner.localeCompare(b.owner))
+              for (const it of weekItems) {
+                const a = it.start > weekDays[0] ? it.start : weekDays[0]
+                const b = it.end < weekDays[6] ? it.end : weekDays[6]
+                const h = Math.max(...weekDays.filter(x => a <= x && x <= b)
+                  .map(x => spanMarkHeight(it, x, today, unfolded.has(it.id), noteLines)))
+                const top = placed.filter(p => p.a <= b && a <= p.b).reduce((m, p) => Math.max(m, p.top + p.h + GAP), 0)
+                placed.push({ it, top, h, a, b })
+                lanes.set(it.id, { top, h })
               }
+              const bottom = (it: CalendarItem) => { const ln = lanes.get(it.id)!; return ln.top + ln.h }
+              if (list.some(it => bottom(it) > room)) {
+                visible = list.filter(it => bottom(it) + MORE_H <= room || unfolded.has(it.id))
+              }
+              visible = [...visible].sort((x, y) => lanes.get(x.id)!.top - lanes.get(y.id)!.top)
             }
             const hidden = list.length - visible.length
+            let laneY = 0
             const dayPubs = showPub ? pubsOn(day) : []
             return (
               <div key={day}
@@ -1063,9 +1076,14 @@ export function Calendar() {
                   // Month view: every task starts folded on its line (one day or several);
                   // its tab unfolds it into a band under the line, the tab does not move.
                   if (view === 'month') {
-                    return <SpanMark key={it.id} it={it} day={day} today={today} selected={it.id === picked}
-                                     open={unfolded.has(it.id)} noteLines={noteLines}
-                                     onClick={pick} onExpand={() => toggleUnfolded(it.id)} />
+                    const ln = lanes.get(it.id)!
+                    const marginTop = ln.top - laneY
+                    laneY = ln.top + ln.h   // the cell flex gap adds the 3 px GAP
+                    return <div key={it.id} style={{ marginTop, height: ln.h, flexShrink: 0 }}>
+                      <SpanMark it={it} day={day} today={today} selected={it.id === picked}
+                                open={unfolded.has(it.id)} noteLines={noteLines}
+                                onClick={pick} onExpand={() => toggleUnfolded(it.id)} />
+                    </div>
                   }
                   return <Chip key={it.id} it={it} full noteLines={noteLines} selected={it.id === picked} onClick={pick} />
                 })}

@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/backend__features__publisher.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-`publish_core.py` (`resolve_publish_path`, briques legacy reutilisees par le moteur), `publish_layout.py` (dossier plat `<base>_LAST` + `<base>_vNNN`), `last_pointer.py` (ADR 0017 : `vNNN` immuable ecrit d'abord, LAST derive en layer USD / copie + `.flux.json` / `.link`), `version_resolver.py`, `modif_log.py`, `texture_conform.py` (.tx OpenImageIO), `usd_proxy.py` (purpose=proxy : meshes decimes, grooms BasisCurves 1 courbe sur N, ADR 0026). Orchestration : `flux_actions/config/publish*.yml`.
+`publish_core.py` (`resolve_publish_path`, briques legacy reutilisees par le moteur), `publish_layout.py` (dossier plat `<base>_LAST` + `<base>_vNNN`), `last_pointer.py` (ADR 0017 : `vNNN` immuable ecrit d'abord, LAST derive en layer USD / copie + `.flux.json` / `.link`), `destination_preview.py` (lecture seule : carte Destination du publisher, `GET /publish/destination`), `version_resolver.py`, `modif_log.py`, `texture_conform.py` (.tx OpenImageIO), `usd_proxy.py` (purpose=proxy : meshes decimes, grooms BasisCurves 1 courbe sur N, ADR 0026). Orchestration : `flux_actions/config/publish*.yml`.
 
 Zone a risque (tous les DCC + projets existants). Le layout par sous-dossier de format decrit dans l'ancienne fiche est OBSOLETE.
 
