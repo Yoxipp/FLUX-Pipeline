@@ -511,7 +511,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
           <div
             key={i}
             onClick={() => { if (it.isDir) setCur({ project: cur.project, sub: [...cur.sub, it.name] }) }}
-            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default', background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--rule-3)' : '1px solid transparent' }}
+            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default', background: isSel ? 'var(--paper-2)' : 'transparent', border: isSel ? '1px solid var(--rule-3)' : '1px solid transparent' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
             onMouseLeave={e => (e.currentTarget.style.background = isSel ? 'var(--accent-soft)' : 'transparent')}
           >
@@ -1070,7 +1070,7 @@ export function Projects() {
                 <div
                   key={id}
                   onClick={() => { setSidebarTab(id); if (id === 'tous') navigateActive({ kind: 'root' }) }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', margin: '1px 8px 1px 0', background: active ? 'var(--accent-soft)' : 'transparent', borderLeft: active ? '2px solid var(--rule-3)' : '2px solid transparent', borderRadius: '0 6px 6px 0', fontSize: 11, color: active ? 'var(--ink)' : 'var(--ink-3)', fontWeight: active ? 500 : 400, cursor: 'pointer', userSelect: 'none' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', margin: '1px 8px 1px 0', background: active ? 'var(--paper-2)' : 'transparent', borderLeft: active ? '2px solid var(--rule-3)' : '2px solid transparent', borderRadius: '0 6px 6px 0', fontSize: 11, color: active ? 'var(--ink)' : 'var(--ink-3)', fontWeight: active ? 500 : 400, cursor: 'pointer', userSelect: 'none' }}
                 >
                   <Icon size={12} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
                   <span>{tr(label, labelEn)}</span>

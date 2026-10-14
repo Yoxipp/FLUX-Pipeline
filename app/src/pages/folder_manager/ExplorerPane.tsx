@@ -613,7 +613,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                         onDragOver={droppable ? (e => { if (acceptDrag(e) && dragOverBc !== i) setDragOverBc(i) }) : undefined}
                         onDragLeave={droppable ? (() => setDragOverBc(prev => (prev === i ? null : prev))) : undefined}
                         onDrop={droppable && nav.kind === 'inside' ? (e => { setDragOverBc(null); dropInto(e, nav.subpath.slice(0, i - 1)) }) : undefined}
-                        style={{ color: dragOverBc === i ? 'var(--accent-hi)' : isLast ? 'var(--accent-hi)' : 'var(--ink-3)', background: dragOverBc === i ? 'var(--accent-soft)' : 'transparent', borderRadius: 3, padding: dragOverBc === i ? '0 3px' : 0, fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'text', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
+                        style={{ color: dragOverBc === i ? 'var(--accent-hi)' : isLast ? 'var(--accent-hi)' : 'var(--ink-3)', background: dragOverBc === i ? 'var(--paper-2)' : 'transparent', borderRadius: 3, padding: dragOverBc === i ? '0 3px' : 0, fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'text', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
                       >
                         {seg}
                       </span>
@@ -778,7 +778,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                     onDragOver={item.isDir ? (e => { if (acceptDrag(e)) { e.stopPropagation(); if (dragOverName !== item.name) setDragOverName(item.name) } }) : undefined}
                     onDragLeave={item.isDir ? (() => setDragOverName(prev => (prev === item.name ? null : prev))) : undefined}
                     onDrop={item.isDir ? (e => { setDragOverName(null); setDragOverPane(false); dropInto(e, [...(nav.kind === 'inside' ? nav.subpath : []), item.name]) }) : undefined}
-                    style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: (isDropTarget || isSel) ? 'var(--accent-soft)' : 'transparent', border: isDropTarget ? '1px dashed var(--rule-3)' : isSel ? '1px solid var(--rule-3)' : '1px solid transparent', opacity: isCut ? 0.45 : 1, gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s, opacity 0.12s' }}
+                    style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: (isDropTarget || isSel) ? 'var(--paper-2)' : 'transparent', border: isDropTarget ? '1px dashed var(--rule-3)' : isSel ? '1px solid var(--rule-3)' : '1px solid transparent', opacity: isCut ? 0.45 : 1, gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s, opacity 0.12s' }}
                   >
                     {/* Checkbox multi-sélection */}
                     {(isHovered || isSel) && (
