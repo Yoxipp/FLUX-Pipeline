@@ -2,7 +2,7 @@
 // what it writes (new vNNN + LAST) and what already sits in that folder.
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Folder, FileText, Link2, Plus, RefreshCw, ExternalLink } from 'lucide-react'
+import { Folder, FileText, Link2, RefreshCw, ExternalLink } from 'lucide-react'
 import { api } from '../../api/client'
 import { useTr } from '../../i18n'
 import type { PublishDestination as Dest } from '../../types'
@@ -12,7 +12,13 @@ const okSoft = 'color-mix(in oklch, var(--ok) 14%, transparent)'
 
 function Badge({ kind }: { kind: 'new' | 'upd' }) {
   const isNew = kind === 'new'
-  const Icon = isNew ? Plus : RefreshCw
+  if (isNew) return (
+    <span style={{
+      flexShrink: 0, padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700,
+      letterSpacing: '0.06em', background: 'var(--accent)', color: 'var(--on-accent)',
+    }}>NEW</span>
+  )
+  const Icon = RefreshCw
   return (
     <span style={{
       width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
@@ -25,15 +31,27 @@ function Badge({ kind }: { kind: 'new' | 'upd' }) {
   )
 }
 
-function Row({ name, kind, link, note }: {
+// Version comment of an existing file, from the folder's modif_logs.json.
+interface VersionLog { modification?: string; user?: string; date?: string; time?: string; version?: string }
+
+function Row({ name, kind, link, note, loadLog }: {
   name: string; kind: 'new' | 'upd' | 'old'; link?: boolean; note?: string
+  loadLog?: (name: string) => Promise<VersionLog | null>
 }) {
   const Icon = link ? Link2 : name.endsWith('/') ? Folder : FileText
   const color = kind === 'new' ? 'var(--accent)' : kind === 'upd' ? 'var(--ok)' : 'var(--ink-4)'
-  return (
-    <div style={{
+  const [open, setOpen] = useState(false)
+  const [entry, setEntry] = useState<VersionLog | null | undefined>(undefined)
+  const toggle = () => {
+    if (!loadLog) return
+    setOpen(o => !o)
+    if (entry === undefined) void loadLog(name).then(setEntry, () => setEntry(null))
+  }
+  return (<>
+    <div onClick={toggle} title={loadLog ? 'Voir le commentaire de la version' : undefined} style={{
       display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5,
-      background: kind === 'new' ? 'var(--accent-soft)' : 'transparent',
+      background: kind === 'new' ? 'var(--accent-soft)' : open ? 'var(--paper-2)' : 'transparent',
+      cursor: loadLog ? 'pointer' : undefined,
     }}>
       <Icon size={13} strokeWidth={1.7} style={{ color, flexShrink: 0 }} />
       <span title={name} style={{
@@ -43,7 +61,19 @@ function Row({ name, kind, link, note }: {
       {note && <span style={{ fontSize: 9.5, fontFamily: mono, color: 'var(--ink-3)' }}>{note}</span>}
       {kind !== 'old' && <Badge kind={kind} />}
     </div>
-  )
+    {open && (
+      <div style={{ margin: '0 6px 4px 27px', padding: '5px 8px', borderLeft: '2px solid var(--rule-3)', fontSize: 10.5, color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}>
+        {entry === undefined ? '…'
+          : !entry || !entry.modification ? <span style={{ color: 'var(--ink-4)' }}>Pas de commentaire</span>
+          : <>
+            {entry.modification}
+            <div style={{ marginTop: 3, fontSize: 9.5, fontFamily: mono, color: 'var(--ink-4)' }}>
+              {[entry.version, entry.user, entry.date && `${entry.date} ${entry.time ?? ''}`.trim()].filter(Boolean).join(' · ')}
+            </div>
+          </>}
+      </div>
+    )}
+  </>)
 }
 
 export function PublishDestination({ project, base, ext, sequence, ready }: {
@@ -73,6 +103,18 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
 
   const ver = dest?.version ?? 'v001'
   const crumbs = (dest?.rel_path ?? '').split('/').filter(Boolean)
+  // Folder listing (with each file's latest modif_log entry), fetched once on the first click.
+  const [logs, setLogs] = useState<Promise<Record<string, VersionLog>> | null>(null)
+  useEffect(() => { setLogs(null) }, [dest?.rel_path])
+  const loadLog = async (name: string) => {
+    let p = logs
+    if (!p) {
+      p = api.browseProject(project, dest?.rel_path ?? '').then(r =>
+        Object.fromEntries(r.files.map(f => [f.name, f as unknown as VersionLog])))
+      setLogs(p)
+    }
+    return (await p)[name] ?? null
+  }
   const navigate = useNavigate()
   // Absolute folder of crumb i: the destination path minus the crumbs after it.
   const crumbPath = (i: number) => {
@@ -127,8 +169,8 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
           {(dest.existing.length > 0 || dest.more > 0) && (
             <div style={{ height: 1, background: 'var(--rule)', margin: '4px 6px' }} />
           )}
-          {dest.existing.map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} note={dest.existing_versions?.[n] ?? undefined} />)}
-          {showAll && (dest.others ?? []).map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} />)}
+          {dest.existing.map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} note={dest.existing_versions?.[n] ?? undefined} loadLog={loadLog} />)}
+          {showAll && (dest.others ?? []).map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} loadLog={loadLog} />)}
           {dest.more > 0 && (
             <button
               onClick={() => setShowAll(v => !v)}
