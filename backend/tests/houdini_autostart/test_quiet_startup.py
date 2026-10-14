@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from dcc.houdini import autostart
-from backend.tests.security.test_houdini_bridge_browser_guard import _load_server_module
+from tests.security.test_houdini_bridge_browser_guard import _load_server_module
 
 
 class QuietStartup(unittest.TestCase):

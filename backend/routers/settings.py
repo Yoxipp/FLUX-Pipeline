@@ -14,7 +14,10 @@ from core.constants import FLUX_MARKER_FILENAME, FLUX_ROOT_DIRS
 from features.system.manual import ensure_manual_in_root
 from core.logger import get_logger
 from core.repository_factory import reset_repository, reset_storage
-from core.paths import ensure_dir, get_flux_root, set_config_username, set_flux_root
+from core.paths import (
+    add_flux_root, ensure_dir, get_flux_root, get_flux_roots, remove_flux_root,
+    same_root, set_config_username, set_flux_root,
+)
 from utils import user_utils
 
 log = get_logger(__name__)
@@ -155,6 +158,49 @@ async def update_settings(req: SettingsUpdate) -> dict:
         log.info("Workspace changed to '%s'", req.workspace)
 
     return {"success": True}
+
+
+class WorkspacePath(BaseModel):
+    path: str
+
+
+def _workspaces_payload() -> dict:
+    root = get_flux_root()
+    return {
+        "active": str(root) if root else None,
+        "workspaces": [
+            {"path": p, "exists": Path(p).is_dir(), "active": bool(root) and same_root(p, str(root))}
+            for p in get_flux_roots()
+        ],
+    }
+
+
+@router.get("/workspaces")
+async def list_workspaces() -> dict:
+    """Known FLUX directories on this machine and the active one."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _workspaces_payload)
+
+
+@router.post("/workspaces")
+async def add_workspace(req: WorkspacePath) -> dict:
+    """Register a FLUX directory (not activated; activate with PUT /settings)."""
+    if not req.path.strip():
+        raise HTTPException(status_code=400, detail="Chemin vide")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: add_flux_root(req.path.strip()))
+    return await loop.run_in_executor(None, _workspaces_payload)
+
+
+@router.post("/workspaces/remove")
+async def remove_workspace(req: WorkspacePath) -> dict:
+    """Forget a FLUX directory from the list. Files are kept; the active one is refused."""
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: remove_flux_root(req.path))
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Impossible de retirer le répertoire actif")
+    return await loop.run_in_executor(None, _workspaces_payload)
 
 
 @router.get("/users")
