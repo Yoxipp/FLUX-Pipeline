@@ -122,6 +122,16 @@ function AppShell({ settings }: { settings: Settings }) {
   const dccStatus          = useDccStatus()
   const { unreadCount }    = useActivity()
   const [showLogin, setShowLogin]         = useState(false)
+  // A click on a toast closes it right away (toasts stay at the top, never in the way for long).
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest('[data-sonner-toast]')
+      if (!el || (e.target as HTMLElement).closest('button')) return
+      toast.dismiss()
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [])
 
   return (
     <HashRouter>
@@ -170,7 +180,7 @@ function AppShell({ settings }: { settings: Settings }) {
         <WorkProfileDialog />
       </div>
       <Toaster
-        position="bottom-right"
+        position="top-center"
         theme="dark"
         visibleToasts={3}
         gap={6}

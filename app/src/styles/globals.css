@@ -525,3 +525,4 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 [data-sonner-toast] [data-icon] { width: 13px; height: 13px; }
 [data-sonner-toast] [data-icon] svg { width: 13px; height: 13px; }
 [data-sonner-toaster] { --width: 320px; }
+[data-sonner-toast] { cursor: pointer; }
