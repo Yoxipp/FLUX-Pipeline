@@ -180,7 +180,9 @@ def _dispatch(cmd: dict) -> dict:
 
     if action == "ping":
         # No zbc.* call — ping must NEVER block on ZBrush's main thread.
-        return {"status": "ok", "version": "ZBrush 2026"}
+        # _dispatch only runs inside the freeze loop: the user clicked Export FLUX,
+        # "publishing" tells FLUX to open its Publisher page.
+        return {"status": "ok", "version": "ZBrush 2026", "publishing": True}
 
     if not _ZBRUSH_AVAILABLE:
         return {"status": "error", "msg": "zbrush module not available"}
@@ -296,20 +298,14 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
     """Read one JSON command, dispatch it, send response.
 
     Returns True if the action was 'stop' (caller should break the freeze loop).
-    SO_LINGER {1,0} forces RST on close to avoid CLOSE_WAIT zombies.
-
-    Struct layout differs per OS:
-      Windows : u_short l_onoff + u_short l_linger = 4 bytes → "HH"
-      Linux   : int     l_onoff + int     l_linger = 8 bytes → "ii"
+    The connection is closed gracefully (FIN): an abortive close (SO_LINGER 0, RST)
+    lets Windows drop the answer before FLUX reads it, and FLUX then gets
+    WinError 10054 although the export itself succeeded.
     """
-    import struct as _struct
-    _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
-    try:
-        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
-    except OSError as _le:
-        _log(f"SO_LINGER failed: {_le!r}")
     conn.settimeout(3.0)
     buf = b""
+    stop = False
+    action = ""
     try:
         while b"\n" not in buf:
             chunk = conn.recv(4096)
@@ -317,22 +313,39 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
                 return False  # probe-only connection (connected then immediately closed)
             buf += chunk
         cmd = json.loads(buf.split(b"\n")[0].decode("utf-8"))
-        if cmd.get("action") in ("stop", "cancel"):
-            conn.sendall(b'{"status":"ok"}\n')
-            conn.close()
-            return True
-        resp = _dispatch(cmd)
+        action = cmd.get("action", "")
+        if action in ("stop", "cancel"):
+            resp = {"status": "ok"}
+            stop = True
+        else:
+            if action != "ping":
+                _log(f"Command {action!r} received")
+            resp = _dispatch(cmd)
+            if action != "ping":
+                _log(f"Command {action!r} -> {resp!r}")
         conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         try:
             conn.sendall((json.dumps({"status": "error", "msg": str(exc)}) + "\n").encode("utf-8"))
         except OSError:
             pass
+    except OSError as exc:
+        _log(f"Connection error on {action or 'command'}: {exc!r}")
+    finally:
+        _close_gracefully(conn)
+    return stop
+
+
+def _close_gracefully(conn: socket.socket) -> None:
+    """Send FIN and close, so the answer already sent always reaches the client."""
+    try:
+        conn.shutdown(socket.SHUT_WR)
     except OSError:
         pass
-    finally:
+    try:
         conn.close()
-    return False
+    except OSError:
+        pass
 
 
 # ── Background ping responder (served OUTSIDE the freeze loop) ─────────────────
@@ -346,12 +359,6 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
 def _serve_idle(conn: "socket.socket") -> None:
     """Answer one request while idle. Only ping (and a stop/cancel ack) are safe;
     a real export received while idle is refused so the client fails fast."""
-    import struct as _struct
-    _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
-    try:
-        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
-    except OSError:
-        pass
     conn.settimeout(2.0)
     buf = b""
     try:
@@ -371,10 +378,7 @@ def _serve_idle(conn: "socket.socket") -> None:
     except Exception:
         pass
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close_gracefully(conn)
 
 
 def _bg_accept_loop() -> None:

@@ -74,6 +74,28 @@ class PortBusyAtStartupTest(unittest.TestCase):
             self.assertIsNotNone(self.mod._server_sock)
             self.zbc.freeze.assert_called_once()
 
+    def test_answers_reach_client_and_ping_says_publishing(self):
+        # Freeze-loop handler: the answer must arrive (graceful close, no RST), and a
+        # ping says "publishing" so FLUX opens its Publisher page.
+        import json
+        self.zbc.press.return_value = None
+        for payload, expected in (
+            ({"action": "ping"}, {"status": "ok", "version": "ZBrush 2026", "publishing": True}),
+            ({"action": "export_ztl", "path": "C:/tmp/a.ztl"}, {"status": "ok", "path": "C:/tmp/a.ztl"}),
+        ):
+            server, client = socket.socketpair()
+            client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            self.assertFalse(self.mod._recv_and_dispatch(server))
+            client.settimeout(2.0)
+            data = b""
+            while True:
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            client.close()
+            self.assertEqual(json.loads(data.split(b"\n")[0]), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

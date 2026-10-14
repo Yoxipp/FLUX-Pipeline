@@ -488,6 +488,8 @@ async def ping_dcc(dcc_key: str) -> dict:
         answer = {"connected": bool(result.get("ok", False)), "version": result.get("version")}
         if result.get("busy"):
             answer["busy"] = True          # e.g. Mari exporting: reachable, just not answering
+        if result.get("publishing"):
+            answer["publishing"] = True    # ZBrush: Export FLUX clicked, waiting for the Publisher
         _ping_cache[dcc_key] = (time.monotonic(), answer)
         if dcc_key == "houdini":
             _on_houdini_ping(answer["connected"])

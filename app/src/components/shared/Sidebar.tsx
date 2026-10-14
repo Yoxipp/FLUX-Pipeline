@@ -384,25 +384,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     }
   }, [psBusy, psReason])
 
-  // Poll ZBrush bridge when plugin is installed.
-  // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
-  // 8s while connected (avoid spamming ZBrush during freeze).
-  const zbrushOkRef = useRef(zbrushServerOk)
-  useEffect(() => { zbrushOkRef.current = zbrushServerOk }, [zbrushServerOk])
+  // Poll ZBrush bridge when plugin is installed, every 1.5s: the bridge answers pings
+  // without touching ZBrush, and an Export FLUX click must open the Publisher quickly.
+  const [zbrushPublishing, setZbrushPublishing] = useState(false)
   useEffect(() => {
-    if (!autostartInstalled.zbrush) { setZbrushServerOk(null); return }
+    if (!autostartInstalled.zbrush) { setZbrushServerOk(null); setZbrushPublishing(false); return }
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
     const poll = () => {
       api.pingDcc('zbrush')
-        .then(p  => { if (!cancelled) setZbrushServerOk(p.connected) })
-        .catch(() => { if (!cancelled) setZbrushServerOk(false) })
-        .finally(() => {
-          if (!cancelled) {
-            const delay = zbrushOkRef.current === true ? 8000 : 1500
-            timer = setTimeout(poll, delay)
-          }
-        })
+        .then(p  => { if (!cancelled) { setZbrushServerOk(p.connected); setZbrushPublishing(!!p.publishing) } })
+        .catch(() => { if (!cancelled) { setZbrushServerOk(false); setZbrushPublishing(false) } })
+        .finally(() => { if (!cancelled) timer = setTimeout(poll, 1500) })
     }
     poll()
     return () => { cancelled = true; clearTimeout(timer) }
@@ -413,14 +406,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const prevZbrushOkToast  = useRef<boolean | null | undefined>(undefined)
   const prevMayaOkToast    = useRef<boolean | null | undefined>(undefined)
 
-  // Auto-navigate to Publisher on ZBrush freeze detected (null/false → true transition)
-  const prevZbrushOk = useRef<boolean | null>(null)
+  // Auto-navigate to the Publisher (ZBrush selected) when Export FLUX is clicked in
+  // ZBrush: the bridge answers "publishing" while it waits in its freeze loop.
+  const prevZbrushPublishing = useRef(false)
   useEffect(() => {
-    if (zbrushServerOk === true && prevZbrushOk.current !== true) {
-      if (pathname !== '/publisher') navigate('/publisher', { state: { zbrushConnected: true } })
+    if (zbrushPublishing && !prevZbrushPublishing.current) {
+      navigate('/publisher', { state: { zbrushConnected: true } })
     }
-    prevZbrushOk.current = zbrushServerOk
-  }, [zbrushServerOk, navigate, pathname])
+    prevZbrushPublishing.current = zbrushPublishing
+  }, [zbrushPublishing, navigate])
 
   // Server status toasts — only on transitions, skip very first render
   useEffect(() => {

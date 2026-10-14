@@ -203,7 +203,7 @@ export const api = {
     apiCall<{ dcc: string; launched: boolean }>('POST', '/dcc/launch', { dcc, exe_path }),
 
   pingDcc: (dcc: string) =>
-    apiCall<{ connected: boolean; version: string | null }>('GET', `/dcc/${dcc}/ping`),
+    apiCall<{ connected: boolean; version: string | null; busy?: boolean; publishing?: boolean }>('GET', `/dcc/${dcc}/ping`),
 
   // Photoshop (COM, no in-app plugin): actionable state + library bootstrap.
   photoshopStatus: () =>
