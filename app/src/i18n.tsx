@@ -49,6 +49,7 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'settings.user':           { fr: 'UTILISATEUR',              en: 'USER' },
   'settings.workspace':      { fr: 'WORKSPACE',                en: 'WORKSPACE' },
   'settings.changeDir':      { fr: 'Changer de répertoire…',   en: 'Change directory…' },
+  'settings.addDir':         { fr: 'Ajouter un répertoire…',   en: 'Add directory…' },
   'settings.changing':       { fr: 'Changement…',              en: 'Changing…' },
   'settings.accent':         { fr: "COULEUR D'ACCENT",         en: 'ACCENT COLOR' },
   'settings.dccs':           { fr: 'LOGICIELS',                en: 'SOFTWARE' },

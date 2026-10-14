@@ -89,8 +89,57 @@ def get_flux_root() -> Path | None:
 
 
 def set_flux_root(path: Path | str) -> None:
-    """Persist workspace path to config.json next to the exe."""
-    _update_config_json("workspace", str(Path(path)))
+    """Persist workspace path to config.json next to the exe.
+
+    The new root is also registered in the known FLUX directories list, so the
+    one active root is always one of the listed ones.
+    """
+    data = _read_config_json()
+    data["workspace"] = str(Path(path))
+    data["workspaces"] = _with_root(data.get("workspaces"), data["workspace"])
+    _write_config_json(data)
+
+
+# ── Known FLUX directories (config.json, per machine) ────────────────────────
+# Several FLUX roots can be registered on a machine; exactly one is active (the
+# "workspace" key above). Registering or forgetting a root never touches files.
+
+def same_root(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def _with_root(roots: object, root: str) -> list[str]:
+    known = [str(r) for r in roots] if isinstance(roots, list) else []
+    if not any(same_root(r, root) for r in known):
+        known.append(root)
+    return known
+
+
+def get_flux_roots() -> list[str]:
+    """Return the registered FLUX directories, the active one always included."""
+    data = _read_config_json()
+    known = [str(r) for r in data.get("workspaces") or [] if r]
+    active = data.get("workspace")
+    return _with_root(known, str(Path(active))) if active else known
+
+
+def add_flux_root(path: Path | str) -> list[str]:
+    """Register a FLUX directory without activating it. Return the new list."""
+    data = _read_config_json()
+    data["workspaces"] = _with_root(get_flux_roots(), str(Path(path)))
+    _write_config_json(data)
+    return data["workspaces"]
+
+
+def remove_flux_root(path: Path | str) -> list[str]:
+    """Forget a FLUX directory (no file is deleted). The active one is refused."""
+    active = get_flux_root()
+    if active and same_root(str(active), str(path)):
+        raise ValueError("Cannot remove the active FLUX directory")
+    data = _read_config_json()
+    data["workspaces"] = [r for r in get_flux_roots() if not same_root(r, str(path))]
+    _write_config_json(data)
+    return data["workspaces"]
 
 
 # ── Metadata backend selection (config.json, bootstrap) ──────────────────────

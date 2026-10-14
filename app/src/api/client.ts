@@ -28,6 +28,11 @@ import type {
 
 const BASE_URL = 'http://127.0.0.1:8765'
 
+export interface WorkspacesInfo {
+  active: string | null
+  workspaces: { path: string; exists: boolean; active: boolean }[]
+}
+
 export interface LogRecord {
   id:      number
   ts:      number
@@ -155,6 +160,17 @@ export const api = {
     username: string; workspace: string; language: 'fr' | 'en'
     log_colors: Record<string, string>
   }>) => apiCall<{ success: boolean }>('PUT', '/settings', patch),
+
+  // Known FLUX directories on this machine; exactly one is active (activate it with
+  // updateSettings({ workspace })).
+  listWorkspaces: () =>
+    apiCall<WorkspacesInfo>('GET', '/settings/workspaces'),
+
+  addWorkspace: (path: string) =>
+    apiCall<WorkspacesInfo>('POST', '/settings/workspaces', { path }),
+
+  removeWorkspace: (path: string) =>
+    apiCall<WorkspacesInfo>('POST', '/settings/workspaces/remove', { path }),
 
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
