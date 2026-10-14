@@ -48,7 +48,7 @@ export function ProdBtn({
       title={title}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        fontFamily: 'var(--sans)', fontSize: fs, fontWeight: variant === 'ghost' ? 500 : 600,
+        fontFamily: 'var(--sans)', fontSize: fs, fontWeight: variant === 'ghost' ? 500 : 700,
         color: fg, background: bg,
         border: `1px solid ${bd}`,
         borderRadius: 6, padding: pad,

@@ -172,7 +172,7 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
-  font-weight: 600;
+  font-weight: 700;
   box-shadow: var(--shadow-xs);
 }
 .btn.primary:hover {
@@ -289,13 +289,12 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .production-nav-row > .nav:hover, .production-nav-children > .nav:hover { transform: none; }
 .nav:hover .glyph { color: var(--ink-2); }
 .nav.active {
-  color: var(--ink);
-  border-left-color: var(--rule-3);
-  background: var(--accent-soft);
-  font-weight: 500;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  color: var(--on-accent);
+  border-left-color: var(--accent);
+  background: var(--accent);
+  font-weight: 700;
 }
-.nav.active .glyph { color: var(--accent); }
+.nav.active .glyph, .nav.active:hover .glyph { color: var(--on-accent); }
 
 /* ─── drag regions ── */
 .drag-region { -webkit-app-region: drag; }
@@ -431,7 +430,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
   height: 28px; padding: 0 8px 0 9px;
   border: 1px solid var(--rule-3); border-radius: 6px;
   background: var(--accent); color: var(--on-accent); border-color: var(--accent);
-  font: 600 11px var(--sans); cursor: pointer; white-space: nowrap;
+  font: 700 11px var(--sans); cursor: pointer; white-space: nowrap;
   box-shadow: var(--shadow-xs); outline: none;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
@@ -502,7 +501,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 }
 .dcc-play:hover:not(:disabled) { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
 .dcc-play:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
-.dcc-play.live { color: var(--on-accent); border-color: var(--accent); background: var(--accent); font-weight: 600; }
+.dcc-play.live { color: var(--on-accent); border-color: var(--accent); background: var(--accent); font-weight: 700; }
 .dcc-play:disabled { cursor: default; opacity: .7; }
 .dcc-gear {
   flex: 1; min-width: 0; height: 24px; display: inline-flex; align-items: center; justify-content: center;

@@ -29,7 +29,7 @@ const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: strin
       width: 40, height: 40, borderRadius: 9,
       border: primary ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
       background: primary ? 'var(--accent)' : 'var(--paper)',
-      color: primary ? 'var(--on-accent)' : 'var(--ink-3)', fontWeight: primary ? 600 : undefined,
+      color: primary ? 'var(--on-accent)' : 'var(--ink-3)', fontWeight: primary ? 700 : undefined,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       boxShadow: 'var(--shadow-sm)',
       transition: 'box-shadow 0.12s',

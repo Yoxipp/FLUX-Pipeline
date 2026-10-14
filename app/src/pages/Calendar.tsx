@@ -87,7 +87,7 @@ const btn = (primary = false, danger = false): CSSProperties => ({
   borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--sans)',
   border: `1px solid ${danger ? 'var(--err)' : primary ? 'var(--accent)' : 'var(--rule-2)'}`,
   background: primary && !danger ? 'var(--accent)' : 'var(--paper-2)',
-  fontWeight: primary && !danger ? 600 : undefined,
+  fontWeight: primary && !danger ? 700 : undefined,
   color: danger ? 'var(--err)' : primary ? 'var(--on-accent)' : 'var(--accent-hi)',
 })
 const input: CSSProperties = {
