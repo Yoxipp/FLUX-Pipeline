@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -76,6 +77,9 @@ def _cached_modif_logs(folder) -> list[dict]:
     return logs
 
 
+_VERSION_IN_FILE = re.compile(r"_(v\d{3,})(?=\.|$)")
+
+
 def _attach_publish_comments(project_path, publishes_by_task: dict) -> None:
     """Attach each publish's modif-log comment as event['description'] (in place).
 
@@ -111,12 +115,18 @@ def _attach_publish_comments(project_path, publishes_by_task: dict) -> None:
                 continue
             folder = project_path / rel
             for cand in (folder, folder.parent, folder.parent.parent):
-                logs = [e for e in _cached_modif_logs(cand) if str(e.get("name", "")).startswith(base)]
+                logs = [e for e in _cached_modif_logs(cand)
+                        if str(e.get("name", "")) == base or str(e.get("name", "")).startswith(base + "_")]
                 if not logs:
                     continue
-                exact = next((e for e in logs
-                              if e.get("date") == ev.get("date") and e.get("time") == ev.get("time")), None)
-                desc = (exact or logs[0]).get("modification", "") or ""
+                # The version in the file name is the reliable key: the log and the
+                # event are timestamped separately and can straddle a minute.
+                ver = _VERSION_IN_FILE.search(fname)
+                exact = next((e for e in logs if ver and e.get("version") == ver.group(1)), None) or \
+                    next((e for e in logs
+                          if e.get("date") == ev.get("date") and e.get("time") == ev.get("time")), None)
+                # No match: leave it unset rather than borrow another version's note.
+                desc = ((exact or {}).get("modification", "") if ver else (exact or logs[0]).get("modification", "")) or ""
                 if desc:
                     ev["description"] = desc
                 break
