@@ -16,6 +16,15 @@ from features.publisher.publish_core import resolve_publish_path
 MAX_SHOWN = 2
 
 
+def _last_label(dest: Path, base: str, ext: str) -> str | None:
+    """vNNN a LAST points to; a pre-0017 LAST (no metadata) falls back to its top vNNN."""
+    label = pl.last_version_label(dest, base, ext)
+    if label:
+        return label
+    top = pl.highest_flat_version(dest, base, ext)
+    return format_version(top) if top else None
+
+
 def destination_preview(project_path: Path, base: str, ext: str, sequence: bool = False) -> dict | None:
     """Return the Destination card data for *base* + *ext*, or None if unresolvable."""
     ext = ext if ext.startswith(".") else f".{ext}"
@@ -69,5 +78,8 @@ def destination_preview(project_path: Path, base: str, ext: str, sequence: bool 
         "first": not entries,
         "last_exists": f"{base}_{ACTIVE_VERSION_LABEL}{ext}" in entries,
         "existing": picked,
+        # vNNN each shown LAST points to: makes the per-format lineage readable.
+        "existing_versions": {n: _last_label(dest, base, n[len(base) + len(ACTIVE_VERSION_LABEL) + 1:])
+                              for n in picked if f"_{ACTIVE_VERSION_LABEL}." in n},
         "more": len(rest),
     }

@@ -41,6 +41,8 @@ class DestinationPreviewTests(unittest.TestCase):
         self.assertTrue(info["last_exists"])
         self.assertEqual(info["existing"], [f"{BASE}_v002.mb", f"{BASE}_LAST.usd"])
         self.assertEqual(info["more"], 3)
+        # The other format's LAST shows its own lineage (pre-0017 copy: its top vNNN).
+        self.assertEqual(info["existing_versions"][f"{BASE}_LAST.usd"], "v001")
 
     def test_unresolved(self):
         with mock.patch.object(dp, "resolve_publish_path", return_value=None):

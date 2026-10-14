@@ -130,6 +130,7 @@ export interface PublishDestination {
   first: boolean
   last_exists: boolean
   existing: string[]
+  existing_versions?: Record<string, string | null>
   more: number
 }
 

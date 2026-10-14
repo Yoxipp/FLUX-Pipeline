@@ -115,7 +115,7 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
           {(dest.existing.length > 0 || dest.more > 0) && (
             <div style={{ height: 1, background: 'var(--rule)', margin: '4px 6px' }} />
           )}
-          {dest.existing.map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} />)}
+          {dest.existing.map(n => <Row key={n} name={n} kind="old" link={n.includes('_LAST')} note={dest.existing_versions?.[n] ?? undefined} />)}
           {dest.more > 0 && (
             <div style={{ padding: '3px 6px', fontSize: 9.5, color: 'var(--ink-4)' }}>+ {dest.more}</div>
           )}
