@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import type { ProductionState, ProductionTask, Settings } from '../../types'
-import { detailStatus, STATUS_LABELS, STATUS_TOKENS, taskStatus } from './tracking'
+import { assigneeIncludes, detailStatus, STATUS_LABELS, STATUS_TOKENS, taskStatus } from './tracking'
 import { taskPublisherPrefill, type TaskEntity } from './taskActions'
 import { applyTaskSelection, type TaskActionTarget } from './taskSelection'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
@@ -54,7 +54,10 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
     const targetKey = `${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`
     return target.entity.task_details?.[targetKey]?.assignee ?? target.entity.task_details?.[target.task.name.toUpperCase()]?.assignee ?? ''
   }))]
-  const menuArtist = targetArtists.length === 1 ? targetArtists[0] || 'Aucun artiste assigné' : 'Plusieurs artistes'
+  const menuArtist = targetArtists.length === 1 ? targetArtists[0] || 'Aucun artiste assigné' : 'Artistes différents'
+  const assignedToAll = (name: string) => targets.every(target => assigneeIncludes(target.entity.task_details?.[`${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`]?.assignee, name))
+  // Several artists per task: a click in the list toggles that artist, the dialog stays open.
+  const toggleArtist = (name: string) => setState(prev => applyTaskSelection(prev, targets, { kind: assignedToAll(name) ? 'artist_remove' : 'artist_add', value: name }))
   const description = multiple ? `${targets.length} tâches sélectionnées` : `${entity.name} · ${task.name}${subtask ? ` · ${subtask}` : ''}`
   const showMenu = (x: number, y: number) => {
     if (disabled) return
@@ -72,7 +75,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
     try {
       const current = settings ?? await api.getSettings()
       if (!current.username?.trim()) { toast.error('Renseignez votre nom d’artiste dans les paramètres.'); return }
-      assign(current.username)
+      setState(prev => applyTaskSelection(prev, targets, { kind: 'artist_add', value: current.username! }))
     } catch { toast.error('Impossible de charger votre profil.') }
   }
   const folder = async () => {
@@ -143,10 +146,10 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
       <div className="production-dialog-actions"><Dialog.Close>Annuler</Dialog.Close><button onClick={() => { setState(prev => applyTaskSelection(prev, targets, { kind: 'clear' })); setRemoveOpen(false) }}>Supprimer</button></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
     <Dialog.Root open={assignOpen} onOpenChange={setAssignOpen}><Dialog.Portal><Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog" onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>
-      <div className="production-dialog-heading"><Dialog.Title>Assigner artiste</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div>
-      <Dialog.Description>{description}</Dialog.Description>
+      <div className="production-dialog-heading"><Dialog.Title>Assigner artistes</Dialog.Title><Dialog.Close aria-label="Fermer"><X size={16} /></Dialog.Close></div>
+      <Dialog.Description>{description}. Cliquez plusieurs artistes pour les ajouter ou les retirer.</Dialog.Description>
       <input autoFocus aria-label="Rechercher un artiste" placeholder="Rechercher un artiste…" value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="production-artist-list">{loading ? <p>Chargement…</p> : error ? <p role="alert">{error}<button onClick={() => void pickArtist()}>Réessayer</button></p> : <>{users.filter(u => u.toLowerCase().includes(search.toLowerCase())).map(user => <button key={user} onClick={() => assign(user)}><UserRound size={14} /><span>{user}</span>{targetArtists.length === 1 && targetArtists[0] === user && <Check size={14} />}</button>)}{!users.filter(u => u.toLowerCase().includes(search.toLowerCase())).length && <p>Aucun artiste trouvé.</p>}<button onClick={() => assign('')}>Retirer l’assignation</button></>}</div>
+      <div className="production-artist-list">{loading ? <p>Chargement…</p> : error ? <p role="alert">{error}<button onClick={() => void pickArtist()}>Réessayer</button></p> : <>{users.filter(u => u.toLowerCase().includes(search.toLowerCase())).map(user => <button key={user} aria-pressed={assignedToAll(user)} onClick={() => toggleArtist(user)}><UserRound size={14} /><span>{user}</span>{assignedToAll(user) && <Check size={14} />}</button>)}{!users.filter(u => u.toLowerCase().includes(search.toLowerCase())).length && <p>Aucun artiste trouvé.</p>}<button onClick={() => assign('')}>Retirer l’assignation</button></>}</div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </>
 }

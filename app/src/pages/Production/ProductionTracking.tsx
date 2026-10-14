@@ -8,7 +8,7 @@ import { api } from '../../api/client'
 import { useSettings } from '../../hooks/useSettings'
 import type { ProductionDependency, ProductionState, ProductionTask, ProductionThumbnail } from '../../types'
 import type { Selection } from './Production'
-import { blockers, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
+import { blockers, dependencyLabel, effectiveCasting, effectiveTasks, ensureTrackingTask, assigneeIncludes, taskAssignedTo, trackingTaskStatus, trackingDepartments, trackingLocked } from './tracking'
 import type { TrackingEntity } from './tracking'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { EntityContextMenu } from './EntityContextMenu'
@@ -64,6 +64,14 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   const [previewSource, setPreviewSource] = usePreviewSource()
   const { t } = useI18n()
   const [taskSelection, setTaskSelection] = useState(emptyTaskSelection)
+  // Shift + press and drag across badges adds every crossed task to the selection.
+  const dragSelect = useRef<{ moved: boolean; start: string } | null>(null)
+  useEffect(() => {
+    const stop = () => { if (dragSelect.current) setTimeout(() => { dragSelect.current = null }, 0) }
+    window.addEventListener('mouseup', stop)
+    return () => window.removeEventListener('mouseup', stop)
+  }, [])
+  const addToSelection = (key: string) => setTaskSelection(prev => prev.keys.includes(key) ? prev : { keys: [...prev.keys, key], anchor: key })
   // New 100% baseline is 90% of the original interface. Old saved zoom is retired.
   const [zoom, setZoom] = useState(1)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -209,7 +217,9 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                 const editable = !trackingLocked(state, entity) || entity.tasks.some(own => own.name.toUpperCase() === task.name.toUpperCase())
                 const taskKey = taskSelectionKey({ entity, task })
                 const taskSelected = selectedKeys.has(taskKey)
-                return <div key={task.name} className="tracking-task-slot" data-task-selected={taskSelected || undefined}>
+                return <div key={task.name} className="tracking-task-slot" data-task-selected={taskSelected || undefined}
+                  onMouseDownCapture={event => { if (event.button === 0 && event.shiftKey) { event.preventDefault(); dragSelect.current = { moved: false, start: taskKey } } }}
+                  onMouseEnter={() => { if (dragSelect.current) { if (!dragSelect.current.moved) { dragSelect.current.moved = true; addToSelection(dragSelect.current.start) } addToSelection(taskKey) } }}>
                   <div className="tracking-task-meta">{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}
                     {status && blocked.length > 0 && <Tooltip scale={0.9 * zoom}><TooltipTrigger asChild><button className="tracking-need" aria-label={`Dépendances requises : ${blocked.join(', ')}`}>NEED</button></TooltipTrigger><TooltipContent>{[...new Set(blocked)].map(label => <div key={label}>{label}</div>)}</TooltipContent></Tooltip>}
                   </div>
@@ -218,6 +228,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                   actionTargets={taskSelected ? selectedTargets : undefined}
                   selectionControl={{ label: `Sélection de ${entity.name} · ${task.name}`, selected: taskSelected, onClick: event => {
                     const additive = event.ctrlKey || event.metaKey
+                    if (dragSelect.current?.moved) return
                     if (additive || event.shiftKey) setTaskSelection(prev => selectProductionTask(prev, visibleTargets, taskKey, additive, event.shiftKey))
                     else setTaskSelection(emptyTaskSelection())
                   } }}
@@ -238,7 +249,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                   <TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={row.task} subtask={row.subtask}
                     statuses={dep.statuses} tooltipScale={0.9 * zoom}
                     onClick={editable ? () => { setState(prev => ensureTrackingTask(prev, entity.id, row.task)); onOpenDetail(selectEntity(entity), row.task, row.subtask) } : undefined} />
-                  <div className="tracking-task-artist">{entity.task_details?.[`${row.task.name.toUpperCase()}|${row.subtask.toUpperCase()}`]?.assignee?.trim().toUpperCase() === username.trim().toUpperCase() && username.trim() && <UserRound size={12} className="tracking-assigned-user" aria-label="Cette sous-tâche vous est assignée" />}</div>
+                  <div className="tracking-task-artist">{assigneeIncludes(entity.task_details?.[`${row.task.name.toUpperCase()}|${row.subtask.toUpperCase()}`]?.assignee, username) && <UserRound size={12} className="tracking-assigned-user" aria-label="Cette sous-tâche vous est assignée" />}</div>
                 </div></div>}</td>)}
             </tr>
           })}

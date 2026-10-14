@@ -19,7 +19,7 @@ export function DepartmentSortMenu({ department, sort, onSort, setState }: { dep
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
   const sorted = sort?.id === department.id
   return <>
-    <button className="tracking-department-heading" aria-label={`Trier ${department.name}`} onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
+    <button className="tracking-department-heading" aria-label={`Actions ${department.name}`} title="Clic gauche ou droit : trier, assigner" onClick={e => { setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }} onContextMenu={e => { e.preventDefault(); setAnchor({ x: e.clientX, y: e.clientY }); setOpen(true) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const rect = viewportRect(e.currentTarget); setAnchor({ x: rect.left, y: rect.bottom }); setOpen(true) } }}>{department.name}{sorted && <ArrowDownWideNarrow size={12} />}</button>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>{createPortal(<Menu.Trigger tabIndex={-1} aria-hidden style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" align="start" collisionPadding={10}>

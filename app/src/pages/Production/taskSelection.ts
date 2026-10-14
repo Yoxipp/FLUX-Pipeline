@@ -1,7 +1,7 @@
 import type { ProductionDepartment, ProductionState, ProductionTask } from '../../types'
 import { patchTaskPriority, type Priority } from './taskPriority'
 import { clearTaskBadge, patchTaskArtist, setTaskStatus, type TaskEntity } from './taskActions'
-import { departmentTasks, taskAssignedTo, type TrackingEntity } from './tracking'
+import { assigneeList, departmentTasks, taskAssignedTo, type TrackingEntity } from './tracking'
 
 export interface TaskActionTarget {
   entity: TaskEntity
@@ -59,7 +59,7 @@ export function selectProductionTask(selection: TaskSelection, targets: TaskActi
   }
 }
 
-export type TaskBatchAction = { kind: 'artist'; value: string } | { kind: 'status'; value: string } | { kind: 'clear' }
+export type TaskBatchAction = { kind: 'artist'; value: string } | { kind: 'artist_add' | 'artist_remove'; value: string } | { kind: 'status'; value: string } | { kind: 'clear' }
   | { kind: 'priority'; value: Priority }
 
 /** One state patch/save for the whole selection, without overwriting other review fields. */
@@ -72,6 +72,11 @@ export function applyTaskSelection(state: ProductionState, targets: TaskActionTa
     const entity = [...next.shots, ...next.assets, ...next.sequences].find(item => item.id === target.entity.id)
     if (!entity) return next
     if (action.kind === 'artist') return patchTaskArtist(next, entity.id, target.task, target.subtask ?? '', action.value)
+    if (action.kind === 'artist_add' || action.kind === 'artist_remove') {
+      const own = assigneeList(entity.task_details?.[`${target.task.name.toUpperCase()}${target.subtask ? `|${target.subtask.toUpperCase()}` : ''}`]?.assignee)
+      const rest = own.filter(name => name.toUpperCase() !== action.value.trim().toUpperCase())
+      return patchTaskArtist(next, entity.id, target.task, target.subtask ?? '', (action.kind === 'artist_add' ? [...rest, action.value.trim()] : rest).join(', '))
+    }
     if (action.kind === 'clear') return clearTaskBadge(next, entity.id, target.task, target.subtask ?? '')
     if (action.kind === 'priority') return patchTaskPriority(next, entity.id, target.task, target.subtask ?? '', action.value)
     if (target.statuses && !target.statuses.includes(action.value)) return next

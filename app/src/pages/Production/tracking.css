@@ -204,3 +204,6 @@
 .timeline-montage-strip button.current { opacity:1; outline:2px solid var(--accent); outline-offset:1px; }
 .tracking-status[data-empty] .tracking-empty-add { color:var(--ink-2); opacity:.55; }
 .tracking-task-slot:hover .tracking-status[data-empty] .tracking-empty-add { opacity:1; }
+.production-tracking button.tracking-department-heading { cursor:pointer; transition:transform .15s ease; }
+.production-tracking button.tracking-department-heading:hover { transform:scale(1.08); }
+@media (prefers-reduced-motion: reduce) { .production-tracking button.tracking-department-heading { transition:none; } }
