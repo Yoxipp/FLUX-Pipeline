@@ -243,11 +243,9 @@ function ConfirmDelete({ title, onCancel, onConfirm }: { title: string; onCancel
 }
 
 // ── span mark (2026-10-09) ───────────────────────────────────────────────
-// A task over several days is one continuous thin line in month view: it runs edge to edge
-// through the cells (negative margins over the cell padding) and only stops inside the
-// start and end days. Two small tabs hang under the line with an arrow (head and end); the
-// head tab follows today once the task has started. A tab unfolds the task into a lighter band
-// under the line. Every task starts folded, one-day tasks too (a short line in their cell).
+// A task is a filled grey bar running edge to edge through its days (2026-10-14, was a
+// thin line with tabs): a left edge in the status color, the name inside on the first day and
+// again at the start of each week. Double-click unfolds it into a band with owner and note.
 function spanHead(it: CalendarItem, today: string) {
   return it.start < today && today <= it.end ? today : it.start
 }
@@ -263,9 +261,12 @@ function bandNoteRows(it: CalendarItem, noteLines: number) {
 
 // Height of a span mark in a cell: the same on every day of an unfolded task, so its band
 // stays continuous from cell to cell.
-function spanMarkHeight(it: CalendarItem, day: string, today: string, open: boolean, noteLines: number) {
+// Folded task = a filled bar (2026-10-14): 16 px with the name inside, 6 px in dense mode.
+const BAR_H = 16
+const BAR_H_DENSE = 6
+function spanMarkHeight(it: CalendarItem, _day: string, _today: string, open: boolean, noteLines: number, dense = false) {
   if (open) return 4 + BAND_BASE + bandNoteRows(it, noteLines) * NOTE_ROW
-  return day === spanHead(it, today) ? 26 : 14
+  return dense ? BAR_H_DENSE : BAR_H
 }
 
 function SpanTab({ color, side, open, onExpand, label }: { color: string; side: 'left' | 'right'; open: boolean; onExpand: () => void; label: string }) {
@@ -282,8 +283,8 @@ function SpanTab({ color, side, open, onExpand, label }: { color: string; side: 
   )
 }
 
-function SpanMark({ it, day, today, selected, open, noteLines, onClick, onExpand }: {
-  it: CalendarItem; day: string; today: string; selected: boolean; open: boolean; noteLines: number; onClick: () => void; onExpand: () => void
+function SpanMark({ it, day, today, selected, open, noteLines, dense, onClick, onExpand }: {
+  it: CalendarItem; day: string; today: string; selected: boolean; open: boolean; noteLines: number; dense: boolean; onClick: () => void; onExpand: () => void
 }) {
   const { l, tr } = useTr()
   const proposed = it.status === 'proposed'
@@ -297,7 +298,29 @@ function SpanMark({ it, day, today, selected, open, noteLines, onClick, onExpand
   // Unfolded: a lighter band glued under the line, continuous like it; every day of the span
   // writes the task in it (2026-10-10), clear of the tabs. The tabs stay, the arrow turns up.
   const noteRows = bandNoteRows(it, noteLines)
-  const height = spanMarkHeight(it, day, today, open, noteLines)
+  const height = spanMarkHeight(it, day, today, open, noteLines, dense)
+  // The name shows on the first day and again at the start of each week the task runs into.
+  const weekStart = new Date(day + 'T00:00:00').getDay() === 1
+  const labelled = isStart || weekStart
+  if (!open) {
+    return (
+      <div onMouseDown={e => e.stopPropagation()}
+           onClick={e => { e.stopPropagation(); onClick() }}
+           onDoubleClick={e => { e.stopPropagation(); onExpand() }}
+           title={`${title}
+${unfold} (double-clic)`}
+           style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height, boxSizing: 'border-box',
+                    marginLeft: isStart ? 0 : -CELL_PAD, marginRight: isEnd ? 0 : -CELL_PAD,
+                    background: selected ? 'var(--rule-3)' : 'var(--paper-2)',
+                    borderLeft: isStart ? `3px solid ${color}` : weekStart ? `3px dashed ${color}` : undefined,
+                    borderRadius: `${isStart ? 3 : 0}px ${isEnd ? 3 : 0}px ${isEnd ? 3 : 0}px ${isStart ? 3 : 0}px`,
+                    padding: dense ? 0 : '0 6px', fontSize: 11, lineHeight: `${height}px`, color: 'var(--ink)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    opacity: it.status === 'declined' ? 0.45 : 1 }}>
+        {!dense && labelled ? it.title : null}
+      </div>
+    )
+  }
   return (
     <div onMouseDown={e => e.stopPropagation()}
          onClick={e => { e.stopPropagation(); onClick() }}
@@ -307,7 +330,7 @@ function SpanMark({ it, day, today, selected, open, noteLines, onClick, onExpand
                   opacity: it.status === 'declined' ? 0.45 : 1 }}>
       <span style={{ position: 'absolute', top: 2, left: 0, right: 0, height: 2, background: color,
                      borderRadius: `${isStart ? 1 : 0}px ${isEnd ? 1 : 0}px ${isEnd ? 1 : 0}px ${isStart ? 1 : 0}px`,
-                     boxShadow: selected ? '0 0 0 1px var(--accent)' : undefined }} />
+                     boxShadow: selected ? '0 0 0 1px var(--rule-3)' : undefined }} />
       {open && (
         <span style={{ position: 'absolute', top: 4, ...inset, bottom: 0,
                        background: `color-mix(in oklch, ${color} 20%, transparent)` }} />
@@ -388,6 +411,7 @@ function Chip({ it, selected, onClick, full, noteLines = 0 }: { it: CalendarItem
 // ── publishes of a day (2026-09-30): one band, unfolded into time / person / file ──
 const PUB_COLOR = 'var(--prod-shot)'
 const PUB_KEY = 'flux.calendar.publishes'
+const DENSE_KEY = 'flux.calendar.dense'
 
 // Unfolded list: an opaque card over the grid (never clipped by the cell), spread over
 // 2-3 columns when a day has many publishes (2026-09-30), kept inside the window.
@@ -781,6 +805,12 @@ export function Calendar() {
   const [drag, setDrag] = useState<{ a: string; b: string } | null>(null)
   // Publishes on the calendar: a checkbox (remembered on this machine), one band per day.
   const [showPub, setShowPub] = useState<boolean>(() => { try { return localStorage.getItem(PUB_KEY) === '1' } catch { return false } })
+  // Dense mode (2026-10-14): thin bars without names, many more tasks per cell.
+  const [dense, setDenseRaw] = useState<boolean>(() => { try { return localStorage.getItem(DENSE_KEY) === '1' } catch { return false } })
+  const setDense = (on: boolean) => {
+    setDenseRaw(on)
+    try { localStorage.setItem(DENSE_KEY, on ? '1' : '0') } catch { /* private mode */ }
+  }
   const [pubs, setPubs] = useState<CalendarPublish[]>([])
   const togglePub = (on: boolean) => {
     setShowPub(on)
@@ -973,6 +1003,11 @@ export function Calendar() {
             <input type="checkbox" checked={showPub} onChange={e => togglePub(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
             {tr('Publishs', 'Publishes')}
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer' }}
+                 title={tr('Barres fines sans nom, plus de tâches par case', 'Thin bars without names, more tasks per cell')}>
+            <input type="checkbox" checked={dense} onChange={e => setDense(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+            {tr('Dense', 'Dense')}
+          </label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} title={tr('Zoom (Ctrl + molette)', 'Zoom (Ctrl + wheel)')}>
             <button style={{ ...btn(), padding: 4 }} disabled={zoom <= ZOOM_MIN} onClick={() => setZoom(z => z - ZOOM_STEP)}
                     aria-label={tr('Dézoomer', 'Zoom out')}><ZoomOut size={12} /></button>
@@ -996,11 +1031,6 @@ export function Calendar() {
           {days.map((d, i) => {
             const day = iso(d)
             const list = itemsOn(day)
-            // 2026-10-01: an accent stair line follows "today" in the grid, between
-            // the past and today / the days to come (top of today's week, left of today).
-            const weekBefore = iso(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7))
-            const lineTop = view === 'month' && day >= today && weekBefore < today
-            const lineLeft = view === 'month' && day === today && i % 7 !== 0
             const weekend = d.getDay() === 0 || d.getDay() === 6
             const past = day < today
             // 2026-09-30: weekends and past days dark, days to come light.
@@ -1029,7 +1059,7 @@ export function Calendar() {
                 const a = it.start > weekDays[0] ? it.start : weekDays[0]
                 const b = it.end < weekDays[6] ? it.end : weekDays[6]
                 const h = Math.max(...weekDays.filter(x => a <= x && x <= b)
-                  .map(x => spanMarkHeight(it, x, today, unfolded.has(it.id), noteLines)))
+                  .map(x => spanMarkHeight(it, x, today, unfolded.has(it.id), noteLines, dense)))
                 const top = placed.filter(p => p.a <= b && a <= p.b).reduce((m, p) => Math.max(m, p.top + p.h + GAP), 0)
                 placed.push({ it, top, h, a, b })
                 lanes.set(it.id, { top, h })
@@ -1050,19 +1080,19 @@ export function Calendar() {
                    title={tr('Clic ou clic-glisser sur plusieurs jours pour ajouter une tâche', 'Click, or click and drag over several days, to add a task')}
                    style={{
                      userSelect: 'none',
-                     boxShadow: inSpan ? 'inset 0 0 0 1px var(--accent)' : undefined,
+                     
                      // Light cells sit almost on --rule, so their grid lines go dark grey (2026-10-09).
                      borderRight: `1px solid ${dark ? 'var(--rule)' : 'var(--bg-deep)'}`,
                      borderBottom: `1px solid ${dark ? 'var(--rule)' : 'var(--bg-deep)'}`, padding: 5,
                      display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, cursor: 'copy',
                      background: cellBg, overflow: 'hidden', position: 'relative',
                    }}>
-                {lineTop && <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
-                {lineLeft && <span style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
                 <div style={{ fontSize: 11.5, fontWeight: day === today ? 700 : 500, paddingRight: dayPubs.length ? 30 : 0,
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0,
                               color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--accent-hi)' }}>
-                  {view === 'week' ? shortDate(day, l) : d.getDate()}
+                  <span style={day === today ? { background: 'var(--accent)', color: 'var(--bg-deep)', borderRadius: 4, padding: '0 5px' } : undefined}>
+                    {view === 'week' ? shortDate(day, l) : d.getDate()}
+                  </span>
                   {/* The 1st of each month carries its name: you see where a month starts while scrolling. */}
                   {view === 'month' && d.getDate() === 1 && (
                     <span style={{ marginLeft: 5, color: 'var(--accent-hi)', fontWeight: 700, textTransform: 'capitalize' }}>
@@ -1081,7 +1111,7 @@ export function Calendar() {
                     laneY = ln.top + ln.h   // the cell flex gap adds the 3 px GAP
                     return <div key={it.id} style={{ marginTop, height: ln.h, flexShrink: 0 }}>
                       <SpanMark it={it} day={day} today={today} selected={it.id === picked}
-                                open={unfolded.has(it.id)} noteLines={noteLines}
+                                open={unfolded.has(it.id)} noteLines={noteLines} dense={dense}
                                 onClick={pick} onExpand={() => toggleUnfolded(it.id)} />
                     </div>
                   }
