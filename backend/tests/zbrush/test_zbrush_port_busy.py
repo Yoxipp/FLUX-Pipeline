@@ -87,7 +87,7 @@ class PortBusyAtStartupTest(unittest.TestCase):
         self.zbc.get_tool_path.side_effect = lambda tid: tool["path"]
         self.zbc.set_tool_path.side_effect = lambda tid, p: tool.__setitem__("path", p)
         self.zbc.press.side_effect = lambda item: (
-            open(tool["path"], "wb").close() if item == "Tool:Save" and tool["path"].startswith(tmp) else None)
+            open(tool["path"], "wb").write(b"ztl") if item == "Tool:Save" and tool["path"].startswith(tmp) else None)
         for payload, expected in (
             ({"action": "ping"}, {"status": "ok", "version": "ZBrush 2026", "publishing": True}),
             ({"action": "export_ztl", "path": out}, {"status": "ok", "path": out}),
@@ -107,10 +107,14 @@ class PortBusyAtStartupTest(unittest.TestCase):
         # The artist's own tool path is restored after the export.
         self.assertEqual(tool["path"], "C:/art/John_Sculpt_v003.ztl")
 
-    def test_fbx_export_uses_zplugin_palette_and_checks_the_file(self):
-        self.zbc.exists.side_effect = lambda item: item == "Zplugin:FBX ExportImport:Export"
-        resp = self.mod._dispatch({"action": "export_fbx", "path": "C:/nowhere/x.fbx", "options": {}})
-        self.zbc.press.assert_any_call("Zplugin:FBX ExportImport:Export")
+    def test_fbx_export_goes_through_native_tool_export(self):
+        # The FBX plugin's own Export button opens a Windows dialog: never pressed.
+        import itertools
+        with mock.patch("time.time", side_effect=itertools.count(0, 5)):
+            resp = self.mod._dispatch({"action": "export_fbx", "path": "C:/nowhere/x.fbx", "options": {}})
+        self.zbc.set_next_filename.assert_called_with("C:/nowhere/x.fbx")
+        self.zbc.press.assert_any_call("Tool:Export")
+        self.assertNotIn(mock.call("Zplugin:FBX ExportImport:Export"), self.zbc.press.call_args_list)
         self.assertEqual(resp["status"], "error")      # nothing written -> clear error
         self.assertIn("FBX", resp["msg"])
 

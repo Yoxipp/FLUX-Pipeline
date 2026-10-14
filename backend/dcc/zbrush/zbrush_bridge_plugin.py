@@ -225,42 +225,34 @@ def _dispatch(cmd: dict) -> dict:
         if not path:
             return {"status": "error", "msg": "Missing path"}
         try:
-            export_btn = _first_existing(_FBX_EXPORT_BUTTONS)
-            if export_btn is None:
-                return {"status": "error",
-                        "msg": "Plugin FBX ExportImport introuvable dans ZBrush (Zplugin > FBX ExportImport)"}
+            # Native Tool:Export picks the exporter from the extension
+            # (ZData/3DFileFormats/EXP_FBX_fbx.zsc) and honours set_next_filename.
+            # The FBX ExportImport plugin's own Export button asks for a path in a
+            # Windows dialog instead, so the publish never ran by itself.
             _apply_fbx_options(options)
             zbc.set_next_filename(path)
-            zbc.press(export_btn)
-            return _written(path, "FBX")
+            zbc.press("Tool:Export")
+            return _written(path, "FBX", wait=15.0)
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
     return {"status": "error", "msg": f"Unknown action: {action}"}
 
 
-# The FBX ExportImport plugin lives under Zplugin; the old "FBXExportImport:Export"
-# path does not exist and press() raised "returned a result with an exception set".
+# FBX export options live in the FBX ExportImport plugin (Zplugin palette).
 _FBX_PALETTE = "Zplugin:FBX ExportImport"
-_FBX_EXPORT_BUTTONS = (f"{_FBX_PALETTE}:Export", "ZPlugin:FBX ExportImport:Export")
 
 
-def _first_existing(item_paths: "tuple[str, ...]") -> "str | None":
-    for item in item_paths:
-        try:
-            if zbc.exists(item):
-                return item
-        except Exception:
-            pass
-    _log(f"None of these ZBrush items exist: {item_paths!r}")
-    return None
-
-
-def _written(path: str, label: str) -> dict:
-    """ok only if ZBrush really wrote the file (a press can silently do nothing)."""
-    if os.path.isfile(path):
-        return {"status": "ok", "path": path}
-    return {"status": "error", "msg": f"ZBrush n'a pas ecrit le fichier {label} : {path}"}
+def _written(path: str, label: str, wait: float = 3.0) -> dict:
+    """ok only if ZBrush really wrote the file (a press can silently do nothing).
+    Waits a little: some exporters finish writing just after press() returns."""
+    deadline = time.time() + wait
+    while True:
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            return {"status": "ok", "path": path}
+        if time.time() >= deadline:
+            return {"status": "error", "msg": f"ZBrush n'a pas ecrit le fichier {label} : {path}"}
+        time.sleep(0.2)
 
 
 def _save_tool_to(path: str) -> None:
