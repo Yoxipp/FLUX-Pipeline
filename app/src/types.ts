@@ -122,6 +122,17 @@ export interface PublishPayload {
   target_name?: string   // composed FLUX name when the source file isn't token-named
 }
 
+export interface PublishDestination {
+  abs_path: string
+  rel_path: string
+  version: string
+  sequence: boolean
+  first: boolean
+  last_exists: boolean
+  existing: string[]
+  more: number
+}
+
 export interface PublishResult {
   success: boolean
   dest_path: string | null
