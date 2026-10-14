@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from core.constants import JSON_PROJECT
+from core.project_setup import setup_path
 
 WS_PREFIX = "ws:"
 PROJECT_PATH_COLLECTIONS = frozenset({"tokens", "locks"})
@@ -77,8 +78,8 @@ def _looks_like_path(doc_id: str) -> bool:
 # ── project identity ──────────────────────────────────────────────────────────
 
 def project_id_of(project_dir: Path) -> str | None:
-    """project_id read from <project_dir>/project.json (cached on mtime), or None."""
-    cfg = Path(project_dir) / JSON_PROJECT
+    """project_id read from the project.json of *project_dir* (cached on mtime), or None."""
+    cfg = setup_path(project_dir, JSON_PROJECT)
     try:
         mtime = cfg.stat().st_mtime_ns
     except OSError:

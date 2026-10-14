@@ -27,6 +27,7 @@ from pathlib import Path
 from core.doc_keys import to_store
 from core.json_manager import invalidate_cache, read_jsonl, write_json, write_jsonl
 from core.logger import get_logger
+from core.constants import SETUP_DIR
 from core.migrate_json_to_sqlite import _json_locate_factory
 
 log = get_logger(__name__)
@@ -103,7 +104,9 @@ def _in_scope(target: Path, workspace_root: Path | None, report: ExportReport) -
         except ValueError:
             report.skipped_foreign.append(str(target))
             return False
-    if not target.parent.is_dir():
+    # A project's setup folder is created on write: the project folder itself must exist.
+    home = target.parent.parent if target.parent.name == SETUP_DIR else target.parent
+    if not home.is_dir():
         report.skipped_stale.append(str(target))
         return False
     return True

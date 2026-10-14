@@ -8,7 +8,7 @@ from pathlib import Path
 
 from dcc.houdini.hda import (
     flux_anim_hda, flux_crowd_hda, flux_exporter_hda, flux_importer_hda, flux_importer_lop_hda,
-    flux_lighting_hda, flux_render_hda, flux_shot_switch_hda,
+    flux_lighting_hda, flux_render_hda, flux_shot_switch_hda, flux_work_hda,
 )
 
 _SVG = Path(flux_importer_hda.__file__).parents[3] / "resources" / "shelves" / "houdini" / "flux_hda.svg"
@@ -33,6 +33,8 @@ class HdaIcons(unittest.TestCase):
             "shot": flux_shot_switch_hda._build_code("x.hda"),
             "crowd": flux_crowd_hda._build_code("x.hda"),
             "render": flux_render_hda._build_code("x.hda"),
+            "work": flux_work_hda._build_code("x.hda"),
+            "work_lop": flux_work_hda._build_code("x.hda", "Lop"),
         }
         for name, code in codes.items():
             with self.subTest(name):

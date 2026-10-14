@@ -9,7 +9,7 @@ team activity, chat and calendar.
 * DCCs: Maya, Houdini, ZBrush (validated); Nuke, Substance Painter / Designer, Mari, Marvelous, Photoshop (bridges).
 
 **Artists**: read the manual, `backend/resources/manual/FLUX_Manuel.html` (French). FLUX copies it into
-`<workspace>/FLUX_UPDATE/` at every start.
+`<workspace>/FLUX_DOC/` at every start, and shows it in Settings > Doc.
 
 ## Architecture
 

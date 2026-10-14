@@ -25,6 +25,11 @@ export interface ExplorerItem { name: string; isDir: boolean; legacy?: boolean }
 
 export const USD_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz'])
 
+// FR/EN pick for code outside React (toasts, menu builders). LanguageProvider keeps
+// <html lang> in sync with the UI language, so this follows useTr() without a hook.
+export const trNow = (fr: string, en: string): string =>
+  (typeof document !== 'undefined' && document.documentElement.lang === 'en' ? en : fr)
+
 export interface SavedItem {
   label:   string
   project: string
@@ -160,6 +165,8 @@ export interface FolderManagerShared {
   // Bumped after any write on disk: every view reloads its folder.
   fsTick:        number
   bumpFs:        () => void
+  // "Setup files" box: show _flux_setup/ and the project's FLUX JSON (off by default).
+  showSetup:     boolean
   dragRef:       MutableRefObject<DragPayload | null>
   transfer:      (src: TransferSource, dest: TransferDest, op: 'move' | 'copy') => Promise<number>
 }

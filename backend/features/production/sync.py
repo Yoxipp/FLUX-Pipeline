@@ -21,10 +21,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_TYPE_TOKENS
+from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_SHOT_TYPE_TOKENS, DEFAULT_TYPE_TOKENS
 from core.logger import get_logger
 from core.paths import ensure_dir
-from features.folder_manager.seq_shot_creator import update_sequence
+from features.folder_manager.seq_shot_creator import shot_task_template, update_sequence
 from features.folder_manager.tokens import add_token, load_tokens
 
 log = get_logger(__name__)
@@ -42,11 +42,29 @@ def _is_templated(rel: str) -> bool:
     return "{" in rel or "}" in rel
 
 
+def _shot_task_token(task: dict, class_map: dict[str, str], shot_type_map: dict[str, str]) -> str:
+    """The department token of a shot task, which decides its folder.
+
+    ``type_tokens`` hold the TYPE key (what publishes match, see the frontend
+    ``taskMatchesDepartment``); ``name`` is the label, usually the same token but
+    free text for a renamed task. The first candidate the token maps know wins,
+    type token first; else the first non-empty one (folder = its lowercase)."""
+    candidates = [str(t).strip() for t in (task.get("type_tokens") or []) if str(t).strip()][:1]
+    name = str(task.get("name") or "").strip()
+    if name:
+        candidates.append(name)
+    for token in candidates:
+        if shot_task_template(token, class_map, shot_type_map):
+            return token
+    return candidates[0] if candidates else ""
+
+
 def sync_production_to_disk(project_path: Path, production: dict) -> dict:
     """Ensure every entity declared in *production* exists on disk. Create-only.
 
-    Returns a summary ``{"assets": n, "tasks": n, "subtasks": n, "sequences": n}``
-    counting the folders newly created (best-effort; used for logging only).
+    Returns a summary ``{"assets", "sequences", "shots", "tasks", "subtasks"}``
+    counting the folders really created by this call (0 everywhere on a no-op;
+    shot task/subtask folders included; used for logging only).
     Never raises for a single bad entity — each is guarded so one failure cannot
     abort the whole sync or, worse, leave disk half-changed in a destructive way
     (nothing here is destructive to begin with).
@@ -55,8 +73,11 @@ def sync_production_to_disk(project_path: Path, production: dict) -> dict:
     class_map = {**DEFAULT_CLASS_TOKENS, **(tokens.get("CLASS") or {})}
     type_map  = {**DEFAULT_TYPE_TOKENS,  **(tokens.get("TYPE")  or {})}
     name_map  = tokens.get("NAME") or {}
+    # Department of a shot = its TYPE_SHOT token (ADR 0019); CLASS stays as the
+    # fallback for old projects whose tokens.json predates TYPE_SHOT.
+    shot_type_map = {**DEFAULT_SHOT_TYPE_TOKENS, **(tokens.get("TYPE_SHOT") or {})}
 
-    created = {"assets": 0, "tasks": 0, "subtasks": 0, "sequences": 0}
+    created = {"assets": 0, "sequences": 0, "shots": 0, "tasks": 0, "subtasks": 0}
 
     for asset in production.get("assets", []):
         try:
@@ -82,7 +103,7 @@ def sync_production_to_disk(project_path: Path, production: dict) -> dict:
             "number": n,
             "label": shot.get("name", "").upper(),
             "tasks": [
-                {"token": t.get("name") or (t.get("type_tokens") or [""])[0],
+                {"token": _shot_task_token(t, class_map, shot_type_map),
                  "subtasks": list(t.get("known_subtasks") or [])}
                 for t in shot.get("tasks", [])
             ],
@@ -94,9 +115,10 @@ def sync_production_to_disk(project_path: Path, production: dict) -> dict:
         if seq_num is None:
             continue
         try:
+            # update_sequence adds what it really created (seq, shots, tasks, subtasks).
             update_sequence(project_path, seq_num, shots_by_seq.get(seq_name, []), class_map,
-                            seq_label=seq_name.upper())
-            created["sequences"] += 1
+                            seq_label=seq_name.upper(), shot_type_tokens=shot_type_map,
+                            counts=created)
         except Exception as exc:  # noqa: BLE001
             log.warning("sync sequence %r failed: %s", seq_name, exc)
 

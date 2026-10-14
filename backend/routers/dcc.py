@@ -21,6 +21,7 @@ from dcc.substance_painter import autostart as _substance_autostart
 from dcc.mari    import autostart as _mari_autostart
 from dcc.substance_designer import autostart as _designer_autostart
 from dcc.marvelous import autostart as _marvelous_autostart
+from dcc.unreal  import autostart as _unreal_autostart
 from features.launcher.launcher_core import find_dcc_exe, get_installed_dccs, launch_dcc
 from dcc.maya.maya_export_client import ANIM_EXTS as MAYA_ANIM_EXTS
 
@@ -37,6 +38,7 @@ _AUTOSTART_MODULES: dict = {
     "mari":    _mari_autostart,
     "substance_designer": _designer_autostart,
     "marvelous": _marvelous_autostart,
+    "unreal":  _unreal_autostart,
 }
 
 log = get_logger(__name__)
@@ -437,6 +439,11 @@ def _ping_marvelous() -> dict:
     return marvelous_client.ping()
 
 
+def _ping_unreal() -> dict:
+    from dcc.unreal.client import unreal_client
+    return unreal_client.ping()
+
+
 _PING_PROBES = {
     "houdini": _ping_houdini,
     "zbrush": _ping_zbrush,
@@ -447,6 +454,7 @@ _PING_PROBES = {
     "mari": _ping_mari,
     "substance_designer": _ping_designer,
     "marvelous": _ping_marvelous,
+    "unreal": _ping_unreal,
 }
 
 # The Sidebar and the Publisher poll the same DCCs every few seconds: one probe per
@@ -481,7 +489,59 @@ async def ping_dcc(dcc_key: str) -> dict:
         if result.get("busy"):
             answer["busy"] = True          # e.g. Mari exporting: reachable, just not answering
         _ping_cache[dcc_key] = (time.monotonic(), answer)
+        if dcc_key == "houdini":
+            _on_houdini_ping(answer["connected"])
     return answer
+
+
+# FLUX HDA check per Houdini connection: "checked" once per connection, "running"
+# while it works (a busy Houdini can miss pings: that must not start a second build),
+# "failed" after a failed build (no automatic retry loop; the Shelf Manager still can).
+_houdini_hdas = {"checked": False, "running": False, "failed": False}
+
+
+def _ensure_houdini_hdas() -> None:
+    from features.shelf_manager.shelf_core import ensure_hdas_in_session
+    try:
+        res = ensure_hdas_in_session()
+        log.info("Houdini connected, FLUX HDAs: %s", res.get("message"))
+        if res.get("missing") and not res.get("built"):
+            _houdini_hdas["failed"] = True
+    except Exception as exc:  # noqa: BLE001 - never breaks the poll
+        log.warning("Houdini HDA check failed: %s", exc)
+    finally:
+        _houdini_hdas["running"] = False
+
+
+def _on_houdini_ping(connected: bool) -> None:
+    """On each new Houdini connection, build the FLUX HDAs it lacks (in background).
+    Installing with Houdini closed only copies the shelf: this is what gets the HDAs
+    into every machine's Houdini, in the prefs dir that Houdini actually reads."""
+    if not connected:
+        if not _houdini_hdas["running"]:
+            _houdini_hdas["checked"] = False
+        return
+    if _houdini_hdas["checked"] or _houdini_hdas["failed"]:
+        return
+    _houdini_hdas["checked"] = _houdini_hdas["running"] = True
+    asyncio.get_running_loop().run_in_executor(None, _ensure_houdini_hdas)
+
+
+@router.post("/bridges/install-all")
+async def install_all_bridges_endpoint() -> dict:
+    """Install the FLUX bridge of every DCC detected on this machine (Settings > User,
+    "Installer tous les bridges"). Per-DCC result: ok / skip (not detected) / error."""
+    from dcc.photoshop.client import ensure_library
+    from features.launcher.bridges import install_all_bridges
+
+    def _do() -> list[dict]:
+        return install_all_bridges(get_installed_dccs(), _AUTOSTART_MODULES, ensure_library)
+
+    loop = asyncio.get_running_loop()
+    results = await loop.run_in_executor(None, _do)
+    log.info("Install all bridges: %s",
+             ", ".join(f"{r['dcc']}={r['status']}" for r in results))
+    return {"results": results}
 
 
 @router.get("/{dcc_key}/autostart")
@@ -2377,6 +2437,73 @@ async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
     return result
 
 
+# ── Unreal bridge (ADR 0052): open a FLUX USD stage, reload changed layers ───
+
+class UnrealOpenStageRequest(BaseModel):
+    path:    str
+    purpose: str = "proxy"          # proxy (interactive) | render
+
+
+@router.get("/unreal/info")
+async def unreal_info() -> dict:
+    """Engine version, host project, level and stage open in Unreal."""
+    from dcc.unreal.client import unreal_client
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, unreal_client.info)
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Unreal ne repond pas", _unreal_autostart, "Unreal"))
+    return result
+
+
+@router.post("/unreal/open-stage")
+async def unreal_open_stage(req: UnrealOpenStageRequest) -> dict:
+    """Point the FLUX stage actor of Unreal at a USD stage (bytes stay on disk, 0005)."""
+    from pathlib import Path as _PLib
+    from dcc.unreal.client import unreal_client
+    if req.purpose not in ("proxy", "render"):
+        raise HTTPException(status_code=400, detail=f"purpose inconnu : {req.purpose}")
+    if not _PLib(req.path).is_file():
+        raise HTTPException(status_code=404, detail=f"Stage introuvable : {req.path}")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: unreal_client.open_stage(req.path, req.purpose))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Unreal n'a pas ouvert le stage", _unreal_autostart, "Unreal"))
+    return result
+
+
+class UnrealLiveRequest(BaseModel):
+    path: str                       # live layer written by the FLUX Unreal Live LOP
+
+
+@router.post("/unreal/live")
+async def unreal_live(req: UnrealLiveRequest) -> dict:
+    """Houdini live push: Unreal opens the live layer the first time, then reloads what changed."""
+    from pathlib import Path as _PLib
+    from dcc.unreal.client import unreal_client
+    if not _PLib(req.path).is_file():
+        raise HTTPException(status_code=404, detail=f"Layer live introuvable : {req.path}")
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: unreal_client.live(req.path))
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Unreal n'a pas pris le live", _unreal_autostart, "Unreal"))
+    return result
+
+
+@router.post("/unreal/reload")
+async def unreal_reload() -> dict:
+    """Re-read in Unreal only the stage layers changed on disk."""
+    from dcc.unreal.client import unreal_client
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, unreal_client.reload)
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            result.get("error"), "Unreal n'a pas recharge le stage", _unreal_autostart, "Unreal"))
+    return result
+
+
 # ── Houdini Importer HDA endpoints ───────────────────────────────────────────
 
 
@@ -2748,6 +2875,13 @@ async def houdini_shot_switch_module() -> dict:
 async def houdini_flux_render_module() -> dict:
     """PythonModule of the FLUX Render HDA (render buttons at the end of a shot branch)."""
     from dcc.houdini.hda.flux_render_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/flux_unreal_live/module")
+async def houdini_flux_unreal_live_module() -> dict:
+    """PythonModule of the FLUX Unreal Live HDA (Houdini /stage shown live in Unreal, ADR 0052)."""
+    from dcc.houdini.hda.flux_unreal_live_hda import MODULE_FUNCTIONS
     return {"code": MODULE_FUNCTIONS}
 
 

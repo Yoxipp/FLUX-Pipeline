@@ -1,10 +1,11 @@
-# routers/system.py — machine-level info (disk usage today; more later).
+# routers/system.py — machine-level info (disk usage, FLUX root, manual, uninstall plan).
 
 from __future__ import annotations
 
 import asyncio
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 
 from core.logger import get_logger
 from core.paths import get_flux_root, get_projects_dir
@@ -32,6 +33,32 @@ async def flux_root() -> dict:
     return {
         "root":         str(root) if root else "",
         "projects_dir": str(get_projects_dir()),
+    }
+
+
+@router.get("/manual")
+async def manual() -> HTMLResponse:
+    """The FLUX manual as HTML, for the Settings > Doc tab (iframe). Serves the
+    FLUX_DOC copy when present, else the bundled one (ADR 0049)."""
+    from features.system.manual import manual_path
+    loop = asyncio.get_running_loop()
+    path = await loop.run_in_executor(None, manual_path)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Manuel introuvable")
+    text = await loop.run_in_executor(None, lambda: path.read_text(encoding="utf-8"))
+    return HTMLResponse(text)
+
+
+@router.get("/manual-info")
+async def manual_info() -> dict:
+    """Where the manual lives on disk (to open it in the system browser)."""
+    from features.system.manual import manual_path
+    loop = asyncio.get_running_loop()
+    path = await loop.run_in_executor(None, manual_path)
+    root = get_flux_root()
+    return {
+        "path":    str(path) if path else "",
+        "doc_dir": str(root / "FLUX_DOC") if root else "",
     }
 
 

@@ -32,11 +32,14 @@ def set_current_project(payload: ProjectPayload) -> dict:
     if not name or not project_utils.project_exists(name):
         raise HTTPException(status_code=404, detail=f"Project not found: {name!r}")
     project_utils.set_current_project(name)
-    # First open by this code: create/heal project.json (ADR 0006). Never blocks.
+    # First open by this code: move the root setup files into _flux_setup/, then
+    # create/heal project.json (ADR 0006). Never blocks.
     try:
         from core.paths import get_project_path, get_projects_dir
+        from core.project_setup import migrate_project_setup
         from features.folder_manager.project_config import ensure_project_config, is_direct_project_dir
         if is_direct_project_dir(get_project_path(name), get_projects_dir()):
+            migrate_project_setup(get_project_path(name))
             ensure_project_config(get_project_path(name))
     except Exception as exc:  # noqa: BLE001
         log.warning("project.json auto-create skipped for %s: %s", name, exc)

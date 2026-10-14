@@ -11,6 +11,7 @@ export const DCC_STATUS_KEYS: Record<string, string> = {
   marvelous:          'Marvelous',
   photoshop:          'Photoshop',
   mari:               'Mari',
+  unreal:             'Unreal',
 }
 
 export const SOFTWARE = [
@@ -23,6 +24,7 @@ export const SOFTWARE = [
   { name: 'Mari',      key: 'mari' },
   { name: 'ZBrush',    key: 'zbrush' },
   { name: 'Photoshop', key: 'photoshop' },
+  { name: 'Unreal',    key: 'unreal' },
 ]
 
 // Backend status key -> frontend key (StatusBar filtering).

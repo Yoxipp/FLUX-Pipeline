@@ -19,6 +19,37 @@ class HoudiniShelfHdas(unittest.TestCase):
         patcher = mock.patch.object(shelf_core, "get_dcc_shelf_dir", return_value=self.toolbar)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Never reach a real open Houdini from the tests.
+        self.reload = mock.patch.object(shelf_core, "_reload_houdini_shelf", return_value=[]).start()
+        self.addCleanup(mock.patch.stopall)
+
+    def test_install_reloads_the_shelf_in_open_houdini(self) -> None:
+        self.reload.return_value = [48885]
+        with mock.patch.object(shelf_core, "install_hdas", return_value=(True, "ok")):
+            ok, msg = shelf_core.install_shelf("Houdini", "21.0")
+        self.reload.assert_called_once_with(self.toolbar / "Flux.shelf")
+        self.assertIn("shelf rechargee dans Houdini :48885", msg)
+
+    def test_reload_targets_only_connected_sessions(self) -> None:
+        mock.patch.stopall()
+        sent = []
+
+        class _Client:
+            def __init__(self, port):
+                self.port = port
+
+            def run(self, code, timeout):
+                sent.append((self.port, code))
+                return {"ok": True, "result": self.port == 48885}
+        with mock.patch("core.dcc_instances.scan_instances",
+                        return_value=[{"port": 48884, "connected": True}, {"port": 48885, "connected": True},
+                                      {"port": 48886, "connected": False}]), \
+             mock.patch("dcc.houdini.client.HoudiniClient", _Client):
+            done = shelf_core._reload_houdini_shelf(Path(r"C:\prefs\houdini22.0\toolbar\Flux.shelf"))
+        self.assertEqual(done, [48885])
+        self.assertEqual([p for p, _ in sent], [48884, 48885])
+        self.assertIn("_FLUX_SHELF = 'C:/prefs/houdini22.0/toolbar/Flux.shelf'", sent[0][1])
+        compile(sent[0][1], "<reload>", "exec")
 
     def test_install_also_installs_hdas(self) -> None:
         with mock.patch.object(shelf_core, "install_hdas", return_value=(True, "HDAs installed → otls")) as hdas:
@@ -92,6 +123,10 @@ class LiveHdaBuild(unittest.TestCase):
         self.addCleanup(staging.stop)
         prefer = mock.patch.object(shelf_core, "_prefer_built_definitions", return_value=[])
         self.prefer = prefer.start()
+        # Never ask a real open Houdini which prefs it reads.
+        active = mock.patch("features.shelf_manager.stale_cleanup.active_houdini_otls", return_value=None)
+        active.start()
+        self.addCleanup(active.stop)
         self.addCleanup(prefer.stop)
 
     def _fake_import(self, failing: str = ""):
@@ -149,3 +184,68 @@ class LiveHdaBuild(unittest.TestCase):
             ok, msg = shelf_core._build_hdas_live([self.otls])
         self.assertIn("C:/old/otls/flux_lighting.hda", msg)
         self.assertIn("Sop/flux_importer : definition FLUX non chargee", msg)
+
+
+class InstallIntoTheReadPrefs(unittest.TestCase):
+    """2026-10-10: Houdini open -> the HDAs go only where it reads them; the copies
+    elsewhere become duplicates the Shelf Manager offers to delete."""
+
+    def test_open_houdini_gets_one_install_closed_gets_every_dir(self) -> None:
+        dirs = [Path("C:/home/houdini22.0/otls"), Path("C:/docs/houdini22.0/otls")]
+        with mock.patch.object(shelf_core, "get_dcc_otls_dirs", return_value=dirs), \
+             mock.patch.object(shelf_core, "purge_hda_backups"), \
+             mock.patch("dcc.houdini.client.houdini_client.is_connected", return_value=True), \
+             mock.patch.object(shelf_core, "_build_hdas_live", return_value=(True, "ok")) as build:
+            with mock.patch("features.shelf_manager.stale_cleanup.active_houdini_otls", return_value=dirs[1]):
+                shelf_core.install_hdas("22.0")
+            build.assert_called_with([dirs[1]])
+            with mock.patch("features.shelf_manager.stale_cleanup.active_houdini_otls", return_value=None):
+                shelf_core.install_hdas("22.0")
+            build.assert_called_with(dirs)
+
+
+class HdasBuiltWhenHoudiniOpens(unittest.TestCase):
+    """2026-10-13: installed with Houdini closed, the shelf showed but the HDAs did
+    not: the offline install only copies the staging (2 old HDAs, none on a new machine).
+    The missing ones are now built live as soon as Houdini connects."""
+
+    def test_missing_types_trigger_a_live_build_into_the_read_prefs(self) -> None:
+        reply = {"ok": True, "result": {"home": "C:/docs/houdini22.0", "version": "22.0",
+                                        "missing": ["flux_lighting.hda"]}}
+        with mock.patch("dcc.houdini.client.houdini_client.run", return_value=reply) as run, \
+             mock.patch.object(shelf_core, "_build_hdas_live", return_value=(True, "ok")) as build:
+            res = shelf_core.ensure_hdas_in_session()
+        build.assert_called_once_with([Path("C:/docs/houdini22.0") / "otls"])
+        self.assertTrue(res["built"])
+        code = run.call_args[0][0]
+        compile(code, "<check>", "exec")
+        self.assertIn("'flux_work_lop.hda'", code)
+
+    def test_nothing_built_when_every_type_is_loaded(self) -> None:
+        reply = {"ok": True, "result": {"home": "C:/h", "version": "22.0", "missing": []}}
+        with mock.patch("dcc.houdini.client.houdini_client.run", return_value=reply), \
+             mock.patch.object(shelf_core, "_build_hdas_live") as build:
+            res = shelf_core.ensure_hdas_in_session()
+        build.assert_not_called()
+        self.assertFalse(res["built"])
+
+    def test_offline_install_with_empty_staging_is_not_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(shelf_core, "_HDA_STAGING_DIR", Path(d) / "staging"), \
+             mock.patch.object(shelf_core, "get_dcc_otls_dirs", return_value=[Path(d) / "otls"]), \
+             mock.patch("dcc.houdini.client.houdini_client.is_connected", return_value=False):
+            ok, msg = shelf_core.install_hdas("22.0")
+        self.assertTrue(ok)
+        self.assertIn("prochaine ouverture de Houdini", msg)
+
+    def test_installed_means_every_build_not_just_the_staged_ones(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            otls = Path(d) / "otls"
+            otls.mkdir()
+            for name in ("flux_importer.hda", "flux_exporter.hda"):
+                (otls / name).write_bytes(b"x")
+            with mock.patch.object(shelf_core, "get_dcc_otls_dirs", return_value=[otls]):
+                self.assertFalse(shelf_core.is_hda_installed("22.0"))
+                for _, name, _, _ in shelf_core._HDA_BUILDS:
+                    (otls / name).write_bytes(b"x")
+                self.assertTrue(shelf_core.is_hda_installed("22.0"))

@@ -51,3 +51,31 @@ class PingCache(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoudiniHdaCheckOnConnect(unittest.TestCase):
+    def setUp(self) -> None:
+        dcc_router._houdini_hdas.update(checked=False, running=False, failed=False)
+
+    def _ping(self, *states: bool) -> int:
+        calls = []
+
+        async def go():
+            loop = asyncio.get_running_loop()
+            with mock.patch.object(loop, "run_in_executor", side_effect=lambda ex, fn: calls.append(fn)):
+                for s in states:
+                    dcc_router._on_houdini_ping(s)
+        asyncio.run(go())
+        return len(calls)
+
+    def test_once_per_connection(self) -> None:
+        self.assertEqual(self._ping(True, True, True), 1)
+        dcc_router._houdini_hdas["running"] = False
+        self.assertEqual(self._ping(False, True), 1)
+
+    def test_missed_ping_during_a_build_does_not_start_another(self) -> None:
+        self.assertEqual(self._ping(True, False, True), 1)
+
+    def test_failed_build_is_not_retried_in_a_loop(self) -> None:
+        dcc_router._houdini_hdas["failed"] = True
+        self.assertEqual(self._ping(True), 0)

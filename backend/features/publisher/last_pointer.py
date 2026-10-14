@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.constants import ACTIVE_VERSION_LABEL, DEFAULT_PADDING, JSON_PROJECT
+from core.project_setup import setup_path
 from core.json_manager import write_json
 from core.logger import get_logger
 from features.folder_manager.naming_validator import format_version
@@ -116,7 +117,7 @@ def load_storage_settings(start: Path) -> dict:
     """
     storage: dict = {}
     for d in (start, *start.parents):
-        cfg = d / JSON_PROJECT
+        cfg = setup_path(d, JSON_PROJECT)
         if cfg.is_file():
             try:
                 data = json.loads(cfg.read_text(encoding="utf-8"))

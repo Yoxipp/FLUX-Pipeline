@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,7 +27,7 @@ from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import archive as prod_archive
 from features.production import lock as prod_lock
 from features.production import production_store as store
-from features.production import ref_media
+from features.production import montage_export, ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
 from features.production.sync import sync_production_to_disk
@@ -76,6 +77,9 @@ def _cached_modif_logs(folder) -> list[dict]:
     return logs
 
 
+_VERSION_IN_FILE = re.compile(r"_(v\d{3,})(?=\.|$)")
+
+
 def _attach_publish_comments(project_path, publishes_by_task: dict) -> None:
     """Attach each publish's modif-log comment as event['description'] (in place).
 
@@ -111,12 +115,18 @@ def _attach_publish_comments(project_path, publishes_by_task: dict) -> None:
                 continue
             folder = project_path / rel
             for cand in (folder, folder.parent, folder.parent.parent):
-                logs = [e for e in _cached_modif_logs(cand) if str(e.get("name", "")).startswith(base)]
+                logs = [e for e in _cached_modif_logs(cand)
+                        if str(e.get("name", "")) == base or str(e.get("name", "")).startswith(base + "_")]
                 if not logs:
                     continue
-                exact = next((e for e in logs
-                              if e.get("date") == ev.get("date") and e.get("time") == ev.get("time")), None)
-                desc = (exact or logs[0]).get("modification", "") or ""
+                # The version in the file name is the reliable key: the log and the
+                # event are timestamped separately and can straddle a minute.
+                ver = _VERSION_IN_FILE.search(fname)
+                exact = next((e for e in logs if ver and e.get("version") == ver.group(1)), None) or \
+                    next((e for e in logs
+                          if e.get("date") == ev.get("date") and e.get("time") == ev.get("time")), None)
+                # No match: leave it unset rather than borrow another version's note.
+                desc = ((exact or {}).get("modification", "") if ver else (exact or logs[0]).get("modification", "")) or ""
                 if desc:
                     ev["description"] = desc
                 break
@@ -211,7 +221,8 @@ async def get_production(project: str) -> dict:
 
 
 def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
-    """(SEQ, SHOT) -> what the shot stage reads from Production (casting + frame range)."""
+    """(SEQ, SHOT) -> what the shot stage reads from Production (casting with its pinned
+    versions, ADR 0048, + frame range)."""
     from features.usd_assembler.shot_stage import read_casting, read_frame_range
 
     seqs = {s.get("id"): s.get("name") for s in production.get("sequences", [])}
@@ -219,14 +230,16 @@ def _shot_keys(production: dict) -> dict[tuple[str, str], tuple]:
     for sh in production.get("shots", []):
         seq = seqs.get(sh.get("seq_id"))
         if seq and sh.get("name"):
-            cast = sorted((c["name"], c["count"]) for c in read_casting(production, seq, sh["name"]))
+            cast = sorted((c["name"], c["count"], c.get("version") or "")
+                          for c in read_casting(production, seq, sh["name"]))
             out[(seq, sh["name"])] = (tuple(cast), read_frame_range(production, seq, sh["name"]))
     return out
 
 
-def _refresh_changed_shot_stages(project: str, before: dict, after: dict) -> list[str]:
+def _refresh_changed_shot_stages(project: str, before: dict, after: dict,
+                                 changed: list | None = None) -> list[str]:
     """Regenerate the stage of every shot whose casting or range changed. Returns the
-    ``SEQ_SHOT vNNN`` written."""
+    ``SEQ_SHOT vNNN`` written; *changed* (optional) receives their (seq, shot)."""
     from features.usd_assembler.shot_stage import stage_versions, write_stage
 
     old, new = _shot_keys(before or {}), _shot_keys(after or {})
@@ -240,6 +253,8 @@ def _refresh_changed_shot_stages(project: str, before: dict, after: dict) -> lis
                           save_casting=False)
         if res.get("version"):
             written.append(f"{key[0]}_{key[1]} {res['version']}")
+            if changed is not None:
+                changed.append(key)
     return written
 
 @router.put("/{project}")
@@ -266,11 +281,19 @@ async def put_production(project: str, payload: ProductionPayload) -> dict:
 
     # A4 (ADR 0020): a casting or frame range edit regenerates that shot's stage.
     stages: list[str] = []
+    changed_shots: list = []
     try:
         stages = await loop.run_in_executor(
-            None, lambda: _refresh_changed_shot_stages(project, previous, payload.production))
+            None, lambda: _refresh_changed_shot_stages(project, previous, payload.production,
+                                                       changed_shots))
     except Exception as e:  # noqa: BLE001 — the save already succeeded
         log.warning("Shot stage refresh after Production save failed for %r: %s", project, e)
+    # P0 Houdini Work: an open Houdini follows the new stages (range + layer reload).
+    try:
+        from dcc.houdini.shot_sync import notify_shot_stages_async
+        notify_shot_stages_async(project, changed_shots)
+    except Exception as e:  # noqa: BLE001 — best effort
+        log.warning("Houdini shot stage sync failed for %r: %s", project, e)
 
     synced = {}
     try:
@@ -650,7 +673,9 @@ async def deposit_ref(project: str, request: Request, rel_path: str = "", filena
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
-            None, lambda: ref_media.deposit(project_path, rel_path, filename, data)
+            None, lambda: ref_media.deposit(
+                project_path, rel_path, filename, data, config.get_current_user() or "",
+            )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -677,15 +702,92 @@ async def latest_ref(project: str, rel_path: str = "") -> dict:
     return {"found": True, **info}
 
 
-@router.get("/{project}/ref/file")
-async def stream_ref(project: str, rel_path: str = "", name: str = "") -> FileResponse:
-    """Stream a ref file (Range-enabled by FileResponse) for the <img>/<video> src."""
+@router.get("/{project}/ref/versions")
+async def ref_versions(project: str, rel_path: str = "") -> dict:
+    """Every version of a /ref zone, newest first, from its modif log (retake 10)."""
     _ensure_project(project)
     project_path = get_project_path(project)
     loop = asyncio.get_running_loop()
     try:
+        rows = await loop.run_in_executor(None, lambda: ref_media.versions(project_path, rel_path))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"versions": rows}
+
+
+class ShotPreviewQuery(BaseModel):
+    seq: str
+    shot: str
+    tasks: list[str] = []
+
+
+class ShotPreviewsRequest(BaseModel):
+    shots: list[ShotPreviewQuery]
+
+
+@router.post("/{project}/shot-previews")
+async def shot_previews(project: str, payload: ShotPreviewsRequest) -> dict:
+    """LAST media of each task of the given shots (Timeline preview, auto edit)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+
+    def _do() -> list[dict]:
+        return [
+            {"seq": q.seq, "shot": q.shot,
+             "media": ref_media.shot_previews(project_path, q.seq, q.shot, q.tasks)}
+            for q in payload.shots
+        ]
+
+    return {"shots": await loop.run_in_executor(None, _do)}
+
+
+class MontageClipIn(BaseModel):
+    seq: str = ""
+    shot: str = ""
+    frames: int = 1
+    media: dict | None = None        # {task, label, rel_path, file, source} as shot-previews gave it
+
+
+class MontageExportRequest(BaseModel):
+    name: str = "montage"
+    dest_dir: str
+    fps: float = 24
+    mov: bool = True
+    folder: bool = True
+    clips: list[MontageClipIn]
+
+
+@router.post("/{project}/montage/export")
+async def export_montage(project: str, payload: MontageExportRequest) -> dict:
+    """Export the Timeline auto edit: media + .otio + .edl and/or one H.264 .mov."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: montage_export.export_montage(
+            project_path, [c.model_dump() for c in payload.clips], payload.fps,
+            payload.dest_dir, payload.name, payload.mov, payload.folder))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project}/ref/file")
+async def stream_ref(project: str, rel_path: str = "", name: str = "", scope: str = "ref") -> FileResponse:
+    """Stream a ref file (Range-enabled by FileResponse) for the <img>/<video> src.
+
+    scope="publish": a published image/video (`*_LAST.ext`) in the folder
+    `rel_path` itself (Timeline preview fallback), not in its /ref zone.
+    """
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+    resolver = ref_media.resolve_publish_file if scope == "publish" else ref_media.resolve_file
+    try:
         path = await loop.run_in_executor(
-            None, lambda: ref_media.resolve_file(project_path, rel_path, name)
+            None, lambda: resolver(project_path, rel_path, name)
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

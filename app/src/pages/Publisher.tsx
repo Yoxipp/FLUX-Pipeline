@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react'
+import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw, Archive } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import { ExpandPicker } from '../components/shared/ExpandPicker'
+import { ProjectPicker } from '../components/shared/ProjectPicker'
+import { ConnectionPill } from '../components/shared/ConnectionPill'
+import { Btn, SecTitle, Pill, Select, SelectTrigger, SelectContent, SelectItem, Popover, PopoverTrigger, PopoverContent } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
@@ -18,11 +21,28 @@ import { MARVELOUS_OPTIONS, defaultMarvelousOptions } from '../lib/marvelousExpo
 import { api } from '../api/client'
 import type { DesignerPackage, MayaUsdPreview, MayaUsdTreeNode, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
+import { useWorkProfile } from '../WorkProfileContext'
+import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { SOFTWARE } from '../lib/dccs'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
+import { PublishDestination } from './publisher/PublishDestination'
 import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstance, readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
+import { useSessionState, readSession, writeSession, clearSession } from '../hooks/useSessionState'
 import { toast } from 'sonner'
+import { useTr } from '../i18n'
+
+type Tr = (fr: string, en: string) => string
+
+// Language-stable tr for callbacks and effects: its identity never changes (an effect
+// keyed on a callback must not re-run on every render), the text follows the language.
+function useStableTr(): Tr {
+  const { tr } = useTr()
+  const ref = useRef(tr)
+  ref.current = tr
+  return useCallback((fr: string, en: string) => ref.current(fr, en), [])
+}
 
 
 // Publish endpoints return version_str already prefixed with "v" (format_version
@@ -52,6 +72,7 @@ const COMMON_HOU_ATTRS = [
 
 // Editable combobox for an attribute name: free text + a dropdown of common attrs.
 function AttrCombo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { tr } = useTr()
   const [open, setOpen] = useState(false)
   const q = value.trim().toLowerCase()
   const matches = q ? COMMON_HOU_ATTRS.filter(a => a.toLowerCase().includes(q)) : COMMON_HOU_ATTRS
@@ -59,7 +80,7 @@ function AttrCombo({ value, onChange }: { value: string; onChange: (v: string) =
     <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
       <input
         value={value}
-        placeholder="nom de l'attribut point"
+        placeholder={tr("nom de l'attribut point", 'point attribute name')}
         onChange={e => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
@@ -94,6 +115,7 @@ function AttrCombo({ value, onChange }: { value: string; onChange: (v: string) =
 
 /** Click-to-copy monospaced command block. */
 function CopyBlock({ text }: { text: string }) {
+  const { tr } = useTr()
   const [copied, setCopied] = useState(false)
   return (
     <div
@@ -102,9 +124,9 @@ function CopyBlock({ text }: { text: string }) {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
       }}
-      title="Cliquer pour copier"
+      title={tr('Cliquer pour copier', 'Click to copy')}
       style={{
-        fontFamily: 'var(--mono)', fontSize: 8,
+        fontFamily: 'var(--code)', fontSize: 10,
         color: copied ? 'var(--ok)' : 'var(--accent-hi)',
         background: 'var(--bg-deep)', border: `1px solid ${copied ? 'var(--ok)' : 'var(--rule-2)'}`,
         borderRadius: 4, padding: '5px 8px', cursor: 'pointer',
@@ -112,7 +134,7 @@ function CopyBlock({ text }: { text: string }) {
         transition: 'color 0.2s, border-color 0.2s',
       }}
     >
-      {copied ? '✓ Copié !' : text}
+      {copied ? tr('✓ Copié !', '✓ Copied!') : text}
     </div>
   )
 }
@@ -125,7 +147,7 @@ function MayaStep({ n, done, title, desc }: { n: number; done: boolean; title: s
         width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: done ? 'var(--ok)' : 'var(--accent)', color: 'white',
-        fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 700,
+        fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 700,
       }}>{done ? '✓' : n}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
         <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{title}</span>
@@ -145,16 +167,27 @@ function formatToken(raw: string): string {
     .replace(/^_|_$/g, '')
 }
 
-function formatSeqLabel(raw: string): string {
-  const n = parseInt(raw.replace(/[^0-9]/g, ''), 10)
-  if (isNaN(n)) return raw.toUpperCase()
-  return `SEQ${String(n).padStart(3, '0')}`
+// SEQ / SHOT label from what the artist typed. One source of truth: an existing label
+// (from the project's tokens) is kept as is, also when matched by number (old SEQ010 for
+// "10"); a new one is padded like the backend creates it (SEQ_SHOT_PADDING, default 4).
+const DEFAULT_SEQ_SHOT_PADDING = 4
+function formatSeqShotLabel(prefix: string, raw: string, known: string[], pad: number): string {
+  const typed = raw.trim().toUpperCase()
+  const exact = known.find(k => k.toUpperCase() === typed)
+  if (exact) return exact
+  const n = parseInt(typed.replace(/[^0-9]/g, ''), 10)
+  if (isNaN(n)) return typed
+  const sameNumber = known.find(k => k.toUpperCase().startsWith(prefix) && parseInt(k.slice(prefix.length), 10) === n)
+  if (sameNumber) return sameNumber
+  return `${prefix}${String(n).padStart(pad, '0')}`
 }
 
-function formatShotLabel(raw: string): string {
-  const n = parseInt(raw.replace(/[^0-9]/g, ''), 10)
-  if (isNaN(n)) return raw.toUpperCase()
-  return `SHOT${String(n).padStart(3, '0')}`
+function formatSeqLabel(raw: string, known: string[] = [], pad = DEFAULT_SEQ_SHOT_PADDING): string {
+  return formatSeqShotLabel('SEQ', raw, known, pad)
+}
+
+function formatShotLabel(raw: string, known: string[] = [], pad = DEFAULT_SEQ_SHOT_PADDING): string {
+  return formatSeqShotLabel('SHOT', raw, known, pad)
 }
 
 // Houdini ROP node type → export extension.
@@ -238,12 +271,12 @@ const outputKey = (gk: string, out: string) => `${gk}::${out}`
 // ZBrush connection message: distinguish "installed but not answering" (ZBrush
 // closed or busy) from "plugin not installed", instead of always blaming install.
 function zbrushStatusText(
-  connected: boolean, checking: boolean, installed: boolean | null, version: string | null,
+  tr: Tr, connected: boolean, checking: boolean, installed: boolean | null, version: string | null,
 ): string {
-  if (connected) return `Connecté${version ? ` · ${version}` : ''}`
-  if (checking) return 'Vérification...'
-  if (installed === false) return 'Plugin non installé : bouton Plug dans la sidebar'
-  return 'Plugin installé, ZBrush ne répond pas (fermé ou occupé)'
+  if (connected) return `${tr('Connecté', 'Connected')}${version ? ` · ${version}` : ''}`
+  if (checking) return tr('Vérification...', 'Checking...')
+  if (installed === false) return tr('Plugin non installé : bouton Plug dans la sidebar', 'Plugin not installed: Plug button in the sidebar')
+  return tr('Plugin installé, ZBrush ne répond pas (fermé ou occupé)', 'Plugin installed, ZBrush is not responding (closed or busy)')
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -299,6 +332,13 @@ function fileStem(path: string): string {
   return base.split('.')[0] || base
 }
 
+// Last extension of a path, with the dot ('' when none): the local publish keeps it.
+function fileExt(path: string): string {
+  const base = path.replace(/\\/g, '/').split('/').pop() || ''
+  const i = base.lastIndexOf('.')
+  return i > 0 ? base.slice(i).toLowerCase() : ''
+}
+
 // Detect the canonical MAP token for a texture file, or '' when the name carries
 // no recognised map nomenclature. Segments are matched exactly (case-insensitive),
 // so a number or a random suffix (e.g. "07", "sc060712") is NEVER mistaken for a map.
@@ -327,9 +367,10 @@ function presetEntries(table: Record<string, UsdTaskContribution>): [string, Usd
 }
 
 // Shot tasks the Publisher offers (2026-09-26): anim, camera (LAYOUT carries the
-// shot camera, shot_stage), FX and light; COMP only from Nuke. No rig / model in a shot.
+// shot camera, shot_stage), FX, light and render (frames, render/{seq}/{shot},
+// 2026-10-09); COMP only from Nuke. No rig / model in a shot.
 function shotTasksFor(dcc: string): string[] {
-  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT']
+  const base = ['ANIM', 'LAYOUT', 'FX', 'LIGHT', 'RENDER']
   return dcc === 'Nuke' ? [...base, 'COMP'] : base
 }
 
@@ -369,71 +410,44 @@ const USD_SHOT_DEPARTMENTS_FALLBACK: Record<string, UsdTaskContribution> = {
 
 // Info popover copy for each token (explanation · expected · concrete example).
 interface TokenInfo { title: string; desc: string; expected: string; example: string }
-const TOKEN_INFO: Record<string, TokenInfo> = {
-  category: { title: 'Catégorie', desc: "Le type d'asset dans le pipeline.", expected: 'CHAR, PROPS, ENV ou FX', example: 'CHAR → assets/chara' },
-  name:     { title: 'Name', desc: "Le nom de l'asset. Seuls les noms de la catégorie choisie sont proposés.", expected: 'Nom court, sans espace', example: 'JEROME' },
-  task:     { title: 'Task', desc: "L'étape de production — détermine le sous-dossier de l'asset.", expected: 'Geo, Shading, Groom, Rig, Cfx, Mult ou Ref', example: 'Rig → assets/chara/JEROME/rig' },
-  instance: { title: 'Instance', desc: 'Sous-variante fonctionnelle. Suggestions basées sur Catégorie + Name + Task.', expected: 'Champ libre (null par défaut)', example: 'CHAR_RIG_JEROME_null_LAST' },
-  variante: { title: 'Variante', desc: 'Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', expected: 'Champ libre (optionnel)', example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
-  seq:      { title: 'Sequence', desc: 'La séquence du plan.', expected: 'Numéro → SEQ#### (de 10 en 10)', example: 'SEQ0010' },
-  shot:     { title: 'Shot', desc: 'Le plan dans la séquence.', expected: 'Numéro → SHOT#### (de 10 en 10, 0015 pour intercaler)', example: 'SHOT0010' },
-  shotName: { title: 'Task', desc: 'Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', expected: 'ANIM, LAYOUT (caméra), FX, LIGHT (COMP depuis Nuke)', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
-  shotCharacter: { title: 'Perso', desc: "L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", expected: 'NAME d\'un asset', example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
-  shotVariante: { title: 'Variante', desc: 'Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', expected: 'Champ libre', example: 'SEQ0010_SHOT0010_ANIM_block_LAST' },
+function tokenInfos(tr: Tr): Record<string, TokenInfo> {
+  return {
+    category: { title: tr('Catégorie', 'Category'), desc: tr("Le type d'asset dans le pipeline.", 'The asset type in the pipeline.'), expected: tr('CHAR, PROPS, ENV ou FX', 'CHAR, PROPS, ENV or FX'), example: 'CHAR → assets/chara' },
+    name:     { title: 'Name', desc: tr("Le nom de l'asset. Seuls les noms de la catégorie choisie sont proposés.", 'The asset name. Only the names of the chosen category are offered.'), expected: tr('Nom court, sans espace', 'Short name, no spaces'), example: 'JEROME' },
+    task:     { title: 'Task', desc: tr("L'étape de production — détermine le sous-dossier de l'asset.", "The production step: it sets the asset's subfolder."), expected: tr('Geo, Shading, Groom, Rig, Cfx, Mult ou Ref', 'Geo, Shading, Groom, Rig, Cfx, Mult or Ref'), example: 'Rig → assets/chara/JEROME/rig' },
+    instance: { title: 'Instance', desc: tr('Sous-variante fonctionnelle. Suggestions basées sur Catégorie + Name + Task.', 'Functional sub-variant. Suggestions based on Category + Name + Task.'), expected: tr('Champ libre (null par défaut)', 'Free text (null by default)'), example: 'CHAR_RIG_JEROME_null_LAST' },
+    variante: { title: tr('Variante', 'Variant'), desc: tr('Déclinaison optionnelle. Suggestions basées sur Catégorie + Name + Task + Instance.', 'Optional variation. Suggestions based on Category + Name + Task + Instance.'), expected: tr('Champ libre (optionnel)', 'Free text (optional)'), example: 'CHAR_RIG_JEROME_null_HERO_LAST' },
+    seq:      { title: 'Sequence', desc: tr('La séquence du plan.', 'The sequence of the shot.'), expected: tr('Numéro → SEQ#### (de 10 en 10)', 'Number → SEQ#### (in steps of 10)'), example: 'SEQ0010' },
+    shot:     { title: 'Shot', desc: tr('Le plan dans la séquence.', 'The shot in the sequence.'), expected: tr('Numéro → SHOT#### (de 10 en 10, 0015 pour intercaler)', 'Number → SHOT#### (in steps of 10, 0015 to insert one)'), example: 'SHOT0010' },
+    shotName: { title: 'Task', desc: tr('Le département du plan, à la même place que le TYPE dans un asset (ADR 0019). LAYOUT porte la caméra du plan.', 'The shot department, in the same place as the TYPE of an asset (ADR 0019). LAYOUT carries the shot camera.'), expected: tr('ANIM, LAYOUT (caméra), FX, LIGHT, RENDER (COMP depuis Nuke)', 'ANIM, LAYOUT (camera), FX, LIGHT, RENDER (COMP from Nuke)'), example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
+    shotCharacter: { title: tr('Perso', 'Character'), desc: tr("L'anim d'un plan = le mouvement d'un perso (2026-09-18). Un 2e DINGO dans le plan : DINGO_02.", 'A shot anim = the motion of one character (2026-09-18). A 2nd DINGO in the shot: DINGO_02.'), expected: tr('NAME d\'un asset', 'An asset NAME'), example: 'SEQ0010_SHOT0010_ANIM_DINGO' },
+    shotVariante: { title: tr('Variante', 'Variant'), desc: tr('Remplace Instance en mode Shot. Suggestions basées sur Sequence + Shot + Task.', 'Replaces Instance in Shot mode. Suggestions based on Sequence + Shot + Task.'), expected: tr('Champ libre', 'Free text'), example: 'SEQ0010_SHOT0010_ANIM_block_LAST' },
+  }
 }
 
 // ── PublishComposer ───────────────────────────────────────────────────────────
 
-// Circled "i" with a click popover — explanation / expected value / concrete example.
-function InfoDot({ info }: { info: TokenInfo }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [open])
-  return (
-    <div ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
-      <div
-        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
-        title="Infos"
-        style={{
-          width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-          border: '1px solid ' + (open ? 'var(--accent)' : 'var(--rule-2)'),
-          color: open ? 'var(--accent-hi)' : 'var(--ink-4)',
-          background: open ? 'var(--accent-soft)' : 'transparent',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 700, fontStyle: 'italic',
-          cursor: 'pointer', lineHeight: 1,
-        }}
-      >i</div>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 600, width: 210,
-          padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
-          borderRadius: 8, boxShadow: 'var(--shadow-md)', fontFamily: 'var(--sans)',
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>{info.title}</div>
-          <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45, marginBottom: 6 }}>{info.desc}</div>
-          <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>Attendu : <span style={{ color: 'var(--ink-2)' }}>{info.expected}</span></div>
-          <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>Ex. : <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent-hi)' }}>{info.example}</span></div>
-        </div>
-      )}
-    </div>
-  )
+// Tooltip text of a token field: what it is, what is expected, an example (ADR 0044:
+// the explanation is no longer printed above every field).
+function tokenTip(info: TokenInfo, tr: Tr): string {
+  return tr(`${info.title} : ${info.desc}
+Attendu : ${info.expected}
+Ex. : ${info.example}`, `${info.title}: ${info.desc}
+Expected: ${info.expected}
+e.g. ${info.example}`)
 }
 
-// A composer module: label + info dot, then a value box — a fixed dropdown or a
-// free-text combobox whose dropdown lists contextual suggestions (`options`).
-function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, onArchiveOption }: {
-  label: string; info: TokenInfo; value: string; placeholder?: string
+// A composer module: a value box whose greyed placeholder is the token name (Type,
+// Name, Task...) — a fixed dropdown or a free-text combobox listing contextual
+// suggestions (`options`). The explanation is the tooltip.
+function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOption }: {
+  label: string; info: TokenInfo; value: string
   options: string[]; fixed?: boolean; onChange: (v: string) => void
   // When set, each option gets a small cross that archives that token (ghost or
   // not) into ARCHIVE/ after confirmation. Only wired on per-project dropdowns.
   onArchiveOption?: (v: string) => void
 }) {
+  const { tr } = useTr()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -445,39 +459,62 @@ function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, 
   const q = value.trim().toLowerCase()
   const shown = fixed ? options : (q ? options.filter(o => o.toLowerCase().includes(q)) : options)
   const filled = !!value
+  // Empties the field only (2026-10-09): nothing is deleted on disk or in Production,
+  // another value can then be picked. Archiving a token stays in the dropdown rows.
+  const clearBtn = filled && (
+    <button
+      title={tr('Vider le champ', 'Clear the field')}
+      aria-label={tr('Vider le champ', 'Clear the field')}
+      onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
+      onClick={e => { e.stopPropagation(); onChange(''); setOpen(false) }}
+      style={{
+        flexShrink: 0, width: 16, height: 16, borderRadius: 3, border: 'none', padding: 0,
+        background: 'transparent', color: 'var(--ink-4)', cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.color = 'var(--ink)')}
+      onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
+    ><X size={11} strokeWidth={2} /></button>
+  )
   return (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 2 }}>
-        <span style={{ fontSize: 8, fontFamily: 'var(--mono)', color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</span>
-        <InfoDot info={info} />
-      </div>
+    <div style={{ flex: '1 1 96px', minWidth: 96 }} title={tokenTip(info, tr)}>
       <div ref={ref} style={{ position: 'relative' }}>
         {fixed ? (
           <div
             onClick={() => setOpen(o => !o)}
             className="scale-hover"
             style={{
-              height: 30, padding: '0 8px', display: 'flex', alignItems: 'center', cursor: 'pointer',
-              borderRadius: 5, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--rule-3)' : 'var(--rule-2)'),
               background: filled ? 'var(--accent-soft)' : 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
-              fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink-4)',
+              fontFamily: filled ? 'var(--mono)' : 'var(--sans)', fontSize: 11,
+              color: filled ? 'var(--accent-hi)' : 'var(--ink-4)', fontStyle: filled ? 'normal' : 'italic',
               fontWeight: filled ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}
-          >{value || placeholder || '-'}</div>
+          >
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{value || label}</span>
+            {clearBtn}
+            <ChevronDown size={11} strokeWidth={2} style={{ flexShrink: 0, opacity: 0.6 }} />
+          </div>
         ) : (
+          <>
           <input
             value={value}
-            placeholder={placeholder}
+            placeholder={label}
             onChange={e => { onChange(e.target.value); setOpen(true) }}
             onFocus={() => setOpen(true)}
             style={{
-              width: '100%', height: 30, padding: '0 8px', boxSizing: 'border-box',
-              borderRadius: 5, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              width: '100%', height: 28, padding: filled ? '0 24px 0 8px' : '0 8px', boxSizing: 'border-box',
+              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--rule-3)' : 'var(--rule-2)'),
               background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', outline: 'none',
-              fontFamily: 'var(--mono)', fontSize: 10, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
+              fontFamily: 'var(--mono)', fontSize: 11, color: filled ? 'var(--accent-hi)' : 'var(--accent-hi)',
               fontWeight: filled ? 600 : 400,
             }}
           />
+          {clearBtn && (
+            <span style={{ position: 'absolute', right: 6, top: 6, display: 'inline-flex' }}>{clearBtn}</span>
+          )}
+          </>
         )}
         {open && shown.length > 0 && (
           <div style={{
@@ -490,7 +527,7 @@ function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, 
                 key={o}
                 onMouseDown={e => { e.preventDefault(); onChange(o); setOpen(false) }}
                 style={{
-                  padding: '5px 8px', fontSize: 10, fontFamily: 'var(--mono)', cursor: 'pointer', whiteSpace: 'nowrap',
+                  padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)', cursor: 'pointer', whiteSpace: 'nowrap',
                   color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)',
                   background: o === value ? 'var(--accent-soft)' : 'transparent',
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -499,7 +536,8 @@ function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, 
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{o}</span>
                 {onArchiveOption && (
                   <button
-                    title="Archiver ce token (déplace le dossier vers ARCHIVE/)"
+                    title={tr('Archiver ce token (déplace son dossier vers ARCHIVE/, après confirmation). Pour seulement vider le champ, utilise la croix du champ.', 'Archive this token (moves its folder to ARCHIVE/, after confirmation). To only clear the field, use the cross in the field.')}
+                    aria-label={tr('Archiver ce token', 'Archive this token')}
                     onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setOpen(false); onArchiveOption(o) }}
                     style={{
                       flexShrink: 0, width: 15, height: 15, borderRadius: 3, border: 'none',
@@ -508,7 +546,7 @@ function ModuleBox({ label, info, value, placeholder, options, fixed, onChange, 
                     }}
                     onMouseEnter={e => (e.currentTarget.style.color = 'var(--err)')}
                     onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
-                  ><X size={10} strokeWidth={2} /></button>
+                  ><Archive size={10} strokeWidth={2} /></button>
                 )}
               </div>
             ))}
@@ -533,6 +571,8 @@ interface ComposerProps {
 }
 
 function PublishComposer({ project, tokens, seqs, shots, mode, sel, dcc, onModeSwitch, onSelect, onArchiveToken }: ComposerProps) {
+  const { tr } = useTr()
+  const TOKEN_INFO = tokenInfos(tr)
   // Asset names for the selected category (filtered by its CLASS path)
   const cls = CATEGORY_TO_CLASS[sel.category] ?? ''
   const classPath = (tokens.CLASS?.[cls] ?? '').replace(/\\/g, '/')
@@ -567,53 +607,46 @@ function PublishComposer({ project, tokens, seqs, shots, mode, sel, dcc, onModeS
   }, [mode, project, cls, sel.category, sel.name, sel.task, sel.instance, sel.seq, sel.shot])
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-      {/* Asset / Shot toggle */}
-      <div onClick={onModeSwitch} className="scale-hover" style={{
-        width: 52, flexShrink: 0, height: 30,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        border: '1px solid var(--rule-2)', borderRadius: 5,
-        background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)',
-        cursor: 'pointer', fontSize: 8, fontFamily: 'var(--mono)',
-        color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)',
-        fontWeight: 700, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)',
-      }}>{mode === 'asset' ? 'ASSET' : 'SHOT'}</div>
-
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <ExpandPicker
+        value={mode}
+        options={[{ value: 'asset', label: 'Asset' }, { value: 'shot', label: 'Shot' }]}
+        onChange={v => { if (v !== mode) onModeSwitch() }}
+      />
       {mode === 'asset' ? (
         <>
-          <ModuleBox label="Catégorie" info={TOKEN_INFO.category} value={sel.category} fixed options={[...ASSET_CATEGORIES]} placeholder="—" onChange={v => onSelect('category', v)} />
+          <ModuleBox label={tr('Catégorie', 'Category')} info={TOKEN_INFO.category} value={sel.category} fixed options={[...ASSET_CATEGORIES]} onChange={v => onSelect('category', v)} />
           <ModuleBox
-            label="Name" info={TOKEN_INFO.name} value={sel.name} options={names}
-            placeholder={sel.category ? 'nom…' : 'catégorie ?'} onChange={v => onSelect('name', v)}
+            label="Name" info={TOKEN_INFO.name} value={sel.name} options={names} onChange={v => onSelect('name', v)}
             onArchiveOption={sel.category ? (v => onArchiveToken('name', v)) : undefined}
           />
-          <ModuleBox label="Task" info={TOKEN_INFO.task} value={sel.task} fixed options={ASSET_TASKS.map(t => t.value)} placeholder="—" onChange={v => onSelect('task', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.task} value={sel.task} fixed options={ASSET_TASKS.map(t => t.value)} onChange={v => onSelect('task', v)} />
           <ModuleBox
             label="Instance" info={TOKEN_INFO.instance} value={sel.instance} options={instanceSug}
-            placeholder="null" onChange={v => onSelect('instance', v)}
+            onChange={v => onSelect('instance', v)}
             onArchiveOption={(sel.category && sel.name && sel.task) ? (v => onArchiveToken('instance', v)) : undefined}
           />
-          <ModuleBox label="Variante" info={TOKEN_INFO.variante} value={sel.variante} options={varianteSug} placeholder="(option)" onChange={v => onSelect('variante', v)} />
+          <ModuleBox label={tr('Variante', 'Variant')} info={TOKEN_INFO.variante} value={sel.variante} options={varianteSug} onChange={v => onSelect('variante', v)} />
         </>
       ) : (
         <>
           <ModuleBox
-            label="Sequence" info={TOKEN_INFO.seq} value={sel.seq} options={seqs}
-            placeholder="SEQ001" onChange={v => onSelect('seq', v)}
+            label={tr('Séquence', 'Sequence')} info={TOKEN_INFO.seq} value={sel.seq} options={seqs}
+            onChange={v => onSelect('seq', v)}
             onArchiveOption={v => onArchiveToken('seq', v)}
           />
           <ModuleBox
             label="Shot" info={TOKEN_INFO.shot} value={sel.shot} options={shots}
-            placeholder="SHOT010" onChange={v => onSelect('shot', v)}
+            onChange={v => onSelect('shot', v)}
             onArchiveOption={sel.seq ? (v => onArchiveToken('shot', v)) : undefined}
           />
-          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} fixed options={shotTasksFor(dcc)} placeholder="—" onChange={v => onSelect('name', v)} />
+          <ModuleBox label="Task" info={TOKEN_INFO.shotName} value={sel.name} fixed options={shotTasksFor(dcc)} onChange={v => onSelect('name', v)} />
           {formatToken(sel.name) === 'ANIM' ? (
-            <ModuleBox label="Perso" info={TOKEN_INFO.shotCharacter} value={sel.variante}
-              options={Object.keys(tokens.NAME ?? {}).sort()} placeholder="DINGO"
+            <ModuleBox label={tr('Perso', 'Character')} info={TOKEN_INFO.shotCharacter} value={sel.variante}
+              options={Object.keys(tokens.NAME ?? {}).sort()}
               onChange={v => onSelect('variante', v)} />
           ) : (
-            <ModuleBox label="Variante" info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} placeholder="null" onChange={v => onSelect('variante', v)} />
+            <ModuleBox label={tr('Variante', 'Variant')} info={TOKEN_INFO.shotVariante} value={sel.variante} options={varianteSug} onChange={v => onSelect('variante', v)} />
           )}
         </>
       )}
@@ -628,38 +661,77 @@ function characterBase(token: string): string {
   return token.replace(/_\d+$/, '')
 }
 
+// Session memory of the publish setup (2026-10-08): kept across page changes,
+// forgotten at FLUX restart or by the "Réinitialiser" button.
+const PUB = 'publisher.'
+
 export function Publisher() {
+  const [generation, setGeneration] = useState(0)
+  const resetAll = useCallback(() => {
+    const dcc = readSession<string>(PUB + 'dcc')
+    clearSession(PUB)
+    if (dcc) writeSession(PUB + 'dcc', dcc)   // the software stays, the publish restarts
+    setGeneration(g => g + 1)
+  }, [])
+  return <PublisherPage key={generation} onReset={resetAll} />
+}
+
+function PublisherPage({ onReset }: { onReset: () => void }) {
+  const tr = useStableTr()
   const { settings } = useSettings()
   const location = useLocation()
-  const [dcc, setDcc]           = useState('Maya')
-  const { project, projects, setProject } = useProject()
+  const [dcc, setDcc]           = useSessionState(PUB + 'dcc', 'Maya')
+  // Work profile (ADR 0042): first software shown, unless the user or a navigation
+  // (Production prefill, ZBrush freeze) already picked one.
+  const { ready: prefsReady, prefs: workPrefs } = useWorkProfile()
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const dccPicked = useRef(readSession(PUB + 'dcc') !== undefined)
+  const changeDcc = useCallback((name: string) => { dccPicked.current = true; setDcc(name) }, [])
+  const dccEnabled = useCallback((name: string) => {
+    const key = SOFTWARE.find(x => x.name === name)?.key
+    return !key || isDccEnabled(key)
+  }, [isDccEnabled])
+  useEffect(() => {
+    if (dccEnabled(dcc)) return
+    setDcc(SOFTWARE.find(x => isDccEnabled(x.key))?.name ?? 'Fichier local')
+  }, [dcc, dccEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!prefsReady || dccPicked.current) return
+    dccPicked.current = true
+    if (workPrefs.publisherSoft && dccEnabled(workPrefs.publisherSoft) && !location.state?.zbrushConnected) setDcc(workPrefs.publisherSoft)
+  }, [prefsReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { project, setProject } = useProject()
   const [tokens, setTokens]     = useState<Record<string, Record<string, string>>>({})
 
   // Composer state
-  const [mode, setMode]       = useState<PublishMode>('asset')
-  const [sel, setSel]         = useState<ComposerSel>(EMPTY_SEL)
+  const [mode, setMode]       = useSessionState<PublishMode>(PUB + 'mode', 'asset')
+  const [sel, setSel]         = useSessionState<ComposerSel>(PUB + 'sel', EMPTY_SEL)
   const [seqs, setSeqs]   = useState<string[]>([])
   const [shots, setShots] = useState<string[]>([])
+  // Padding of new SEQ/SHOT labels, exposed by GET .../sequences (backend SEQ_SHOT_PADDING).
+  const [seqPad, setSeqPad] = useState(DEFAULT_SEQ_SHOT_PADDING)
+  const seqLabelOf  = useCallback((raw: string) => formatSeqLabel(raw, seqs, seqPad), [seqs, seqPad])
+  const shotLabelOf = useCallback((raw: string) => formatShotLabel(raw, shots, seqPad), [shots, seqPad])
 
   // Export config (shared for all DCCs)
-  const [exportExt, setExportExt]   = useState('.abc')
-  const [isSequence, setIsSequence] = useState(false)
+  const [exportExt, setExportExt]   = useSessionState(PUB + 'exportExt', '.abc')
+  const [isSequence, setIsSequence] = useSessionState(PUB + 'isSequence', false)
   // ANIMATION = one file with time samples over a frame range (abc / USD).
   // SÉQUENCE = one file per frame ($F4 folder). Frame fields are shared.
-  const [animRange, setAnimRange] = useState(false)
-  const [frameStart, setFrameStart] = useState(1)
-  const [frameEnd, setFrameEnd]     = useState(100)
-  const [frameStep, setFrameStep]   = useState(1)
+  const [animRange, setAnimRange] = useSessionState(PUB + 'animRange', false)
+  const [frameStart, setFrameStart] = useSessionState(PUB + 'frameStart', 1)
+  const [frameEnd, setFrameEnd]     = useSessionState(PUB + 'frameEnd', 100)
+  const [frameStep, setFrameStep]   = useSessionState(PUB + 'frameStep', 1)
   // Where Start / End came from (U1): the keys of the DCC, its timeline, or typed by hand.
   const [rangeInfo, setRangeInfo]   = useState('')
 
   // Per-format export options (Maya). Reset to the format's defaults whenever the
   // active extension changes — defaults reproduce the pre-options export exactly.
-  const [mayaExportOpts, setMayaExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(schemaForExt('.abc')))
-  const [houExportOpts, setHouExportOpts] = useState<Record<string, unknown>>(() => defaultOptions(houdiniSchemaForExt('.abc')))
+  const [mayaExportOpts, setMayaExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'mayaExportOpts', () => defaultOptions(schemaForExt('.abc')))
+  const [houExportOpts, setHouExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'houExportOpts', () => defaultOptions(houdiniSchemaForExt('.abc')))
   // Houdini export attribute filter (F): keep-only / remove named point attributes.
-  const [houAttrMode, setHouAttrMode] = useState<'none' | 'keep' | 'remove'>('none')
-  const [houAttrNames, setHouAttrNames] = useState<string[]>([])
+  const [houAttrMode, setHouAttrMode] = useSessionState<'none' | 'keep' | 'remove'>(PUB + 'houAttrMode', 'none')
+  const [houAttrNames, setHouAttrNames] = useSessionState<string[]>(PUB + 'houAttrNames', [])
 
   // Resizable right panel (draggable splitter). Width persists per viewer; a
   // "Reset interface" action in the settings fires 'flux:reset-ui' to restore it.
@@ -668,7 +740,9 @@ export function Publisher() {
   // Node path we last auto-suggested a format for, so the Houdini poll suggests a
   // format once per newly-selected node instead of clobbering a manual override
   // (e.g. rop_geometry → .obj) on every 3s tick.
-  const autoExtForNodeRef = useRef<string | null>(null)
+  // Starts on the node restored from the session: coming back to the page must not
+  // re-suggest its format over the artist's choice.
+  const autoExtForNodeRef = useRef<string | null>(readSession<string>(PUB + 'ropNodePath') || null)
 
   useEffect(() => {
     try { localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth)) } catch { /* blocked storage */ }
@@ -703,17 +777,17 @@ export function Publisher() {
   }, [rightWidth])
 
   // Source / description / state
-  const [sourcePath, setSourcePath]   = useState('')
+  const [sourcePath, setSourcePath]   = useSessionState(PUB + 'sourcePath', '')
   // Local-file source: multiple files can be picked at once (texture sets). The
   // first also fills sourcePath so the single-file path/name UI still works.
-  const [localFiles, setLocalFiles]   = useState<string[]>([])
+  const [localFiles, setLocalFiles]   = useSessionState<string[]>(PUB + 'localFiles', [])
   // Autogroup: derive each file's INSTANCE (map token) from its filename so a
   // whole texture set publishes into one folder per map. Off = one instance for all.
-  const [autoGroup, setAutoGroup]     = useState(true)
-  const [description, setDescription] = useState('')
+  const [autoGroup, setAutoGroup]     = useSessionState(PUB + 'autoGroup', true)
+  const [description, setDescription] = useSessionState(PUB + 'description', '')
   const [publishing, setPublishing]   = useState(false)
   // Optional published-name override (local file). null = follow the token composer.
-  const [nameOverride, setNameOverride] = useState<string | null>(null)
+  const [nameOverride, setNameOverride] = useSessionState<string | null>(PUB + 'nameOverride', null)
 
   // ZBrush-specific
   const [zbrushConnected, setZbrushConnected] = useState(false)
@@ -722,24 +796,24 @@ export function Publisher() {
   const [zbrushPluginInstalled, setZbrushPluginInstalled] = useState<boolean | null>(null)
   // Per-format ZBrush export options, rendered via <ExportOptions> in the right
   // panel like Maya/Houdini. Reset to the format defaults when the format changes.
-  const [zbrushExportOpts, setZbrushExportOpts] = useState<Record<string, unknown>>(
+  const [zbrushExportOpts, setZbrushExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'zbrushExportOpts',
     () => defaultZbrushOptions('.obj'),
   )
 
   // Nuke per-format export options (Write knobs), rendered via <ExportOptions>.
-  const [nukeExportOpts, setNukeExportOpts] = useState<Record<string, unknown>>(
+  const [nukeExportOpts, setNukeExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'nukeExportOpts',
     () => defaultNukeOptions('.exr'),
   )
 
   // Photoshop per-format export options (COM save-option fields).
-  const [psExportOpts, setPsExportOpts] = useState<Record<string, unknown>>(
+  const [psExportOpts, setPsExportOpts] = useSessionState<Record<string, unknown>>(PUB + 'psExportOpts',
     () => defaultPhotoshopOptions('.psd'),
   )
 
   // Painter / Mari options (preset / bit depth / conform_tx). These map to typed
   // request fields, not a Write-knob dict; the format comes from the shared picker.
-  const [painterOpts, setPainterOpts] = useState<Record<string, unknown>>(() => defaultPainterOptions())
-  const [mariOpts, setMariOpts] = useState<Record<string, unknown>>(() => defaultMariOptions())
+  const [painterOpts, setPainterOpts] = useSessionState<Record<string, unknown>>(PUB + 'painterOpts', () => defaultPainterOptions())
+  const [mariOpts, setMariOpts] = useSessionState<Record<string, unknown>>(PUB + 'mariOpts', () => defaultMariOptions())
   // Painter texture sets / Mari channels read from the app: the ticked ones export.
   const [texItems, setTexItems]     = useState<{ name: string; detail: string }[]>([])
   const [texChecked, setTexChecked] = useState<Set<string>>(new Set())
@@ -749,9 +823,9 @@ export function Publisher() {
   // map by map like Mari, bit depth and size per map, only the ticked maps publish).
   const [painterPresets, setPainterPresets] = useState<PainterPreset[]>([])
   const [mapChecked, setMapChecked] = useState<Set<string>>(new Set())
-  const [mapOpts, setMapOpts] = useState<Record<string, MapOpts>>({})
+  const [mapOpts, setMapOpts] = useSessionState<Record<string, MapOpts>>(PUB + 'mapOpts', {})
   // Mari: format / bit depth / size per channel (same table as Painter's maps).
-  const [chanOpts, setChanOpts] = useState<Record<string, MapOpts>>({})
+  const [chanOpts, setChanOpts] = useSessionState<Record<string, MapOpts>>(PUB + 'chanOpts', {})
   // The project's Painter export presets (project.json, picked at creation): only those
   // are offered; none chosen = every preset of Painter (2026-09-26).
   const [projectPresets, setProjectPresets] = useState<string[]>([])
@@ -766,7 +840,7 @@ export function Publisher() {
     if (!project) return
     const next = projectPresets.includes(name) ? projectPresets.filter(n => n !== name) : [...projectPresets, name]
     api.putPainterPresets(project, next)
-      .then(r => { setProjectPresets(r.project); toast.success(`Presets du projet : ${r.project.join(', ') || 'tous'}`) })
+      .then(r => { setProjectPresets(r.project); toast.success(tr(`Presets du projet : ${r.project.join(', ') || 'tous'}`, `Project presets: ${r.project.join(', ') || 'all'}`)) })
       .catch(e => toast.error(e instanceof Error ? e.message : String(e)))
   }
   const offeredPresets = projectPresets.length
@@ -782,17 +856,17 @@ export function Publisher() {
   // top of the preset (coat, anisotropy, user...), unticked until wanted.
   const presetRows: { id: string; label: string; detail?: string }[] = curPreset?.maps ?? []
   const channelRows: { id: string; label: string; detail?: string }[] = painterChannels
-    .map(c => ({ id: channelMapId(c), label: `+ ${c.label}`, detail: 'canal' }))
+    .map(c => ({ id: channelMapId(c), label: `+ ${c.label}`, detail: tr('canal', 'channel') }))
     .filter(r => !presetRows.some(m => m.id === r.id))
   const mapRows = [...presetRows, ...channelRows]
 
   // Designer: the graphs of the open packages (ticked ones export) and their outputs.
-  const [designerOpts, setDesignerOpts] = useState<Record<string, unknown>>(() => defaultDesignerOptions())
+  const [designerOpts, setDesignerOpts] = useSessionState<Record<string, unknown>>(PUB + 'designerOpts', () => defaultDesignerOptions())
   const [designerPkgs, setDesignerPkgs] = useState<DesignerPackage[]>([])
   const [graphChecked, setGraphChecked] = useState<Set<string>>(new Set())
   const [outputChecked, setOutputChecked] = useState<Set<string>>(new Set())
   // Marvelous: the open project and the formats this Marvelous can export.
-  const [marvelousOpts, setMarvelousOpts] = useState<Record<string, unknown>>(() => defaultMarvelousOptions())
+  const [marvelousOpts, setMarvelousOpts] = useSessionState<Record<string, unknown>>(PUB + 'marvelousOpts', () => defaultMarvelousOptions())
   const [marvelousFormats, setMarvelousFormats] = useState<string[]>([])
   const [marvelousScript, setMarvelousScript] = useState<string | null>(null)
   const designerGraphs = designerPkgs.flatMap(p => p.graphs.map(g => ({ key: graphKey(p.path, g.id), pkg: p, graph: g })))
@@ -806,14 +880,14 @@ export function Publisher() {
 
 
   // Houdini-specific
-  const [ropNodePath, setRopNodePath]             = useState('')
+  const [ropNodePath, setRopNodePath]             = useSessionState(PUB + 'ropNodePath', '')
   const [houdiniConnected, setHoudiniConnected]   = useState(false)
   const [houdiniVersion, setHoudiniVersion]       = useState<string | null>(null)
   const [detectedNodeType, setDetectedNodeType]   = useState<string | null>(null)
 
   // Maya-specific
   const [mayaConnected, setMayaConnected]           = useState(false)
-  const [mayaScope, setMayaScope]                   = useState<'scene' | 'selection'>('scene')
+  const [mayaScope, setMayaScope]                   = useSessionState<'scene' | 'selection'>(PUB + 'mayaScope', 'selection')
   // Several Maya / Houdini open (2026-09-26): each one's scene and selection, the
   // artist picks which one publishes (and, in Houdini, which selected node).
   const [openInstances, setOpenInstances] = useState<{ port: number; pid?: number | null; label: string; scene: string | null; selection?: string[] }[]>([])
@@ -825,7 +899,7 @@ export function Publisher() {
   const [charLoading, setCharLoading]     = useState(false)
   // Who writes the USD of an asset task: null = the default for this task (FLUX when
   // the task has a department), true/false = the artist's explicit choice.
-  const [fluxWriter, setFluxWriter]                 = useState<boolean | null>(null)
+  const [fluxWriter, setFluxWriter]                 = useSessionState<boolean | null>(PUB + 'fluxWriter', null)
   const [usdDepartments, setUsdDepartments] = useState(USD_DEPARTMENTS_FALLBACK)
   const [usdShotDepartments, setUsdShotDepartments] = useState(USD_SHOT_DEPARTMENTS_FALLBACK)
   useEffect(() => {
@@ -849,7 +923,7 @@ export function Publisher() {
   // (or the selection) as usual, with that format's own options.
   const usdPreset: UsdPreset | null = usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)
     ? presetForTask(mode === 'asset' ? sel.task : formatToken(sel.name), mode === 'shot') : null
-  const [usdPresetOpts, setUsdPresetOpts] = useState(defaultPresetOptions)
+  const [usdPresetOpts, setUsdPresetOpts] = useSessionState(PUB + 'usdPresetOpts', defaultPresetOptions)
   const [usdPreview, setUsdPreview] = useState<MayaUsdPreview | null>(null)
   const [usdPreviewBusy, setUsdPreviewBusy] = useState(false)
   const [usdPreviewErr, setUsdPreviewErr] = useState('')
@@ -897,11 +971,11 @@ export function Publisher() {
       toast.error(e instanceof Error ? e.message : String(e))
     }
     if (!ok) { setTokenArchive(p => (p ? { ...p, busy: false } : p)); return }
-    toast.success('Token archivé')
+    toast.success(tr('Token archivé', 'Token archived'))
     setTokenArchive(null)
     reloadTokens()
     window.dispatchEvent(new Event('flux:refresh'))
-  }, [project, tokenArchive, reloadTokens])
+  }, [project, tokenArchive, reloadTokens, tr])
 
   // "Publish here" from Production — prefill project + mode + composer once.
   useEffect(() => {
@@ -917,7 +991,9 @@ export function Publisher() {
   // Sequences (shot mode)
   useEffect(() => {
     if (!project || mode !== 'shot') { setSeqs([]); return }
-    api.getSequences(project).then(d => setSeqs(d.sequences)).catch(() => setSeqs([]))
+    api.getSequences(project)
+      .then(d => { setSeqs(d.sequences); if (d.padding && d.padding > 0) setSeqPad(d.padding) })
+      .catch(() => setSeqs([]))
   }, [project, mode])
 
   // Shots for selected SEQ
@@ -1008,8 +1084,12 @@ export function Publisher() {
     if (!formats.includes(exportExt)) setExportExt(formats[0])
   }, [dcc]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset export options to the active format's defaults whenever it changes.
+  // Reset export options to the active format's defaults whenever it changes (not at
+  // mount: options restored from the session belong to the restored format).
+  const prevExt = useRef(exportExt)
   useEffect(() => {
+    if (prevExt.current === exportExt) return
+    prevExt.current = exportExt
     setMayaExportOpts(defaultOptions(schemaForExt(exportExt)))
     setHouExportOpts(defaultOptions(houdiniSchemaForExt(exportExt)))
     setZbrushExportOpts(defaultZbrushOptions(exportExt))
@@ -1124,19 +1204,19 @@ export function Publisher() {
     }
     const varr = formatToken(sel.variante) || 'null'
     // ADR 0019: SEQ_SHOT_TASK[_VARIANTE] — the department sits where an asset has its TYPE.
-    return `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${varr}`
-  }, [mode, sel])
+    return `${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${formatToken(sel.name)}_${varr}`
+  }, [mode, sel, seqLabelOf, shotLabelOf])
 
   // ── Token / folder pre-creation before publish ─────────────────────────────
 
   const createNewTokens = useCallback(async () => {
     if (mode === 'shot') {
-      const seqLabel = formatSeqLabel(sel.seq)
+      const seqLabel = seqLabelOf(sel.seq)
       const seqNum   = parseInt(seqLabel.replace(/[^0-9]/g, ''), 10)
       if (!isNaN(seqNum) && !seqs.includes(seqLabel)) {
         try { await api.createSequence(project, seqNum); const d = await api.getSequences(project); setSeqs(d.sequences) } catch { /* may exist */ }
       }
-      const shotLabel = formatShotLabel(sel.shot)
+      const shotLabel = shotLabelOf(sel.shot)
       const shotNum   = parseInt(shotLabel.replace(/[^0-9]/g, ''), 10)
       if (!isNaN(seqNum) && !isNaN(shotNum) && !shots.includes(shotLabel)) {
         try { await api.createShot(project, seqNum, shotNum); const d = await api.getShots(project, seqLabel); setShots(d.shots.map(s => s.split('/')[1] ?? s)) } catch { /* may exist */ }
@@ -1149,27 +1229,23 @@ export function Publisher() {
     if (name && cls) {
       try { await api.createAsset(project, cls, name) } catch { /* may already exist */ }
     }
-  }, [mode, project, sel, seqs, shots])
+  }, [mode, project, sel, seqs, shots, seqLabelOf, shotLabelOf])
 
   // ── Publish ─────────────────────────────────────────────────────────────────
 
   const handleCancelZBrush = useCallback(async () => {
     try {
       await api.cancelZBrush()          // sends stop; the bridge acks even when idle
-      toast.success('ZBrush libéré')
+      toast.success(tr('ZBrush libéré', 'ZBrush released'))
     } catch {
       // ZBrush not reachable (closed / already released): nothing to free.
-      toast('ZBrush déjà libre')
+      toast(tr('ZBrush déjà libre', 'ZBrush already free'))
     }
     setZbrushConnected(false)
     setZbrushVersion(null)
-  }, [])
+  }, [tr])
 
-  const reset = useCallback(() => {
-    setSel(EMPTY_SEL)
-    setSourcePath('')
-    setDescription('')
-  }, [])
+  const reset = onReset
 
   const ANIM_EXTS = ['.abc', '.usd', '.usda', '.usdc']
   // model / rig / look presets are a rest state: no frame range (2026-09-26).
@@ -1191,14 +1267,14 @@ export function Publisher() {
       const r = await api.getMayaCharacterInstances(shotCharName, readActiveInstancePort('Maya') ?? undefined)
       setCharInstances(r.items)
       setCharChecked(new Set(r.items.map(i => i.node)))
-      if (!quiet && r.items.length === 0) toast.info(`Aucune instance de ${shotCharName} dans Maya`)
+      if (!quiet && r.items.length === 0) toast.info(tr(`Aucune instance de ${shotCharName} dans Maya`, `No instance of ${shotCharName} in Maya`))
     } catch (e) {
       setCharInstances([])
       if (!quiet) toast.error(e instanceof Error ? e.message : String(e))
     } finally {
       setCharLoading(false)
     }
-  }, [shotCharName])
+  }, [shotCharName, tr])
 
   useEffect(() => {
     if (instancePicker && mayaConnected) void loadInstances(true)
@@ -1215,12 +1291,12 @@ export function Publisher() {
       if (!usdPreset || !ANIMATED_PRESETS.has(usdPreset)) setFrameStart(r.start)
       setFrameEnd(r.end)
       setRangeInfo(r.source === 'keys'
-        ? `Clés ${r.start}-${r.end} (${r.curves} courbe${r.curves > 1 ? 's' : ''})`
-        : `Timeline ${r.start}-${r.end} (aucune clé)`)
+        ? tr(`Clés ${r.start}-${r.end} (${r.curves} courbe${r.curves > 1 ? 's' : ''})`, `Keys ${r.start}-${r.end} (${r.curves} curve${r.curves > 1 ? 's' : ''})`)
+        : tr(`Timeline ${r.start}-${r.end} (aucune clé)`, `Timeline ${r.start}-${r.end} (no keys)`))
     } catch {
-      setRangeInfo(`${dcc} ne répond pas : plage à saisir`)
+      setRangeInfo(tr(`${dcc} ne répond pas : plage à saisir`, `${dcc} is not responding: type the range`))
     }
-  }, [dcc, mayaScope, usdPreset])
+  }, [dcc, mayaScope, usdPreset, tr])
 
   useEffect(() => {
     if (animCapable && animRange) void fetchAnimRange()
@@ -1228,7 +1304,10 @@ export function Publisher() {
 
   // ANIM preset (2026-09-26): animation on by default, Start 1001 (a pre-roll such
   // as 995 stays editable), End from the last key of the scene (fetch above).
+  const prevPreset = useRef(usdPreset)
   useEffect(() => {
+    if (prevPreset.current === usdPreset) return
+    prevPreset.current = usdPreset
     if (!usdPreset || !ANIMATED_PRESETS.has(usdPreset)) return
     setAnimRange(true)
     setFrameStart(1001)
@@ -1259,7 +1338,7 @@ export function Publisher() {
   }, [dcc, usdPreset, mayaScope, mayaConnected])
 
   const handlePublish = useCallback(async () => {
-    if (!project) { toast.error('Sélectionne un projet'); return }
+    if (!project) { toast.error(tr('Sélectionne un projet', 'Select a project')); return }
     const animOn = animCapable && animRange
     const seqOn = seqCapable && isSequence
     // Shot animation (SEQ_SHOT_ANIM_<NAME>): the 4th token is the animated character.
@@ -1270,7 +1349,7 @@ export function Publisher() {
     const filename = buildFilename()
     const parts = filename.split('_').filter(Boolean)
     if (parts.length < 4) {
-      toast.error(mode === 'asset' ? 'Complète Catégorie, Name et Task' : 'Complète Sequence, Shot et Name')
+      toast.error(mode === 'asset' ? tr('Complète Catégorie, Name et Task', 'Fill in Category, Name and Task') : tr('Complète Sequence, Shot et Name', 'Fill in Sequence, Shot and Name'))
       return
     }
 
@@ -1281,7 +1360,7 @@ export function Publisher() {
 
       if (dcc === 'Maya') {
         if (!mayaConnected) {
-          toast.error('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)')
+          toast.error(tr('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)', 'Maya not connected: open Maya with the FLUX bridge active (commandPort 7001)'))
           return
         }
         if (usdLook && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
@@ -1293,13 +1372,13 @@ export function Publisher() {
             user:         settings?.username ?? undefined,
             port:         readActiveInstancePort('Maya') ?? undefined,
           })
-          toast.success(`Look ${res.version} → ${res.materials} matériau(x), ${res.bindings} liaison(s)`)
+          toast.success(tr(`Look ${res.version} → ${res.materials} matériau(x), ${res.bindings} liaison(s)`, `Look ${res.version} → ${res.materials} material(s), ${res.bindings} binding(s)`))
           res.warnings?.forEach(w => toast.warning(w))
           return
         }
         if (usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = shotCharacter ?? (formatToken(sel.name) || parts[2])
-          if (!assetName) { toast.error('Choisis le perso animé (4e case)'); return }
+          if (!assetName) { toast.error(tr('Choisis le perso animé (4e case)', 'Pick the animated character (4th field)')); return }
           // Preset options (ADR 0034): Maya runs the preset sweep (model / rig / anim).
           const presetOptions = usdPreset && usdPreset !== 'look'
             ? { preset: usdPreset, ...usdPresetOpts[usdPreset] } : undefined
@@ -1309,7 +1388,7 @@ export function Publisher() {
             const charName = characterBase(assetName)
             for (const it of picked) {
               const token = it.instance === 1 ? charName : `${charName}_${String(it.instance).padStart(2, '0')}`
-              const fn = `${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${formatToken(sel.name)}_${token}`
+              const fn = `${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${formatToken(sel.name)}_${token}`
               try {
                 const r = await api.exportMayaLightUsd({
                   project_name: project, asset: charName, filename: fn, root: it.node,
@@ -1344,7 +1423,7 @@ export function Publisher() {
             options:         presetOptions,
             port:            readActiveInstancePort('Maya') ?? undefined,
           })
-          toast.success(`USD ${usdPreset ?? 'léger'} ${res.version} → ${res.asset}`)
+          toast.success(`USD ${usdPreset ?? tr('léger', 'light')} ${res.version} → ${res.asset}`)
           res.warnings?.forEach(w => toast.warning(w))
           return
         }
@@ -1363,7 +1442,7 @@ export function Publisher() {
         toast.success(`${versionLabel(res.version_str)} → Maya`)
       } else if (dcc === 'Houdini') {
         if (!houdiniConnected) {
-          toast.error('Houdini non connecté : lance le serveur FLUX dans Houdini')
+          toast.error(tr('Houdini non connecté : lance le serveur FLUX dans Houdini', 'Houdini not connected: start the FLUX server in Houdini'))
           return
         }
         if (usdLook && mode === 'asset' && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
@@ -1374,13 +1453,13 @@ export function Publisher() {
             fmt:          exportExt.replace('.', ''),
             user:         settings?.username ?? undefined,
           })
-          toast.success(`Look ${res.version} → ${res.materials} matériau(x), ${res.bindings} liaison(s)`)
+          toast.success(tr(`Look ${res.version} → ${res.materials} matériau(x), ${res.bindings} liaison(s)`, `Look ${res.version} → ${res.materials} material(s), ${res.bindings} binding(s)`))
           res.warnings?.forEach(w => toast.warning(w))
           return
         }
         if (usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)) {
           const assetName = shotCharacter ?? (formatToken(sel.name) || parts[2])
-          if (!assetName) { toast.error('Choisis le perso animé (4e case)'); return }
+          if (!assetName) { toast.error(tr('Choisis le perso animé (4e case)', 'Pick the animated character (4th field)')); return }
           const res = await api.exportHoudiniLightUsd({
             project_name: project,
             asset:        assetName,
@@ -1415,7 +1494,7 @@ export function Publisher() {
         toast.success(`${versionLabel(res.version_str)} → ${res.rop_node}`)
       } else if (dcc === 'ZBrush') {
         if (!zbrushConnected) {
-          toast.error('ZBrush non connecté : active le bridge FLUX dans ZBrush')
+          toast.error(tr('ZBrush non connecté : active le bridge FLUX dans ZBrush', 'ZBrush not connected: enable the FLUX bridge in ZBrush'))
           return
         }
         const res = await api.publishZBrush({
@@ -1432,7 +1511,7 @@ export function Publisher() {
         window.electronAPI?.windowMinimize()
       } else if (dcc === 'Nuke') {
         if (!bridgeStatus.connected) {
-          toast.error('Nuke non connecté : lance le serveur FLUX dans Nuke (menu FLUX)')
+          toast.error(tr('Nuke non connecté : lance le serveur FLUX dans Nuke (menu FLUX)', 'Nuke not connected: start the FLUX server in Nuke (FLUX menu)'))
           return
         }
         // colorspace is a top-level arg of the backend (not a Write knob): pull it
@@ -1453,7 +1532,7 @@ export function Publisher() {
         toast.success(`${versionLabel(res.version_str)} → Nuke`)
       } else if (dcc === 'Photoshop') {
         if (!bridgeStatus.connected) {
-          toast.error('Photoshop non connecté : ouvre Photoshop (photoshop-python-api requis)')
+          toast.error(tr('Photoshop non connecté : ouvre Photoshop (photoshop-python-api requis)', 'Photoshop not connected: open Photoshop (photoshop-python-api required)'))
           return
         }
         const res = await api.publishPhotoshop({
@@ -1469,11 +1548,11 @@ export function Publisher() {
         // The ping can fail while the bridge answers (a busy app): once its texture sets /
         // channels were read, the publish is tried and reports its own error.
         if (!bridgeStatus.connected && texItems.length === 0) {
-          toast.error(`${dcc} non connecté : ouvre ${dcc} avec le bridge FLUX actif`)
+          toast.error(tr(`${dcc} non connecté : ouvre ${dcc} avec le bridge FLUX actif`, `${dcc} not connected: open ${dcc} with the FLUX bridge active`))
           return
         }
         if (mode !== 'asset') {
-          toast.error('Le texturing se publie en mode Asset (Catégorie / Task / Name)')
+          toast.error(tr('Le texturing se publie en mode Asset (Catégorie / Task / Name)', 'Texturing publishes in Asset mode (Category / Task / Name)'))
           return
         }
         // Tokens from the asset composer (same derivation as buildFilename).
@@ -1490,13 +1569,13 @@ export function Publisher() {
         // Only the ticked texture sets / channels (all ticked = let the app export all).
         const picked = texItems.length > 0 && texChecked.size < texItems.length
           ? texItems.map(t => t.name).filter(n => texChecked.has(n)) : undefined
-        if (picked && picked.length === 0) { toast.error(dcc === 'Painter' ? 'Coche au moins un texture set' : 'Coche au moins un channel'); return }
+        if (picked && picked.length === 0) { toast.error(dcc === 'Painter' ? tr('Coche au moins un texture set', 'Tick at least one texture set') : tr('Coche au moins un channel', 'Tick at least one channel')); return }
         const presetIds = presetRows.map(m => m.id)
         const tickedPreset = presetIds.filter(id => mapChecked.has(id))
         const extraChannels = painterChannels.filter(c => channelRows.some(r => r.id === channelMapId(c)) && mapChecked.has(channelMapId(c)))
         // every preset map = no filter; none = the added channels only
         const pickedMaps = tickedPreset.length === presetIds.length ? undefined : tickedPreset
-        if (dcc === 'Painter' && tickedPreset.length === 0 && extraChannels.length === 0) { toast.error('Coche au moins une map'); return }
+        if (dcc === 'Painter' && tickedPreset.length === 0 && extraChannels.length === 0) { toast.error(tr('Coche au moins une map', 'Tick at least one map')); return }
         const mapParams = buildMapParams(mapRows, mapChecked, mapOpts)
         const chanParams = buildMapParams(texItems.map(t => ({ id: t.name, label: t.name })), texChecked, chanOpts)
         const res = dcc === 'Painter'
@@ -1517,23 +1596,23 @@ export function Publisher() {
                                     channel_params: Object.keys(chanParams).length ? chanParams : undefined })
         const n = res.published?.length ?? 0
         const timings = 'timings' in res && res.timings ? ` (${res.timings})` : ''
-        toast.success(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''} → ${dcc}${res.tx?.length ? ' · .tx' : ''}${timings}`)
+        toast.success(tr(`${n} map${n > 1 ? 's' : ''} publiée${n > 1 ? 's' : ''}`, `${n} map${n > 1 ? 's' : ''} published`) + ` → ${dcc}${res.tx?.length ? ' · .tx' : ''}${timings}`)
         res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Designer') {
         // Like Painter: the bridge exports the ticked graphs (their ticked outputs, the
         // .sbsar / .sbs), FLUX publishes each under the asset tokens.
         if (!bridgeStatus.connected && designerGraphs.length === 0) {
-          toast.error('Designer non connecté : ouvre Designer avec le bridge FLUX actif')
+          toast.error(tr('Designer non connecté : ouvre Designer avec le bridge FLUX actif', 'Designer not connected: open Designer with the FLUX bridge active'))
           return
         }
         if (mode !== 'asset') {
-          toast.error('Designer se publie en mode Asset (Catégorie / Task / Name)')
+          toast.error(tr('Designer se publie en mode Asset (Catégorie / Task / Name)', 'Designer publishes in Asset mode (Category / Task / Name)'))
           return
         }
         const picked = designerGraphs.filter(g => graphChecked.has(g.key))
-        if (designerGraphs.length > 0 && picked.length === 0) { toast.error('Coche au moins un graph'); return }
+        if (designerGraphs.length > 0 && picked.length === 0) { toast.error(tr('Coche au moins un graph', 'Tick at least one graph')); return }
         if (!designerOpts.maps && !designerOpts.sbsar && !designerOpts.sbs) {
-          toast.error('Coche les maps, le .sbsar ou le .sbs'); return
+          toast.error(tr('Coche les maps, le .sbsar ou le .sbs', 'Tick the maps, the .sbsar or the .sbs')); return
         }
         const graphs = picked.map(g => {
           const outs = g.graph.outputs.map(o => o.id).filter(id => outputChecked.has(outputKey(g.key, id)))
@@ -1541,7 +1620,7 @@ export function Publisher() {
                    outputs: outs.length < g.graph.outputs.length ? outs : null }
         })
         if (designerOpts.maps && graphs.some(g => g.outputs && g.outputs.length === 0) && !designerOpts.sbsar && !designerOpts.sbs) {
-          toast.error('Coche au moins un output par graph'); return
+          toast.error(tr('Coche au moins un output par graph', 'Tick at least one output per graph')); return
         }
         const res = await api.publishDesignerBridge({
           project_name: project,
@@ -1561,13 +1640,13 @@ export function Publisher() {
           user:         settings?.username ?? undefined,
         })
         const n = res.published?.length ?? 0
-        toast.success(`${n} fichier${n > 1 ? 's' : ''} publié${n > 1 ? 's' : ''} → Designer${res.tx?.length ? ' · .tx' : ''}`)
+        toast.success(tr(`${n} fichier${n > 1 ? 's' : ''} publié${n > 1 ? 's' : ''}`, `${n} file${n > 1 ? 's' : ''} published`) + ` → Designer${res.tx?.length ? ' · .tx' : ''}`)
         res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Marvelous') {
         // The bridge exports the open project in the picked format (+ .zprj), FLUX
         // publishes it under the composed name (asset or shot).
         if (!bridgeStatus.connected && marvelousFormats.length === 0) {
-          toast.error('Marvelous non connecté : lance le script bridge FLUX dans Marvelous')
+          toast.error(tr('Marvelous non connecté : lance le script bridge FLUX dans Marvelous', 'Marvelous not connected: run the FLUX bridge script in Marvelous'))
           return
         }
         const { with_zprj, ...options } = marvelousOpts
@@ -1581,13 +1660,13 @@ export function Publisher() {
           user:         settings?.username ?? undefined,
         })
         const n = res.published?.length ?? 0
-        toast.success(`${n} fichier${n > 1 ? 's' : ''} publié${n > 1 ? 's' : ''} → Marvelous`)
+        toast.success(tr(`${n} fichier${n > 1 ? 's' : ''} publié${n > 1 ? 's' : ''}`, `${n} file${n > 1 ? 's' : ''} published`) + ' → Marvelous')
         res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Fichier local') {
         // File ingest (Level 1): local files of any type, under the token-composed name.
         const files = localFiles.length ? localFiles : (sourcePath.trim() ? [sourcePath] : [])
         if (!files.length) {
-          toast.error('Indique le(s) fichier(s) source')
+          toast.error(tr('Indique le(s) fichier(s) source', 'Specify the source file(s)'))
           return
         }
         const multi = files.length > 1
@@ -1607,24 +1686,25 @@ export function Publisher() {
             const varr = formatToken(sel.variante)
             return `${cls}_${sel.task}_${formatToken(sel.name)}_${inst}_${distinct}` + (varr ? `_${varr}` : '')
           }
-          return `${formatToken(sel.name)}_${formatSeqLabel(sel.seq)}_${formatShotLabel(sel.shot)}_${distinct}`
+          return `${formatToken(sel.name)}_${seqLabelOf(sel.seq)}_${shotLabelOf(sel.shot)}_${distinct}`
         }
         // Publish one file; ok + what the publish also wrote (.tx, USD proxy).
-        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean }> => {
+        const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean; message: string }> => {
           const r = await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
                    target_name: target })
-          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path }
+          return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path, message: r.message }
         }
         let okCount = 0, txCount = 0, proxyCount = 0
+        // Each failure keeps the backend's reason (unknown task token, missing file...).
         const failed: string[] = []
         for (const f of files) {
           try {
             const r = await publishOne(f, targetFor(f))
             if (r.ok) { okCount++; txCount += r.tx; if (r.proxy) proxyCount++ }
-            else failed.push(fileStem(f))
-          } catch {
-            failed.push(fileStem(f))
+            else failed.push(`${fileStem(f)} : ${r.message || tr('raison inconnue', 'unknown reason')}`)
+          } catch (e) {
+            failed.push(`${fileStem(f)} : ${e instanceof Error ? e.message : String(e)}`)
           }
         }
         if (okCount) {
@@ -1632,17 +1712,18 @@ export function Publisher() {
           const extras = `${txCount ? ` · ${txCount} .tx` : ''}${proxyCount ? ` · proxy USD` : ''}`
           toast.success(
             multi
-              ? `${okCount} fichier${okCount > 1 ? 's' : ''} publié${okCount > 1 ? 's' : ''}${extras}${failed.length ? ` · ${failed.length} échec(s)` : ''}`
-              : `Publié → ${dcc}${extras}`,
+              ? tr(`${okCount} fichier${okCount > 1 ? 's' : ''} publié${okCount > 1 ? 's' : ''}${extras}${failed.length ? ` · ${failed.length} échec(s)` : ''}`,
+                   `${okCount} file${okCount > 1 ? 's' : ''} published${extras}${failed.length ? ` · ${failed.length} failure(s)` : ''}`)
+              : tr(`Publié → ${dcc}${extras}`, `Published → ${dcc}${extras}`),
           )
         }
-        if (failed.length && !okCount) toast.error(`Échec : ${failed.join(', ')}`)
+        if (failed.length) toast.error(tr(`Échec : ${failed.join(' · ')}`, `Failed: ${failed.join(' · ')}`))
       } else {
-        toast.error(`Publication depuis ${dcc} non encore disponible`)
+        toast.error(tr(`Publication depuis ${dcc} non encore disponible`, `Publishing from ${dcc} is not available yet`))
         return
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Erreur inconnue')
+      toast.error(e instanceof Error ? e.message : tr('Erreur inconnue', 'Unknown error'))
     } finally {
       setPublishing(false)
     }
@@ -1655,6 +1736,7 @@ export function Publisher() {
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
     mapRows, mapChecked, mapOpts, painterChannels, channelRows,
     mayaConnected, mayaScope, mayaExportOpts, usdLayers, usdInclude, usdPreset, usdPresetOpts, sel, houdiniConnected, houExportOpts, houAttrMode, houAttrNames,
+    seqLabelOf, shotLabelOf, tr,
   ])
 
   // The app a texture list belongs to: a slow answer (Mari busy exporting) that lands
@@ -1674,7 +1756,7 @@ export function Publisher() {
         setTexItems(r.texture_sets.map(t => ({
           name: t.name, detail: [t.resolution ? `${t.resolution}px` : '', t.udim ? 'UDIM' : ''].filter(Boolean).join(' · '),
         })))
-        setTexSource(r.project || 'Aucun projet ouvert')
+        setTexSource(r.project || tr('Aucun projet ouvert', 'No project open'))
         setTexChecked(new Set(r.texture_sets.map(t => t.name)))
         setPainterPresets(r.presets ?? [])
         setPainterChannels(r.channels ?? [])
@@ -1685,11 +1767,11 @@ export function Publisher() {
         setTexItems(r.channels.map(c => ({
           name: c.name,
           detail: r.mode === 'nodes'
-            ? [c.input ? `← ${c.input}` : 'rien de branché', c.baked === true ? 'baké' : c.baked === false ? 'bake pas à jour' : ''].filter(Boolean).join(' ')
+            ? [c.input ? `← ${c.input}` : tr('rien de branché', 'nothing connected'), c.baked === true ? tr('baké', 'baked') : c.baked === false ? tr('bake pas à jour', 'bake out of date') : ''].filter(Boolean).join(' ')
             : [c.size ? `${c.size >= 1024 ? `${c.size / 1024}K` : c.size}` : '', c.depth ? `${c.depth}b${c.depth > 8 ? 'f' : ''}` : '',
-               c.layers != null ? `${c.layers} calque${c.layers > 1 ? 's' : ''}` : ''].filter(Boolean).join(' '),
+               c.layers != null ? tr(`${c.layers} calque${c.layers > 1 ? 's' : ''}`, `${c.layers} layer${c.layers > 1 ? 's' : ''}`) : ''].filter(Boolean).join(' '),
         })))
-        setTexSource(r.geo ? `${r.geo}${r.mode === 'nodes' ? ' · nodes FLUX Export' : ''}` : 'Aucune geo')
+        setTexSource(r.geo ? `${r.geo}${r.mode === 'nodes' ? tr(' · nodes FLUX Export', ' · FLUX Export nodes') : ''}` : tr('Aucune geo', 'No geo'))
         setTexChecked(new Set(r.channels.map(c => c.name)))
       }
     } catch (e) {
@@ -1699,7 +1781,7 @@ export function Publisher() {
     } finally {
       if (!stale()) setTexLoading(false)
     }
-  }, [dcc])
+  }, [dcc, tr])
   useEffect(() => { void loadTexItems() }, [loadTexItems])
 
   // Designer graphs / Marvelous project read from the app (Relire re-reads them).
@@ -1716,11 +1798,11 @@ export function Publisher() {
         const current = all.filter(x => x.g.current)
         setGraphChecked(new Set((current.length ? current : all).map(x => x.key)))
         setOutputChecked(new Set(all.flatMap(x => x.g.outputs.map(o => outputKey(x.key, o.id)))))
-        setBridgeInfoSource(r.packages.length ? r.packages.map(p => p.name).join(', ') : 'Aucun package ouvert')
+        setBridgeInfoSource(r.packages.length ? r.packages.map(p => p.name).join(', ') : tr('Aucun package ouvert', 'No package open'))
       } else {
         const r = await api.getMarvelousInfo()
         setMarvelousFormats(r.formats)
-        setBridgeInfoSource([r.project || 'Projet sans nom',
+        setBridgeInfoSource([r.project || tr('Projet sans nom', 'Untitled project'),
           r.patterns != null ? `${r.patterns} patterns` : '', r.avatars != null ? `${r.avatars} avatar(s)` : '',
         ].filter(Boolean).join(' · '))
       }
@@ -1731,7 +1813,7 @@ export function Publisher() {
     } finally {
       setTexLoading(false)
     }
-  }, [dcc])
+  }, [dcc, tr])
   useEffect(() => { void loadBridgeInfo() }, [loadBridgeInfo])
   // Marvelous has no startup folder: show where the bridge script is, to run it by hand.
   useEffect(() => {
@@ -1779,28 +1861,28 @@ export function Publisher() {
   }
   const instanceChooser = openInstances.length > 1 && (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-      <div className="cap">{openInstances.length} {dcc} ouverts : choisis celui qui publie</div>
+      <div className="cap">{openInstances.length} {dcc} {tr('ouverts : choisis celui qui publie', 'open: pick the one that publishes')}</div>
       {openInstances.map(it => {
         const on = it.port === activeInstPort
-        const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : 'Scène sans nom'
+        const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : tr('Scène sans nom', 'Untitled scene')
         const sel = it.selection ?? []
         return (
           <div key={it.port} onClick={() => chooseInstance(it.port, undefined, dcc === 'Maya' ? 'scene' : undefined)}
             title={it.scene ?? ''}
             style={{
               padding: '7px 10px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
-              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
+              border: '1px solid ' + (on ? 'var(--rule-3)' : 'var(--rule-2)'),
               background: on ? 'var(--accent-soft)' : 'var(--paper)',
               display: 'flex', flexDirection: 'column', gap: 5,
             }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--ink-4)' }} />
+              <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--accent)' : 'var(--rule-3)' }} />
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{scene}</span>
-              <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', flexShrink: 0 }}>:{it.port}</span>
+              <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', flexShrink: 0 }}>:{it.port}</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {sel.length === 0 && (
-                <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>{dcc === 'Houdini' ? 'aucun node sélectionné' : 'rien de sélectionné'}</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{dcc === 'Houdini' ? tr('aucun node sélectionné', 'no node selected') : tr('rien de sélectionné', 'nothing selected')}</span>
               )}
               {sel.slice(0, 12).map(n => {
                 const picked = on && (dcc === 'Houdini' ? ropNodePath === n : mayaScope === 'selection')
@@ -1808,15 +1890,15 @@ export function Publisher() {
                   <span key={n} title={n}
                     onClick={e => { e.stopPropagation(); chooseInstance(it.port, dcc === 'Houdini' ? n : undefined, dcc === 'Maya' ? 'selection' : undefined) }}
                     style={{
-                      fontSize: 10, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
+                      fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      border: '1px solid ' + (picked ? 'var(--accent)' : 'var(--rule-2)'),
+                      border: '1px solid ' + (picked ? 'var(--rule-3)' : 'var(--rule-2)'),
                       background: picked ? 'var(--accent-soft)' : 'var(--paper-2)',
                       color: picked ? 'var(--accent-hi)' : 'var(--ink-2)',
                     }}>{dcc === 'Houdini' ? n.split('/').filter(Boolean).slice(-2).join('/') : n.split('|').pop()}</span>
                 )
               })}
-              {sel.length > 12 && <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>+{sel.length - 12}</span>}
+              {sel.length > 12 && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>+{sel.length - 12}</span>}
             </div>
           </div>
         )
@@ -1861,43 +1943,83 @@ export function Publisher() {
 
   const filename = buildFilename()
 
+  // One connection indicator in the toolbar (ADR 0044). Ports, versions and setup steps
+  // are in its tooltip / click popover, only shown when there is something to do.
+  const connectionPill = dcc === 'Fichier local' ? null
+    : dcc === 'ZBrush' ? (
+      <ConnectionPill
+        state={zbrushConnected ? 'ok' : zbrushChecking ? 'checking' : 'off'}
+        detail={zbrushStatusText(tr, zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
+        help={zbrushConnected ? undefined : zbrushStatusText(tr, zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
+      />
+    ) : dcc === 'Maya' ? (
+      <ConnectionPill
+        state={mayaConnected ? 'ok' : mayaAutostartInstalled === null ? 'checking' : 'off'}
+        detail={mayaConnected ? `commandPort ${activeInstPort ?? 7001}` : tr('Le pont FLUX (commandPort 7001) est injoignable', 'The FLUX bridge (commandPort 7001) is unreachable')}
+        help={mayaConnected || mayaAutostartInstalled === null ? undefined : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <MayaStep
+              n={1}
+              done={!!mayaAutostartInstalled}
+              title={mayaAutostartInstalled ? tr('Autostart installé', 'Autostart installed') : tr("Installer l'autostart Maya", 'Install the Maya autostart')}
+              desc={mayaAutostartInstalled ? (mayaStartupFile ?? tr('userSetup.py mis à jour', 'userSetup.py updated')) : tr('Launcher : bouton Play de Maya, puis Installer le bridge', 'Launcher: Maya Play button, then Install the bridge')}
+            />
+            {mayaAutostartInstalled && (
+              <MayaStep n={2} done={false} title={tr('Redémarre Maya', 'Restart Maya')} desc={tr("Le commandPort s'ouvre au lancement.", 'The commandPort opens at startup.')} />
+            )}
+            {mayaConnectCmd && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span>{tr('Ou tout de suite, dans le Script Editor (Python) de Maya :', 'Or right now, in the Maya Script Editor (Python):')}</span>
+                <CopyBlock text={mayaConnectCmd} />
+              </div>
+            )}
+          </div>
+        )}
+      />
+    ) : dcc === 'Houdini' ? (
+      <ConnectionPill
+        state={houdiniConnected ? 'ok' : 'off'}
+        detail={houdiniConnected && houdiniVersion ? `Houdini ${houdiniVersion}` : undefined}
+        help={houdiniConnected ? undefined : tr('Lance le serveur FLUX dans Houdini : Launcher, bouton Play de Houdini, Installer le bridge, puis relance Houdini.', 'Start the FLUX server in Houdini: Launcher, Houdini Play button, Install the bridge, then restart Houdini.')}
+      />
+    ) : DCC_PING_KEY[dcc] ? (
+      <ConnectionPill
+        state={bridgeStatus.connected ? 'ok' : bridgeStatus.checking ? 'checking' : 'off'}
+        detail={bridgeStatus.version ?? undefined}
+        help={bridgeStatus.connected || bridgeStatus.checking ? undefined : dcc === 'Marvelous' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span>{tr('Marvelous 2024.1+ : Plugins > Plug-in > FLUX Bridge.', 'Marvelous 2024.1+: Plugins > Plug-in > FLUX Bridge.')}</span>
+            {marvelousScript
+              ? <>
+                  <span>{tr('Sinon, colle cette ligne dans Script > Python (Plugins > Python Editor en 2024.1+) puis Run :', 'Otherwise, paste this line in Script > Python (Plugins > Python Editor in 2024.1+), then Run:')}</span>
+                  {/* No " and no \ : the Marvelous 2024 editor mangles them (SyntaxError). */}
+                  <CopyBlock text={`exec(open('${marvelousScript.replace(/\\/g, '/')}').read())`} />
+                </>
+              : <span>{tr('Script absent : Launcher, bouton Play de Marvelous, Installer le bridge.', 'Script missing: Launcher, Marvelous Play button, Install the bridge.')}</span>}
+          </div>
+        ) : tr(`${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (Launcher, bouton Play, Installer le bridge).`, `${dcc} is not responding: start the FLUX bridge in ${dcc} (Launcher, Play button, Install the bridge).`)}
+      />
+    ) : <ConnectionPill state="warn" label={tr('Depuis le logiciel', 'From the software')} detail={tr(`La publication depuis ${dcc} se déclenche dans le logiciel`, `Publishing from ${dcc} is triggered inside the software`)} />
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      {/* Header */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Publish</div>
+      {/* Toolbar: software (expand picker), project, connection. No page title (ADR 0044). */}
+      <div className="page-toolbar">
+        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} />
+        <ProjectPicker />
+        <div style={{ flex: 1 }} />
+        {connectionPill}
       </div>
-
-      <SoftwareSelector active={dcc} onChange={setDcc} />
 
       <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* ── Left: Composer + source + description ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
-          <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', minHeight: 0 }}>
-
-            {/* Project selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div className="cap">PROJET</div>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex', zIndex: 1 }}>
-                  <FolderIcon color="var(--accent)" />
-                </span>
-                <Select value={project} onValueChange={setProject}>
-                  <SelectTrigger style={{ width: 200, paddingLeft: 26 }} />
-                  <SelectContent>
-                    {projects.length === 0
-                      ? <SelectItem value="__none__">Aucun projet</SelectItem>
-                      : projects.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+          <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0 }}>
 
             {/* Publish Composer */}
             <PublishComposer
@@ -1938,141 +2060,65 @@ export function Publisher() {
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
                     <Trash2 size={15} strokeWidth={1.9} color="var(--err)" />
-                    Archiver {tokenArchive.label} ?
+                    {tr(`Archiver ${tokenArchive.label} ?`, `Archive ${tokenArchive.label}?`)}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
                     {tokenArchive.info === null
-                      ? 'Analyse du dossier…'
+                      ? tr('Analyse du dossier…', 'Scanning the folder…')
                       : tokenArchive.info.exists && tokenArchive.info.file_count > 0
-                        ? `Ce dossier contient ${tokenArchive.info.file_count} fichier${tokenArchive.info.file_count > 1 ? 's' : ''}. Il sera déplacé vers ARCHIVE/ (récupérable), pas supprimé.`
+                        ? tr(`Ce dossier contient ${tokenArchive.info.file_count} fichier${tokenArchive.info.file_count > 1 ? 's' : ''}. Il sera déplacé vers ARCHIVE/ (récupérable), pas supprimé.`,
+                             `This folder holds ${tokenArchive.info.file_count} file${tokenArchive.info.file_count > 1 ? 's' : ''}. It will be moved to ARCHIVE/ (recoverable), not deleted.`)
                         : tokenArchive.info.exists
-                          ? 'Le dossier (vide) sera déplacé vers ARCHIVE/.'
-                          : "Aucun dossier sur disque : seul le token sera retiré."}
+                          ? tr('Le dossier (vide) sera déplacé vers ARCHIVE/.', 'The (empty) folder will be moved to ARCHIVE/.')
+                          : tr("Aucun dossier sur disque : seul le token sera retiré.", 'No folder on disk: only the token will be removed.')}
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                    <Btn onClick={() => setTokenArchive(null)} disabled={tokenArchive.busy}>Annuler</Btn>
+                    <Btn onClick={() => setTokenArchive(null)} disabled={tokenArchive.busy}>{tr('Annuler', 'Cancel')}</Btn>
                     <Btn onClick={confirmTokenArchive} disabled={tokenArchive.busy || tokenArchive.info === null}>
-                      {tokenArchive.busy ? 'Archivage…' : 'Archiver'}
+                      {tokenArchive.busy ? tr('Archivage…', 'Archiving…') : tr('Archiver', 'Archive')}
                     </Btn>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Source / DCC info */}
-            {dcc === 'ZBrush' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {/* Connection status */}
-                <div>
-                  <div className="cap" style={{ marginBottom: 6 }}>CONNEXION ZBRUSH</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{
-                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                      background: zbrushConnected ? 'var(--ok)' : zbrushChecking ? 'var(--ink-4)' : 'var(--err)',
-                    }} />
-                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                      {zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            ) : dcc === 'Maya' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-                {/* Maya connection — coherent card, UI sans font (matches Launcher naming) */}
-                {mayaConnected ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0, boxShadow: '0 0 6px var(--ok)' }} />
-                    <span style={{ fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>Maya connecté</span>
-                    <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)' }}>· commandPort {activeInstPort ?? 7001}</span>
-                  </div>
-                ) : mayaAutostartInstalled !== null && (
-                  <div style={{ borderRadius: 10, border: '1px solid var(--accent)', background: 'var(--accent-soft)', overflow: 'hidden' }}>
-                    {/* Header */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--rule-2)' }}>
-                      <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--err)', flexShrink: 0, marginTop: 4 }} />
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                        <span style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Maya n'est pas connecté</span>
-                        <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45 }}>
-                          Le pont FLUX (commandPort 7001) est injoignable. Suis les étapes pour l'activer.
-                        </span>
-                      </div>
-                    </div>
-                    {/* Steps */}
-                    <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--paper)' }}>
-                      <MayaStep
-                        n={1}
-                        done={!!mayaAutostartInstalled}
-                        title={mayaAutostartInstalled ? 'Autostart installé' : "Installer l'autostart Maya"}
-                        desc={mayaAutostartInstalled ? (mayaStartupFile ?? 'userSetup.py mis à jour') : 'Sidebar → bouton ⬡ à côté de Maya'}
-                      />
-                      {mayaAutostartInstalled && (
-                        <MayaStep n={2} done={false} title="Redémarre Maya" desc="Le commandPort s'ouvre automatiquement au lancement." />
-                      )}
-                      {mayaConnectCmd && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                          <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)' }}>
-                            Ou ouvre le port immédiatement — colle ceci dans le Script Editor (Python) de Maya :
-                          </span>
-                          <CopyBlock text={mayaConnectCmd} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {mayaConnected && instanceChooser}
-              </div>
-            ) : dcc === 'Houdini' ? (
-              <div>
-                <div className="cap" style={{ marginBottom: 6 }}>NODE ROP</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
-                  <div style={{
-                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                    background: houdiniConnected ? 'var(--ok)' : 'var(--err)',
-                  }} />
-                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                    {houdiniConnected
-                      ? `Connecté${houdiniVersion ? ` · Houdini ${houdiniVersion}` : ''}`
-                      : 'Houdini non connecté : lance le serveur FLUX dans Houdini'}
-                  </div>
-                </div>
-                {houdiniConnected && instanceChooser && <div style={{ marginBottom: 8 }}>{instanceChooser}</div>}
+            {/* Source: only what the artist has to act on (instance, ROP node, local file). */}
+            {(dcc === 'Maya' && mayaConnected) && instanceChooser}
+            {dcc === 'Houdini' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {houdiniConnected && instanceChooser}
                 <input
                   value={ropNodePath}
                   onChange={e => setRopNodePath(e.target.value)}
-                  placeholder="/out/rop_alembic1  (auto-rempli depuis la sélection)"
+                  placeholder={tr('Node ROP (rempli depuis la sélection)', 'ROP node (filled from the selection)')}
+                  title={tr('Node ROP exporté, ex. /out/rop_alembic1', 'Exported ROP node, e.g. /out/rop_alembic1')}
                   style={{
                     width: '100%', height: 28,
                     background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
+                    borderRadius: 6, padding: '0 8px',
+                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                     boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
-                {detectedNodeType && (
-                  <div style={{ marginTop: 4, fontSize: 9, fontFamily: 'var(--mono)', color: resolveNodeExt(detectedNodeType) ? 'var(--ok)' : 'var(--ink-4)' }}>
-                    {resolveNodeExt(detectedNodeType)
-                      ? `→ ${resolveNodeExt(detectedNodeType)} (${detectedNodeType})`
-                      : `type non reconnu : ${detectedNodeType}`}
+                {detectedNodeType && !resolveNodeExt(detectedNodeType) && (
+                  <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
+                    {tr('type non reconnu :', 'unknown type:')} {detectedNodeType}
                   </div>
                 )}
               </div>
-            ) : dcc === 'Fichier local' ? (
+            )}
+            {dcc === 'Fichier local' && (
               <div>
-                <div className="cap" style={{ marginBottom: 6 }}>
-                  FICHIER SOURCE
-                </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
                     value={sourcePath}
                     onChange={e => setSourcePath(e.target.value)}
-                    placeholder="Chemin absolu vers le fichier à publier…  (tout type)"
+                    placeholder={tr('Fichier à publier (tout type)', 'File to publish (any type)')}
                     style={{
                       flex: 1, minWidth: 0, height: 28,
                       background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                       borderRadius: 5, padding: '0 8px',
-                      fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-2)',
+                      fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)',
                       boxShadow: 'var(--shadow-inset)', outline: 'none',
                     }}
                   />
@@ -2082,7 +2128,7 @@ export function Publisher() {
                       // files (a texture set, a folder's worth of maps) publishes them
                       // in one go; each gets its own destination via autogroup.
                       const picked = await window.electronAPI?.openFiles?.([
-                        { name: 'Tous les fichiers', extensions: ['*'] },
+                        { name: tr('Tous les fichiers', 'All files'), extensions: ['*'] },
                       ])
                       if (picked && picked.length) {
                         setLocalFiles(picked)
@@ -2090,17 +2136,17 @@ export function Publisher() {
                       }
                     }}
                     className="scale-hover"
-                    title="Parcourir… (sélection multiple possible)"
+                    title={tr('Parcourir… (sélection multiple possible)', 'Browse… (multiple selection allowed)')}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
                       height: 28, padding: '0 10px', borderRadius: 5,
                       border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 10,
+                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 11,
                       boxShadow: 'var(--shadow-xs)',
                     }}
                   >
                     <FolderOpen size={12} strokeWidth={1.75} />
-                    Parcourir
+                    {tr('Parcourir', 'Browse')}
                   </div>
                   <div
                     onClick={async () => {
@@ -2111,21 +2157,21 @@ export function Publisher() {
                         setLocalFiles(picked)
                         setSourcePath(picked[0])
                       } else if (picked) {
-                        toast.error('Aucune image trouvée dans ce dossier')
+                        toast.error(tr('Aucune image trouvée dans ce dossier', 'No image found in this folder'))
                       }
                     }}
                     className="scale-hover"
-                    title="Importer un dossier de textures (récursif)"
+                    title={tr('Importer un dossier de textures (récursif)', 'Import a texture folder (recursive)')}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
                       height: 28, padding: '0 10px', borderRadius: 5,
                       border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 10,
+                      color: 'var(--ink-3)', cursor: 'pointer', fontSize: 11,
                       boxShadow: 'var(--shadow-xs)',
                     }}
                   >
                     <FolderOpen size={12} strokeWidth={1.75} />
-                    Dossier
+                    {tr('Dossier', 'Folder')}
                   </div>
                 </div>
 
@@ -2135,25 +2181,25 @@ export function Publisher() {
                 {localFiles.length > 1 && (
                   <div style={{ marginTop: 8, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: '8px 10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span className="cap">{localFiles.length} FICHIERS</span>
+                      <span className="cap">{localFiles.length} {tr('FICHIERS', 'FILES')}</span>
                       <span style={{ flex: 1 }} />
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 10, color: 'var(--ink-2)' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 11, color: 'var(--ink-2)' }}>
                         <input type="checkbox" checked={autoGroup} onChange={e => setAutoGroup(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
-                        Autogroup par map
+                        {tr('Autogroup par map', 'Autogroup by map')}
                       </label>
                       <span
                         onClick={() => { setLocalFiles([]); setSourcePath('') }}
-                        style={{ color: 'var(--accent-hi)', cursor: 'pointer', fontSize: 10 }}
-                      >Vider</span>
+                        style={{ color: 'var(--accent-hi)', cursor: 'pointer', fontSize: 11 }}
+                      >{tr('Vider', 'Clear')}</span>
                     </div>
                     <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {localFiles.map(f => {
                         const distinct = (mode === 'asset' && autoGroup) ? mapSuffix(f) : formatToken(fileStem(f))
                         const instLabel = mode === 'asset'
                           ? (formatToken(sel.instance) || 'null')
-                          : `${formatSeqLabel(sel.seq)}/${formatShotLabel(sel.shot)}`
+                          : `${seqLabelOf(sel.seq)}/${shotLabelOf(sel.shot)}`
                         return (
-                          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+                          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileStem(f)}</span>
                             <span style={{ color: 'var(--accent-hi)', flexShrink: 0 }}>→ {instLabel} · {distinct}</span>
                           </div>
@@ -2165,102 +2211,63 @@ export function Publisher() {
 
                 {/* Published name — single file only; multi-file names are auto per file.
                     Must stay token-parseable (it drives the destination folder). */}
-                {localFiles.length <= 1 && (<>
-                <div className="cap" style={{ margin: '10px 0 6px' }}>NOM PUBLIÉ</div>
-                <input
-                  value={nameOverride ?? filename}
-                  onChange={e => setNameOverride(e.target.value)}
-                  spellCheck={false}
-                  placeholder={filename}
-                  style={{
-                    width: '100%', height: 28,
-                    background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 8px',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
-                    boxShadow: 'var(--shadow-inset)', outline: 'none',
-                  }}
-                />
-                <div style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 4, fontFamily: 'var(--mono)' }}>
-                  Extension conservée depuis le fichier source. {nameOverride !== null && (
-                    <span onClick={() => setNameOverride(null)} style={{ color: 'var(--accent-hi)', cursor: 'pointer' }}>
-                      Réinitialiser
-                    </span>
-                  )}
-                </div>
-                </>)}
-              </div>
-            ) : DCC_PING_KEY[dcc] ? (
-              <div>
-                <div className="cap" style={{ marginBottom: 6 }}>CONNEXION {dcc.toUpperCase()}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                    background: bridgeStatus.connected ? 'var(--ok)' : bridgeStatus.checking ? 'var(--ink-4)' : 'var(--err)',
-                  }} />
-                  <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                    {bridgeStatus.connected
-                      ? `Connecté${bridgeStatus.version ? ` · ${bridgeStatus.version}` : ''}`
-                      : bridgeStatus.checking
-                        ? 'Vérification...'
-                        : dcc === 'Marvelous'
-                          ? 'Marvelous ne répond pas : dans Marvelous 2024.1+, Plugins > Plug-in > FLUX Bridge ; en 2024, la ligne ci-dessous (une fois par session)'
-                          : `${dcc} ne répond pas : lance le bridge FLUX dans ${dcc} (bouton Plug dans la sidebar pour l'autostart)`}
-                  </div>
-                </div>
-                {dcc === 'Marvelous' && !bridgeStatus.connected && !bridgeStatus.checking && (
-                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {marvelousScript
-                      ? <>
-                          <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>
-                            Pas de menu Plugins &gt; Plug-in (Marvelous 2024) ou pas de FLUX Bridge dedans : colle cette ligne dans Script &gt; Python (Plugins &gt; Python Editor en 2024.1+) puis Run.
-                          </span>
-                          {/* No " and no \ : the Marvelous 2024 editor mangles them (SyntaxError). */}
-                          <CopyBlock text={`exec(open('${marvelousScript.replace(/\\/g, '/')}').read())`} />
-                        </>
-                      : <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>Script absent : bouton Plug de Marvelous dans la sidebar pour l'écrire.</span>}
+                {localFiles.length <= 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <input
+                      value={nameOverride ?? filename}
+                      onChange={e => setNameOverride(e.target.value)}
+                      spellCheck={false}
+                      placeholder={filename}
+                      title={tr("Nom publié (l'extension du fichier source est conservée)", 'Published name (the source file extension is kept)')}
+                      style={{
+                        flex: 1, minWidth: 0, height: 28,
+                        background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
+                        borderRadius: 6, padding: '0 8px',
+                        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                        boxShadow: 'var(--shadow-inset)', outline: 'none',
+                      }}
+                    />
+                    {nameOverride !== null && (
+                      <span onClick={() => setNameOverride(null)} title={tr('Revenir au nom des tokens', 'Back to the token name')}
+                        style={{ color: 'var(--ink-3)', cursor: 'pointer', display: 'flex' }}>
+                        <RotateCcw size={12} strokeWidth={2} />
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)' }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ink-4)', flexShrink: 0 }} />
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                  La publication depuis <span style={{ color: 'var(--ink-2)' }}>{dcc}</span> se déclenche directement depuis le logiciel
-                </div>
-              </div>
             )}
 
-            {/* Published by */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', letterSpacing: '0.06em' }}>PUBLIÉ PAR</div>
-              <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-                {settings?.username ?? '-'}
-              </div>
-            </div>
-          </div>
-
-          {/* Description + result */}
-          <div style={{ padding: '0 20px 16px', flexShrink: 0 }}>
-            <SecTitle>Description</SecTitle>
+            {/* Description, then where it lands (ADR 0017 flat layout). */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
             <textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="Décris la modification effectuée…"
+              placeholder={tr('Description de la modification…', 'Description of the change…')}
               style={{
-                width: '100%', height: 90, resize: 'none',
+                width: '100%', height: 80, flexShrink: 0, resize: 'none',
                 background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
                 borderRadius: 6, padding: '10px 12px',
                 fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)',
                 outline: 'none', boxShadow: 'var(--shadow-inset)',
               }}
             />
+              <PublishDestination
+                project={project}
+                base={dcc === 'Fichier local' ? ((nameOverride && nameOverride.trim()) || filename) : filename}
+                ext={dcc === 'Fichier local' ? fileExt(sourcePath) : exportExt}
+                sequence={Boolean(seqCapable && isSequence)}
+                ready={filename.split('_').filter(Boolean).length >= 4 && !(dcc === 'Fichier local' && localFiles.length > 1)}
+              />
+            </div>
           </div>
+
         </div>
 
         {/* draggable splitter — resizes the right panel */}
         <div
           onMouseDown={startSplitDrag}
-          title="Glisser pour redimensionner"
+          title={tr('Glisser pour redimensionner', 'Drag to resize')}
           style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: 'var(--rule)', transition: 'background 0.12s' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--rule)' }}
@@ -2269,11 +2276,30 @@ export function Publisher() {
         {/* ── Right: Format + Séquence + Aperçu (shared for all DCCs) ── */}
         <div style={{ width: rightWidth, flexShrink: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto', paddingBottom: 24 }}>
 
+          {/* FORMAT + SCOPE: one picker each (ADR 0044). Hidden for a local file: the format is
+              the picked file's own extension (backend infers it from source_path). */}
+          {dcc !== 'Fichier local' && (
+            <div style={{ padding: '16px 20px 4px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
+              <ExpandPicker mono title="Format"
+                value={exportExt}
+                options={formatsForDcc(dcc).map(ext => ({ value: ext, label: ext }))}
+                onChange={setExportExt}
+              />
+              {dcc === 'Maya' && (
+                <ExpandPicker title={tr('Ce qui est exporté', 'What is exported')}
+                  value={mayaScope}
+                  options={[{ value: 'scene', label: tr('Scène', 'Scene') }, { value: 'selection', label: tr('Sélection', 'Selection') }]}
+                  onChange={v => setMayaScope(v as 'scene' | 'selection')}
+                />
+              )}
+            </div>
+          )}
+
           {/* PRESETS — one click = the USD department to publish (task + format), asset
               and shot alike (2026-09-26: the shot anim uses the same anim preset). */}
           {(dcc === 'Maya' || dcc === 'Houdini') && ['.usd', '.usda', '.usdc'].includes(exportExt) && (
-            <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-              <SecTitle>PRESETS USD</SecTitle>
+            <div style={{ padding: '4px 20px 0', flexShrink: 0 }}>
+              <SecTitle>{tr('PRESETS USD', 'USD PRESETS')}</SecTitle>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {presetEntries(mode === 'asset' ? usdDepartments : usdShotDepartments).map(([task, info]) => (
                   <Pill key={task}
@@ -2291,33 +2317,13 @@ export function Publisher() {
                 ))}
                 {/* custom: the DCC writes the file with every one of its USD options. */}
                 <Pill active={!usdLayers && ['.usd', '.usda', '.usdc'].includes(exportExt)} style={{ cursor: 'pointer' }}>
-                  <span title={`${dcc} écrit le fichier avec toutes ses options d'export USD (animation comprise)`}
+                  <span title={tr(`${dcc} écrit le fichier avec toutes ses options d'export USD (animation comprise)`, `${dcc} writes the file with all of its USD export options (animation included)`)}
                     onClick={() => { setExportExt('.usd'); setFluxWriter(false) }}>
                     custom
                   </span>
                 </Pill>
               </div>
             </div>
-          )}
-
-          {/* FORMAT — hidden for a local file: the format is the picked file's own
-              extension (backend infers it from source_path), so we never ask. */}
-          {dcc !== 'Fichier local' && (
-          <div style={{ padding: '16px 20px 12px', flexShrink: 0 }}>
-            <SecTitle>FORMAT</SecTitle>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {formatsForDcc(dcc).map(ext => (
-                <div key={ext} onClick={() => setExportExt(ext)} className="scale-hover" style={{
-                  padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
-                  fontFamily: 'var(--mono)', fontWeight: exportExt === ext ? 600 : 400,
-                  border: exportExt === ext ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                  background: exportExt === ext ? 'var(--accent-soft)' : 'var(--paper-2)',
-                  color: exportExt === ext ? 'var(--accent-hi)' : 'var(--ink-3)',
-                  transition: 'all 0.1s',
-                }}>{ext}</div>
-              ))}
-            </div>
-          </div>
           )}
 
           {/* ANIMATION (one animated file: abc / USD) or SÉQUENCE (one file per frame, $F4) */}
@@ -2331,7 +2337,7 @@ export function Publisher() {
             if (!(animCapable && usdLayers)) fields.push(['Step', frameStep, setFrameStep])
             return (
               <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-                <SecTitle>{animCapable ? 'ANIMATION' : 'SÉQUENCE'}</SecTitle>
+                <SecTitle>{animCapable ? 'ANIMATION' : tr('SÉQUENCE', 'SEQUENCE')}</SecTitle>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 10 : 0 }}>
                   <div onClick={toggle} style={{
                     width: 32, height: 18, borderRadius: 9, cursor: 'pointer', flexShrink: 0,
@@ -2346,15 +2352,15 @@ export function Publisher() {
                   </div>
                   <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
                     {animCapable
-                      ? (on ? 'Plage animée · un seul fichier' : (usdLayers ? 'Plage de lecture du DCC' : 'Image courante'))
-                      : (on ? 'Activé · dossier versionné + $F4' : 'Désactivé · fichier unique LAST')}
+                      ? (on ? tr('Plage animée · un seul fichier', 'Animated range · one file') : (usdLayers ? tr('Plage de lecture du DCC', 'DCC playback range') : tr('Image courante', 'Current frame')))
+                      : (on ? tr('Activé · dossier versionné + $F4', 'On · versioned folder + $F4') : tr('Désactivé · fichier unique LAST', 'Off · single LAST file'))}
                   </div>
                 </div>
                 {on && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {fields.map(([lbl, val, set]) => (
                       <div key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)', textTransform: 'uppercase' }}>{lbl}</div>
                         <input type="number" value={val} onChange={e => { set(Number(e.target.value)); setRangeInfo('') }} style={{
                           width: 56, height: 26, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
                           borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
@@ -2364,17 +2370,17 @@ export function Publisher() {
                     ))}
                     {animCapable && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-                        <div style={{ fontSize: 9, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>&nbsp;</div>
+                        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>&nbsp;</div>
                         <Btn ghost style={{ height: 26, gap: 5 }} onClick={() => { void fetchAnimRange() }}>
                           <RefreshCw size={11} strokeWidth={2} />
-                          Clés
+                          {tr('Clés', 'Keys')}
                         </Btn>
                       </div>
                     )}
                   </div>
                 )}
                 {on && animCapable && rangeInfo && (
-                  <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 6 }}>{rangeInfo}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginTop: 6 }}>{rangeInfo}</div>
                 )}
               </div>
             )
@@ -2389,12 +2395,12 @@ export function Publisher() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: charInstances.length ? 8 : 0 }}>
                   <Btn ghost disabled={charLoading} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={() => { void loadInstances(false) }}>
                     <RefreshCw size={11} strokeWidth={2} />
-                    {charLoading ? 'Lecture…' : `Relire ${charName}`}
+                    {charLoading ? tr('Lecture…', 'Reading…') : tr(`Relire ${charName}`, `Reload ${charName}`)}
                   </Btn>
-                  <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0 }}>
                     {charInstances.length
-                      ? `${charChecked.size} / ${charInstances.length} coché(s) · une anim par instance`
-                      : 'Sans liste : une seule anim (scope ci-dessous)'}
+                      ? tr(`${charChecked.size} / ${charInstances.length} coché(s) · une anim par instance`, `${charChecked.size} / ${charInstances.length} ticked · one anim per instance`)
+                      : tr('Sans liste : une seule anim (scope ci-dessous)', 'No list: a single anim (scope below)')}
                   </div>
                 </div>
                 {charInstances.length > 0 && (
@@ -2412,7 +2418,7 @@ export function Publisher() {
                           style={{
                             padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
                             fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                            border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                            border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                             background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                             color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2426,29 +2432,6 @@ export function Publisher() {
               </div>
             )
           })()}
-
-          {/* SCOPE — Maya only */}
-          {dcc === 'Maya' && (
-            <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>SCOPE</SecTitle>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {(['scene', 'selection'] as const).map(s => (
-                  <div
-                    key={s}
-                    onClick={() => setMayaScope(s)}
-                    style={{
-                      padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
-                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: mayaScope === s ? 600 : 400,
-                      border: mayaScope === s ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-                      background: mayaScope === s ? 'var(--accent-soft)' : 'var(--paper-2)',
-                      color: mayaScope === s ? 'var(--accent-hi)' : 'var(--ink-3)',
-                      transition: 'all 0.1s',
-                    }}
-                  >{s}</div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* OPTIONS du preset USD — Maya, FLUX writes: only what makes sense for it (ADR 0034). */}
           {dcc === 'Maya' && usdPreset && USD_PRESET_SCHEMAS[usdPreset].length > 0 && (
@@ -2479,7 +2462,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Maya, per-format (the DCC writes the file: custom). */}
           {dcc === 'Maya' && !usdPreset && schemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
                 schema={schemaForExt(exportExt)}
                 values={mayaExportOpts}
@@ -2491,7 +2474,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Houdini, per-format (ROP parameters). */}
           {dcc === 'Houdini' && houdiniSchemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
                 schema={houdiniSchemaForExt(exportExt)}
                 values={houExportOpts}
@@ -2503,7 +2486,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — ZBrush, per-format (Tool:Export sliders / FBX plugin). */}
           {dcc === 'ZBrush' && zbrushSchemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
                 schema={zbrushSchemaForExt(exportExt)}
                 values={zbrushExportOpts}
@@ -2515,7 +2498,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Nuke, per-format (Write node knobs + colorspace). */}
           {dcc === 'Nuke' && nukeSchemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
                 schema={nukeSchemaForExt(exportExt)}
                 values={nukeExportOpts}
@@ -2527,7 +2510,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Photoshop, per-format (COM save-option fields). */}
           {dcc === 'Photoshop' && photoshopSchemaForExt(exportExt).length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               <ExportOptions
                 schema={photoshopSchemaForExt(exportExt)}
                 values={psExportOpts}
@@ -2543,13 +2526,13 @@ export function Publisher() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: texItems.length ? 8 : 0 }}>
                 <Btn ghost disabled={texLoading} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={() => { void loadTexItems() }}>
                   <RefreshCw size={11} strokeWidth={2} />
-                  {texLoading ? 'Lecture…' : 'Relire'}
+                  {texLoading ? tr('Lecture…', 'Reading…') : tr('Relire', 'Reload')}
                 </Btn>
                 {dcc === 'Painter' && texItems.length > 0 && (
                   <>
-                    <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set(texItems.map(t => t.name)))}>Tout</Btn>
-                    <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set())}>Aucun</Btn>
-                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{texChecked.size} / {texItems.length}</span>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set(texItems.map(t => t.name)))}>{tr('Tout', 'All')}</Btn>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setTexChecked(new Set())}>{tr('Aucun', 'None')}</Btn>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{texChecked.size} / {texItems.length}</span>
                   </>
                 )}
               </div>
@@ -2561,7 +2544,7 @@ export function Publisher() {
                   opts={chanOpts}
                   setOpts={fn => setChanOpts(prev => fn(prev))}
                   defaultFormat={exportExt.replace('.', '')}
-                  sizeDefaultLabel="Taille Mari"
+                  sizeDefaultLabel={tr('Taille Mari', 'Mari size')}
                 />
               )}
               {dcc === 'Painter' && texItems.length > 0 && (
@@ -2574,7 +2557,7 @@ export function Publisher() {
                         style={{
                           padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
                           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                           background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                           color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2591,20 +2574,20 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Painter (preset / bit depth / size / padding / conform .tx). */}
           {dcc === 'Painter' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
               {bundledPresets.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: 'var(--ink-3)', marginRight: 4 }} title="Enregistré dans le projet (project.json)">Presets du projet</span>
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', marginRight: 4 }} title={tr('Enregistré dans le projet (project.json)', 'Saved in the project (project.json)')}>{tr('Presets du projet', 'Project presets')}</span>
                   {bundledPresets.map(n => (
                     <Pill key={n} active={projectPresets.includes(n)} onClick={() => toggleProjectPreset(n)} style={{ cursor: 'pointer' }}>{n}</Pill>
                   ))}
-                  {projectPresets.length === 0 && <span style={{ fontSize: 10, color: 'var(--ink-4)' }}>aucun : tous les presets de Painter</span>}
+                  {projectPresets.length === 0 && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('aucun : tous les presets de Painter', 'none: every Painter preset')}</span>}
                 </div>
               )}
               {missingPresets.length > 0 && (
-                <div style={{ fontSize: 10, color: 'var(--warn)', marginBottom: 8 }}>
-                  Preset du projet absent de Painter : {missingPresets.join(', ')}. Réinstalle le bridge Painter
-                  (bouton Plug) puis relance Painter.
+                <div style={{ fontSize: 11, color: 'var(--warn)', marginBottom: 8 }}>
+                  {tr(`Preset du projet absent de Painter : ${missingPresets.join(', ')}. Réinstalle le bridge Painter (bouton Plug) puis relance Painter.`,
+                      `Project preset missing from Painter: ${missingPresets.join(', ')}. Reinstall the Painter bridge (Plug button), then restart Painter.`)}
                 </div>
               )}
               {offeredPresets.length > 0 && (
@@ -2613,7 +2596,7 @@ export function Publisher() {
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
                     <Select value={curPreset ? (curPreset.url || curPreset.name) : undefined}
                       onValueChange={v => setPainterOpts(prev => ({ ...prev, preset: v }))}>
-                      <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 260, fontSize: 10 }} />
+                      <SelectTrigger style={{ height: 24, width: '100%', maxWidth: 260, fontSize: 11 }} />
                       <SelectContent>
                         {offeredPresets.map(p => <SelectItem key={p.url || p.name} value={p.url || p.name}>{p.name}</SelectItem>)}
                       </SelectContent>
@@ -2633,7 +2616,7 @@ export function Publisher() {
               on top of it, each with its own format / bit depth / size (same table as Mari). */}
           {dcc === 'Painter' && mapRows.length > 0 && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>MAPS <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{curPreset?.name}{channelRows.length ? ` + ${channelRows.length} canal(aux) ajoutable(s)` : ''}</span></SecTitle>
+              <SecTitle>MAPS <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{curPreset?.name}{channelRows.length ? tr(` + ${channelRows.length} canal(aux) ajoutable(s)`, ` + ${channelRows.length} channel(s) you can add`) : ''}</span></SecTitle>
               <TextureMapTable
                 rows={mapRows}
                 checked={mapChecked}
@@ -2641,7 +2624,7 @@ export function Publisher() {
                 opts={mapOpts}
                 setOpts={fn => setMapOpts(prev => fn(prev))}
                 defaultFormat={exportExt.replace('.', '')}
-                sizeDefaultLabel="Taille du set"
+                sizeDefaultLabel={tr('Taille du set', 'Set size')}
               />
             </div>
           )}
@@ -2649,7 +2632,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Mari (conform .tx). */}
           {dcc === 'Mari' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>channels {exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>channels {exportExt}</span></SecTitle>
               <ExportOptions
                 schema={MARI_OPTIONS}
                 values={mariOpts}
@@ -2661,28 +2644,28 @@ export function Publisher() {
           {/* GRAPHS (Designer) / PROJET (Marvelous): read from the app through the bridge. */}
           {(dcc === 'Designer' || dcc === 'Marvelous') && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>{dcc === 'Designer' ? 'GRAPHS' : 'PROJET'} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{bridgeInfoSource}</span></SecTitle>
+              <SecTitle>{dcc === 'Designer' ? 'GRAPHS' : tr('PROJET', 'PROJECT')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{bridgeInfoSource}</span></SecTitle>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                 <Btn ghost disabled={texLoading} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={() => { void loadBridgeInfo() }}>
                   <RefreshCw size={11} strokeWidth={2} />
-                  {texLoading ? 'Lecture…' : 'Relire'}
+                  {texLoading ? tr('Lecture…', 'Reading…') : tr('Relire', 'Reload')}
                 </Btn>
                 {dcc === 'Designer' && designerGraphs.length > 0 && (
                   <>
-                    <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set(designerGraphs.map(g => g.key)))}>Tout</Btn>
-                    <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set())}>Aucun</Btn>
-                    <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{graphChecked.size} / {designerGraphs.length}</span>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set(designerGraphs.map(g => g.key)))}>{tr('Tout', 'All')}</Btn>
+                    <Btn ghost style={{ height: 26 }} onClick={() => setGraphChecked(new Set())}>{tr('Aucun', 'None')}</Btn>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{graphChecked.size} / {designerGraphs.length}</span>
                   </>
                 )}
                 {dcc === 'Marvelous' && marvelousFormats.length > 0 && (
-                  <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-                    exports : {marvelousFormats.map(f => `.${f}`).join(' ')}
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+                    {tr('exports :', 'exports:')} {marvelousFormats.map(f => `.${f}`).join(' ')}
                   </span>
                 )}
               </div>
               {dcc === 'Marvelous' && marvelousFormats.length > 0 && !marvelousFormats.includes(exportExt.replace('.', '').replace(/^usd[ac]$/, 'usd')) && (
-                <div style={{ fontSize: 10, color: 'var(--warn, #e8912a)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
-                  {exportExt} absent de ce Marvelous : choisis un autre format
+                <div style={{ fontSize: 11, color: 'var(--warn, #e8912a)', fontFamily: 'var(--mono)', marginBottom: 8 }}>
+                  {exportExt} {tr('absent de ce Marvelous : choisis un autre format', 'is not available in this Marvelous: pick another format')}
                 </div>
               )}
               {dcc === 'Designer' && designerGraphs.length > 0 && (
@@ -2695,13 +2678,13 @@ export function Publisher() {
                         style={{
                           padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
                           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                           background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                           color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
                         {g.graph.id}
-                        <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> · {g.pkg.name} · {g.graph.outputs.length} out{g.graph.current ? ' · ouvert' : ''}</span>
+                        <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> · {g.pkg.name} · {g.graph.outputs.length} out{g.graph.current ? tr(' · ouvert', ' · open') : ''}</span>
                       </div>
                     )
                   })}
@@ -2721,9 +2704,9 @@ export function Publisher() {
                   <div key={g.key} style={{ marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                       <span style={{ fontSize: 11, color: 'var(--ink-2)', fontFamily: 'var(--mono)' }}>{g.graph.id}</span>
-                      <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev, ...keys]))}>Tout</Btn>
-                      <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev].filter(k => !keys.includes(k))))}>Aucun</Btn>
-                      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{nOn} / {keys.length}</span>
+                      <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev, ...keys]))}>{tr('Tout', 'All')}</Btn>
+                      <Btn ghost style={{ height: 22 }} onClick={() => setOutputChecked(prev => new Set([...prev].filter(k => !keys.includes(k))))}>{tr('Aucun', 'None')}</Btn>
+                      <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{nOn} / {keys.length}</span>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {g.graph.outputs.map(o => {
@@ -2735,7 +2718,7 @@ export function Publisher() {
                             style={{
                               padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
                               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                              border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                              border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                               background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                               color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                             }}>
@@ -2753,7 +2736,7 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Designer (maps / .sbsar / .sbs, taille, bit depth, .tx). */}
           {dcc === 'Designer' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>maps {exportExt}</span></SecTitle>
               <ExportOptions
                 schema={DESIGNER_OPTIONS}
                 values={designerOpts}
@@ -2765,9 +2748,9 @@ export function Publisher() {
           {/* OPTIONS D'EXPORT — Marvelous (contenu, epaisseur, UV, echelle, .zprj). */}
           {dcc === 'Marvelous' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>OPTIONS D'EXPORT <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
+              <SecTitle>{tr("OPTIONS D'EXPORT", 'EXPORT OPTIONS')} <span style={{ fontFamily: 'var(--mono)', textTransform: 'none', color: 'var(--ink-4)' }}>{exportExt}</span></SecTitle>
               {exportExt === '.zprj'
-                ? <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>Le projet Marvelous est publié tel quel (aucune option).</div>
+                ? <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{tr('Le projet Marvelous est publié tel quel (aucune option).', 'The Marvelous project is published as is (no options).')}</div>
                 : <ExportOptions
                     schema={MARVELOUS_OPTIONS}
                     values={marvelousOpts}
@@ -2779,13 +2762,13 @@ export function Publisher() {
           {/* ATTRIBUTS — Houdini, filtre les attributs point à l'export (attribdelete) */}
           {dcc === 'Houdini' && exportExt !== '.fbx' && (
             <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-              <SecTitle>ATTRIBUTS</SecTitle>
+              <SecTitle>{tr('ATTRIBUTS', 'ATTRIBUTES')}</SecTitle>
               <div style={{ display: 'flex', gap: 4, marginBottom: houAttrMode === 'none' ? 0 : 10 }}>
-                {([['none', 'Tous'], ['keep', 'Garder uniquement'], ['remove', 'Supprimer']] as const).map(([m, label]) => (
+                {([['none', tr('Tous', 'All')], ['keep', tr('Garder uniquement', 'Keep only')], ['remove', tr('Supprimer', 'Remove')]] as const).map(([m, label]) => (
                   <div key={m} onClick={() => setHouAttrMode(m)} style={{
                     padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
                     fontFamily: 'var(--mono)', fontWeight: houAttrMode === m ? 600 : 400,
-                    border: houAttrMode === m ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                    border: houAttrMode === m ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                     background: houAttrMode === m ? 'var(--accent-soft)' : 'var(--paper-2)',
                     color: houAttrMode === m ? 'var(--accent-hi)' : 'var(--ink-3)',
                   }}>{label}</div>
@@ -2804,11 +2787,11 @@ export function Publisher() {
                       <span onClick={() => setHouAttrNames(prev => [...prev, 'mask'])}>+ mask</span>
                     </Pill>
                     <div style={{ flex: 1 }} />
-                    <Btn sm onClick={() => setHouAttrNames(prev => [...prev, ''])}>+ attribut</Btn>
+                    <Btn sm onClick={() => setHouAttrNames(prev => [...prev, ''])}>{tr('+ attribut', '+ attribute')}</Btn>
                   </div>
                   {houAttrNames.length === 0 && (
-                    <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
-                      {houAttrMode === 'keep' ? 'Aucun attribut listé (P toujours conservé)' : 'Aucun attribut à supprimer'}
+                    <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+                      {houAttrMode === 'keep' ? tr('Aucun attribut listé (P toujours conservé)', 'No attribute listed (P is always kept)') : tr('Aucun attribut à supprimer', 'No attribute to remove')}
                     </div>
                   )}
                   {houAttrNames.map((n, i) => (
@@ -2823,8 +2806,8 @@ export function Publisher() {
                       </div>
                     </div>
                   ))}
-                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
-                    Attributs point uniquement (curveu, masks, boneCapture…). Renommage : bientôt.
+                  <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>
+                    {tr('Attributs point uniquement (curveu, masks, boneCapture…). Renommage : bientôt.', 'Point attributes only (curveu, masks, boneCapture…). Renaming: coming soon.')}
                   </div>
                 </div>
               )}
@@ -2859,88 +2842,78 @@ export function Publisher() {
                       transition: 'left 0.15s',
                     }} />
                   </div>
-                  <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
-                    {on ? 'Écrit par FLUX (layers USD)' : `Écrit par ${dcc}`}
+                  <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: on ? 'var(--accent-hi)' : 'var(--ink-3)' }}>
+                    {on ? tr('Écrit par FLUX (layers USD)', 'Written by FLUX (USD layers)') : tr(`Écrit par ${dcc}`, `Written by ${dcc}`)}
                   </span>
-                </div>
-                <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <span onClick={e => e.stopPropagation()} title={tr('Ce qui est écrit', 'What is written')}
+                        style={{ display: 'flex', color: 'var(--ink-4)', cursor: 'pointer' }}>
+                        <Info size={12} strokeWidth={2} />
+                      </span>
+                    </PopoverTrigger>
+                    <PopoverContent side="bottom" align="start" style={{ width: 320, fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.5, display: 'block' }}>
                   {usdOk && mode === 'shot' && (usdPreset === 'camera' || usdPreset === 'light') ? (<>
-                    TASK {formatToken(sel.name)} du plan : {contribution.what}, avec la plage d'images et les fps.
+                    {tr(`TASK ${formatToken(sel.name)} du plan : ${contribution.what}, avec la plage d'images et les fps.`,
+                        `Shot TASK ${formatToken(sel.name)}: ${contribution.what}, with the frame range and the fps.`)}
                     {on
                       ? (usdPreset === 'camera'
-                        ? ' FLUX écrit les caméras sous /cameras (persp / top / front / side ignorées), rien d\'autre.'
-                        : ' FLUX écrit les lumières sous /lights (UsdLux), rien d\'autre. Remplace le light rig LIGHT publié depuis Houdini.')
-                      : ` ${dcc} écrit le fichier tel quel (structure non garantie).`}
+                        ? tr(' FLUX écrit les caméras sous /cameras (persp / top / front / side ignorées), rien d\'autre.', ' FLUX writes the cameras under /cameras (persp / top / front / side ignored), nothing else.')
+                        : tr(' FLUX écrit les lumières sous /lights (UsdLux), rien d\'autre. Remplace le light rig LIGHT publié depuis Houdini.', ' FLUX writes the lights under /lights (UsdLux), nothing else. Replaces the LIGHT light rig published from Houdini.'))
+                      : tr(` ${dcc} écrit le fichier tel quel (structure non garantie).`, ` ${dcc} writes the file as is (structure not guaranteed).`)}
                   </>) : usdOk && mode === 'shot' ? (<>
-                    TASK {formatToken(sel.name)} du plan : {contribution.what}, avec la plage d'images et les fps.
-                    Le 4e token est le perso animé (<span style={{ fontFamily: 'var(--mono)' }}>SEQ_SHOT_ANIM_NAME</span>) ;
-                    sélectionne son rig dans {dcc}.
+                    {tr(`TASK ${formatToken(sel.name)} du plan : ${contribution.what}, avec la plage d'images et les fps.`,
+                        `Shot TASK ${formatToken(sel.name)}: ${contribution.what}, with the frame range and the fps.`)}
+                    {' '}{tr('Le 4e token est le perso animé', 'The 4th token is the animated character')} (<span style={{ fontFamily: 'var(--mono)' }}>SEQ_SHOT_ANIM_NAME</span>){tr(' ;', ';')}
+                    {' '}{tr(`sélectionne son rig dans ${dcc}.`, `select its rig in ${dcc}.`)}
                     {on
-                      ? " FLUX écrit /NAME/skel/Anim seul : le squelette et la géo viennent de l'asset."
-                      : ` ${dcc} écrit le fichier tel quel (structure non garantie).`}
+                      ? tr(" FLUX écrit /NAME/skel/Anim seul : le squelette et la géo viennent de l'asset.", ' FLUX writes /NAME/skel/Anim only: the skeleton and the geo come from the asset.')
+                      : tr(` ${dcc} écrit le fichier tel quel (structure non garantie).`, ` ${dcc} writes the file as is (structure not guaranteed).`)}
                   </>) : usdOk ? (<>
-                    TASK {sel.task} : département <span style={{ fontFamily: 'var(--mono)' }}>{contribution.department}</span> de
-                    l'asset, {contribution.what}. La task décide de ce qui est exporté.
+                    {tr(`TASK ${sel.task} : département `, `TASK ${sel.task}: `)}<span style={{ fontFamily: 'var(--mono)' }}>{contribution.department}</span>
+                    {tr(` de l'asset, ${contribution.what}. La task décide de ce qui est exporté.`, ` department of the asset, ${contribution.what}. The task decides what is exported.`)}
                     {on
                       ? (contribution.writer === 'look'
-                        ? ` FLUX lit les matériaux de ${dcc === 'Houdini' ? 'Solaris (LOP affiché ou chemin du node)' : 'la scène'} et écrit /NAME/mtl + les assignations sur /NAME/geo/render (textures .tx si converties).`
+                        ? tr(` FLUX lit les matériaux de ${dcc === 'Houdini' ? 'Solaris (LOP affiché ou chemin du node)' : 'la scène'} et écrit /NAME/mtl + les assignations sur /NAME/geo/render (textures .tx si converties).`,
+                             ` FLUX reads the materials from ${dcc === 'Houdini' ? 'Solaris (displayed LOP or node path)' : 'the scene'} and writes /NAME/mtl + the assignments on /NAME/geo/render (.tx textures if converted).`)
                         : usdPreset === 'model'
-                          ? ' FLUX écrit la géo seule sous /NAME/geo/render (+ proxy auto) ; skeleton et poids viennent du rig.'
+                          ? tr(' FLUX écrit la géo seule sous /NAME/geo/render (+ proxy auto) ; skeleton et poids viennent du rig.', ' FLUX writes the geo only under /NAME/geo/render (+ auto proxy); skeleton and weights come from the rig.')
                           : usdPreset === 'rig'
-                            ? ' FLUX écrit /NAME/skel/Skeleton en rest pose et pose les poids de skin sur /NAME/geo/render du GEO publié (boneCapture dans Houdini).'
+                            ? tr(' FLUX écrit /NAME/skel/Skeleton en rest pose et pose les poids de skin sur /NAME/geo/render du GEO publié (boneCapture dans Houdini).', ' FLUX writes /NAME/skel/Skeleton in rest pose and puts the skin weights on /NAME/geo/render of the published GEO (boneCapture in Houdini).')
                             : usdPreset === 'anim'
-                              ? ' FLUX écrit /NAME/skel/Anim : les rotations des joints qui bougent, sans altérer la courbe.'
-                              : " FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe).")
-                      : ` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`}
+                              ? tr(' FLUX écrit /NAME/skel/Anim : les rotations des joints qui bougent, sans altérer la courbe.', ' FLUX writes /NAME/skel/Anim: the rotations of the joints that move, without altering the curve.')
+                              : tr(" FLUX extrait la scène et écrit /NAME/geo/render, /NAME/skel (structure du pipe).", ' FLUX extracts the scene and writes /NAME/geo/render, /NAME/skel (pipeline structure).'))
+                      : tr(` ${dcc} écrit le fichier tel quel (matériaux, blend shapes… mais structure non garantie).`, ` ${dcc} writes the file as is (materials, blend shapes… but structure not guaranteed).`)}
                   </>) : (
                     mode === 'shot'
-                      ? `TASK ${formatToken(sel.name) || '—'} : FLUX écrit l'ANIM, les caméras (LAYOUT) et les lumières (LIGHT) d'un plan. ${dcc} écrit le fichier.`
-                      : `TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`
+                      ? tr(`TASK ${formatToken(sel.name) || '—'} : FLUX écrit l'ANIM, les caméras (LAYOUT) et les lumières (LIGHT) d'un plan. ${dcc} écrit le fichier.`,
+                           `TASK ${formatToken(sel.name) || '(none)'}: FLUX writes the ANIM, the cameras (LAYOUT) and the lights (LIGHT) of a shot. ${dcc} writes the file.`)
+                      : tr(`TASK ${sel.task || '—'} : pas de département USD (GEO, SHADING, RIG ou ANIM). ${dcc} écrit le fichier.`,
+                           `TASK ${sel.task || '(none)'}: no USD department (GEO, SHADING, RIG or ANIM). ${dcc} writes the file.`)
                   )}
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
             )
           })()}
 
-          {/* APERÇU OUTPUT */}
-          <div style={{ padding: '0 20px 16px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <SecTitle>APERÇU OUTPUT</SecTitle>
-            <div className="subcard" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4, minHeight: 90, maxHeight: 200, overflowY: 'auto' }}>
-              {(seqCapable && isSequence) ? (<>
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>{filename}_v001/</div>
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)', paddingLeft: 12 }}>
-                  {filename}_v001.$F4{exportExt}
-                </div>
-              </>) : (
-                <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink)' }}>
-                  {filename}_LAST{exportExt}
-                </div>
-              )}
-              {dcc === 'Houdini' && ropNodePath && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)' }}>
-                  ROP : {ropNodePath}
-                </div>
-              )}
-              {dcc === 'ZBrush' && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', fontSize: 9, fontFamily: 'var(--mono)', color: zbrushConnected ? 'var(--ok)' : zbrushChecking ? 'var(--ink-4)' : 'var(--err)' }}>
-                  {zbrushConnected
-                    ? `● ZBrush connecté${zbrushVersion ? ` · ${zbrushVersion}` : ''}`
-                    : `${zbrushChecking ? '…' : '✕'} ${zbrushStatusText(zbrushConnected, zbrushChecking, zbrushPluginInstalled, zbrushVersion)}`}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
-        <Btn ghost onClick={reset}>Réinitialiser</Btn>
+      {/* Bottom bar: where it lands + actions */}
+      <div style={{ borderTop: '1px solid var(--rule)', padding: '9px 20px', display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+        <div title={tr('Fichier publié', 'Published file')} style={{ flex: 1, minWidth: 0, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {dcc === 'Fichier local' && localFiles.length > 1
+            ? tr(`${localFiles.length} fichiers`, `${localFiles.length} files`)
+            : (seqCapable && isSequence) ? `${filename}_v001/${filename}_v001.$F4${exportExt}` : `${filename}_LAST${dcc === 'Fichier local' ? '' : exportExt}`}
+        </div>
+        <Btn ghost onClick={reset} title={tr('Réinitialiser', 'Reset')}><RotateCcw size={12} strokeWidth={2} /></Btn>
         {dcc === 'ZBrush' && (
-          <Btn ghost onClick={handleCancelZBrush}>Annuler</Btn>
+          <Btn ghost onClick={handleCancelZBrush}>{tr('Annuler', 'Cancel')}</Btn>
         )}
         <Btn primary onClick={() => void requestPublish()}>
-          {publishing ? 'Publication…' : 'Publish →'}
+          {publishing ? tr('Publication…', 'Publishing…') : 'Publish'}
         </Btn>
       </div>
 
@@ -2955,33 +2928,33 @@ export function Publisher() {
             background: 'var(--paper-2)', boxShadow: 'var(--shadow-md)',
           }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-              Publier depuis quel {instancePick.dcc} ?
+              {tr(`Publier depuis quel ${instancePick.dcc} ?`, `Publish from which ${instancePick.dcc}?`)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              {instancePick.items.length} instances ouvertes. Le choix reste actif pour les prochains publishs.
+              {tr(`${instancePick.items.length} instances ouvertes. Le choix reste actif pour les prochains publishs.`, `${instancePick.items.length} open instances. The choice stays active for the next publishes.`)}
             </div>
             {instancePick.items.map(it => {
               const active = readActiveInstancePort(instancePick.dcc) === it.port
-              const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : 'Scène sans nom'
+              const scene = it.scene ? it.scene.replace(/\\/g, '/').split('/').pop() : tr('Scène sans nom', 'Untitled scene')
               return (
                 <div key={it.port} onClick={() => publishOn(it.port)} title={it.scene ?? ''} style={{
                   padding: '9px 12px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
-                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--rule-2)'),
+                  border: '1px solid ' + (active ? 'var(--rule-3)' : 'var(--rule-2)'),
                   background: active ? 'var(--accent-soft)' : 'var(--paper)',
                   display: 'flex', alignItems: 'center', gap: 10,
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scene}</div>
-                    <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       port {it.port}{it.scene ? ` · ${it.scene}` : ''}
                     </div>
                   </div>
-                  {active && <span style={{ fontSize: 10, color: 'var(--accent-hi)', flexShrink: 0 }}>actif</span>}
+                  {active && <span style={{ fontSize: 11, color: 'var(--accent-hi)', flexShrink: 0 }}>{tr('actif', 'active')}</span>}
                 </div>
               )
             })}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Btn ghost onClick={() => setInstancePick(null)}>Annuler</Btn>
+              <Btn ghost onClick={() => setInstancePick(null)}>{tr('Annuler', 'Cancel')}</Btn>
             </div>
           </div>
         </div>
@@ -3008,7 +2981,7 @@ function PresetTreeNode({ node, depth }: { node: MayaUsdTreeNode; depth: number 
         style={{
           display: 'flex', alignItems: 'center', gap: 4, paddingLeft: depth * 12, minWidth: 0,
           cursor: has ? 'pointer' : 'default', lineHeight: '18px',
-          fontFamily: 'var(--mono)', fontSize: 10,
+          fontFamily: 'var(--mono)', fontSize: 11,
           color: node.type === 'joint' ? 'var(--ink-2)' : 'var(--ink-3)',
         }}
       >
@@ -3016,7 +2989,7 @@ function PresetTreeNode({ node, depth }: { node: MayaUsdTreeNode; depth: number 
           ? (open ? <ChevronDown size={11} strokeWidth={2} /> : <ChevronRight size={11} strokeWidth={2} />)
           : <span style={{ width: 11, flexShrink: 0 }} />}
         <span style={{
-          fontSize: 8, padding: '0 4px', borderRadius: 3, flexShrink: 0,
+          fontSize: 10, padding: '0 4px', borderRadius: 3, flexShrink: 0,
           background: node.type === 'joint' ? 'var(--accent-soft)' : 'var(--paper-2)',
           color: node.type === 'joint' ? 'var(--accent-hi)' : 'var(--ink-4)',
         }}>{node.type === 'joint' ? 'jnt' : 'grp'}</span>
@@ -3038,6 +3011,7 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
   onRefresh: () => void
   onRenames: (renames: Record<string, string>) => void
 }) {
+  const { tr } = useTr()
   const renames = (opts.renames as Record<string, string> | undefined) ?? {}
   const items = preview?.items ?? []
   const colorSets = preset === 'model'
@@ -3045,27 +3019,28 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
   const attrs = exportedAttrs(preset, opts, colorSets)
   const renamable = attrs.filter(a => a.rename)
 
-  let summary = connected ? '' : 'Maya non connecté'
+  let summary = connected ? '' : tr('Maya non connecté', 'Maya not connected')
   if (preview) {
-    if (preset === 'model') summary = items.length ? `${items.length} géo(s)` : "aucune géo : l'export échouera"
+    if (preset === 'model') summary = items.length ? tr(`${items.length} géo(s)`, `${items.length} geo(s)`) : tr("aucune géo : l'export échouera", 'no geo: the export will fail')
     else if (preset === 'rig') {
       summary = preview.joints
-        ? `${preview.joints} joints · ${preview.roots?.length ?? 0} squelette(s) · ${preview.skinned?.length ?? 0} mesh(es) skinné(s)`
-        : "aucun joint : l'export échouera"
+        ? tr(`${preview.joints} joints · ${preview.roots?.length ?? 0} squelette(s) · ${preview.skinned?.length ?? 0} mesh(es) skinné(s)`,
+             `${preview.joints} joints · ${preview.roots?.length ?? 0} skeleton(s) · ${preview.skinned?.length ?? 0} skinned mesh(es)`)
+        : tr("aucun joint : l'export échouera", 'no joint: the export will fail')
     } else if (preset === 'anim') {
       summary = items.length
-        ? `${items.length} joint(s) animé(s) sur ${preview.joints ?? 0}`
-        : 'aucun joint ne bouge sur la plage'
+        ? tr(`${items.length} joint(s) animé(s) sur ${preview.joints ?? 0}`, `${items.length} animated joint(s) out of ${preview.joints ?? 0}`)
+        : tr('aucun joint ne bouge sur la plage', 'no joint moves over the range')
     } else if (preset === 'camera') {
-      summary = items.length ? `${items.length} caméra(s)` : "aucune caméra : l'export échouera"
+      summary = items.length ? tr(`${items.length} caméra(s)`, `${items.length} camera(s)`) : tr("aucune caméra : l'export échouera", 'no camera: the export will fail')
     } else if (preset === 'light') {
-      summary = items.length ? `${items.length} lumière(s)` : "aucune lumière : l'export échouera"
-    } else summary = items.length ? `${items.length} matériau(x)` : 'aucun matériau sur la géo'
+      summary = items.length ? tr(`${items.length} lumière(s)`, `${items.length} light(s)`) : tr("aucune lumière : l'export échouera", 'no light: the export will fail')
+    } else summary = items.length ? tr(`${items.length} matériau(x)`, `${items.length} material(s)`) : tr('aucun matériau sur la géo', 'no material on the geo')
   }
 
   const row: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, lineHeight: '18px',
-    fontFamily: 'var(--mono)', fontSize: 10,
+    fontFamily: 'var(--mono)', fontSize: 11,
   }
   const dim: React.CSSProperties = { color: 'var(--ink-4)', flexShrink: 0 }
   const name: React.CSSProperties = {
@@ -3074,24 +3049,24 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
 
   return (<>
     <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-      <SecTitle>À EXPORTER</SecTitle>
+      <SecTitle>{tr('À EXPORTER', 'TO EXPORT')}</SecTitle>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, minWidth: 0 }}>
         <Btn ghost disabled={busy || !connected} style={{ height: 26, gap: 5, flexShrink: 0 }} onClick={onRefresh}>
           <RefreshCw size={11} strokeWidth={2} />
-          {busy ? 'Lecture…' : 'Relire la scène'}
+          {busy ? tr('Lecture…', 'Reading…') : tr('Relire la scène', 'Reload the scene')}
         </Btn>
-        <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0,
+        <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)', minWidth: 0,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</div>
       </div>
-      {error && <div style={{ fontSize: 10, color: 'var(--err)', marginBottom: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 11, color: 'var(--err)', marginBottom: 6 }}>{error}</div>}
       {preview && (items.length > 0 || (preview.tree?.length ?? 0) > 0) && (
         <div className="subcard" style={{ padding: '6px 10px', maxHeight: 240, overflowY: 'auto' }}>
           {preset === 'model' && items.map(i => (
             <div key={i.path ?? i.name} style={row} title={i.path}>
               <span style={name}>{i.name}</span>
               <span style={dim}>{i.points} pts · {i.faces} f</span>
-              <span style={{ ...dim, color: i.uv ? 'var(--ink-4)' : 'var(--warn, var(--err))' }}>{i.uv ? 'UV' : 'sans UV'}</span>
-              {i.skinned && <span style={dim} title="Les poids de skin se publient avec le preset rig">skin → rig</span>}
+              <span style={{ ...dim, color: i.uv ? 'var(--ink-4)' : 'var(--warn, var(--err))' }}>{i.uv ? 'UV' : tr('sans UV', 'no UV')}</span>
+              {i.skinned && <span style={dim} title={tr('Les poids de skin se publient avec le preset rig', 'Skin weights are published with the rig preset')}>skin → rig</span>}
             </div>
           ))}
           {preset === 'anim' && items.map(i => (
@@ -3116,7 +3091,7 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
             <div key={i.name} style={row}>
               <span style={name}>{i.name}</span>
               <span style={dim}>{i.type}</span>
-              <span style={dim}>{i.meshes} géo(s)</span>
+              <span style={dim}>{i.meshes} {tr('géo(s)', 'geo(s)')}</span>
             </div>
           ))}
           {preset === 'rig' && (<>
@@ -3135,34 +3110,34 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
         </div>
       )}
       {preset === 'anim' && preview && (
-        <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 4 }}>
-          Aperçu sur {preview.sampled ?? 0} images ; l'export lit chaque image.
+        <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>
+          {tr(`Aperçu sur ${preview.sampled ?? 0} images ; l'export lit chaque image.`, `Preview over ${preview.sampled ?? 0} frames; the export reads every frame.`)}
         </div>
       )}
     </div>
 
     <div style={{ padding: '0 20px 12px', flexShrink: 0 }}>
-      <SecTitle>ATTRIBUTS EXPORTÉS</SecTitle>
+      <SecTitle>{tr('ATTRIBUTS EXPORTÉS', 'EXPORTED ATTRIBUTES')}</SecTitle>
       {renamable.length > 0 && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           <Btn ghost sm onClick={() => {
             const next = { ...renames }
             renamable.forEach(a => { if (a.houdiniName) next[a.key ?? a.usd] = a.houdiniName })
             onRenames(next)
-          }}>Nomenclature Houdini</Btn>
-          <Btn ghost sm onClick={() => onRenames({})}>Noms USD</Btn>
+          }}>{tr('Nomenclature Houdini', 'Houdini naming')}</Btn>
+          <Btn ghost sm onClick={() => onRenames({})}>{tr('Noms USD', 'USD names')}</Btn>
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: '4px 8px', alignItems: 'center' }}>
-        <span className="cap" style={{ fontSize: 9 }}>USD</span>
-        <span className="cap" style={{ fontSize: 9 }}>Nom exporté</span>
-        <span className="cap" style={{ fontSize: 9 }}>Dans Houdini</span>
+        <span className="cap" style={{ fontSize: 10.5 }}>USD</span>
+        <span className="cap" style={{ fontSize: 10.5 }}>{tr('Nom exporté', 'Exported name')}</span>
+        <span className="cap" style={{ fontSize: 10.5 }}>{tr('Dans Houdini', 'In Houdini')}</span>
         {attrs.map(a => {
           const key = a.key ?? a.usd
           const value = renames[key] ?? ''
           return (
             <div key={a.usd} style={{ display: 'contents' }}>
-              <span title={a.what} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+              <span title={a.what} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
                                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.usd}</span>
               {a.rename ? (
                 <input
@@ -3171,14 +3146,14 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
                   onChange={e => onRenames({ ...renames, [key]: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })}
                   style={{
                     height: 22, minWidth: 0, background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                    borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 10,
+                    borderRadius: 5, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11,
                     color: 'var(--ink)', boxShadow: 'var(--shadow-inset)', outline: 'none',
                   }}
                 />
               ) : (
-                <span style={{ fontSize: 9, color: 'var(--ink-4)' }} title={a.what}>fixe</span>
+                <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }} title={a.what}>{tr('fixe', 'fixed')}</span>
               )}
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent-hi)',
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--accent-hi)',
                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {a.rename && value ? value : a.houdini}
               </span>
@@ -3186,12 +3161,14 @@ function UsdPresetPanel({ preset, preview, busy, error, connected, opts, onRefre
           )
         })}
       </div>
-      <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+      <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
         {preset === 'rig'
-          ? "Houdini reconstruit boneCapture à partir de skel:jointIndices / jointWeights et du Skeleton (USD Skin Import, UsdSkel Character Import) : ces noms restent fixes. Les poids se posent sur la géo du GEO publié (et sur son proxy)."
+          ? tr("Houdini reconstruit boneCapture à partir de skel:jointIndices / jointWeights et du Skeleton (USD Skin Import, UsdSkel Character Import) : ces noms restent fixes. Les poids se posent sur la géo du GEO publié (et sur son proxy).",
+               'Houdini rebuilds boneCapture from skel:jointIndices / jointWeights and the Skeleton (USD Skin Import, UsdSkel Character Import): these names stay fixed. The weights go onto the geo of the published GEO (and onto its proxy).')
           : preset === 'model'
-            ? "UV : st est le nom lu par les matériaux USD (UsdPreviewSurface) ; ne renomme en uv que pour un pipe 100 % Houdini. Un color set renommé Cd devient la couleur de point dans Houdini."
-            : 'Attributs du schéma USD : noms fixes.'}
+            ? tr("UV : st est le nom lu par les matériaux USD (UsdPreviewSurface) ; ne renomme en uv que pour un pipe 100 % Houdini. Un color set renommé Cd devient la couleur de point dans Houdini.",
+                 'UV: st is the name USD materials read (UsdPreviewSurface); rename it to uv only for a 100% Houdini pipe. A color set renamed Cd becomes the point color in Houdini.')
+            : tr('Attributs du schéma USD : noms fixes.', 'USD schema attributes: fixed names.')}
       </div>
     </div>
   </>)

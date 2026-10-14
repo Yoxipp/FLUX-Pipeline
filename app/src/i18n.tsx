@@ -21,7 +21,6 @@ const LS_KEY = 'flux.lang'
 // Add keys here as strings are migrated. { fr, en } per key.
 export const STRINGS: Record<string, { fr: string; en: string }> = {
   // titlebar
-  'titlebar.tagline':        { fr: 'Pipeline Tool',            en: 'Pipeline Tool' },
   'titlebar.refresh':        { fr: 'Rafraîchir les données',   en: 'Refresh data' },
   'titlebar.pin':            { fr: 'Garder FLUX au premier plan', en: 'Keep FLUX on top' },
   'titlebar.unpin':          { fr: 'Ne plus garder au premier plan', en: 'Stop keeping on top' },
@@ -32,6 +31,10 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'titlebar.closeHint':      { fr: 'Les logiciels ouverts (Maya, Houdini…) restent ouverts. Pense quand même à sauvegarder tes scènes.', en: 'Open software (Maya, Houdini…) stays open. Remember to save your scenes anyway.' },
   'titlebar.slideToClose':   { fr: 'Glisse pour fermer FLUX',  en: 'Slide to close FLUX' },
   'titlebar.cancel':         { fr: 'Annuler',                  en: 'Cancel' },
+
+  // slide-to-confirm (Production lock / archive, 2026-10-09)
+  'confirm.slideToUnlock':   { fr: 'Glisse pour déverrouiller', en: 'Slide to unlock' },
+  'confirm.slideToArchive':  { fr: 'Glisse pour archiver',      en: 'Slide to archive' },
 
   // backend status / reconnect banner
   'backend.starting':        { fr: 'Démarrage du service FLUX…', en: 'Starting the FLUX service…' },
@@ -46,9 +49,22 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'settings.user':           { fr: 'UTILISATEUR',              en: 'USER' },
   'settings.workspace':      { fr: 'WORKSPACE',                en: 'WORKSPACE' },
   'settings.changeDir':      { fr: 'Changer de répertoire…',   en: 'Change directory…' },
+  'settings.addDir':         { fr: 'Ajouter un répertoire…',   en: 'Add directory…' },
   'settings.changing':       { fr: 'Changement…',              en: 'Changing…' },
   'settings.accent':         { fr: "COULEUR D'ACCENT",         en: 'ACCENT COLOR' },
   'settings.dccs':           { fr: 'LOGICIELS',                en: 'SOFTWARE' },
+  'settings.bridges.all':     { fr: 'Installer tous les bridges', en: 'Install all bridges' },
+  'settings.bridges.hint':    { fr: 'Installe le bridge FLUX dans chaque logiciel détecté sur ce poste (et la librairie Photoshop).', en: 'Installs the FLUX bridge in every software detected on this machine (and the Photoshop library).' },
+  'settings.bridges.running': { fr: 'Installation…',            en: 'Installing…' },
+  'settings.bridges.ok':      { fr: 'installé',                 en: 'installed' },
+  'settings.bridges.skip':    { fr: 'non détecté',              en: 'not detected' },
+  'settings.bridges.error':   { fr: 'erreur',                   en: 'error' },
+  'settings.bridges.summary': { fr: '{ok} installé(s), {skip} ignoré(s), {error} erreur(s)', en: '{ok} installed, {skip} skipped, {error} error(s)' },
+  'settings.bridges.restart': { fr: 'Relance les logiciels ouverts pour charger le bridge.', en: 'Restart open software to load the bridge.' },
+  'settings.doc.hint':        { fr: 'Manuel de FLUX',           en: 'FLUX manual' },
+  'settings.doc.open':        { fr: 'Ouvrir dans le navigateur', en: 'Open in the browser' },
+  'settings.doc.folder':      { fr: 'Dossier FLUX_DOC',         en: 'FLUX_DOC folder' },
+  'settings.doc.where':       { fr: 'Le manuel est aussi rangé dans le dossier FLUX_DOC du workspace.', en: 'The manual is also stored in the FLUX_DOC folder of the workspace.' },
   'settings.interface':      { fr: 'INTERFACE',                en: 'INTERFACE' },
   'settings.resetUi':        { fr: "Réinitialiser l'interface", en: 'Reset the interface' },
   'settings.language':       { fr: 'LANGUE',                   en: 'LANGUAGE' },
@@ -71,6 +87,9 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'nav.calendar':            { fr: 'Calendrier',               en: 'Calendar' },
   'nav.activity':            { fr: 'Activité',                 en: 'Activity' },
   'nav.actionPublish':       { fr: 'Publish (action)',         en: 'Publish (action)' },
+  'nav.production.pin':      { fr: 'Garder Production ouvert', en: 'Keep Production open' },
+  'nav.production.unpin':    { fr: 'Ne plus garder Production ouvert', en: 'Stop keeping Production open' },
+  'nav.production.modes':    { fr: 'Modes de production',      en: 'Production modes' },
 
   // production tab
   'prod.mode.asset':         { fr: 'Assets',                   en: 'Assets' },
@@ -79,6 +98,18 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.class.PROPS':        { fr: 'Props',                    en: 'Props' },
   'prod.class.ENV':          { fr: 'Environnements',           en: 'Environments' },
   'prod.class.FXRIG':        { fr: 'FX Rigs',                  en: 'FX Rigs' },
+  'prod.assetGroup.CHAR':    { fr: 'Charas',                   en: 'Characters' },
+  'prod.assetGroup.PROPS':   { fr: 'Props',                    en: 'Props' },
+  'prod.assetGroup.ENV':     { fr: 'Enviros',                  en: 'Environments' },
+  'prod.assetGroup.count':   { fr: 'assets',                   en: 'assets' },
+  'prod.table.expand':       { fr: 'Déplier',                  en: 'Expand' },
+  'prod.table.collapse':     { fr: 'Replier',                  en: 'Collapse' },
+  'prod.table.subtasks':     { fr: 'Sous-tâches',              en: 'Subtasks' },
+  'prod.table.noSubtask':    { fr: 'Aucune sous-tâche',        en: 'No subtask' },
+  'prod.sort.deadlineMine':  { fr: 'Deadline + Me concerne',   en: 'Deadline + Mine' },
+  'prod.sort.deadlineMineHint': { fr: 'Mes tâches d\'abord, puis la deadline la plus proche', en: 'My tasks first, then the nearest deadline' },
+  'prod.preview.source':     { fr: 'Source de l\'aperçu',      en: 'Preview source' },
+  'prod.preview.sourceHint': { fr: 'Clic droit : source de l\'aperçu (partagée avec la Timeline)', en: 'Right-click: preview source (shared with the Timeline)' },
   'prod.newAsset':           { fr: 'Nouvel asset',             en: 'New asset' },
   'prod.newGroup':           { fr: 'Nouveau groupe',           en: 'New group' },
   'prod.newTask':            { fr: 'Nouvelle tâche',           en: 'New task' },
@@ -97,6 +128,8 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.retakes':            { fr: 'Retakes',                  en: 'Retakes' },
   'prod.subtasks':           { fr: 'Sous-tâches',              en: 'Subtasks' },
   'prod.addSubtask':         { fr: 'Ajouter une sous-tâche',   en: 'Add a subtask' },
+  'prod.noPublishNote':      { fr: 'Pas de note pour cette version', en: 'No note for this version' },
+  'prod.pickVersion':        { fr: 'Choisir la version',      en: 'Pick the version' },
   'prod.recentPublishes':    { fr: 'Publishs récents',         en: 'Recent publishes' },
   'prod.noPublishes':        { fr: 'Aucun publish encore',     en: 'No publishes yet' },
   'prod.autoBadge':          { fr: 'auto',                     en: 'auto' },
@@ -113,6 +146,9 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'prod.inheritTasks':       { fr: 'Hériter des tâches de la séquence', en: 'Inherit sequence tasks' },
   'prod.inheritAssets':      { fr: 'Hériter des assets de la séquence', en: 'Inherit sequence assets' },
   'prod.tabAssets':          { fr: 'Assets',                   en: 'Assets' },
+  'prod.versionPinned':      { fr: 'épinglé {v}',              en: 'pinned {v}' },
+  'prod.versionLast':        { fr: 'Suit LAST (dernière version publiée)', en: 'Follows LAST (latest published version)' },
+  'prod.versionNewer':       { fr: 'Plus récente : {v}',       en: 'Newer: {v}' },
   'prod.emptyTimeline':      { fr: 'Aucune séquence. Utilise le menu Edit.', en: 'No sequences yet. Use the Edit menu.' },
   'prod.seqNumber':          { fr: 'Numéro',                   en: 'Number' },
   'prod.shotNumber':         { fr: 'Numéro',                   en: 'Number' },
@@ -147,23 +183,23 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
 
   // hub
   'hub.hello':               { fr: 'Bonjour',                  en: 'Hello' },
-  'hub.recentActivity':      { fr: 'ACTIVITÉ RÉCENTE',         en: 'RECENT ACTIVITY' },
-  'hub.noRecentActivity':    { fr: 'Aucune activité récente',  en: 'No recent activity' },
+  'hub.yourTasks':           { fr: 'TES TÂCHES',               en: 'YOUR TASKS' },
+  'hub.yourRetakes':         { fr: 'TES RETAKES',              en: 'YOUR RETAKES' },
+  'hub.noRetake':            { fr: 'Aucun retake sur tes tâches.', en: 'No retake on your tasks.' },
+  'hub.sortConcernHint':     { fr: 'Tes tâches en retake (RTK) d’abord, puis la deadline la plus proche, puis la priorité', en: 'Your tasks in retake (RTK) first, then the nearest deadline, then priority' },
+  'prod.commentRetake':      { fr: 'Retake',                   en: 'Retake' },
+  'prod.commentRetakeHint':  { fr: 'Marquer ce commentaire comme retake : il apparaît dans « Tes retakes » de l’artiste assigné', en: 'Mark this comment as a retake: it shows in the assigned artist’s "Your retakes"' },
+  'prod.refNoProject':       { fr: 'Aucun projet actif : dépôt impossible', en: 'No active project: cannot drop' },
+  'prod.refNoSeq':           { fr: 'Séquence du plan introuvable : dépôt impossible', en: 'Shot sequence not found: cannot drop' },
+  'prod.refResolveFailed':   { fr: 'Chemin de la tâche non résolu ({err}) : dépôt impossible', en: 'Task path not resolved ({err}): cannot drop' },
+  'prod.refUnresolved':      { fr: 'Chemin de la tâche non résolu : dépôt impossible', en: 'Task path not resolved: cannot drop' },
+  'prod.refNoFile':          { fr: 'Glisse un fichier depuis l’explorateur', en: 'Drag a file from the file explorer' },
   'hub.teamChat':            { fr: 'TEAM CHAT',                en: 'TEAM CHAT' },
   'hub.chatNoProject':       { fr: 'Aucun projet actif : choisis-en un pour voir son chat.', en: 'No active project: pick one to see its chat.' },
   'hub.noMessage':           { fr: 'Aucun message',            en: 'No message' },
   'hub.messagePlaceholder':  { fr: 'Message…  (@ pour mentionner)', en: 'Message…  (@ to mention)' },
-  'hub.shortcuts':           { fr: 'RACCOURCIS',               en: 'SHORTCUTS' },
-  'hub.sc.folderManager':    { fr: 'Naviguer & importer',      en: 'Browse & import' },
-  'hub.sc.publisher':        { fr: 'Exporter un asset',        en: 'Export an asset' },
-  'hub.sc.usd':              { fr: 'Composer des layers',      en: 'Compose layers' },
-  'hub.sc.shelf':            { fr: 'Installer / màj',          en: 'Install / update' },
-  'hub.sc.activity':         { fr: 'Historique équipe',        en: 'Team history' },
-  'hub.dccConnection':       { fr: 'CONNEXION DCC',            en: 'DCC CONNECTION' },
-  'hub.noDcc':               { fr: 'Aucun DCC connecté',       en: 'No DCC connected' },
 
   // activity page
-  'activity.title':          { fr: 'Activité & Notifications', en: 'Activity & Notifications' },
   'activity.markAllRead':    { fr: 'Tout marquer lu',          en: 'Mark all read' },
   'activity.loadOlder':      { fr: 'Charger l’historique plus ancien', en: 'Load older history' },
   'activity.historyLoading': { fr: 'Chargement…',              en: 'Loading…' },
@@ -174,7 +210,16 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'activity.filter.imports': { fr: 'Imports',                  en: 'Imports' },
   'activity.filter.updates': { fr: 'Updates',                  en: 'Updates' },
   'activity.filter.errors':  { fr: 'Erreurs',                  en: 'Errors' },
-  'activity.entries':        { fr: '{n} entrées',              en: '{n} entries' },
+  'activity.view.self':     { fr: 'Self',                     en: 'Self' },
+  'activity.view.global':   { fr: 'Global',                   en: 'Global' },
+  'activity.view.selfHint': { fr: 'Mes shots suivis, mes tâches favorites et assignées, mes mentions', en: 'My followed shots, favorite and assigned tasks, my mentions' },
+  'activity.view.globalHint': { fr: 'Toute l’activité du projet actif', en: 'All activity of the active project' },
+  'activity.noProject':     { fr: 'Choisis un projet pour voir son activité.', en: 'Pick a project to see its activity.' },
+  'activity.selfEmptyNoFollow': { fr: 'Tu ne suis aucun shot. Dans Production, clic droit sur un shot > Suivre le shot. Les tâches qui te sont assignées arrivent ici aussi.', en: 'You follow no shot. In Production, right-click a shot > Follow shot. Tasks assigned to you show up here too.' },
+  'activity.selfEmpty':     { fr: 'Rien de nouveau sur tes shots suivis et tes tâches.', en: 'Nothing new on your followed shots and tasks.' },
+  'activity.followed':      { fr: 'Shots suivis',             en: 'Followed shots' },
+  'activity.unfollow':      { fr: 'Ne plus suivre',           en: 'Unfollow' },
+  'activity.shotGone':      { fr: 'Ce shot n’existe plus dans la production du projet', en: 'This shot no longer exists in the project production' },
   'activity.empty':          { fr: 'Aucune activité pour le moment.', en: 'No activity yet.' },
   'activity.openContext':    { fr: 'Ouvrir le contexte',       en: 'Open context' },
   'activity.copyPath':       { fr: 'Copier le chemin',         en: 'Copy path' },
@@ -184,8 +229,6 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'activity.pathCopyFail':   { fr: 'Impossible de copier le chemin', en: 'Could not copy path' },
 
   // usd assembler — header + sections
-  'usd.title':               { fr: 'USD',                       en: 'USD' },
-  'usd.subtitle':            { fr: 'Assets et décors publiés du projet · départements, versions et composition.', en: 'Published assets and sets of the project · departments, versions and composition.' },
   'usd.sec.target':          { fr: 'Cible',                     en: 'Target' },
   'usd.sec.identity':        { fr: 'Identité',                  en: 'Identity' },
   'usd.sec.layers':          { fr: 'Layers',                    en: 'Layers' },
@@ -258,6 +301,11 @@ export const STRINGS: Record<string, { fr: string; en: string }> = {
   'usd.lib.components':      { fr: 'Components',                en: 'Components' },
   'usd.lib.assemblies':      { fr: 'Assemblies',                en: 'Assemblies' },
   'usd.lib.search':          { fr: 'Rechercher',                en: 'Search' },
+  'usd.lib.sortBy':          { fr: 'Trier par',                 en: 'Sort by' },
+  'usd.lib.sortName':        { fr: 'Nom',                       en: 'Name' },
+  'usd.lib.noToken':         { fr: 'Sans token',                en: 'No token' },
+  'usd.lib.obsoleteToken':   { fr: "Ce token n'existe plus dans le projet : clic pour le retirer du filtre", en: 'This token no longer exists in the project: click to drop it from the filter' },
+  'usd.lib.clearFilter':     { fr: 'Tout afficher',             en: 'Show all' },
   'usd.lib.refresh':         { fr: 'Actualiser',                en: 'Refresh' },
   'usd.lib.empty':           { fr: 'Rien de publié pour ce filtre', en: 'Nothing published for this filter' },
   'usd.lib.emptyAssets':     { fr: 'Nouveau component, puis New link dans ses blocks.', en: 'New component, then New link in its blocks.' },
@@ -463,4 +511,15 @@ export function useI18n(): I18nContextValue {
   const ctx = useContext(I18nContext)
   if (!ctx) throw new Error('useI18n must be used within a LanguageProvider')
   return ctx
+}
+
+/** Inline FR/EN pair for one-off UI strings: `tr('Tout', 'All')`. Prefer a STRINGS key when the
+ *  text is shared between pages. `locale` is the BCP 47 tag for dates and numbers. */
+export function useTr() {
+  const { lang } = useI18n()
+  return {
+    lang,
+    tr: (fr: string, en: string) => (lang === 'en' ? en : fr),
+    locale: lang === 'en' ? 'en-GB' : 'fr-FR',
+  }
 }

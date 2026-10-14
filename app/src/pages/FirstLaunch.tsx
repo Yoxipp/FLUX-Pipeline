@@ -70,7 +70,7 @@ export function FirstLaunch() {
           <FluxLogo size={30} />
           <div>
             <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 14, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</div>
-            <div style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
               {step === 1 ? 'Étape 1 / 2 · Dossier de travail' : 'Étape 2 / 2 · Utilisateur'}
             </div>
           </div>
@@ -79,7 +79,7 @@ export function FirstLaunch() {
         {/* ── étape 1 : workspace ── */}
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
               Dossier de travail de l'équipe
             </div>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>
@@ -112,7 +112,7 @@ export function FirstLaunch() {
                   color: 'var(--ink-3)', cursor: 'pointer',
                   transition: 'border-color 0.12s, color 0.12s',
                 }}
-                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--accent)'; el.style.color = 'var(--accent-hi)' }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-3)'; el.style.color = 'var(--accent-hi)' }}
                 onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.color = 'var(--ink-3)' }}
               >
                 <FolderOpen size={14} strokeWidth={1.75} />
@@ -128,7 +128,7 @@ export function FirstLaunch() {
             {/* utilisateurs existants */}
             {users.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 2 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 2 }}>
                   Artistes existants
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
@@ -142,7 +142,7 @@ export function FirstLaunch() {
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '7px 10px', borderRadius: 7,
                           background: isActive ? 'var(--accent-soft)' : 'var(--paper-2)',
-                          border: '1px solid ' + (isActive ? 'var(--accent)' : 'var(--rule)'),
+                          border: '1px solid ' + (isActive ? 'var(--rule-3)' : 'var(--rule)'),
                           cursor: 'pointer',
                           transition: 'border-color 0.12s, background 0.12s',
                         }}
@@ -150,7 +150,7 @@ export function FirstLaunch() {
                         <Avatar ch={u[0].toUpperCase()} size={22} />
                         <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{u}</span>
                         {isActive && (
-                          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.08em', color: 'var(--accent-hi)', textTransform: 'uppercase' }}>
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', color: 'var(--accent-hi)', textTransform: 'uppercase' }}>
                             Sélectionné
                           </span>
                         )}
@@ -163,7 +163,7 @@ export function FirstLaunch() {
 
             {/* nouveau nom */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
                 {users.length > 0 ? 'Ou entrer un nouveau nom' : 'Votre prénom'}
               </div>
               <input
@@ -188,7 +188,7 @@ export function FirstLaunch() {
 
         {/* erreur */}
         {error && (
-          <div style={{ fontSize: 10, color: 'var(--err)', fontFamily: 'var(--mono)' }}>{error}</div>
+          <div style={{ fontSize: 11, color: 'var(--err)', fontFamily: 'var(--mono)' }}>{error}</div>
         )}
 
         {/* actions */}
@@ -214,7 +214,7 @@ export function FirstLaunch() {
             style={{
               flex: 1, padding: '7px 16px', borderRadius: 7, textAlign: 'center',
               background: 'var(--accent-soft)',
-              border: '1px solid var(--accent)',
+              border: '1px solid var(--rule-3)',
               fontSize: 11, fontWeight: 600,
               color: 'var(--accent-hi)',
               cursor: loading ? 'default' : 'pointer',

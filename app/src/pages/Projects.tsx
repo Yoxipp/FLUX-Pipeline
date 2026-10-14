@@ -1,25 +1,27 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { ProjectPicker } from '../components/shared/ProjectPicker'
 import { toast } from 'sonner'
 import { useLocation } from 'react-router-dom'
 import {
   Star, LayoutGrid, Clock, Archive,
-  HardDrive, Plus, Minus, X, Trash2, Copy, RotateCcw,
-  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2,
+  HardDrive, X, Trash2, Copy, RotateCcw,
+  Grid3x3, Grid2x2, Square, FileDown, Rows2, Columns2, ChevronDown, Check,
 } from 'lucide-react'
-import { FolderIcon, Select, SelectTrigger, SelectContent, SelectItem } from '../components/shared/ui'
+import * as Menu from '@radix-ui/react-dropdown-menu'
+import { FolderIcon } from '../components/shared/ui'
+import { PublishNote } from '../components/shared/PublishNote'
 import { api } from '../api/client'
 import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
 import { useSettings } from '../hooks/useSettings'
 import { useDccStatus } from '../hooks/useDccStatus'
-import { PublishNote } from '../components/shared/PublishNote'
-import { FileLog } from '../components/shared/FileLog'
 import { useSessionState } from '../hooks/useSessionState'
+import { useTr } from '../i18n'
 import { FileSvg, FolderSvg, getExt } from './folder_manager/icons'
 import { ExplorerPane } from './folder_manager/ExplorerPane'
 import type { PaneHandle } from './folder_manager/ExplorerPane'
 import {
-  FolderManagerContext, PANE_COUNT, itemKey, makeSavedItem, navigateTargetFor, resolveOpenPath, savedKey, uniqueName,
+  FolderManagerContext, PANE_COUNT, itemKey, makeSavedItem, navigateTargetFor, resolveOpenPath, savedKey, trNow, uniqueName,
 } from './folder_manager/shared'
 import type {
   Clip, DragPayload, ExplorerItem, FindResult, FolderManagerShared, NavLevel, PaneLayout, PaneReport,
@@ -30,32 +32,39 @@ import type {
 
 type SidebarTab = 'tous' | 'favoris' | 'recents' | 'archives'
 
+// Tile size, views and the creation forms are page preferences, persisted per browser
+// (not part of a work profile, ADR 0043). Ctrl + wheel over the views changes the tile size.
 const TILE_SIZE_KEY = 'flux.folderManager.tileSize'
-
-function loadTileSize(): TileSize {
-  try {
-    const v = localStorage.getItem(TILE_SIZE_KEY)
-    if (v === 'sm' || v === 'md' || v === 'lg') return v
-  } catch { /* localStorage unavailable */ }
-  return 'md'
-}
-
-// Views layout (B2), persisted per-browser like the tile size.
 const LAYOUT_KEY = 'flux.folderManager.layout'
+const SHOW_SETUP_KEY = 'flux.folderManager.showSetup'
 
-function loadLayout(): PaneLayout {
-  try {
-    const v = localStorage.getItem(LAYOUT_KEY)
-    if (v === 'single' || v === 'stacked' || v === 'side' || v === 'quad') return v
-  } catch { /* localStorage unavailable */ }
-  return 'single'
+function useLocalPref<T extends string>(key: string, fallback: T, valid: readonly T[]): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const v = localStorage.getItem(key)
+      if (v && (valid as readonly string[]).includes(v)) return v as T
+    } catch { /* localStorage unavailable */ }
+    return fallback
+  })
+  const change = useCallback((next: T) => {
+    setValue(next)
+    try { localStorage.setItem(key, next) } catch { /* localStorage unavailable */ }
+  }, [key])
+  return [value, change]
 }
 
-const LAYOUTS: { id: PaneLayout; icon: typeof Square; title: string }[] = [
-  { id: 'single',  icon: Square,   title: 'Une vue' },
-  { id: 'stacked', icon: Rows2,    title: 'Deux vues empilées' },
-  { id: 'side',    icon: Columns2, title: 'Deux vues côte à côte' },
-  { id: 'quad',    icon: Grid2x2,  title: 'Quatre vues' },
+const TILE_ORDER: TileSize[] = ['sm', 'md', 'lg']
+const TILE_CHOICES: { id: TileSize; icon: typeof Square; title: string; titleEn: string }[] = [
+  { id: 'sm', icon: Grid3x3, title: 'Petites tuiles',  titleEn: 'Small tiles' },
+  { id: 'md', icon: Grid2x2, title: 'Tuiles moyennes', titleEn: 'Medium tiles' },
+  { id: 'lg', icon: Square,  title: 'Grandes tuiles',  titleEn: 'Large tiles' },
+]
+
+const LAYOUTS: { id: PaneLayout; icon: typeof Square; title: string; titleEn: string }[] = [
+  { id: 'single',  icon: Square,   title: 'Une vue',               titleEn: 'One view' },
+  { id: 'stacked', icon: Rows2,    title: 'Deux vues empilées',    titleEn: 'Two views stacked' },
+  { id: 'side',    icon: Columns2, title: 'Deux vues côte à côte', titleEn: 'Two views side by side' },
+  { id: 'quad',    icon: Grid2x2,  title: 'Quatre vues',           titleEn: 'Four views' },
 ]
 
 const EMPTY_REPORT: PaneReport = { nav: { kind: 'root' }, selectedNames: new Set(), items: [] }
@@ -65,16 +74,7 @@ type FinderMode = 'asset' | 'shot'
 interface TokenSel { category: string; name: string; task: string; instance: string; variante: string; seq: string; shot: string; mode: FinderMode }
 const EMPTY_TOKEN_SEL: TokenSel = { category: '', name: '', task: '', instance: '', variante: '', seq: '', shot: '', mode: 'asset' }
 
-type Tab = 'project' | 'asset' | 'shot' | 'directory'
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'project',   label: 'Projet' },
-  { id: 'asset',     label: 'Asset' },
-  { id: 'shot',      label: 'Shot' },
-  { id: 'directory', label: 'Dossier' },
-]
 
-const ASSET_TOKENS = ['CHAR', 'PROPS', 'ENV', 'FXRIG']
-const TOKEN_TYPES  = ['CLASS', 'TYPE', 'NAME', 'INSTANCE', 'SEQ', 'SHOT', 'custom']
 
 // Finder — same fixed lists as the Publisher composer (Category / Task predefined,
 // FX is the display label for the FXRIG class). Name/Instance/Variante come from disk.
@@ -83,11 +83,11 @@ const FINDER_CATEGORY_TO_CLASS: Record<string, string> = { CHAR: 'CHAR', PROPS: 
 // One task = one USD department (ADR 0019); MULT is kept on disk for old publishes only.
 const FINDER_TASKS = ['GEO', 'SHADING', 'GROOM', 'RIG', 'CFX', 'ANIM']
 
-const SIDEBAR_TABS: { id: SidebarTab; label: string; icon: typeof Star }[] = [
-  { id: 'favoris',  label: 'Favoris',  icon: Star },
-  { id: 'tous',     label: 'Home',     icon: LayoutGrid },
-  { id: 'recents',  label: 'Récents',  icon: Clock },
-  { id: 'archives', label: 'Archivés', icon: Archive },
+const SIDEBAR_TABS: { id: SidebarTab; label: string; labelEn: string; icon: typeof Star }[] = [
+  { id: 'favoris',  label: 'Favoris',  labelEn: 'Favorites', icon: Star },
+  { id: 'tous',     label: 'Home',     labelEn: 'Home',      icon: LayoutGrid },
+  { id: 'recents',  label: 'Récents',  labelEn: 'Recent',    icon: Clock },
+  { id: 'archives', label: 'Archivés', labelEn: 'Archived',  icon: Archive },
 ]
 
 // ── Token Finder ──────────────────────────────────────────────────────────────
@@ -106,6 +106,7 @@ function TokenFinder({ project, onChange }: {
   const [varSug,  setVarSug]          = useState<string[]>([])
   const [shotNameSug, setShotNameSug] = useState<string[]>([])
   const rootRef           = useRef<HTMLDivElement>(null)
+  const { tr }            = useTr()
 
   const cls = FINDER_CATEGORY_TO_CLASS[sel.category] ?? ''
 
@@ -193,7 +194,7 @@ function TokenFinder({ project, onChange }: {
 
   const MODULES: { key: keyof TokenSel; label: string; opts: string[] }[] = mode === 'asset'
     ? [
-        { key: 'category', label: 'CATÉGORIE', opts: FINDER_CATEGORIES },
+        { key: 'category', label: tr('CATÉGORIE', 'CATEGORY'), opts: FINDER_CATEGORIES },
         { key: 'name',     label: 'NAME',      opts: nameSug },
         { key: 'task',     label: 'TASK',      opts: FINDER_TASKS },
         { key: 'instance', label: 'INSTANCE',  opts: instSug },
@@ -211,7 +212,7 @@ function TokenFinder({ project, onChange }: {
       {/* Mode toggle ASSET / SHOT */}
       <div
         onClick={switchMode}
-        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 9, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
+        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--on-accent)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
       >
         {mode === 'asset' ? 'ASSET' : 'SHOT'}
       </div>
@@ -229,27 +230,27 @@ function TokenFinder({ project, onChange }: {
               onClick={() => setOpen(isOpen ? null : i)}
               style={{ height: 30, padding: '0 6px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1, cursor: 'pointer', background: value ? 'var(--accent-soft)' : 'transparent', transition: 'background 0.08s', borderRadius: i === 0 ? '4px 0 0 4px' : i === MODULES.length - 1 ? '0 4px 4px 0' : 0 }}
             >
-              <span style={{ fontSize: 7, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
-              <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+              <span style={{ fontSize: 9, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1 }}>{label}</span>
+              <span style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: value ? 'var(--accent-hi)' : 'var(--ink-4)', fontWeight: value ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
                 {value || '-'}
               </span>
             </div>
             {isOpen && (
               <div style={{ position: 'absolute', top: 'calc(100% + 3px)', left: 0, zIndex: 500, minWidth: 110, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 5, boxShadow: 'var(--shadow)', overflow: 'hidden' }}>
                 {value && (
-                  <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
-                    effacer
+                  <div onClick={() => clear(key)} style={{ padding: '5px 8px', fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}>
+                    {tr('effacer', 'clear')}
                   </div>
                 )}
                 {opts.length === 0 ? (
-                  <div style={{ padding: '6px 8px', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-                    {project ? 'Vide' : 'Projet requis'}
+                  <div style={{ padding: '6px 8px', fontSize: 10.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+                    {project ? tr('Vide', 'Empty') : tr('Projet requis', 'Project required')}
                   </div>
                 ) : opts.map(o => (
                   <div
                     key={o}
                     onClick={() => update(key, o)}
-                    style={{ padding: '5px 8px', fontSize: 9, fontFamily: 'var(--mono)', color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)', background: o === value ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ padding: '5px 8px', fontSize: 10.5, fontFamily: 'var(--mono)', color: o === value ? 'var(--accent-hi)' : 'var(--ink-2)', background: o === value ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer', whiteSpace: 'nowrap' }}
                   >
                     {o}
                   </div>
@@ -260,304 +261,6 @@ function TokenFinder({ project, onChange }: {
         )
       })}
       </div>
-    </div>
-  )
-}
-
-// ── Sous-composants partagés ──────────────────────────────────────────────────
-
-// Seq / shot number (2026-10-01): main number on 3 digits (-/+ by 10) and an optional
-// secondary digit: 1 -> 0010, 1 + 5 -> 0015, to slot a shot in between.
-function Spinner({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const main = Math.floor(value / 10)
-  const sub = value % 10
-  const [draft, setDraft] = useState(String(main).padStart(3, '0'))
-
-  useEffect(() => { setDraft(String(main).padStart(3, '0')) }, [main])
-
-  const commit = () => {
-    const n = parseInt(draft, 10)
-    if (!isNaN(n) && n >= 0 && n * 10 + sub >= 1) { onChange(n * 10 + sub); setDraft(String(n).padStart(3, '0')) }
-    else setDraft(String(main).padStart(3, '0'))
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, overflow: 'hidden', background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)' }}>
-        <div onClick={() => onChange(Math.max(10, value - 10))} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRight: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
-          <Minus size={10} strokeWidth={2} />
-        </div>
-        <input
-          type="text"
-          inputMode="numeric"
-          maxLength={3}
-          value={draft}
-          onChange={e => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
-          onBlur={commit}
-          onKeyDown={e => { if (e.key === 'Enter') commit() }}
-          style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'transparent', border: 'none', outline: 'none', minWidth: 0 }}
-        />
-        <div onClick={() => onChange(value + 10)} style={{ width: 26, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--rule-2)', cursor: 'pointer', color: 'var(--ink-3)', flexShrink: 0 }}>
-          <Plus size={10} strokeWidth={2} />
-        </div>
-      </div>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={1}
-        placeholder="+"
-        title="Numero secondaire : 1 et 5 -> 0015"
-        value={sub ? String(sub) : ''}
-        onChange={e => { const d = parseInt(e.target.value.replace(/[^0-9]/g, '').slice(-1) || '0', 10); if (main * 10 + d >= 1) onChange(main * 10 + d) }}
-        style={{ width: 28, height: 28, textAlign: 'center', fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)', borderRadius: 5, outline: 'none', boxShadow: 'var(--shadow-inset)' }}
-      />
-    </div>
-  )
-}
-
-function SelectEl({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger style={{ width: '100%' }} />
-      <SelectContent>
-        {options.length === 0
-          ? <SelectItem value="__empty__">-</SelectItem>
-          : options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  )
-}
-
-function InputField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  return (
-    <input
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={{ width: '100%', height: 28, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', color: 'var(--ink-2)', fontFamily: 'var(--sans)', fontSize: 10, padding: '0 8px', boxShadow: 'var(--shadow-inset)', outline: 'none' }}
-    />
-  )
-}
-
-function PanelBtn({ primary, children, onClick, disabled, danger }: { primary?: boolean; danger?: boolean; children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
-  return (
-    <div
-      className={`btn${primary ? ' primary' : ' ghost'}`}
-      onClick={disabled ? undefined : onClick}
-      style={{ width: '100%', justifyContent: 'center', opacity: disabled ? 0.5 : 1, cursor: disabled ? 'default' : 'pointer', ...(danger ? { background: 'var(--err)', borderColor: 'var(--err)' } : {}) }}
-    >
-      {children}
-    </div>
-  )
-}
-
-function NavContext({ project }: { project: string }) {
-  if (!project) return (
-    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', fontStyle: 'italic' }}>
-      Naviguez dans un projet
-    </div>
-  )
-  return (
-    <div style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-2)' }}>
-      <span style={{ color: 'var(--ink-4)' }}>Projet : </span>
-      <span style={{ fontWeight: 600 }}>{project}</span>
-    </div>
-  )
-}
-
-// ── Onglets panneau droit ─────────────────────────────────────────────────────
-
-function TabProject({ onCreateProject }: { onCreateProject: (name: string, painterPresets: string[]) => Promise<void> }) {
-  const [name, setName]     = useState('')
-  const [status, setStatus] = useState('')
-  // Painter export presets are picked per project in the Shelf Manager (Painter shelf).
-
-  const handleCreate = async () => {
-    if (!name.trim()) return
-    try {
-      await onCreateProject(name.trim(), [])
-      setStatus('✓ Créé')
-      setName('')
-    } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>NOM</div>
-        <InputField value={name} onChange={setName} placeholder="ex: NEW_PROJECT" />
-      </div>
-      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
-      <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleCreate()} disabled={!name.trim()}>Create Project</PanelBtn>
-    </div>
-  )
-}
-
-function TabAsset({ currentProject, onCreateAsset }: {
-  currentProject: string
-  onCreateAsset: (project: string, cls: string, name: string) => Promise<void>
-}) {
-  const [token, setToken]   = useState('CHAR')
-  const [name, setName]     = useState('')
-  const [status, setStatus] = useState('')
-
-  const handleCreate = async () => {
-    if (!currentProject || !name.trim()) return
-    try {
-      await onCreateAsset(currentProject, token, name.trim())
-      setStatus('✓ Créé')
-      setName('')
-    } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <NavContext project={currentProject} />
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>TYPE</div>
-        <SelectEl options={ASSET_TOKENS} value={token} onChange={setToken} />
-      </div>
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>NAME</div>
-        <InputField value={name} onChange={setName} placeholder="ex: HorseRig" />
-      </div>
-      {status && <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{status}</div>}
-      <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleCreate()} disabled={!currentProject || !name.trim()}>Create Asset</PanelBtn>
-    </div>
-  )
-}
-
-function TabShot({ currentProject, sequences, onCreateSequence, onCreateShot, onRefreshSequences }: {
-  currentProject: string; sequences: string[]
-  onCreateSequence: (project: string, seqN: number) => Promise<void>
-  onCreateShot: (project: string, seqN: number, shotN: number) => Promise<void>
-  onRefreshSequences: () => void
-}) {
-  // SEQ0010 / SHOT0010 by default, steps of 10 leave room for 0011, 0015...
-  const [seqN, setSeqN]             = useState(10)
-  const [shotN, setShotN]           = useState(10)
-  const [seq, setSeq]               = useState('')
-  const [statusSeq, setStatusSeq]   = useState('')
-  const [statusShot, setStatusShot] = useState('')
-
-  useEffect(() => { setSeq(sequences[0] ?? '') }, [sequences])
-
-  const handleCreateSeq = async () => {
-    if (!currentProject) return
-    try {
-      await onCreateSequence(currentProject, seqN)
-      setStatusSeq('✓ SEQ' + String(seqN).padStart(4, '0'))
-      onRefreshSequences()
-    } catch (e) {
-      setStatusSeq('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
-    }
-  }
-
-  const handleCreateShot = async () => {
-    if (!currentProject || !seq) return
-    const seqNum = parseInt(seq.replace(/\D/g, ''), 10) || seqN
-    try {
-      await onCreateShot(currentProject, seqNum, shotN)
-      setStatusShot(`✓ SEQ${String(seqNum).padStart(4, '0')}_SHOT${String(shotN).padStart(4, '0')}`)
-    } catch (e) {
-      setStatusShot('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <NavContext project={currentProject} />
-      <div style={{ padding: '10px', border: '1px solid var(--rule-2)', borderRadius: 7, background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: 'var(--shadow-inset)' }}>
-        <div className="cap">SEQ</div>
-        <Spinner value={seqN} onChange={setSeqN} />
-        {statusSeq && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusSeq.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusSeq}</div>}
-        <PanelBtn primary onClick={() => void handleCreateSeq()} disabled={!currentProject}>Create Sequence</PanelBtn>
-      </div>
-      <div style={{ padding: '10px', border: '1px solid var(--rule-2)', borderRadius: 7, background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', gap: 8, boxShadow: 'var(--shadow-inset)' }}>
-        <div className="cap">SHOT</div>
-        <div>
-          <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>IN SEQUENCE</div>
-          <SelectEl options={sequences.length > 0 ? sequences : ['-']} value={seq} onChange={setSeq} />
-        </div>
-        <div>
-          <div className="cap" style={{ marginBottom: 4, fontSize: 8 }}>SHOT NO.</div>
-          <Spinner value={shotN} onChange={setShotN} />
-        </div>
-        {statusShot && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusShot.startsWith('✓') ? 'var(--ok)' : 'var(--err)' }}>{statusShot}</div>}
-        <PanelBtn primary onClick={() => void handleCreateShot()} disabled={!currentProject || !seq}>Create Shot</PanelBtn>
-      </div>
-      <div style={{ flex: 1 }} />
-    </div>
-  )
-}
-
-function TabDirectory({ currentProject, currentSubpath, onSuccess }: {
-  currentProject: string
-  currentSubpath: string[]
-  onSuccess: () => void
-}) {
-  const [name, setName]           = useState('')
-  const [token, setToken]         = useState('')
-  const [tokenType, setTokenType] = useState('CLASS')
-  const [status, setStatus]       = useState('')
-  const [busy, setBusy]           = useState(false)
-
-  const handleAdd = async () => {
-    if (!name.trim() || !currentProject) return
-    setBusy(true)
-    setStatus('')
-    try {
-      const res = await api.createDirectory(
-        currentProject,
-        currentSubpath,
-        name.trim(),
-        token.trim() || undefined,
-        token.trim() ? tokenType : undefined,
-      )
-      const shortPath = res.rel_path.split('/').slice(-2).join('/')
-      setStatus(`✓ ${shortPath}`)
-      setName('')
-      setToken('')
-      onSuccess()
-    } catch (e) {
-      setStatus('✗ ' + (e instanceof Error ? e.message : 'Erreur'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-      <NavContext project={currentProject} />
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>NAME</div>
-        <InputField value={name} onChange={setName} placeholder="ex: NEW_FOLDER" />
-      </div>
-      <div>
-        <div className="cap" style={{ marginBottom: 4 }}>TOKEN (optionnel)</div>
-        <InputField value={token} onChange={setToken} placeholder="ex: SLA" />
-      </div>
-      {token.trim() && (
-        <div>
-          <div className="cap" style={{ marginBottom: 4 }}>TOKEN TYPE</div>
-          <SelectEl options={TOKEN_TYPES} value={tokenType} onChange={setTokenType} />
-        </div>
-      )}
-      {status && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: status.startsWith('✓') ? 'var(--ok)' : 'var(--err)', lineHeight: 1.4 }}>
-          {status}
-        </div>
-      )}
-      <div style={{ flex: 1 }} />
-      <PanelBtn primary onClick={() => void handleAdd()} disabled={!name.trim() || !currentProject || busy}>
-        {busy ? '…' : 'Add Folder'}
-      </PanelBtn>
     </div>
   )
 }
@@ -577,6 +280,7 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
 }) {
   const [typed, setTyped] = useState('')
   const match = typed === DELETE_PROJECT_PHRASE
+  const { tr } = useTr()
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
@@ -590,19 +294,19 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <Trash2 size={16} strokeWidth={1.75} color="var(--err)" />
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-            Supprimer le projet «&nbsp;{project}&nbsp;» ?
+            {tr(`Supprimer le projet «\u00a0${project}\u00a0» ?`, `Delete project "${project}"?`)}
           </div>
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 16, lineHeight: 1.5 }}>
-          Le dossier du projet et tout son contenu seront retirés définitivement du workspace.
-          Cette action est irréversible.
+          {tr('Le dossier du projet et tout son contenu seront retirés définitivement du workspace. Cette action est irréversible.',
+            'The project folder and all its contents will be permanently removed from the workspace. This cannot be undone.')}
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-2)', marginBottom: 8, lineHeight: 1.5 }}>
-          Tape{' '}
+          {tr('Tape', 'Type')}{' '}
           <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink)' }}>
             {DELETE_PROJECT_PHRASE}
           </code>{' '}
-          pour confirmer.
+          {tr('pour confirmer.', 'to confirm.')}
         </div>
         <input
           autoFocus
@@ -621,7 +325,7 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
           }}
         />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>
+          <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>{tr('Annuler', 'Cancel')}</div>
           <div
             className="btn primary"
             onClick={() => { if (match) onConfirm() }}
@@ -632,7 +336,7 @@ function DeleteProjectModal({ project, onConfirm, onCancel }: {
               opacity: match ? 1 : 0.5,
             }}
           >
-            Supprimer
+            {tr('Supprimer', 'Delete')}
           </div>
         </div>
       </div>
@@ -654,6 +358,7 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   const [selected, setSelected]   = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting]   = useState(false)
+  const { tr } = useTr()
 
   useEffect(() => {
     let ok = true
@@ -676,14 +381,14 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
           ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
         ])
       })
-      .catch(() => { if (ok) { setEntries([]); setErr('Aucune archive pour ce projet.') } })
+      .catch(() => { if (ok) { setEntries([]); setErr(trNow('Aucune archive pour ce projet.', 'No archive for this project.')) } })
       .finally(() => { if (ok) setLoading(false) })
     return () => { ok = false }
   }, [cur])
 
   const _hdr: React.CSSProperties = {
     padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0,
-    background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+    background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)',
     display: 'flex', alignItems: 'center', gap: 8,
   }
   const _row: React.CSSProperties = {
@@ -695,10 +400,10 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   if (!cur) {
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <div style={_hdr}>ARCHIVÉS · {projects.length} projet{projects.length > 1 ? 's' : ''}</div>
+        <div style={_hdr}>{tr(`ARCHIVÉS · ${projects.length} projet${projects.length > 1 ? 's' : ''}`, `ARCHIVED · ${projects.length} project${projects.length > 1 ? 's' : ''}`)}</div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {projects.length === 0 ? (
-            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Aucun projet</div>
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Aucun projet', 'No projects')}</div>
           ) : projects.map(p => (
             <div
               key={p}
@@ -750,9 +455,9 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
         ...d.folders.map(f => ({ name: f.name, isDir: true })),
         ...(d.files ?? []).map(f => ({ name: f.name, isDir: false })),
       ])
-      toast.success(`${removed} élément${removed > 1 ? 's' : ''} supprimé${removed > 1 ? 's' : ''}`)
+      toast.success(tr(`${removed} élément${removed > 1 ? 's' : ''} supprimé${removed > 1 ? 's' : ''}`, `${removed} item${removed > 1 ? 's' : ''} deleted`))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Suppression échouée')
+      toast.error(e instanceof Error ? e.message : tr('Suppression échouée', 'Delete failed'))
     } finally {
       setDeleting(false)
     }
@@ -761,53 +466,53 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={_hdr}>
-        <span onClick={goUp} style={{ cursor: 'pointer', color: 'var(--accent-hi)' }}>‹ Retour</span>
+        <span onClick={goUp} style={{ cursor: 'pointer', color: 'var(--accent-hi)' }}>{tr('‹ Retour', '‹ Back')}</span>
         <span style={{ color: 'var(--ink-2)' }}>{cur.project}</span>
         {relStr && <span style={{ color: 'var(--ink-4)' }}>/ {relStr}</span>}
       </div>
       {selected.size > 0 && (
         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
-          <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
-            {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
+          <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-3)' }}>
+            {tr(`${selected.size} sélectionné${selected.size > 1 ? 's' : ''}`, `${selected.size} selected`)}
           </span>
           <span style={{ flex: 1 }} />
           {confirming ? (
             <>
               <span
                 onClick={() => !deleting && setConfirming(false)}
-                style={{ fontSize: 10, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
-              >Annuler</span>
+                style={{ fontSize: 11, color: 'var(--ink-3)', cursor: 'pointer', padding: '3px 8px' }}
+              >{tr('Annuler', 'Cancel')}</span>
               <span
                 onClick={doDelete}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--danger, #d05a5a)', cursor: deleting ? 'default' : 'pointer', padding: '3px 8px', border: '1px solid var(--danger, #d05a5a)', borderRadius: 4, opacity: deleting ? 0.6 : 1 }}
               >
-                <Trash2 size={11} strokeWidth={1.75} /> {deleting ? 'Suppression…' : 'Confirmer la suppression définitive'}
+                <Trash2 size={11} strokeWidth={1.75} /> {deleting ? tr('Suppression…', 'Deleting…') : tr('Confirmer la suppression définitive', 'Confirm permanent delete')}
               </span>
             </>
           ) : (
             <span
               onClick={() => setConfirming(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-2)', cursor: 'pointer', padding: '3px 8px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
             >
-              <Trash2 size={11} strokeWidth={1.75} /> Supprimer
+              <Trash2 size={11} strokeWidth={1.75} /> {tr('Supprimer', 'Delete')}
             </span>
           )}
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
         {loading ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Chargement…</div>
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Chargement…', 'Loading…')}</div>
         ) : err ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{err}</div>
         ) : entries.length === 0 ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>Vide</div>
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic' }}>{tr('Vide', 'Empty')}</div>
         ) : entries.map((it, i) => {
           const isSel = selected.has(it.name)
           return (
           <div
             key={i}
             onClick={() => { if (it.isDir) setCur({ project: cur.project, sub: [...cur.sub, it.name] }) }}
-            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default', background: isSel ? 'var(--accent-soft)' : 'transparent', border: isSel ? '1px solid var(--accent)' : '1px solid transparent' }}
+            style={{ ..._row, cursor: it.isDir ? 'pointer' : 'default', background: isSel ? 'var(--paper-2)' : 'transparent', border: isSel ? '1px solid var(--rule-3)' : '1px solid transparent' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-soft)')}
             onMouseLeave={e => (e.currentTarget.style.background = isSel ? 'var(--accent-soft)' : 'transparent')}
           >
@@ -822,9 +527,9 @@ function ArchivesBrowser({ onOpen }: { onOpen: (project: string, subpath: string
             <span style={{ flex: 1, fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
             <span
               onClick={e => { e.stopPropagation(); onOpen(cur.project, it.isDir ? [...cur.sub, it.name] : cur.sub) }}
-              title="Ouvrir dans l'explorateur"
-              style={{ flexShrink: 0, fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
-            >Ouvrir</span>
+              title={tr("Ouvrir dans l'explorateur", 'Open in the explorer')}
+              style={{ flexShrink: 0, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--accent-hi)', cursor: 'pointer', padding: '2px 6px', border: '1px solid var(--rule-2)', borderRadius: 4 }}
+            >{tr('Ouvrir', 'Open')}</span>
           </div>
           )
         })}
@@ -847,6 +552,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
   // A root-level project is identified by project === label && empty subpath.
   const isProjectRoot = (s: SavedItem) => s.project === s.label && s.subpath.length === 0
   const [ctx, setCtx] = useState<{ x: number; y: number; item: SavedItem } | null>(null)
+  const { tr } = useTr()
 
   useEffect(() => {
     if (!ctx) return
@@ -869,8 +575,8 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
   return (
     <>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
-          {label} · {items.length === 0 ? emptyMsg : `${items.length} élément${items.length > 1 ? 's' : ''}`}
+        <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>
+          {label} · {items.length === 0 ? emptyMsg : tr(`${items.length} élément${items.length > 1 ? 's' : ''}`, `${items.length} item${items.length > 1 ? 's' : ''}`)}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {items.length === 0 ? (
@@ -889,7 +595,7 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
               {s.isDir ? <FolderSvg size={24} /> : <FileSvg size={20} ext={getExt(s.label)} />}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div title={s.label} style={{ fontSize: 11, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
-                <div style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {s.project}{s.subpath.length > 0 ? ' / ' + s.subpath.join(' / ') : ''}
                 </div>
               </div>
@@ -912,12 +618,12 @@ function SavedList({ items, label, emptyMsg, removeLabel, onNavigate, onRemove, 
           onMouseDown={e => e.stopPropagation()}
           style={{ position: 'fixed', top: ctx.y, left: ctx.x, zIndex: 1000, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 7, boxShadow: 'var(--shadow)', minWidth: 170, overflow: 'hidden', paddingBlock: 4 }}
         >
-          {menuRow('Ouvrir', false, () => { onNavigate(ctx.item); setCtx(null) })}
+          {menuRow(tr('Ouvrir', 'Open'), false, () => { onNavigate(ctx.item); setCtx(null) })}
           {menuRow(removeLabel, false, () => { onRemove(ctx.item); setCtx(null) })}
           {onDeleteProject && isProjectRoot(ctx.item) && (
             <>
               <div style={{ height: 1, background: 'var(--rule)', margin: '4px 0' }} />
-              {menuRow('Supprimer définitivement', true, () => { onDeleteProject(ctx.item); setCtx(null) })}
+              {menuRow(tr('Supprimer définitivement', 'Delete permanently'), true, () => { onDeleteProject(ctx.item); setCtx(null) })}
             </>
           )}
         </div>
@@ -940,14 +646,13 @@ export function Projects() {
   const { settings } = useSettings()
   const dccStatus = useDccStatus()
   const location = useLocation()
+  const { tr } = useTr()
 
   // ── Views (B2) ─────────────────────────────────────────────────────────────
 
-  const [layout, setLayout] = useState<PaneLayout>(loadLayout)
-  const changeLayout = useCallback((l: PaneLayout) => {
-    setLayout(l)
-    try { localStorage.setItem(LAYOUT_KEY, l) } catch { /* localStorage unavailable */ }
-  }, [])
+  const [layout, changeLayout] = useLocalPref<PaneLayout>(LAYOUT_KEY, 'single', ['single', 'stacked', 'side', 'quad'])
+  const [showSetupValue, setShowSetupValue] = useLocalPref(SHOW_SETUP_KEY, 'hidden', ['hidden', 'shown'])
+  const showSetup = showSetupValue === 'shown'
   const paneCount = PANE_COUNT[layout]
   const [activePane, setActivePane] = useSessionState('fm.activePane', 0)
   const activeIdx = Math.min(activePane, paneCount - 1)
@@ -957,7 +662,6 @@ export function Projects() {
   const onReport = useCallback((id: number, r: PaneReport) => setReports(prev => ({ ...prev, [id]: r })), [])
   const report = reports[activeIdx] ?? EMPTY_REPORT
   const nav: NavLevel = report.nav
-  const selectedNames = report.selectedNames
   const navProject: string = nav.kind === 'inside' ? nav.project : ''
   const navigateActive = useCallback((level: NavLevel) => paneRefs.current[activeIdx]?.navigateTo(level), [activeIdx])
 
@@ -974,17 +678,26 @@ export function Projects() {
     if (navProject && navProject !== activeProject) setActiveProject(navProject)
   }, [navProject])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [tab, setTab]               = useSessionState<Tab>('fm.tab', 'project')
   const [sidebarTab, setSidebarTab] = useSessionState<SidebarTab>('fm.sidebarTab', 'tous')
 
-  // Explorer tile size (small / medium / large), persisted per-browser
-  const [tileSize, setTileSize]   = useState<TileSize>(loadTileSize)
-  const changeTileSize = useCallback((s: TileSize) => {
-    setTileSize(s)
-    try { localStorage.setItem(TILE_SIZE_KEY, s) } catch { /* localStorage unavailable */ }
-  }, [])
+  // Explorer tile size (small / medium / large), persisted per browser; Ctrl + wheel steps it.
+  const [tileSize, changeTileSize] = useLocalPref<TileSize>(TILE_SIZE_KEY, 'md', TILE_ORDER)
+  const viewsRef = useRef<HTMLDivElement>(null)
+  const tileSizeRef = useRef(tileSize)
+  tileSizeRef.current = tileSize
+  useEffect(() => {
+    const node = viewsRef.current
+    if (!node) return
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const i = TILE_ORDER.indexOf(tileSizeRef.current) + (e.deltaY < 0 ? 1 : -1)
+      if (i >= 0 && i < TILE_ORDER.length) changeTileSize(TILE_ORDER[i])
+    }
+    node.addEventListener('wheel', wheel, { passive: false })
+    return () => node.removeEventListener('wheel', wheel)
+  }, [changeTileSize])
 
-  const [sequences, setSequences] = useState<string[]>([])
   // Preset quick-drop (RETAKES-3): the linked presets of the active view's project.
   const [presets, setPresets]     = useState<Preset[]>([])
 
@@ -999,7 +712,6 @@ export function Projects() {
   // Token Finder
   const [tokenSel, setTokenSel]           = useState<TokenSel>(EMPTY_TOKEN_SEL)
   const [projectTokens, setProjectTokens] = useState<Record<string, Record<string, string>>>({})
-  const [tokenRefreshTick, setTokenRefreshTick] = useState(0)
   const [findLoading, setFindLoading]     = useState(false)
 
   // Clipboard, undo, drag payload and disk refresh, shared by every view
@@ -1081,7 +793,7 @@ export function Projects() {
 
   const undoLast = useCallback(async () => {
     const op = undoStack[undoStack.length - 1]
-    if (!op) { toast('Rien à annuler'); return }
+    if (!op) { toast(trNow('Rien à annuler', 'Nothing to undo')); return }
     setUndoStack(prev => prev.slice(0, -1))
     let ok = 0
     for (const a of [...op.actions].reverse()) {
@@ -1091,30 +803,30 @@ export function Projects() {
         else if (a.kind === 'copy')   await api.deleteItem(a.project, a.sub, a.name)
         ok++
       } catch (e) {
-        toast.error(`Annulation : ${e instanceof Error ? e.message : 'échec'}`)
+        toast.error(trNow(`Annulation : ${e instanceof Error ? e.message : 'échec'}`, `Undo: ${e instanceof Error ? e.message : 'failed'}`))
       }
     }
-    if (ok > 0) { toast.success(`Annulé : ${op.label}`); bumpFs() }
+    if (ok > 0) { toast.success(trNow(`Annulé : ${op.label}`, `Undone: ${op.label}`)); bumpFs() }
   }, [undoStack, bumpFs])
 
   // One path for every move / copy, inside a view or from one view to another.
   const transfer = useCallback(async (src: TransferSource, dest: TransferDest, op: 'move' | 'copy'): Promise<number> => {
     if (src.names.length === 0) return 0
-    if (src.project !== dest.project) { toast.error('Déplacement / copie entre projets non supporté'); return 0 }
+    if (src.project !== dest.project) { toast.error(trNow('Déplacement / copie entre projets non supporté', 'Move / copy between projects is not supported')); return 0 }
     const srcKey  = src.subpath.join('/')
     const destKey = dest.subpath.join('/')
     if (op === 'move' && srcKey === destKey) return 0   // same folder → no-op
     // The backend reads an empty destination as "keep the parent": no move to the project root.
     if (op === 'move' && dest.subpath.length === 0) {
-      toast.error('Déplacer à la racine du projet : pas encore possible (copier fonctionne)')
+      toast.error(trNow('Déplacer à la racine du projet : pas encore possible (copier fonctionne)', 'Moving to the project root is not possible yet (copy works)'))
       return 0
     }
     const into = src.names.find(n => (destKey + '/').startsWith([...src.subpath, n].join('/') + '/'))
-    if (into) { toast.error(`"${into}" ne peut pas aller dans son propre dossier`); return 0 }
+    if (into) { toast.error(trNow(`"${into}" ne peut pas aller dans son propre dossier`, `"${into}" cannot go into its own folder`)); return 0 }
     let names = src.names
     if (op === 'move' && src.locked?.size) {
       names = names.filter(n => !src.locked!.has(n))
-      if (names.length < src.names.length) toast.error(`${src.names.length - names.length} verrouillé(s) — non déplacé(s)`)
+      if (names.length < src.names.length) toast.error(trNow(`${src.names.length - names.length} verrouillé(s) : non déplacé(s)`, `${src.names.length - names.length} locked: not moved`))
       if (names.length === 0) return 0
     }
     // Copy: free name in the destination ("x (2).ext").
@@ -1143,13 +855,15 @@ export function Projects() {
         }
         ok++
       } catch (e) {
-        toast.error(`${name} : ${e instanceof Error ? e.message : 'échec'}`)
+        toast.error(trNow(`${name} : ${e instanceof Error ? e.message : 'échec'}`, `${name}: ${e instanceof Error ? e.message : 'failed'}`))
       }
     }
     if (moved.length) forgetSaved(moved)
-    pushUndo({ label: op === 'move' ? `déplacement (${undoActions.length})` : `copie (${undoActions.length})`, actions: undoActions })
+    pushUndo({ label: op === 'move'
+      ? trNow(`déplacement (${undoActions.length})`, `move (${undoActions.length})`)
+      : trNow(`copie (${undoActions.length})`, `copy (${undoActions.length})`), actions: undoActions })
     if (ok > 0) {
-      toast.success(`${ok} élément(s) ${op === 'move' ? 'déplacé(s)' : 'copié(s)'}`)
+      toast.success(trNow(`${ok} élément(s) ${op === 'move' ? 'déplacé(s)' : 'copié(s)'}`, `${ok} item(s) ${op === 'move' ? 'moved' : 'copied'}`))
       bumpFs()
     }
     return ok
@@ -1160,9 +874,9 @@ export function Projects() {
     tileSize, dccStatus, favorites, archived,
     toggleFavorite, toggleArchived, addToRecents, forgetSaved, renameSaved,
     clipboard, setClipboard, pushUndo, undoLast,
-    fsTick, bumpFs, dragRef, transfer,
+    fsTick, bumpFs, dragRef, transfer, showSetup,
   }), [settings?.workspace, tileSize, dccStatus, favorites, archived, toggleFavorite, toggleArchived, addToRecents,
-       forgetSaved, renameSaved, clipboard, pushUndo, undoLast, fsTick, bumpFs, transfer])
+       forgetSaved, renameSaved, clipboard, pushUndo, undoLast, fsTick, bumpFs, transfer, showSetup])
 
   // ── Presets (quick-drop into the active view's folder) ──────────────────────
   // Reload the project's presets when entering a project, and whenever the
@@ -1186,27 +900,19 @@ export function Projects() {
     if (nav.kind !== 'inside') return
     try {
       const r = await api.dropPreset(nav.project, p.id, nav.subpath.join('/'))
-      toast.success(`${r.name} déposé ici`)
+      toast.success(trNow(`${r.name} déposé ici`, `${r.name} dropped here`))
       bumpFs()
     } catch (e) {
-      toast.error(`Dépôt : ${e instanceof Error ? e.message : 'échec'}`)
+      toast.error(trNow(`Dépôt : ${e instanceof Error ? e.message : 'échec'}`, `Drop: ${e instanceof Error ? e.message : 'failed'}`))
     }
   }, [nav, bumpFs])
-
-  const loadSequences = useCallback(async () => {
-    if (!activeProject) return
-    try { const d = await api.getSequences(activeProject); setSequences(d.sequences) }
-    catch {}
-  }, [activeProject])
-
-  useEffect(() => { void loadSequences() }, [activeProject])
 
   // Fetch tokens.json for the active/nav project whenever project or tick changes
   const tokensProject = navProject || activeProject
   useEffect(() => {
     if (!tokensProject) { setProjectTokens({}); return }
     api.getTokens(tokensProject).then(d => setProjectTokens(d.tokens)).catch(() => setProjectTokens({}))
-  }, [tokensProject, tokenRefreshTick])
+  }, [tokensProject])
 
   // ── Token Finder (results shown in the active view) ─────────────────────────
 
@@ -1290,34 +996,6 @@ export function Projects() {
     setFindLoading(false)
   }, [tokenSel, navProject, activeProject, projectTokens, activeIdx])
 
-  // ── Creation tabs ───────────────────────────────────────────────────────────
-
-  const handleSetProject = useCallback((name: string) => {
-    setActiveProject(name)
-    void api.updateSettings({ last_project: name })
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleCreateProject = useCallback(async (name: string, painterPresets: string[] = []) => {
-    await api.createProject(name, painterPresets)
-    bumpFs()
-    setActiveProject(name)
-  }, [bumpFs])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleCreateAsset = useCallback(async (project: string, cls: string, name: string) => {
-    await api.createAsset(project, cls, name)
-    bumpFs()
-  }, [bumpFs])
-
-  const handleCreateSequence = useCallback(async (project: string, seqN: number) => {
-    await api.createSequence(project, seqN)
-    bumpFs()
-  }, [bumpFs])
-
-  const handleCreateShot = useCallback(async (project: string, seqN: number, shotN: number) => {
-    await api.createShot(project, seqN, shotN)
-    bumpFs()
-  }, [bumpFs])
-
   // Hard-delete a whole project from the Archives view (after typed confirmation).
   const handleDeleteProject = useCallback(async (s: SavedItem) => {
     const name = s.project
@@ -1333,18 +1011,13 @@ export function Projects() {
         setActiveProject(remaining[0] ?? '')
       }
       bumpFs()
-      toast.success(`Projet "${name}" supprimé`)
+      toast.success(trNow(`Projet "${name}" supprimé`, `Project "${name}" deleted`))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Suppression du projet échouée')
+      toast.error(e instanceof Error ? e.message : trNow('Suppression du projet échouée', 'Project delete failed'))
     } finally {
       setDeleteProjectTarget(null)
     }
   }, [refreshProjects, activeProject, projects, setActiveProject, bumpFs])
-
-  const contextProject: string | null =
-    navProject !== '' ? navProject
-    : (selectedNames.size === 1 && projects.includes([...selectedNames][0])) ? [...selectedNames][0]
-    : null
 
   const recentSidebarItems = recents.slice(0, 5)
   const navBtn = (ok: boolean): React.CSSProperties => ({ width: 24, height: 24, border: '1px solid var(--rule-2)', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ok ? 'var(--ink-2)' : 'var(--ink-4)', boxShadow: 'var(--shadow-xs)', cursor: ok ? 'pointer' : 'default', opacity: ok ? 1 : 0.4, flexShrink: 0 })
@@ -1355,47 +1028,36 @@ export function Projects() {
     <FolderManagerContext.Provider value={shared}>
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      {/* En-tête : titre + choix des vues (comme les vues de Houdini) */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--rule)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink)' }}>Folder Manager</div>
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: 4 }}>
-          {LAYOUTS.map(({ id, icon: Icon, title }) => {
-            const on = layout === id
-            return (
-              <div
-                key={id}
-                title={title}
-                onClick={() => changeLayout(id)}
-                style={{ width: 28, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, cursor: 'pointer', background: on ? 'var(--accent-soft)' : 'transparent', border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)' }}
-              >
-                <Icon size={13} strokeWidth={1.75} color={on ? 'var(--accent)' : 'var(--ink-4)'} />
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
       {/* Barre commune : annuler + Token Finder (résultats dans la vue active) + presse-papier */}
       <div style={{ padding: '6px 10px 7px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title="Annuler (Ctrl+Z)" style={navBtn(undoStack.length > 0)}>
+        <ProjectPicker width={170} />
+        <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title={tr('Annuler (Ctrl+Z)', 'Undo (Ctrl+Z)')} style={navBtn(undoStack.length > 0)}>
           <RotateCcw size={12} strokeWidth={2} />
         </div>
         <TokenFinder project={navProject || activeProject} onChange={setTokenSel} />
         <div
           onClick={() => void handleFind()}
           className="btn primary"
-          style={{ height: 30, padding: '0 14px', flexShrink: 0, display: 'flex', alignItems: 'center', fontSize: 10, cursor: findLoading ? 'wait' : 'pointer' }}
+          style={{ height: 30, padding: '0 14px', flexShrink: 0, display: 'flex', alignItems: 'center', fontSize: 11, cursor: findLoading ? 'wait' : 'pointer' }}
         >
           {findLoading ? '…' : 'Find'}
         </div>
         {clipboard && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '0 8px', height: 30, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', boxShadow: 'var(--shadow-inset)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '0 8px', height: 30, border: '1px solid var(--rule-2)', borderRadius: 5, background: 'var(--bg-deep)', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', boxShadow: 'var(--shadow-inset)' }}>
             <Copy size={10} strokeWidth={1.75} color="var(--ink-4)" />
-            <span>{clipboard.items.length} {clipboard.op === 'cut' ? 'coupé(s)' : 'copié(s)'}</span>
+            <span>{clipboard.items.length} {clipboard.op === 'cut' ? tr('coupé(s)', 'cut') : tr('copié(s)', 'copied')}</span>
             <X size={10} strokeWidth={2} style={{ cursor: 'pointer' }} onClick={() => setClipboard(null)} />
           </div>
         )}
+        <div style={{ flex: 1 }} />
+        <label className="fm-setup-toggle" title={tr('Afficher le dossier _flux_setup et les fichiers de configuration du projet', 'Show the _flux_setup folder and the project configuration files')}>
+          <input type="checkbox" checked={showSetup} onChange={e => setShowSetupValue(e.target.checked ? 'shown' : 'hidden')} />
+          <span>Setup files</span>
+        </label>
+        <ViewMenu
+          layout={layout} onLayout={changeLayout}
+          tileSize={tileSize} onTileSize={changeTileSize}
+        />
       </div>
 
       {/* Corps */}
@@ -1404,23 +1066,23 @@ export function Projects() {
         {/* Sidebar gauche */}
         <div style={{ width: 170, borderRight: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', background: 'var(--paper-2)', flexShrink: 0 }}>
           <div style={{ padding: '8px 0 4px' }}>
-            {SIDEBAR_TABS.map(({ id, label, icon: Icon }) => {
+            {SIDEBAR_TABS.map(({ id, label, labelEn, icon: Icon }) => {
               const active = sidebarTab === id
               return (
                 <div
                   key={id}
                   onClick={() => { setSidebarTab(id); if (id === 'tous') navigateActive({ kind: 'root' }) }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', margin: '1px 8px 1px 0', background: active ? 'var(--accent-soft)' : 'transparent', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent', borderRadius: '0 6px 6px 0', fontSize: 11, color: active ? 'var(--ink)' : 'var(--ink-3)', fontWeight: active ? 500 : 400, cursor: 'pointer', userSelect: 'none' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', margin: '1px 8px 1px 0', background: active ? 'var(--paper-2)' : 'transparent', borderLeft: active ? '2px solid var(--rule-3)' : '2px solid transparent', borderRadius: '0 6px 6px 0', fontSize: 11, color: active ? 'var(--ink)' : 'var(--ink-3)', fontWeight: active ? 500 : 400, cursor: 'pointer', userSelect: 'none' }}
                 >
                   <Icon size={12} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
-                  <span>{label}</span>
+                  <span>{tr(label, labelEn)}</span>
                   {id === 'favoris' && favorites.length > 0 && (
-                    <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
+                    <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
                       {favorites.length}
                     </span>
                   )}
                   {id === 'archives' && archived.length > 0 && (
-                    <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
+                    <span style={{ marginLeft: 'auto', fontSize: 10.5, fontFamily: 'var(--mono)', color: active ? 'var(--accent)' : 'var(--ink-4)', background: active ? 'transparent' : 'var(--bg-deep)', padding: '1px 5px', borderRadius: 9, border: '1px solid var(--rule-2)' }}>
                       {archived.length}
                     </span>
                   )}
@@ -1441,14 +1103,14 @@ export function Projects() {
                     <button
                       key={p.id}
                       onClick={() => void dropPresetHere(p)}
-                      title={`Déposer "${p.file}" dans le dossier courant`}
+                      title={tr(`Déposer "${p.file}" dans le dossier courant`, `Drop "${p.file}" into the current folder`)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 7, width: '100%', textAlign: 'left',
                         padding: '6px 8px', background: 'var(--bg-deep)', border: '1px solid var(--rule-2)',
-                        borderRadius: 6, color: 'var(--ink-2)', fontSize: 10, fontFamily: 'var(--sans)',
+                        borderRadius: 6, color: 'var(--ink-2)', fontSize: 11, fontFamily: 'var(--sans)',
                         cursor: 'pointer', boxShadow: 'var(--shadow-xs)',
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--ink)' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--rule-3)'; e.currentTarget.style.color = 'var(--ink)' }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--rule-2)'; e.currentTarget.style.color = 'var(--ink-2)' }}
                     >
                       <FileDown size={12} strokeWidth={1.75} color="var(--accent)" style={{ flexShrink: 0 }} />
@@ -1463,9 +1125,9 @@ export function Projects() {
 
           {/* Récents rapides */}
           <div style={{ padding: '2px 12px 0' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>RÉCENTS</div>
+            <div className="cap" style={{ marginBottom: 6 }}>{tr('RÉCENTS', 'RECENT')}</div>
             {recentSidebarItems.length === 0 ? (
-              <div style={{ fontSize: 10, color: 'var(--ink-4)', fontStyle: 'italic', padding: '3px 0' }}>Aucun</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic', padding: '3px 0' }}>{tr('Aucun', 'None')}</div>
             ) : recentSidebarItems.map((s, i) => (
               <div
                 key={i}
@@ -1480,39 +1142,15 @@ export function Projects() {
 
           <div style={{ height: 1, background: 'var(--rule)', margin: '10px 0 0' }} />
 
-          {/* Taille des tuiles de l'explorer */}
-          <div style={{ padding: '8px 12px 2px' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>TAILLE</div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {([
-                { id: 'sm' as TileSize, icon: Grid3x3,    title: 'Petites tuiles' },
-                { id: 'md' as TileSize, icon: Grid2x2,    title: 'Tuiles moyennes' },
-                { id: 'lg' as TileSize, icon: Square,     title: 'Grandes tuiles' },
-              ]).map(({ id, icon: Icon, title }) => {
-                const active = tileSize === id
-                return (
-                  <div
-                    key={id}
-                    title={title}
-                    onClick={() => changeTileSize(id)}
-                    style={{ flex: 1, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, cursor: 'pointer', background: active ? 'var(--accent-soft)' : 'transparent', border: active ? '1px solid var(--accent)' : '1px solid var(--rule-2)', transition: 'background 0.08s' }}
-                  >
-                    <Icon size={14} strokeWidth={1.75} color={active ? 'var(--accent)' : 'var(--ink-4)'} />
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
           <div style={{ flex: 1 }} />
           <div style={{ padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
               <HardDrive size={10} strokeWidth={1.75} color="var(--ink-4)" />
               <div className="cap">WORKSPACE</div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
-              <span style={{ color: 'var(--ink-3)' }}>Projets</span>
-              <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', fontSize: 10 }}>{projects.length}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+              <span style={{ color: 'var(--ink-3)' }}>{tr('Projets', 'Projects')}</span>
+              <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', fontSize: 11 }}>{projects.length}</span>
             </div>
           </div>
         </div>
@@ -1523,16 +1161,16 @@ export function Projects() {
           {/* Listes sauvegardées (Favoris / Récents / Archivés) : ouvrent dans la vue active */}
           {sidebarTab === 'favoris' && (
             <SavedList
-              items={favorites} label="FAVORIS" emptyMsg="Aucun favori"
-              removeLabel="Retirer des Favoris"
+              items={favorites} label={tr('FAVORIS', 'FAVORITES')} emptyMsg={tr('Aucun favori', 'No favorites')}
+              removeLabel={tr('Retirer des Favoris', 'Remove from Favorites')}
               onNavigate={navigateToSaved}
               onRemove={s => removeFromSaved(s, 'favorites')}
             />
           )}
           {sidebarTab === 'recents' && (
             <SavedList
-              items={recents} label="RÉCENTS" emptyMsg="Aucun élément récent"
-              removeLabel="Retirer des Récents"
+              items={recents} label={tr('RÉCENTS', 'RECENT')} emptyMsg={tr('Aucun élément récent', 'No recent items')}
+              removeLabel={tr('Retirer des Récents', 'Remove from Recent')}
               onNavigate={navigateToSaved}
               onRemove={s => removeFromSaved(s, 'recents')}
             />
@@ -1547,7 +1185,7 @@ export function Projects() {
           )}
 
           {/* Vues d'exploration : restent montées (état gardé) quand une liste est affichée */}
-          <div style={{
+          <div ref={viewsRef} title={tr('Ctrl + molette : taille des tuiles', 'Ctrl + wheel: tile size')} style={{
             flex: 1, minHeight: 0, minWidth: 0,
             display: sidebarTab === 'tous' ? 'grid' : 'none',
             gridTemplateColumns: twoCols ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)',
@@ -1567,72 +1205,13 @@ export function Projects() {
               />
             ))}
           </div>
-        </div>
 
-        {/* Panneau droit (suit la vue active) */}
-        <div style={{ width: 200, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', flexShrink: 0, background: 'var(--paper-2)' }}>
-            {TABS.map(t => (
-              <div
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                style={{ flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 8.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: tab === t.id ? 'var(--accent-hi)' : 'var(--ink-4)', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === t.id ? 'var(--accent-soft)' : 'transparent', cursor: 'pointer' }}
-              >
-                {t.label}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ flex: 1, padding: '12px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
-            {tab === 'project' && <TabProject onCreateProject={handleCreateProject} />}
-            {tab === 'asset' && <TabAsset currentProject={navProject} onCreateAsset={handleCreateAsset} />}
-            {tab === 'shot' && (
-              <TabShot
-                currentProject={navProject}
-                sequences={sequences}
-                onCreateSequence={handleCreateSequence}
-                onCreateShot={handleCreateShot}
-                onRefreshSequences={() => void loadSequences()}
-              />
-            )}
-            {tab === 'directory' && (
-              <TabDirectory
-                currentProject={navProject}
-                currentSubpath={nav.kind === 'inside' ? nav.subpath : []}
-                onSuccess={() => { bumpFs(); setTokenRefreshTick(t => t + 1) }}
-              />
-            )}
-          </div>
-
-          {/* N7: note of the selected published file (hidden when it has none) */}
-          {nav.kind === 'inside' && selectedNames.size === 1 && (
-            <>
-              <PublishNote project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
-              <FileLog     project={nav.project} relPath={[...nav.subpath, [...selectedNames][0]].join('/')} />
-            </>
+          {/* N7: note of the selected published file, at the bottom (hidden when it has none) */}
+          {sidebarTab === 'tous' && nav.kind === 'inside' && report.selectedNames.size === 1 && (
+            <PublishNote project={nav.project} relPath={[...nav.subpath, [...report.selectedNames][0]].join('/')} />
           )}
-
-          {/* Projet actif + Set Project */}
-          <div style={{ flexShrink: 0, padding: '10px 12px 12px', borderTop: '1px solid var(--rule)' }}>
-            <div className="cap" style={{ marginBottom: 6 }}>PROJET ACTIF</div>
-            <div style={{ padding: '6px 8px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--accent-soft)', marginBottom: 8 }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--accent-hi)' }}>
-                {activeProject || '-'}
-              </div>
-              <div style={{ fontSize: 9, color: 'var(--ink-3)', marginTop: 2 }}>
-                {sequences.length > 0 ? `${sequences.length} séquences` : 'Aucune séquence'}
-              </div>
-            </div>
-            {contextProject && contextProject !== activeProject && (
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                → {contextProject}
-              </div>
-            )}
-            <PanelBtn primary onClick={() => contextProject && handleSetProject(contextProject)} disabled={!contextProject}>
-              Set Project
-            </PanelBtn>
-          </div>
         </div>
+
       </div>
 
       {deleteProjectTarget && (
@@ -1644,5 +1223,47 @@ export function Projects() {
       )}
     </div>
     </FolderManagerContext.Provider>
+  )
+}
+
+// "Affichage" menu of the Folder Manager header (ADR 0042, page prefs per ADR 0043): views, tile size and the
+// creation forms in one place instead of seven always-visible buttons.
+function ViewMenu({ layout, onLayout, tileSize, onTileSize }: {
+  layout: PaneLayout; onLayout: (l: PaneLayout) => void
+  tileSize: TileSize; onTileSize: (s: TileSize) => void
+}) {
+  const Current = LAYOUTS.find(l => l.id === layout)?.icon ?? Square
+  const { tr } = useTr()
+  return (
+    <Menu.Root modal={false}>
+      <Menu.Trigger className="fm-view-trigger" aria-label={tr('Affichage', 'View')}>
+        <Current size={13} strokeWidth={1.75} />
+        <span>{tr('Affichage', 'View')}</span>
+        <ChevronDown size={11} />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Content className="launcher-menu" side="bottom" align="end" sideOffset={4} collisionPadding={10}>
+          <Menu.Label className="launcher-menu-label">{tr('Vues', 'Views')}</Menu.Label>
+          <Menu.RadioGroup value={layout} onValueChange={v => onLayout(v as PaneLayout)}>
+            {LAYOUTS.map(({ id, icon: Icon, title, titleEn }) => (
+              <Menu.RadioItem key={id} value={id} className="launcher-menu-item">
+                <Icon size={13} strokeWidth={1.75} />{tr(title, titleEn)}
+                <Menu.ItemIndicator style={{ marginLeft: 'auto', display: 'inline-flex' }}><Check size={13} /></Menu.ItemIndicator>
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+          <Menu.Separator className="launcher-menu-separator" />
+          <Menu.Label className="launcher-menu-label">{tr('Taille · Ctrl + molette', 'Size · Ctrl + wheel')}</Menu.Label>
+          <Menu.RadioGroup value={tileSize} onValueChange={v => onTileSize(v as TileSize)}>
+            {TILE_CHOICES.map(({ id, icon: Icon, title, titleEn }) => (
+              <Menu.RadioItem key={id} value={id} className="launcher-menu-item">
+                <Icon size={13} strokeWidth={1.75} />{tr(title, titleEn)}
+                <Menu.ItemIndicator style={{ marginLeft: 'auto', display: 'inline-flex' }}><Check size={13} /></Menu.ItemIndicator>
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+        </Menu.Content>
+      </Menu.Portal>
+    </Menu.Root>
   )
 }

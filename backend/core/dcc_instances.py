@@ -5,6 +5,7 @@
 # range. Discovery = scan the range and report every reachable port as one
 # instance. Instance identity is the port itself (unique on localhost), exposed
 # as a stable string id "<dcc>:<port>".
+# Maya's extra commandPorts for the same PID are aliases, not extra sessions.
 #
 # A1 (2026-09-27): an instance is (port, pid). The pid comes from the listening
 # socket (core/dcc_identity.py); scene / version / busy are added by the status route.
@@ -46,11 +47,11 @@ def make_instance(dcc: str, port: int, connected: bool = True, pid: int | None =
 
 
 def scan_instances(dcc: str, *, probe=None, timeout: float = _SCAN_TIMEOUT_S, pid_of=None) -> list[dict]:
-    """Probe every port in *dcc*'s range; return one record per reachable port.
+    """Probe every port in *dcc*'s range; return one record per instance.
 
     *probe* defaults to socket_manager.probe_port and is injectable for tests.
-    Returns instances ordered by port (ascending), so the lowest open port is a
-    stable default "active" instance when the caller has no explicit selection.
+    Returns instances ordered by port (ascending). Maya ports belonging to the
+    same PID are merged, retaining the selected port or otherwise the lowest.
     """
     if dcc not in DCC_PORT_RANGES:
         return []
@@ -67,13 +68,37 @@ def scan_instances(dcc: str, *, probe=None, timeout: float = _SCAN_TIMEOUT_S, pi
             ports = [port for port in ports if port in listening]
     if pid_of is None:
         # A faked probe (tests) has no real listener: no pid lookup then.
-        from core.dcc_identity import pid_on_port
-        pid_of = pid_on_port if probe is None else (lambda _port: None)
-    return [
+        from core.dcc_identity import listener_pids, pid_on_port
+        # Keep the raw PID for Maya so a FLUX/backend listener is recognized as
+        # foreign, rather than treated as an unknown DCC (pid_on_port hides self).
+        if probe is not None:
+            pid_of = lambda _port: None
+        elif dcc == "Maya":
+            pid_of = lambda port: listener_pids().get(port)
+        else:
+            pid_of = pid_on_port
+    instances = [
         make_instance(dcc, port, pid=pid_of(port))
         for port in ports
         if probe_fn(port, timeout)
     ]
+    if dcc == "Maya":
+        if probe is None:
+            from core.dcc_identity import live_instances, process_names
+            instances = live_instances(dcc, instances, process_names())
+        # Legacy/custom startup scripts may open several commandPorts in one Maya.
+        # Keep the selected port if it belongs to that process, otherwise the lowest.
+        selected = _ACTIVE.get(dcc)
+        by_pid: dict[int, dict] = {}
+        unknown = []
+        for inst in instances:
+            pid = inst["pid"]
+            if pid is None:
+                unknown.append(inst)   # unknown identity must not merge real sessions
+            elif pid not in by_pid or (selected and selected[0] == inst["port"] and selected[1] in (None, pid)):
+                by_pid[pid] = inst
+        instances = sorted([*unknown, *by_pid.values()], key=lambda i: i["port"])
+    return instances
 
 
 def scan_all_instances(*, probe=None, timeout: float = _SCAN_TIMEOUT_S) -> dict[str, list[dict]]:

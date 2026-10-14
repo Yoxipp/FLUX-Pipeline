@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from operator import add
 import os
 import sys
 import time
@@ -26,7 +27,7 @@ from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
-from routers import actions, activity, dcc, files, folder_manager, logs, production, project, publish, settings, shelf, system, team_calendar, usd_assembler
+from routers import actions, activity, dcc, files, folder_manager, houdini_work, logs, production, project, publish, review, settings, shelf, system, team_calendar, usd_assembler
 
 log = get_logger("main")
 
@@ -71,7 +72,8 @@ async def lifespan(app: FastAPI):
             log.info("[FLUX] Advanced switches applied: %s", applied)
     except Exception as exc:  # never block startup on a prefs hiccup
         log.warning("[FLUX] Advanced switches skipped: %s", exc)
-    # The manual ships with each FLUX version into FLUX_UPDATE (next to the installers).
+    # The manual ships with each FLUX version into FLUX_DOC (ADR 0049); the old copy in
+    # FLUX_UPDATE (next to the installers) is removed.
     try:
         from features.system.manual import ensure_manual_in_flux_root
         ensure_manual_in_flux_root()
@@ -163,6 +165,7 @@ async def health() -> dict:
 
 
 app.include_router(dcc.router,            prefix="/dcc",            tags=["DCC"])
+app.include_router(houdini_work.router,   prefix="/dcc/houdini/work", tags=["HoudiniWork"])
 app.include_router(publish.router,        prefix="/publish",        tags=["Publisher"])
 app.include_router(actions.router,        prefix="/actions",        tags=["Actions"])
 app.include_router(activity.router,       prefix="/activity",       tags=["Activity"])
@@ -175,8 +178,11 @@ app.include_router(logs.router,           prefix="/logs",           tags=["Logs"
 app.include_router(project.router,        prefix="/project",        tags=["Project"])
 app.include_router(production.router,     prefix="/production",     tags=["Production"])
 app.include_router(team_calendar.router,  prefix="/calendar",       tags=["Calendar"])
+app.include_router(review.router,         prefix="/review",         tags=["Review"])
 app.include_router(system.router,         prefix="/system",         tags=["System"])
 
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
+
+

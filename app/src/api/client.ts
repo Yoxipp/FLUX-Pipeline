@@ -8,6 +8,7 @@ import type {
   ActionGraph,
   ActionPreviewResponse,
   ActivityEvent,
+  FollowedShot,
   ChatMention,
   ChatMessage,
   FileEntry,
@@ -18,6 +19,7 @@ import type {
   ProductionPayload,
   ProductionState,
   PublishPayload,
+  PublishDestination,
   PublishResult,
   Settings,
   ZBrushPublishPayload,
@@ -25,6 +27,11 @@ import type {
 } from '../types'
 
 const BASE_URL = 'http://127.0.0.1:8765'
+
+export interface WorkspacesInfo {
+  active: string | null
+  workspaces: { path: string; exists: boolean; active: boolean }[]
+}
 
 export interface LogRecord {
   id:      number
@@ -132,6 +139,13 @@ export interface CleanupItem {
 }
 export interface CleanupScan { scope: string; items: CleanupItem[]; unknown: string[] }
 
+// One DCC of "Installer tous les bridges" (backend features/launcher/bridges.py).
+export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'error'; message: string }
+
+// The manual as HTML, for the Settings > Doc iframe (the Electron main process adds
+// the X-Flux-Token header to every request to the backend, frames included).
+export const MANUAL_URL = `${BASE_URL}/system/manual`
+
 export const api = {
   // Settings
   getSettings: () =>
@@ -146,6 +160,17 @@ export const api = {
     username: string; workspace: string; language: 'fr' | 'en'
     log_colors: Record<string, string>
   }>) => apiCall<{ success: boolean }>('PUT', '/settings', patch),
+
+  // Known FLUX directories on this machine; exactly one is active (activate it with
+  // updateSettings({ workspace })).
+  listWorkspaces: () =>
+    apiCall<WorkspacesInfo>('GET', '/settings/workspaces'),
+
+  addWorkspace: (path: string) =>
+    apiCall<WorkspacesInfo>('POST', '/settings/workspaces', { path }),
+
+  removeWorkspace: (path: string) =>
+    apiCall<WorkspacesInfo>('POST', '/settings/workspaces/remove', { path }),
 
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
@@ -188,6 +213,14 @@ export const api = {
   photoshopInstall: () =>
     apiCall<{ ok: boolean; already: boolean; installed: boolean; frozen: boolean; message: string }>(
       'POST', '/dcc/photoshop/install'),
+
+  // Settings > User: install the FLUX bridge of every DCC detected on this machine.
+  installAllBridges: () =>
+    apiCall<{ results: BridgeInstallResult[] }>('POST', '/dcc/bridges/install-all', undefined, 180000),
+
+  // Settings > Doc: where the manual lives (FLUX_DOC copy, else the bundled one).
+  getManualInfo: () =>
+    apiCall<{ path: string; doc_dir: string }>('GET', '/system/manual-info'),
 
   photoshopOpen: (project_name: string, rel_path: string) =>
     apiCall<{ ok: boolean; error: string | null }>('POST', '/dcc/photoshop/open', { project_name, rel_path }),
@@ -252,6 +285,9 @@ export const api = {
     apiCall<{ ok: boolean }>('DELETE', '/logs'),
 
   // Publisher
+  getPublishDestination: (project: string, base: string, ext: string, sequence = false) =>
+    apiCall<PublishDestination>('GET', `/publish/destination?${new URLSearchParams({
+      project, base, ext, sequence: String(sequence) })}`),
   publish: (payload: PublishPayload) =>
     apiCall<PublishResult>('POST', '/publish', payload),
 
@@ -465,6 +501,14 @@ export const api = {
       'GET', '/dcc/substance/info', undefined, 25000),
   getTextureFormats: () =>
     apiCall<{ formats: Record<string, string[]>; sizes: number[] }>('GET', '/dcc/texture/formats'),
+  // Unreal (ADR 0052): point the FLUX stage actor at a USD stage, reload changed layers.
+  unrealOpenStage: (path: string, purpose: 'proxy' | 'render' = 'proxy') =>
+    apiCall<{ ok: boolean; path: string; purpose: string; seconds: number }>(
+      'POST', '/dcc/unreal/open-stage', { path, purpose }, 600000),
+  unrealReload: () =>
+    apiCall<{ ok: boolean; mode: 'targeted' | 'full'; changed?: string[]; seconds: number }>(
+      'POST', '/dcc/unreal/reload', undefined, 600000),
+
   getMariInfo: () =>
     apiCall<{ ok: boolean; geo: string; mode?: 'channels' | 'nodes'
               channels: { name: string; size?: number; depth?: number; layers?: number
@@ -551,6 +595,13 @@ export const api = {
     apiGetConditional<{ events: ActivityEvent[]; unread_count: number }>(
       `/activity?limit=${limit}`, etag),
 
+  // Personal notifications of ONE project for the current artist (retake 04):
+  // scope 'self' = followed shots, favorite and assigned tasks; 'global' = every
+  // event of the project, each annotated with its `reason`.
+  getNotifications: (project: string, scope: 'self' | 'global', limit = 200) =>
+    apiCall<{ events: ActivityEvent[]; followed_shots: FollowedShot[]; user: string }>(
+      'GET', `/activity/notifications?${new URLSearchParams({ project, scope, limit: String(limit) })}`),
+
   getMentionsConditional: (etag?: string) =>
     apiGetConditional<{ mentions: ChatMention[]; unread_count: number }>(
       '/activity/chat/mentions', etag),
@@ -612,10 +663,19 @@ export const api = {
   getUninstallPlan: () =>
     apiCall<{ remove: { label: string; paths: string[] }[]; keep: string[] }>('GET', '/system/uninstall-plan'),
 
-  browseProject: (project_name: string, subpath?: string) =>
-    apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${subpath ? `?subpath=${encodeURIComponent(subpath)}` : ''}`),
+  // setup: also list the project's setup files (_flux_setup/ and its JSON), hidden by default.
+  browseProject: (project_name: string, subpath?: string, setup = false) => {
+    const q = new URLSearchParams()
+    if (subpath) q.set('subpath', subpath)
+    if (setup) q.set('setup', 'true')
+    const qs = q.toString()
+    return apiCall<{ path: string; folders: { name: string; path: string }[]; files: FileEntry[] }>('GET', `/files/projects/${project_name}/browse${qs ? `?${qs}` : ''}`)
+  },
 
   // Folder Manager
+  // Copy Path Relative: $FLUX/DOSSIER_PROJETS/$PROD/.../$SEQ/$SHOT (FLUX Work scene variables).
+  getRelativePath: (project: string, rel_path: string) =>
+    apiCall<{ path: string }>('GET', `/folder/projects/${encodeURIComponent(project)}/relative-path?rel_path=${encodeURIComponent(rel_path)}`),
   getTokens: (project: string) =>
     apiCall<{ tokens: Record<string, Record<string, string>> }>('GET', `/folder/projects/${encodeURIComponent(project)}/tokens`),
 
@@ -628,6 +688,12 @@ export const api = {
 
   setCurrentProject: (project: string) =>
     apiCall<{ project: string }>('PUT', '/project/current', { project }),
+
+  // Work profiles shared by a project (project.json "ui.work_profiles", ADR 0042)
+  getProjectWorkProfiles: (project: string) =>
+    apiCall<{ profiles: unknown[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/work-profiles`),
+  setProjectWorkProfiles: (project: string, profiles: unknown[]) =>
+    apiCall<{ profiles: unknown[] }>('PUT', `/folder/projects/${encodeURIComponent(project)}/work-profiles`, { profiles }),
 
   createProject: (name: string, painter_presets?: string[]) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name, painter_presets: painter_presets ?? null }),
@@ -679,7 +745,7 @@ export const api = {
     apiCall<{ name: string; path: string }>('POST', '/folder/assets', { project, class_token, name }),
 
   getSequences: (project: string) =>
-    apiCall<{ sequences: string[] }>('GET', `/folder/projects/${project}/sequences`),
+    apiCall<{ sequences: string[]; padding?: number }>('GET', `/folder/projects/${project}/sequences`),
 
   createSequence: (project: string, seq_number: number) =>
     apiCall<{ seq_number: number; path: string }>('POST', '/folder/sequences', { project, seq_number }),
@@ -788,6 +854,13 @@ export const api = {
 
   installShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('POST', '/shelf/install', { dcc, version }),
+
+  // Old FLUX files of a DCC after a reinstall (only FLUX's own, with why), then remove the ticked ones.
+  getStaleShelfFiles: (dcc: string, version: string) =>
+    apiCall<{ items: { path: string; reason: string }[] }>('GET', `/shelf/stale?dcc=${encodeURIComponent(dcc)}&version=${encodeURIComponent(version)}`),
+
+  removeStaleShelfFiles: (dcc: string, version: string, paths: string[]) =>
+    apiCall<{ removed: string[]; skipped: string[]; failed: string[] }>('POST', '/shelf/stale/remove', { dcc, version, paths }),
 
   removeShelf: (dcc: string, version: string) =>
     apiCall<{ success: boolean; message: string }>('DELETE', '/shelf', { dcc, version }),
@@ -1040,9 +1113,34 @@ export const api = {
       'GET', `/production/${encodeURIComponent(project)}/ref/latest?${qs}`)
   },
 
+  // Every version of a /ref zone, newest first, from its modif log (retake 10).
+  getRefVersions: (project: string, relPath: string) => {
+    const qs = new URLSearchParams({ rel_path: relPath })
+    return apiCall<{ versions: RefVersion[] }>(
+      'GET', `/production/${encodeURIComponent(project)}/ref/versions?${qs}`)
+  },
+
+  // LAST media of each task of the given shots (Timeline preview, auto edit).
+  getShotPreviews: (project: string, shots: Array<{ seq: string; shot: string; tasks: string[] }>) =>
+    apiCall<{ shots: Array<{ seq: string; shot: string; media: ShotPreviewMedia[] }> }>(
+      'POST', `/production/${encodeURIComponent(project)}/shot-previews`, { shots }),
+
+  // Export of the Timeline auto edit: media + .otio + .edl and/or one H.264 .mov (ffmpeg).
+  exportMontage: (project: string, body: {
+    name: string; dest_dir: string; fps: number; mov?: boolean; folder?: boolean
+    clips: Array<{ seq: string; shot: string; frames: number; media: { task: string; label: string; rel_path: string; file: string; source?: string } | null }>
+  }) =>
+    apiCall<{ dir: string; mov: string | null; otio: string | null; edl: string | null; shots: number; missing: number; warnings: string[] }>(
+      'POST', `/production/${encodeURIComponent(project)}/montage/export`, body, 30 * 60 * 1000),
+
+  // Keyframe Pro (retake 09): status of this machine, open pipeline videos.
+  keyframeStatus: () => apiCall<KeyframeStatus>('GET', '/review/keyframe/status', undefined, 8000),
+  keyframeOpen: (project: string, items: Array<{ rel_path?: string; path?: string; label?: string }>, title = 'FLUX', siblings = true) =>
+    apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
+
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
-  refFileUrl: (project: string, relPath: string, name: string) => {
-    const qs = new URLSearchParams({ rel_path: relPath, name })
+  refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref') => {
+    const qs = new URLSearchParams({ rel_path: relPath, name, ...(scope === 'publish' ? { scope } : {}) })
     return `${BASE_URL}/production/${encodeURIComponent(project)}/ref/file?${qs}`
   },
 
@@ -1081,6 +1179,7 @@ export interface UsdProposedFile {
 export interface UsdComponentInfo {
   name: string
   class: string | null   // CLASS token (deep link to Production)
+  tokens: Record<string, string>   // classification tokens from tokens.json (UI sort / filter, retake 03)
   state: 'ok' | 'stale' | 'empty'
   legacy: boolean        // written before ADR 0023: saved again in the new format on the next update
   version: string | null
@@ -1104,6 +1203,7 @@ export interface UsdAssemblyInstance {
 }
 export interface UsdAssemblyInfo {
   name: string; class?: string; file: string; instances: UsdAssemblyInstance[]; broken: number
+  tokens: Record<string, string>   // {} for a legacy flat file
   version: string | null      // current vNNN (null = legacy flat file)
   versions: string[]
   legacy: boolean             // old builder file, converted on first edit
@@ -1124,6 +1224,7 @@ export interface UsdLibrary {
   project: string; components: UsdComponentInfo[]; assemblies: UsdAssemblyInfo[]
   creatable: string[]      // asset NAMEs without a component (created by hand, ADR 0023)
   departments: string[]    // asset TYPE tokens of the project
+  token_keys: string[]     // token categories present (CLASS first), for sort / filter
   rules: UsdComponentRules
 }
 export interface UsdComponentRules {
@@ -1220,4 +1321,33 @@ export interface UsdComposition {
   file: string; default_prim: string
   layers: { path: string; root: boolean }[]
   tree: UsdPrimNode | null
+}
+
+// /ref versions (retake 10): one row per deposit, from the ref folder's modif log.
+export interface RefVersion {
+  version: string; file: string; ext: string; kind: string
+  user: string; date: string; time: string
+  source_name: string      // name of the dropped file
+  logged: boolean          // false: file older than the log (no author / date)
+  available: boolean       // file still on disk
+  playable: boolean        // the renderer can show it (mov / mkv often cannot)
+  latest: boolean          // what LAST is a copy of
+}
+export interface ShotPreviewMedia {
+  task: string; rel_path: string; file: string; ext: string; kind: string
+  version: string; version_file: string; version_count: number; abs_path: string
+  source?: 'ref' | 'publish'      // publish = DCC publish in the task folder (no /ref drop)
+}
+// Keyframe Pro (retake 09, backend features/review/keyframe.py).
+export interface KeyframeStatus {
+  installed: boolean; exe: string; flavor: '' | 'pro' | 'mp'
+  api: 'ready' | 'not_running' | 'not_licensed' | 'error'
+}
+export interface KeyframeOpenResult {
+  mode: 'api' | 'cli' | 'none'
+  code?: string
+  message: string
+  opened: Array<{ path: string; label?: string }>
+  skipped: Array<{ path: string; label?: string; reason: string }>
+  siblings?: number
 }

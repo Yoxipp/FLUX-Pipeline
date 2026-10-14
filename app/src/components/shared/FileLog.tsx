@@ -66,7 +66,7 @@ function Section({ title, open, onToggle, children }: {
       <div
         onClick={onToggle}
         style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-                 fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-3)',
+                 fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
                  textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}
       >
         {open ? <ChevronDown size={10} strokeWidth={2} /> : <ChevronRight size={10} strokeWidth={2} />}
@@ -82,7 +82,7 @@ function JsonBlock({ data }: { data: Entry }) {
     <pre style={{
       margin: '3px 0', padding: '5px 7px', borderRadius: 4,
       border: '1px solid var(--rule-2)', background: 'var(--paper-2)',
-      fontFamily: 'var(--mono)', fontSize: 9, lineHeight: 1.4,
+      fontFamily: 'var(--code)', fontSize: 10.5, lineHeight: 1.4,
       color: 'var(--ink-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
     }}>
       {JSON.stringify(data, null, 2)}

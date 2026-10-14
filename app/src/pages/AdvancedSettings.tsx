@@ -1,7 +1,11 @@
-// AdvancedSettings — "Parametres avances" (N8). Reached from Settings after typing
-// "Understand": project.json of the active project (fps, resolution, USD units, OCIO,
-// env, LAST storage) and the publish switches of this machine (.tx, USD proxy, portable
-// paths; decision D1). Every write is validated by the backend, nothing is saved on error.
+// AdvancedSettings — project.json of the active project and the publish switches of
+// this machine (.tx, USD proxy, portable paths; decision D1). Every write is validated
+// by the backend, nothing is saved on error.
+// Retake 06: one form, two places in the Settings page.
+//   part="project"  -> Settings > Projet : everyday project values (fps, resolution).
+//   part="advanced" -> Settings > Avance (after typing "Understand", N8): USD units, OCIO,
+//                      env, LAST storage, actions graph, publish switches of this machine.
+// Both parts load and save the whole project.json, so neither drops the other's values.
 
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ExternalLink, RotateCcw, Save, Workflow } from 'lucide-react'
@@ -43,7 +47,8 @@ function parseLines(text: string): Record<string, string> {
   return out
 }
 
-export function AdvancedSettings() {
+export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'advanced' }) {
+  const adv = part === 'advanced'
   const { project: activeProject } = useProject()
   const navigate = useNavigate()
   const [proj, setProj] = useState<AdvancedProject | null>(null)
@@ -113,24 +118,22 @@ export function AdvancedSettings() {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <AlertTriangle size={15} strokeWidth={1.75} color="var(--warn)" />
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>Parametres avances</div>
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 }}>
+      {adv && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+        <AlertTriangle size={14} strokeWidth={1.75} color="var(--warn)" style={{ flexShrink: 0 }} />
         Ces reglages changent la facon dont FLUX ecrit les fichiers. Une valeur fausse peut casser les publishs
         du projet : ne modifie que ce que tu comprends.
-      </div>
+      </div>}
       {error && <div style={{ fontSize: 11, color: 'var(--err)', whiteSpace: 'pre-wrap' }}>{error}</div>}
       {saved && !error && <div style={{ fontSize: 11, color: 'var(--ok)' }}>{saved}</div>}
 
-      <SecTitle>{proj ? `Projet ${proj.name} (project.json)` : 'Projet'}</SecTitle>
+      <SecTitle>{proj ? `${adv ? 'Technique du projet' : 'Projet'} ${proj.name} (project.json, tous les artistes)` : 'Projet'}</SecTitle>
       {!proj && <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucun projet actif.</div>}
       {proj && (
         <div className="card" style={{ padding: '10px 12px', display: 'grid', gridTemplateColumns: '200px 1fr', gap: '8px 12px', alignItems: 'center' }}>
           <span className="cap">Identifiant</span>
           <span style={{ ...mono, color: 'var(--ink-4)' }}>{proj.project_id}</span>
+          {!adv && <>
           <span className="cap">FPS</span>
           <input style={{ ...inputStyle, width: 90 }} value={fps} onChange={e => setFps(e.target.value)} />
           <span className="cap">Resolution</span>
@@ -139,6 +142,8 @@ export function AdvancedSettings() {
             <span style={{ color: 'var(--ink-4)' }}>x</span>
             <input style={{ ...inputStyle, width: 80 }} value={resH} onChange={e => setResH(e.target.value)} />
           </div>
+          </>}
+          {adv && <>
           <span className="cap">USD metres par unite</span>
           <input style={{ ...inputStyle, width: 90 }} value={mpu} onChange={e => setMpu(e.target.value)} />
           <span className="cap">USD axe vertical</span>
@@ -158,6 +163,7 @@ export function AdvancedSettings() {
             onChange={e => setModesText(e.target.value)}
             placeholder={`.abc=link   (modes : ${proj.last_modes.join(', ')})`}
           />
+          </>}
           <span />
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn sm primary disabled={busy} onClick={saveProject}><Save size={11} strokeWidth={2} /> Enregistrer project.json</Btn>
@@ -166,12 +172,13 @@ export function AdvancedSettings() {
         </div>
       )}
 
+      {adv && <>
       <SecTitle>Actions (YAML)</SecTitle>
       <div className="card" style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
         <Workflow size={14} strokeWidth={1.75} color="var(--ink-3)" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: 'var(--ink)' }}>Graph YAML</div>
-          <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1 }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
             Node flow des actions (publish...), en lecture seule : le YAML reste la source.
           </div>
         </div>
@@ -193,8 +200,8 @@ export function AdvancedSettings() {
             <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--rule)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--ink)' }}>{meta.label}</div>
-                <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1 }}>
-                  {meta.help} <span style={{ ...mono, fontSize: 9 }}>{sw.env}</span> · {SOURCE_LABEL[sw.source] ?? sw.source}
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
+                  {meta.help} <span style={{ ...mono, fontSize: 10.5 }}>{sw.env}</span> · {SOURCE_LABEL[sw.source] ?? sw.source}
                 </div>
               </div>
               {isBool ? (
@@ -218,6 +225,7 @@ export function AdvancedSettings() {
           )
         })}
       </div>
+      </>}
     </div>
   )
 }

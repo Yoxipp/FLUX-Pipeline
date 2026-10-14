@@ -35,6 +35,20 @@ class PublishResult(BaseModel):
     proxy_path: str | None = None
 
 
+@router.get("/destination")
+def publish_destination(project: str, base: str, ext: str, sequence: bool = False) -> dict:
+    """Read-only preview of the folder a publish of *base* + *ext* lands in."""
+    from features.publisher.destination_preview import destination_preview
+
+    project_path = get_project_path(project)
+    if not project_path.exists():
+        raise HTTPException(status_code=400, detail=f"Projet introuvable : {project}")
+    info = destination_preview(project_path, base, ext, sequence)
+    if info is None:
+        raise HTTPException(status_code=422, detail="Destination non résolue")
+    return info
+
+
 @router.post("", response_model=PublishResult)
 async def publish(req: PublishRequest) -> PublishResult:
     """Publish a file into the pipeline folder structure."""
@@ -71,7 +85,8 @@ async def publish(req: PublishRequest) -> PublishResult:
         )
 
     if dest is None:
-        return PublishResult(success=False, dest_path=None, message="Publish échoué, voir les logs")
+        return PublishResult(success=False, dest_path=None,
+                             message=_failure_reason(source, project_path, req.target_name))
 
     # Post-publish optimisation hooks (both opt-in, both best-effort: a failure
     # here never fails the publish itself).
@@ -84,6 +99,21 @@ async def publish(req: PublishRequest) -> PublishResult:
         success=True, dest_path=str(dest), message="Publish réussi",
         tx_paths=tx_paths, proxy_path=proxy_path,
     )
+
+
+def _failure_reason(source: Path, project_path: Path, target_name: str | None) -> str:
+    """Readable reason of a failed publish for the UI toast: an unresolved destination
+    (unknown task token...) is named; anything else points to the logs."""
+    from features.publisher.publish_core import (
+        explain_unresolved_publish, resolve_publish_filename, resolve_publish_path,
+    )
+    try:
+        filename = resolve_publish_filename(source, target_name)
+        if resolve_publish_path(project_path, filename) is None:
+            return explain_unresolved_publish(project_path, filename)
+    except Exception:  # noqa: BLE001 - the reason is best-effort, never a second error
+        log.exception("Cannot explain failed publish of %s", source)
+    return "Publish échoué, voir les logs"
 
 
 async def _maybe_conform_texture(dest: Path, loop) -> list[str] | None:

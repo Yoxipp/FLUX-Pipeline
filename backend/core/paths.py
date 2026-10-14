@@ -89,8 +89,57 @@ def get_flux_root() -> Path | None:
 
 
 def set_flux_root(path: Path | str) -> None:
-    """Persist workspace path to config.json next to the exe."""
-    _update_config_json("workspace", str(Path(path)))
+    """Persist workspace path to config.json next to the exe.
+
+    The new root is also registered in the known FLUX directories list, so the
+    one active root is always one of the listed ones.
+    """
+    data = _read_config_json()
+    data["workspace"] = str(Path(path))
+    data["workspaces"] = _with_root(data.get("workspaces"), data["workspace"])
+    _write_config_json(data)
+
+
+# ── Known FLUX directories (config.json, per machine) ────────────────────────
+# Several FLUX roots can be registered on a machine; exactly one is active (the
+# "workspace" key above). Registering or forgetting a root never touches files.
+
+def same_root(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def _with_root(roots: object, root: str) -> list[str]:
+    known = [str(r) for r in roots] if isinstance(roots, list) else []
+    if not any(same_root(r, root) for r in known):
+        known.append(root)
+    return known
+
+
+def get_flux_roots() -> list[str]:
+    """Return the registered FLUX directories, the active one always included."""
+    data = _read_config_json()
+    known = [str(r) for r in data.get("workspaces") or [] if r]
+    active = data.get("workspace")
+    return _with_root(known, str(Path(active))) if active else known
+
+
+def add_flux_root(path: Path | str) -> list[str]:
+    """Register a FLUX directory without activating it. Return the new list."""
+    data = _read_config_json()
+    data["workspaces"] = _with_root(get_flux_roots(), str(Path(path)))
+    _write_config_json(data)
+    return data["workspaces"]
+
+
+def remove_flux_root(path: Path | str) -> list[str]:
+    """Forget a FLUX directory (no file is deleted). The active one is refused."""
+    active = get_flux_root()
+    if active and same_root(str(active), str(path)):
+        raise ValueError("Cannot remove the active FLUX directory")
+    data = _read_config_json()
+    data["workspaces"] = [r for r in get_flux_roots() if not same_root(r, str(path))]
+    _write_config_json(data)
+    return data["workspaces"]
 
 
 # ── Metadata backend selection (config.json, bootstrap) ──────────────────────
@@ -214,6 +263,11 @@ def get_update_dir() -> Path:
     return _root_subdir("FLUX_UPDATE")
 
 
+def get_doc_dir() -> Path:
+    """<FLUX_ROOT>/FLUX_DOC: the FLUX manual, kept with the workspace (ADR 0049)."""
+    return _root_subdir("FLUX_DOC")
+
+
 def _root_subdir(name: str) -> Path:
     root = get_flux_root()
     if root is None:
@@ -235,17 +289,20 @@ def get_project_path(project_name: str) -> Path:
 
 def get_project_tokens_path(project_name: str) -> Path:
     from core.constants import JSON_TOKENS
-    return get_project_path(project_name) / JSON_TOKENS
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_TOKENS)
 
 
 def get_project_production_path(project_name: str) -> Path:
     from core.constants import JSON_PRODUCTION
-    return get_project_path(project_name) / JSON_PRODUCTION
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_PRODUCTION)
 
 
 def get_project_calendar_path(project_name: str) -> Path:
     from core.constants import JSON_CALENDAR
-    return get_project_path(project_name) / JSON_CALENDAR
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_CALENDAR)
 
 
 # ── CONFIG / shared JSON paths ────────────────────────────────────────────────
@@ -261,8 +318,9 @@ def get_chat_path() -> Path:
 
 
 def get_project_chat_path(project_name: str) -> Path:
-    """Team chat of one project: DOSSIER_PROJETS/<project>/teamChat.json."""
-    return get_project_path(project_name) / JSON_CHAT
+    """Team chat of one project: DOSSIER_PROJETS/<project>/_flux_setup/teamChat.json."""
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_CHAT)
 
 
 def get_mentions_path() -> Path:

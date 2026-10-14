@@ -28,6 +28,7 @@ import re
 from pathlib import Path
 
 from core.logger import get_logger
+from core.project_setup import is_project_root
 
 from . import component_recipe as cr
 from .resolve.base import ResolveError
@@ -862,7 +863,7 @@ def refresh_from_publish_folder(dest_folder: str | Path, base: str, ext: str, *,
         return None
     try:
         folder = Path(dest_folder).resolve()
-        project = next((p for p in [folder, *folder.parents] if (p / "tokens.json").is_file()), None)
+        project = next((p for p in [folder, *folder.parents] if is_project_root(p)), None)
         if project is None:
             return None
         return refresh_from_publish(project, base, user=user)

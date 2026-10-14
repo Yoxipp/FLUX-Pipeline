@@ -3,7 +3,7 @@
 // see which files weigh the most on the drive.
 
 import { useCallback, useEffect, useState } from 'react'
-import { RotateCcw, HardDrive, FolderOpen } from 'lucide-react'
+import { RotateCcw, FolderOpen } from 'lucide-react'
 import { api } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
 import { useProject } from '../ProjectContext'
@@ -66,10 +66,6 @@ export function DiskUsage() {
   return (
     <div style={{ padding: '16px 20px', overflow: 'auto', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <HardDrive size={16} strokeWidth={1.75} color="var(--ink-2)" />
-        <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-          Gestionnaire de disque
-        </div>
         <div style={{ flex: 1 }} />
         <select
           value={scope}
@@ -138,7 +134,7 @@ export function DiskUsage() {
                   <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-2)', width: 90, textAlign: 'right' }}>
                     {humanSize(p.size)}
                   </span>
-                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', width: 60, textAlign: 'right', fontSize: 10 }}>
+                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', width: 60, textAlign: 'right', fontSize: 11 }}>
                     {p.file_count.toLocaleString('fr')} f.
                   </span>
                 </div>
@@ -152,7 +148,7 @@ export function DiskUsage() {
 
       <SecTitle>Fichiers les plus lourds</SecTitle>
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', gap: 12, padding: '7px 10px', fontSize: 10, fontWeight: 600,
+        <div style={{ display: 'flex', gap: 12, padding: '7px 10px', fontSize: 11, fontWeight: 600,
                       textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-2)',
                       background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
           <span style={{ width: 90, textAlign: 'right' }}>Taille</span>
@@ -193,7 +189,7 @@ export function DiskUsage() {
 function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div>
-      <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
+      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-3)' }}>
         {label}
       </div>
       <div style={{ fontSize: 13, fontFamily: mono ? 'var(--mono)' : 'var(--sans)',

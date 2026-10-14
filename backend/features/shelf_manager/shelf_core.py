@@ -106,6 +106,19 @@ def get_dcc_shelf_dir(dcc_name: str, version: str) -> Path | None:
     return None
 
 
+def _unreal_exes() -> dict[str, str]:
+    """{"5.6": UnrealEditor.exe} of every Unreal found by the launcher (newest kept per version)."""
+    from dcc.unreal.autostart import engine_association
+    from features.launcher.launcher_core import list_dcc_candidates
+
+    out: dict[str, str] = {}
+    for exe in list_dcc_candidates("unreal"):
+        version = engine_association(exe)
+        if version and version not in out:
+            out[version] = exe
+    return out
+
+
 def get_installed_versions(dcc_name: str) -> list[str]:
     """Return sorted list of DCC user-directory versions found on disk.
 
@@ -115,6 +128,8 @@ def get_installed_versions(dcc_name: str) -> list[str]:
     if dcc_name == "ZBrush":
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.get_versions()
+    if dcc_name == "Unreal":
+        return sorted(_unreal_exes(), key=lambda v: tuple(int(n) for n in v.split(".")))
 
     docs = _get_documents_dir()
     versions: list[str] = []
@@ -143,6 +158,9 @@ def is_shelf_installed(dcc_name: str, version: str) -> bool:
     if dcc_name == "ZBrush":
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.is_installed(version)
+    if dcc_name == "Unreal":
+        from dcc.unreal import autostart as unreal_autostart
+        return unreal_autostart.is_installed() and unreal_autostart.project_engine() == version
     shelf_dir = get_dcc_shelf_dir(dcc_name, version)
     filename = _SHELF_FILENAME.get(dcc_name)
     if shelf_dir is None or filename is None:
@@ -163,6 +181,14 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
         # ZBrush "shelf" = the FLUX UI (flux_ui_zbrush.cfg) + the bridge (FLUX menu).
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.install(version)
+    if dcc_name == "Unreal":
+        # Unreal "shelf" = host project FluxRender + FluxBridge plugin (FLUX menu, live).
+        from dcc.unreal import autostart as unreal_autostart
+        exe = _unreal_exes().get(version)
+        if exe is None:
+            return False, f"Unreal {version} introuvable."
+        res = unreal_autostart.install(exe)
+        return bool(res["success"]), str(res["message"])
 
     src = get_shelf_source_path(dcc_name)
     if src is None:
@@ -203,8 +229,48 @@ def install_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
         if not hda_ok:
             log.warning("HDA install failed (non-fatal): %s", hda_msg)
         msg += f" | HDA : {hda_msg}" if hda_ok else f" | HDA non installes : {hda_msg}"
+        reloaded = _reload_houdini_shelf(dest)
+        if reloaded:
+            msg += " | shelf rechargee dans Houdini " + ", ".join(f":{p}" for p in reloaded)
 
     return True, msg
+
+
+# Houdini reads its shelf files at startup only: an open session kept the old FLUX
+# shelf after a reinstall (2026-10-10, no FLUX Work button). Reloaded in place in
+# each connected Houdini whose user pref dir holds the installed file.
+_RELOAD_SHELF_CODE = """
+import os
+_dir = os.path.dirname(os.path.dirname(_FLUX_SHELF))
+_mine = os.path.normcase(os.path.abspath(hou.homeHoudiniDirectory())) == os.path.normcase(os.path.abspath(_dir))
+if _mine:
+    hou.shelves.loadFile(_FLUX_SHELF)
+result = _mine
+"""
+
+
+def _reload_houdini_shelf(shelf_file: Path) -> list[int]:
+    """Reload *shelf_file* in the open Houdini sessions; returns the ports done."""
+    try:
+        from core.dcc_instances import scan_instances
+        from dcc.houdini.client import HoudiniClient
+
+        ports = [i["port"] for i in scan_instances("Houdini") if i.get("connected")]
+    except Exception as exc:  # noqa: BLE001 — best effort
+        log.debug("Houdini scan for shelf reload failed: %s", exc)
+        return []
+    done = []
+    code = "_FLUX_SHELF = %r\n" % str(shelf_file).replace("\\", "/") + _RELOAD_SHELF_CODE
+    for port in ports:
+        try:
+            resp = HoudiniClient(port=port).run(code, timeout=20.0)
+        except Exception as exc:  # noqa: BLE001
+            resp = {"ok": False, "error": str(exc)}
+        if resp.get("ok") and resp.get("result"):
+            done.append(port)
+        elif not resp.get("ok"):
+            log.warning("Shelf reload in Houdini :%s failed: %s", port, resp.get("error"))
+    return done
 
 
 # ── Maya tools → single Flux shelf ────────────────────────────────────────────
@@ -354,6 +420,10 @@ def remove_shelf(dcc_name: str, version: str) -> tuple[bool, str]:
     if dcc_name == "ZBrush":
         from features.shelf_manager import zbrush_ui
         return zbrush_ui.remove(version)
+    if dcc_name == "Unreal":
+        from dcc.unreal import autostart as unreal_autostart
+        res = unreal_autostart.uninstall()
+        return bool(res["success"]), str(res["message"])
     dest_dir = get_dcc_shelf_dir(dcc_name, version)
     filename = _SHELF_FILENAME.get(dcc_name)
     if dest_dir is None or filename is None:
@@ -457,15 +527,16 @@ def get_dcc_otls_dirs(version: str) -> list[Path]:
 
 
 def is_hda_installed(version: str) -> bool:
-    """Return True if all FLUX HDAs are present in at least one houdiniX.Y/otls/."""
+    """Return True if every FLUX HDA (_HDA_BUILDS) is in at least one houdiniX.Y/otls/.
+
+    Checked against the full build list, not the staging dir: the staging only holds
+    what an earlier live build produced (two HDAs on old installs, none on a new
+    machine), so "installed" used to be reported with most HDAs missing."""
     otls_dirs = get_dcc_otls_dirs(version)
     if not otls_dirs:
         return False
-    staged = list(_HDA_STAGING_DIR.glob("*.hda"))
-    if not staged:
-        return False
     return any(
-        all((otls / hda.name).is_file() for hda in staged)
+        all((otls / name).is_file() for name in _hda_filenames())
         for otls in otls_dirs
     )
 
@@ -508,6 +579,9 @@ _HDA_BUILDS: tuple[tuple[str, str, str, str], ...] = (
     ("flux_render_hda:build_hda",       "flux_render.hda",       "hou.lopNodeTypeCategory()", "flux_render"),
     ("flux_sequence_hda:build_hda",     "flux_sequence.hda",     "hou.lopNodeTypeCategory()", "flux_sequence"),
     ("flux_crowd_hda:build_hda",        "flux_crowd.hda",        "hou.lopNodeTypeCategory()", "flux_crowd"),
+    ("flux_work_hda:build_hda",         "flux_work.hda",         "hou.sopNodeTypeCategory()", "flux_work"),
+    ("flux_work_hda:build_hda_lop",     "flux_work_lop.hda",     "hou.lopNodeTypeCategory()", "flux_work"),
+    ("flux_unreal_live_hda:build_hda",  "flux_unreal_live.hda",  "hou.lopNodeTypeCategory()", "flux_unreal_live"),
 )
 
 # Runs inside Houdini after the build: makes the definition FLUX just wrote the one
@@ -652,7 +726,12 @@ def install_hdas(version: str) -> tuple[bool, str]:
         connected = False
 
     if connected:
-        ok, msg = _build_hdas_live(otls_dirs)
+        # Houdini open in this version: it says which prefs it reads, the HDAs go there
+        # only; copies elsewhere are duplicates the Shelf Manager offers to delete
+        # (stale_cleanup). Closed / other version: every candidate dir, as before.
+        from features.shelf_manager.stale_cleanup import active_houdini_otls
+        active = active_houdini_otls(version)
+        ok, msg = _build_hdas_live([active] if active is not None else otls_dirs)
         if ok:
             return ok, msg
         # A failed live build is reported as a failure: the staged copy of the HDA
@@ -660,8 +739,13 @@ def install_hdas(version: str) -> tuple[bool, str]:
         log.warning("Live HDA build failed: %s", msg)
         return False, msg + " | les HDA en echec gardent leur ancienne version"
 
-    # Offline path — copy the staged HDAs.
-    hdas = list(_HDA_STAGING_DIR.glob("*.hda"))
+    # Offline path: copy the staged HDAs. The staging only holds what an earlier live
+    # build produced, so whatever is missing is built live the next time this Houdini
+    # connects to FLUX (ensure_hdas_in_session, called from the Houdini ping).
+    hdas = [p for p in _HDA_STAGING_DIR.glob("*.hda") if p.name in _hda_filenames()]
+    missing = sorted(_hda_filenames() - {p.name for p in hdas})
+    later = (f" | {len(missing)} HDA construits a la prochaine ouverture de Houdini"
+             if missing else "")
     if hdas:
         installed_to: list[str] = []
         try:
@@ -671,14 +755,53 @@ def install_hdas(version: str) -> tuple[bool, str]:
                     shutil.copy2(hda, otls / hda.name)
                     log.info("HDA installed: %s → %s", hda.name, otls)
                 installed_to.append(str(otls))
-            return True, f"HDAs installed → {', '.join(installed_to)}"
+            return True, f"HDAs installed → {', '.join(installed_to)}{later}"
         except OSError as exc:
             return False, f"HDA copy failed: {exc}"
 
-    return False, (
-        "No staged HDAs found and Houdini is not connected. Open Houdini (so the "
-        "HDA can be built live) or run scripts/build_hdas.py, then retry."
-    )
+    return True, "Houdini ferme : les HDA FLUX seront construits a la prochaine ouverture de Houdini"
+
+
+def _hda_filenames() -> set[str]:
+    return {filename for _, filename, _, _ in _HDA_BUILDS}
+
+
+# Runs inside Houdini: which FLUX node types this session lacks, and where it reads prefs.
+_MISSING_TYPES_CODE = '''
+_missing = []
+for _cat_expr, _name, _file in _FLUX_TYPES:
+    if hou.nodeType(eval(_cat_expr), _name) is None:
+        _missing.append(_file)
+result = {"home": hou.homeHoudiniDirectory(),
+          "version": "%d.%d" % hou.applicationVersion()[:2],
+          "missing": _missing}
+'''
+
+
+def ensure_hdas_in_session() -> dict:
+    """Build the FLUX HDAs in the connected Houdini when some node types are missing.
+
+    The Shelf Manager install copies the shelf even with Houdini closed, but the HDAs
+    are generated from source by a live build only: with Houdini closed, a new machine
+    got none and older ones only the two staged long ago (shelf visible, no HDA). The
+    Houdini ping calls this once per connection; it builds into the prefs dir that
+    Houdini reports reading, and does nothing when every FLUX type is already there.
+    Returns {"built": bool, "missing": [...], "message": str}.
+    """
+    from dcc.houdini.client import houdini_client
+
+    # Keyed by file (two LOP builds share the flux_exporter / flux_work names).
+    types = [(cat, name, filename) for _, filename, cat, name in _HDA_BUILDS]
+    resp = houdini_client.run(f"_FLUX_TYPES = {types!r}\n" + _MISSING_TYPES_CODE, timeout=30.0)
+    info = resp.get("result") if resp.get("ok") else None
+    if not isinstance(info, dict):
+        return {"built": False, "missing": [], "message": f"check failed: {resp.get('error')}"}
+    missing = sorted(set(info.get("missing") or []))
+    if not missing:
+        return {"built": False, "missing": [], "message": "all FLUX HDAs loaded"}
+    log.info("Houdini %s lacks FLUX HDAs %s: live build", info.get("version"), missing)
+    ok, msg = _build_hdas_live([Path(info["home"]) / "otls"])
+    return {"built": ok, "missing": missing, "message": msg}
 
 
 def reconcile_installed_dccs() -> dict:

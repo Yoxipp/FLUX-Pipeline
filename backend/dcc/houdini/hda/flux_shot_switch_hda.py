@@ -283,6 +283,48 @@ def resolve_path(node, opening=False):
     msg += "  camera " + (_pval(node, "camera") or "aucune")
     _status(node, msg)
 
+def refresh_from_flux(node, project, changed):
+    """FLUX regenerated the stage of the *changed* [seq, shot] pairs (Production edit): follow
+    it in the open scene. A pinned version is left alone, the camera never moves, and the
+    timeline only follows when it still showed this node's old range (several FLUX Shot:
+    no "last one wins"). Returns a short report or None when this node is not concerned."""
+    import hou
+    if _pval(node, "project") != project:
+        return None
+    key = [_pval(node, "seq").upper(), _pval(node, "shot").upper()]
+    if key not in [[str(s).upper(), str(h).upper()] for s, h in changed]:
+        return None
+    _cache.pop("shots:" + project, None)
+    if (_pval(node, "version") or "LAST") != "LAST":
+        _status(node, "Stage regenere par FLUX : version epinglee gardee")
+        return "pinned"
+    try:
+        old = (int(node.evalParm("frame_rangex")), int(node.evalParm("frame_rangey")))
+    except Exception:
+        old = None
+    shots, ok = _fetch_shots(project)
+    if not ok:
+        _status(node, "FLUX injoignable : stage actuel garde"); return "offline"
+    _cache["shots:" + project] = (time.monotonic() + _TTL, shots)
+    item = _current(node)
+    if item is None or not item.get("last"):
+        return "missing"
+    _set(node, "resolved_path", item["last"].replace(chr(92), "/"))
+    rng = item.get("range") or [1, 0]
+    node.parmTuple("frame_range").set((int(rng[0]), int(rng[1])))
+    _set(node, "fps", float(item.get("fps") or 24))
+    _reload(node)
+    shown = tuple(int(round(v)) for v in hou.playbar.frameRange())
+    follow = node.parm("follow_range")
+    moved = bool(old) and shown == old and (follow is None or bool(follow.eval()))
+    if moved:
+        apply_frame_range(node)
+    msg = "Mis a jour par FLUX : %s %s" % (item["seq"], item["shot"])
+    if item.get("range"):
+        msg += "  images %d-%d" % (int(rng[0]), int(rng[1]))
+    _status(node, msg)
+    return "timeline" if moved else "updated"
+
 def _branch_end(node):
     """Last node of this shot's branch: follows single outputs, stops before a node that
     mixes several inputs (another shot, a merge) or a ROP. Several shots side by side

@@ -1,7 +1,11 @@
 // App.tsx — shell principal : routing, TitleBar, Sidebar, StatusBar.
 
 import { useEffect, useRef, useState } from 'react'
-import { HashRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { StartPageRedirect, WorkProfileProvider, useWorkProfile } from './WorkProfileContext'
+import { notificationReason, REASON_LABEL } from './lib/activityNotify'
+import { useProject } from './ProjectContext'
+import { WorkProfileDialog } from './components/shared/WorkProfileDialog'
+import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { TitleBar }  from './components/shared/TitleBar'
 import { Sidebar }   from './components/shared/Sidebar'
 import { StatusBar } from './components/shared/StatusBar'
@@ -10,9 +14,7 @@ import { useBackendStatus } from './hooks/useBackendStatus'
 import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
-import { useFavorites, eventMatchesFavorite } from './hooks/useFavorites'
 import { useSettings }   from './hooks/useSettings'
-import { parseFluxFilename } from './pages/Production/util'
 import { Hub }           from './pages/Hub'
 import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
@@ -22,11 +24,9 @@ import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
 import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
-import { TemplateEditor } from './pages/TemplateEditor'
 import { Production }    from './pages/Production/Production'
 import { Calendar }      from './pages/Calendar'
-import { AdvancedSettings } from './pages/AdvancedSettings'
-import { DiskUsage } from './pages/DiskUsage'
+import { SettingsPage } from './pages/settings/SettingsPage'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
@@ -40,6 +40,9 @@ import { Toaster, toast } from 'sonner'
 function MentionWatcher() {
   const navigate = useNavigate()
   const { mentions, loaded } = useMentionsFeed()
+  const { prefs } = useWorkProfile()
+  const enabled = useRef(prefs.notifyMention)
+  enabled.current = prefs.notifyMention
   const seen = useRef<Set<string> | null>(null)
   useEffect(() => {
     if (!loaded) return
@@ -49,6 +52,7 @@ function MentionWatcher() {
       if (seen.current.has(m.id)) continue
       seen.current.add(m.id)
       if (m.read) continue   // already-read history that scrolled in — don't toast
+      if (!enabled.current) continue   // turned off in the work profile (ADR 0043)
       toast(`${m.from_user} t'a mentionné`, {
         description: m.text,
         position: 'bottom-right',
@@ -63,35 +67,37 @@ function MentionWatcher() {
   return null
 }
 
-// Polls the activity feed and pops a floating toast + native notification for
-// every NEW event whose parsed target matches one of the user's Production
-// favorites. Silent on the very first poll so the backlog isn't replayed.
+// Pops a floating toast + native notification for every NEW event of the active
+// project's personal feed (retake 04): the backend already says why an event
+// concerns the artist (followed shot, favorite task, assigned task); the work
+// profile adds publishes / comments / errors of other artists (ADR 0043).
+// Silent on the first snapshot of a project so its backlog isn't replayed.
 function FavoriteWatcher() {
   const navigate = useNavigate()
-  const { favorites } = useFavorites()
-  const { events, loaded } = useActivityFeed()
-  const seen = useRef<Set<string> | null>(null)
-  const favRef = useRef<string[]>(favorites)
-  useEffect(() => { favRef.current = favorites }, [favorites])
+  const { events, loaded, project: feedProject } = useActivityFeed()
+  const { prefs } = useWorkProfile()
+  const { project } = useProject()
+  const { settings } = useSettings()
+  const seen = useRef<{ project: string; ids: Set<string> } | null>(null)
+  const ctxRef = useRef({ prefs, project, username: settings?.username ?? '' })
+  ctxRef.current = { prefs, project, username: settings?.username ?? '' }
   useEffect(() => {
     if (!loaded) return
-    // First real snapshot seeds `seen` silently so the backlog isn't replayed.
-    if (seen.current === null) { seen.current = new Set(events.map(e => e.id)); return }
+    // First snapshot of a project seeds `seen` silently so the backlog isn't replayed.
+    if (seen.current === null || seen.current.project !== feedProject) {
+      seen.current = { project: feedProject, ids: new Set(events.map(e => e.id)) }
+      return
+    }
     for (const e of events) {
-      if (seen.current.has(e.id)) continue
-      seen.current.add(e.id)
+      if (seen.current.ids.has(e.id)) continue
+      seen.current.ids.add(e.id)
       if (!e.file || !e.project) continue
-      const parsed = parseFluxFilename(e.file)
-      if (!parsed) continue
-      const favs = favRef.current
-      const match = favs.some(k => eventMatchesFavorite(k, {
-        project: e.project!, class: parsed.class, name: parsed.name,
-        task: parsed.task, instance: parsed.instance,
-      }))
-      if (!match) continue
-      const title = e.action === 'comment'
-        ? `${e.user} · commentaire sur favori`
-        : `${e.user} · ${e.action} sur favori`
+      const reason = notificationReason(e, { ...ctxRef.current, followed: !!e.reason })
+      if (!reason) continue
+      const why = e.reason ? REASON_LABEL[e.reason] : ''
+      const title = reason === 'followed'
+        ? `${e.user} · ${e.action === 'comment' ? 'commentaire' : e.action} · ${why}`
+        : reason === 'error' ? `${e.user} · erreur` : `${e.user} · ${e.action}`
       const body  = e.file
       toast(title, {
         description: body,
@@ -101,7 +107,7 @@ function FavoriteWatcher() {
       })
       void window.electronAPI?.showNotification?.(title, body)
     }
-  }, [events, loaded, navigate])
+  }, [events, loaded, feedProject, navigate])
   return null
 }
 
@@ -116,9 +122,21 @@ function AppShell({ settings }: { settings: Settings }) {
   const dccStatus          = useDccStatus()
   const { unreadCount }    = useActivity()
   const [showLogin, setShowLogin]         = useState(false)
+  // A click on a toast closes it right away (toasts stay at the top, never in the way for long).
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest('[data-sonner-toast]')
+      if (!el || (e.target as HTMLElement).closest('button')) return
+      toast.dismiss()
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [])
 
   return (
     <HashRouter>
+      <WorkProfileProvider>
+      {!DETACHED && <StartPageRedirect />}
       <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
         {showLogin && <Login onDone={() => setShowLogin(false)} />}
 
@@ -144,11 +162,13 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />
               <Route path="/usd"       element={<UsdPage />} />
-              <Route path="/templates" element={<TemplateEditor />} />
+              {/* Template Editor and Disk live in Settings > Avance (retake 06); old links redirect. */}
+              <Route path="/templates" element={<Navigate to="/settings?tab=advanced&sub=templates" replace />} />
               <Route path="/production" element={<Production />} />
               <Route path="/calendar"  element={<Calendar />} />
-              <Route path="/advanced"  element={<AdvancedSettings />} />
-              <Route path="/disk"      element={<DiskUsage />} />
+              <Route path="/settings"  element={<SettingsPage />} />
+              <Route path="/advanced"  element={<Navigate to="/settings?tab=advanced" replace />} />
+              <Route path="/disk"      element={<Navigate to="/settings?tab=advanced&sub=disk" replace />} />
             </Routes>
             </PageErrorBoundary>
           </main>
@@ -157,18 +177,25 @@ function AppShell({ settings }: { settings: Settings }) {
         {!DETACHED && <StatusBar dccStatus={dccStatus} />}
         {!DETACHED && <MentionWatcher />}
         {!DETACHED && <FavoriteWatcher />}
+        <WorkProfileDialog />
       </div>
       <Toaster
         position="top-center"
         theme="dark"
+        visibleToasts={3}
+        gap={6}
+        offset={14}
         toastOptions={{
+          duration: 2500,
           style: {
+            width: 'auto', maxWidth: 320, minHeight: 0,
+            padding: '7px 11px', gap: 6, borderRadius: 6,
             background: 'var(--paper-2)',
             color: 'var(--ink)',
             border: '1px solid var(--rule-2)',
             fontFamily: 'var(--sans)',
             fontSize: 11,
-            boxShadow: 'var(--shadow-md)',
+            boxShadow: 'var(--shadow-sm)',
           },
           classNames: {
             success: 'flux-toast-ok',
@@ -177,6 +204,7 @@ function AppShell({ settings }: { settings: Settings }) {
           },
         }}
       />
+      </WorkProfileProvider>
     </HashRouter>
   )
 }

@@ -35,6 +35,7 @@ from core.logger import get_logger
 from features.folder_manager.naming_validator import get_base_name, parse_filename
 from features.folder_manager.tokens import get_path_for_token, load_tokens
 from features.publisher import last_pointer as lp
+from core.project_setup import is_setup_rel
 
 log = get_logger(__name__)
 
@@ -210,8 +211,8 @@ def _plan(project: Path, root: Path, name: str | None) -> tuple[list[dict], list
         parts = f.relative_to(project).parts
         if _SKIP_DIRS & set(parts) or any(p.startswith(".") for p in parts):
             continue
-        if len(parts) == 1:
-            continue                       # project files: tokens.json, project.json...
+        if len(parts) == 1 or is_setup_rel(parts[0]):
+            continue                       # project files: _flux_setup/, legacy root tokens.json...
         if lp.is_temp_name(f.name):
             ops.append({"kind": "temp", "action": "drop_tmp", "src": f})
             continue

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 import main
 from features.folder_manager import project_config as pc
 from features.folder_manager.project_init import create_project
+from core.project_setup import setup_path
 
 
 def _read(path: Path) -> dict:
@@ -32,7 +33,7 @@ class EnsureProjectConfigTests(unittest.TestCase):
     def test_creates_with_defaults_and_houdini_units(self):
         config, warnings = pc.ensure_project_config(self.project)
         self.assertEqual(warnings, [])
-        self.assertTrue(self.path.is_file())
+        self.assertTrue((self.project / "_flux_setup" / "project.json").is_file())   # new layout (ADR 0054)
         self.assertEqual(config["usd"], {"meters_per_unit": 1.0, "up_axis": "Y"})
         self.assertEqual(config["schema_version"], pc.SCHEMA_VERSION)
         self.assertTrue(config["project_id"])
@@ -40,10 +41,11 @@ class EnsureProjectConfigTests(unittest.TestCase):
 
     def test_idempotent_keeps_project_id(self):
         first, _ = pc.ensure_project_config(self.project)
-        mtime = self.path.stat().st_mtime_ns
+        path = pc.project_config_path(self.project)
+        mtime = path.stat().st_mtime_ns
         second, _ = pc.ensure_project_config(self.project)
         self.assertEqual(first["project_id"], second["project_id"])
-        self.assertEqual(self.path.stat().st_mtime_ns, mtime)  # no rewrite
+        self.assertEqual(path.stat().st_mtime_ns, mtime)  # no rewrite
 
     def test_heals_missing_keys_keeps_values(self):
         self.path.write_text(json.dumps({"project_id": "abc", "fps": 25, "usd": {"up_axis": "Z"}}), encoding="utf-8")
@@ -98,8 +100,8 @@ class CreateProjectWritesConfigTests(unittest.TestCase):
     def test_create_project_writes_project_json(self):
         with tempfile.TemporaryDirectory() as d:
             path = create_project("demo", projects_root=Path(d))
-            self.assertTrue((path / "project.json").is_file())
-            self.assertEqual(pc.validate_project_config(_read(path / "project.json")), [])
+            self.assertTrue(setup_path(path, "project.json").is_file())
+            self.assertEqual(pc.validate_project_config(_read(setup_path(path, "project.json"))), [])
 
 
 class ProjectConfigRouteTests(unittest.TestCase):
@@ -115,7 +117,7 @@ class ProjectConfigRouteTests(unittest.TestCase):
                 r = self.client.get("/folder/projects/PROJ/config")
                 self.assertEqual(r.status_code, 200)
                 self.assertTrue(r.json()["config"]["project_id"])
-                self.assertTrue((Path(d) / "PROJ" / "project.json").is_file())
+                self.assertTrue(setup_path(Path(d) / "PROJ", "project.json").is_file())
 
     def test_config_route_404(self):
         with tempfile.TemporaryDirectory() as d:

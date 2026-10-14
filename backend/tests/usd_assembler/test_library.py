@@ -10,7 +10,8 @@ from pathlib import Path
 
 from features.folder_manager import tokens as tok
 from features.usd_assembler import component_auto as ca
-from features.usd_assembler.library import build_library, relink_instance
+from features.usd_assembler import assembly_v2 as av
+from features.usd_assembler.library import _tokens_of, build_library, relink_instance, token_keys
 from features.usd_assembler.resolve.flux_resolver import FluxResolver
 from features.usd_assembler.usd_assembler_core import assemble
 from features.usd_export import LightAsset, MeshData, SkeletonData, publish_light_asset
@@ -134,3 +135,53 @@ class Library(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenSorting(unittest.TestCase):
+    """Retake 03: components and assemblies carry their classification tokens (from
+    tokens.json, never from a prim name / vNNN / LAST) for sorting and filtering."""
+
+    def _tokens(self) -> dict:
+        tokens = tok.build_default_tokens()
+        tokens["BIOME"] = {"DESERT": "assets/props", "DUNE": "assets/props/dunes"}
+        tokens["NAME"].update({"UTAH": "assets/chara/UTAH", "BOB": "assets/chara/BOB",
+                               "ROCK": "assets/props/ROCK", "SAND": "assets/props/dunes/SAND",
+                               "GHOST": "misc/GHOST", "TOWN": "assets/sets/TOWN"})
+        return tokens
+
+    def test_tokens_of_cases(self) -> None:
+        tokens = self._tokens()
+        # same value for two assets, several categories, longest match wins
+        self.assertEqual(_tokens_of(tokens, "UTAH"), {"CLASS": "CHAR"})
+        self.assertEqual(_tokens_of(tokens, "BOB"), {"CLASS": "CHAR"})
+        self.assertEqual(_tokens_of(tokens, "ROCK"), {"CLASS": "PROPS", "BIOME": "DESERT"})
+        self.assertEqual(_tokens_of(tokens, "SAND"), {"CLASS": "PROPS", "BIOME": "DUNE"})
+        # outside every token folder, or unknown to tokens.json: no token
+        self.assertEqual(_tokens_of(tokens, "GHOST"), {})
+        self.assertEqual(_tokens_of(tokens, "NOPE"), {})
+        # shot templates and departments never classify an asset
+        self.assertNotIn("TYPE", _tokens_of(tokens, "UTAH"))
+
+    def test_token_keys_class_first(self) -> None:
+        entries = [{"tokens": {"BIOME": "DESERT", "CLASS": "PROPS"}}, {"tokens": {}}, {}]
+        self.assertEqual(token_keys(entries), ["CLASS", "BIOME"])
+        self.assertEqual(token_keys([]), [])
+
+    def test_library_components_assemblies_and_mixed(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        project = Path(tmp.name) / "PROJ"
+        project.mkdir()
+        tok.save_tokens(project, self._tokens())
+        for name, cls in (("UTAH", "CHAR"), ("ROCK", "PROPS"), ("GHOST", "CHAR")):
+            rel = self._tokens()["NAME"][name]
+            publish_light_asset(_asset(), project, fmt="usd", dest_dir=project / rel / "model" / "null",
+                                base_name=f"{cls}_GEO_{name}_null")
+            ca.add_proposed(project, name, ["GEO"])
+        av.create_assembly(project, "TOWN")
+        lib = build_library(project)
+        comps = {c["name"]: c["tokens"] for c in lib["components"]}
+        self.assertEqual(comps, {"UTAH": {"CLASS": "CHAR"}, "ROCK": {"CLASS": "PROPS", "BIOME": "DESERT"},
+                                 "GHOST": {}})
+        self.assertEqual({a["name"]: a["tokens"] for a in lib["assemblies"]}, {"TOWN": {"CLASS": "SET"}})
+        self.assertEqual(lib["token_keys"], ["CLASS", "BIOME"])

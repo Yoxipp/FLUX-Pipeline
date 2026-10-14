@@ -39,9 +39,10 @@ SESSION_NAMES: dict[str, tuple[str, ...]] = {
     "SubstanceP": ("painter",),
     "SubstanceD": ("substance 3d designer", "substance designer"),
     "Mari":       ("mari",),
+    "Unreal":     ("unrealeditor.exe",),
     "ZBrush":     ("zbrush",),
 }
-_EXCLUDED = ("hython", "hbatch", "hserver", "mayapy", "mayabatch", "mayabatch", "husk", "hescape")
+_EXCLUDED = ("hython", "hbatch", "hserver", "mayapy", "mayabatch", "mayabatch", "husk", "hescape", "unrealeditor-cmd")
 
 
 def _run(args: list[str]) -> str:

@@ -19,6 +19,7 @@ DCC_PORT_RANGES: dict[str, tuple[int, int]] = {
     "Marvelous":   (7050, 8),    # 7050..7057
     "Photoshop":   (7060, 8),    # 7060..7067
     "Mari":        (7070, 8),    # 7070..7077
+    "Unreal":      (7080, 8),    # 7080..7087 — FluxBridge plugin of the FLUX host project
     "ZBrush":      (9876, 8),    # 9876..9883 — flux ZBrush bridge plugin port
     "Houdini":     (48884, 8),   # 48884..48891 — flux_houdini_server HTTP port
 }
@@ -56,44 +57,86 @@ DCC_COLORS: dict[str, str] = {
     "Marvelous":   "#b34141",   # red
     "Photoshop":   "#00bcd4",   # cyan
     "Mari":        "#c17a3a",   # amber
+    "Unreal":      "#d0d0d0",   # light grey
     "disconnected": "#9a9a9a",  # grey
 }
 
 # ── DCC display names + default exe search patterns ──────────────────────────
 
-def _build_dcc_patterns() -> dict[str, list[str]]:
+def _program_files_roots() -> list[str]:
+    """Every Program Files root of this machine, deduplicated, 64-bit first.
+
+    %ProgramFiles% is "Program Files (x86)" for a 32-bit process, so %ProgramW6432%
+    is checked too (school installs: C:\\Program Files\\Autodesk\\Maya2025)."""
+    pf = _os.environ.get("PROGRAMFILES", r"C:\Program Files")
+    candidates = [
+        _os.environ.get("PROGRAMW6432") or "",
+        pf,
+        _os.environ.get("PROGRAMFILES(X86)") or rf"{pf} (x86)",
+    ]
+    roots: list[str] = []
+    for root in candidates:
+        if root and _os.path.normcase(root) not in {_os.path.normcase(r) for r in roots}:
+            roots.append(root)
+    return roots
+
+
+def _build_dcc_pattern_groups() -> dict[str, list[list[str]]]:
+    """Exe glob patterns per DCC, in priority groups, expanded on every Program Files root.
+
+    Inside a group the newest version wins (launcher_core sorts by version); an earlier
+    group wins over a later one (e.g. the Adobe Painter over an old Allegorithmic one)."""
     pf   = _os.environ.get("PROGRAMFILES",      r"C:\Program Files")
     pf86 = _os.environ.get("PROGRAMFILES(X86)", rf"{pf} (x86)")
     lad  = _os.environ.get("LOCALAPPDATA",       _os.path.expanduser(r"~\AppData\Local"))
+    roots = _program_files_roots()
+    out: dict[str, list[list[str]]] = {}
+    for key, groups in _patterns_for_root("{pf}", pf86, lad).items():
+        out[key] = [
+            # Patterns outside a Program Files root (Steam, LOCALAPPDATA) come out once
+            # per root: dict.fromkeys keeps the first occurrence only.
+            list(dict.fromkeys(p.replace("{pf}", root) for root in roots for p in group))
+            for group in groups
+        ]
+    return out
+
+
+def _patterns_for_root(pf: str, pf86: str, lad: str) -> dict[str, list[list[str]]]:
     return {
-        "Maya":       [rf"{pf}\Autodesk\Maya*\bin\maya.exe"],
-        "Houdini":    [
-            # houdini.exe est le launcher générique SideFX (adapte la licence automatiquement)
-            # houdinifx.exe en fallback pour les installs qui n'ont pas houdini.exe
-            rf"{pf}\Side Effects Software\Houdini*\bin\houdini.exe",
-            rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe",
-        ],
-        "Nuke":       [rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"],   # [0-9] exclut CrashFeedback
-        "SubstanceP": [rf"{pf}\Adobe\Adobe Substance 3D Painter*\Adobe Substance 3D Painter.exe",
-                       rf"{pf86}\Steam\steamapps\common\Substance 3D Painter*\Adobe Substance 3D Painter.exe",
-                       rf"{pf}\Allegorithmic\Substance Painter*\Substance Painter.exe"],
+        "Maya":       [[rf"{pf}\Autodesk\Maya*\bin\maya.exe"]],
+        # houdini.exe est le launcher générique SideFX (adapte la licence automatiquement)
+        # houdinifx.exe en fallback pour les installs qui n'ont pas houdini.exe
+        # (same group: the newest version wins, houdini.exe first at equal version).
+        "Houdini":    [[rf"{pf}\Side Effects Software\Houdini*\bin\houdini.exe",
+                        rf"{pf}\Side Effects Software\Houdini*\bin\houdinifx.exe"]],
+        "Nuke":       [[rf"{pf}\Nuke[0-9]*\Nuke[0-9]*.exe"]],   # [0-9] exclut CrashFeedback
+        "SubstanceP": [[rf"{pf}\Adobe\Adobe Substance 3D Painter*\Adobe Substance 3D Painter.exe"],
+                       [rf"{pf86}\Steam\steamapps\common\Substance 3D Painter*\Adobe Substance 3D Painter.exe"],
+                       [rf"{pf}\Allegorithmic\Substance Painter*\Substance Painter.exe"]],
         # Designer: Adobe install, Steam build, older Allegorithmic install.
-        "SubstanceD": [rf"{pf}\Adobe\Adobe Substance 3D Designer*\Adobe Substance 3D Designer.exe",
-                       rf"{pf86}\Steam\steamapps\common\Substance 3D Designer*\Adobe Substance 3D Designer.exe",
-                       rf"{pf}\Allegorithmic\Substance Designer*\Substance Designer.exe"],
-        "ZBrush":     [rf"{pf}\Maxon ZBrush*\ZBrush.exe",
-                       rf"{pf86}\Maxon ZBrush*\ZBrush.exe"],
+        "SubstanceD": [[rf"{pf}\Adobe\Adobe Substance 3D Designer*\Adobe Substance 3D Designer.exe"],
+                       [rf"{pf86}\Steam\steamapps\common\Substance 3D Designer*\Adobe Substance 3D Designer.exe"],
+                       [rf"{pf}\Allegorithmic\Substance Designer*\Substance Designer.exe"]],
+        "ZBrush":     [[rf"{pf}\Maxon ZBrush*\ZBrush.exe",
+                        rf"{pf86}\Maxon ZBrush*\ZBrush.exe"]],
         # Marvelous: school Enterprise build (Marvelous Designer Enterprise OnlineAuth /
         # MarvelousDesigner_Enterprise_Online.exe) and the CLO-SET personal install.
-        "Marvelous":  [rf"{pf}\Marvelous Designer*\MarvelousDesigner*.exe",
-                       rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner*.exe",
-                       rf"{pf}\CLO Virtual Fashion\MarvelousDesigner*\MarvelousDesigner*.exe"],
-        "Photoshop":  [rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
-                       rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"],
-        "Mari":       [rf"{pf}\Mari*\Bundle\bin\Mari*.exe"],
+        "Marvelous":  [[rf"{pf}\Marvelous Designer*\MarvelousDesigner*.exe"],
+                       [rf"{pf}\CLO-SET\MarvelousDesigner*\MarvelousDesigner*.exe"],
+                       [rf"{pf}\CLO Virtual Fashion\MarvelousDesigner*\MarvelousDesigner*.exe"]],
+        # One group: "Adobe Photoshop 2025" beats "Adobe Photoshop CC 2019" wherever it is.
+        "Photoshop":  [[rf"{pf}\Adobe\Adobe Photoshop*\Photoshop.exe",
+                        rf"{lad}\Adobe\Adobe Photoshop*\Photoshop.exe"]],
+        "Mari":       [[rf"{pf}\Mari*\Bundle\bin\Mari*.exe"]],
+        # Epic Games Launcher default location; other drives come from LauncherInstalled.dat.
+        "Unreal":     [[rf"{pf}\Epic Games\UE_*\Engine\Binaries\Win64\UnrealEditor.exe"]],
     }
 
-DCC_EXE_PATTERNS: dict[str, list[str]] = _build_dcc_patterns()
+DCC_EXE_PATTERN_GROUPS: dict[str, list[list[str]]] = _build_dcc_pattern_groups()
+# Flat view (priority order), for callers that only need "every pattern".
+DCC_EXE_PATTERNS: dict[str, list[str]] = {
+    key: [p for group in groups for p in group] for key, groups in DCC_EXE_PATTERN_GROUPS.items()
+}
 
 # ── Naming / token system ─────────────────────────────────────────────────────
 TOKEN_TYPES: tuple[str, ...] = ("CLASS", "TYPE", "NAME", "INSTANCE", "VARIANTE", "ITER")
@@ -129,6 +172,7 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
+    "RENDER": "render/{seq}/{shot}",
 }
 
 # Default TYPE token map for a SHOT (ADR 0019: the department of a shot is its TYPE,
@@ -142,6 +186,9 @@ DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
     "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
+    # Rendered frames of a shot (2026-10-09), own root like LIGHT / COMP. Projects
+    # whose tokens.json predates it get it from load_tokens (defaults merged in).
+    "RENDER": "render/{seq}/{shot}",
 }
 
 # Default TYPE token map (Task → asset-relative top-level sub-folder).
@@ -206,12 +253,15 @@ ARCHIVE_DIRNAME: str        = "archive"
 ARCHIVE_STEM_ACTIVITY: str  = "activite"
 ARCHIVE_STEM_MENTIONS: str  = "chatMentions"
 
-# Per-project JSON filenames
-JSON_TOKENS: str     = "tokens.json"        # project root
-JSON_PROJECT: str    = "project.json"       # project root - project config + project_id (ADR 0006)
-JSON_PRODUCTION: str = "production.json"    # project root — Production Tab store
-JSON_CALENDAR: str = "calendar.json"        # project root — team calendar (commitments)
-JSON_LOCKS: str      = "locks.json"         # project root — folder lock registry
+# Per-project JSON filenames. They live in <project>/SETUP_DIR/ (legacy projects: at
+# the root until migrated); always resolve them through core.project_setup.setup_path.
+SETUP_DIR: str       = "_flux_setup"        # project setup folder (locked, hidden in the Folder Manager)
+PRODUCTION_MEDIA_DIR: str = "_production"   # Production Tab media (thumbnails), inside SETUP_DIR
+JSON_TOKENS: str     = "tokens.json"        # setup dir
+JSON_PROJECT: str    = "project.json"       # setup dir - project config + project_id (ADR 0006)
+JSON_PRODUCTION: str = "production.json"    # setup dir - Production Tab store
+JSON_CALENDAR: str = "calendar.json"        # setup dir - team calendar (commitments)
+JSON_LOCKS: str      = "locks.json"         # setup dir - folder lock registry
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
 
 # Per-user settings
@@ -221,7 +271,8 @@ JSON_USER_SETTINGS: str = "User.json"      # USER/<name>/UserSettings/User.json
 FLUX_MARKER_FILENAME: str = ".flux"   # presence = directory already initialised
 
 # ── FLUX_ROOT required top-level directories ──────────────────────────────────
-FLUX_ROOT_DIRS: tuple[str, ...] = ("USER", "DOSSIER_PROJETS", "CONFIG", "FLUX_UPDATE")
+# FLUX_DOC holds the manual (ADR 0049), next to FLUX_UPDATE (installers only).
+FLUX_ROOT_DIRS: tuple[str, ...] = ("USER", "DOSSIER_PROJETS", "CONFIG", "FLUX_UPDATE", "FLUX_DOC")
 
 # ── Theme defaults ────────────────────────────────────────────────────────────
 # ── 4-color theme system ──────────────────────────────────────────────────────
@@ -286,7 +337,7 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.8.000"
+APP_VERSION: str = "0.9.001"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out

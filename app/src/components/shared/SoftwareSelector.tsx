@@ -1,52 +1,29 @@
-import { Pill } from './ui'
+import { FileUp } from 'lucide-react'
+import { DccLogo } from './DccLogo'
+import { ExpandPicker, type PickOption } from './ExpandPicker'
 
-// Supported DCCs + most recent supported version (detection itself is version-agnostic:
-// the real source is DCC_EXE_PATTERNS glob wildcards in backend/core/constants.py).
-const SW_DCC = [
-  { name: 'Maya',      v: '2026' },
-  { name: 'Houdini',   v: '22.0' },
-  { name: 'Nuke',      v: '16.0' },
-  { name: 'Marvelous', v: '2025' },
-  { name: 'Painter',   v: '2024' },
-  { name: 'Designer',  v: '2024' },
-  { name: 'Mari',      v: '7.0' },
-  { name: 'ZBrush',    v: '2026' },
-  { name: 'Photoshop', v: '2025' },
-]
+// Supported DCCs (detection is version-agnostic: DCC_EXE_PATTERNS in backend/core/constants.py).
+const SW_DCC = ['Maya', 'Houdini', 'Nuke', 'Marvelous', 'Painter', 'Designer', 'Mari', 'ZBrush', 'Photoshop']
 
 interface Props {
   active?: string
   onChange?: (name: string) => void
-  // Publisher shows "Fichier local" as a standalone source; the Importer hides it
-  // and exposes local-file import as a per-software action instead.
+  // Publisher shows "Fichier local" as a standalone source; the Shelf hides it.
   showLocal?: boolean
+  // Only the software enabled in Settings > Logiciels is offered (same list as the
+  // launcher). The active one always shows, even while it is being switched away.
+  isVisible?: (name: string) => boolean
+  // Extra software for this page only (Shelf Manager: Unreal, not a Publisher source).
+  extra?: string[]
 }
 
-export function SoftwareSelector({ active = 'Maya', onChange, showLocal = true }: Props) {
-  return (
-    <div style={{
-      minHeight: 34, borderBottom: '1px solid var(--rule)',
-      padding: '4px 16px', display: 'flex', alignItems: 'center', gap: 8,
-      background: 'var(--paper)', flexShrink: 0,
-    }}>
-      <div className="cap">LOGICIEL</div>
-      <div style={{ width: 1, height: 12, background: 'var(--rule-2)' }} />
-      <div className="chip-row" style={{ gap: 4, flex: 1 }}
-           onWheel={e => { if (e.deltaY && !e.deltaX) e.currentTarget.scrollLeft += e.deltaY }}>
-        {SW_DCC.map(s => (
-          <Pill key={s.name} active={s.name === active} onClick={() => onChange?.(s.name)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            {s.name}<span style={{ marginLeft: 5, fontSize: 8, opacity: 0.55, fontFamily: 'var(--mono)' }}>{s.v}</span>
-          </Pill>
-        ))}
-        {showLocal && (
-          <>
-            <div style={{ width: 1, height: 12, background: 'var(--rule-2)', margin: '0 4px', flexShrink: 0 }} />
-            <Pill active={'Fichier local' === active} onClick={() => onChange?.('Fichier local')} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              Fichier local
-            </Pill>
-          </>
-        )}
-      </div>
-    </div>
-  )
+// One button with the current software (logo + name + arrow); a click slides the
+// other software out to the right, a pick closes it (ADR 0044).
+export function SoftwareSelector({ active = 'Maya', onChange, showLocal = true, isVisible, extra = [] }: Props) {
+  const shown = [...SW_DCC, ...extra].filter(n => !isVisible || isVisible(n) || n === active)
+  const options: PickOption[] = [
+    ...shown.map(n => ({ value: n, label: n, icon: <DccLogo dcc={n} size={14} color="currentColor" /> })),
+    ...(showLocal ? [{ value: 'Fichier local', label: 'Fichier local', icon: <FileUp size={14} strokeWidth={1.8} /> }] : []),
+  ]
+  return <ExpandPicker value={active} options={options} onChange={v => onChange?.(v)} />
 }

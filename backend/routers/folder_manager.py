@@ -13,8 +13,10 @@ from pydantic import BaseModel
 from core.logger import get_logger
 from core.paths import force_remove, force_rmtree, get_project_path, get_projects_dir, is_subpath
 from features.folder_manager.asset_creator import create_asset, heal_tokens_from_disk, list_assets
-from features.folder_manager.locks import is_locked, load_locks, set_lock
-from features.folder_manager.project_config import ensure_project_config, is_direct_project_dir
+from features.folder_manager.locks import is_locked, load_locks, set_lock, with_setup
+from features.folder_manager.project_config import (
+    ensure_project_config, is_direct_project_dir, read_work_profiles, write_work_profiles,
+)
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
     create_sequence, create_shot, list_sequences, list_shots,
@@ -41,6 +43,19 @@ def _parse_int(label: str) -> int:
 class ProjectCreate(BaseModel):
     name: str
     painter_presets: list[str] | None = None    # Painter export presets of the project
+
+
+@router.get("/projects/{project_name}/relative-path")
+async def get_relative_path(project_name: str, rel_path: str = "") -> dict:
+    """Houdini path of a project item on the FLUX Work scene variables (Copy Path Relative)."""
+    from features.folder_manager.relative_path import relative_path
+
+    project_path = get_project_path(project_name)
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    path = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: relative_path(project_path, project_name, rel_path))
+    return {"path": path}
 
 
 @router.get("/projects/{project_name}/tokens")
@@ -75,6 +90,33 @@ async def get_project_config(project_name: str) -> dict:
     loop = asyncio.get_running_loop()
     config, warnings = await loop.run_in_executor(None, lambda: ensure_project_config(project_path))
     return {"config": config, "warnings": warnings}
+
+
+class WorkProfilesPayload(BaseModel):
+    profiles: list[dict]
+
+
+@router.get("/projects/{project_name}/work-profiles")
+async def get_work_profiles(project_name: str) -> dict:
+    """Work profiles the project shares with its artists (project.json "ui")."""
+    project_path = get_project_path(project_name)
+    if not is_direct_project_dir(project_path, get_projects_dir()):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_running_loop()
+    return {"profiles": await loop.run_in_executor(None, lambda: read_work_profiles(project_path))}
+
+
+@router.put("/projects/{project_name}/work-profiles")
+async def put_work_profiles(project_name: str, payload: WorkProfilesPayload) -> dict:
+    project_path = get_project_path(project_name)
+    if not is_direct_project_dir(project_path, get_projects_dir()):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_running_loop()
+    try:
+        profiles = await loop.run_in_executor(None, lambda: write_work_profiles(project_path, payload.profiles))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"profiles": profiles}
 
 
 @router.get("/projects")
@@ -317,7 +359,9 @@ async def get_sequences(project_name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_running_loop()
     seqs = await loop.run_in_executor(None, lambda: list_sequences(project_path))
-    return {"sequences": seqs}   # ["SEQ001", "SEQ002", ...]
+    from core.constants import SEQ_SHOT_PADDING
+    # padding: digits of NEW SEQ/SHOT labels, so the UI pads like the backend creates.
+    return {"sequences": seqs, "padding": SEQ_SHOT_PADDING}   # ["SEQ0010", ...], 4
 
 
 @router.post("/sequences")
@@ -491,7 +535,7 @@ async def get_locks(project_name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_running_loop()
     locked = await loop.run_in_executor(None, lambda: load_locks(project_path))
-    return {"locked": locked}
+    return {"locked": with_setup(locked)}
 
 
 @router.post("/locks")
@@ -502,7 +546,7 @@ async def post_lock(req: LockSet) -> dict:
     rel = f"{req.subpath}/{req.name}" if req.subpath else req.name
     loop = asyncio.get_running_loop()
     locked = await loop.run_in_executor(None, lambda: set_lock(project_path, rel, req.locked))
-    return {"locked": locked}
+    return {"locked": with_setup(locked)}
 
 
 # ── Copy ──────────────────────────────────────────────────────────────────────

@@ -48,7 +48,12 @@ export interface ActivityEvent {
   date: string
   time: string
   read: boolean
+  // Why it concerns the current artist (GET /activity/notifications, retake 04):
+  // a followed shot, a favorite task, a task assigned to them; null = project-wide only.
+  reason?: 'followed_shot' | 'favorite' | 'assigned' | null
 }
+
+export interface FollowedShot { seq: string; shot: string; exists: boolean }
 
 export interface ChatMessage {
   id: string
@@ -115,6 +120,19 @@ export interface PublishPayload {
   description?: string
   user?: string
   target_name?: string   // composed FLUX name when the source file isn't token-named
+}
+
+export interface PublishDestination {
+  abs_path: string
+  rel_path: string
+  version: string
+  sequence: boolean
+  first: boolean
+  last_exists: boolean
+  existing: string[]
+  existing_versions?: Record<string, string | null>
+  more: number
+  others?: string[]
 }
 
 export interface PublishResult {
@@ -273,12 +291,17 @@ export interface ProductionComment {
   author: string
   date:   string                  // ISO YYYY-MM-DD
   time:   string                  // HH:MM
+  kind?:  'note' | 'retake'       // absent = note (old comments); 'retake' feeds the home "Tes retakes"
+  version?: string                // vNNN the comment is about (absent = whole task, old comments)
 }
 
 export interface ProductionTaskDetail {
+  assignee?:   string             // pipeline artist assigned to this task or subtask
+  status?:     string             // explicit review token; completion never implies approval
   notes?:      string
   completion?: number             // 0-100
   comments?:   ProductionComment[]
+  priority?:   'high' | 'low'     // absent = normal (retake 07, Production/taskPriority.ts)
 }
 
 export interface ProductionTask {
@@ -292,6 +315,8 @@ export interface ProductionTask {
 }
 
 export interface ProductionAsset {
+  thumbnail?: ProductionThumbnail
+  dependencies?: ProductionDependency[]
   id: string
   class: string                   // CHAR / PROPS / ENV / FXRIG …
   name: string
@@ -333,9 +358,13 @@ export interface CastingLink {
   ref: string
   count?: number
   origin?: 'user' | 'auto'
+  // ADR 0048: pinned USD version of the asset ("v003"); absent or "" = follows LAST.
+  version?: string
 }
 
 export interface ProductionShot {
+  thumbnail?: ProductionThumbnail
+  dependencies?: ProductionDependency[]
   id: string
   seq_id: string
   name: string                    // SHOT010
@@ -350,14 +379,29 @@ export interface ProductionShot {
   frame_start?: number            // shot frame range (ADR 0020), written on the shot stage
   frame_end?: number
   locked?: ProductionLock
+  preview_source?: string         // department shown for this shot in the Timeline edit (group id); unset = global source
 }
 
 export interface ProductionState {
+  tracking?: { departments: ProductionDepartment[] }
   version: number
   sequences: ProductionSequence[]
   shots:     ProductionShot[]
   assets:    ProductionAsset[]
   asset_groups: ProductionAssetGroup[]
+}
+
+export interface ProductionThumbnail { rel_path: string; file: string }
+export interface ProductionDependency { entity_id: string; task?: string }
+export interface ProductionDepartment {
+  id: string
+  name: string
+  task_tokens: string[]
+  scope: 'shot' | 'asset'
+  active: boolean
+  fixed?: boolean
+  statuses: string[]
+  depends_on: string[]
 }
 
 // Publish event enriched by reconcile — carries the parsed INSTANCE for grouping.

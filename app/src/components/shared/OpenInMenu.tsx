@@ -158,10 +158,10 @@ export function OpenInMenu({ project, relPath, label = 'Ouvrir dans', compact = 
           padding: 4, borderRadius: 7, border: '1px solid var(--rule-2)', background: 'var(--paper)',
           boxShadow: 'var(--shadow-md)', fontFamily: 'var(--sans)',
         }}>
-          {lt?.message && <div style={{ padding: '4px 8px', fontSize: 9, color: 'var(--ink-4)' }}>{lt.message}</div>}
-          {loading && <div style={{ padding: '6px 8px', fontSize: 10, color: 'var(--ink-4)' }}>Lecture…</div>}
+          {lt?.message && <div style={{ padding: '4px 8px', fontSize: 10.5, color: 'var(--ink-4)' }}>{lt.message}</div>}
+          {loading && <div style={{ padding: '6px 8px', fontSize: 11, color: 'var(--ink-4)' }}>Lecture…</div>}
           {!loading && targets.length === 0 && (
-            <div style={{ padding: '6px 8px', fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.45 }}>
+            <div style={{ padding: '6px 8px', fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.45 }}>
               Aucun logiciel connecté pour ce fichier (Houdini, Maya, Nuke, Photoshop).
             </div>
           )}
@@ -182,7 +182,7 @@ export function OpenInMenu({ project, relPath, label = 'Ouvrir dans', compact = 
 const _btn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6,
   border: '1px solid var(--rule-2)', background: 'var(--paper)', color: 'var(--ink-2)',
-  fontFamily: 'var(--sans)', fontSize: 10, cursor: 'pointer',
+  fontFamily: 'var(--sans)', fontSize: 11, cursor: 'pointer',
 }
 const _icon: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18,

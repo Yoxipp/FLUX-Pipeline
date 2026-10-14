@@ -6,9 +6,13 @@ echo ============================================
 echo   FLUX Pipeline - DEV
 echo   backend + vite + electron
 echo ============================================
-if not exist "node_modules" (
-    echo [setup] premiere fois : npm install...
+REM Reinstall whenever package-lock.json differs from the copy taken at the last install
+REM (new dependency pulled from git, e.g. @fontsource-variable/inter).
+fc /b "package-lock.json" "node_modules\.flux_lock_stamp" >nul 2>&1
+if errorlevel 1 (
+    echo [setup] dependances changees : npm install...
     call npm install
+    if not errorlevel 1 copy /y "package-lock.json" "node_modules\.flux_lock_stamp" >nul
 )
 call npm run dev
 echo.

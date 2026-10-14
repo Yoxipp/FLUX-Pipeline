@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 from core.logger import get_logger
+from core.project_setup import is_project_root
 
 from .validator import ERROR, WARN, Issue
 
@@ -33,7 +34,7 @@ _MAX_LISTED = 5
 def find_project_root(folder: Path) -> Path | None:
     """First parent of *folder* holding project.json or tokens.json."""
     for cand in [Path(folder), *Path(folder).parents]:
-        if (cand / "project.json").is_file() or (cand / "tokens.json").is_file():
+        if is_project_root(cand):
             return cand
     return None
 

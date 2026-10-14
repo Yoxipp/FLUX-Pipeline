@@ -13,12 +13,29 @@
 // - Row heights persist in localStorage and are adjustable via a drag handle.
 // - Sequences and shots are ordered by their `order` field. Newly created seqs
 //   get an `order` that places them right before the next-higher SEQ number.
+// - Mouse (retake 05): wheel = scroll along the edit, Shift+wheel = scroll the page,
+//   Ctrl+wheel = zoom anchored under the cursor, Ctrl+Shift+wheel = row height,
+//   middle-button drag = pan. "Tout voir" fits the whole edit. No on-screen help
+//   (2026-10-08). Sliders stay for touch screens / no wheel. A wheel over a
+//   field never moves the timeline.
+// - Create (top of the toolbar) opens the Shot or Sequence form (CreateMenu).
+// - Click (Tom, after retake 09): selects and shows the preview under the edit
+//   (TimelinePreview: storyboard / animatic / anim ... per the Source picker, the
+//   auto edit of a sequence or of the film, Keyframe Pro). The former click action
+//   (Edit) and the others moved to the right-click menu.
 // - Clip width = duration (2026-09-27): a shot is as wide as its frame range, a
 //   sequence is the sum of its shots, the ruler counts the frames of the edit. Dragging
 //   the right edge of a shot sets its duration (frame_end), the next shots follow.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Minus, MoveVertical, Plus } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import * as Dropdown from '@radix-ui/react-dropdown-menu'
+import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertical } from 'lucide-react'
+import { CreateMenu, type CreateKind } from './CreateMenu'
+import { TimelinePreview } from './TimelinePreview'
+import { buildMontage, pickShotMedia, previewCandidates, type PreviewMedia } from './previewEdit'
+import { usePreviewSource } from './previewSourceStore'
+import { openInKeyframe } from '../../lib/keyframe'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
 import { useI18n } from '../../i18n'
@@ -34,7 +51,12 @@ interface Props {
   selection:       Selection
   setSelection:    (s: Selection) => void
   onEntityClicked?: () => void
+  onCreate?:       (kind: CreateKind) => void
 }
+
+
+const isField = (el: EventTarget | null) =>
+  el instanceof HTMLElement && !!el.closest('input, select, textarea, [contenteditable="true"]')
 
 // H zoom == per-shot width. Min is intentionally tiny so a whole sequence can be
 // squashed to a compact overview (shots become thin slivers); the number/label
@@ -70,6 +92,7 @@ const VZOOM_MIN = 0.6
 const VZOOM_MAX = 3.0
 const VZOOM_DEF = 1.0
 const LS_VZOOM = 'flux.production.shot.vzoom'
+// Preview source: shared with the Production table thumbnails (previewSourceStore.ts).
 
 // Bookmarks are per-user (stored in User.json via /settings/user-data under
 // `production.bookmarks.<project>`). Not scoped to the machine.
@@ -139,7 +162,7 @@ function useLocalNumber(key: string, def: number, clampMin: number, clampMax: nu
   return [v, set]
 }
 
-export function ProductionShot({ state, setState, selection, setSelection, onEntityClicked }: Props) {
+export function ProductionShot({ state, setState, selection, setSelection, onEntityClicked, onCreate }: Props) {
   const { t } = useI18n()
   const { project } = useProject()
 
@@ -193,6 +216,63 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     return () => { alive = false }
   }, [project])
   const framesOf = (shot: Shot) => (resizing && resizing.id === shot.id ? resizing.frames : shotFrames(shot))
+
+  // ── preview + auto edit (TimelinePreview) ─────────────────────────────────
+  const [source, setSource] = usePreviewSource()
+  const [montage, setMontage] = useState<{ seqId?: string } | null>(null)
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [previews, setPreviews] = useState<Record<string, PreviewMedia[]>>({})
+  const [previewsLoading, setPreviewsLoading] = useState(false)
+  // One request for the whole edit; again when shots / tasks change or on flux:refresh.
+  const previewQuery = useMemo(() => state.shots.map(shot => ({
+    id: shot.id,
+    seq: state.sequences.find(s => s.id === shot.seq_id)?.name ?? '',
+    shot: shot.name,
+    tasks: previewCandidates(state, shot).map(c => c.token),
+  })).filter(q => q.seq), [state])
+  const previewKey = JSON.stringify(previewQuery.map(q => [q.id, q.seq, q.shot, q.tasks]))
+  const [refreshTick, setRefreshTick] = useState(0)
+  useEffect(() => {
+    const h = () => setRefreshTick(t => t + 1)
+    window.addEventListener('flux:refresh', h)
+    return () => window.removeEventListener('flux:refresh', h)
+  }, [])
+  useEffect(() => {
+    let alive = true
+    if (!project || previewQuery.length === 0) { setPreviews({}); return }
+    setPreviewsLoading(true)
+    api.getShotPreviews(project, previewQuery.map(({ seq, shot, tasks }) => ({ seq, shot, tasks })))
+      .then(r => {
+        if (!alive) return
+        const map: Record<string, PreviewMedia[]> = {}
+        r.shots.forEach((row, i) => { map[previewQuery[i].id] = row.media })
+        setPreviews(map)
+      })
+      .catch(() => { if (alive) setPreviews({}) })
+      .finally(() => { if (alive) setPreviewsLoading(false) })
+    return () => { alive = false }
+  }, [project, previewKey, refreshTick])   // eslint-disable-line react-hooks/exhaustive-deps
+  const stableFrames = useCallback((shot: Shot) => shotFrames(shot), [])
+
+  // Right-click menu of a clip (the former click actions live here).
+  const [ctx, setCtx] = useState<{ kind: 'seq' | 'shot'; id: string; x: number; y: number } | null>(null)
+  const openCtx = (kind: 'seq' | 'shot', id: string, x: number, y: number) => {
+    setSelection({ kind, id }); setCtx({ kind, id, x, y })
+  }
+  const keyframeShot = (shot: Shot) => {
+    const seq = state.sequences.find(s => s.id === shot.seq_id)
+    const m = pickShotMedia(state, shot, previews, source)
+    const label = `${seq?.name ?? ''} ${shot.name}`
+    if (!m) { void openInKeyframe(project || '', []); return }
+    void openInKeyframe(project || '', [{ path: m.abs_path, label: `${label} · ${m.label} · ${m.version || 'LAST'}` }], { title: label, fallbackPath: m.abs_path })
+  }
+  const keyframeSeq = (seqId: string) => {
+    const seq = state.sequences.find(s => s.id === seqId)
+    const clips = buildMontage(state, previews, source, fps, stableFrames, seqId).filter(c => c.media)
+    if (clips.length === 0) { void openInKeyframe(project || '', []); return }
+    void openInKeyframe(project || '', clips.map(c => ({ path: c.media!.abs_path, label: `${c.seq} ${c.shot} · ${c.media!.label} · ${c.media!.version || 'LAST'}` })),
+      { title: seq?.name ?? 'Montage', siblings: false, fallbackPath: clips[0].media!.abs_path })
+  }
   const widthOf = (frames: number) => Math.max(3, Math.round(frames * pxPerFrame))
   const shotW = pxPerBlock          // an empty sequence shows one default shot wide
   const seqFrames = sequences.map(seq => (shotsBySeq.get(seq.id) ?? []).reduce((acc, sh) => acc + framesOf(sh), 0))
@@ -333,9 +413,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     }
     if (!next) return
     scrollToBookmark(next.x)
-    // Also focus the target so MenuEdit / MenuSpec reflect it.
+    // Also select the target: its preview shows under the edit (Edit = right click).
     setSelection({ kind: next.b.kind, id: next.b.entityId })
-    onEntityClicked?.()
   }
 
   const reorderSeq = (draggedId: string, targetId: string) => {
@@ -367,29 +446,96 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
     })
   }
 
+  // ── mouse navigation (retake 05) ──────────────────────────────────────────
+  // Zoom anchored under the cursor: remember which frame sat under the pointer and
+  // put it back there once the new width is laid out.
+  const zoomAnchor = useRef<{ frame: number; px: number } | null>(null)
+  const zoomRef = useRef(pxPerBlock); zoomRef.current = pxPerBlock
+  const vZoomRef = useRef(vZoom); vZoomRef.current = vZoom
+  useLayoutEffect(() => {
+    const el = scrollWrapRef.current, a = zoomAnchor.current
+    if (!el || !a) return
+    zoomAnchor.current = null
+    el.scrollLeft = Math.max(0, a.frame * (pxPerBlock / DEFAULT_SHOT_FRAMES) + HEADER_W + 10 - a.px)
+  }, [pxPerBlock])
+  const [hasTimeline, setHasTimeline] = useState(false)
+  useEffect(() => { setHasTimeline(sequences.length > 0) }, [sequences.length])
+  useEffect(() => {
+    const el = scrollWrapRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (isField(e.target)) return
+      const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        if (e.shiftKey) { setVZ(vZoomRef.current * (delta > 0 ? 0.9 : 1.1)); return }
+        const rect = el.getBoundingClientRect()
+        const px = e.clientX - rect.left
+        const cur = zoomRef.current
+        zoomAnchor.current = { frame: Math.max(0, (el.scrollLeft + px - HEADER_W - 10) / (cur / DEFAULT_SHOT_FRAMES)), px }
+        setZoom(Math.round(cur * (delta > 0 ? 0.85 : 1 / 0.85)))
+        return
+      }
+      if (e.shiftKey) return   // page scroll, handled by the parent scroller
+      if (el.scrollWidth <= el.clientWidth) return
+      e.preventDefault()
+      el.scrollLeft += delta
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [hasTimeline])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Middle-button drag pans the edit (horizontal) and the page (vertical).
+  const startPan = (e: React.MouseEvent) => {
+    if (e.button !== 1) return
+    e.preventDefault()
+    const el = scrollWrapRef.current
+    const page = el?.closest('[data-timeline-page]') as HTMLElement | null
+    if (!el) return
+    const x0 = e.clientX, y0 = e.clientY, left0 = el.scrollLeft, top0 = page?.scrollTop ?? 0
+    const move = (ev: MouseEvent) => {
+      el.scrollLeft = left0 - (ev.clientX - x0)
+      if (page) page.scrollTop = top0 - (ev.clientY - y0)
+    }
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.style.cursor = '' }
+    document.body.style.cursor = 'grabbing'
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  // Back to the whole edit: the zoom that fits every frame in the visible width.
+  const fitAll = () => {
+    const el = scrollWrapRef.current
+    const total = seqFrames.reduce((a, b) => a + b, 0)
+    if (!el || total <= 0) return
+    const avail = el.clientWidth - HEADER_W - 24 - sequences.length * gap
+    setZoom(Math.floor(Math.max(1, avail) / total * DEFAULT_SHOT_FRAMES))
+    el.scrollLeft = 0
+  }
+
   return (
-    <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}
+    <div data-timeline-page style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, minHeight: '100%' }}
          onClick={(e) => { if (e.target === e.currentTarget) setSelection({ kind: 'none' }) }}>
-      {/* Toolbar */}
+      {/* Toolbar: Create first, then view controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        {onCreate && <div className="production-timeline-toolbar"><CreateMenu mode="shot" hasSequences={sequences.length > 0} onCreate={onCreate} /></div>}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <ArrowDownUp size={11} strokeWidth={1.75} color="var(--ink-3)" style={{ transform: 'rotate(90deg)' }} />
-          <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
-          <button onClick={() => setZoom(pxPerBlock <= 20 ? pxPerBlock - 2 : pxPerBlock - 20)} style={_zoomBtn}><Minus size={11} strokeWidth={2} /></button>
+          <span className="cap" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>H</span>
           <input type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={1} value={pxPerBlock}
                  onChange={e => setZoom(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <button onClick={() => setZoom(pxPerBlock < 20 ? pxPerBlock + 2 : pxPerBlock + 20)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{pxPerBlock}px</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', minWidth: 34 }}>{pxPerBlock}px</span>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <MoveVertical size={11} strokeWidth={1.75} color="var(--ink-3)" />
-          <span className="cap" style={{ fontSize: 9, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>V</span>
-          <button onClick={() => setVZ(vZoom - 0.1)} style={_zoomBtn}><Minus size={11} strokeWidth={2} /></button>
+          <span className="cap" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>V</span>
           <input type="range" min={VZOOM_MIN} max={VZOOM_MAX} step={0.05} value={vZoom}
                  onChange={e => setVZ(Number(e.target.value))} style={{ width: 140, accentColor: 'var(--accent)' }} />
-          <button onClick={() => setVZ(vZoom + 0.1)} style={_zoomBtn}><Plus size={11} strokeWidth={2} /></button>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', minWidth: 34 }}>{Math.round(vZoom * 100)}%</span>
         </div>
+
+        <button onClick={fitAll} disabled={sequences.length === 0} title="Tout voir"
+          style={{ ..._zoomBtn, width: 'auto', padding: '0 8px', gap: 5, fontSize: 11 }}>
+          <Maximize2 size={11} strokeWidth={2} /> Tout voir
+        </button>
 
         {/* Bookmarks */}
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -419,13 +565,13 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
               background: bookmarkActive ? 'var(--accent-soft)' : 'var(--paper-2)',
               color: bookmarkActive ? 'var(--accent-hi)' : (canBookmark ? 'var(--ink-2)' : 'var(--ink-4)'),
               opacity: canBookmark ? 1 : 0.55,
-              borderColor: bookmarkActive ? 'var(--accent)' : 'var(--rule-2)',
+              borderColor: bookmarkActive ? 'var(--rule-3)' : 'var(--rule-2)',
             }}
           >
             <Bookmark size={12} strokeWidth={2}
                       fill={bookmarkActive ? 'var(--accent)' : 'none'} />
           </button>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', minWidth: 18, textAlign: 'right' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)', minWidth: 18, textAlign: 'right' }}>
             {bookmarks.length || ''}
           </span>
         </div>
@@ -447,13 +593,13 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         }}>
           {/* Single horizontal scroll container. Header cells stick to the left
               via position:sticky so they stay visible while the lanes scroll. */}
-          <div ref={scrollWrapRef} className="timeline-scroll" style={{ overflowX: 'scroll', overflowY: 'hidden', position: 'relative' }}>
+          <div ref={scrollWrapRef} className="timeline-scroll" onMouseDown={startPan} style={{ overflowX: 'scroll', overflowY: 'hidden', position: 'relative' }}>
             <div style={{ minWidth: HEADER_W + contentW, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               {/* Bookmark overlay — vertical markers spanning ruler + tracks */}
               {bookmarkPositions.map((p, i) => (
                 <div key={i} style={{
                   position: 'absolute', top: 0, bottom: 0, left: p.x,
-                  width: 0, borderLeft: '2px solid var(--accent)',
+                  width: 0, borderLeft: '2px solid var(--rule-3)',
                   pointerEvents: 'none', zIndex: 4, opacity: 0.85,
                 }}>
                   <div style={{
@@ -475,8 +621,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                   borderRight: '1px solid var(--rule)',
                   background: 'var(--paper-2)',
                   display: 'flex', alignItems: 'center', padding: '0 12px',
-                  fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 600,
-                  letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)',
+                  fontFamily: 'var(--sans)', fontSize: 11.5, fontWeight: 600,
+                  letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-2)',
                 }}>Timeline</div>
                 <div style={{ display: 'flex', padding: '0 10px' }}>
                   {sequences.map((seq, i) => {
@@ -502,8 +648,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                     return (
                       <div key={seq.id} title={`${seq.name} : ${seqFrames[i]} images, ${formatSeconds(seqFrames[i], fps)} a ${fps} fps`} style={{
                         width: colWidths[i] - gap, marginRight: gap, position: 'relative', overflow: 'hidden',
-                        borderLeft: i === 0 ? 'none' : '2px solid var(--ink-4)',
-                        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                        borderLeft: i === 0 ? 'none' : '2px solid var(--rule-3)',
+                        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                       }}>
                         <span style={{
                           position: 'absolute', top: 2, left: 5, fontFamily: 'var(--sans)', fontSize: 11,
@@ -520,7 +666,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                           <div key={f} style={{ position: 'absolute', left: xOf(f), bottom: 0, height: 13, borderLeft: '1px solid var(--ink-3)' }}>
                             <span style={{ position: 'absolute', left: 3, bottom: 1, lineHeight: 1, whiteSpace: 'nowrap', fontWeight: 600 }}>
                               {f}
-                              <span style={{ fontWeight: 400, color: 'var(--ink-4)', fontSize: 9 }}> {formatSeconds(f, fps)}</span>
+                              <span style={{ fontWeight: 400, color: 'var(--ink-4)', fontSize: 10.5 }}> {formatSeconds(f, fps)}</span>
                             </span>
                           </div>
                         ))}
@@ -549,7 +695,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                         width={colWidths[i] - gap}
                         height={effSeqH - 18}
                         active={selection.kind === 'seq' && selection.id === seq.id}
-                        onClick={() => { setSelection({ kind: 'seq', id: seq.id }); onEntityClicked?.() }}
+                        onClick={() => { setSelection({ kind: 'seq', id: seq.id }); setMontage(null) }}
+                        onContextMenu={(x, y) => openCtx('seq', seq.id, x, y)}
                         onDragStart={e => {
                           e.dataTransfer.effectAllowed = 'move'
                           e.dataTransfer.setData('text/flux-seq-id', seq.id)
@@ -607,7 +754,10 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
                             height={shotSquare}
                             seqColor={seqCol}
                             active={selection.kind === 'shot' && selection.id === shot.id}
-                            onClick={() => { setSelection({ kind: 'shot', id: shot.id }); onEntityClicked?.() }}
+                            playing={playingId === shot.id}
+                            hasMedia={(previews[shot.id] ?? []).length > 0}
+                            onClick={() => { setSelection({ kind: 'shot', id: shot.id }); setMontage(null) }}
+                            onContextMenu={(x, y) => openCtx('shot', shot.id, x, y)}
                             onDragStart={e => {
                               e.dataTransfer.effectAllowed = 'move'
                               e.dataTransfer.setData('text/flux-shot-id', shot.id)
@@ -628,6 +778,35 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
         </div>
         )
       })()}
+
+      {sequences.length > 0 && (
+        <TimelinePreview project={project || ''} state={state} selection={selection} previews={previews} loading={previewsLoading}
+          source={source} setSource={setSource} fps={fps} framesOf={stableFrames}
+          montage={montage} setMontage={setMontage} onPlayingShot={setPlayingId}
+          setShotSource={(id, group) => setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === id ? { ...s, preview_source: group || undefined } : s) }))} />
+      )}
+
+      <Dropdown.Root open={!!ctx} onOpenChange={o => { if (!o) setCtx(null) }} modal={false}>
+        {createPortal(<Dropdown.Trigger tabIndex={-1} aria-hidden style={{ position: 'fixed', left: ctx?.x ?? 0, top: ctx?.y ?? 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
+        <Dropdown.Portal><Dropdown.Content className="production-context-menu" align="start" collisionPadding={10}>
+          {ctx && (() => {
+            const shot = ctx.kind === 'shot' ? state.shots.find(s => s.id === ctx.id) : undefined
+            const seqId = shot ? shot.seq_id : ctx.id
+            const seq = state.sequences.find(s => s.id === seqId)
+            const marked = bookmarkExistsFor(ctx.kind, ctx.id)
+            return <>
+              <Dropdown.Label className="production-menu-artist">{shot ? `${seq?.name ?? ''} ${shot.name}` : seq?.name}</Dropdown.Label>
+              <Dropdown.Item className="production-menu-item" onSelect={() => onEntityClicked?.()}>Éditer</Dropdown.Item>
+              <Dropdown.Item className="production-menu-item" onSelect={() => setMontage({ seqId })}>Montage de {seq?.name}</Dropdown.Item>
+              {shot && <Dropdown.Item className="production-menu-item" onSelect={() => keyframeShot(shot)}>Ouvrir dans Keyframe Pro</Dropdown.Item>}
+              <Dropdown.Item className="production-menu-item" onSelect={() => keyframeSeq(seqId)}>Montage de {seq?.name} dans Keyframe Pro</Dropdown.Item>
+              <Dropdown.Item className="production-menu-item" onSelect={() => persistBookmarks(marked
+                ? bookmarks.filter(b => !(b.kind === ctx.kind && b.entityId === ctx.id))
+                : [...bookmarks, { kind: ctx.kind, entityId: ctx.id }])}>{marked ? 'Retirer le bookmark' : 'Poser un bookmark'}</Dropdown.Item>
+            </>
+          })()}
+        </Dropdown.Content></Dropdown.Portal>
+      </Dropdown.Root>
     </div>
   )
 }
@@ -671,7 +850,7 @@ function TrackRow({ title, color, subtitle, height, children, colWidths, gap, no
           {subtitle && (
             <span style={{
               fontFamily: 'var(--sans)', fontWeight: 500,
-              fontSize: 9, color: 'var(--ink-4)', marginTop: 1,
+              fontSize: 10.5, color: 'var(--ink-4)', marginTop: 1,
             }}>{subtitle}</span>
           )}
         </div>
@@ -711,12 +890,13 @@ const effectiveSeqColor = (seq: ProductionSequence): string =>
 // The timeline is purely visual now: sequences and shots are created/deleted
 // from the Edit menu, never by resizing a clip. So a seq clip is just a draggable
 // (reorder) colored block — no right-edge grip.
-function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, shotCount }: {
+function SeqClip({ seq, width, height, active, onClick, onContextMenu, onDragStart, onDrop, shotCount }: {
   seq:         ProductionSequence
   width:       number
   height:      number
   active:      boolean
   onClick:     () => void
+  onContextMenu: (x: number, y: number) => void
   onDragStart: React.DragEventHandler
   onDrop:      React.DragEventHandler
   shotCount:   number
@@ -733,6 +913,7 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
       small={seq.label || ''}
       active={active}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDrop={onDrop}
       acceptType="text/flux-seq-id"
@@ -742,7 +923,10 @@ function SeqClip({ seq, width, height, active, onClick, onDragStart, onDrop, sho
   )
 }
 
-function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onClick, onDragStart, onDrop, seqColor, locked }: {
+function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, playing, hasMedia, onClick, onContextMenu, onDragStart, onDrop, seqColor, locked }: {
+  playing:     boolean              // current shot of the montage being played
+  hasMedia:    boolean              // something published in Production to preview
+  onContextMenu: (x: number, y: number) => void
   shot:        Shot
   locked:      boolean              // own lock or its sequence's: no resize (2026-09-30)
   frames:      number
@@ -771,12 +955,16 @@ function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onCl
       small={`${shot.label ? `${shot.label} · ` : ''}${frames} f · ${formatSeconds(frames, fps)}`}
       onResizeDown={onResizeDown}
       active={active}
+      playing={playing}
+      dot={hasMedia}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDrop={onDrop}
       acceptType="text/flux-shot-id"
       title={
         `${shot.name}${shot.label ? ` — ${shot.label}` : ''}\n${frames} images, ${formatSeconds(frames, fps)} (${range})` +
+        (hasMedia ? '\nAperçu disponible' : '\nRien de publié en Production') +
         '\nBord droit : glisser pour changer la duree' +
         (override ? '\nOverrides seq' : '') +
         (locked ? '\nVerrouillé' : '')
@@ -787,8 +975,11 @@ function ShotClip({ shot, frames, fps, onResizeDown, width, height, active, onCl
 }
 
 // ── generic clip (big number, optional label under) ─────────────────────────
-function Clip({ width, height, color, big, small, active, onClick, onDragStart, onDrop, acceptType, title, badge, onResizeDown }: {
+function Clip({ width, height, color, big, small, active, playing, dot, onClick, onContextMenu, onDragStart, onDrop, acceptType, title, badge, onResizeDown }: {
   onResizeDown?: (e: React.MouseEvent) => void
+  playing?:    boolean
+  dot?:        boolean
+  onContextMenu: (x: number, y: number) => void
   width:       number
   height:      number
   color:       string
@@ -824,6 +1015,14 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
       onDragLeave={() => setDragOver(false)}
       onDrop={e => { setDragOver(false); onDrop(e) }}
       onClick={(e) => { e.stopPropagation(); onClick() }}
+      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e.clientX, e.clientY) }}
+      tabIndex={0}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() }
+        else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onContextMenu(r.left, r.bottom)
+        }
+      }}
       title={title}
       style={{
         // border-box so the given width INCLUDES padding/border — otherwise each
@@ -837,7 +1036,7 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
         border: `1px solid color-mix(in oklch, ${color} 75%, black 20%)`,
         outline: active
           ? '2px solid var(--accent)'
-          : dragOver ? '2px dashed var(--accent-hi)' : 'none',
+          : playing ? '2px solid var(--ink)' : dragOver ? '2px dashed var(--accent-hi)' : 'none',
         outlineOffset: active ? 1 : 0,
         boxShadow: active
           ? `0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent)`
@@ -854,11 +1053,17 @@ function Clip({ width, height, color, big, small, active, onClick, onDragStart, 
       {badge && showBig && (
         <span style={{
           position: 'absolute', top: 3, right: 4,
-          fontFamily: 'var(--mono)', fontSize: 7, fontWeight: 700,
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
           padding: '1px 4px', borderRadius: 3,
           background: 'rgba(0,0,0,0.35)', color: 'var(--paper)',
           letterSpacing: '0.06em', pointerEvents: 'none',
         }}>{badge}</span>
+      )}
+      {dot && width >= 14 && (
+        <span aria-hidden style={{
+          position: 'absolute', left: 4, top: 4, width: 5, height: 5, borderRadius: '50%',
+          background: 'var(--paper)', opacity: 0.9, pointerEvents: 'none',
+        }} />
       )}
       {onResizeDown && width >= 8 && (
         <div

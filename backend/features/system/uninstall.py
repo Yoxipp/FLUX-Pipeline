@@ -37,13 +37,14 @@ _AUTOSTART_MODULES: dict[str, tuple[str, str]] = {
     "substance_designer": ("Substance Designer", "dcc.substance_designer.autostart"),
     "mari":               ("Mari", "dcc.mari.autostart"),
     "marvelous":          ("Marvelous Designer", "dcc.marvelous.autostart"),
+    "unreal":             ("Unreal Engine", "dcc.unreal.autostart"),
 }
 
 # Shown in Settings before uninstalling: what is left on the machine.
 KEPT = [
     "Python et ses paquets (FLUX n'installe pas Python, rien n'y est retire)",
     "Les logiciels eux-memes (Maya, Houdini, Nuke, ZBrush, Substance, Mari, Marvelous...)",
-    "Les projets et le dossier FLUX (DOSSIER_PROJETS, USER, CONFIG)",
+    "Les projets et le dossier FLUX (DOSSIER_PROJETS, USER, CONFIG, FLUX_UPDATE, FLUX_DOC avec le manuel)",
     "Ton propre contenu dans userSetup.py, 123.py, init.py... (seul le bloc FLUX est retire)",
     "Un preset Painter FLUX que tu as modifie",
 ]

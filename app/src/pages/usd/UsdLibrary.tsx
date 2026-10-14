@@ -1,6 +1,6 @@
 // UsdLibrary.tsx — the USD page content: everything already published in the project.
 // Left: assets (components created by hand, ADR 0023, links in blocks ADR 0024) and decors
-// (assemblies), with search.
+// (assemblies), with search, sort and filter by classification tokens (retake 03, lib/usdTokenSort).
 // Right: one entity in four views, like a documented USD pipeline tool (AYON scene
 // inventory / Solaris stage manager): Content (departments or instances, editable),
 // Versions, Composition (what the file really gives) and Dependencies.
@@ -20,6 +20,9 @@ import type {
 } from '../../api/client'
 import { useI18n } from '../../i18n'
 import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
+import { ExpandPicker } from '../../components/shared/ExpandPicker'
+import { useSessionState } from '../../hooks/useSessionState'
+import { NO_TOKEN, SORT_NAME, sortAndFilter, tokenValue, tokenValues } from '../../lib/usdTokenSort'
 
 type Tab = 'components' | 'assemblies'
 type DetailTab = 'content' | 'versions' | 'composition' | 'deps'
@@ -29,7 +32,7 @@ const stateColor: Record<UsdComponentInfo['state'], string> = {
   ok: 'var(--ok)', stale: 'var(--warn)', empty: 'var(--ink-4)',
 }
 
-const mono: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 10.5 }
+const mono: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5 }
 
 export function UsdLibrary({ project, projects, onProject }: {
   project: string | null | undefined; projects: string[]; onProject: (name: string) => void
@@ -39,6 +42,9 @@ export function UsdLibrary({ project, projects, onProject }: {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState<Tab>('components')
   const [query, setQuery] = useState('')
+  // Sort key and token filter survive page changes for the session (like the Publisher).
+  const [sortKey, setSortKey] = useSessionState<string>('usd.lib.sort', SORT_NAME)
+  const [tokenFilter, setTokenFilter] = useSessionState<Record<string, string[]>>('usd.lib.tokenFilter', {})
   const [sel, setSel] = useState<Selection>(null)
   const [legacy, setLegacy] = useState<{ name: string; rel_path: string }[]>([])
 
@@ -58,10 +64,28 @@ export function UsdLibrary({ project, projects, onProject }: {
   useEffect(() => { load() }, [load])
 
   const q = query.trim().toLowerCase()
+  const tokenKeys = lib?.token_keys ?? []
+  // A sort key gone from the project (token category removed) falls back to the name.
+  const activeSort = sortKey === SORT_NAME || tokenKeys.includes(sortKey) ? sortKey : SORT_NAME
+  const selected = useMemo(() => activeSort === SORT_NAME ? [] : (tokenFilter[activeSort] ?? []), [activeSort, tokenFilter])
   const components = useMemo(
-    () => (lib?.components ?? []).filter(c => !q || c.name.toLowerCase().includes(q)), [lib, q])
+    () => sortAndFilter((lib?.components ?? []).filter(c => !q || c.name.toLowerCase().includes(q)), activeSort, selected),
+    [lib, q, activeSort, selected])
   const assemblies = useMemo(
-    () => (lib?.assemblies ?? []).filter(a => !q || a.name.toLowerCase().includes(q)), [lib, q])
+    () => sortAndFilter((lib?.assemblies ?? []).filter(a => !q || a.name.toLowerCase().includes(q)), activeSort, selected),
+    [lib, q, activeSort, selected])
+  // Values offered as filter chips: those of the current tab, plus selected ones that
+  // no longer exist (shown as obsolete so the artist can drop them).
+  const tabEntries = tab === 'components' ? (lib?.components ?? []) : (lib?.assemblies ?? [])
+  const presentValues = activeSort === SORT_NAME ? [] : tokenValues(tabEntries, activeSort)
+  const obsoleteValues = lib ? selected.filter(v => !presentValues.includes(v)) : []
+  function toggleValue(v: string) {
+    setTokenFilter(f => {
+      const cur = f[activeSort] ?? []
+      return { ...f, [activeSort]: cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v] }
+    })
+  }
+  const groupLabel = (v: string) => v === NO_TOKEN ? tr('usd.lib.noToken') : v
 
   const selComponent = sel?.tab === 'components' ? lib?.components.find(c => c.name === sel.name) : undefined
   const selAssembly = sel?.tab === 'assemblies' ? lib?.assemblies.find(a => a.name === sel.name) : undefined
@@ -130,7 +154,8 @@ export function UsdLibrary({ project, projects, onProject }: {
               <RefreshCw size={11} strokeWidth={2} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
             </Btn>
           </div>
-          <div style={{ position: 'relative' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
             <Search size={11} strokeWidth={2} color="var(--ink-4)" style={{ position: 'absolute', left: 8, top: 8 }} />
             <input
               value={query}
@@ -141,7 +166,32 @@ export function UsdLibrary({ project, projects, onProject }: {
                 background: 'var(--bg-deep)', color: 'var(--ink)', fontSize: 11, outline: 'none', boxSizing: 'border-box',
               }}
             />
+            </div>
+            {tokenKeys.length > 0 && (
+              <ExpandPicker title={tr('usd.lib.sortBy')} mono value={activeSort} onChange={setSortKey}
+                options={[{ value: SORT_NAME, label: tr('usd.lib.sortName') },
+                  ...tokenKeys.map(k => ({ value: k, label: k, title: `${tr('usd.lib.sortBy')} ${k}` }))]} />
+            )}
           </div>
+          {activeSort !== SORT_NAME && (presentValues.length > 1 || selected.length > 0) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+              {presentValues.map(v => (
+                <Pill key={v} active={selected.includes(v)} onClick={() => toggleValue(v)}
+                  style={{ cursor: 'pointer', fontFamily: v === NO_TOKEN ? undefined : 'var(--mono)' }}>
+                  {groupLabel(v)} {tabEntries.filter(e => tokenValue(e, activeSort) === v).length}
+                </Pill>
+              ))}
+              {obsoleteValues.map(v => (
+                <span key={v} title={tr('usd.lib.obsoleteToken')} onClick={() => toggleValue(v)}
+                  style={{ ...mono, cursor: 'pointer', color: 'var(--warn)', textDecoration: 'line-through', padding: '0 4px' }}>
+                  {groupLabel(v)} <X size={9} strokeWidth={2} />
+                </span>
+              ))}
+              {selected.length > 0 && (
+                <Btn sm ghost onClick={() => setTokenFilter(f => ({ ...f, [activeSort]: [] }))}>{tr('usd.lib.clearFilter')}</Btn>
+              )}
+            </div>
+          )}
         </div>
 
         {tab === 'components' && lib && (
@@ -153,8 +203,12 @@ export function UsdLibrary({ project, projects, onProject }: {
             onCreated={name => { load(); goTo('assemblies', name) }} />
         )}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {tab === 'components' && components.map(c => (
-            <ListRow key={c.name} active={sel?.tab === 'components' && sel.name === c.name}
+          {tab === 'components' && components.map((c, i) => (
+            <div key={c.name} style={{ display: 'contents' }}>
+            {activeSort !== SORT_NAME && (i === 0 || tokenValue(components[i - 1], activeSort) !== tokenValue(c, activeSort)) && (
+              <GroupHeader label={groupLabel(tokenValue(c, activeSort))} />
+            )}
+            <ListRow active={sel?.tab === 'components' && sel.name === c.name}
               onClick={() => setSel({ tab: 'components', name: c.name })}
               icon={<Box size={12} strokeWidth={1.75} />}
               title={c.name}
@@ -164,9 +218,14 @@ export function UsdLibrary({ project, projects, onProject }: {
               </>}
               sub={`${c.blocks.map(b => b.name).join(' · ') || '-'}  ·  ${c.files.length} link${c.files.length > 1 ? 's' : ''}${c.used_by.length ? `  ·  ${c.used_by.length} asm` : ''}`}
             />
+            </div>
           ))}
-          {tab === 'assemblies' && assemblies.map(a => (
-            <ListRow key={a.file} active={sel?.tab === 'assemblies' && sel.name === a.name}
+          {tab === 'assemblies' && assemblies.map((a, i) => (
+            <div key={a.file} style={{ display: 'contents' }}>
+            {activeSort !== SORT_NAME && (i === 0 || tokenValue(assemblies[i - 1], activeSort) !== tokenValue(a, activeSort)) && (
+              <GroupHeader label={groupLabel(tokenValue(a, activeSort))} />
+            )}
+            <ListRow active={sel?.tab === 'assemblies' && sel.name === a.name}
               onClick={() => setSel({ tab: 'assemblies', name: a.name })}
               icon={<Boxes size={12} strokeWidth={1.75} />}
               title={a.name}
@@ -176,14 +235,15 @@ export function UsdLibrary({ project, projects, onProject }: {
               </>}
               sub={`${a.instances.length} ${tr('usd.lib.instances').toLowerCase()}`}
             />
+            </div>
           ))}
           {tab === 'assemblies' && legacy.length > 0 && (
             <div style={{ marginTop: 10, padding: '8px 6px', borderTop: '1px solid var(--rule)' }}>
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 4 }}>
+              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
                 Anciens fichiers ({legacy.length}) : plus proposes a l'import
               </div>
               {legacy.map(f => (
-                <div key={f.rel_path} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5 }}>
+                <div key={f.rel_path} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
                   <span style={{ ...mono, flex: 1, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis' }} title={f.rel_path}>{f.name}</span>
                   <Btn sm ghost title="Deplace le fichier dans <projet>/_backup_flux (rien n'est efface)"
                     onClick={() => {
@@ -199,7 +259,7 @@ export function UsdLibrary({ project, projects, onProject }: {
             </div>
           )}
           {lib &&(tab === 'components' ? components : assemblies).length === 0 && (
-            <div className="lbl" style={{ padding: '8px 6px', fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+            <div className="lbl" style={{ padding: '8px 6px', fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5 }}>
               {tr('usd.lib.empty')}
               {tab === 'components' && <><br />{tr('usd.lib.emptyAssets')}</>}
             </div>
@@ -223,6 +283,14 @@ export function UsdLibrary({ project, projects, onProject }: {
   )
 }
 
+function GroupHeader({ label }: { label: string }) {
+  return (
+    <div className="lbl" style={{ ...mono, fontSize: 11, color: 'var(--ink-4)', padding: '8px 6px 2px', letterSpacing: '.04em' }}>
+      {label}
+    </div>
+  )
+}
+
 function ListRow({ active, onClick, icon, title, meta, sub }: {
   active: boolean; onClick: () => void; icon: React.ReactNode; title: string; meta: React.ReactNode; sub: string
 }) {
@@ -237,7 +305,7 @@ function ListRow({ active, onClick, icon, title, meta, sub }: {
         <span style={{ fontSize: 11.5, fontWeight: 500, color: active ? 'var(--accent-hi)' : 'var(--ink)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
         {meta}
       </div>
-      <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', paddingLeft: 18 }}>{sub}</span>
+      <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', paddingLeft: 18 }}>{sub}</span>
     </div>
   )
 }
@@ -395,7 +463,7 @@ function Check2({ label, checked, disabled, title, onChange }: {
 }) {
   return (
     <label title={title} style={{
-      display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5,
+      display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5,
       color: disabled ? 'var(--ink-4)' : 'var(--ink-3)', cursor: disabled ? 'default' : 'pointer',
     }}>
       <input type="checkbox" checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
@@ -434,12 +502,12 @@ function LinkRow({ project, comp, link, files, rules, busy, onPatch, onRemove, o
           <span style={{ color: nonUsd ? 'var(--warn)' : 'var(--ink-4)' }}> .{link.format}</span>
         </span>
         {info && info.found === false && (
-          <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)' }}>{tr('usd.comp.notFound')}</span>
+          <span className="lbl" style={{ fontSize: 11, color: 'var(--err)' }}>{tr('usd.comp.notFound')}</span>
         )}
-        <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>{link.department}</span>
+        <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{link.department}</span>
         {link.source === 'publish'
           ? <VersionSelect project={project} name={comp.name} file={link} disabled={busy} onChange={v => onPatch({ version: v })} />
-          : <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', width: 70 }}>{tr('usd.comp.manual')}</span>}
+          : <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', width: 70 }}>{tr('usd.comp.manual')}</span>}
         <Btn sm ghost disabled={busy} title={tr('usd.lib.remove')} onClick={onRemove}>
           <Trash2 size={10} strokeWidth={2} />
         </Btn>
@@ -646,7 +714,7 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
         <Box size={15} strokeWidth={1.75} color="var(--ink-3)" />
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{comp.name}</span>
         {comp.version && <span style={{ ...mono, color: 'var(--ink-3)' }}>{comp.version}</span>}
-        <span className="lbl" style={{ fontSize: 10, color: stateColor[comp.state] }}>{tr(`usd.lib.state.${comp.state}`)}</span>
+        <span className="lbl" style={{ fontSize: 11, color: stateColor[comp.state] }}>{tr(`usd.lib.state.${comp.state}`)}</span>
         <div style={{ flex: 1 }} />
         <Btn sm ghost onClick={() => navigate('/projects', { state: { openPath: assetDir } })} title={assetDir}>
           <FolderOpen size={11} strokeWidth={2} /> {tr('usd.lib.openFolder')}
@@ -763,14 +831,14 @@ function ComponentDetail({ project, comp, departments, rules, onChanged, onOpenA
             <span style={{ ...mono, color: 'var(--ink-3)' }}>{f.composed_version ?? ''}</span>
           </div>
         ))}
-        {comp.files.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>}
+        {comp.files.length === 0 && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>-</span>}
       </div>
 
       <SkeletonInfo project={project} name={comp.name} />
 
       <SecTitle>{tr('usd.lib.usedBy')}</SecTitle>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        {comp.used_by.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.lib.unused')}</span>}
+        {comp.used_by.length === 0 && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.lib.unused')}</span>}
         {comp.used_by.map(a => (
           <Pill key={a} onClick={() => onOpenAssembly(a)} style={{ cursor: 'pointer' }}>
             <Boxes size={10} strokeWidth={2} /> {a}
@@ -913,7 +981,7 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{asm.name}</span>
         {asm.version && <span style={{ ...mono, color: 'var(--ink-3)' }}>{asm.version}</span>}
         {asm.broken > 0 && (
-          <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{tr('usd.lib.brokenCount', { n: asm.broken })}</span>
+          <span className="lbl" style={{ fontSize: 11, color: 'var(--err)' }}>{tr('usd.lib.brokenCount', { n: asm.broken })}</span>
         )}
         <div style={{ flex: 1 }} />
         <Btn sm ghost onClick={() => navigate('/projects', { state: { openPath: asm.file.replace(/[\\/][^\\/]+$/, '') } })}>
@@ -932,10 +1000,10 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
         </Btn>
       </div>
       {asm.legacy && (
-        <span className="lbl" style={{ fontSize: 10, color: 'var(--warn)' }}>{tr('usd.lib.legacy')}</span>
+        <span className="lbl" style={{ fontSize: 11, color: 'var(--warn)' }}>{tr('usd.lib.legacy')}</span>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }} title={asm.layout ?? undefined}>
+        <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }} title={asm.layout ?? undefined}>
           {tr('usd.lib.layout')} : {asm.layout_version ?? (asm.layout ? asm.layout.split(/[\\/]/).pop() : tr('usd.lib.noLayout'))}
         </span>
         <div style={{ flex: 1 }} />
@@ -983,7 +1051,7 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
         </Btn>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {asm.instances.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.lib.noInstance')}</span>}
+        {asm.instances.length === 0 && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.lib.noInstance')}</span>}
         {asm.instances.map(i => {
           const name = instName(i.prim)
           const rowEdit = editing?.prim === i.prim ? editing.mode : null
@@ -1001,9 +1069,9 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
                   <Box size={10} strokeWidth={2} /> {i.component}
                 </Pill>
               ) : (
-                <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>{tr('usd.lib.notComponent')}</span>
+                <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.lib.notComponent')}</span>
               )}
-              <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)', width: 40, textAlign: 'right' }}>
+              <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-3)', width: 40, textAlign: 'right' }}>
                 {i.follows_last ? tr('usd.lib.followLast') : (i.asset_path.match(/_(v\d+)\//)?.[1] ?? tr('usd.lib.frozen'))}
               </span>
               {/* ADR 0023/0024: a variant set per toggled link (on / off) or per block (its variants);
@@ -1021,7 +1089,7 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
                 )
               })}
               {i.broken && (
-                <span className="lbl" style={{ fontSize: 9.5, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span className="lbl" style={{ fontSize: 11, color: 'var(--err)', display: 'flex', alignItems: 'center', gap: 4 }}>
                   <AlertTriangle size={10} strokeWidth={2} /> {tr('usd.lib.broken')}
                 </span>
               )}
@@ -1088,7 +1156,7 @@ function AssemblyDetail({ project, asm, components, onOpenComponent, onChanged }
               <Box size={10} strokeWidth={2} /> {c}
             </Pill>
           ))}
-          {asm.instances.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>}
+          {asm.instances.length === 0 && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>-</span>}
         </div>
 
         <SecTitle>{tr('usd.lib.layout')}</SecTitle>
@@ -1117,13 +1185,13 @@ function DetailTabs({ tab, onTab }: { tab: DetailTab; onTab: (t: DetailTab) => v
 // Version history: newest first, the one LAST points at is marked.
 function VersionsView({ versions, current }: { versions: string[]; current: string | null }) {
   const { t: tr } = useI18n()
-  if (versions.length === 0) return <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>-</span>
+  if (versions.length === 0) return <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>-</span>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {[...versions].reverse().map(v => (
         <div key={v} className="card" style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ ...mono, color: v === current ? 'var(--accent-hi)' : 'var(--ink-2)' }}>{v}</span>
-          {v === current && <span className="lbl" style={{ fontSize: 9.5, color: 'var(--accent-hi)' }}>{tr('usd.versions.current')}</span>}
+          {v === current && <span className="lbl" style={{ fontSize: 11, color: 'var(--accent-hi)' }}>{tr('usd.versions.current')}</span>}
         </div>
       ))}
     </div>
@@ -1156,21 +1224,21 @@ function SkeletonInfo({ project, name }: { project: string; name: string }) {
   return (<>
     <SecTitle>{tr('usd.crowd.skeleton')}</SecTitle>
     <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {error && <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{error}</span>}
-      {!error && !compat && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>...</span>}
-      {compat && !info && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.crowd.noSkeleton')}</span>}
+      {error && <span className="lbl" style={{ fontSize: 11, color: 'var(--err)' }}>{error}</span>}
+      {!error && !compat && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>...</span>}
+      {compat && !info && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.crowd.noSkeleton')}</span>}
       {info && (<>
         <span style={{ ...mono, color: 'var(--ink-2)' }}>
           {tr('usd.crowd.signature')} {info.signature} · {info.joint_count} {tr('usd.crowd.joints')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
           <span className="cap" style={{ marginRight: 4 }}>{tr('usd.crowd.sameRig')}</span>
-          {info.compatible.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.crowd.none')}</span>}
+          {info.compatible.length === 0 && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.crowd.none')}</span>}
           {info.compatible.map(a => <Pill key={a}>{a}</Pill>)}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
           <span className="cap" style={{ marginRight: 4 }}>{tr('usd.crowd.clips')}</span>
-          {clips.length === 0 && <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.crowd.none')}</span>}
+          {clips.length === 0 && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.crowd.none')}</span>}
           {clips.map(c => (
             <Pill key={c.base}>
               {c.asset} {c.clip}{c.range ? ` ${c.range[0]}-${c.range[1]}` : ''}
@@ -1196,13 +1264,13 @@ function CompositionView({ project, file }: { project: string; file: string | nu
       .catch(e => setError(errMsg(e)))
   }, [project, file])
 
-  if (!file) return <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>{tr('usd.comp.empty')}</span>
-  if (error) return <span className="lbl" style={{ fontSize: 10, color: 'var(--err)' }}>{error}</span>
-  if (!comp) return <span className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>...</span>
+  if (!file) return <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.comp.empty')}</span>
+  if (error) return <span className="lbl" style={{ fontSize: 11, color: 'var(--err)' }}>{error}</span>
+  if (!comp) return <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>...</span>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {comp.tree ? <PrimRow node={comp.tree} depth={0} /> : <span className="lbl" style={{ fontSize: 10 }}>-</span>}
+        {comp.tree ? <PrimRow node={comp.tree} depth={0} /> : <span className="lbl" style={{ fontSize: 11 }}>-</span>}
       </div>
       <SecTitle>{tr('usd.comp.layers')}</SecTitle>
       <div className="card" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1223,28 +1291,28 @@ function PrimRow({ node, depth }: { node: UsdPrimNode; depth: number }) {
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: depth * 14 }}>
         <span style={{ ...mono, color: 'var(--ink)' }}>{node.name || '/'}</span>
-        {node.type && <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>{node.type}</span>}
+        {node.type && <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{node.type}</span>}
         {node.kind && <Pill>{node.kind}</Pill>}
         {node.purpose && node.purpose !== 'default' && (
-          <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>{node.purpose}</span>
+          <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{node.purpose}</span>
         )}
         {vsets.map(([name, v]) => (
-          <span key={name} className="lbl" style={{ fontSize: 9.5, color: 'var(--accent-hi)' }}>
+          <span key={name} className="lbl" style={{ fontSize: 11, color: 'var(--accent-hi)' }}>
             {name} = {v.selection || '-'} ({v.variants.length})
           </span>
         ))}
         {node.arcs.map((a, i) => (
-          <span key={i} className="lbl" title={a.asset} style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>
+          <span key={i} className="lbl" title={a.asset} style={{ fontSize: 11, color: 'var(--ink-4)' }}>
             {a.arc} {a.asset.split('/').pop()}
           </span>
         ))}
         {node.instanceable && (
-          <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)' }}>{tr('usd.comp.instanced')}</span>
+          <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('usd.comp.instanced')}</span>
         )}
       </div>
       {node.children.map(c => <PrimRow key={c.path} node={c} depth={depth + 1} />)}
       {node.truncated && !node.instanceable && (
-        <span className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-4)', paddingLeft: (depth + 1) * 14 }}>
+        <span className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', paddingLeft: (depth + 1) * 14 }}>
           {tr('usd.comp.more')}
         </span>
       )}

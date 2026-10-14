@@ -37,7 +37,7 @@ export function ProdBtn({
   } else {
     const c = color ?? 'var(--accent)'
     bg = c
-    fg = 'var(--paper)'
+    fg = 'var(--on-accent)'
     bd = c
   }
 
@@ -48,19 +48,19 @@ export function ProdBtn({
       title={title}
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        fontFamily: 'var(--sans)', fontSize: fs, fontWeight: variant === 'ghost' ? 500 : 600,
+        fontFamily: 'var(--sans)', fontSize: fs, fontWeight: variant === 'ghost' ? 500 : 700,
         color: fg, background: bg,
         border: `1px solid ${bd}`,
         borderRadius: 6, padding: pad,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.55 : 1,
         boxShadow: variant === 'solid' ? '0 1px 3px rgba(0,0,0,0.35)' : undefined,
-        transition: 'transform 0.12s, filter 0.12s',
+        transition: 'background-color 0.12s',
         width: full ? '100%' : undefined,
         ...style,
       }}
-      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.filter = 'brightness(1.08)' } }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.filter = 'brightness(1)' }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = `color-mix(in srgb, ${bg} 90%, var(--ink) 10%)` }}
+      onMouseLeave={e => { e.currentTarget.style.background = bg }}
     >
       {children}
     </button>
@@ -95,7 +95,7 @@ export function CategoryTile({
       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.filter = 'brightness(1)' }}
     >
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '0.02em' }}>{label}</div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, opacity: 0.85 }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, opacity: 0.85 }}>
         {count === 0 ? '—' : `${count} asset${count > 1 ? 's' : ''}`}
       </div>
     </button>

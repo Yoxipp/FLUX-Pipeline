@@ -38,6 +38,12 @@ export function buildFavoriteKey(
   return subtask ? `${base}|${subtask.toUpperCase()}` : base
 }
 
+// A followed shot (retake 04): every task of the shot notifies the artist. Same
+// list as task favorites; the backend (features/activity/notifications.py) reads it.
+export function shotFollowKey(project: string, seq: string, shot: string): string {
+  return `${project}|${seq.toUpperCase()}/${shot.toUpperCase()}|*`
+}
+
 // Match a favorite key against a parsed publish/comment event.
 export function eventMatchesFavorite(
   favKey: string,

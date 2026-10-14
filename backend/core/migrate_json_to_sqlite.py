@@ -40,6 +40,7 @@ from core.constants import (
 from core.json_repository import JsonFileRepository
 from core.logger import get_logger
 from core.doc_keys import to_logical
+from core.project_setup import setup_path
 from core.sqlite_repository import SqliteRepository
 
 log = get_logger(__name__)
@@ -91,15 +92,15 @@ def _json_locate_factory(projects_dir: Path, users_dir: Path, prefs_path: Path):
 
     def locate(collection: str, doc_id: str | None) -> Path:
         if collection == "tokens":
-            return Path(str(doc_id)) / JSON_TOKENS
+            return setup_path(str(doc_id), JSON_TOKENS)
         if collection == "locks":
-            return Path(str(doc_id)) / JSON_LOCKS
+            return setup_path(str(doc_id), JSON_LOCKS)
         if collection == "modif_log":
             return Path(str(doc_id)) / JSON_MODIF_LOG
         if collection == "production":
-            return projects_dir / str(doc_id) / JSON_PRODUCTION
+            return setup_path(projects_dir / str(doc_id), JSON_PRODUCTION)
         if collection == "calendar":
-            return projects_dir / str(doc_id) / JSON_CALENDAR
+            return setup_path(projects_dir / str(doc_id), JSON_CALENDAR)
         if collection == "user_settings":
             return users_dir / str(doc_id) / "UserSettings" / JSON_USER_SETTINGS
         if collection == "config":
@@ -131,16 +132,17 @@ def _scan(
 
     # per-project documents: tokens/locks keyed by path, production keyed by name.
     for project in _subdirs(projects_dir):
-        if (project / JSON_TOKENS).exists():
+        if setup_path(project, JSON_TOKENS).exists():
             docs.append(("tokens", str(project)))
-        if (project / JSON_LOCKS).exists():
+        if setup_path(project, JSON_LOCKS).exists():
             docs.append(("locks", str(project)))
-        if (project / JSON_PRODUCTION).exists():
+        if setup_path(project, JSON_PRODUCTION).exists():
             docs.append(("production", project.name))
-        if (project / JSON_CALENDAR).exists():
+        if setup_path(project, JSON_CALENDAR).exists():
             docs.append(("calendar", project.name))
-        if (project / JSON_CHAT).exists():   # per-project team chat (feed log)
-            logs.append(("chat_log", str(project / JSON_CHAT)))
+        chat = setup_path(project, JSON_CHAT)
+        if chat.exists():   # per-project team chat (feed log)
+            logs.append(("chat_log", str(chat)))
 
     # per-user settings, keyed by user name.
     for user in _subdirs(users_dir):

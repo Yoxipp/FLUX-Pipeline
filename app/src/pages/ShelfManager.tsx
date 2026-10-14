@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Zap, RefreshCw, CheckCircle2, XCircle, ArrowRight, Trash2 } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
-import { Btn, SecTitle, Pill, Check } from '../components/shared/ui'
+import { Btn, SecTitle, Check } from '../components/shared/ui'
+import { ExpandPicker } from '../components/shared/ExpandPicker'
+import { ConnectionPill } from '../components/shared/ConnectionPill'
 import { FluxLogo } from '../components/shared/Logo'
 import { api } from '../api/client'
 import { useProject } from '../ProjectContext'
+import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { SOFTWARE } from '../lib/dccs'
+import { useTr } from '../i18n'
+import { StaleFilesDialog, type StaleItem } from './shelf_manager/StaleFilesDialog'
 
 // Shelf tool tints — ANIM (orange) / RIG (blue), matching the Maya shelf icons.
 const ANIM_COLOR = 'oklch(70% 0.15 52)'
@@ -22,30 +28,17 @@ const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: strin
     <div style={{
       width: 40, height: 40, borderRadius: 9,
       border: primary ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
-      background: primary ? 'var(--accent-soft)' : 'var(--paper)',
-      color: primary ? 'var(--accent-hi)' : 'var(--ink-3)',
+      background: primary ? 'var(--accent)' : 'var(--paper)',
+      color: primary ? 'var(--on-accent)' : 'var(--ink-3)', fontWeight: primary ? 700 : undefined,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       boxShadow: 'var(--shadow-sm)',
       transition: 'box-shadow 0.12s',
     }}>
       {icon}
     </div>
-    <div className="lbl" style={{ fontSize: 9 }}>{label}</div>
+    <div className="lbl" style={{ fontSize: 10.5 }}>{label}</div>
   </div>
 )
-
-type StatusBadge = { ok: boolean; label: string }
-
-function Badge({ ok, label }: StatusBadge) {
-  const Icon = ok ? CheckCircle2 : XCircle
-  const color = ok ? 'var(--ok)' : 'var(--err)'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10 }}>
-      <Icon size={11} strokeWidth={2} color={color} style={{ flexShrink: 0 }} />
-      <span style={{ color: ok ? 'var(--ink-2)' : 'var(--err)' }}>{label}</span>
-    </div>
-  )
-}
 
 type ShelfData = {
   versions: string[]
@@ -58,7 +51,19 @@ type AllShelvesResponse = Record<string, ShelfData>
 type LogEntry = { type: 'ok' | 'err' | 'info'; msg: string }
 
 export function ShelfManager() {
+  const { tr } = useTr()
+  const { isEnabled: isDccEnabled } = useEnabledDccs()
   const [dcc, setDcc] = useState('Houdini')
+  // Same software list as the launcher: the ones enabled in Settings > Logiciels.
+  const dccEnabled = useCallback((name: string) => {
+    const key = SOFTWARE.find(x => x.name === name)?.key
+    return !key || isDccEnabled(key)
+  }, [isDccEnabled])
+  useEffect(() => {
+    if (dccEnabled(dcc)) return
+    const first = SOFTWARE.find(x => isDccEnabled(x.key))
+    if (first) { setDcc(first.name); setVersion('') }
+  }, [dcc, dccEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
   const [version, setVersion] = useState('')
   const [shelfData, setShelfData] = useState<AllShelvesResponse>({})
   const [log, setLog] = useState<LogEntry[]>([])
@@ -68,6 +73,8 @@ export function ShelfManager() {
   const [toolVersion, setToolVersion] = useState('')
   const [toolsInstalled, setToolsInstalled] = useState<Record<string, boolean>>({})
   const [checked, setChecked] = useState<Record<string, boolean>>({})
+  // Old FLUX files found after an install (shelf/stale): shown in a checklist.
+  const [stale, setStale] = useState<{ dcc: string; version: string; items: StaleItem[] } | null>(null)
 
   // Painter: the export presets of the current project (project.json texturing.painter_presets).
   const { project } = useProject()
@@ -87,7 +94,7 @@ export function ShelfManager() {
     setPainterPicked(next)
     try {
       await api.putPainterPresets(project, next)
-      addLog('ok', `Presets Painter de ${project} : ${next.length ? next.join(', ') : 'tous'}`)
+      addLog('ok', tr(`Presets Painter de ${project} : ${next.length ? next.join(', ') : 'tous'}`, `Painter presets for ${project}: ${next.length ? next.join(', ') : 'all'}`))
     } catch (e: any) {
       addLog('err', String(e?.message ?? e))
       void loadPainterPresets()
@@ -111,7 +118,7 @@ export function ShelfManager() {
         setVersion(v => v || dccData.versions[dccData.versions.length - 1])
       }
     } catch (err) {
-      addLog('err', `Fetch failed: ${err}`)
+      addLog('err', tr(`Échec de la lecture : ${err}`, `Fetch failed: ${err}`))
     }
   }
 
@@ -120,27 +127,38 @@ export function ShelfManager() {
   async function handleInstall() {
     if (!version) return
     setBusy(true)
-    addLog('info', `Installing ${dcc} ${version} shelf…`)
+    addLog('info', tr(`Installation du shelf ${dcc} ${version}…`, `Installing ${dcc} ${version} shelf…`))
     try {
       const res = await api.installShelf(dcc, version)
       addLog('ok', (res as { message: string }).message)
+      await offerStaleCleanup(dcc, version)
     } catch (err) {
-      addLog('err', `Install failed: ${err}`)
+      addLog('err', tr(`Échec de l'installation : ${err}`, `Install failed: ${err}`))
     } finally {
       await fetchStatus()
       setBusy(false)
     }
   }
 
+  // After an install: the old FLUX files of that DCC that are no longer the real ones.
+  async function offerStaleCleanup(forDcc: string, forVersion: string) {
+    try {
+      const { items } = await api.getStaleShelfFiles(forDcc, forVersion)
+      if (items.length) setStale({ dcc: forDcc, version: forVersion, items })
+    } catch (err) {
+      addLog('err', tr(`Recherche des anciens fichiers FLUX impossible : ${err}`, `Could not look for old FLUX files: ${err}`))
+    }
+  }
+
   async function handleRemove() {
     if (!version) return
     setBusy(true)
-    addLog('info', `Removing ${dcc} ${version} shelf…`)
+    addLog('info', tr(`Retrait du shelf ${dcc} ${version}…`, `Removing ${dcc} ${version} shelf…`))
     try {
       const res = await api.removeShelf(dcc, version)
       addLog('ok', (res as { message: string }).message)
     } catch (err) {
-      addLog('err', `Remove failed: ${err}`)
+      addLog('err', tr(`Échec du retrait : ${err}`, `Remove failed: ${err}`))
     } finally {
       await fetchStatus()
       setBusy(false)
@@ -149,9 +167,9 @@ export function ShelfManager() {
 
   async function handleRefresh() {
     setBusy(true)
-    addLog('info', 'Refreshing status…')
+    addLog('info', tr('Mise à jour du statut…', 'Refreshing status…'))
     await fetchStatus()
-    addLog('ok', 'Status updated')
+    addLog('ok', tr('Statut à jour', 'Status updated'))
     setBusy(false)
   }
 
@@ -172,10 +190,11 @@ export function ShelfManager() {
     if (!toolVersion) return
     setBusy(true)
     const ids = tools.filter(t => checked[t.id]).map(t => t.id)
-    addLog('info', `Installation shelf Flux (${ids.length} tool(s))…`)
+    addLog('info', tr(`Installation shelf Flux (${ids.length} tool(s))…`, `Installing Flux shelf (${ids.length} tool(s))…`))
     try {
       const res = await api.applyTools(toolVersion, ids)
       addLog('ok', res.message)
+      await offerStaleCleanup('Maya', toolVersion)
       await fetchTools()
     } catch (e: any) {
       addLog('err', String(e?.message ?? e))
@@ -188,55 +207,52 @@ export function ShelfManager() {
   const hdaOk   = version ? (currentData.hdas_installed[version] ?? false) : false
   const isHoudini = dcc === 'Houdini'
   const isZBrush = dcc === 'ZBrush'
+  const isUnreal = dcc === 'Unreal'
   const hasPreview = isHoudini || isZBrush || dcc === 'Maya'
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-      <div style={{ padding: '12px 20px 10px', borderBottom: '1px solid var(--rule)', flexShrink: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Gestion du Shelf</div>
+      {/* One toolbar: software, target version, state, actions (ADR 0044). */}
+      <div className="page-toolbar">
+        <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false}
+          isVisible={dccEnabled} extra={['Unreal']} />
+        {!isPainter && (versions.length === 0
+          ? <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr(`Aucune version ${dcc} détectée`, `No ${dcc} version found`)}</span>
+          : <ExpandPicker mono title={tr('Version cible', 'Target version')} placeholder={tr('Version', 'Version')} value={version}
+              options={versions.map(v => ({ value: v, label: v }))} onChange={setVersion} />)}
+        {version && !isPainter && (
+          <>
+            <ConnectionPill state={shelfOk ? 'ok' : 'off'} label={isUnreal ? (shelfOk ? tr('Plugin FLUX installé', 'FLUX plugin installed') : tr('Plugin FLUX absent', 'FLUX plugin missing')) : isZBrush ? (shelfOk ? tr('UI FLUX installée', 'FLUX UI installed') : tr('UI FLUX absente', 'FLUX UI missing')) : shelfOk ? tr('Shelf installé', 'Shelf installed') : tr('Shelf absent', 'Shelf missing')} />
+            {isHoudini && <ConnectionPill state={hdaOk ? 'ok' : 'off'} label={hdaOk ? tr('HDAs installés', 'HDAs installed') : tr('HDAs absents', 'HDAs missing')} />}
+          </>
+        )}
+        <div style={{ flex: 1 }} />
+        {!isPainter && (
+          <>
+            <Btn ghost disabled={busy} title={tr('Mettre à jour', 'Refresh')} onClick={handleRefresh}><RefreshCw size={12} strokeWidth={2} /></Btn>
+            <Btn ghost disabled={!version || busy} title={isHoudini ? tr("Retirer la shelf (l'Autostart garde les HDAs)", 'Remove the shelf (Autostart keeps the HDAs)') : isUnreal ? tr('Retirer le plugin FLUX (le projet FluxRender et ses caches restent)', 'Remove the FLUX plugin (the FluxRender project and its caches stay)') : isZBrush ? tr('Remettre ton interface ZBrush', 'Restore your ZBrush interface') : tr('Retirer le shelf', 'Remove the shelf')} onClick={handleRemove}>
+              <Trash2 size={12} strokeWidth={2} />
+            </Btn>
+            <Btn primary disabled={!version || busy} style={{ gap: 6 }} onClick={handleInstall}
+              title={isHoudini ? tr('Copie la shelf et les HDAs (reconstruits si Houdini est ouvert)', 'Copies the shelf and HDAs (rebuilt if Houdini is open)')
+                : isUnreal ? tr("Prépare le projet Unreal FluxRender (USD, Python, Movie Render Queue) avec le plugin FLUX : menu FLUX dans Unreal, live depuis Houdini. Rien à régler dans Unreal.", 'Sets up the FluxRender Unreal project (USD, Python, Movie Render Queue) with the FLUX plugin: FLUX menu in Unreal, live from Houdini. Nothing to set up in Unreal.')
+                : isZBrush ? tr("Remplace l'interface de ZBrush par l'UI FLUX (la tienne est gardée) et installe le bridge : menu FLUX avec Export FLUX et Save +1. Relance ZBrush.", 'Replaces the ZBrush interface with the FLUX UI (yours is kept) and installs the bridge: FLUX menu with Export FLUX and Save +1. Restart ZBrush.')
+                : undefined}>
+              <Zap size={12} strokeWidth={2} />
+              {isHoudini ? tr('Installer shelf + HDAs', 'Install shelf + HDAs') : isUnreal ? tr('Installer le plugin FLUX', 'Install FLUX plugin') : isZBrush ? tr('Installer UI FLUX', 'Install FLUX UI') : tr('Installer', 'Install')}
+            </Btn>
+          </>
+        )}
       </div>
-
-      <SoftwareSelector active={dcc} onChange={v => { setDcc(v); setVersion('') }} showLocal={false} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
         <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
 
-          {/* version */}
-          {!isPainter && <div>
-            <SecTitle>Version cible</SecTitle>
-            {versions.length === 0 ? (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
-                Aucune version {dcc} détectée
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 6 }}>
-                {versions.map(v => (
-                  <Pill key={v} active={version === v} style={{ cursor: 'pointer' }}>
-                    <span onClick={() => setVersion(v)}>{v}</span>
-                  </Pill>
-                ))}
-              </div>
-            )}
-          </div>}
-
-          {/* status badges */}
-          {version && !isPainter && (
-            <div>
-              <SecTitle>État</SecTitle>
-              <div style={{ display: 'flex', gap: 16 }}>
-                <Badge ok={shelfOk} label={isZBrush ? (shelfOk ? 'UI FLUX installée' : 'UI FLUX absente') : shelfOk ? 'Shelf installé' : 'Shelf absent'} />
-                {isHoudini && (
-                  <Badge ok={hdaOk} label={hdaOk ? 'HDAs installés' : 'HDAs absents'} />
-                )}
-              </div>
-            </div>
-          )}
-
           {/* aperçu shelf: only the DCCs that really have a FLUX shelf (2026-09-30) */}
           {hasPreview && <div>
-            <SecTitle>Aperçu du shelf</SecTitle>
+            <SecTitle>{tr('Aperçu du shelf', 'Shelf preview')}</SecTitle>
             <div className="card" style={{ padding: '14px 20px', display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', minHeight: 62 }}>
               {isZBrush ? (
                 <>
@@ -244,7 +260,7 @@ export function ShelfManager() {
                   <ShelfBtn icon={<FluxLogo size={20} color={CAM_COLOR} />} label="SAVE +1" />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginLeft: 6, paddingLeft: 16, borderLeft: '1px solid var(--rule-2)' }}>
                     <div style={{ fontSize: 11, color: 'var(--ink)', fontFamily: 'var(--mono)' }}>flux_ui_zbrush</div>
-                    <div className="lbl" style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>UI FLUX (template Rongeart) · menu FLUX · .ztl à chaque clic FLUX + QuickSave 10 min</div>
+                    <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{tr('UI FLUX (template Rongeart) · menu FLUX · .ztl à chaque clic FLUX + QuickSave 10 min', 'FLUX UI (Rongeart template) · FLUX menu · .ztl on every FLUX click + QuickSave 10 min')}</div>
                   </div>
                 </>
               ) : dcc === 'Maya' ? (
@@ -257,7 +273,7 @@ export function ShelfManager() {
               ) : (
                 <>
                   {/* One button per FLUX node (HDA): same list as resources/shelves/houdini/Flux.shelf. */}
-                  {['Import', 'Export', 'Anim', 'Shot', 'Crowd', 'Lighting'].map(l => (
+                  {['Import', 'Export', 'Anim', 'Shot', 'Crowd', 'Work', 'Lighting', 'Render', 'Sequence'].map(l => (
                     <ShelfBtn key={l} icon={<FluxLogo size={20} color={ANIM_COLOR} />} label={l} />
                   ))}
                 </>
@@ -268,9 +284,9 @@ export function ShelfManager() {
           {/* PAINTER: export presets of the project (moved from the Folder Manager). */}
           {isPainter && (
             <div>
-              <SecTitle>Presets d'export Painter{project ? ` · ${project}` : ''}</SecTitle>
+              <SecTitle>{tr("Presets d'export Painter", 'Painter export presets')}{project ? ` · ${project}` : ''}</SecTitle>
               {!project ? (
-                <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>Choisis un projet pour régler ses presets.</div>
+                <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>{tr('Choisis un projet pour régler ses presets.', 'Pick a project to set its presets.')}</div>
               ) : (
                 <div className="card" style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {painterBundled.map(p => {
@@ -287,60 +303,27 @@ export function ShelfManager() {
                   })}
                 </div>
               )}
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
-                Le Publisher ne propose que les presets cochés pour ce projet ; aucun coché : tous.
-                Les presets FLUX sont copiés dans Painter à l'installation du bridge (Autostart).
+              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
+                {tr("Le Publisher ne propose que les presets cochés pour ce projet ; aucun coché : tous. Les presets FLUX sont copiés dans Painter à l'installation du bridge (Autostart).",
+                  'The Publisher only offers the presets checked for this project; none checked: all of them. FLUX presets are copied into Painter when the bridge is installed (Autostart).')}
               </div>
             </div>
           )}
-
-          {/* actions. Houdini: installing the shelf also installs (or rebuilds, when
-              Houdini is connected) the FLUX HDAs; removing it keeps them (Autostart). */}
-          {!isPainter && <div>
-            <SecTitle>Actions</SecTitle>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn primary disabled={!version || busy} style={{ flex: 1, height: 32, justifyContent: 'center', gap: 6 }} onClick={handleInstall}>
-                <Zap size={12} strokeWidth={2} />
-                {isHoudini ? 'Installer shelf + HDAs' : isZBrush ? 'Installer UI FLUX + bridge' : 'Installer le shelf'}
-              </Btn>
-              <Btn ghost disabled={busy} style={{ height: 32, gap: 5 }} onClick={handleRefresh}>
-                <RefreshCw size={11} strokeWidth={2} />
-                Màj
-              </Btn>
-              <Btn ghost disabled={!version || busy} style={{ height: 32, gap: 5 }} onClick={handleRemove}>
-                <Trash2 size={11} strokeWidth={2} />
-                Retirer
-              </Btn>
-            </div>
-            {isHoudini && (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
-                Installer copie la shelf et les HDAs (reconstruits si Houdini est ouvert).
-                Retirer enlève la shelf seulement : l'Autostart garde les HDAs.
-              </div>
-            )}
-            {isZBrush && (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)', lineHeight: 1.5, marginTop: 6 }}>
-                Installer remplace l'interface de ZBrush par l'UI FLUX (la tienne est gardée une fois de côté)
-                et installe le bridge : menu FLUX avec Export FLUX et Save +1. Retirer remet ton interface. Relance ZBrush.
-              </div>
-            )}
-          </div>}
 
           {/* Catalogue de tools Maya (rig toolbox / anim tool / flux) — Maya only.
               Rigging/Anim toolboxes are Maya-specific; Houdini has no equivalent. */}
           {dcc === 'Maya' && (
           <div>
-            <SecTitle>Tools de la shelf Flux</SecTitle>
+            <SecTitle>{tr('Tools de la shelf Flux', 'Flux shelf tools')}</SecTitle>
             {toolVersions.length === 0 ? (
-              <div className="lbl" style={{ fontSize: 10, color: 'var(--ink-4)' }}>
-                Aucune version Maya détectée
+              <div className="lbl" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+                {tr('Aucune version Maya détectée', 'No Maya version found')}
               </div>
             ) : (
               <>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                  {toolVersions.map(v => (
-                    <Pill key={v} active={toolVersion === v} onClick={() => setToolVersion(v)} style={{ cursor: 'pointer' }}>{v}</Pill>
-                  ))}
+                <div style={{ marginBottom: 10 }}>
+                  <ExpandPicker mono title={tr('Version de Maya', 'Maya version')} value={toolVersion}
+                    options={toolVersions.map(v => ({ value: v, label: v }))} onChange={setToolVersion} />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tools.map(t => (
@@ -352,11 +335,11 @@ export function ShelfManager() {
                     >
                       <div style={{
                         width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                        border: '1.5px solid ' + (checked[t.id] ? 'var(--accent)' : 'var(--rule-2)'),
+                        border: '1.5px solid ' + (checked[t.id] ? 'var(--rule-3)' : 'var(--rule-2)'),
                         background: checked[t.id] ? 'var(--accent)' : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        {checked[t.id] && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                        {checked[t.id] && <span style={{ color: 'white', fontSize: 11, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                       </div>
                       <div style={{ flex: 1, fontSize: 12, color: 'var(--ink)' }}>{t.label}</div>
                     </div>
@@ -365,14 +348,11 @@ export function ShelfManager() {
                 <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center' }}>
                   <Btn primary disabled={busy || !toolVersion} style={{ height: 30, gap: 6, justifyContent: 'center' }} onClick={() => { void handleApplyTools() }}>
                     <Zap size={12} strokeWidth={2} />
-                    Installer les tools cochés
+                    {tr('Installer les tools cochés', 'Install checked tools')}
                   </Btn>
-                  <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
-                    {toolVersion && (toolsInstalled[toolVersion] ? `Shelf Flux installée · ${toolVersion}` : `Non installée · ${toolVersion}`)}
+                  <div className="lbl" style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>
+                    {toolVersion && (toolsInstalled[toolVersion] ? tr(`Shelf Flux installée · ${toolVersion}`, `Flux shelf installed · ${toolVersion}`) : tr(`Non installée · ${toolVersion}`, `Not installed · ${toolVersion}`))}
                   </div>
-                </div>
-                <div className="lbl" style={{ fontSize: 9, color: 'var(--ink-4)', marginTop: 6 }}>
-                  Une seule shelf « Flux » regroupe les tools cochés. Ton choix est conservé pour les réinstallations.
                 </div>
               </>
             )}
@@ -386,11 +366,11 @@ export function ShelfManager() {
           <SecTitle>Log</SecTitle>
           <div className="card" style={{
             flex: 1, padding: '10px 14px', minHeight: 0, overflowY: 'auto',
-            fontFamily: 'var(--mono)', fontSize: 10, lineHeight: 2.0,
+            fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 2.0,
             color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', gap: 2,
           }}>
             {log.length === 0 ? (
-              <div style={{ color: 'var(--ink-4)' }}>En attente d&apos;une action</div>
+              <div style={{ color: 'var(--ink-4)' }}>{tr("En attente d'une action", 'Waiting for an action')}</div>
             ) : (
               log.map((e, i) => {
                 const Icon = e.type === 'ok' ? CheckCircle2 : e.type === 'err' ? XCircle : ArrowRight
@@ -406,23 +386,14 @@ export function ShelfManager() {
               })
             )}
             <div style={{ flex: 1 }} />
-            {version && (
-              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)', color: 'var(--ink-4)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="dot" style={{ width: 5, height: 5, background: shelfOk ? 'var(--ok)' : 'var(--err)', borderRadius: '50%' }} />
-                {shelfOk ? `Shelf actif · ${version}` : `Shelf inactif · ${version}`}
-                {isHoudini && (
-                  <>
-                    <span style={{ margin: '0 4px' }}>·</span>
-                    <span className="dot" style={{ width: 5, height: 5, background: hdaOk ? 'var(--ok)' : 'var(--err)', borderRadius: '50%' }} />
-                    {hdaOk ? 'HDAs OK' : 'HDAs manquants'}
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
       </div>
+      {stale && (
+        <StaleFilesDialog dcc={stale.dcc} version={stale.version} items={stale.items}
+          onDone={summary => { setStale(null); if (summary) addLog('ok', summary) }} />
+      )}
     </div>
   )
 }

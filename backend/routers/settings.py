@@ -11,9 +11,13 @@ from pathlib import Path
 
 from core import config
 from core.constants import FLUX_MARKER_FILENAME, FLUX_ROOT_DIRS
-from features.system.manual import ensure_manual
+from features.system.manual import ensure_manual_in_root
 from core.logger import get_logger
-from core.paths import ensure_dir, get_flux_root, set_config_username, set_flux_root
+from core.repository_factory import reset_repository, reset_storage
+from core.paths import (
+    add_flux_root, ensure_dir, get_flux_root, get_flux_roots, remove_flux_root,
+    same_root, set_config_username, set_flux_root,
+)
 from utils import user_utils
 
 log = get_logger(__name__)
@@ -75,7 +79,7 @@ async def init_first_launch(req: InitRequest) -> dict:
         for d in FLUX_ROOT_DIRS:
             ensure_dir(root / d)
         (root / FLUX_MARKER_FILENAME).touch()
-        ensure_manual(root / "FLUX_UPDATE")
+        ensure_manual_in_root(root)
         # Bootstrap keys go into config.json (next to exe / %APPDATA%/FluxPipeline/
         # when frozen) because is_first_launch reads that file directly - it must NOT
         # depend on the metadata repository, whose location depends on the workspace.
@@ -139,13 +143,64 @@ async def update_settings(req: SettingsUpdate) -> dict:
             for d in FLUX_ROOT_DIRS:
                 ensure_dir(ws / d)
             (ws / FLUX_MARKER_FILENAME).touch(exist_ok=True)
-            ensure_manual(ws / "FLUX_UPDATE")
+            ensure_manual_in_root(ws)
+            # Forget the previous root's projects and restore this root's own prefs;
+            # the cached metadata/storage backends are bound to the old root, drop them.
+            old_root = get_flux_root()
+            if old_root:
+                config.stash_workspace_prefs(str(old_root))
             set_flux_root(ws)
+            reset_repository()
+            reset_storage()
             config.set("workspace", str(ws))
+            config.restore_workspace_prefs(str(ws))
         await loop.run_in_executor(None, _update_workspace)
         log.info("Workspace changed to '%s'", req.workspace)
 
     return {"success": True}
+
+
+class WorkspacePath(BaseModel):
+    path: str
+
+
+def _workspaces_payload() -> dict:
+    root = get_flux_root()
+    return {
+        "active": str(root) if root else None,
+        "workspaces": [
+            {"path": p, "exists": Path(p).is_dir(), "active": bool(root) and same_root(p, str(root))}
+            for p in get_flux_roots()
+        ],
+    }
+
+
+@router.get("/workspaces")
+async def list_workspaces() -> dict:
+    """Known FLUX directories on this machine and the active one."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _workspaces_payload)
+
+
+@router.post("/workspaces")
+async def add_workspace(req: WorkspacePath) -> dict:
+    """Register a FLUX directory (not activated; activate with PUT /settings)."""
+    if not req.path.strip():
+        raise HTTPException(status_code=400, detail="Chemin vide")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: add_flux_root(req.path.strip()))
+    return await loop.run_in_executor(None, _workspaces_payload)
+
+
+@router.post("/workspaces/remove")
+async def remove_workspace(req: WorkspacePath) -> dict:
+    """Forget a FLUX directory from the list. Files are kept; the active one is refused."""
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, lambda: remove_flux_root(req.path))
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Impossible de retirer le répertoire actif")
+    return await loop.run_in_executor(None, _workspaces_payload)
 
 
 @router.get("/users")

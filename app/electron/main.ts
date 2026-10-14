@@ -9,6 +9,7 @@ import {
   getBackendStatus, onBackendStatus, type BackendStatus,
 } from './python_bridge'
 import { promptUpdateAtLaunch } from './updater'
+import { displayVersion } from './version'
 import { spawn } from 'child_process'
 
 // The terminal that launched FLUX can go away (window closed, concurrently stopped)
@@ -268,7 +269,8 @@ ipcMain.handle('dialog:saveFile', async (_event, opts?: { defaultName?: string; 
   return result.canceled ? null : (result.filePath ?? null)
 })
 
-ipcMain.handle('app:getVersion', () => app.getVersion())
+// Display version x.x.xxx from package.json fluxVersion (version.ts), not the semver.
+ipcMain.handle('app:getVersion', () => displayVersion())
 
 ipcMain.handle('notification:show', (_event, { title, body }: { title: string; body: string }) => {
   // silent:false → Windows plays the default notification sound; icon = app mark.

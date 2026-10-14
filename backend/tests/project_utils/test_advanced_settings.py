@@ -12,6 +12,7 @@ from unittest import mock
 
 from features.settings import advanced as adv
 from flux_actions import switch
+from core.project_setup import setup_path
 
 _ENVS = [env for env, _ in adv.SWITCHES.values()]
 
@@ -71,7 +72,7 @@ class ProjectSettings(unittest.TestCase):
         self.project.mkdir()
 
     def _file(self) -> dict:
-        return json.loads((self.project / "project.json").read_text(encoding="utf-8"))
+        return json.loads(setup_path(self.project, "project.json").read_text(encoding="utf-8"))
 
     def test_read_gives_the_editable_part(self) -> None:
         res = adv.read_project_settings(self.project)

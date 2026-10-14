@@ -230,8 +230,16 @@ def write_json(path: Path | str, data: dict | list, indent: int = 2) -> bool:
             os.unlink(tmp_path)
             return False
 
-        # Atomic replace (works on Windows with os.replace)
-        os.replace(tmp_path, path)
+        # Atomic replace (works on Windows with os.replace). OneDrive / an open
+        # editor can lock the target: never leave the temp file behind then.
+        try:
+            os.replace(tmp_path, path)
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         # Drop any stale read-cache entry so the next cached_read_json re-reads.
         # Never let a cache hiccup turn a successful write into a reported failure.
         try:
@@ -312,7 +320,14 @@ def write_jsonl(path: Path | str, entries: list[dict]) -> bool:
         except Exception:
             os.unlink(tmp_path)
             return False
-        os.replace(tmp_path, path)
+        try:
+            os.replace(tmp_path, path)
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         try:
             invalidate_cache(path)
         except Exception:  # noqa: BLE001

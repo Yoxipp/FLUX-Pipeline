@@ -12,8 +12,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Cascadia Code', 'monospace'],
+        // ADR 0050: one font everywhere (embedded Inter); see --sans / --mono / --code in globals.css.
+        sans: ['Inter Variable', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['Inter Variable', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
       borderRadius: {
         'flux-sm': '4px',

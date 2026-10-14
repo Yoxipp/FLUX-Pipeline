@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.constants import JSON_PROJECT
+from core.project_setup import setup_path
 from core.json_manager import read_json, write_json
 from core.logger import get_logger
 
@@ -52,8 +53,16 @@ PROJECT_SCHEMA: dict = {
             "type": "object",
             "properties": {"painter_presets": {"type": "array", "items": {"type": "string"}}},
         },
+        # Work profiles shared by the project (role presets, see sanitize_work_profiles).
+        "ui": {
+            "type": "object",
+            "properties": {"work_profiles": {"type": "array", "items": {"type": "object"}}},
+        },
     },
 }
+
+MAX_WORK_PROFILES = 20
+MAX_PROFILE_NAME = 40
 
 
 def is_direct_project_dir(project_path: Path, projects_root: Path) -> bool:
@@ -66,7 +75,7 @@ def is_direct_project_dir(project_path: Path, projects_root: Path) -> bool:
 
 
 def project_config_path(project_path: Path) -> Path:
-    return Path(project_path) / JSON_PROJECT
+    return setup_path(project_path, JSON_PROJECT)
 
 
 def default_project_config() -> dict:
@@ -106,6 +115,51 @@ def read_project_config(project_path: Path) -> dict | None:
         return None
     data = read_json(path)
     return data if isinstance(data, dict) and data else None
+
+
+def sanitize_work_profiles(profiles: object) -> list[dict]:
+    """Keep only well formed {id, name, prefs} entries with scalar pref values.
+
+    The frontend owns the meaning of each pref and re-validates it; the backend only
+    guarantees the shape so a hand-edited project.json can never break the UI.
+    """
+    if not isinstance(profiles, list):
+        return []
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for item in profiles:
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("id") or "").strip()
+        name = str(item.get("name") or "").strip()[:MAX_PROFILE_NAME]
+        if not pid or not name or pid in seen:
+            continue
+        prefs = item.get("prefs") if isinstance(item.get("prefs"), dict) else {}
+        prefs = {str(k): v for k, v in prefs.items() if isinstance(v, (str, bool, int, float))}
+        seen.add(pid)
+        clean.append({"id": pid, "name": name, "prefs": prefs})
+        if len(clean) >= MAX_WORK_PROFILES:
+            break
+    return clean
+
+
+def read_work_profiles(project_path: Path) -> list[dict]:
+    """Work profiles shared by the project (project.json "ui.work_profiles")."""
+    cfg = read_project_config(project_path) or {}
+    ui = cfg.get("ui") if isinstance(cfg.get("ui"), dict) else {}
+    return sanitize_work_profiles(ui.get("work_profiles"))
+
+
+def write_work_profiles(project_path: Path, profiles: object) -> list[dict]:
+    """Replace the project's shared work profiles, keeping every other key."""
+    cfg, _warnings = ensure_project_config(project_path)
+    clean = sanitize_work_profiles(profiles)
+    ui = dict(cfg.get("ui")) if isinstance(cfg.get("ui"), dict) else {}
+    ui["work_profiles"] = clean
+    cfg["ui"] = ui
+    if not write_json(project_config_path(project_path), cfg):
+        raise OSError("project.json : ecriture impossible")
+    return clean
 
 
 def ensure_project_config(project_path: Path) -> tuple[dict, list[str]]:
@@ -201,7 +255,7 @@ def _adopt_oldest_conflict_copy(project_path: Path, data: dict, warnings: list[s
     """Look for OneDrive conflict copies (project-*.json); adopt the oldest project_id."""
     stem, suffix = Path(JSON_PROJECT).stem, Path(JSON_PROJECT).suffix
     candidates: list[dict] = []
-    for copy in sorted(project_path.glob(f"{stem}-*{suffix}")):
+    for copy in sorted(project_config_path(project_path).parent.glob(f"{stem}-*{suffix}")):
         other = read_json(copy)
         if isinstance(other, dict) and isinstance(other.get("project_id"), str):
             candidates.append({"file": copy.name, **other})

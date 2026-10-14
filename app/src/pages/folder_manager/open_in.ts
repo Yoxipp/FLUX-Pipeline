@@ -7,7 +7,7 @@ import { api } from '../../api/client'
 import type { LoadTargets } from '../../api/client'
 import { readActiveInstancePort } from '../../hooks/useActiveInstances'
 import type { DccStatusMap } from '../../types'
-import { USD_EXTS } from './shared'
+import { USD_EXTS, trNow } from './shared'
 import type { ExplorerItem } from './shared'
 
 // Files a Houdini LOP loads directly (USD + Houdini's USD file format plugins).
@@ -23,11 +23,11 @@ const NUKE_IMPORT_EXTS = new Set(['.exr', '.png', '.jpg', '.jpeg', '.tif', '.tif
 const PS_OPEN_EXTS     = new Set(['.psd', '.psb', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif'])
 
 const isOffline = (msg: string) => /urlopen|refused|connect|actively refused|WinError/i.test(msg)
-const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Erreur inconnue')
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : trNow('Erreur inconnue', 'Unknown error'))
 
 async function openInHoudini(project: string, rel_path: string, name: string) {
   // DCC imports can take a while (big USD stages): keep a spinner toast until done.
-  const id = toast.loading(`Import de ${name} dans Houdini…`)
+  const id = toast.loading(trNow(`Import de ${name} dans Houdini…`, `Importing ${name} into Houdini…`))
   try {
     const tok = await api.getFluxTokensFromPath(project, rel_path)
     const res = await api.createFluxImporterNode({
@@ -42,75 +42,75 @@ async function openInHoudini(project: string, rel_path: string, name: string) {
     // Node is created but resolve can still find nothing (asset missing for these
     // tokens, or FLUX unreachable from Houdini) — warn instead of a false success.
     if (res.result?.mode === 'replaced') {
-      toast.success(`${name} : path mis à jour sur le node sélectionné`, { id })
+      toast.success(trNow(`${name} : path mis à jour sur le node sélectionné`, `${name}: path updated on the selected node`), { id })
     } else if (res.result?.resolved_path) {
-      toast.success(`${name} importé dans Houdini`, { id })
+      toast.success(trNow(`${name} importé dans Houdini`, `${name} imported into Houdini`), { id })
     } else {
-      toast.warning(`Node créé mais fichier non résolu pour ${name} : clique ↺ Resolve dans le node`, { id })
+      toast.warning(trNow(`Node créé mais fichier non résolu pour ${name} : clique ↺ Resolve dans le node`, `Node created but file not resolved for ${name}: click ↺ Resolve in the node`), { id })
     }
   } catch (e) {
     const msg = errMsg(e)
     toast.error(isOffline(msg)
-      ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
-      : `Import Houdini échoué : ${msg}`, { id })
+      ? trNow('Houdini non connecté : lance le serveur FLUX dans Houdini', 'Houdini not connected: start the FLUX server in Houdini')
+      : trNow(`Import Houdini échoué : ${msg}`, `Houdini import failed: ${msg}`), { id })
   }
 }
 
 async function importHoudiniLop(project: string, rel_path: string, name: string, mode: LopMode) {
   const label = LOP_MODE_LABELS[mode]
-  const id = toast.loading(`${label} de ${name} dans Houdini…`)
+  const id = toast.loading(trNow(`${label} de ${name} dans Houdini…`, `${label} of ${name} in Houdini…`))
   try {
     const res = await api.houdiniImportLop(project, rel_path, mode)
     const r = res.result
     const added = r?.mode?.endsWith('_added')
     toast.success(added
-      ? `${name} ajouté à ${r?.node_path} (entrée ${r?.entry})`
-      : `${name} : ${label} LOP créé (${r?.node_path})`, { id })
+      ? trNow(`${name} ajouté à ${r?.node_path} (entrée ${r?.entry})`, `${name} added to ${r?.node_path} (entry ${r?.entry})`)
+      : trNow(`${name} : ${label} LOP créé (${r?.node_path})`, `${name}: ${label} LOP created (${r?.node_path})`), { id })
   } catch (e) {
     const msg = errMsg(e)
     toast.error(isOffline(msg)
-      ? 'Houdini non connecté : lance le serveur FLUX dans Houdini'
-      : `Import LOP échoué : ${msg}`, { id })
+      ? trNow('Houdini non connecté : lance le serveur FLUX dans Houdini', 'Houdini not connected: start the FLUX server in Houdini')
+      : trNow(`Import LOP échoué : ${msg}`, `LOP import failed: ${msg}`), { id })
   }
 }
 
 async function openInMaya(project: string, rel_path: string, name: string, mode: 'import' | 'proxy' = 'import') {
-  const id = toast.loading(`Import de ${name} dans Maya…`)
+  const id = toast.loading(trNow(`Import de ${name} dans Maya…`, `Importing ${name} into Maya…`))
   try {
     await api.importFileInMaya(project, rel_path, readActiveInstancePort('Maya') ?? undefined, mode)
-    toast.success(`${name} importé dans Maya`, { id })
+    toast.success(trNow(`${name} importé dans Maya`, `${name} imported into Maya`), { id })
   } catch (e) {
     const msg = errMsg(e)
     toast.error(msg.includes('répond pas')
-      ? 'Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)'
-      : `Import Maya échoué : ${msg}`, { id })
+      ? trNow('Maya non connecté : ouvre Maya avec le bridge FLUX actif (commandPort 7001)', 'Maya not connected: open Maya with the FLUX bridge active (commandPort 7001)')
+      : trNow(`Import Maya échoué : ${msg}`, `Maya import failed: ${msg}`), { id })
   }
 }
 
 async function openInNuke(project: string, rel_path: string, name: string) {
-  const id = toast.loading(`Import de ${name} dans Nuke…`)
+  const id = toast.loading(trNow(`Import de ${name} dans Nuke…`, `Importing ${name} into Nuke…`))
   try {
     await api.nukeImportPath(project, rel_path)
     toast.success(`${name} → Nuke (Read)`, { id })
   } catch (e) {
-    toast.error(`Import Nuke échoué : ${errMsg(e)}`, { id })
+    toast.error(trNow(`Import Nuke échoué : ${errMsg(e)}`, `Nuke import failed: ${errMsg(e)}`), { id })
   }
 }
 
 async function openInPhotoshop(project: string, rel_path: string, name: string) {
-  const id = toast.loading(`Ouverture de ${name} dans Photoshop…`)
+  const id = toast.loading(trNow(`Ouverture de ${name} dans Photoshop…`, `Opening ${name} in Photoshop…`))
   try {
     await api.photoshopOpen(project, rel_path)
-    toast.success(`${name} ouvert dans Photoshop`, { id })
+    toast.success(trNow(`${name} ouvert dans Photoshop`, `${name} opened in Photoshop`), { id })
   } catch (e) {
-    toast.error(`Ouverture Photoshop échouée : ${errMsg(e)}`, { id })
+    toast.error(trNow(`Ouverture Photoshop échouée : ${errMsg(e)}`, `Photoshop open failed: ${errMsg(e)}`), { id })
   }
 }
 
 async function deleteLegacy(project: string, rel_path: string, name: string, onDone: () => void) {
   try {
     const res = await api.deleteUsdLegacy(project, rel_path)
-    toast.success(`${name} deplace dans le backup du projet`, { description: res.backup })
+    toast.success(trNow(`${name} deplace dans le backup du projet`, `${name} moved to the project backup`), { description: res.backup })
     onDone()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
@@ -147,19 +147,19 @@ export function buildOpenInTargets(args: {
     : []
   if (USD_EXTS.has(ext) && lt) {
     for (const t of lt.targets) {
-      const label = t.primary ? t.label : 'couche seule'
+      const label = t.primary ? t.label : trNow('couche seule', 'layer only')
       if (houdini) {
         targets.push({ dcc: `Houdini : ${label}`, onClick: () => void openInHoudini(project, t.rel_path, item.name) })
       }
       if (maya) {
-        targets.push({ dcc: `Maya : ${label} (aplati)`, onClick: () => void openInMaya(project, t.rel_path, item.name) })
+        targets.push({ dcc: trNow(`Maya : ${label} (aplati)`, `Maya: ${label} (flattened)`), onClick: () => void openInMaya(project, t.rel_path, item.name) })
         if (t.primary) {
-          targets.push({ dcc: `Maya : ${label} (proxy USD, variantes)`, onClick: () => void openInMaya(project, t.rel_path, item.name, 'proxy') })
+          targets.push({ dcc: trNow(`Maya : ${label} (proxy USD, variantes)`, `Maya: ${label} (USD proxy, variants)`), onClick: () => void openInMaya(project, t.rel_path, item.name, 'proxy') })
         }
       }
     }
     if (lt.legacy) {
-      targets.push({ dcc: 'Ancien fichier : supprimer (backup)', onClick: () => void deleteLegacy(project, rel, item.name, onChanged) })
+      targets.push({ dcc: trNow('Ancien fichier : supprimer (backup)', 'Old file: delete (backup)'), onClick: () => void deleteLegacy(project, rel, item.name, onChanged) })
     } else {
       targets.push(...lopTargets)
     }

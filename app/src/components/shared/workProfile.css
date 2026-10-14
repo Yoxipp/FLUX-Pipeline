@@ -1,0 +1,50 @@
+/* Work profile dialog (ADR 0042). Flat surfaces, light elevation, no glow. */
+.work-profile-overlay { position:fixed; inset:0; z-index:1200; background:#0007; backdrop-filter:blur(3px); animation:work-profile-fade 160ms ease-out; }
+.work-profile-dialog { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:1201; width:min(720px,calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow:auto; padding:20px 22px; box-sizing:border-box; background:var(--paper-2); color:var(--ink); border:1px solid var(--rule-2); border-radius:12px; box-shadow:0 24px 80px #0006; font:12px var(--sans); animation:work-profile-in 170ms ease-out; }
+.work-profile-confirm { width:min(420px,calc(100vw - 32px)); }
+.work-profile-confirm h2 { font-size:15px; font-weight:600; margin:0 0 10px; }
+.work-profile-confirm p { color:var(--ink-2); margin:0 0 14px; line-height:1.5; }
+.work-profile-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.work-profile-heading h2 { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; margin:0; }
+.work-profile-intro { color:var(--ink-3); margin:8px 0 16px; line-height:1.5; }
+.work-profile-dialog button { display:inline-flex; align-items:center; justify-content:center; gap:6px; font:12px var(--sans); color:var(--ink); border:1px solid var(--rule-2); background:var(--paper); border-radius:5px; padding:6px 10px; cursor:pointer; }
+.work-profile-dialog button:hover:not(:disabled) { background:var(--rule); }
+.work-profile-dialog button:disabled { opacity:.45; cursor:default; }
+.work-profile-dialog :focus-visible { outline:2px solid var(--rule-3); outline-offset:2px; }
+.work-profile-dialog select, .work-profile-dialog input:not([type="checkbox"]) { box-sizing:border-box; width:100%; min-width:0; padding:7px 9px; font:12px var(--sans); color:var(--ink); background:var(--paper); border:1px solid var(--rule-2); border-radius:5px; }
+.work-profile-body { display:grid; grid-template-columns:220px minmax(0,1fr); gap:18px; }
+.work-profile-list { display:flex; flex-direction:column; gap:14px; border-right:1px solid var(--rule); padding-right:14px; }
+.work-profile-group { display:flex; flex-direction:column; gap:2px; }
+.work-profile-group .cap { margin-bottom:4px; }
+.work-profile-empty { color:var(--ink-4); margin:2px 0; font-size:11px; }
+.work-profile-item { display:flex; align-items:center; gap:2px; border-radius:5px; }
+.work-profile-item > button:first-child { flex:1; justify-content:flex-start; border:0; background:transparent; padding:5px 6px; color:var(--ink-2); text-align:left; }
+.work-profile-item[data-on] > button:first-child { color:var(--accent-hi); background:var(--accent-soft); }
+.work-profile-icon { border:0 !important; background:transparent !important; padding:4px !important; color:var(--ink-4) !important; opacity:0; }
+.work-profile-item:hover .work-profile-icon, .work-profile-icon:focus-visible { opacity:1; }
+.work-profile-icon:hover { color:var(--err) !important; }
+.work-profile-prefs { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.work-profile-prefs > label, .work-profile-field { display:flex; flex-direction:column; gap:6px; color:var(--ink-2); }
+.work-profile-field small { color:var(--ink-4); font-size:11.5px; }
+.work-profile-check { flex-direction:row !important; align-items:center; gap:8px !important; cursor:pointer; }
+.work-profile-check input { accent-color:var(--accent); margin:0; }
+.work-profile-current { display:flex; align-items:center; gap:8px; min-height:28px; font-weight:600; }
+.work-profile-current button { margin-left:auto; }
+.work-profile-modified { font:500 11px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--warn, #e8912a); }
+.work-profile-dot { display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--warn, #e8912a); vertical-align:middle; }
+.work-profile-seg { display:flex; gap:4px; flex-wrap:wrap; }
+.work-profile-seg button { padding:5px 10px; color:var(--ink-3); }
+.work-profile-seg button[data-on] { color: var(--on-accent); border-color:var(--accent); background:var(--accent); font-weight:700; }
+.work-profile-save { display:flex; gap:8px; align-items:center; border-top:1px solid var(--rule); margin-top:18px; padding-top:14px; }
+.work-profile-save input { flex:1; }
+.work-profile-save button { white-space:nowrap; }
+.work-profile-actions { display:flex; justify-content:flex-end; gap:8px; }
+@keyframes work-profile-in { from { opacity:0; transform:translate(-50%,-48%) scale(.98); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
+@keyframes work-profile-fade { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .work-profile-dialog, .work-profile-overlay { animation:none; } }
+@media (max-width:640px) { .work-profile-body { grid-template-columns:1fr; } .work-profile-list { border-right:0; padding-right:0; } .work-profile-save { flex-wrap:wrap; } }
+.work-profile-departments { display:flex; flex-direction:column; gap:6px; }
+.work-profile-seg-label { align-self:center; min-width:46px; font:11px var(--mono); text-transform:uppercase; letter-spacing:.06em; color:var(--ink-4); }
+.work-profile-check small { margin-left:6px; color:var(--ink-4); font-size:11.5px; }
+.work-profile-field > .work-profile-check { color:var(--ink-2); }
+.work-profile-check { display:flex; }

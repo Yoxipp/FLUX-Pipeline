@@ -22,7 +22,7 @@ from features.shelf_manager.shelf_core import (
 log = get_logger(__name__)
 router = APIRouter()
 
-_SUPPORTED_DCCS = ("Maya", "Houdini", "ZBrush")
+_SUPPORTED_DCCS = ("Maya", "Houdini", "ZBrush", "Unreal")
 
 
 class ShelfInstallRequest(BaseModel):
@@ -124,3 +124,30 @@ async def apply_tools(req: ToolsApplyRequest) -> dict:
     if not ok:
         raise HTTPException(status_code=500, detail=msg)
     return {"success": True, "message": msg}
+
+
+# ── Old FLUX files after a reinstall (features/shelf_manager/stale_cleanup.py) ──
+
+class StaleRemoveRequest(BaseModel):
+    dcc: str
+    version: str
+    paths: list[str]
+
+
+@router.get("/stale")
+async def stale_files(dcc: str, version: str) -> dict:
+    """FLUX files of *dcc* *version* that are no longer the real install, with why.
+    Only FLUX's own files are ever listed (never an artist's HDA or shelf)."""
+    from features.shelf_manager import stale_cleanup
+
+    loop = asyncio.get_running_loop()
+    return {"items": await loop.run_in_executor(None, lambda: stale_cleanup.scan(dcc, version))}
+
+
+@router.post("/stale/remove")
+async def remove_stale_files(req: StaleRemoveRequest) -> dict:
+    """Delete the ticked files; a path a fresh scan does not list is skipped."""
+    from features.shelf_manager import stale_cleanup
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: stale_cleanup.remove(req.dcc, req.version, req.paths))
