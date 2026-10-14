@@ -102,7 +102,7 @@ export function EntityContextMenu({ project, state, entity, setState, setSelecti
       <Dialog.Description>Créé dans le dossier de {entity.name} sur le disque.</Dialog.Description>
       <input autoFocus value={newDir ?? ''} disabled={busy} placeholder="Nom du dossier" onChange={e => setNewDir(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter') void createDir() }} style={{ width: '100%', marginTop: 10 }} />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}><button className="production-menu-item" disabled={busy || !(newDir ?? '').trim()} onClick={() => void createDir()}>Créer</button></div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}><button className="btn primary" disabled={busy || !(newDir ?? '').trim()} onClick={() => void createDir()}>Créer</button></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </>
 }
