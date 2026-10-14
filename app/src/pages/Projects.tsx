@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { FolderIcon } from '../components/shared/ui'
+import { PublishNote } from '../components/shared/PublishNote'
 import { api } from '../api/client'
 import type { Preset } from '../types'
 import { useProject } from '../ProjectContext'
@@ -1202,6 +1203,11 @@ export function Projects() {
               />
             ))}
           </div>
+
+          {/* N7: note of the selected published file, at the bottom (hidden when it has none) */}
+          {sidebarTab === 'tous' && nav.kind === 'inside' && report.selectedNames.size === 1 && (
+            <PublishNote project={nav.project} relPath={[...nav.subpath, [...report.selectedNames][0]].join('/')} />
+          )}
         </div>
 
       </div>
