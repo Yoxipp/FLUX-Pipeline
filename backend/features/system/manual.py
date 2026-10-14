@@ -82,7 +82,10 @@ def ensure_manual_in_flux_root() -> Path | None:
 
 
 def manual_path() -> Path | None:
-    """The manual to show: the FLUX_DOC copy when present, else the bundled one."""
+    """The manual to show: the local bundled copy (installed with the app, no network
+    read), else the FLUX_DOC copy on the shared root, which stays as a duplicate."""
+    if MANUAL_SOURCE.is_file():
+        return MANUAL_SOURCE
     from core import paths
     try:
         if paths.get_flux_root() is not None:
@@ -91,4 +94,4 @@ def manual_path() -> Path | None:
                 return copy
     except (OSError, RuntimeError):
         pass
-    return MANUAL_SOURCE if MANUAL_SOURCE.is_file() else None
+    return None

@@ -87,13 +87,22 @@ class ManualPath(unittest.TestCase):
         with mock.patch("core.paths.get_flux_root", return_value=None):
             self.assertEqual(manual_mod.manual_path(), MANUAL_SOURCE)
 
-    def test_prefers_flux_doc_copy(self):
+    def test_prefers_local_bundled_over_flux_doc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "FLUX_DOC").mkdir()
+            (root / "FLUX_DOC" / MANUAL_FILENAME).write_text("<html>copy</html>", encoding="utf-8")
+            with mock.patch("core.paths.get_flux_root", return_value=root):
+                self.assertEqual(manual_mod.manual_path(), MANUAL_SOURCE)
+
+    def test_falls_back_to_flux_doc_copy(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "FLUX_DOC").mkdir()
             copy = root / "FLUX_DOC" / MANUAL_FILENAME
             copy.write_text("<html>copy</html>", encoding="utf-8")
-            with mock.patch("core.paths.get_flux_root", return_value=root):
+            missing = root / "nope.html"
+            with mock.patch("core.paths.get_flux_root", return_value=root),                     mock.patch.object(manual_mod, "MANUAL_SOURCE", missing):
                 self.assertEqual(manual_mod.manual_path(), copy)
 
 
