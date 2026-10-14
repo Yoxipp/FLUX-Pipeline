@@ -170,16 +170,22 @@ function AppShell({ settings }: { settings: Settings }) {
         <WorkProfileDialog />
       </div>
       <Toaster
-        position="top-center"
+        position="bottom-right"
         theme="dark"
+        visibleToasts={3}
+        gap={6}
+        offset={14}
         toastOptions={{
+          duration: 2500,
           style: {
+            width: 'auto', maxWidth: 320, minHeight: 0,
+            padding: '7px 11px', gap: 6, borderRadius: 6,
             background: 'var(--paper-2)',
             color: 'var(--ink)',
             border: '1px solid var(--rule-2)',
             fontFamily: 'var(--sans)',
             fontSize: 11,
-            boxShadow: 'var(--shadow-md)',
+            boxShadow: 'var(--shadow-sm)',
           },
           classNames: {
             success: 'flux-toast-ok',

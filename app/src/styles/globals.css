@@ -520,3 +520,8 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 
 /* Publisher destination breadcrumb: each folder opens in the Folder Manager. */
 .dest-crumb:hover { color: var(--accent-hi); text-decoration: underline; }
+
+/* Compact toasts: small icon, no oversized title line. */
+[data-sonner-toast] [data-icon] { width: 13px; height: 13px; }
+[data-sonner-toast] [data-icon] svg { width: 13px; height: 13px; }
+[data-sonner-toaster] { --width: 320px; }
