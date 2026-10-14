@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dropdown from '@radix-ui/react-dropdown-menu'
 import { CreateMenu, type CreateKind } from './CreateMenu'
+import { ProjectPicker } from '../../components/shared/ProjectPicker'
 import { CalendarClock, Check, ChevronDown, ChevronRight, ImagePlus, Search, Settings2, UserRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -159,6 +160,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   }
   return <div className="production-tracking">
     <div className="tracking-toolbar">
+      <ProjectPicker width={170} />
       <label className="tracking-search"><Search size={14} /><input aria-label="Rechercher dans la production" placeholder={mode === 'shot' ? 'Rechercher un shot, un asset...' : 'Rechercher un asset...'} value={query} onChange={e => setQuery(e.target.value)} /></label>
       <span className="tracking-count">{entities.length} / {mode === 'shot' ? state.shots.length : state.assets.length}</span>
       <div className="tracking-spacer" />

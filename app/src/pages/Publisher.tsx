@@ -3,8 +3,9 @@ import { useLocation } from 'react-router-dom'
 import { Trash2, FolderOpen, X, RefreshCw, ChevronRight, ChevronDown, Info, RotateCcw, Archive } from 'lucide-react'
 import { SoftwareSelector } from '../components/shared/SoftwareSelector'
 import { ExpandPicker } from '../components/shared/ExpandPicker'
+import { ProjectPicker } from '../components/shared/ProjectPicker'
 import { ConnectionPill } from '../components/shared/ConnectionPill'
-import { Btn, SecTitle, FolderIcon, Pill, Select, SelectTrigger, SelectContent, SelectItem, Popover, PopoverTrigger, PopoverContent } from '../components/shared/ui'
+import { Btn, SecTitle, Pill, Select, SelectTrigger, SelectContent, SelectItem, Popover, PopoverTrigger, PopoverContent } from '../components/shared/ui'
 import { ExportOptions } from '../components/shared/ExportOptions'
 import { schemaForExt, defaultOptions } from '../lib/mayaExportOptions'
 import { houdiniSchemaForExt } from '../lib/houdiniExportOptions'
@@ -699,7 +700,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
     dccPicked.current = true
     if (workPrefs.publisherSoft && dccEnabled(workPrefs.publisherSoft) && !location.state?.zbrushConnected) setDcc(workPrefs.publisherSoft)
   }, [prefsReady]) // eslint-disable-line react-hooks/exhaustive-deps
-  const { project, projects, setProject } = useProject()
+  const { project, setProject } = useProject()
   const [tokens, setTokens]     = useState<Record<string, Record<string, string>>>({})
 
   // Composer state
@@ -2008,20 +2009,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
       {/* Toolbar: software (expand picker), project, connection. No page title (ADR 0044). */}
       <div className="page-toolbar">
         <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} />
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-          <span style={{ position: 'absolute', left: 8, pointerEvents: 'none', display: 'flex', zIndex: 1 }}>
-            <FolderIcon color="var(--accent)" />
-          </span>
-          <Select value={project} onValueChange={setProject}>
-            <SelectTrigger style={{ width: 190, paddingLeft: 26 }} title={tr('Projet', 'Project')} />
-            <SelectContent>
-              {projects.length === 0
-                ? <SelectItem value="__none__">{tr('Aucun projet', 'No project')}</SelectItem>
-                : projects.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)
-              }
-            </SelectContent>
-          </Select>
-        </div>
+        <ProjectPicker />
         <div style={{ flex: 1 }} />
         {connectionPill}
       </div>

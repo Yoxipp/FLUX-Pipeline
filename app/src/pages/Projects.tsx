@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { ProjectPicker } from '../components/shared/ProjectPicker'
 import { toast } from 'sonner'
 import { useLocation } from 'react-router-dom'
 import {
@@ -1029,6 +1030,7 @@ export function Projects() {
 
       {/* Barre commune : annuler + Token Finder (résultats dans la vue active) + presse-papier */}
       <div style={{ padding: '6px 10px 7px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <ProjectPicker width={170} />
         <div onClick={undoStack.length > 0 ? () => void undoLast() : undefined} title={tr('Annuler (Ctrl+Z)', 'Undo (Ctrl+Z)')} style={navBtn(undoStack.length > 0)}>
           <RotateCcw size={12} strokeWidth={2} />
         </div>
