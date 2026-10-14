@@ -2,7 +2,7 @@ import { useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowDown, Check, ChevronRight, Flag, FolderOpen, Trash2, Upload, UserRound, X } from 'lucide-react'
+import { ArrowDown, Check, ChevronRight, Flag, FolderOpen, Plus, Trash2, Upload, UserRound, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -88,7 +88,11 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
   }
   return <>
     {selectionControl && <button ref={selectionButton} className="tracking-task-select" aria-label={selectionControl.label} aria-pressed={selectionControl.selected}
-      onClick={selectionControl.onClick}
+      onClick={e => {
+        // A plain click on an empty cell opens the menu so a task can be added right there.
+        if (!status && !e.ctrlKey && !e.metaKey && !e.shiftKey) { onContextTask?.(); showMenu(e.clientX, e.clientY); return }
+        selectionControl.onClick(e)
+      }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }} />}
     {status && priority === 'high' && <span className="tracking-priority-high" aria-label="Priorité haute" title="Priorité haute">!</span>}
@@ -105,7 +109,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
         else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status}{status && priority === 'low' && <span className="tracking-priority" data-priority="low" aria-label="Priorité basse"><ArrowDown size={9} strokeWidth={2.6} /></span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status || <Plus size={11} className="tracking-empty-add" aria-hidden />}{status && priority === 'low' && <span className="tracking-priority" data-priority="low" aria-label="Priorité basse"><ArrowDown size={9} strokeWidth={2.6} /></span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" side="bottom" align="start" collisionPadding={10} onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>
@@ -120,6 +124,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
           <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
             <Menu.Item className="production-menu-item" onSelect={() => void takeTask()}>{multiple ? 'Prendre les tasks' : 'Prendre la task'}</Menu.Item>
             <Menu.Item className="production-menu-item" onSelect={() => void pickArtist()}>Assigner artiste</Menu.Item>
+            {targetArtists.some(Boolean) && <Menu.Item className="production-menu-item production-menu-delete" onSelect={() => assign('')}><X size={14} />Supprimer l’assignation</Menu.Item>}
           </Menu.SubContent></Menu.Portal></Menu.Sub>
         <Menu.Sub><Menu.SubTrigger className="production-menu-item"><Flag size={14} />Priorité<ChevronRight size={13} className="production-menu-chevron" /></Menu.SubTrigger>
           <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>

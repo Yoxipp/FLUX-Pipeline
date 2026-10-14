@@ -1,5 +1,6 @@
-import type { ProductionAsset, ProductionSequence, ProductionShot, ProductionState, ProductionTask, ProductionTaskDetail } from '../../types'
-import { ensureTrackingTask, patchTrackingDetail } from './tracking'
+import type { ProductionAsset, ProductionDepartment, ProductionSequence, ProductionShot, ProductionState, ProductionTask, ProductionTaskDetail } from '../../types'
+import { departmentTasks, ensureTrackingTask, patchTrackingDetail } from './tracking'
+import { trackingCellTasks } from './taskSelection'
 
 export type TaskEntity = ProductionAsset | ProductionShot | ProductionSequence
 
@@ -67,4 +68,16 @@ export function createShotBatch(state: ProductionState, seqId: string, count: nu
     sorted.sort((a, b) => a.order - b.order)
   }
   return { ...state, shots: [...state.shots.filter(s => s.seq_id !== seqId), ...sorted] }
+}
+
+/** Department-wide assignment: task level key of every shot / asset of the department scope. Subtask assignees stay independent. */
+export function assignDepartment(state: ProductionState, department: ProductionDepartment, assignee: string): ProductionState {
+  const entities = department.scope === 'shot' ? state.shots : state.assets
+  let next = state
+  for (const entity of entities) {
+    const tasks = departmentTasks(next, entity, department)
+    if (assignee) next = trackingCellTasks(next, entity, department, false, '').reduce((acc, task) => patchTaskArtist(acc, entity.id, task, '', assignee), next)
+    else next = tasks.reduce((acc, task) => entity.task_details?.[task.name.toUpperCase()]?.assignee ? patchTaskArtist(acc, entity.id, task, '', '') : acc, next)
+  }
+  return next
 }

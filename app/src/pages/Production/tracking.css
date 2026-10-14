@@ -202,3 +202,5 @@
 .timeline-montage-strip button { flex-basis:0; min-width:3px; border:0; padding:0; border-radius:2px; background:var(--prod-shot); opacity:.55; cursor:pointer; }
 .timeline-montage-strip button.gap { background:var(--rule-2); }
 .timeline-montage-strip button.current { opacity:1; outline:2px solid var(--accent); outline-offset:1px; }
+.tracking-status[data-empty] .tracking-empty-add { color:var(--ink-2); opacity:.55; }
+.tracking-task-slot:hover .tracking-status[data-empty] .tracking-empty-add { opacity:1; }
