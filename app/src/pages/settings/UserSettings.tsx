@@ -5,9 +5,9 @@
 // no longer hidden in the user switch menu.
 
 import { useEffect, useState } from 'react'
-import { ChevronRight, FolderOpen, Pencil, RefreshCw, RotateCcw, Trash2, UserRound } from 'lucide-react'
+import { Check, ChevronRight, FolderOpen, Pencil, RefreshCw, RotateCcw, Trash2, UserRound, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '../../api/client'
+import { api, type WorkspacesInfo } from '../../api/client'
 import { Avatar, Btn, SecTitle } from '../../components/shared/ui'
 import { useI18n } from '../../i18n'
 import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
@@ -37,9 +37,7 @@ const inputStyle = {
 
 export function UserSettings({ username }: { username: string }) {
   const { t, lang, setLang } = useI18n()
-  const [workspace, setWorkspace] = useState('')
   const [version, setVersion] = useState('')
-  const [changing, setChanging] = useState(false)
   const [accentKey, setAccentKey] = useState('orange')
   const [logColors, setLogColors] = useState<Record<string, string>>({})
   const { isEnabled: isDccEnabled, setEnabled: setEnabledDccs } = useEnabledDccs()
@@ -47,7 +45,6 @@ export function UserSettings({ username }: { username: string }) {
 
   useEffect(() => {
     api.getSettings().then(s => {
-      setWorkspace(s.workspace ?? '')
       const stored = s.theme?.accent ?? 'orange'
       setAccentKey(ACCENT_PRESETS.some(p => p.key === stored) ? stored : 'orange')
       setLogColors(s.log_colors ?? {})
@@ -83,17 +80,6 @@ export function UserSettings({ username }: { username: string }) {
     window.dispatchEvent(new Event('flux:reset-ui'))
     toast.success(t('settings.resetUi'))
   }
-  const handleChangeWorkspace = async () => {
-    const path = await window.electronAPI?.openFolder()
-    if (!path) return
-    setChanging(true)
-    try {
-      await api.updateSettings({ workspace: path })
-      window.location.reload()
-    } catch {
-      setChanging(false)
-    }
-  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 620 }}>
@@ -112,14 +98,7 @@ export function UserSettings({ username }: { username: string }) {
       </div>
 
       <SecTitle>{t('settings.workspace')}</SecTitle>
-      <div className="card" style={{ ...card, flexDirection: 'row', alignItems: 'center' }}>
-        <FolderOpen size={13} strokeWidth={1.75} color="var(--ink-4)" />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontFamily: 'var(--mono)', color: workspace ? 'var(--ink-2)' : 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace}>{workspace || '-'}</span>
-        <Btn sm ghost disabled={changing} onClick={() => void handleChangeWorkspace()}>
-          {changing ? <RefreshCw size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <FolderOpen size={11} />}
-          {changing ? t('settings.changing') : t('settings.changeDir')}
-        </Btn>
-      </div>
+      <Workspaces />
 
       <SecTitle>{t('settings.accent')}</SecTitle>
       <div className="card" style={card}>
@@ -260,6 +239,62 @@ function OwnAccount({ username }: { username: string }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// FLUX directories known on this machine. Exactly one is active (the backend keeps a
+// single "workspace"): activating another one reloads the app on it. Removing only
+// forgets the entry, no file is deleted, and the active one cannot be removed.
+function Workspaces() {
+  const { t } = useI18n()
+  const [info, setInfo] = useState<WorkspacesInfo | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<string | null>(null)
+
+  useEffect(() => { api.listWorkspaces().then(setInfo).catch(() => {}) }, [])
+
+  const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e))
+  const add = async () => {
+    const path = await window.electronAPI?.openFolder()
+    if (!path) return
+    try { setInfo(await api.addWorkspace(path)) } catch (e) { fail(e) }
+  }
+  const activate = async (path: string) => {
+    setBusy(path)
+    try { await api.updateSettings({ workspace: path }); window.location.reload() }
+    catch (e) { fail(e); setBusy(null) }
+  }
+  const remove = async (path: string) => {
+    try { setInfo(await api.removeWorkspace(path)); setConfirm(null) } catch (e) { fail(e) }
+  }
+
+  return (
+    <div className="card" style={{ ...card, gap: 4 }}>
+      {(info?.workspaces ?? []).map(({ path, exists, active }) => (
+          <div key={path} style={{ ...row, minHeight: 26 }}>
+            <button type="button" role="radio" aria-checked={active} disabled={active || !!busy}
+              title={active ? 'Répertoire actif' : 'Activer ce répertoire'} onClick={() => void activate(path)}
+              style={{ width: 13, height: 13, flexShrink: 0, borderRadius: '50%', padding: 0, cursor: active ? 'default' : 'pointer',
+                border: `1.5px solid ${active ? 'var(--accent)' : 'var(--ink-4)'}`,
+                background: active ? 'radial-gradient(var(--accent) 45%, transparent 50%)' : 'transparent' }} />
+            <span title={path} style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              color: active ? 'var(--ink)' : exists ? 'var(--ink-3)' : 'var(--ink-4)' }}>{path}</span>
+            {!exists && <span style={{ fontSize: 10.5, color: 'var(--warn)' }}>introuvable</span>}
+            {active ? <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>actif</span>
+              : busy === path ? <RefreshCw size={11} style={{ animation: 'spin 1s linear infinite' }} />
+              : confirm === path ? <>
+                <Btn sm ghost title="Retirer de la liste (aucun fichier supprimé)" onClick={() => void remove(path)} style={{ color: 'var(--err)' }}><Check size={11} /></Btn>
+                <Btn sm ghost title="Annuler" onClick={() => setConfirm(null)}><X size={11} /></Btn>
+              </> : <>
+                <Btn sm ghost disabled={!!busy || !exists} onClick={() => void activate(path)}>Activer</Btn>
+                <Btn sm ghost disabled={!!busy} title="Retirer de la liste" onClick={() => setConfirm(path)}><Trash2 size={11} /></Btn>
+              </>}
+          </div>
+      ))}
+      <div style={{ ...row, marginTop: 4 }}>
+        <Btn sm ghost disabled={!!busy} onClick={() => void add()}><FolderOpen size={11} /> {t('settings.addDir')}</Btn>
+      </div>
     </div>
   )
 }
