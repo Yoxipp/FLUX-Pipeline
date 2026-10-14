@@ -24,6 +24,7 @@ import { useWorkProfile } from '../WorkProfileContext'
 import { useEnabledDccs } from '../hooks/useEnabledDccs'
 import { SOFTWARE } from '../lib/dccs'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
+import { PublishDestination } from './publisher/PublishDestination'
 import type { MapOpts } from './publisher/TextureMapTable'
 import { useSettings } from '../hooks/useSettings'
 import { readActiveInstance, readActiveInstancePort, writeActiveInstancePort } from '../hooks/useActiveInstances'
@@ -328,6 +329,13 @@ const TEXTURE_EXTS = [
 function fileStem(path: string): string {
   const base = path.replace(/\\/g, '/').split('/').pop() || path
   return base.split('.')[0] || base
+}
+
+// Last extension of a path, with the dot ('' when none): the local publish keeps it.
+function fileExt(path: string): string {
+  const base = path.replace(/\\/g, '/').split('/').pop() || ''
+  const i = base.lastIndexOf('.')
+  return i > 0 ? base.slice(i).toLowerCase() : ''
 }
 
 // Detect the canonical MAP token for a texture file, or '' when the name carries
@@ -2241,23 +2249,31 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                 )}
               </div>
             )}
-          </div>
 
-          {/* Description */}
-          <div style={{ padding: '0 20px 16px', flexShrink: 0 }}>
+            {/* Description, then where it lands (ADR 0017 flat layout). */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
             <textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder={tr('Description de la modification…', 'Description of the change…')}
               style={{
-                width: '100%', height: 90, resize: 'none',
+                width: '100%', height: 80, flexShrink: 0, resize: 'none',
                 background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
                 borderRadius: 6, padding: '10px 12px',
                 fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-2)',
                 outline: 'none', boxShadow: 'var(--shadow-inset)',
               }}
             />
+              <PublishDestination
+                project={project}
+                base={dcc === 'Fichier local' ? ((nameOverride && nameOverride.trim()) || filename) : filename}
+                ext={dcc === 'Fichier local' ? fileExt(sourcePath) : exportExt}
+                sequence={Boolean(seqCapable && isSequence)}
+                ready={filename.split('_').filter(Boolean).length >= 4 && !(dcc === 'Fichier local' && localFiles.length > 1)}
+              />
+            </div>
           </div>
+
         </div>
 
         {/* draggable splitter — resizes the right panel */}
