@@ -1,5 +1,5 @@
 import type { ProductionAsset, ProductionDepartment, ProductionSequence, ProductionShot, ProductionState, ProductionTask, ProductionTaskDetail } from '../../types'
-import { departmentTasks, ensureTrackingTask, patchTrackingDetail } from './tracking'
+import { assigneeIncludes, assigneeList, departmentTasks, ensureTrackingTask, patchTrackingDetail } from './tracking'
 import { trackingCellTasks } from './taskSelection'
 
 export type TaskEntity = ProductionAsset | ProductionShot | ProductionSequence
@@ -70,14 +70,27 @@ export function createShotBatch(state: ProductionState, seqId: string, count: nu
   return { ...state, shots: [...state.shots.filter(s => s.seq_id !== seqId), ...sorted] }
 }
 
-/** Department-wide assignment: task level key of every shot / asset of the department scope. Subtask assignees stay independent. */
-export function assignDepartment(state: ProductionState, department: ProductionDepartment, assignee: string): ProductionState {
+/** Department-wide assignment on the task level key of every shot / asset of the department scope.
+ *  'add' / 'remove' toggle one artist among several, 'clear' empties it. Subtask assignees stay independent. */
+export function assignDepartment(state: ProductionState, department: ProductionDepartment, assignee: string, mode: 'add' | 'remove' | 'clear'): ProductionState {
   const entities = department.scope === 'shot' ? state.shots : state.assets
+  const who = assignee.trim().toUpperCase()
   let next = state
   for (const entity of entities) {
-    const tasks = departmentTasks(next, entity, department)
-    if (assignee) next = trackingCellTasks(next, entity, department, false, '').reduce((acc, task) => patchTaskArtist(acc, entity.id, task, '', assignee), next)
-    else next = tasks.reduce((acc, task) => entity.task_details?.[task.name.toUpperCase()]?.assignee ? patchTaskArtist(acc, entity.id, task, '', '') : acc, next)
+    const tasks = mode === 'add' ? trackingCellTasks(next, entity, department, false, '') : departmentTasks(next, entity, department)
+    for (const task of tasks) {
+      const own = assigneeList(entity.task_details?.[task.name.toUpperCase()]?.assignee)
+      const rest = mode === 'clear' ? [] : own.filter(name => name.toUpperCase() !== who)
+      const value = (mode === 'add' ? [...rest, assignee.trim()] : rest).join(', ')
+      if (value !== own.join(', ')) next = patchTaskArtist(next, entity.id, task, '', value)
+    }
   }
   return next
+}
+
+/** True when every task of the department already lists *assignee*. */
+export function departmentHasArtist(state: ProductionState, department: ProductionDepartment, assignee: string): boolean {
+  const entities = department.scope === 'shot' ? state.shots : state.assets
+  const tasks = entities.flatMap(entity => departmentTasks(state, entity, department).map(task => entity.task_details?.[task.name.toUpperCase()]?.assignee))
+  return tasks.length > 0 && tasks.every(value => assigneeIncludes(value, assignee))
 }

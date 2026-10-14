@@ -65,13 +65,12 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
   const { t } = useI18n()
   const [taskSelection, setTaskSelection] = useState(emptyTaskSelection)
   // Shift + press and drag across badges adds every crossed task to the selection.
-  const dragSelect = useRef<{ moved: boolean; start: string } | null>(null)
+  const dragSelect = useRef<{ moved: boolean; start: string; base: string[] } | null>(null)
   useEffect(() => {
     const stop = () => { if (dragSelect.current) setTimeout(() => { dragSelect.current = null }, 0) }
     window.addEventListener('mouseup', stop)
     return () => window.removeEventListener('mouseup', stop)
   }, [])
-  const addToSelection = (key: string) => setTaskSelection(prev => prev.keys.includes(key) ? prev : { keys: [...prev.keys, key], anchor: key })
   // New 100% baseline is 90% of the original interface. Old saved zoom is retired.
   const [zoom, setZoom] = useState(1)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -124,6 +123,22 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
     }))),
   ))
   const visibleKeys = visibleTargets.map(taskSelectionKey)
+  // Grid position of every visible task (row = entity, column = department) for rectangle drag selection.
+  const entityRows = new Map<string, number>()
+  visibleTargets.forEach(target => { if (!entityRows.has(target.entity.id)) entityRows.set(target.entity.id, entityRows.size) })
+  const dragTo = (key: string) => {
+    const drag = dragSelect.current
+    if (!drag) return
+    drag.moved = true
+    const cell = (k: string) => { const t = visibleTargets.find(target => taskSelectionKey(target) === k); return t ? { r: entityRows.get(t.entity.id) ?? 0, c: t.columnOrder ?? 0 } : null }
+    const a = cell(drag.start), b = cell(key)
+    if (!a || !b) return
+    const inside = visibleTargets.filter(t => {
+      const r = entityRows.get(t.entity.id) ?? 0, c = t.columnOrder ?? 0
+      return r >= Math.min(a.r, b.r) && r <= Math.max(a.r, b.r) && c >= Math.min(a.c, b.c) && c <= Math.max(a.c, b.c)
+    }).map(taskSelectionKey)
+    setTaskSelection({ keys: [...new Set([...drag.base, ...inside])], anchor: key })
+  }
   const visibleSignature = JSON.stringify(visibleKeys)
   useEffect(() => { setTaskSelection(prev => pruneTaskSelection(prev, visibleKeys)) }, [visibleSignature])
   const selectedKeys = new Set(taskSelection.keys)
@@ -161,7 +176,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
       <table className="tracking-table" style={{ zoom, minWidth: IDENTITY_WIDTH + (mode === 'shot' ? TIMING_WIDTH : 0) + CASTING_WIDTH + departments.length * DEPARTMENT_MIN_WIDTH }}>
         {/* Fixed layout: Shot / Timing / Casting keep their width, hidden departments widen the department columns. */}
         <colgroup><col style={{ width: IDENTITY_WIDTH }} />{mode === 'shot' && <col style={{ width: TIMING_WIDTH }} />}<col style={{ width: CASTING_WIDTH }} />{departments.map(d => <col key={d.id} />)}</colgroup>
-        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Casting' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} setState={setState} /></th>)}</tr></thead>
+        <thead><tr><th className="tracking-identity">{mode === 'shot' ? 'Shot' : 'Asset'}</th>{mode === 'shot' && <th>Timing</th>}<th>{mode === 'shot' ? 'Casting' : 'Shots liés'}</th>{departments.map(d => <th key={d.id} className="tracking-department-column"><DepartmentSortMenu department={d} sort={sort} onSort={setSort} setState={setState} state={state} /></th>)}</tr></thead>
         {groups.map(group => <tbody key={group.id} className="tracking-sequence-block">
           {mode === 'asset' && <>
             <tr className="tracking-sequence-gap" aria-hidden><td colSpan={columnCount} /></tr>
@@ -218,8 +233,8 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                 const taskKey = taskSelectionKey({ entity, task })
                 const taskSelected = selectedKeys.has(taskKey)
                 return <div key={task.name} className="tracking-task-slot" data-task-selected={taskSelected || undefined}
-                  onMouseDownCapture={event => { if (event.button === 0 && event.shiftKey) { event.preventDefault(); dragSelect.current = { moved: false, start: taskKey } } }}
-                  onMouseEnter={() => { if (dragSelect.current) { if (!dragSelect.current.moved) { dragSelect.current.moved = true; addToSelection(dragSelect.current.start) } addToSelection(taskKey) } }}>
+                  onMouseDownCapture={event => { if (event.button === 0 && event.shiftKey) { event.preventDefault(); dragSelect.current = { moved: false, start: taskKey, base: taskSelection.keys } } }}
+                  onMouseEnter={() => dragTo(taskKey)}>
                   <div className="tracking-task-meta">{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}
                     {status && blocked.length > 0 && <Tooltip scale={0.9 * zoom}><TooltipTrigger asChild><button className="tracking-need" aria-label={`Dépendances requises : ${blocked.join(', ')}`}>NEED</button></TooltipTrigger><TooltipContent>{[...new Set(blocked)].map(label => <div key={label}>{label}</div>)}</TooltipContent></Tooltip>}
                   </div>
