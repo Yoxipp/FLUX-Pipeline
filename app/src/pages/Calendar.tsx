@@ -85,9 +85,9 @@ const isLate = (it: CalendarItem) => (it.status === 'accepted' || it.status === 
 const btn = (primary = false, danger = false): CSSProperties => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '5px 10px', fontSize: 11,
   borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--sans)',
-  border: `1px solid ${danger ? 'var(--err)' : primary ? 'var(--accent)' : 'var(--rule-2)'}`,
+  border: `1px solid ${danger ? 'var(--err)' : primary ? 'var(--rule-3)' : 'var(--rule-2)'}`,
   background: primary ? 'var(--accent-soft)' : 'var(--paper-2)',
-  color: danger ? 'var(--err)' : primary ? 'var(--accent-hi)' : 'var(--ink)',
+  color: danger ? 'var(--err)' : primary ? 'var(--accent-hi)' : 'var(--accent-hi)',
 })
 const input: CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '5px 8px', fontSize: 11.5, borderRadius: 6,
@@ -138,7 +138,7 @@ function DateRange({ start, end, onChange, min }: {
       <div style={lbl}>{label}</div>
       <button type="button" onClick={() => setOpen(o => !o)}
               style={{ ...input, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', textAlign: 'left',
-                       borderColor: open ? 'var(--accent)' : 'var(--rule-2)' }}>
+                       borderColor: open ? 'var(--rule-3)' : 'var(--rule-2)' }}>
         <CalendarDays size={11} strokeWidth={1.8} color="var(--ink-3)" />
         {shown(value)}
       </button>
@@ -193,7 +193,7 @@ function DateRange({ start, end, onChange, min }: {
                        background: inSpan ? (edge ? 'color-mix(in oklch, var(--accent) 45%, transparent)' : 'var(--accent-soft)') : 'transparent',
                        borderRadius: edge ? 4 : 0,
                        outline: day === today && !inSpan ? '1px solid var(--rule-2)' : undefined, outlineOffset: -1,
-                       color: off ? 'var(--ink-4)' : inSpan ? 'var(--accent-hi)' : d.getMonth() === month.getMonth() ? 'var(--ink)' : 'var(--ink-3)',
+                       color: off ? 'var(--ink-4)' : inSpan ? 'var(--accent-hi)' : d.getMonth() === month.getMonth() ? 'var(--accent-hi)' : 'var(--ink-3)',
                        opacity: off ? 0.5 : 1, fontWeight: edge && inSpan ? 700 : 400,
                      }}>
                   {d.getDate()}
@@ -360,7 +360,7 @@ function Chip({ it, selected, onClick, full, noteLines = 0 }: { it: CalendarItem
         background: proposed ? 'transparent' : `color-mix(in oklch, ${c} 18%, transparent)`,
         border: proposed ? '1px dashed var(--ink-3)' : '1px solid transparent',
         borderLeft: proposed ? '1px dashed var(--ink-3)' : `3px solid ${c}`,
-        outline: selected ? '1px solid var(--accent)' : undefined,
+        outline: selected ? '1px solid var(--rule-3)' : undefined,
         opacity: it.status === 'declined' ? 0.45 : 1,
         textDecoration: it.status === 'declined' ? 'line-through' : undefined,
         color: 'var(--ink)', minWidth: 0,
@@ -547,7 +547,7 @@ function LinkPicker({ project, value, onChange }: { project: string; value: stri
             return (
               <button key={t} type="button" onClick={() => set({ task: on ? '' : t })}
                       style={{ fontSize: 11, fontFamily: 'var(--mono)', padding: '1px 6px', borderRadius: 10, cursor: 'pointer',
-                               border: `1px solid ${on ? 'var(--accent)' : 'var(--rule-2)'}`,
+                               border: `1px solid ${on ? 'var(--rule-3)' : 'var(--rule-2)'}`,
                                background: on ? 'color-mix(in oklch, var(--accent) 22%, var(--paper))' : 'var(--paper)',
                                color: on ? 'var(--ink)' : 'var(--ink-2)' }}>{t}</button>
             )
@@ -1061,7 +1061,7 @@ export function Calendar() {
                 {lineLeft && <span style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 2, background: 'var(--accent)', pointerEvents: 'none' }} />}
                 <div style={{ fontSize: 11.5, fontWeight: day === today ? 700 : 500, paddingRight: dayPubs.length ? 30 : 0,
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0,
-                              color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--ink)' }}>
+                              color: day === today || inSpan ? 'var(--accent-hi)' : dark ? 'var(--ink-2)' : 'var(--accent-hi)' }}>
                   {view === 'week' ? shortDate(day, l) : d.getDate()}
                   {/* The 1st of each month carries its name: you see where a month starts while scrolling. */}
                   {view === 'month' && d.getDate() === 1 && (

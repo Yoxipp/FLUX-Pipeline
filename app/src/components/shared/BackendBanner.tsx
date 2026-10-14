@@ -25,7 +25,7 @@ export function BackendBanner() {
         padding: '6px 14px',
         background: 'var(--paper-2)',
         borderBottom: '1px solid var(--rule-2)',
-        borderLeft: `2px solid ${down ? 'var(--danger, #d0654f)' : 'var(--color-accent)'}`,
+        borderLeft: `2px solid ${down ? 'var(--danger, #d0654f)' : 'var(--rule-3)'}`,
         fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink)',
       }}
     >

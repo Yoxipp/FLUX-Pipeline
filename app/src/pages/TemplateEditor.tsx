@@ -109,7 +109,7 @@ function PresetRow({
           <input
             autoFocus value={name} onChange={(e) => setName(e.target.value)}
             onBlur={rename} onKeyDown={(e) => { if (e.key === 'Enter') rename(); if (e.key === 'Escape') { setEditing(false); setName(preset.name) } }}
-            style={{ font: 'inherit', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', width: '100%' }}
+            style={{ font: 'inherit', color: 'var(--ink)', background: 'var(--paper)', border: '1px solid var(--rule-3)', borderRadius: 5, padding: '2px 6px', width: '100%' }}
           />
         ) : (
           <button onClick={() => setEditing(true)} title={t('te.rename')} style={{
@@ -270,7 +270,7 @@ const btnGhost: React.CSSProperties = {
 }
 const btnAccent: React.CSSProperties = {
   font: 'inherit', fontSize: 12, color: 'var(--paper)', background: 'var(--accent)',
-  border: '1px solid var(--accent)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontWeight: 600,
+  border: '1px solid var(--rule-3)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontWeight: 600,
 }
 const metaSelect: React.CSSProperties = {
   font: 'inherit', fontSize: 11, color: 'var(--ink)', background: 'var(--paper)',

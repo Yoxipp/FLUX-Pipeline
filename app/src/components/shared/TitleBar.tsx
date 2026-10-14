@@ -169,7 +169,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
           <div style={{
             position: 'absolute', top: 2, right: 2,
             minWidth: 14, height: 14, padding: '0 3px',
-            background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+            background: 'var(--accent-soft)', border: '1px solid var(--rule-3)',
             borderRadius: 999, fontFamily: 'var(--mono)', fontSize: 10,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'var(--accent-hi)', fontWeight: 600,
@@ -212,7 +212,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
           boxShadow: 'var(--shadow-xs)',
           transition: 'border-color 0.12s, background 0.12s',
         }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'; (e.currentTarget as HTMLElement).style.background = 'var(--accent-soft)' }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--rule-3)'; (e.currentTarget as HTMLElement).style.background = 'var(--accent-soft)' }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--rule-2)'; (e.currentTarget as HTMLElement).style.background = 'var(--paper-2)' }}
       >
         <Avatar ch={user[0].toUpperCase()} size={20} />

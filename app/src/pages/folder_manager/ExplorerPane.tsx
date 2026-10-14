@@ -553,7 +553,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
       onMouseDownCapture={() => { if (!active) onFocus(paneId) }}
       style={{
         flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden',
-        ...(framed ? { border: `1px solid ${active ? 'var(--accent)' : 'var(--rule)'}`, borderRadius: 6, background: 'var(--paper)' } : {}),
+        ...(framed ? { border: `1px solid ${active ? 'var(--rule-3)' : 'var(--rule)'}`, borderRadius: 6, background: 'var(--paper)' } : {}),
       }}
     >
       {/* Barre de navigation de la vue : retour / suivant, chemin, recherche */}
@@ -566,7 +566,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
             onDragLeave={upDroppable ? (() => setDragOverUp(false)) : undefined}
             onDrop={upDroppable ? (e => { setDragOverUp(false); dropInto(e, (nav.kind === 'inside' ? nav.subpath : []).slice(0, -1)) }) : undefined}
             title={upDroppable ? tr('Retour · déposer ici pour monter d’un niveau', 'Back · drop here to move up one level') : tr('Retour', 'Back')}
-            style={{ ...navBtn(canBack || upDroppable), ...(dragOverUp ? { borderColor: 'var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-hi)' } : {}) }}
+            style={{ ...navBtn(canBack || upDroppable), ...(dragOverUp ? { borderColor: 'var(--rule-3)', background: 'var(--accent-soft)', color: 'var(--accent-hi)' } : {}) }}
           >
             <ChevronLeft size={13} strokeWidth={2} />
           </div>
@@ -587,7 +587,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               onBlur={() => { if (!pathError) setEditingPath(false) }}
               spellCheck={false}
               placeholder={tr('Coller un chemin (C:\\… ou PROJET/sous-dossier) puis Entrée', 'Paste a path (C:\\… or PROJECT/subfolder) then Enter')}
-              style={{ flex: 1, minWidth: 0, height: 24, border: '1px solid ' + (pathError ? 'var(--err)' : 'var(--accent)'), padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }}
+              style={{ flex: 1, minWidth: 0, height: 24, border: '1px solid ' + (pathError ? 'var(--err)' : 'var(--rule-3)'), padding: '0 8px', background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }}
             />
           ) : (
             <div
@@ -613,7 +613,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                         onDragOver={droppable ? (e => { if (acceptDrag(e) && dragOverBc !== i) setDragOverBc(i) }) : undefined}
                         onDragLeave={droppable ? (() => setDragOverBc(prev => (prev === i ? null : prev))) : undefined}
                         onDrop={droppable && nav.kind === 'inside' ? (e => { setDragOverBc(null); dropInto(e, nav.subpath.slice(0, i - 1)) }) : undefined}
-                        style={{ color: dragOverBc === i ? 'var(--accent-hi)' : isLast ? 'var(--ink)' : 'var(--ink-3)', background: dragOverBc === i ? 'var(--accent-soft)' : 'transparent', borderRadius: 3, padding: dragOverBc === i ? '0 3px' : 0, fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'text', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
+                        style={{ color: dragOverBc === i ? 'var(--accent-hi)' : isLast ? 'var(--accent-hi)' : 'var(--ink-3)', background: dragOverBc === i ? 'var(--accent-soft)' : 'transparent', borderRadius: 3, padding: dragOverBc === i ? '0 3px' : 0, fontWeight: isLast ? 600 : 400, cursor: !isLast ? 'pointer' : 'text', whiteSpace: 'nowrap', overflow: isLast ? 'visible' : 'hidden', textOverflow: 'ellipsis', flexShrink: isLast ? 0 : 1 }}
                       >
                         {seg}
                       </span>
@@ -661,7 +661,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
 
       {/* Contenu : résultats de recherche ou dossier courant. Déposer ici = dans ce dossier. */}
       <div
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, outline: dragOverPane ? '1px dashed var(--accent)' : 'none', outlineOffset: -3 }}
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, outline: dragOverPane ? '1px dashed var(--rule-3)' : 'none', outlineOffset: -3 }}
         onClick={() => { if (searchResults === null) setSelectedNames(new Set()) }}
         onDragOver={e => { if (fromOtherPlace() && acceptDrag(e) && !dragOverPane) setDragOverPane(true) }}
         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverPane(false) }}
@@ -778,7 +778,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                     onDragOver={item.isDir ? (e => { if (acceptDrag(e)) { e.stopPropagation(); if (dragOverName !== item.name) setDragOverName(item.name) } }) : undefined}
                     onDragLeave={item.isDir ? (() => setDragOverName(prev => (prev === item.name ? null : prev))) : undefined}
                     onDrop={item.isDir ? (e => { setDragOverName(null); setDragOverPane(false); dropInto(e, [...(nav.kind === 'inside' ? nav.subpath : []), item.name]) }) : undefined}
-                    style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: (isDropTarget || isSel) ? 'var(--accent-soft)' : 'transparent', border: isDropTarget ? '1px dashed var(--accent)' : isSel ? '1px solid var(--accent)' : '1px solid transparent', opacity: isCut ? 0.45 : 1, gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s, opacity 0.12s' }}
+                    style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px 6px', borderRadius: 6, background: (isDropTarget || isSel) ? 'var(--accent-soft)' : 'transparent', border: isDropTarget ? '1px dashed var(--rule-3)' : isSel ? '1px solid var(--rule-3)' : '1px solid transparent', opacity: isCut ? 0.45 : 1, gap: 5, cursor: 'default', userSelect: 'none', transition: 'background 0.08s, opacity 0.12s' }}
                   >
                     {/* Checkbox multi-sélection */}
                     {(isHovered || isSel) && (
@@ -792,7 +792,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                             return next
                           })
                         }}
-                        style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSel ? 'var(--accent)' : 'var(--ink-4)'}`, background: isSel ? 'var(--accent)' : 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
+                        style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${isSel ? 'var(--rule-3)' : 'var(--ink-4)'}`, background: isSel ? 'var(--accent)' : 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
                       >
                         {isSel && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                       </div>
@@ -800,7 +800,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
                     {locked && (
                       <div
                         title={tr('Verrouillé', 'Locked')}
-                        style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: 3, background: 'var(--paper-2)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-hi)', zIndex: 1, boxShadow: 'var(--shadow-xs)' }}
+                        style={{ position: 'absolute', top: 4, right: 4, width: 15, height: 15, borderRadius: 3, background: 'var(--paper-2)', border: '1px solid var(--rule-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-hi)', zIndex: 1, boxShadow: 'var(--shadow-xs)' }}
                       >
                         <Lock size={9} strokeWidth={2} />
                       </div>

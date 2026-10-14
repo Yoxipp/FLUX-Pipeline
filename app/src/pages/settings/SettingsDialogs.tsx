@@ -32,7 +32,7 @@ export function AdvancedConfirm({ onConfirm, onCancel }: { onConfirm: () => void
           onKeyDown={e => { if (e.key === 'Enter' && match) onConfirm() }}
           placeholder={ADVANCED_PHRASE} spellCheck={false} autoCapitalize="off" autoCorrect="off"
           style={{ width: '100%', boxSizing: 'border-box', marginBottom: 18, padding: '7px 10px', fontSize: 12, fontFamily: 'var(--mono)',
-                   background: 'var(--paper-2)', color: 'var(--ink)', border: `1px solid ${match ? 'var(--accent)' : 'var(--rule-2)'}`, borderRadius: 6, outline: 'none' }}
+                   background: 'var(--paper-2)', color: 'var(--ink)', border: `1px solid ${match ? 'var(--rule-3)' : 'var(--rule-2)'}`, borderRadius: 6, outline: 'none' }}
         />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <div className="btn ghost" onClick={onCancel} style={{ cursor: 'pointer' }}>Annuler</div>

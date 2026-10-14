@@ -312,7 +312,7 @@ export function TaskDetail({
                   <div key={c.id} style={{
                     border: '1px solid var(--rule-2)', borderRadius: 6, padding: '6px 8px 6px 10px',
                     background: 'var(--paper)',
-                    borderLeft: read ? '1px solid var(--rule-2)' : '3px solid var(--accent)',
+                    borderLeft: read ? '1px solid var(--rule-2)' : '3px solid var(--rule-3)',
                   }}>
                     <div style={{
                       display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2,
@@ -1086,7 +1086,7 @@ function VersionList({ project, relPath, versions, current, onPick, onKeyframe, 
               onClick={() => onPick(v)}
               style={{
                 flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: 4,
-                borderRadius: 5, border: `1px solid ${isCurrent ? 'var(--accent)' : 'transparent'}`,
+                borderRadius: 5, border: `1px solid ${isCurrent ? 'var(--rule-3)' : 'transparent'}`,
                 background: isCurrent ? 'var(--accent-soft)' : 'transparent', textAlign: 'left',
                 cursor: v.available ? 'pointer' : 'not-allowed', opacity: v.available ? 1 : 0.55, color: 'var(--ink)',
               }}
@@ -1257,6 +1257,6 @@ const _miniIconBtn: React.CSSProperties = {
 }
 const _postBtn: React.CSSProperties = {
   padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-  border: '1px solid var(--accent)', background: 'var(--accent)',
+  border: '1px solid var(--rule-3)', background: 'var(--accent)',
   color: 'var(--paper)', cursor: 'pointer',
 }

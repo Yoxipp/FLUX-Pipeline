@@ -27,7 +27,7 @@ const ShelfBtn =({ icon, label, primary }: { icon: React.ReactNode; label: strin
   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
     <div style={{
       width: 40, height: 40, borderRadius: 9,
-      border: primary ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+      border: primary ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
       background: primary ? 'var(--accent-soft)' : 'var(--paper)',
       color: primary ? 'var(--accent-hi)' : 'var(--ink-3)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -335,7 +335,7 @@ export function ShelfManager() {
                     >
                       <div style={{
                         width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                        border: '1.5px solid ' + (checked[t.id] ? 'var(--accent)' : 'var(--rule-2)'),
+                        border: '1.5px solid ' + (checked[t.id] ? 'var(--rule-3)' : 'var(--rule-2)'),
                         background: checked[t.id] ? 'var(--accent)' : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>

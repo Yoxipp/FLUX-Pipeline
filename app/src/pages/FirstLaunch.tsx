@@ -112,7 +112,7 @@ export function FirstLaunch() {
                   color: 'var(--ink-3)', cursor: 'pointer',
                   transition: 'border-color 0.12s, color 0.12s',
                 }}
-                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--accent)'; el.style.color = 'var(--accent-hi)' }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-3)'; el.style.color = 'var(--accent-hi)' }}
                 onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'var(--rule-2)'; el.style.color = 'var(--ink-3)' }}
               >
                 <FolderOpen size={14} strokeWidth={1.75} />
@@ -142,7 +142,7 @@ export function FirstLaunch() {
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '7px 10px', borderRadius: 7,
                           background: isActive ? 'var(--accent-soft)' : 'var(--paper-2)',
-                          border: '1px solid ' + (isActive ? 'var(--accent)' : 'var(--rule)'),
+                          border: '1px solid ' + (isActive ? 'var(--rule-3)' : 'var(--rule)'),
                           cursor: 'pointer',
                           transition: 'border-color 0.12s, background 0.12s',
                         }}
@@ -214,7 +214,7 @@ export function FirstLaunch() {
             style={{
               flex: 1, padding: '7px 16px', borderRadius: 7, textAlign: 'center',
               background: 'var(--accent-soft)',
-              border: '1px solid var(--accent)',
+              border: '1px solid var(--rule-3)',
               fontSize: 11, fontWeight: 600,
               color: 'var(--accent-hi)',
               cursor: loading ? 'default' : 'pointer',

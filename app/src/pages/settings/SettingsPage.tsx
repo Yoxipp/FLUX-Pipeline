@@ -101,7 +101,7 @@ function ProjectTab({ currentUser }: { currentUser: string }) {
   if (!project) return <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>Aucun projet actif : choisis-en un pour voir ses réglages.</div>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 }}>
-      <div className="card" style={{ padding: '8px 12px', fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.5, borderColor: 'var(--accent)' }}>
+      <div className="card" style={{ padding: '8px 12px', fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.5, borderColor: 'var(--rule-3)' }}>
         Portée : projet <b>{project}</b>. Une modification ici s'applique à tous les artistes du projet.
       </div>
       <AdvancedSettings part="project" />
@@ -180,7 +180,7 @@ function OtherUsers({ currentUser }: { currentUser: string }) {
           {renaming === u
             ? <input autoFocus value={value} onChange={e => setValue(e.target.value.toUpperCase())}
                 onKeyDown={e => { if (e.key === 'Enter') void run(() => api.renameUser(u, value.trim())); if (e.key === 'Escape') setRenaming(null) }}
-                style={{ flex: 1, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 5 }} />
+                style={{ flex: 1, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--rule-3)', borderRadius: 5 }} />
             : <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)' }}>{u}</span>}
           {renaming === u ? <>
             <Btn sm ghost title="Valider" onClick={() => void run(() => api.renameUser(u, value.trim()))}><Check size={11} /></Btn>

@@ -10,7 +10,7 @@
 .work-profile-dialog button { display:inline-flex; align-items:center; justify-content:center; gap:6px; font:12px var(--sans); color:var(--ink); border:1px solid var(--rule-2); background:var(--paper); border-radius:5px; padding:6px 10px; cursor:pointer; }
 .work-profile-dialog button:hover:not(:disabled) { background:var(--rule); }
 .work-profile-dialog button:disabled { opacity:.45; cursor:default; }
-.work-profile-dialog :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.work-profile-dialog :focus-visible { outline:2px solid var(--rule-3); outline-offset:2px; }
 .work-profile-dialog select, .work-profile-dialog input:not([type="checkbox"]) { box-sizing:border-box; width:100%; min-width:0; padding:7px 9px; font:12px var(--sans); color:var(--ink); background:var(--paper); border:1px solid var(--rule-2); border-radius:5px; }
 .work-profile-body { display:grid; grid-template-columns:220px minmax(0,1fr); gap:18px; }
 .work-profile-list { display:flex; flex-direction:column; gap:14px; border-right:1px solid var(--rule); padding-right:14px; }
@@ -34,7 +34,7 @@
 .work-profile-dot { display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--warn, #e8912a); vertical-align:middle; }
 .work-profile-seg { display:flex; gap:4px; flex-wrap:wrap; }
 .work-profile-seg button { padding:5px 10px; color:var(--ink-3); }
-.work-profile-seg button[data-on] { color:var(--accent-hi); border-color:var(--accent); background:var(--accent-soft); }
+.work-profile-seg button[data-on] { color: var(--accent-hi); border-color:var(--rule-3); background:var(--accent-soft); }
 .work-profile-save { display:flex; gap:8px; align-items:center; border-top:1px solid var(--rule); margin-top:18px; padding-top:14px; }
 .work-profile-save input { flex:1; }
 .work-profile-save button { white-space:nowrap; }

@@ -190,7 +190,7 @@ function GroupBox({ group, assets, color, selection, onSelect, onAssetClicked, o
     <div
       onClick={(e) => { e.stopPropagation(); onSelect({ kind: 'group', id: group.id }) }}
       style={{
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--rule-2)'}`,
+        border: `1px solid ${active ? 'var(--rule-3)' : 'var(--rule-2)'}`,
         borderRadius: 10, padding: '10px 12px',
         background: active ? 'var(--accent-soft)' : 'var(--paper-2)',
         boxShadow: 'var(--shadow-xs)',
@@ -269,7 +269,7 @@ function Chip({ asset, color, active, onClick, onDragStart, onDropBefore }: {
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 8,
         padding: '9px 16px', borderRadius: 10,
-        border: `1px solid ${active ? 'var(--accent)' : color}`,
+        border: `1px solid ${active ? 'var(--rule-3)' : color}`,
         outline: active ? '2px solid var(--accent-soft)' : 'none',
         background: color,
         color: 'var(--paper)',

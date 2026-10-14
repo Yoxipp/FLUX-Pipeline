@@ -565,7 +565,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
               background: bookmarkActive ? 'var(--accent-soft)' : 'var(--paper-2)',
               color: bookmarkActive ? 'var(--accent-hi)' : (canBookmark ? 'var(--ink-2)' : 'var(--ink-4)'),
               opacity: canBookmark ? 1 : 0.55,
-              borderColor: bookmarkActive ? 'var(--accent)' : 'var(--rule-2)',
+              borderColor: bookmarkActive ? 'var(--rule-3)' : 'var(--rule-2)',
             }}
           >
             <Bookmark size={12} strokeWidth={2}
@@ -599,7 +599,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
               {bookmarkPositions.map((p, i) => (
                 <div key={i} style={{
                   position: 'absolute', top: 0, bottom: 0, left: p.x,
-                  width: 0, borderLeft: '2px solid var(--accent)',
+                  width: 0, borderLeft: '2px solid var(--rule-3)',
                   pointerEvents: 'none', zIndex: 4, opacity: 0.85,
                 }}>
                   <div style={{

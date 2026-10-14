@@ -10,7 +10,7 @@ export const Avatar = ({ ch, size = 20 }: { ch: string; size?: number }) => (
   <div style={{
     width: size, height: size, borderRadius: '50%',
     background: 'var(--accent-soft)',
-    border: '1px solid var(--accent)',
+    border: '1px solid var(--rule-3)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontFamily: 'var(--mono)', fontSize: Math.round(size * 0.52), fontWeight: 600,
     color: 'var(--accent-hi)', flexShrink: 0,
@@ -69,7 +69,7 @@ export const Tag = ({ children, kind = '' }: { children: React.ReactNode; kind?:
 export const Check = ({ on }: { on: boolean }) => (
   <div style={{
     width: 14, height: 14,
-    border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
+    border: '1px solid ' + (on ? 'var(--rule-3)' : 'var(--rule-2)'),
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     background: on ? 'var(--accent-soft)' : 'var(--bg-deep)',
     borderRadius: 4,

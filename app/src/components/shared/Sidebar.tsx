@@ -65,7 +65,7 @@ function NavItem({ icon: Icon, label, active, indent = false, notif = 0, notifRe
           minWidth: 17, height: 17, padding: '0 4px', borderRadius: 6,
           // Red badge for @mentions, accent badge for regular notifications.
           background: notifRed ? 'color-mix(in oklch, var(--err) 18%, transparent)' : 'var(--accent-soft)',
-          border: '1px solid ' + (notifRed ? 'var(--err)' : 'var(--accent)'),
+          border: '1px solid ' + (notifRed ? 'var(--err)' : 'var(--rule-3)'),
           color: notifRed ? 'var(--err)' : 'var(--accent-hi)',
           fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 600,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

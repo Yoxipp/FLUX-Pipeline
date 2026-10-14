@@ -484,7 +484,7 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
             className="scale-hover"
             style={{
               height: 28, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
-              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--rule-3)' : 'var(--rule-2)'),
               background: filled ? 'var(--accent-soft)' : 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)',
               fontFamily: filled ? 'var(--mono)' : 'var(--sans)', fontSize: 11,
               color: filled ? 'var(--accent-hi)' : 'var(--ink-4)', fontStyle: filled ? 'normal' : 'italic',
@@ -504,9 +504,9 @@ function ModuleBox({ label, info, value, options, fixed, onChange, onArchiveOpti
             onFocus={() => setOpen(true)}
             style={{
               width: '100%', height: 28, padding: filled ? '0 24px 0 8px' : '0 8px', boxSizing: 'border-box',
-              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--accent)' : 'var(--rule-2)'),
+              borderRadius: 6, border: '1px solid ' + (filled ? 'var(--rule-3)' : 'var(--rule-2)'),
               background: 'var(--bg-deep)', boxShadow: 'var(--shadow-inset)', outline: 'none',
-              fontFamily: 'var(--mono)', fontSize: 11, color: filled ? 'var(--accent-hi)' : 'var(--ink)',
+              fontFamily: 'var(--mono)', fontSize: 11, color: filled ? 'var(--accent-hi)' : 'var(--accent-hi)',
               fontWeight: filled ? 600 : 400,
             }}
           />
@@ -1870,7 +1870,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             title={it.scene ?? ''}
             style={{
               padding: '7px 10px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
-              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--rule-2)'),
+              border: '1px solid ' + (on ? 'var(--rule-3)' : 'var(--rule-2)'),
               background: on ? 'var(--accent-soft)' : 'var(--paper)',
               display: 'flex', flexDirection: 'column', gap: 5,
             }}>
@@ -1891,7 +1891,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     style={{
                       fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4, maxWidth: '100%',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      border: '1px solid ' + (picked ? 'var(--accent)' : 'var(--rule-2)'),
+                      border: '1px solid ' + (picked ? 'var(--rule-3)' : 'var(--rule-2)'),
                       background: picked ? 'var(--accent-soft)' : 'var(--paper-2)',
                       color: picked ? 'var(--accent-hi)' : 'var(--ink-2)',
                     }}>{dcc === 'Houdini' ? n.split('/').filter(Boolean).slice(-2).join('/') : n.split('|').pop()}</span>
@@ -2430,7 +2430,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                           style={{
                             padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
                             fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                            border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                            border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                             background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                             color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2569,7 +2569,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                         style={{
                           padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
                           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                           background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                           color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2690,7 +2690,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                         style={{
                           padding: '5px 10px', borderRadius: 6, cursor: 'pointer', maxWidth: '100%',
                           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                          border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                          border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                           background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                           color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -2730,7 +2730,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                             style={{
                               padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
                               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                              border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                              border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                               background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                               color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                             }}>
@@ -2780,7 +2780,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                   <div key={m} onClick={() => setHouAttrMode(m)} style={{
                     padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
                     fontFamily: 'var(--mono)', fontWeight: houAttrMode === m ? 600 : 400,
-                    border: houAttrMode === m ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                    border: houAttrMode === m ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                     background: houAttrMode === m ? 'var(--accent-soft)' : 'var(--paper-2)',
                     color: houAttrMode === m ? 'var(--accent-hi)' : 'var(--ink-3)',
                   }}>{label}</div>
@@ -2951,7 +2951,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
               return (
                 <div key={it.port} onClick={() => publishOn(it.port)} title={it.scene ?? ''} style={{
                   padding: '9px 12px', borderRadius: 6, cursor: 'pointer', minWidth: 0,
-                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--rule-2)'),
+                  border: '1px solid ' + (active ? 'var(--rule-3)' : 'var(--rule-2)'),
                   background: active ? 'var(--accent-soft)' : 'var(--paper)',
                   display: 'flex', alignItems: 'center', gap: 10,
                 }}>

@@ -138,7 +138,7 @@ export function TextureMapTable({
                 style={{
                   flex: 1, minWidth: 0, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
                   fontFamily: 'var(--mono)', fontSize: 11, fontWeight: on ? 600 : 400,
-                  border: on ? '1px solid var(--accent)' : '1px solid var(--rule-2)',
+                  border: on ? '1px solid var(--rule-3)' : '1px solid var(--rule-2)',
                   background: on ? 'var(--accent-soft)' : 'var(--paper-2)',
                   color: on ? 'var(--accent-hi)' : 'var(--ink-3)',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

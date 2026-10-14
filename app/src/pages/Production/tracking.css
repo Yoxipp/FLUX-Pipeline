@@ -3,7 +3,7 @@
 .production-tracking button { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:6px 9px; border:1px solid var(--rule-2); border-radius:4px; background:var(--paper-2); cursor:pointer; box-shadow:none; }
 .production-tracking button:hover { background:var(--rule); }
 .production-tracking button:disabled { cursor:default; opacity:.55; }
-.production-tracking :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.production-tracking :focus-visible { outline:2px solid var(--rule-3); outline-offset:2px; }
 .production-tracking input, .production-tracking select { background:var(--paper); border:1px solid var(--rule-2); border-radius:4px; padding:6px 8px; min-width:0; }
 .tracking-toolbar { display:flex; align-items:center; gap:8px; padding:12px 16px; flex-wrap:wrap; border-bottom:1px solid var(--rule); }
 .tracking-search { display:flex; align-items:center; gap:8px; color:var(--ink-2); min-width:180px; width:260px; }
@@ -24,7 +24,7 @@
 .tracking-table th.tracking-identity { z-index:3; background:var(--paper-2); }
 .tracking-name-cell { display:flex; align-items:center; gap:12px; }
 /* Retakes B2-B5 (2026-10-09). */
-.tracking-sort-toggle[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); }
+.tracking-sort-toggle[aria-pressed="true"] { color:var(--accent); border-color:var(--rule-3); }
 .tracking-asset-class { font-size:12px; color:var(--ink); }
 .production-tracking .tracking-row-expand { padding:2px; margin-right:-6px; border:0; background:transparent; color:var(--ink-2); flex-shrink:0; }
 .production-tracking .tracking-row-expand:disabled { opacity:.3; cursor:default; }
@@ -93,7 +93,7 @@
 .production-dialog button, .production-timeline-toolbar button { display:inline-flex; align-items:center; justify-content:center; gap:8px; font:12px var(--sans); color:var(--ink); border:1px solid var(--rule-2); background:var(--paper); border-radius:5px; padding:7px 10px; cursor:pointer; }
 .production-dialog button:hover { background:var(--rule); }
 .production-dialog input, .production-dialog select { box-sizing:border-box; width:100%; min-width:0; padding:8px 10px; font:12px var(--sans); color:var(--ink); background:var(--paper); border:1px solid var(--rule-2); border-radius:5px; }
-.production-dialog :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.production-dialog :focus-visible { outline:2px solid var(--rule-3); outline-offset:2px; }
 .production-create-form { display:flex; flex-direction:column; gap:14px; }
 .production-create-form label { display:flex; flex-direction:column; gap:6px; color:var(--ink-2); }
 .production-number-fields { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
@@ -120,7 +120,7 @@
 .tracking-task-meta .tracking-need { pointer-events:auto; }
 .tracking-task-slot[data-task-selected] { background:var(--accent-soft); border-radius:4px; box-shadow:0 0 0 4px var(--accent-soft); }
 .tracking-selection-summary { display:flex; align-items:center; gap:6px; color:var(--accent-hi); font-size:11px; }
-.production-tracking .tracking-selection-summary button { border:0; padding:3px; background:transparent; color:var(--accent-hi); }
+.production-tracking .tracking-selection-summary button { border:0; padding:3px; background:transparent; color: var(--accent-hi); }
 .tracking-task-meta { display:flex; align-items:center; justify-content:center; gap:5px; height:14px; white-space:nowrap; }
 .tracking-task-meta .tracking-muted { font-size:10.5px; }
 .tracking-task-artist { display:flex; align-items:center; justify-content:center; height:14px; }
@@ -169,7 +169,7 @@
 .tracking-deadline[data-deadline="Late"] { --deadline-color: #ffce55; }
 .tracking-deadline[data-deadline="Extra-late"] { --deadline-color: #ff6376; }
 .tracking-deadline[data-deadline="Done"] { --deadline-color: #61e0a1; }
-.tracking-show-count { margin-left:4px; padding:1px 5px; border-radius:4px; background:var(--accent-soft); color:var(--accent-hi); font:11px var(--mono); }
+.tracking-show-count { margin-left:4px; padding:1px 5px; border-radius:4px; background:var(--accent-soft); color: var(--accent-hi); font:11px var(--mono); }
 
 /* Task priority (retake 07): high = bold red "!" left of the badge, low = muted arrow in it. */
 .tracking-priority { display:inline-flex; margin-left:2px; vertical-align:middle; }
@@ -183,7 +183,7 @@
 .timeline-preview-source { display:inline-flex; align-items:center; gap:6px; font:10.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); }
 .timeline-preview-source select { font:11px var(--sans); color:var(--ink); background:var(--paper); border:1px solid var(--rule-2); border-radius:4px; padding:3px 6px; text-transform:none; letter-spacing:0; }
 .timeline-preview-btn { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 9px; font:11px var(--sans); color:var(--ink-2); background:var(--paper); border:1px solid var(--rule-2); border-radius:5px; cursor:pointer; white-space:nowrap; }
-.timeline-preview-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--ink); }
+.timeline-preview-btn:hover:not(:disabled) { border-color:var(--rule-3); color:var(--ink); }
 .timeline-preview-btn:disabled { opacity:.45; cursor:default; }
 .timeline-preview-empty { padding:22px 14px; font-size:12px; color:var(--ink-3); }
 .timeline-preview-shotpick { display:flex; align-items:center; gap:8px; padding:8px 12px 0; }
@@ -203,7 +203,7 @@
 .timeline-montage-strip { display:flex; gap:2px; height:12px; margin:0 12px; }
 .timeline-montage-strip button { flex-basis:0; min-width:3px; border:0; padding:0; border-radius:2px; background:var(--prod-shot); opacity:.55; cursor:pointer; }
 .timeline-montage-strip button.gap { background:var(--rule-2); }
-.timeline-montage-strip button.current { opacity:1; outline:2px solid var(--accent); outline-offset:1px; }
+.timeline-montage-strip button.current { opacity:1; outline:2px solid var(--rule-3); outline-offset:1px; }
 .tracking-status[data-empty] .tracking-empty-add { color:var(--ink-2); opacity:.55; }
 .tracking-task-slot:hover .tracking-status[data-empty] .tracking-empty-add { opacity:1; }
 .production-tracking button.tracking-department-heading { cursor:pointer; transition:transform .15s ease; }

@@ -98,7 +98,7 @@ export function Login({ onDone }: Props) {
                       display: 'flex', alignItems: 'center', gap: 8,
                       padding: '6px 8px', borderRadius: 7,
                       background: isActive ? 'var(--accent-soft)' : (hovered === u ? 'var(--paper)' : 'transparent'),
-                      border: '1px solid ' + (isActive ? 'var(--accent)' : 'transparent'),
+                      border: '1px solid ' + (isActive ? 'var(--rule-3)' : 'transparent'),
                       cursor: 'pointer',
                       transition: 'border-color 0.12s, background 0.12s',
                     }}
@@ -165,7 +165,7 @@ export function Login({ onDone }: Props) {
             style={{
               padding: '6px 14px', borderRadius: 6,
               background: canEnter ? 'var(--accent-soft)' : 'var(--paper)',
-              border: '1px solid ' + (canEnter ? 'var(--accent)' : 'var(--rule)'),
+              border: '1px solid ' + (canEnter ? 'var(--rule-3)' : 'var(--rule)'),
               fontSize: 11, fontWeight: 600,
               color: canEnter ? 'var(--accent-hi)' : 'var(--ink-4)',
               cursor: canEnter ? 'pointer' : 'default',

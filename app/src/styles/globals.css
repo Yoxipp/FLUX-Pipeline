@@ -127,10 +127,10 @@ body {
 }
 .pill:hover { transform: scale(1.04); }
 .pill.active {
-  border-color: var(--accent);
+  border-color: var(--rule-3);
   color: var(--accent-hi);
   background: var(--accent-soft);
-  box-shadow: var(--shadow-xs), 0 0 0 1px color-mix(in oklch, var(--accent) 20%, transparent);
+  box-shadow: var(--shadow-xs);
 }
 .pill.disabled { opacity: 0.28; pointer-events: none; }
 
@@ -169,7 +169,7 @@ body {
 }
 .btn.primary {
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: var(--rule-3);
   color: var(--accent-hi);
   box-shadow: var(--shadow-xs);
 }
@@ -199,9 +199,9 @@ body {
   box-shadow: var(--shadow-inset);
   transition: border-color 0.12s;
 }
-.field:focus-within { border-color: var(--accent); }
+.field:focus-within { border-color: var(--rule-3); }
 .field .placeholder { color: var(--ink-4); font-style: italic; }
-.field.tinted { background: var(--accent-soft); border-color: var(--accent); }
+.field.tinted { background: var(--accent-soft); border-color: var(--rule-3); }
 
 /* native inputs */
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="submit"]):not([type="button"]),
@@ -247,7 +247,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .tag.live   { color: var(--ok);  border-color: var(--ok);  opacity: .85; }
 .tag.ver    { color: var(--ink-3); }
 .tag.err    { color: var(--err); border-color: var(--err); }
-.tag.accent { color: var(--accent-hi); border-color: var(--accent); }
+.tag.accent { color: var(--accent-hi); border-color: var(--rule-3); }
 
 /* ── nav (sidebar items) ── */
 .nav {
@@ -287,7 +287,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .nav:hover .glyph { color: var(--ink-2); }
 .nav.active {
   color: var(--ink);
-  border-left-color: var(--accent);
+  border-left-color: var(--rule-3);
   background: var(--accent-soft);
   font-weight: 500;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
@@ -326,7 +326,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
   outline: none;
   text-align: left;
 }
-.select-trigger:focus { border-color: var(--accent); }
+.select-trigger:focus { border-color: var(--rule-3); }
 .select-trigger[data-placeholder] { color: var(--ink-4); font-style: italic; }
 
 .select-content {
@@ -417,7 +417,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .fm-setup-toggle { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; margin-right: 6px; border: 1px solid var(--rule-2); border-radius: 5px; color: var(--ink-3); font: 11px var(--sans); cursor: pointer; user-select: none; }
 .fm-setup-toggle:hover { background: var(--paper-2); color: var(--ink); }
 .fm-setup-toggle input { margin: 0; accent-color: var(--accent); cursor: pointer; }
-.fm-view-trigger:focus-visible, .fm-create-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fm-view-trigger:focus-visible, .fm-create-toggle:focus-visible { outline: 2px solid var(--rule-3); outline-offset: 1px; }
 .fm-create-toggle { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--rule); background: var(--paper-2); color: var(--ink-3); cursor: pointer; text-align: left; flex-shrink: 0; }
 .fm-create-toggle:hover { color: var(--ink); }
 .fm-create-hint { margin-left: auto; font-size: 11px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -426,7 +426,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .xpick {
   display: inline-flex; align-items: center; gap: 7px;
   height: 28px; padding: 0 8px 0 9px;
-  border: 1px solid var(--accent); border-radius: 6px;
+  border: 1px solid var(--rule-3); border-radius: 6px;
   background: var(--accent-soft); color: var(--accent-hi);
   font: 500 11px var(--sans); cursor: pointer; white-space: nowrap;
   box-shadow: var(--shadow-xs); outline: none;
@@ -458,7 +458,7 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 }
 .xpick-opt.mono { font-family: var(--mono); font-size: 11.5px; }
 .xpick-opt.muted { opacity: .5; }
-.xpick-opt:hover, .xpick-opt:focus-visible { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hi); outline: none; opacity: 1; }
+.xpick-opt:hover, .xpick-opt:focus-visible { background: var(--accent-soft); border-color: var(--rule-3); color: var(--accent-hi); outline: none; opacity: 1; }
 @keyframes xpick-opt-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
 
 /* ── Connection pill (ADR 0044): one dot + one word, details on click ── */
@@ -496,16 +496,16 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
   cursor: pointer; position: relative; outline: none; font: 11px var(--sans);
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.dcc-play:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hi); }
+.dcc-play:hover:not(:disabled) { border-color: var(--rule-3); background: var(--accent-soft); color: var(--accent-hi); }
 .dcc-play:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
-.dcc-play.live { color: var(--accent-hi); border-color: color-mix(in oklch, var(--accent) 55%, var(--rule-2)); }
+.dcc-play.live { color: var(--accent-hi); border-color: var(--rule-3); }
 .dcc-play:disabled { cursor: default; opacity: .7; }
 .dcc-gear {
   flex: 1; min-width: 0; height: 24px; display: inline-flex; align-items: center; justify-content: center;
   position: relative; border: 1px solid var(--rule-2); border-radius: 6px; background: var(--paper-2); color: var(--ink-3);
   cursor: pointer; outline: none; transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.dcc-gear:hover, .dcc-gear[data-state='open'] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-hi); }
+.dcc-gear:hover, .dcc-gear[data-state='open'] { border-color: var(--rule-3); background: var(--accent-soft); color: var(--accent-hi); }
 .dcc-gear:focus-visible { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 45%, transparent); }
 .dcc-gear .dcc-flag { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--paper); box-sizing: content-box; }
 .dcc-gear .dcc-flag.warn { background: var(--warn); }
