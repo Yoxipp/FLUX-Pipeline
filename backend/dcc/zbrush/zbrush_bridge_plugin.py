@@ -161,9 +161,9 @@ def _apply_fbx_options(options: dict) -> None:
             pass
     scope = options.get("scope", "all")
     _FBX_SCOPE_BUTTONS = {
-        "all":      "FBXExportImport:ExportGrp:AllMeshes",
-        "selected": "FBXExportImport:ExportGrp:SelMesh",
-        "visible":  "FBXExportImport:ExportGrp:VisMeshes",
+        "all":      f"{_FBX_PALETTE}:All",
+        "selected": f"{_FBX_PALETTE}:Selected",
+        "visible":  f"{_FBX_PALETTE}:Visible",
     }
     btn = _FBX_SCOPE_BUTTONS.get(scope)
     if btn:
@@ -201,9 +201,8 @@ def _dispatch(cmd: dict) -> dict:
         if not path:
             return {"status": "error", "msg": "Missing path"}
         try:
-            zbc.set_next_filename(path)
-            zbc.press("Tool:Save")
-            return {"status": "ok", "path": path}
+            _save_tool_to(path)
+            return _written(path, "ZTL")
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
@@ -216,7 +215,7 @@ def _dispatch(cmd: dict) -> dict:
             _apply_obj_options(options)
             zbc.set_next_filename(path)
             zbc.press("Tool:Export")
-            return {"status": "ok", "path": path}
+            return _written(path, "OBJ")
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
@@ -226,14 +225,65 @@ def _dispatch(cmd: dict) -> dict:
         if not path:
             return {"status": "error", "msg": "Missing path"}
         try:
+            export_btn = _first_existing(_FBX_EXPORT_BUTTONS)
+            if export_btn is None:
+                return {"status": "error",
+                        "msg": "Plugin FBX ExportImport introuvable dans ZBrush (Zplugin > FBX ExportImport)"}
             _apply_fbx_options(options)
             zbc.set_next_filename(path)
-            zbc.press("FBXExportImport:Export")
-            return {"status": "ok", "path": path}
+            zbc.press(export_btn)
+            return _written(path, "FBX")
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
     return {"status": "error", "msg": f"Unknown action: {action}"}
+
+
+# The FBX ExportImport plugin lives under Zplugin; the old "FBXExportImport:Export"
+# path does not exist and press() raised "returned a result with an exception set".
+_FBX_PALETTE = "Zplugin:FBX ExportImport"
+_FBX_EXPORT_BUTTONS = (f"{_FBX_PALETTE}:Export", "ZPlugin:FBX ExportImport:Export")
+
+
+def _first_existing(item_paths: "tuple[str, ...]") -> "str | None":
+    for item in item_paths:
+        try:
+            if zbc.exists(item):
+                return item
+        except Exception:
+            pass
+    _log(f"None of these ZBrush items exist: {item_paths!r}")
+    return None
+
+
+def _written(path: str, label: str) -> dict:
+    """ok only if ZBrush really wrote the file (a press can silently do nothing)."""
+    if os.path.isfile(path):
+        return {"status": "ok", "path": path}
+    return {"status": "error", "msg": f"ZBrush n'a pas ecrit le fichier {label} : {path}"}
+
+
+def _save_tool_to(path: str) -> None:
+    """Save the active tool as .ztl at *path* (official SDK pattern: set_tool_path
+    then Tool:Save). set_next_filename is ignored by Tool:Save once the tool has a
+    path: ZBrush then overwrote the artist's own .ztl. The tool path is restored
+    afterwards so the artist's next save still goes to their own file."""
+    tid = zbc.get_active_tool_index()
+    old = zbc.get_tool_path(tid)
+    try:
+        for candidate in (path, path.replace("\\", "/")):
+            zbc.set_tool_path(tid, candidate)
+            zbc.press("Tool:Save")
+            if os.path.isfile(path):
+                return
+            _log(f"Tool:Save did not write {candidate!r}")
+    finally:
+        try:
+            if old:
+                zbc.set_tool_path(tid, old)
+            zbc.update(redraw_ui=True)
+        except Exception as exc:
+            _log(f"Restoring tool path {old!r} failed: {exc!r}")
 
 
 # ── Server socket singleton ───────────────────────────────────────────────────
@@ -615,9 +665,8 @@ def _autosave_ztl() -> None:
     try:
         target = autosave_ztl_path(_remember_project(), zbc.get_active_tool_path())
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        zbc.set_next_filename(target)
-        zbc.press("Tool:Save")
-        _log(f"Auto-save ztl -> {target}")
+        _save_tool_to(target)
+        _log(f"Auto-save ztl -> {target} (written={os.path.isfile(target)})")
     except Exception as exc:
         _log(f"Auto-save ztl failed (non-critical): {exc!r}")
 

@@ -78,10 +78,19 @@ class PortBusyAtStartupTest(unittest.TestCase):
         # Freeze-loop handler: the answer must arrive (graceful close, no RST), and a
         # ping says "publishing" so FLUX opens its Publisher page.
         import json
-        self.zbc.press.return_value = None
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        out = os.path.join(tmp, "a_FLUX_TMP.ztl")
+        # ZBrush writes the tool to its *tool path*, whatever set_next_filename says.
+        tool = {"path": "C:/art/John_Sculpt_v003.ztl"}
+        self.zbc.get_tool_path.side_effect = lambda tid: tool["path"]
+        self.zbc.set_tool_path.side_effect = lambda tid, p: tool.__setitem__("path", p)
+        self.zbc.press.side_effect = lambda item: (
+            open(tool["path"], "wb").close() if item == "Tool:Save" and tool["path"].startswith(tmp) else None)
         for payload, expected in (
             ({"action": "ping"}, {"status": "ok", "version": "ZBrush 2026", "publishing": True}),
-            ({"action": "export_ztl", "path": "C:/tmp/a.ztl"}, {"status": "ok", "path": "C:/tmp/a.ztl"}),
+            ({"action": "export_ztl", "path": out}, {"status": "ok", "path": out}),
         ):
             server, client = socket.socketpair()
             client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
@@ -95,6 +104,15 @@ class PortBusyAtStartupTest(unittest.TestCase):
                 data += chunk
             client.close()
             self.assertEqual(json.loads(data.split(b"\n")[0]), expected)
+        # The artist's own tool path is restored after the export.
+        self.assertEqual(tool["path"], "C:/art/John_Sculpt_v003.ztl")
+
+    def test_fbx_export_uses_zplugin_palette_and_checks_the_file(self):
+        self.zbc.exists.side_effect = lambda item: item == "Zplugin:FBX ExportImport:Export"
+        resp = self.mod._dispatch({"action": "export_fbx", "path": "C:/nowhere/x.fbx", "options": {}})
+        self.zbc.press.assert_any_call("Zplugin:FBX ExportImport:Export")
+        self.assertEqual(resp["status"], "error")      # nothing written -> clear error
+        self.assertIn("FBX", resp["msg"])
 
 
 if __name__ == "__main__":
