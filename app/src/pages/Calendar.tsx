@@ -654,7 +654,7 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
   const { l, tr } = useTr()
   const isOwner = same(it.owner, me)
   const isAuthor = same(it.created_by, me)
-  const canEdit = isOwner || (isAuthor && it.status === 'proposed')
+  const canEdit = true   // anyone edits any task (2026-10-14)
   const [start, setStart] = useState(it.start)
   const [end, setEnd] = useState(it.end)
   const [postponing, setPostponing] = useState(false)
@@ -721,7 +721,7 @@ function Detail({ project, me, it, onChanged, onDeleted, onClose }: {
       )}
 
       {/* Progress: not started (red) / in progress (orange) / done (green) */}
-      {isOwner && progress.includes(it.status) && (
+      {progress.includes(it.status) && (
         <div>
           <div style={lbl}>{tr('Avancement', 'Progress')}</div>
           <div style={{ display: 'flex', gap: 4 }}>
