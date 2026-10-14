@@ -37,7 +37,7 @@ export function ProdBtn({
   } else {
     const c = color ?? 'var(--accent)'
     bg = c
-    fg = 'var(--paper)'
+    fg = 'var(--on-accent)'
     bd = c
   }
 
