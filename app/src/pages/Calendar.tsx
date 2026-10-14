@@ -86,7 +86,7 @@ const btn = (primary = false, danger = false): CSSProperties => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '5px 10px', fontSize: 11,
   borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--sans)',
   border: `1px solid ${danger ? 'var(--err)' : primary ? 'var(--rule-3)' : 'var(--rule-2)'}`,
-  background: primary ? 'var(--accent-soft)' : 'var(--paper-2)',
+  background: 'var(--paper-2)',
   color: danger ? 'var(--err)' : primary ? 'var(--accent-hi)' : 'var(--accent-hi)',
 })
 const input: CSSProperties = {
