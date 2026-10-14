@@ -79,6 +79,10 @@ export function TaskDetail({
     (a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`),
   )
   const latestPublish = sortedPublishes[0] ?? null
+  // Version picker: the publish whose note and comments are shown (newest by default).
+  const [publishId, setPublishId] = useState('')
+  const selPublish = sortedPublishes.find(p => p.id === publishId) ?? latestPublish
+  const selVersion = selPublish ? publishVersion(selPublish.file) : ''
 
   const addSubtask = () => {
     const v = subtaskInput.trim().toUpperCase()
@@ -98,6 +102,7 @@ export function TaskDetail({
       date: now.toISOString().slice(0, 10),
       time: now.toTimeString().slice(0, 5),
       ...(asRetake ? { kind: 'retake' as const } : {}),   // absent = note
+      ...(selVersion ? { version: selVersion } : {}),
     }
     onPatchDetail({ comments: [...(detail.comments || []), comment] })
     setCommentInput('')
@@ -210,12 +215,26 @@ export function TaskDetail({
         {/* Left: notes / completion / subtasks / comments */}
         <div style={{ padding: '10px 14px', overflowY: 'auto', borderRight: '1px solid var(--rule)' }}>
           <Section label={t('prod.notes')}>
-            <textarea
-              value={detail.notes || ''}
-              onChange={e => onPatchDetail({ notes: e.target.value })}
-              rows={3}
-              style={_textarea}
-            />
+            {/* The note the artist left when publishing the selected version. */}
+            <div style={{ ..._textarea, minHeight: 58, cursor: 'default', whiteSpace: 'pre-wrap' }}>
+              {selPublish ? (<>
+                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginBottom: 3 }}>
+                  {selVersion || selPublish.file} · {selPublish.user} · {selPublish.date} {selPublish.time}
+                </div>
+                {(selPublish.description || '').trim()
+                  ? selPublish.description
+                  : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishNote')}</span>}
+              </>) : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</span>}
+            </div>
+            {/* Free task notes written before publish notes took this place: kept, still editable. */}
+            {(detail.notes || '').trim() && (
+              <textarea
+                value={detail.notes || ''}
+                onChange={e => onPatchDetail({ notes: e.target.value })}
+                rows={2}
+                style={{ ..._textarea, marginTop: 6 }}
+              />
+            )}
           </Section>
 
           <Section label={t('prod.progress')}>
@@ -287,7 +306,7 @@ export function TaskDetail({
               >Envoyer</button>
             </div>
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(detail.comments || []).slice().reverse().map(c => {
+              {(detail.comments || []).filter(c => !c.version || !selVersion || c.version === selVersion).slice().reverse().map(c => {
                 const read = readState.isRead(c.id)
                 return (
                   <div key={c.id} style={{
@@ -303,6 +322,7 @@ export function TaskDetail({
                         color: 'var(--accent-hi)', letterSpacing: '0.04em',
                       }}>{c.author}</span>
                       <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{c.date} {c.time}</span>
+                      {c.version && <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{c.version}</span>}
                       {c.kind === 'retake' && (
                         <span style={{
                           fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
@@ -363,6 +383,18 @@ export function TaskDetail({
               </span>
             )}
             <span style={{ flex: 1 }} />
+            {sortedPublishes.length > 1 && (
+              <select
+                value={selPublish?.id ?? ''}
+                onChange={e => setPublishId(e.target.value)}
+                title={t('prod.pickVersion')}
+                style={{ ..._input, height: 22, padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 10.5, textTransform: 'none', letterSpacing: 0 }}
+              >
+                {sortedPublishes.map(p => (
+                  <option key={p.id} value={p.id}>{publishVersion(p.file) || p.file}{p.instance ? ` · ${p.instance}` : ''}</option>
+                ))}
+              </select>
+            )}
             {sortedPublishes.length > 0 && (
               <button
                 onClick={() => setPublishListOpen(true)}
@@ -379,12 +411,12 @@ export function TaskDetail({
           {!latestPublish && (
             <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</div>
           )}
-          {latestPublish && (
+          {selPublish && (
             <PublishRow
-              p={latestPublish}
-              onOpen={() => openInFolderManager(latestPublish)}
-              onCopy={() => copyPath(latestPublish)}
-              onExplorer={() => openInExplorer(latestPublish)}
+              p={selPublish}
+              onOpen={() => openInFolderManager(selPublish)}
+              onCopy={() => copyPath(selPublish)}
+              onExplorer={() => openInExplorer(selPublish)}
             />
           )}
 
@@ -406,6 +438,11 @@ export function TaskDetail({
       )}
     </div>
   )
+}
+
+// vNNN of a published file name ('' when none).
+function publishVersion(file: string): string {
+  return /_(v\d{3,})(?=\.|$)/i.exec(file)?.[1] ?? ''
 }
 
 // ── one recent-publish row (inline latest + modal list) ──────────────────────

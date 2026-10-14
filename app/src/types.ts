@@ -132,6 +132,7 @@ export interface PublishDestination {
   existing: string[]
   existing_versions?: Record<string, string | null>
   more: number
+  others?: string[]
 }
 
 export interface PublishResult {
@@ -291,6 +292,7 @@ export interface ProductionComment {
   date:   string                  // ISO YYYY-MM-DD
   time:   string                  // HH:MM
   kind?:  'note' | 'retake'       // absent = note (old comments); 'retake' feeds the home "Tes retakes"
+  version?: string                // vNNN the comment is about (absent = whole task, old comments)
 }
 
 export interface ProductionTaskDetail {
