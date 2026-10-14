@@ -85,9 +85,10 @@ const isLate = (it: CalendarItem) => (it.status === 'accepted' || it.status === 
 const btn = (primary = false, danger = false): CSSProperties => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '5px 10px', fontSize: 11,
   borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--sans)',
-  border: `1px solid ${danger ? 'var(--err)' : primary ? 'var(--rule-3)' : 'var(--rule-2)'}`,
-  background: 'var(--paper-2)',
-  color: danger ? 'var(--err)' : primary ? 'var(--accent-hi)' : 'var(--accent-hi)',
+  border: `1px solid ${danger ? 'var(--err)' : primary ? 'var(--accent)' : 'var(--rule-2)'}`,
+  background: primary && !danger ? 'var(--accent)' : 'var(--paper-2)',
+  fontWeight: primary && !danger ? 600 : undefined,
+  color: danger ? 'var(--err)' : primary ? 'var(--on-accent)' : 'var(--accent-hi)',
 })
 const input: CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '5px 8px', fontSize: 11.5, borderRadius: 6,

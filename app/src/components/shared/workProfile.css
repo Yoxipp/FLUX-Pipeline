@@ -34,7 +34,7 @@
 .work-profile-dot { display:inline-block; width:6px; height:6px; margin-left:6px; border-radius:50%; background:var(--warn, #e8912a); vertical-align:middle; }
 .work-profile-seg { display:flex; gap:4px; flex-wrap:wrap; }
 .work-profile-seg button { padding:5px 10px; color:var(--ink-3); }
-.work-profile-seg button[data-on] { color: var(--accent-hi); border-color:var(--rule-3); background:var(--paper-2); }
+.work-profile-seg button[data-on] { color: var(--on-accent); border-color:var(--accent); background:var(--accent); font-weight:600; }
 .work-profile-save { display:flex; gap:8px; align-items:center; border-top:1px solid var(--rule); margin-top:18px; padding-top:14px; }
 .work-profile-save input { flex:1; }
 .work-profile-save button { white-space:nowrap; }

@@ -211,7 +211,7 @@ function TokenFinder({ project, onChange }: {
       {/* Mode toggle ASSET / SHOT */}
       <div
         onClick={switchMode}
-        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent-soft)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--accent-hi)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
+        style={{ flexShrink: 0, height: 30, padding: '0 9px', display: 'flex', alignItems: 'center', border: '1px solid var(--rule-2)', borderRadius: 5, background: mode === 'shot' ? 'var(--accent)' : 'var(--bg-deep)', cursor: 'pointer', fontSize: 10.5, fontFamily: 'var(--mono)', color: mode === 'shot' ? 'var(--on-accent)' : 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.08em', userSelect: 'none', boxShadow: 'var(--shadow-xs)' }}
       >
         {mode === 'asset' ? 'ASSET' : 'SHOT'}
       </div>
