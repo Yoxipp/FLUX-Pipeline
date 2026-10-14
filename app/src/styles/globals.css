@@ -517,3 +517,6 @@ textarea::placeholder { color: var(--ink-4); font-style: italic; }
 .dcc-gear .dcc-flag.warn { background: var(--warn); }
 .dcc-gear .dcc-flag.err { background: var(--err); }
 .dcc-play .dcc-count { font: 600 10.5px var(--mono); }
+
+/* Publisher destination breadcrumb: each folder opens in the Folder Manager. */
+.dest-crumb:hover { color: var(--accent-hi); text-decoration: underline; }

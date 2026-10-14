@@ -1,6 +1,7 @@
 // Publisher "Destination" card: where the publish lands (ADR 0017 flat layout),
 // what it writes (new vNNN + LAST) and what already sits in that folder.
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Folder, FileText, Link2, Plus, RefreshCw, ExternalLink } from 'lucide-react'
 import { api } from '../../api/client'
 import { useTr } from '../../i18n'
@@ -72,6 +73,12 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
 
   const ver = dest?.version ?? 'v001'
   const crumbs = (dest?.rel_path ?? '').split('/').filter(Boolean)
+  const navigate = useNavigate()
+  // Absolute folder of crumb i: the destination path minus the crumbs after it.
+  const crumbPath = (i: number) => {
+    const parts = (dest?.abs_path ?? '').split(/[\\/]/)
+    return parts.slice(0, parts.length - (crumbs.length - 1 - i)).join('\\')
+  }
 
   return (
     <div className="subcard" style={{ padding: 0, overflow: 'hidden' }}>
@@ -86,7 +93,10 @@ export function PublishDestination({ project, base, ext, sequence, ready }: {
             : crumbs.map((c, i) => (
               <span key={i} style={{ display: 'inline-flex', gap: 4 }}>
                 {i > 0 && <span style={{ color: 'var(--ink-4)' }}>›</span>}
-                <span style={i === crumbs.length - 1 ? { color: 'var(--ink)', fontWeight: 500 } : undefined}>{c}</span>
+                <span role="link" tabIndex={0} className="dest-crumb" title={tr('Ouvrir dans le Folder Manager', 'Open in the Folder Manager')}
+                  onClick={() => navigate('/projects', { state: { openPath: crumbPath(i) } })}
+                  onKeyDown={e => { if (e.key === 'Enter') navigate('/projects', { state: { openPath: crumbPath(i) } }) }}
+                  style={{ cursor: 'pointer', ...(i === crumbs.length - 1 ? { color: 'var(--ink)', fontWeight: 500 } : {}) }}>{c}</span>
               </span>
             ))}
         </div>
