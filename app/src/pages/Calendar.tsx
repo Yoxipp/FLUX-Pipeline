@@ -305,7 +305,7 @@ function SpanMark({ it, day, today, selected, open, noteLines, dense, onClick, o
   const labelled = isStart || weekStart
   if (!open) {
     return (
-      <div onMouseDown={e => e.stopPropagation()}
+      <div data-cal-sel={selected || undefined} onMouseDown={e => e.stopPropagation()}
            onClick={e => { e.stopPropagation(); onClick() }}
            onDoubleClick={e => { e.stopPropagation(); onExpand() }}
            title={`${title}
@@ -323,7 +323,7 @@ ${unfold} (double-clic)`}
     )
   }
   return (
-    <div onMouseDown={e => e.stopPropagation()}
+    <div data-cal-sel={selected || undefined} onMouseDown={e => e.stopPropagation()}
          onClick={e => { e.stopPropagation(); onClick() }}
          title={title}
          style={{ position: 'relative', flexShrink: 0, cursor: 'pointer', height,
@@ -375,7 +375,7 @@ function Chip({ it, selected, onClick, full, noteLines = 0 }: { it: CalendarItem
   const showNote = noteLines > 0 && !!it.note
   return (
     <div
-      onMouseDown={e => e.stopPropagation()}
+      data-cal-sel={selected || undefined} onMouseDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onClick() }}
       title={`${it.title} · ${it.owner} · ${span(it, l)} · ${STATUS_LABEL[l][it.status]}${late ? tr(' · en retard', ' · late') : ''}`}
       style={{
@@ -923,19 +923,32 @@ export function Calendar() {
     const wheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
+      // Anchor: the selected task when it is on screen, else the middle of the view.
+      const box = node.getBoundingClientRect()
+      let y = box.height / 2
+      const sel = node.querySelector('[data-cal-sel]')
+      if (sel) {
+        const r = sel.getBoundingClientRect()
+        const mid = r.top + r.height / 2 - box.top
+        if (mid >= 0 && mid <= box.height) y = mid
+      }
+      zoomAnchor.current = y
       setZoom(z => z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
     }
     node.addEventListener('wheel', wheel, { passive: false })
     return () => node.removeEventListener('wheel', wheel)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // Keep the same week at the top of the grid when the rows grow or shrink.
+  // Keep the zoom anchor (selection or view middle) in place when the rows grow or shrink.
+  const zoomAnchor = useRef<number | null>(null)
   const prevRowH = useRef(rowH)
   useLayoutEffect(() => {
     const el = scrollRef.current
     const old = prevRowH.current
     prevRowH.current = rowH
+    const anchor = zoomAnchor.current ?? 0
+    zoomAnchor.current = null
     if (!el || old === rowH || view !== 'month') return
-    el.scrollTop = el.scrollTop * rowH / old
+    el.scrollTop = (el.scrollTop + anchor) * rowH / old - anchor
   }, [rowH, view])
   // Entering the month view lands on the current month.
   useEffect(() => {
