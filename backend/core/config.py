@@ -131,6 +131,37 @@ def set_last_project(name: str) -> None:
     set("last_project", name)
 
 
+# Prefs that only make sense inside one workspace (FLUX_ROOT). Remembered per root so
+# switching workspace forgets the other root's projects, and switching back restores them.
+_ROOT_SCOPED_KEYS: tuple[str, ...] = ("last_project",)
+
+
+def stash_workspace_prefs(root: str) -> None:
+    """Remember the root-scoped prefs of ``root`` before leaving it."""
+    cfg = _load()
+    by_root = cfg.get("prefs_by_root")
+    by_root = by_root if isinstance(by_root, dict) else {}
+    by_root[_root_key(root)] = {k: cfg.get(k) for k in _ROOT_SCOPED_KEYS}
+    cfg["prefs_by_root"] = by_root
+    _save(cfg)
+
+
+def restore_workspace_prefs(root: str) -> None:
+    """Apply the prefs remembered for ``root`` (empty when never visited)."""
+    cfg = _load()
+    by_root = cfg.get("prefs_by_root")
+    if not isinstance(by_root, dict):
+        return  # no per-root memory in this store (e.g. the root's own SQLite base)
+    saved = by_root.get(_root_key(root)) or {}
+    for k in _ROOT_SCOPED_KEYS:
+        cfg[k] = saved.get(k)
+    _save(cfg)
+
+
+def _root_key(root: str) -> str:
+    return str(Path(root)).rstrip("\/").lower()
+
+
 def get_theme() -> dict:
     """Return the 4-color theme dict, migrating old primary/secondary keys if needed."""
     t = get("theme", {}) or {}

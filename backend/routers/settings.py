@@ -13,6 +13,7 @@ from core import config
 from core.constants import FLUX_MARKER_FILENAME, FLUX_ROOT_DIRS
 from features.system.manual import ensure_manual_in_root
 from core.logger import get_logger
+from core.repository_factory import reset_repository, reset_storage
 from core.paths import ensure_dir, get_flux_root, set_config_username, set_flux_root
 from utils import user_utils
 
@@ -140,8 +141,16 @@ async def update_settings(req: SettingsUpdate) -> dict:
                 ensure_dir(ws / d)
             (ws / FLUX_MARKER_FILENAME).touch(exist_ok=True)
             ensure_manual_in_root(ws)
+            # Forget the previous root's projects and restore this root's own prefs;
+            # the cached metadata/storage backends are bound to the old root, drop them.
+            old_root = get_flux_root()
+            if old_root:
+                config.stash_workspace_prefs(str(old_root))
             set_flux_root(ws)
+            reset_repository()
+            reset_storage()
             config.set("workspace", str(ws))
+            config.restore_workspace_prefs(str(ws))
         await loop.run_in_executor(None, _update_workspace)
         log.info("Workspace changed to '%s'", req.workspace)
 
