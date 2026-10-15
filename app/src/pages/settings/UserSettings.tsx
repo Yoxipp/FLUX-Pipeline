@@ -113,11 +113,14 @@ export function UserSettings({ username }: { username: string }) {
           })}
           <label title="Couleur libre" aria-label="Couleur libre"
             style={{ flex: 1, height: 24, borderRadius: 5, cursor: 'pointer', position: 'relative', overflow: 'hidden',
-              background: isCustomAccent(accentKey) ? accentKey : 'conic-gradient(from 90deg, #d66, #dd6, #6d6, #6dd, #66d, #d6d, #d66)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--ink-2)', fontSize: 15, lineHeight: 1,
+              background: isCustomAccent(accentKey) ? accentKey : 'var(--ink-4)',
               border: isCustomAccent(accentKey) ? '2px solid var(--ink)' : '2px solid transparent' }}>
             <input type="color" value={isCustomAccent(accentKey) ? accentKey : '#c8743a'}
               onChange={e => handleAccent(e.target.value)}
               style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+            {!isCustomAccent(accentKey) && '+'}
           </label>
         </div>
       </div>
