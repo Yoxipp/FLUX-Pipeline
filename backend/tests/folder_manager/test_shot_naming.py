@@ -43,14 +43,19 @@ class ShotNaming(unittest.TestCase):
 
     def test_departments_of_a_shot_are_type_tokens(self) -> None:
         tokens = tok.load_tokens(self.project)
-        self.assertEqual(tokens["TYPE_SHOT"]["LIGHT"], "lighting/{seq}")
+        self.assertEqual(tokens["TYPE_SHOT"]["LIGHT"], "shot/{seq}/{shot}/lighting")
         self.assertEqual(resolve_publish_path(self.project, "SEQ010_SHOT020_LIGHT_null_v001.hip"),
-                         self.project / "lighting" / "SEQ010" / "null")
+                         self.project / "shot" / "SEQ010" / "SHOT020" / "lighting" / "null")
+        self.assertEqual(resolve_publish_path(self.project, "SEQ010_SHOT020_COMP_null_v001.nk"),
+                         self.project / "shot" / "SEQ010" / "SHOT020" / "comp" / "null")
         # a project written before ADR 0019 has no TYPE_SHOT section: defaults fill it in
         raw = tok.build_default_tokens()
         raw.pop("TYPE_SHOT")
         tok.save_tokens(self.project, raw)
         self.assertIn("TYPE_SHOT", tok.load_tokens(self.project))
+        # ...but LIGHT / COMP keep their pre-ADR 0055 roots there.
+        self.assertEqual(resolve_publish_path(self.project, "SEQ010_SHOT020_LIGHT_null_v001.hip"),
+                         self.project / "lighting" / "SEQ010" / "null")
         self.assertIsNotNone(resolve_publish_path(self.project, "SEQ010_SHOT020_FX_null_v001.bgeo"))
 
     def test_an_asset_name_is_not_read_as_a_shot(self) -> None:

@@ -96,8 +96,9 @@ def create_shot(
 
 def shot_department_dirs(project_path: Path, seq_label: str, shot_label: str) -> list[Path]:
     """Department folders every shot has (2026-09-19): one per TYPE_SHOT token whose
-    folder lives inside the shot (layout, anim, cfx, fx...). LIGHT and COMP have their
-    own roots (``lighting/{seq}``, ``comp/{seq}/{shot}``) and are left to their publishes."""
+    folder lives inside the shot (layout, anim, cfx, fx, lighting, comp, render...). A
+    token with its own root (LIGHT / COMP / RENDER of a project made before ADR 0055) is
+    left to its publishes."""
     from core.constants import DEFAULT_SHOT_TYPE_TOKENS
 
     shot_rel = f"shot/{seq_label}/{shot_label}"
@@ -156,7 +157,7 @@ def update_sequence(
     * For each entry in *shots* (``[{'number': int, 'tasks': [{'token': str,
       'subtasks': [str, ...]}]}]``), ensures the shot dir and — inside it —
       each task folder plus its subtask subfolders. Task→folder resolution
-      uses *shot_type_tokens* (TYPE_SHOT, ADR 0019, e.g. ``LIGHT → lighting/{seq}``),
+      uses *shot_type_tokens* (TYPE_SHOT, ADR 0019, e.g. ``FX → shot/{seq}/{shot}/fx``),
       then the legacy *class_tokens* (old projects), then the lowercased token
       under the shot.
 

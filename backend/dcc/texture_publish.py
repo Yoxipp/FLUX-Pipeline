@@ -173,6 +173,41 @@ def publish_udim_map(tiles: list[tuple[int, Path]], project_path: Path, project:
     return folder
 
 
+def convert_to_tx(files: list[Path], label: str = "") -> tuple[list[Path], list[str]]:
+    """"Only .tx" publish: conform each exported map to a .tx in a temp folder.
+
+    The .tx files are then published IN PLACE of the source images, so the publish
+    folder holds only <base>_vNNN.tx + LAST.tx. Publishing the image then deleting it
+    would break versioning (versions are counted per extension: the next .png publish
+    would restart at v001 and overwrite the v001.tx). A map whose conform fails keeps
+    its source image (warning), never lost. Non-image files pass through unchanged.
+    """
+    import tempfile
+
+    from features.publisher.texture_conform import is_texture_source
+    from flux_actions.runner import run_conform_texture_action
+    from flux_actions.switch import conform_tx_colorconvert
+
+    out_dir = Path(tempfile.mkdtemp(prefix="flux_tx_only_"))
+    result: list[Path] = []
+    warnings: list[str] = []
+    for f in files:
+        if not is_texture_source(f):
+            result.append(f)
+            continue
+        tx = out_dir / f"{f.stem}.tx"
+        try:
+            run_conform_texture_action(f, out_dir=out_dir, colorconvert=conform_tx_colorconvert())
+        except Exception as exc:  # noqa: BLE001 - a failed conform publishes the source instead
+            log.warning("%s .tx conform failed for %s: %s", label, f.name, exc)
+        if tx.is_file():
+            result.append(tx)
+        else:
+            warnings.append(f"{f.name} : conversion .tx echouee, image source publiee a la place")
+            result.append(f)
+    return result, warnings
+
+
 def publish_maps(files: list[Path], project_path: Path, project: str, prefix: list[str],
                  variante: str, description: str, user: str,
                  whole_name: bool = False) -> tuple[list[str], list[str]]:

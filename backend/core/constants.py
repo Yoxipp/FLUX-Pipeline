@@ -170,9 +170,10 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "FX":     "shot/{seq}/{shot}/fx",
     "CFX":    "shot/{seq}/{shot}/cfx",
     "CROWD":  "shot/{seq}/{shot}/crowd",
-    "LIGHT":  "lighting/{seq}",
-    "COMP":   "comp/{seq}/{shot}",
-    "RENDER": "render/{seq}/{shot}",
+    # LIGHT, COMP and RENDER live in the shot like the other departments (ADR 0055).
+    "LIGHT":  "shot/{seq}/{shot}/lighting",
+    "COMP":   "shot/{seq}/{shot}/comp",
+    "RENDER": "shot/{seq}/{shot}/render",
 }
 
 # Default TYPE token map for a SHOT (ADR 0019: the department of a shot is its TYPE,
@@ -184,10 +185,17 @@ DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
     "FX":     "shot/{seq}/{shot}/fx",
     "CFX":    "shot/{seq}/{shot}/cfx",
     "CROWD":  "shot/{seq}/{shot}/crowd",
+    "LIGHT":  "shot/{seq}/{shot}/lighting",
+    "COMP":   "shot/{seq}/{shot}/comp",
+    # Rendered frames of a shot (2026-10-09), inside the shot since ADR 0055.
+    "RENDER": "shot/{seq}/{shot}/render",
+}
+
+# Where LIGHT, COMP and RENDER lived before ADR 0055. An existing tokens.json missing these keys
+# gets these, not the new defaults, so its publishes are not split across two folders.
+LEGACY_SHOT_ROOT_TOKENS: dict[str, str] = {
     "LIGHT":  "lighting/{seq}",
     "COMP":   "comp/{seq}/{shot}",
-    # Rendered frames of a shot (2026-10-09), own root like LIGHT / COMP. Projects
-    # whose tokens.json predates it get it from load_tokens (defaults merged in).
     "RENDER": "render/{seq}/{shot}",
 }
 
@@ -337,7 +345,7 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.9.001"
+APP_VERSION: str = "0.9.002"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out

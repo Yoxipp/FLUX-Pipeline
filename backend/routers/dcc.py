@@ -2135,6 +2135,7 @@ class SubstancePublishRequest(BaseModel):
     maps:         list[str] | None = None   # output maps of the preset (fileName), None = all
     map_params:   dict[str, dict] | None = None   # {fileName: {"bit_depth", "size"}}
     channels:     list[dict] | None = None  # "Canaux du shader": [{"id", "label", "gray"}]
+    tx_only:      bool = False              # publish the .tx instead of the images
 
 
 @router.post("/substance/publish")
@@ -2152,7 +2153,7 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
             req.instance, req.preset, req.file_format, req.bit_depth,
             req.conform_tx, req.description or "", user,
             req.texture_sets, req.size, req.padding, req.dilation,
-            req.maps, req.map_params, req.channels,
+            req.maps, req.map_params, req.channels, req.tx_only,
         ),
     )
     if not result.get("ok"):
@@ -2249,6 +2250,7 @@ class MariPublishRequest(BaseModel):
     user:         str | None = None
     channels:     list[str] | None = None   # None / [] = every channel of the current geo
     channel_params: dict[str, dict] | None = None   # {channel: {"format", "bit_depth", "size"}}
+    tx_only:      bool = False              # publish the .tx instead of the images
 
 
 @router.post("/mari/publish")
@@ -2264,7 +2266,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
         lambda: publish_mari(
             req.project_name, req.class_token, req.task_token, req.name_token,
             req.instance, req.file_format, req.conform_tx, req.description or "", user,
-            req.channels, req.channel_params,
+            req.channels, req.channel_params, req.tx_only,
         ),
     )
     if not result.get("ok"):
@@ -2358,6 +2360,7 @@ class DesignerBridgePublishRequest(BaseModel):
     conform_tx:   bool = False
     description:  str | None = None
     user:         str | None = None
+    tx_only:      bool = False               # publish the .tx instead of the map images
 
 
 @router.get("/designer/info")
@@ -2387,6 +2390,7 @@ async def designer_bridge_publish(req: DesignerBridgePublishRequest) -> dict:
             req.project_name, req.class_token, req.task_token, req.name_token,
             req.instance, req.graphs, req.file_format, req.size, req.bit_depth,
             req.maps, req.sbsar, req.sbs, req.conform_tx, req.description or "", user,
+            req.tx_only,
         ),
     )
     if not result.get("ok"):

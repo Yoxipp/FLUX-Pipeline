@@ -325,6 +325,12 @@ const TEXTURE_EXTS = [
   'exr', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'tga', 'tx', 'hdr', 'bmp', 'webp', 'psd',
 ]
 
+// A texture image the .tx conform accepts (a .tx itself is already converted).
+function isTextureFile(path: string): boolean {
+  const ext = (path.split('.').pop() || '').toLowerCase()
+  return !!path && ext !== 'tx' && TEXTURE_EXTS.includes(ext)
+}
+
 // Basename without directory or extension(s) — strips a UDIM/frame tail too
 // (Mesh_BCol.1001.exr -> "Mesh_BCol", Mesh_Disp.exr -> "Mesh_Disp").
 function fileStem(path: string): string {
@@ -784,6 +790,8 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   // Autogroup: derive each file's INSTANCE (map token) from its filename so a
   // whole texture set publishes into one folder per map. Off = one instance for all.
   const [autoGroup, setAutoGroup]     = useSessionState(PUB + 'autoGroup', true)
+  // Local file: publish the .tx of a texture instead of the image (lighter publish).
+  const [txOnly, setTxOnly]           = useSessionState(PUB + 'txOnly', false)
   const [description, setDescription] = useSessionState(PUB + 'description', '')
   const [publishing, setPublishing]   = useState(false)
   // Optional published-name override (local file). null = follow the token composer.
@@ -1584,6 +1592,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
               preset:       String(painterOpts.preset ?? 'PBR Metallic Roughness'),
               bit_depth:    String(painterOpts.bit_depth ?? '8'),
               conform_tx:   !!painterOpts.conform_tx,
+              tx_only:      !!painterOpts.conform_tx && !!painterOpts.tx_only,
               texture_sets: picked,
               size:         painterOpts.size ? Number(painterOpts.size) : undefined,
               padding:      String(painterOpts.padding ?? 'infinite'),
@@ -1593,6 +1602,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
               channels:     extraChannels.length ? extraChannels : undefined,
             })
           : await api.publishMari({ ...tokens, conform_tx: !!mariOpts.conform_tx, channels: picked,
+                                    tx_only: !!mariOpts.conform_tx && !!mariOpts.tx_only,
                                     channel_params: Object.keys(chanParams).length ? chanParams : undefined })
         const n = res.published?.length ?? 0
         const timings = 'timings' in res && res.timings ? ` (${res.timings})` : ''
@@ -1636,6 +1646,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           sbsar:        !!designerOpts.sbsar,
           sbs:          !!designerOpts.sbs,
           conform_tx:   !!designerOpts.conform_tx,
+          tx_only:      !!designerOpts.maps && !!designerOpts.conform_tx && !!designerOpts.tx_only,
           description:  description || undefined,
           user:         settings?.username ?? undefined,
         })
@@ -1692,7 +1703,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
         const publishOne = async (f: string, target: string): Promise<{ ok: boolean; tx: number; proxy: boolean; message: string }> => {
           const r = await api.publish({ source_path: f, project_name: project,
                    description: description || undefined, user: settings?.username ?? undefined,
-                   target_name: target })
+                   target_name: target, tx_only: txOnly && isTextureFile(f) })
           return { ok: r.success, tx: r.tx_paths?.length ?? 0, proxy: !!r.proxy_path, message: r.message }
         }
         let okCount = 0, txCount = 0, proxyCount = 0
@@ -1730,7 +1741,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   }, [
     project, mode, buildFilename, createNewTokens, dcc,
     exportExt, ropNodePath, isSequence, animRange, animCapable, seqCapable, frameStart, frameEnd, frameStep,
-    description, settings?.username, sourcePath, localFiles, autoGroup, nameOverride,
+    description, settings?.username, sourcePath, localFiles, autoGroup, txOnly, nameOverride,
     zbrushConnected, zbrushExportOpts,
     bridgeStatus.connected, nukeExportOpts, psExportOpts, painterOpts, mariOpts, texItems, texChecked,
     designerOpts, designerGraphs, graphChecked, outputChecked, marvelousOpts, marvelousFormats,
@@ -2174,6 +2185,15 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
                     {tr('Dossier', 'Folder')}
                   </div>
                 </div>
+
+                {/* "Only .tx": shown when a picked file is a texture image. */}
+                {(localFiles.length ? localFiles : [sourcePath]).some(isTextureFile) && (
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, cursor: 'pointer', fontSize: 11, color: 'var(--ink-2)' }}
+                         title={tr('Publie seulement le .tx (sans la texture source) : publish plus léger', 'Publish only the .tx (no source image): lighter publish')}>
+                    <input type="checkbox" checked={txOnly} onChange={e => setTxOnly(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+                    {tr('Export .tx seulement', 'Export .tx only')}
+                  </label>
+                )}
 
                 {/* Multi-file set: list + autogroup toggle. Every file publishes UNDER
                     the composer INSTANCE; autogroup distinguishes them by canonical map

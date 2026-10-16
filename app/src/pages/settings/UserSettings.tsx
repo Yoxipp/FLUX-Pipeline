@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 import { api, type WorkspacesInfo } from '../../api/client'
 import { Avatar, Btn, SecTitle } from '../../components/shared/ui'
 import { useI18n } from '../../i18n'
-import { ACCENT_PRESETS, applyAccentPreset } from '../../lib/accentPresets'
+import { ACCENT_PRESETS, applyAccentPreset, isCustomAccent } from '../../lib/accentPresets'
 import { SOFTWARE } from '../../lib/dccs'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { useWorkProfile } from '../../WorkProfileContext'
@@ -46,7 +46,7 @@ export function UserSettings({ username }: { username: string }) {
   useEffect(() => {
     api.getSettings().then(s => {
       const stored = s.theme?.accent ?? 'orange'
-      setAccentKey(ACCENT_PRESETS.some(p => p.key === stored) ? stored : 'orange')
+      setAccentKey(ACCENT_PRESETS.some(p => p.key === stored) || isCustomAccent(stored) ? stored : 'orange')
       setLogColors(s.log_colors ?? {})
     }).catch(() => {})
     window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
@@ -111,6 +111,17 @@ export function UserSettings({ username }: { username: string }) {
                   border: active ? '2px solid var(--ink)' : '2px solid transparent' }} />
             )
           })}
+          <label title="Couleur libre" aria-label="Couleur libre"
+            style={{ flex: 1, height: 24, borderRadius: 5, cursor: 'pointer', position: 'relative', overflow: 'hidden',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--ink-2)', fontSize: 15, lineHeight: 1,
+              background: isCustomAccent(accentKey) ? accentKey : 'var(--ink-4)',
+              border: isCustomAccent(accentKey) ? '2px solid var(--ink)' : '2px solid transparent' }}>
+            <input type="color" value={isCustomAccent(accentKey) ? accentKey : '#c8743a'}
+              onChange={e => handleAccent(e.target.value)}
+              style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+            {!isCustomAccent(accentKey) && '+'}
+          </label>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core.constants import LEGACY_SHOT_ROOT_TOKENS
 from features.folder_manager.tokens import build_default_tokens, save_tokens
 from features.production import archive
 from features.production.reconcile import reconcile
@@ -33,6 +34,8 @@ class DeleteSeqShot(unittest.TestCase):
     def setUp(self) -> None:
         self.project = Path(tempfile.mkdtemp(prefix="flux_delseq_"))
         tokens = build_default_tokens()
+        # comp/ and lighting/ at the project root: a project made before ADR 0055.
+        tokens["TYPE_SHOT"].update(LEGACY_SHOT_ROOT_TOKENS)
         tokens["SEQ"] = {"SEQ001": "shot/SEQ001", "SEQ002": "shot/SEQ002"}
         tokens["SHOT"] = {"SEQ001/SHOT001": "shot/SEQ001/SHOT001", "SEQ001/SHOT002": "shot/SEQ001/SHOT002",
                           "SEQ002/SHOT001": "shot/SEQ002/SHOT001"}

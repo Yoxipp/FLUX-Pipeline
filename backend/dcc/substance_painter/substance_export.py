@@ -162,9 +162,11 @@ def publish_painter(
     maps: list[str] | None = None,
     map_params: dict[str, dict] | None = None,
     channels: list[dict] | None = None,
+    tx_only: bool = False,
 ) -> dict:
     """Export Painter maps and ingest them into FLUX (one publish per map, so only the
-    ticked maps get a texture folder).
+    ticked maps get a texture folder). *tx_only*: publish the .tx instead of the
+    exported images (lighter publish, see texture_publish.convert_to_tx).
 
     Returns {ok, published:[paths], tx:[paths]} or {ok: False, error}.
     """
@@ -188,16 +190,23 @@ def publish_painter(
     if not files:
         return {"ok": False, "error": "Painter export produced no maps"}
 
-    from dcc.texture_publish import publish_maps
+    from dcc.texture_publish import convert_to_tx, publish_maps
 
+    tx_warnings: list[str] = []
+    if tx_only:
+        files, tx_warnings = convert_to_tx(files, "Painter")
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
                                        variante, description, user)
+    warnings = tx_warnings + warnings
     for w in warnings:
         log.warning("Painter publish: %s", w)
     if not published:
         return {"ok": False, "error": "No Painter map could be published"}
-    tx_paths = _conform_published(published, "Painter") if conform_tx else []
+    if tx_only:
+        tx_paths = published
+    else:
+        tx_paths = _conform_published(published, "Painter") if conform_tx else []
     return {"ok": True, "published": published, "tx": tx_paths or None, "warnings": warnings}
 
 

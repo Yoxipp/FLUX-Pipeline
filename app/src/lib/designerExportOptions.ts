@@ -32,6 +32,8 @@ export const DESIGNER_OPTIONS: ExportOption[] = [
       { value: '32f', label: '32 bit float' },
     ] },
   { key: 'conform_tx', label: 'Conform .tx (Karma)', type: 'bool', default: false, tier: 'common', dependsOn: 'maps' },
+  { key: 'tx_only', label: 'Export .tx seulement', type: 'bool', default: false, tier: 'common', dependsOn: 'conform_tx',
+    hint: 'Publie le .tx sans la texture source : plus leger' },
 ]
 
 export function defaultDesignerOptions(): Record<string, unknown> {

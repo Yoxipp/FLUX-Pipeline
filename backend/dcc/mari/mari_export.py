@@ -28,6 +28,7 @@ def publish_mari(
     user: str = "unknown",
     channels: list[str] | None = None,
     channel_params: dict[str, dict] | None = None,
+    tx_only: bool = False,
 ) -> dict:
     """Export Mari channels and ingest them into FLUX (one publish per channel).
 
@@ -59,7 +60,7 @@ def publish_mari(
         return {"ok": False, "error": result.get("error", "Mari export failed")}
 
     from dcc.substance_painter.substance_export import _conform_published, _exported_files
-    from dcc.texture_publish import publish_maps
+    from dcc.texture_publish import convert_to_tx, publish_maps
 
     files = [f for f in _exported_files(export_dir, result.get("files", [])) if "$UDIM" not in f.name]
     if not files:
@@ -75,6 +76,11 @@ def publish_mari(
     if not files:
         return {"ok": False, "error": "Aucune map convertie : " + " ; ".join(conv_warnings[:3])}
 
+    if tx_only:
+        t0 = time.monotonic()
+        files, tx_warnings = convert_to_tx(files, "Mari")
+        conv_warnings += tx_warnings
+        timings.append(f".tx {time.monotonic() - t0:.0f} s")
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
     t0 = time.monotonic()
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
@@ -84,8 +90,10 @@ def publish_mari(
         log.warning("Mari publish: %s", w)
     timings.append(f"copie {time.monotonic() - t0:.0f} s")
     t0 = time.monotonic()
-    tx_paths = _conform_published(published, "Mari") if (conform_tx and published) else []
-    if conform_tx:
+    tx_paths = _conform_published(published, "Mari") if (conform_tx and published and not tx_only) else []
+    if tx_only:
+        tx_paths = published
+    elif conform_tx:
         timings.append(f".tx {time.monotonic() - t0:.0f} s")
     log.info("Mari publish timings (%d file(s)): %s", len(files), ", ".join(timings))
 

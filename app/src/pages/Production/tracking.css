@@ -121,10 +121,11 @@
 .tracking-task-slot[data-task-selected] { background:var(--accent-soft); border-radius:4px; box-shadow:0 0 0 4px var(--accent-soft); }
 .tracking-selection-summary { display:flex; align-items:center; gap:6px; color:var(--accent-hi); font-size:11px; }
 .production-tracking .tracking-selection-summary button { border:0; padding:3px; background:transparent; color: var(--accent-hi); }
-.tracking-task-meta { display:flex; align-items:center; justify-content:center; gap:5px; height:14px; white-space:nowrap; }
+.tracking-task-meta { display:flex; align-items:center; justify-content:center; gap:5px; height:14px; white-space:nowrap; max-width:100%; min-width:0; }
 .tracking-task-meta .tracking-muted { font-size:10.5px; }
 .tracking-task-artist { display:flex; align-items:center; justify-content:center; height:14px; }
-.production-tracking button.tracking-need { padding:0; border:0; background:transparent; color:#ec666f; font:600 10.5px var(--mono); line-height:14px; cursor:help; }
+.production-tracking button.tracking-need { display:inline-flex; gap:3px; min-width:0; max-width:96px; padding:0; border:0; background:transparent; color:#ec666f; font:600 10.5px var(--mono); line-height:14px; cursor:help; }
+.tracking-need-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .production-tracking button.tracking-need:hover { color:#ff8992; background:transparent; }
 .tracking-table th.tracking-department-column { text-align:center; min-width:110px; }
 .production-tracking button.tracking-department-heading { border:0; background:transparent; font:inherit; font-weight:500; width:100%; padding:0; cursor:context-menu; }
@@ -171,9 +172,13 @@
 .tracking-deadline[data-deadline="Done"] { --deadline-color: #61e0a1; }
 .tracking-show-count { margin-left:4px; padding:1px 5px; border-radius:4px; background:var(--paper-2); color: var(--accent-hi); font:11px var(--mono); }
 
-/* Task priority (retake 07): high = bold red "!" left of the badge, low = muted arrow in it. */
-.tracking-priority { display:inline-flex; margin-left:2px; vertical-align:middle; }
-.tracking-priority[data-priority="low"] { color:var(--ink-4); }
+/* Task priority (retake 07): one slot left of the badge; high = bold red "!", low = blue down arrow. */
+.tracking-priority-mark { display:inline-flex; align-items:center; justify-content:center; width:12px; height:14px; margin-right:3px; font:800 13px var(--sans); line-height:1; vertical-align:middle; }
+.tracking-priority-mark[data-priority="high"] { color:var(--err); }
+.tracking-priority-mark[data-priority="low"] { color:oklch(68% 0.11 245); }
+.production-menu-priority { display:inline-flex; width:15px; }
+.production-menu-priority .tracking-priority-mark { margin-right:0; }
+/* Still used by home/MyTasks. */
 .tracking-priority-high { display:inline-block; width:8px; margin-right:3px; color:var(--err); font:800 13px var(--sans); line-height:1; text-align:center; vertical-align:middle; }
 
 /* Timeline preview + auto edit (TimelinePreview.tsx): flat surfaces, light elevation. */

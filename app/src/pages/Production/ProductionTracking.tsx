@@ -238,7 +238,7 @@ export function ProductionTracking({ project, mode, state, setState, selection, 
                   onMouseDownCapture={event => { if (event.button === 0 && event.shiftKey) { event.preventDefault(); dragSelect.current = { moved: false, start: taskKey, base: taskSelection.keys } } }}
                   onMouseEnter={() => dragTo(taskKey)}>
                   <div className="tracking-task-meta">{visible.length > 1 && <span className="tracking-muted">{task.name}</span>}
-                    {status && blocked.length > 0 && <Tooltip scale={0.9 * zoom}><TooltipTrigger asChild><button className="tracking-need" aria-label={`Dépendances requises : ${blocked.join(', ')}`}>NEED</button></TooltipTrigger><TooltipContent>{[...new Set(blocked)].map(label => <div key={label}>{label}</div>)}</TooltipContent></Tooltip>}
+                    {status && blocked.length > 0 && <Tooltip scale={0.9 * zoom}><TooltipTrigger asChild><button className="tracking-need" aria-label={`Dépendances requises : ${blocked.join(', ')}`}><span className="tracking-need-label">NEED {blocked[0]}</span>{new Set(blocked).size > 1 && <span>+{new Set(blocked).size - 1}</span>}</button></TooltipTrigger><TooltipContent>{[...new Set(blocked)].map(label => <div key={label}>{label}</div>)}</TooltipContent></Tooltip>}
                   </div>
                   <TaskStatusBadge project={project} state={state} setState={setState} entity={entity} task={task} status={status} statuses={dep.statuses}
                   tooltipScale={0.9 * zoom}

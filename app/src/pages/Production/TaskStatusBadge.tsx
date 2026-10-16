@@ -26,6 +26,14 @@ interface Props {
   tooltipScale?: number
 }
 
+/** Priority mark shown left of the badge and in the menu: high = red "!", low = blue down arrow, same slot. */
+function PriorityMark({ priority }: { priority: 'high' | 'low' }) {
+  const label = `Priorité ${PRIORITY_LABEL[priority].toLowerCase()}`
+  return <span className="tracking-priority-mark" data-priority={priority} aria-label={label} title={label}>
+    {priority === 'high' ? '!' : <ArrowDown size={12} strokeWidth={3} aria-hidden />}
+  </span>
+}
+
 export function TaskStatusBadge({ project, state, setState, entity, task, subtask = '', status: suppliedStatus, statuses = STATUS_TOKENS, disabled, onClick, selectionControl, onContextTask, actionTargets, tooltipScale }: Props) {
   const navigate = useNavigate()
   const button = useRef<HTMLButtonElement>(null)
@@ -98,7 +106,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
       onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }} />}
-    {status && priority === 'high' && <span className="tracking-priority-high" aria-label="Priorité haute" title="Priorité haute">!</span>}
+    {status && priority !== 'normal' && <PriorityMark priority={priority} />}
     <Tooltip scale={tooltipScale}><TooltipTrigger asChild><button ref={button} className="tracking-status" data-status={STATUS_TOKENS.includes(status) ? status : 'UNKNOWN'} disabled={disabled}
       aria-label={`${task.name} : ${status || 'Aucun statut - clic droit'}`}
       data-empty={!status || undefined}
@@ -112,7 +120,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
         else { const rect = viewportRect(button.current!); showMenu(rect.left, rect.bottom) }
       }}
       onContextMenu={e => { e.preventDefault(); onContextTask?.(); showMenu(e.clientX, e.clientY) }}
-      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status || <Plus size={11} className="tracking-empty-add" aria-hidden />}{status && priority === 'low' && <span className="tracking-priority" data-priority="low" aria-label="Priorité basse"><ArrowDown size={9} strokeWidth={2.6} /></span>}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
+      onKeyDown={e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); onContextTask?.(); const rect = viewportRect(e.currentTarget); showMenu(rect.left, rect.bottom) } }}>{status || <Plus size={11} className="tracking-empty-add" aria-hidden />}</button></TooltipTrigger><TooltipContent>{hoverArtists || 'Aucun artiste assigné'}{priority !== 'normal' ? ` · priorité ${PRIORITY_LABEL[priority].toLowerCase()}` : ''}</TooltipContent></Tooltip>
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       {createPortal(<Menu.Trigger aria-hidden tabIndex={-1} style={{ position: 'fixed', left: anchor.x, top: anchor.y, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />, document.body)}
       <Menu.Portal><Menu.Content className="production-context-menu" side="bottom" align="start" collisionPadding={10} onCloseAutoFocus={e => { e.preventDefault(); (!status && selectionControl ? selectionButton : button).current?.focus() }}>
@@ -132,7 +140,7 @@ export function TaskStatusBadge({ project, state, setState, entity, task, subtas
         <Menu.Sub><Menu.SubTrigger className="production-menu-item"><Flag size={14} />Priorité<ChevronRight size={13} className="production-menu-chevron" /></Menu.SubTrigger>
           <Menu.Portal><Menu.SubContent className="production-context-menu" sideOffset={5} collisionPadding={10}>
             {PRIORITIES.map(p => <Menu.Item key={p} className="production-menu-item" onSelect={() => setState(prev => applyTaskSelection(prev, targets, { kind: 'priority', value: p }))}>
-              {PRIORITY_LABEL[p]}{targetPriorities.length === 1 && targetPriorities[0] === p && <Check size={13} />}
+              <span className="production-menu-priority">{p !== 'normal' && <PriorityMark priority={p} />}</span>{PRIORITY_LABEL[p]}{targetPriorities.length === 1 && targetPriorities[0] === p && <Check size={13} />}
             </Menu.Item>)}
           </Menu.SubContent></Menu.Portal></Menu.Sub>
         {!multiple && <><Menu.Item className="production-menu-item" onSelect={() => navigate('/publisher', { state: { prefill: taskPublisherPrefill(project, state, entity, task) } })}><Upload size={14} />Publish here</Menu.Item>

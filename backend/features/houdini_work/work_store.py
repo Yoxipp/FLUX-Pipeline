@@ -92,8 +92,9 @@ def work_dir(project_path: str | Path, seq: str, shot: str, task: str) -> Path:
 
     The department folder comes from the TYPE_SHOT token of *task* (``CFX`` ->
     ``shot/{seq}/{shot}/cfx``). A template without ``{shot}`` (``LIGHT`` ->
-    ``lighting/{seq}``) gets the shot appended so two shots never share a folder;
-    a sequence task uses the sequence folder + the department name."""
+    ``lighting/{seq}`` in a project made before ADR 0055) gets the shot appended so
+    two shots never share a folder; a sequence task drops the shot level
+    (``shot/{seq}/{shot}/lighting`` -> ``shot/SEQ/lighting``)."""
     from features.folder_manager.seq_shot_creator import shot_task_template
     from features.folder_manager.tokens import load_tokens
 

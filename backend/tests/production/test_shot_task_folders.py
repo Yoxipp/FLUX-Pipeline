@@ -80,7 +80,7 @@ class RefMediaShotRoot(_Base):
         save_tokens(self.project, self.tokens)
         rel = ref_media.resolve_ref_root(self.project, "shot", seq="SEQ0010", shot="SHOT0030",
                                          task="LIGHT", subtask="key")
-        self.assertEqual(rel, "lighting/SEQ0010/key")
+        self.assertEqual(rel, "shot/SEQ0010/SHOT0030/lighting/key")
 
     def test_existing_ref_under_the_old_location_is_kept(self) -> None:
         self.tokens["CLASS"]["LIGHT"] = "shot/{seq}/{shot}/light"

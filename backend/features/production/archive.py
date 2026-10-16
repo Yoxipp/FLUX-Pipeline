@@ -292,7 +292,8 @@ def _stamp_now() -> str:
 
 
 def satellite_rels(project_path: Path, kind: str, seq: str, shot: str = "") -> list[str]:
-    """Folders of a sequence / shot living outside ``shot/<SEQ>`` (comp, lighting):
+    """Folders of a sequence / shot living outside ``shot/<SEQ>`` (comp, lighting,
+    render in a project made before ADR 0055):
     archived with it, or the disk scan adopts the shot back from them."""
     from core.constants import DEFAULT_SHOT_TYPE_TOKENS
 
