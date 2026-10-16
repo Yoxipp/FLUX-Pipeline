@@ -23,17 +23,19 @@ class RenderDepartment(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_render_is_a_default_shot_department(self) -> None:
-        self.assertEqual(DEFAULT_SHOT_TYPE_TOKENS["RENDER"], "render/{seq}/{shot}")
-        self.assertEqual(DEFAULT_CLASS_TOKENS["RENDER"], "render/{seq}/{shot}")
+        # Inside the shot since ADR 0055.
+        self.assertEqual(DEFAULT_SHOT_TYPE_TOKENS["RENDER"], "shot/{seq}/{shot}/render")
+        self.assertEqual(DEFAULT_CLASS_TOKENS["RENDER"], "shot/{seq}/{shot}/render")
 
     def test_render_resolves_in_a_new_project(self) -> None:
         tok.save_tokens(self.project, tok.build_default_tokens())
         for name in ("SEQ0010_SHOT0010_RENDER_null_v001.exr", "RENDER_SEQ0010_SHOT0010_null_v001.exr"):
             self.assertEqual(resolve_publish_path(self.project, name),
-                             self.project / "render" / "SEQ0010" / "SHOT0010" / "null", name)
+                             self.project / "shot" / "SEQ0010" / "SHOT0010" / "render" / "null", name)
 
     def test_project_tokens_without_render_fall_back_to_the_default(self) -> None:
-        # tokens.json written before RENDER existed: neither TYPE_SHOT nor CLASS has it
+        # tokens.json written before RENDER existed: neither TYPE_SHOT nor CLASS has it,
+        # it keeps the root it had then (ADR 0055 legacy)
         raw = tok.build_default_tokens()
         raw["TYPE_SHOT"].pop("RENDER")
         raw["CLASS"].pop("RENDER")

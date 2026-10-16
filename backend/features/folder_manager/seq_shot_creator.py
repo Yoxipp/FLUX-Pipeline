@@ -96,9 +96,9 @@ def create_shot(
 
 def shot_department_dirs(project_path: Path, seq_label: str, shot_label: str) -> list[Path]:
     """Department folders every shot has (2026-09-19): one per TYPE_SHOT token whose
-    folder lives inside the shot (layout, anim, cfx, fx, lighting, comp...). A token with
-    its own root (RENDER ``render/{seq}/{shot}``, LIGHT / COMP of a project made before
-    ADR 0055) is left to its publishes."""
+    folder lives inside the shot (layout, anim, cfx, fx, lighting, comp, render...). A
+    token with its own root (LIGHT / COMP / RENDER of a project made before ADR 0055) is
+    left to its publishes."""
     from core.constants import DEFAULT_SHOT_TYPE_TOKENS
 
     shot_rel = f"shot/{seq_label}/{shot_label}"

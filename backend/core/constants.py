@@ -170,10 +170,10 @@ DEFAULT_CLASS_TOKENS: dict[str, str] = {
     "FX":     "shot/{seq}/{shot}/fx",
     "CFX":    "shot/{seq}/{shot}/cfx",
     "CROWD":  "shot/{seq}/{shot}/crowd",
-    # LIGHT and COMP live in the shot like the other departments (ADR 0055).
+    # LIGHT, COMP and RENDER live in the shot like the other departments (ADR 0055).
     "LIGHT":  "shot/{seq}/{shot}/lighting",
     "COMP":   "shot/{seq}/{shot}/comp",
-    "RENDER": "render/{seq}/{shot}",
+    "RENDER": "shot/{seq}/{shot}/render",
 }
 
 # Default TYPE token map for a SHOT (ADR 0019: the department of a shot is its TYPE,
@@ -187,16 +187,16 @@ DEFAULT_SHOT_TYPE_TOKENS: dict[str, str] = {
     "CROWD":  "shot/{seq}/{shot}/crowd",
     "LIGHT":  "shot/{seq}/{shot}/lighting",
     "COMP":   "shot/{seq}/{shot}/comp",
-    # Rendered frames of a shot (2026-10-09), own root (heavy frames, ADR 0038/0055).
-    # Projects whose tokens.json predates it get it from load_tokens (defaults merged in).
-    "RENDER": "render/{seq}/{shot}",
+    # Rendered frames of a shot (2026-10-09), inside the shot since ADR 0055.
+    "RENDER": "shot/{seq}/{shot}/render",
 }
 
-# Where LIGHT and COMP lived before ADR 0055. An existing tokens.json missing these keys
+# Where LIGHT, COMP and RENDER lived before ADR 0055. An existing tokens.json missing these keys
 # gets these, not the new defaults, so its publishes are not split across two folders.
 LEGACY_SHOT_ROOT_TOKENS: dict[str, str] = {
-    "LIGHT": "lighting/{seq}",
-    "COMP":  "comp/{seq}/{shot}",
+    "LIGHT":  "lighting/{seq}",
+    "COMP":   "comp/{seq}/{shot}",
+    "RENDER": "render/{seq}/{shot}",
 }
 
 # Default TYPE token map (Task → asset-relative top-level sub-folder).

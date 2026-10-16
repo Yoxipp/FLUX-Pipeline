@@ -25,9 +25,8 @@ _PROJECT_DIRS = (
     "assets/props",
     "assets/enviros",
     "assets/fx_rig",
-    "shot",           # LIGHT and COMP live in each shot (ADR 0055)
+    "shot",           # LIGHT, COMP and RENDER live in each shot (ADR 0055)
     "usd/assembly",
-    "render",
     # template/ holds the interchangeable Houdini lighting base scenes the
     # seq/shot generators read. Seeded below; the team can swap the files freely.
     "template",

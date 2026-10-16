@@ -28,9 +28,9 @@ log = get_logger(__name__)
 
 NODE_NAME = "flux_render"
 LABEL = "FLUX Render"
-# Output of the shot render: <project>/render/<SEQ>/<SHOT>/ (2026-09-28), $FLUX = the
+# Output of the shot render: <project>/shot/<SEQ>/<SHOT>/render/ (ADR 0055), $FLUX = the
 # workspace (flux.json package), projects under DOSSIER_PROJETS.
-RENDER_PICTURE = ('$FLUX/DOSSIER_PROJETS/`chs("project")`/render/`chs("seq")`/`chs("shot")`/'
+RENDER_PICTURE = ('$FLUX/DOSSIER_PROJETS/`chs("project")`/shot/`chs("seq")`/`chs("shot")`/render/'
                   '`chs("seq")`_`chs("shot")`.$F4.exr')
 
 BOOTSTRAP: str = '''
