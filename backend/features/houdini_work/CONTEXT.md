@@ -4,7 +4,8 @@
 
 FLUX Work (travail Houdini versionne par tache, E2 du 2026-10-10). `work_store.py` (fonctions pures sur disque) :
 * `work_dir(project, seq, shot, task)` : dossier departement du token `TYPE_SHOT` + `work/houdini/<TASK>/`. Template sans
-  `{shot}` (LIGHT = `lighting/{seq}`) : le shot est ajoute. `shot` vide = tache de sequence (`<SEQ>/<dept>/work/houdini/<TASK>`).
+  `{shot}` (LIGHT = `lighting/{seq}` d'un projet d'avant ADR 0055) : le shot est ajoute. `shot` vide = tache de sequence,
+  template sans le niveau shot (`shot/<SEQ>/lighting/work/houdini/LIGHT`).
 * Versions `wNNN.json` + `wNNN.cpio` (w000 = template). `reserve_version` prend le numero par creation exclusive
   (`O_EXCL`, etat `writing`), jamais reutilise ; `commit_version` exige le `.cpio` et recalcule son hash
   (`dcc/houdini/hda/flux_work_io.normalized_hash`) ; `abort_version` ne retire jamais une version `ok`. Une reservation

@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.constants import DEFAULT_CLASS_TOKENS, DEFAULT_SHOT_TYPE_TOKENS, DEFAULT_TYPE_TOKENS
+from core.constants import (
+    DEFAULT_CLASS_TOKENS,
+    DEFAULT_SHOT_TYPE_TOKENS,
+    DEFAULT_TYPE_TOKENS,
+    LEGACY_SHOT_ROOT_TOKENS,
+)
 from core.logger import get_logger
 from core.repository_factory import get_repository
 
@@ -54,6 +59,12 @@ def load_tokens(project_path: Path) -> dict:
         return build_default_tokens()
 
     defaults = build_default_tokens()
+    # An existing project keeps LIGHT / COMP at their old roots (ADR 0055).
+    for section in ("CLASS", "TYPE_SHOT"):
+        own = raw.get(section) if isinstance(raw.get(section), dict) else {}
+        for key, legacy in LEGACY_SHOT_ROOT_TOKENS.items():
+            if key not in own:
+                defaults[section][key] = legacy
     for section in _TOKEN_SECTIONS:
         default_section = defaults.get(section, {})
         if section in ("CLASS", "TYPE", "TYPE_SHOT", "INSTANCE") and default_section:

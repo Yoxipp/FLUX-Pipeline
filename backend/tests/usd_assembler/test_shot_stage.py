@@ -250,7 +250,7 @@ class ShotStage(unittest.TestCase):
         layer.Save()
         res = publish_shot_light(src, self.project, "SEQ001", "SHOT010", user="adam")
         self.assertEqual((res["base"], res["version"]), ("SEQ001_SHOT010_LIGHT", "v001"))
-        self.assertTrue(str(res["last"]).replace("\\", "/").endswith("lighting/SEQ001/null/SEQ001_SHOT010_LIGHT_LAST.usda"))
+        self.assertTrue(str(res["last"]).replace("\\", "/").endswith("shot/SEQ001/SHOT010/lighting/null/SEQ001_SHOT010_LIGHT_LAST.usda"))
         self.assertEqual(res["stage"], "v002")              # the stage now sublayers the light rig
         stage = Usd.Stage.Open(str(ss.last_file(self.project, "SEQ001", "SHOT010")))
         self.assertTrue(stage.GetPrimAtPath("/lights/key"))

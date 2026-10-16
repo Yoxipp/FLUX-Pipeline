@@ -38,13 +38,27 @@ class WorkDir(unittest.TestCase):
         got = ws.work_dir(self.project, "seq010", "sh020", "cfx")
         self.assertEqual(got, self.project / "shot/SEQ010/SH020/cfx/work/houdini/CFX")
 
+    def test_light_lives_in_the_shot(self) -> None:
+        # ADR 0055: LIGHT is a shot department like the others.
+        got = ws.work_dir(self.project, "SEQ010", "SH020", "LIGHT")
+        self.assertEqual(got, self.project / "shot/SEQ010/SH020/lighting/work/houdini/LIGHT")
+
     def test_department_without_shot_in_its_template_gets_the_shot(self) -> None:
+        # A project made before ADR 0055 keeps LIGHT = lighting/{seq}.
+        from core.constants import LEGACY_SHOT_ROOT_TOKENS
+        from features.folder_manager.tokens import build_default_tokens, save_tokens
+
+        tokens = build_default_tokens()
+        tokens["TYPE_SHOT"].update(LEGACY_SHOT_ROOT_TOKENS)
+        save_tokens(self.project, tokens)
         got = ws.work_dir(self.project, "SEQ010", "SH020", "LIGHT")
         self.assertEqual(got, self.project / "lighting/SEQ010/SH020/work/houdini/LIGHT")
+        self.assertEqual(ws.work_dir(self.project, "SEQ010", "", "LIGHT"),
+                         self.project / "lighting/SEQ010/work/houdini/LIGHT")
 
     def test_sequence_task(self) -> None:
         self.assertEqual(ws.work_dir(self.project, "SEQ010", "", "LIGHT"),
-                         self.project / "lighting/SEQ010/work/houdini/LIGHT")
+                         self.project / "shot/SEQ010/lighting/work/houdini/LIGHT")
         self.assertEqual(ws.work_dir(self.project, "SEQ010", "", "FX"),
                          self.project / "shot/SEQ010/fx/work/houdini/FX")
         # Token ending with {shot} (render/{seq}/{shot}): the sequence folder itself.

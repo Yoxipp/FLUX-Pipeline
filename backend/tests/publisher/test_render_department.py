@@ -42,8 +42,11 @@ class RenderDepartment(unittest.TestCase):
                          self.project / "render" / "SEQ010" / "SHOT020" / "beauty")
 
     def test_existing_departments_are_unchanged(self) -> None:
+        # tokens.json of a project made before RENDER and ADR 0055: LIGHT / COMP keep their roots.
         raw = tok.build_default_tokens()
-        raw["TYPE_SHOT"].pop("RENDER")
+        for key in ("RENDER", "LIGHT", "COMP"):
+            raw["TYPE_SHOT"].pop(key)
+            raw["CLASS"].pop(key)
         tok.save_tokens(self.project, raw)
         self.assertEqual(resolve_publish_path(self.project, "SEQ010_SHOT020_LIGHT_null_v001.hip"),
                          self.project / "lighting" / "SEQ010" / "null")
