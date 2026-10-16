@@ -49,6 +49,8 @@ export const PAINTER_OPTIONS: ExportOption[] = [
   { key: 'dilation', label: 'Distance de dilatation (px)', type: 'int', default: 16, tier: 'advanced',
     hint: 'Pour Transparente, Couleur et Diffusion' },
   { key: 'conform_tx', label: 'Conform .tx (Karma)', type: 'bool', default: true, tier: 'common' },
+  { key: 'tx_only', label: 'Export .tx seulement', type: 'bool', default: false, tier: 'common', dependsOn: 'conform_tx',
+    hint: 'Publie le .tx sans la texture source : plus leger' },
 ]
 
 // Build the default value map.

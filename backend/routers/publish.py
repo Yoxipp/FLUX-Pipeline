@@ -23,6 +23,7 @@ class PublishRequest(BaseModel):
     description: str = ""
     user: str | None = None   # defaults to current user
     target_name: str | None = None  # composed FLUX name when the source isn't token-named
+    tx_only: bool = False     # texture: publish its .tx instead of the image (lighter)
 
 
 class PublishResult(BaseModel):
@@ -64,6 +65,14 @@ async def publish(req: PublishRequest) -> PublishResult:
 
     loop = asyncio.get_running_loop()
 
+    # "Only .tx": convert first, then publish the .tx itself (see convert_to_tx for
+    # why the image is never published then deleted).
+    tx_only_done = False
+    if req.tx_only:
+        source, target_name, tx_only_done = await loop.run_in_executor(
+            None, lambda: _source_as_tx(source, req.target_name))
+        req.target_name = target_name
+
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape. The runner runs publish.yml, which
     # resolves then reuses copy_publish, so both paths land the file identically.
@@ -92,13 +101,33 @@ async def publish(req: PublishRequest) -> PublishResult:
     # here never fails the publish itself).
     #   texture -> mipped/tiled .tx so Karma stops re-mipmapping at render time.
     #   USD asset -> decimated purpose=proxy geometry for lighter viewports.
-    tx_paths = await _maybe_conform_texture(Path(dest), loop)
+    tx_paths = [str(dest)] if tx_only_done else await _maybe_conform_texture(Path(dest), loop)
     proxy_path = await _maybe_generate_proxy(Path(dest), loop)
 
     return PublishResult(
         success=True, dest_path=str(dest), message="Publish réussi",
         tx_paths=tx_paths, proxy_path=proxy_path,
     )
+
+
+def _source_as_tx(source: Path, target_name: str | None) -> tuple[Path, str | None, bool]:
+    """(file to publish, target name, converted) for an "only .tx" publish.
+
+    A non-texture or a failed conform keeps the source as is. A target name carrying
+    the image extension gets ".tx" instead, so the publish is named after the .tx.
+    """
+    from dcc.texture_publish import convert_to_tx
+    from features.publisher.texture_conform import is_texture_source
+
+    if not is_texture_source(source):
+        return source, target_name, False
+    files, _warnings = convert_to_tx([source], "Publish")
+    tx = files[0]
+    if tx.suffix.lower() != ".tx":
+        return source, target_name, False
+    if target_name and Path(target_name).suffix.lower() == source.suffix.lower():
+        target_name = str(Path(target_name).with_suffix(".tx"))
+    return tx, target_name, True
 
 
 def _failure_reason(source: Path, project_path: Path, target_name: str | None) -> str:

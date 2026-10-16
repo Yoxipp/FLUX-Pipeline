@@ -120,6 +120,7 @@ export interface PublishPayload {
   description?: string
   user?: string
   target_name?: string   // composed FLUX name when the source file isn't token-named
+  tx_only?: boolean      // texture: publish its .tx instead of the image
 }
 
 export interface PublishDestination {

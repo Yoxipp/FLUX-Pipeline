@@ -482,6 +482,7 @@ export const api = {
     file_format?: string
     bit_depth?:   string
     conform_tx?:  boolean
+    tx_only?:     boolean
     description?: string
     user?:        string
     texture_sets?: string[]
@@ -525,6 +526,7 @@ export const api = {
     instance?:    string
     file_format?: string
     conform_tx?:  boolean
+    tx_only?:     boolean
     description?: string
     user?:        string
     channels?:    string[]
@@ -564,6 +566,7 @@ export const api = {
     sbsar?:       boolean
     sbs?:         boolean
     conform_tx?:  boolean
+    tx_only?:     boolean
     description?: string
     user?:        string
   }) =>

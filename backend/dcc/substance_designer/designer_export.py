@@ -89,6 +89,7 @@ def publish_designer(
     conform_tx: bool = False,
     description: str = "",
     user: str = "unknown",
+    tx_only: bool = False,
 ) -> dict:
     """Export Designer maps / .sbsar / .sbs and ingest them into FLUX.
 
@@ -110,7 +111,7 @@ def publish_designer(
         log.warning("Designer export failed: %s", result.get("error"))
         return {"ok": False, "error": result.get("error", "Designer export failed")}
 
-    from dcc.texture_publish import publish_maps
+    from dcc.texture_publish import convert_to_tx, publish_maps
     from features.publisher.publish_core import publish_file
 
     prefix = [class_tok, task_tok, name_tok]
@@ -124,11 +125,16 @@ def publish_designer(
         files = sorted(p for p in gdir.iterdir() if p.is_file())
         if not files:
             continue
+        if tx_only:
+            files, tx_warns = convert_to_tx(files, "Designer")
+            warnings.extend(f"{gdir.name} : {w}" for w in tx_warns)
         variante = variant_for(instance, gdir.name, len(graph_dirs) > 1)
         done, warns = publish_maps(files, project_path, project, prefix, variante, description, user)
         published.extend(done)
         warnings.extend(f"{gdir.name} : {w}" for w in warns)
-        if conform_tx and done:
+        if tx_only:
+            tx_paths.extend(done)
+        elif conform_tx and done:
             from dcc.substance_painter.substance_export import _conform_published
             tx_paths.extend(_conform_published(done, "Designer"))
 
