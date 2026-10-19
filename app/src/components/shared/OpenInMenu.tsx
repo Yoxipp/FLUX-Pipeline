@@ -11,6 +11,7 @@ import { api } from '../../api/client'
 import type { LoadTargets } from '../../api/client'
 import { useDccStatus } from '../../hooks/useDccStatus'
 import { readActiveInstancePort } from '../../hooks/useActiveInstances'
+import { MARVELOUS_IMPORT_EXTS, openInMarvelous } from '../../pages/folder_manager/open_in'
 
 const USD_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz'])
 const LOP_IMPORT_EXTS = new Set(['.usd', '.usda', '.usdc', '.usdz', '.abc', '.bgeo', '.sc', '.geo', '.obj',
@@ -141,6 +142,9 @@ export function OpenInMenu({ project, relPath, label = 'Ouvrir dans', compact = 
     if (dcc['Nuke']?.connected && NUKE_IMPORT_EXTS.has(ext)) {
       targets.push({ label: 'Nuke', run: () => void simple('Nuke (Read)', name, () => api.nukeImportPath(project, relPath)) })
     }
+    if (dcc['Marvelous']?.connected && MARVELOUS_IMPORT_EXTS.has(ext)) {
+      targets.push({ label: 'Marvelous', run: () => void openInMarvelous(project, relPath, name) })
+    }
     if (PS_OPEN_EXTS.has(ext)) {
       targets.push({ label: 'Photoshop', run: () => void simple('Photoshop', name, () => api.photoshopOpen(project, relPath)) })
     }
@@ -162,7 +166,7 @@ export function OpenInMenu({ project, relPath, label = 'Ouvrir dans', compact = 
           {loading && <div style={{ padding: '6px 8px', fontSize: 11, color: 'var(--ink-4)' }}>Lecture…</div>}
           {!loading && targets.length === 0 && (
             <div style={{ padding: '6px 8px', fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.45 }}>
-              Aucun logiciel connecté pour ce fichier (Houdini, Maya, Nuke, Photoshop).
+              Aucun logiciel connecté pour ce fichier (Houdini, Maya, Nuke, Marvelous, Photoshop).
             </div>
           )}
           {!loading && targets.map(t => (

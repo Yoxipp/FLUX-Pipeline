@@ -21,6 +21,8 @@ const MAYA_IMPORT_EXTS = new Set(['.obj', '.fbx', '.ma', '.mb', '.abc', '.usd', 
 // Nuke Read supports image/plate formats; Photoshop opens raster/PSD files.
 const NUKE_IMPORT_EXTS = new Set(['.exr', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.dpx', '.mov', '.psd', '.hdr', '.tga'])
 const PS_OPEN_EXTS     = new Set(['.psd', '.psb', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif'])
+// Marvelous import_api: meshes, its own project / garment / avatar / fabric files, DXF patterns.
+export const MARVELOUS_IMPORT_EXTS = new Set(['.obj', '.fbx', '.abc', '.glb', '.gltf', '.zprj', '.zpac', '.avt', '.zfab', '.dxf'])
 
 const isOffline = (msg: string) => /urlopen|refused|connect|actively refused|WinError/i.test(msg)
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : trNow('Erreur inconnue', 'Unknown error'))
@@ -94,6 +96,16 @@ async function openInNuke(project: string, rel_path: string, name: string) {
     toast.success(`${name} → Nuke (Read)`, { id })
   } catch (e) {
     toast.error(trNow(`Import Nuke échoué : ${errMsg(e)}`, `Nuke import failed: ${errMsg(e)}`), { id })
+  }
+}
+
+export async function openInMarvelous(project: string, rel_path: string, name: string) {
+  const id = toast.loading(trNow(`Import de ${name} dans Marvelous…`, `Importing ${name} into Marvelous…`))
+  try {
+    await api.importInMarvelous(project, rel_path)
+    toast.success(trNow(`${name} importé dans Marvelous`, `${name} imported into Marvelous`), { id })
+  } catch (e) {
+    toast.error(trNow(`Import Marvelous échoué : ${errMsg(e)}`, `Marvelous import failed: ${errMsg(e)}`), { id })
   }
 }
 
@@ -174,6 +186,9 @@ export function buildOpenInTargets(args: {
   }
   if (dccStatus['Nuke']?.connected && NUKE_IMPORT_EXTS.has(ext)) {
     targets.push({ dcc: 'Nuke', onClick: () => void openInNuke(project, rel, item.name) })
+  }
+  if (dccStatus['Marvelous']?.connected && MARVELOUS_IMPORT_EXTS.has(ext)) {
+    targets.push({ dcc: 'Marvelous', onClick: () => void openInMarvelous(project, rel, item.name) })
   }
   // Photoshop is external COM (no scan entry); offer it for raster/PSD files.
   if (PS_OPEN_EXTS.has(ext)) {

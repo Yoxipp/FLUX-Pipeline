@@ -20,7 +20,8 @@
 #   alive.json          rewritten every second: {pid, version, time, mode}
 #   <id>.req            written by FLUX: {action, config}
 #   <id>.resp           written here:    {status: ok | error, ...}
-# Actions: ping, info, export {exportPath, name, format, options, zprj}, shutdown.
+# Actions: ping, info, export {exportPath, name, format, options, zprj},
+#          import {path, options}, shutdown.
 #
 # NOTE: export_api function names and ImportExportOption fields changed across
 # Marvelous versions; they are looked up defensively and must be verified live.
@@ -357,14 +358,93 @@ def _call_export(fmt, path, opts):
     raise RuntimeError('export %s refuse par Marvelous : %s' % (fmt, ' | '.join(errors)))
 
 
+# -- import --------------------------------------------------------------------
+
+# Words that name each format in import_api function names (ImportOBJ, ImportZprj...).
+_IMPORT_WORDS = {
+    'abc':  ('alembic', 'abc'),
+    'obj':  ('obj',),
+    'fbx':  ('fbx',),
+    'zprj': ('zprj', 'project'),
+    'zpac': ('zpac', 'garment'),
+    'avt':  ('avatar', 'avt'),
+    'glb':  ('glb', 'gltf'),
+    'gltf': ('gltf', 'glb'),
+    'usd':  ('usd',),
+    'usda': ('usd',),
+    'usdc': ('usd',),
+    'usdz': ('usd',),
+    'dxf':  ('dxf',),
+    'zfab': ('fabric', 'zfab'),
+}
+
+
+def _import_functions(fmt):
+    # import_api functions named after *fmt* first, then the generic file importer
+    # (ImportFile), which picks the reader from the extension.
+    mod = _module('import_api')
+    if mod is None:
+        return []
+    words = _IMPORT_WORDS.get(fmt, (fmt,))
+    named, generic = [], []
+    for n in sorted(dir(mod)):
+        low = n.lower()
+        fn = getattr(mod, n, None)
+        if not callable(fn) or not low.startswith('import'):
+            continue
+        if fmt == 'obj' and 'object' in low:
+            continue
+        if any(w in low for w in words):
+            named.append(fn)
+        elif low in ('importfile', 'importfilew'):
+            generic.append(fn)
+    return named + generic
+
+
+def _do_import(config):
+    if _module('import_api') is None:
+        return {'status': 'error', 'msg': 'import_api non disponible (script lance hors de Marvelous ?)'}
+    path = str(config.get('path') or '').replace(chr(92), '/')
+    if not path or not os.path.isfile(path):
+        return {'status': 'error', 'msg': 'fichier introuvable : %s' % path}
+    fmt = os.path.splitext(path)[1].lstrip('.').lower()
+    opts = dict(config.get('options') or {})
+    cands = []
+    for order, fn in enumerate(_import_functions(fmt)):
+        name = getattr(fn, '__name__', str(fn))
+        for types in _signatures(fn) or [['str']]:
+            args = _build_args(types, path, opts)
+            if args is None:
+                continue
+            n_opt = sum(1 for t in types if t.split('::')[-1].strip().endswith(('Option', 'Options')))
+            # Format-specific readers before ImportFile, option objects first.
+            cands.append((order, -n_opt, name, fn, args))
+    cands.sort(key=lambda c: (c[0], c[1]))
+    if not cands:
+        return {'status': 'error', 'msg': 'import .%s absent de cette version de Marvelous' % fmt}
+    errors = []
+    for _order, _n, name, fn, args in cands:
+        try:
+            res = fn(*args)
+        except Exception as exc:  # noqa: BLE001 - wrong signature for this version: next one
+            errors.append('%s: %s' % (name, exc))
+            continue
+        _diag('import %s: %s(%d args) -> %r' % (path, name, len(args), res))
+        if res is False:
+            errors.append('%s: refuse' % name)
+            continue
+        return {'status': 'ok', 'function': name, 'path': path}
+    return {'status': 'error', 'msg': 'import .%s refuse par Marvelous : %s' % (fmt, ' | '.join(errors))}
+
+
 def _inventory():
-    # Every export function with its signatures, for the log.
+    # Every export / import function with its signatures, for the log.
     rows = []
-    for mod_name in ('export_api', 'utility_api'):
+    for mod_name in ('export_api', 'import_api', 'utility_api'):
         mod = _module(mod_name)
         for n in sorted(dir(mod)) if mod else []:
             low = n.lower()
-            if low.startswith('export') or ('save' in low and 'proj' in low):
+            if low.startswith(('export', 'import')) or ('save' in low and 'proj' in low):
                 sig = _signatures(getattr(mod, n))
                 rows.append('%s.%s%s' % (mod_name, n, sig or ''))
     return rows
@@ -471,6 +551,8 @@ def _dispatch(cmd):
         return _do_info()
     if action == 'export':
         return _do_export(cmd.get('config', {}))
+    if action == 'import':
+        return _do_import(cmd.get('config', {}))
     if action == 'shutdown':
         _state()['stop'] = True
         return {'status': 'ok'}
@@ -527,7 +609,7 @@ def serve(pump=None):
     st.update(running=True, stop=False)
     _diag('Marvelous bridge ready, mailbox %s, mode %s (%s)' % (MAILBOX, mode, _environment()))
     try:
-        _diag('export functions: ' + ' ; '.join(_inventory()))
+        _diag('api functions: ' + ' ; '.join(_inventory()))
     except Exception as exc:  # noqa: BLE001 - the log line is a help, never a failure
         _diag('inventory failed: %r' % (exc,))
     last_beat = 0.0
@@ -543,8 +625,8 @@ def serve(pump=None):
             reqs = _pending()
             for req in reqs:
                 action = _serve_request(req)
-                if one_shot and action == 'export':
-                    st['stop'] = True        # give Marvelous back after the export
+                if one_shot and action in ('export', 'import'):
+                    st['stop'] = True        # give Marvelous back after the export / import
             if not reqs:
                 if one_shot and now - started > ONE_SHOT_IDLE_S:
                     _diag('one-shot mode: no export for %d s, stopping' % ONE_SHOT_IDLE_S)

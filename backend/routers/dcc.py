@@ -150,7 +150,37 @@ async def _probe_all_dccs() -> dict:
         maya["stuck"] = stuck
         maya["stuck_pid"] = pid
 
+    # Marvelous never opens its port (no _socket in its Python): the bridge talks
+    # through a mailbox folder, so its heartbeat says whether it is connected.
+    if "Marvelous" in status:
+        _apply_marvelous_heartbeat(status["Marvelous"])
+
     return status
+
+
+def _apply_marvelous_heartbeat(entry: dict) -> None:
+    """Mark Marvelous connected (or busy) when its mailbox bridge beats."""
+    from dcc.marvelous import client as md_client
+
+    if entry.get("connected"):
+        return
+    res = md_client.marvelous_client.ping()
+    if not res.get("ok"):
+        return
+    busy = bool(res.get("busy"))
+    port = DCC_PORTS["Marvelous"]
+    entry.update({
+        "connected": True,
+        "port": port,
+        "no_bridge": False,
+        "no_bridge_count": 0,
+        "busy": busy,
+        "instances": [{
+            "id": f"Marvelous:{port}", "dcc": "Marvelous", "port": port, "connected": True,
+            "pid": res.get("pid"), "scene": None, "version": res.get("version"),
+            "label": "Marvelous Designer", "state": "busy" if busy else "connected",
+        }],
+    })
 
 
 @router.get("/status")
@@ -2439,6 +2469,30 @@ async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
         raise HTTPException(status_code=503, detail=_bridge_error(
             result.get("error"), "Marvelous publish failed", _marvelous_autostart, "Marvelous"))
     return result
+
+
+class MarvelousImportRequest(BaseModel):
+    project_name: str
+    rel_path:     str                        # project-relative file (Folder Manager)
+    options:      dict | None = None
+
+
+@router.post("/marvelous/import")
+async def marvelous_import(req: MarvelousImportRequest) -> dict:
+    """Import a project file (obj / fbx / abc / zprj / zpac / avt...) into the open Marvelous."""
+    from core.paths import get_project_path
+    from dcc.marvelous.client import marvelous_client
+
+    file_path = get_project_path(req.project_name) / req.rel_path
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"fichier introuvable : {req.rel_path}")
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(
+        None, lambda: marvelous_client.import_file(file_path.as_posix(), req.options))
+    if not res.get("ok"):
+        raise HTTPException(status_code=503, detail=_bridge_error(
+            res.get("error"), "Marvelous import failed", _marvelous_autostart, "Marvelous"))
+    return res
 
 
 # ── Unreal bridge (ADR 0052): open a FLUX USD stage, reload changed layers ───

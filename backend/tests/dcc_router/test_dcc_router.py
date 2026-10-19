@@ -63,6 +63,26 @@ class ProbeAllDccs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["Maya"]["stuck_pid"], 4242)
         m.assert_called_once()
 
+    async def test_marvelous_connected_by_its_heartbeat(self):
+        # Marvelous never opens its port (mailbox bridge): its heartbeat decides.
+        from dcc.marvelous import client as md_client
+
+        beat = {"ok": True, "version": "Marvelous Designer 2024", "mode": "live", "pid": 99}
+        with mock.patch.object(dcc_router, "scan_instances", side_effect=lambda d, **k: []), \
+             mock.patch.object(dcc_router, "_maya_stuck_throttled", return_value=(False, None)), \
+             mock.patch.object(md_client.marvelous_client, "ping", return_value=beat):
+            status = await dcc_router._probe_all_dccs()
+        md = status["Marvelous"]
+        self.assertTrue(md["connected"])
+        self.assertFalse(md["no_bridge"])
+        self.assertEqual(md["instances"][0]["pid"], 99)
+
+        with mock.patch.object(dcc_router, "scan_instances", side_effect=lambda d, **k: []), \
+             mock.patch.object(dcc_router, "_maya_stuck_throttled", return_value=(False, None)), \
+             mock.patch.object(md_client.marvelous_client, "ping", return_value={"ok": False}):
+            status = await dcc_router._probe_all_dccs()
+        self.assertFalse(status["Marvelous"]["connected"])
+
 
 if __name__ == "__main__":
     unittest.main()

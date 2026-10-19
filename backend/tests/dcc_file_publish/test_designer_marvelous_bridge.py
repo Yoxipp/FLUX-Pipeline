@@ -368,6 +368,75 @@ class MarvelousBridgeScript(unittest.TestCase):
         rows = self.br._inventory()
         self.assertTrue(any(r.startswith("export_api.ExportUSDW[[") for r in rows), rows)
 
+    def _import_api(self):
+        # import_api shaped like export_api: a format reader with options, the
+        # generic ImportFile, and a reader that refuses (returns False).
+        imported: list = []
+
+        def ImportOBJ(path, option):
+            imported.append(("obj", path, option))
+            return True
+        ImportOBJ.__doc__ = "ImportOBJ(arg0: str, arg1: Marvelous::ImportExportOption) -> bool\n"
+
+        def ImportFBX(path):
+            return False
+        ImportFBX.__doc__ = "ImportFBX(arg0: str) -> bool\n"
+
+        def ImportFile(path):
+            imported.append(("file", path, None))
+            return True
+        ImportFile.__doc__ = "ImportFile(arg0: str) -> bool\n"
+
+        api = types.ModuleType("import_api")
+        for fn in (ImportOBJ, ImportFBX, ImportFile):
+            setattr(api, fn.__name__, fn)
+        api.ImportObjectFromLibrary = lambda path: imported.append(("object", path, None))
+        # Inside setUp's sys.modules patch (restored in tearDown): a second patch.dict
+        # stopped after it would put the fake export_api back for the next tests.
+        sys.modules["import_api"] = api
+        return imported
+
+    def _import(self, name):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / name
+            path.write_text("x")
+            return self.br._do_import({"path": str(path)})
+
+    def test_import_uses_the_format_reader_first(self):
+        imported = self._import_api()
+        res = self._import("Robe.obj")
+        self.assertEqual(res["status"], "ok", res)
+        self.assertEqual(res["function"], "ImportOBJ")
+        self.assertEqual([c[0] for c in imported], ["obj"])         # not ImportObjectFromLibrary
+        self.assertIsNotNone(imported[0][2])
+
+    def test_import_falls_back_to_import_file(self):
+        imported = self._import_api()
+        res = self._import("Robe.fbx")                                # ImportFBX refuses
+        self.assertEqual(res["status"], "ok", res)
+        self.assertEqual(res["function"], "ImportFile")
+        self.assertEqual([c[0] for c in imported], ["file"])
+
+    def test_import_of_a_missing_file_is_an_error(self):
+        self._import_api()
+        res = self.br._do_import({"path": "C:/nowhere/Robe.obj"})
+        self.assertEqual(res["status"], "error")
+        self.assertIn("introuvable", res["msg"])
+
+    def test_import_through_the_mailbox(self):
+        imported = self._import_api()
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src:
+            box = Path(d) / "flux_marvelous_bridge"
+            box.mkdir()
+            f = Path(src) / "Robe.obj"
+            f.write_text("x")
+            t, state = self._serve_in_thread(box, lambda: True)
+            res = md_client.marvelous_client.import_file(str(f))
+            self.assertTrue(res["ok"], res)
+            self.assertEqual(imported[0][0], "obj")
+            md_client.call({"action": "shutdown"}, 5.0)
+            t.join(5.0)
+
     def _serve_in_thread(self, box, pump):
         # The thread plays Marvelous: the loop runs on its caller's thread (Marvelous
         # freezes background threads) and talks to FLUX through the mailbox files

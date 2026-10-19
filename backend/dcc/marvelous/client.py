@@ -150,12 +150,13 @@ class MarvelousClient:
         if beat is None:
             # An export holds the bridge's loop, so it stops beating: a request being
             # served (.work) means busy, not gone.
+            pid = (_read_alive() or {}).get("pid")
             if any(mailbox_dir().glob("*.work")):
-                return {"ok": True, "busy": True, "version": "Marvelous Designer (export en cours)"}
+                return {"ok": True, "busy": True, "pid": pid, "version": "Marvelous Designer (export en cours)"}
             if blocked():
-                return {"ok": True, "busy": True, "version": "Marvelous Designer (occupe)"}
+                return {"ok": True, "busy": True, "pid": pid, "version": "Marvelous Designer (occupe)"}
             return {"ok": False, "error": NOT_RUNNING}
-        return {"ok": True, "version": beat.get("version"), "mode": beat.get("mode")}
+        return {"ok": True, "version": beat.get("version"), "mode": beat.get("mode"), "pid": beat.get("pid")}
 
     def info(self) -> dict:
         """Open project + formats this Marvelous can export: {ok, project, formats}."""
@@ -164,6 +165,11 @@ class MarvelousClient:
     def export(self, config: dict[str, Any]) -> dict:
         """Ask Marvelous to export with *config*; returns {ok, files, warnings}."""
         return call({"action": "export", "config": config}, timeout=900.0)
+
+    def import_file(self, path: str, options: dict[str, Any] | None = None) -> dict:
+        """Ask Marvelous to import *path* into the open scene; returns {ok, function}."""
+        return call({"action": "import", "config": {"path": path, "options": options or {}}},
+                    timeout=600.0)
 
 
 marvelous_client = MarvelousClient()

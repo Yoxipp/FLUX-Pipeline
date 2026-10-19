@@ -579,6 +579,10 @@ export const api = {
     apiCall<{ ok: boolean; project: string; path?: string; formats: string[];
               patterns?: number | null; avatars?: number | null }>(
       'GET', '/dcc/marvelous/info', undefined, 25000),
+  // Import a project file into the open Marvelous scene (Folder Manager "Ouvrir dans").
+  importInMarvelous: (project_name: string, rel_path: string) =>
+    apiCall<{ ok: boolean; function?: string; path?: string }>(
+      'POST', '/dcc/marvelous/import', { project_name, rel_path }, 600000),
   publishMarvelousBridge: (payload: {
     project_name: string
     target_name:  string
