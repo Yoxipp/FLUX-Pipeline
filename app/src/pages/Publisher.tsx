@@ -2033,10 +2033,9 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
         detail={bridgeStatus.version ?? undefined}
         help={bridgeStatus.connected || bridgeStatus.checking ? undefined : dcc === 'Marvelous' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span>{tr('Marvelous 2024.1+ : Plugins > Plug-in > FLUX Bridge.', 'Marvelous 2024.1+: Plugins > Plug-in > FLUX Bridge.')}</span>
             {marvelousScript
               ? <>
-                  <span>{tr('Sinon, colle cette ligne dans Script > Python (Plugins > Python Editor en 2024.1+) puis Run :', 'Otherwise, paste this line in Script > Python (Plugins > Python Editor in 2024.1+), then Run:')}</span>
+                  <span>{tr('À chaque session Marvelous, colle cette ligne dans Script > Python puis Run (Marvelous 2025+ : aussi Plugins > Plug-in > FLUX Bridge) :', 'Each Marvelous session, paste this line in Script > Python, then Run (Marvelous 2025+: also Plugins > Plug-in > FLUX Bridge):')}</span>
                   {/* No " and no \ : the Marvelous 2024 editor mangles them (SyntaxError). */}
                   <CopyBlock text={`exec(open('${marvelousScript.replace(/\\/g, '/')}').read())`} />
                 </>
