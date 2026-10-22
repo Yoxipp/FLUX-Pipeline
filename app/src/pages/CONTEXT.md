@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__pages.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `ActionGraph` (node flow lecture seule, route cachee `/action-graph`), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
+Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `ActionGraph` (ancien editeur des actions YAML, route `/action-graph-legacy` via `flow_editor/LegacyEditor.tsx`, retire en P8), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
@@ -151,3 +151,16 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * Table Production (2026-10-08) : layout fixe (`colgroup`), Shot / Timing / Casting gardent leur largeur
   et les departements masques elargissent les colonnes de departement. Plus de resume
   "X taches selectionnees" : Ctrl / Shift + clic sur le badge selectionne, clic simple ouvre les retakes.
+
+## Editeur de Flows (`flow_editor/`, chantier Flows P0 2026-10-22)
+
+Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, fichiers), ADR 0057. P0 = lecture seule.
+* `FlowEditor.tsx` : coque (route `/action-graph`, lien profond `?flow=<nom>`) : `TopBar` (choix du flow, badges, recherche,
+  Cadrer, "Ancien editeur"), `ShelfBar` (onglet par famille), `NetworkPane` (@xyflow/react, Tab, F, Echap, MiniMap par famille),
+  `ParamsPane` (node selectionne ou flow).
+* `nodes/FlowNode.tsx` (barre de famille, icone, ligne exec, une ligne par port), `PortHandle.tsx` (forme et couleur par type,
+  plein = relie), `PortTooltip.tsx` (une seule info-bulle en portail, 300 ms), `edges/FlowEdge.tsx` (exec blanc, data couleur du type).
+* `families.ts` / `icons.ts` / `portTypes.ts` : variables `--fam-*` et `--port-*` de `globals.css`, table statique lucide.
+* `v1_adapter.ts` : `ActionGraph` v1 -> `FlowView` (fonctions pures : commande -> famille, params -> ports, une chaine exec
+  dans l'ordre des etapes, node Start en tete, liens data des parametres cables). Appels API dans `api/flows.ts` (routes v1).
+* `TabMenu.tsx` : recherche seule en P0 (rien ne s'ajoute, edition en P4). `useTr.ts` copie de l'ancien editeur.
