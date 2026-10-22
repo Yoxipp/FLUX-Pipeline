@@ -146,6 +146,30 @@ export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'err
 // the X-Flux-Token header to every request to the backend, frames included).
 export const MANUAL_URL = `${BASE_URL}/system/manual`
 
+// Tractor farm render (backend features/render/team_settings.py, routers/render.py).
+export interface RenderSettings {
+  tractor_project: string; priority: number; maxactive: number; chunk_size: number
+  renderer: 'karma' | 'renderman'; freeze_by_default: boolean
+  schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
+  service_karma: string; service_renderman: string; envkeys: string[]
+  husk_path: string; bridge_python: string; bridge_script: string; engine: string; dry_run: boolean
+}
+export interface RenderShot { seq: string; shot: string; frame_start: number; frame_end: number; has_stage: boolean }
+export interface RenderSubmitResult {
+  dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
+  output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
+}
+export interface RenderJob {
+  jid: number; title: string; user: string; projects?: string[] | string; priority?: number
+  numTasks: number; numDone: number; numError: number; numActive: number
+  spooltime?: string | number; metadata?: unknown
+}
+export interface RenderFarm {
+  blades: unknown[]; active_by_project: Record<string, number>
+  schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
+  tractor_project: string; dry_run?: boolean
+}
+
 export const api = {
   // Settings
   getSettings: () =>
@@ -1045,6 +1069,25 @@ export const api = {
   // Team calendar of a project: commitments, proposals (ping) and answers.
   getCalendar: (project: string) =>
     apiCall<{ items: CalendarItem[]; me: string }>('GET', `/calendar/${encodeURIComponent(project)}`),
+  // Tractor farm render (ADR 0015, backend routers/render.py)
+  renderSettings: (project: string) =>
+    apiCall<{ settings: RenderSettings; warning: string | null }>('GET', `/render/settings?project=${encodeURIComponent(project)}`),
+  renderSaveSettings: (project: string, patch: Partial<RenderSettings>) =>
+    apiCall<{ settings: RenderSettings; warning: string | null }>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
+  renderShots: (project: string) =>
+    apiCall<{ shots: RenderShot[] }>('GET', `/render/shots?project=${encodeURIComponent(project)}`),
+  renderSubmit: (body: {
+    project: string; seq?: string; shot?: string; usd_path?: string
+    frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
+  }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
+  renderJobs: (project: string, mine: boolean) =>
+    apiCall<{ jobs: RenderJob[]; dry_run?: boolean; finished?: { jid: number; title: string; output?: string }[] }>(
+      'GET', `/render/jobs?project=${encodeURIComponent(project)}&mine=${mine}`),
+  renderFarm: (project: string) =>
+    apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
+  renderJobAction: (project: string, jid: number, action: 'kill' | 'retry' | 'pause' | 'resume') =>
+    apiCall<unknown>('POST', `/render/jobs/${jid}/${action}?project=${encodeURIComponent(project)}`),
+
   getCalendarPublishes: (project: string, start: string, end: string) =>
     apiCall<{ publishes: CalendarPublish[] }>('GET', `/calendar/${encodeURIComponent(project)}/publishes?start=${start}&end=${end}`),
   createCalendarItem: (project: string, body: { title: string; owner: string; start: string; end: string; note: string; link: string }) =>

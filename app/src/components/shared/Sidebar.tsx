@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -844,6 +844,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             </div>
           )
         })}
+        {/* Tractor farm render (ADR 0015): not a DCC, so a plain row after the software list. */}
+        <NavItem icon={ServerCog} label="Tractor" active={pathname === '/render'} route="/render" onClick={() => navigate('/render')} />
       </NavGroup>
 
       <div style={{ flex: 1 }} />

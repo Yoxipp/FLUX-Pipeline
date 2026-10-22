@@ -26,6 +26,7 @@ import { ShelfManager }  from './pages/ShelfManager'
 import { UsdPage }       from './pages/usd/UsdPage'
 import { Production }    from './pages/Production/Production'
 import { Calendar }      from './pages/Calendar'
+import { Render }        from './pages/Render'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
@@ -166,6 +167,7 @@ function AppShell({ settings }: { settings: Settings }) {
               <Route path="/templates" element={<Navigate to="/settings?tab=advanced&sub=templates" replace />} />
               <Route path="/production" element={<Production />} />
               <Route path="/calendar"  element={<Calendar />} />
+              <Route path="/render"    element={<Render />} />
               <Route path="/settings"  element={<SettingsPage />} />
               <Route path="/advanced"  element={<Navigate to="/settings?tab=advanced" replace />} />
               <Route path="/disk"      element={<Navigate to="/settings?tab=advanced&sub=disk" replace />} />

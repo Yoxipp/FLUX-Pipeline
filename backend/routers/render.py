@@ -155,7 +155,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         envkeys=settings["envkeys"],
         husk=settings["husk_path"],
         metadata={"flux_project": body.project, "entity": name, "user": user,
-                  "output": out_dir.name, "frozen": "1" if frozen["frozen"] else "0"},
+                  "output": _farm(out_dir, "Le dossier de rendu", simulate), "frozen": "1" if frozen["frozen"] else "0"},
     )
     try:
         result = tractor_bridge.spool(spec, settings, user, out_dir / "_job")
