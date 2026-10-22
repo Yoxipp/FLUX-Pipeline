@@ -1,12 +1,17 @@
 # registry.py — the @flow_node registry (01_ARCHITECTURE §1, 02_NODES §1).
 #
 # A node type is "<family>.<name>" with documented ports (doc_fr / doc_en /
-# example), a Shelf rank and Tab-search aliases. FLUX ships no node type in P1
-# (02 §1 "Phases"); team nodes come from CONFIG/extensions/nodes/*.py. The loader
+# example), a Shelf rank and Tab-search aliases. FLUX's own node types live in
+# one module per family (BUILTIN_MODULES, imported by ensure_builtin); team nodes
+# come from CONFIG/extensions/nodes/*.py. The loader
 # only imports a file that contains "@flow_node": the v1 CONFIG/nodes files copied
 # there stay inert (they belong to flux_core).
 #
 # Team nodes run with FLUX's own rights (gap to ADR 0014, assumed by ADR 0057).
+#
+# Body contract (nodes/contract.py): ``func(ctx, inputs, params) -> outputs``; a
+# node with an effect (``effect=True`` or destructive) must give ``simulate``
+# with the same signature returning ``{lines, outputs}`` (dry run, 01 §5).
 
 from __future__ import annotations
 
@@ -24,6 +29,10 @@ FAMILIES: Tuple[str, ...] = (
     "event", "data", "logic", "operator", "action", "flux", "session", "dcc", "bridge", "subflow",
 )
 MARKER = "@flow_node"
+BUILTIN_MODULES: Tuple[str, ...] = (
+    "flux_flows.nodes.event", "flux_flows.nodes.data", "flux_flows.nodes.logic",
+    "flux_flows.nodes.operator", "flux_flows.nodes.flux",
+)
 _TEAM_MODULE_PREFIX = "flux_flows_team_nodes."
 
 
@@ -65,6 +74,7 @@ class NodeSpec:
     doc_fr: str = ""
     doc_en: str = ""
     destructive: Any = None             # True, or {"param": .., "equals": ..}
+    effect: bool = False                # acts on the world: simulated in a dry run
     source: str = "flux"                # flux | team
     file: str = ""
     func: Optional[Callable[..., Any]] = None
@@ -76,7 +86,7 @@ class NodeSpec:
             "inputs": [p.to_dict() for p in self.inputs], "outputs": [p.to_dict() for p in self.outputs],
             "params": [p.to_dict() for p in self.params], "shelf": self.shelf, "aliases": list(self.aliases),
             "doc_fr": self.doc_fr, "doc_en": self.doc_en, "destructive": self.destructive,
-            "source": self.source, "file": self.file,
+            "effect": self.effect, "source": self.source, "file": self.file,
         }
 
 
@@ -103,18 +113,22 @@ def _check_ports(node_type: str, kind: str, ports: Iterable[Port]) -> List[Port]
 def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] = (),
               outputs: Iterable[Port] = (), params: Iterable[Port] = (), shelf: Optional[int] = None,
               aliases: Iterable[str] = (), doc_fr: str = "", doc_en: str = "", destructive: Any = None,
-              simulate: Optional[Callable[..., Any]] = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Declare a node type. The decorated function is its body (run by the engine, P2)."""
+              effect: bool = False, simulate: Optional[Callable[..., Any]] = None,
+              ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Declare a node type. The decorated function is its body (run by the engine)."""
     if not NODE_TYPE_RE.match(type):
         raise NodeDefinitionError(f"type '{type}' : attendu <famille>.<nom>")
     family = type.split(".", 1)[0]
     if family not in FAMILIES:
         raise NodeDefinitionError(f"{type} : famille '{family}' inconnue ({', '.join(FAMILIES)})")
+    effect = bool(effect or destructive)
+    if effect and simulate is None:
+        raise NodeDefinitionError(f"{type} : un node a effet doit definir simulate (essai a blanc)")
     spec = NodeSpec(
         type=type, label=label, family=family, icon=icon,
         inputs=_check_ports(type, "entree", inputs), outputs=_check_ports(type, "sortie", outputs),
         params=_check_ports(type, "parametre", params), shelf=shelf, aliases=list(aliases),
-        doc_fr=doc_fr, doc_en=doc_en, destructive=destructive, simulate=simulate,
+        doc_fr=doc_fr, doc_en=doc_en, destructive=destructive, effect=effect, simulate=simulate,
     )
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -131,12 +145,34 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
     return decorate
 
 
+_BUILTIN_SENTINEL = "event.manual"
+
+
+def ensure_builtin() -> None:
+    """Import FLUX's own node modules (they register on import). Re-imports them
+    when a test emptied the registry behind our back."""
+    if _BUILTIN_SENTINEL in _REGISTRY:
+        return
+    with _LOCK:
+        if _BUILTIN_SENTINEL in _REGISTRY:
+            return
+        for node_type in [t for t, s in _REGISTRY.items() if s.func and s.func.__module__ in BUILTIN_MODULES]:
+            del _REGISTRY[node_type]
+        for name in BUILTIN_MODULES:
+            if name in sys.modules:
+                importlib.reload(sys.modules[name])
+            else:
+                importlib.import_module(name)
+
+
 def get_node(node_type: str) -> Optional[NodeSpec]:
+    ensure_builtin()
     with _LOCK:
         return _REGISTRY.get(node_type)
 
 
 def all_nodes() -> List[NodeSpec]:
+    ensure_builtin()
     with _LOCK:
         return sorted(_REGISTRY.values(), key=lambda s: (FAMILIES.index(s.family), s.type))
 
