@@ -2,7 +2,8 @@
 
 Chantier Flows (ADR 0057, 0058 ; specs `docs/yaml_update_refonte/`). Package neuf : `flux_core` et `flux_actions`
 ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Etat au 2026-10-22 : P1 fait
-(prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). Pas de moteur ni de run (P2).
+(prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). P2 fait (prompt `P2_moteur_runs.md`) :
+moteur, runs, essai a blanc, WS, 11 types de node. Pas encore de validation complete (P4) ni d'evenement automatique (P5).
 
 ## Fichiers
 
@@ -10,12 +11,17 @@ ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Et
 |---|---|
 | `model.py` | Schema v2 strict (pydantic `extra="forbid"`), `parse_flow`, `load_flow_text`, `dump_flow` (emission YAML stable, sert aussi de forme canonique), `to_document`, `v1_limit_issues`. Nom `^[a-z][a-z0-9_]{1,40}$`, noms reserves (routes statiques + `rights`), 1 Mo, 500 nodes. Node `subnet` (ses `nodes` / `links`), flag `bypass`. `origin` d'un flow migre : `kind`, `name`, `shelf`, `thumbnail`, `extends`, `params`. |
 | `types.py` | Types de ports, `can_connect` -> ok / implicite / incompatible + raison fr / en (ADR 0058 : un lien incompatible est accepte par le modele, la validation P4 le signale). |
-| `nodes/registry.py` | `@flow_node` (doc fr / en, exemple par port, shelf, alias), 10 familles, chargeur des nodes d'equipe (`CONFIG/extensions/nodes/`, seulement les fichiers qui contiennent `@flow_node`). Vide en P1 : les nodes arrivent en P2 / P3. |
+| `nodes/registry.py` | `@flow_node` (doc fr / en, exemple par port, shelf, alias, `effect`), 10 familles, chargeur des nodes d'equipe (`CONFIG/extensions/nodes/`, seulement les fichiers qui contiennent `@flow_node`). Un node a effet (`effect=True` ou destructif) sans `simulate` est refuse. `ensure_builtin()` importe les modules FLUX (`BUILTIN_MODULES`). |
+| `nodes/contract.py` | Contrat d'un corps de node : `body(ctx, inputs, params) -> {port: valeur}`, `simulate(...) -> {lines, outputs}`, `NodeError` (message affiche sur le node), `NodeContext` (`context`, `interface`, `cancelled`, `log`, `notify`, variables), `EXEC_KEY` (`_exec`) pour choisir la sortie exec. |
+| `nodes/event.py`, `data.py`, `logic.py`, `operator.py`, `flux.py` | Nodes P2 (02 §11) : `event.button`, `event.manual` ; `data.value`, `get_variable`, `set_variable`, `flow_input` ; `logic.if` ; `operator.foreach_begin`, `foreach_end` ; `flux.notify`, `flux.legacy_command`. |
+| `engine.py` | Moteur exec + data (01 §4), `Run` (un run) et `RunManager` (admission, un par boucle asyncio : `engine.manager()`). |
+| `runs.py` | Enregistrements de run (01 §6) : id, ecriture atomique, liste, retention, `interrupted`. |
+| `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. |
 | `locations.py` | Dossier de chaque portee ; `roots_for(user, project)` construit le dict `{portee: dossier ou None}` du store (nom de projet = un nom de dossier, jamais un chemin). |
 | `store.py` | Portees, fichier de travail, versions figees, `state.json`, `history.jsonl`, `_trash/`, verrou, ecriture atomique, conflit 409. |
 | `rights.py` | Cases TD / Team TD, table de 01 §7, 403. |
 | `migrate_v1.py` | Actions v1 -> flows (script de dev pour `shipped/`, `POST /flows/migrate` pour l'equipe). |
-| `shipped/` | Flows livres, lecture seule, dans l'exe (`scripts/backend.spec`, dossier copie recursivement). Aujourd'hui les 5 `legacy_*`. |
+| `shipped/` | Flows livres, lecture seule, dans l'exe (`scripts/backend.spec`, dossier copie recursivement). Les 5 `legacy_*` et 2 exemples P2 (`example_foreach`, `example_error`, a la racine pour etre ouvrables : le store ne liste que ce niveau). |
 
 ## Stockage (ADR 0058, prime sur 01 §6)
 
@@ -73,9 +79,44 @@ Le store ne verifie aucun droit : le router appelle `rights.check` avant chaque 
 Statiques d'abord : `GET /catalog`, `GET /rights`, `POST /migrate`. Puis `GET ""` (liste, `category` pipe / project / perso),
 `GET /{name}` (`scope?`, `project?`, `version?` ; sans portee = celle qui gagne), `GET /{name}/versions`, `PUT /{name}` (Enregistrer),
 `POST /{name}/increment`, `/revert`, `/activate`, `/deactivate`, `/copy` (Enregistrer sous ailleurs ; shipped -> team = unlock, Team TD),
-`DELETE /{name}`. Erreurs : `{detail: {message, ...}}`. Pas encore de push WS `flow_changed` (P2).
+`DELETE /{name}`. Erreurs : `{detail: {message, ...}}`. Pas encore de push WS `flow_changed` (P4 / P5).
+P2 : `GET /runs`, `GET /runs/{run_id}`, `POST /runs/{run_id}/cancel` (TD ou lanceur), `WS /ws` (statiques, avant `/{name}`),
+`POST /{name}/run {scope, project?, event?, values, dry_run, draft?, base_revision?}` : `draft` = document de l'editeur (TD,
+aucune version), `dry_run` = fichier enregistre (TD), sinon `active_version` d'un flow actif (409 "flow non actif") ;
+409 aussi si `refused` / `skipped` (`detail.issues`).
+
+## Moteur et runs (P2, 01 §4 a §6, §10)
+
+* **Exec + data** : un curseur exec suit les liens dont le port cible est `exec` (une sortie exec = un lien). Une entree data
+  liee est **tiree** quand son node s'execute : source pure (aucun lien exec entrant) = evaluee a la demande et memoisee ;
+  source deja executee = ses dernieres sorties ; source de la chaine pas encore executee = erreur "donnee lue avant d'etre
+  produite" ; node du corps d'une boucle lu apres son End = refuse ("utilise results de End"). Entree non liee = litteral de
+  `params`, sinon defaut du port ; entree obligatoire vide = erreur du node.
+* **Memo** : par node, valide tant que les tours de boucle dont la valeur depend sont les memes (et que le compteur
+  d'ecritures de variables n'a pas bouge si une variable a ete lue). Rien ne survit au run.
+* **Blocs** : ForEach (End apparie par `params.begin`, liste vide = corps saute, `results` = valeurs de `collect`) ; If et tout
+  node qui branche rendent `_exec` (`then` par defaut). Boucle exec hors bloc = arret en erreur. Subnet : pas encore execute (P3).
+* **Erreurs** : exception ou `NodeError` = node `error` (message + valeurs recues dans le record) ; `on_error` relie =
+  `error_handled`, sortie `error`, le flux suit ce lien ; sinon le run s'arrete en `error`. Erreur d'un node pur = attribuee
+  a lui et fait echouer le lecteur. `bypass` = node `skipped`, suite par `then`.
+* **Timeout** `params.timeout_s` (120 s, 600 s pour `session` / `dcc`) ; un thread depasse est abandonne (dit dans le log).
+  **Annulation** : drapeau `cancelled` lu entre deux nodes + `CancelledError` sur l'attente en cours.
+* **Threads** : corps `async def` sur la boucle (courts), corps synchrones dans le pool `FLOWS` (8 threads,
+  `core/executors.py`), jamais sur la boucle. `flux.legacy_command` lance la commande v1 dans son propre `asyncio.run`
+  dans ce pool (les commandes v1 bloquent dans leur `run`), avec un objet `.buffer.context` ; `flux_core` n'est pas modifie.
+* **Admission** (`RunManager.submit`) : precheck minimal (node inconnu, evenement absent, limites V1 ; validation complete en
+  P4) -> `refused` ; `run_policy` `skip_if_running` -> `skipped`, `queue` -> FIFO (20 max par flow) ; 4 runs a la fois.
+  Statuts et etats : ceux de 01 §4.
+* **Essai a blanc** (`mode: dry`) : un node a effet appelle `simulate` (lignes du rapport + sorties simulees), les autres
+  tournent pour de vrai ; seul l'enregistrement du run est ecrit. Premiere ligne du rapport = limites de l'essai.
+* **Runs** : `runs/<flow>/<run_id>.json` (team et shipped : `CONFIG/extensions/runs/`, projet : `_flux_setup/flows/_runs/`,
+  perso : `USER/<NOM>/flows/_runs/`), reecrit 1 fois par seconde au plus, purge a la cloture (200 runs, 20 essais par flow,
+  200 logs par node, 1 Ko par valeur de lien). Un run `running` d'un backend precedent du meme poste se lit `interrupted`.
+* **Push** (`events.py` -> WS `/flows/ws`) : `run_started`, `node_state` et `link_value` regroupes (dernier etat par node /
+  lien toutes les 100 ms), `log`, `notify` (toast de `flux.notify`, proposition : absent de la table 01 §10), `run_finished`.
 
 ## Tests
 
-`backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+`backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
+flows_ws, legacy_command ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.

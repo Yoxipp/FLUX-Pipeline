@@ -164,3 +164,9 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
 * `v1_adapter.ts` : `ActionGraph` v1 -> `FlowView` (fonctions pures : commande -> famille, params -> ports, une chaine exec
   dans l'ordre des etapes, node Start en tete, liens data des parametres cables). Appels API dans `api/flows.ts` (routes v1).
 * `TabMenu.tsx` : recherche seule en P0 (rien ne s'ajoute, edition en P4). `useTr.ts` copie de l'ancien editeur.
+* P2 (runs, 03 §7) : `TopBar` Run (le document ouvert, `draft`, TD, aucune version), Essai (fichier enregistre, grise sur
+  une version figee), Stop, Runs. `FlowEditor` ecoute `useFlowsWs` : etats par `run_id` (gardes meme avant la reponse du POST),
+  toast des nodes Notify et de fin de run, relecture de `GET /flows/runs/{id}` a la fin et apres reconnexion.
+  `FlowNode` : bordure et pastille par etat (`running` accent + LoaderCircle, `ok` coche + `xN`, `error` `--err` + message,
+  valeurs recues en info-bulle, `error_handled` `--warn`, `skipped` / `cancelled` tirets). `RunsPanel.tsx` : dock Runs
+  (historique du flow, clic = graph colore par ce run, rapport d'essai et logs, clic sur une ligne = selection du node).
