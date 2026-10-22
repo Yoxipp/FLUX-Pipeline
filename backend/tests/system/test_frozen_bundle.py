@@ -23,7 +23,10 @@ def _bundled_sources() -> list[str]:
     block = text.split("app_datas = [", 1)[1].split("\n]", 1)[0]
     files: list[str] = []
     for rel in re.findall(r'ROOT / "([^"]+)"', block):
-        files += [str(Path(p).resolve()) for p in glob.glob(str(_BACKEND.parent / rel))]
+        for match in map(Path, glob.glob(str(_BACKEND.parent / rel))):
+            # A folder source is copied recursively by PyInstaller.
+            found = [f for f in match.rglob("*") if f.is_file()] if match.is_dir() else [match]
+            files += [str(f.resolve()) for f in found]
     return files
 
 
@@ -34,6 +37,13 @@ class FrozenBundleData(unittest.TestCase):
         self.assertTrue(ymls)
         for yml in ymls:
             self.assertIn(str(yml.resolve()), bundled, f"{yml.name} missing from backend.spec")
+
+    def test_every_shipped_flow_is_bundled(self) -> None:
+        bundled = _bundled_sources()
+        flows = sorted((_BACKEND / "flux_flows" / "shipped").rglob("*.flow.yml"))
+        self.assertTrue(flows)
+        for flow in flows:
+            self.assertIn(str(flow.resolve()), bundled, f"{flow.name} missing from backend.spec")
 
     def test_runtime_data_files_are_bundled(self) -> None:
         bundled = _bundled_sources()
