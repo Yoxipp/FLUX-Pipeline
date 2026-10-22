@@ -82,6 +82,12 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
   d'abord, puis deadline Calendar la plus proche (`entityDeadline`). Clic droit sur la
   miniature d'un shot : source de l'apercu (Auto, Tout, etapes), partagee avec la Timeline
   via `previewSourceStore.ts` (cle localStorage + evenement `flux:preview-source-change`).
+  Origine des medias (Auto = ref sinon publish / Ref / Publish) : meme store (`flux.production.timeline.previewOrigin`,
+  evenement `flux:preview-origin-change`). Par plan, champs optionnels `shot.preview_origin` et `shot.preview_version`
+  (vNNN, absent = LAST), appliques par `previewEdit.ts` (`pickMedia` origine, `applyVersion`). `shot-previews` renvoie
+  une entree ref ET une entree publish par tache, chacune avec `versions`. Evenement `flux:ref-change`
+  (`notifyRefChange`) : depot / suppression / restauration d'une ref (TaskDetail) -> la Timeline refetch aussitot.
+  Backend `/ref/delete` (vNNN seulement, LAST re-pointe) et `/ref/restore` (copie en nouvelle version).
 * `taskSelection.ts` : Ctrl/Meta + clic autour du badge ajoute/retire une tache, Shift + clic selectionne
   un rectangle de lignes/departements visibles. Clic droit sur la selection : assignation,
   prise en charge, statut commun ou suppression des badges avec confirmation. Une seule

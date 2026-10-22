@@ -7,6 +7,7 @@ import { FluxLogo } from './Logo'
 import { Console } from './Console'
 import { SlideToConfirm } from './SlideToConfirm'
 import { useI18n } from '../../i18n'
+import { useShareLatency } from '../../lib/adaptivePoll'
 
 interface Props {
   username: string | null
@@ -52,6 +53,7 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const { t } = useI18n()
+  const share = useShareLatency()
   const user = username ?? 'User'
 
   // Refresh without restart: broadcast a global event that the shell hooks
@@ -89,6 +91,21 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 12, letterSpacing: '0.14em', color: 'var(--ink)' }}>FLUX</span>
 
       <div style={{ flex: 1 }} />
+
+      {/* slow file share: median of the feed polls above 1 s (hidden under 0.7 s) */}
+      {share.slow && (
+        <span
+          className="no-drag"
+          title="Le serveur de fichiers répond lentement ; FLUX ralentit ses rafraîchissements."
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+            padding: '2px 7px', border: '1px solid var(--rule-2)', borderRadius: 999,
+            background: 'var(--paper-2)', whiteSpace: 'nowrap', cursor: 'default',
+          }}
+        >
+          Partage lent ({(share.medianMs / 1000).toFixed(1)} s)
+        </span>
+      )}
 
       {/* transient confirmation, shown just left of the refresh button */}
       {refreshDone && (

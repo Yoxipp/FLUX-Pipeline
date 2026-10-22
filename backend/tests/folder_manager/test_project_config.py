@@ -126,6 +126,39 @@ class ProjectConfigRouteTests(unittest.TestCase):
                 r = self.client.get("/folder/projects/NOPE/config")
                 self.assertEqual(r.status_code, 404)
 
+    def test_config_route_returns_the_schema_of_the_settings_window(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "PROJ").mkdir()
+            with mock.patch("routers.folder_manager.get_project_path", side_effect=lambda n: Path(d) / n), \
+                    mock.patch("routers.folder_manager.get_projects_dir", return_value=Path(d)):
+                schema = self.client.get("/folder/projects/PROJ/config").json()["schema"]
+                self.assertEqual(schema["properties"]["fps"]["title"], "FPS")
+                self.assertTrue(schema["properties"]["project_id"]["x-flux-hidden"])
+
+    def test_put_config_merges_settings_and_keeps_identity(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "PROJ").mkdir()
+            with mock.patch("routers.folder_manager.get_project_path", side_effect=lambda n: Path(d) / n), \
+                    mock.patch("routers.folder_manager.get_projects_dir", return_value=Path(d)):
+                before = self.client.get("/folder/projects/PROJ/config").json()["config"]
+                r = self.client.put("/folder/projects/PROJ/config", json={"settings": {
+                    "fps": 25, "usd": {"meters_per_unit": 0.01, "up_axis": "Y"}, "project_id": "hacked"}})
+                self.assertEqual(r.status_code, 200)
+                cfg = _read(setup_path(Path(d) / "PROJ", "project.json"))
+                self.assertEqual(cfg["fps"], 25)
+                self.assertEqual(cfg["usd"]["meters_per_unit"], 0.01)
+                self.assertEqual(cfg["project_id"], before["project_id"])
+                self.assertEqual(cfg["resolution"], before["resolution"])
+
+    def test_put_config_rejects_invalid_values(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "PROJ").mkdir()
+            with mock.patch("routers.folder_manager.get_project_path", side_effect=lambda n: Path(d) / n), \
+                    mock.patch("routers.folder_manager.get_projects_dir", return_value=Path(d)):
+                r = self.client.put("/folder/projects/PROJ/config", json={"settings": {"fps": -1}})
+                self.assertEqual(r.status_code, 400)
+                self.assertEqual(_read(setup_path(Path(d) / "PROJ", "project.json"))["fps"], 24)
+
 
 if __name__ == "__main__":
     unittest.main()

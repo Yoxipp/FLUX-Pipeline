@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -384,25 +384,18 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
     }
   }, [psBusy, psReason])
 
-  // Poll ZBrush bridge when plugin is installed.
-  // Uses recursive setTimeout so interval adapts: 1.5s while disconnected (< 2s T5 detection),
-  // 8s while connected (avoid spamming ZBrush during freeze).
-  const zbrushOkRef = useRef(zbrushServerOk)
-  useEffect(() => { zbrushOkRef.current = zbrushServerOk }, [zbrushServerOk])
+  // Poll ZBrush bridge when plugin is installed, every 1.5s: the bridge answers pings
+  // without touching ZBrush, and an Export FLUX click must open the Publisher quickly.
+  const [zbrushPublishing, setZbrushPublishing] = useState(false)
   useEffect(() => {
-    if (!autostartInstalled.zbrush) { setZbrushServerOk(null); return }
+    if (!autostartInstalled.zbrush) { setZbrushServerOk(null); setZbrushPublishing(false); return }
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
     const poll = () => {
       api.pingDcc('zbrush')
-        .then(p  => { if (!cancelled) setZbrushServerOk(p.connected) })
-        .catch(() => { if (!cancelled) setZbrushServerOk(false) })
-        .finally(() => {
-          if (!cancelled) {
-            const delay = zbrushOkRef.current === true ? 8000 : 1500
-            timer = setTimeout(poll, delay)
-          }
-        })
+        .then(p  => { if (!cancelled) { setZbrushServerOk(p.connected); setZbrushPublishing(!!p.publishing) } })
+        .catch(() => { if (!cancelled) { setZbrushServerOk(false); setZbrushPublishing(false) } })
+        .finally(() => { if (!cancelled) timer = setTimeout(poll, 1500) })
     }
     poll()
     return () => { cancelled = true; clearTimeout(timer) }
@@ -413,14 +406,15 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const prevZbrushOkToast  = useRef<boolean | null | undefined>(undefined)
   const prevMayaOkToast    = useRef<boolean | null | undefined>(undefined)
 
-  // Auto-navigate to Publisher on ZBrush freeze detected (null/false → true transition)
-  const prevZbrushOk = useRef<boolean | null>(null)
+  // Auto-navigate to the Publisher (ZBrush selected) when Export FLUX is clicked in
+  // ZBrush: the bridge answers "publishing" while it waits in its freeze loop.
+  const prevZbrushPublishing = useRef(false)
   useEffect(() => {
-    if (zbrushServerOk === true && prevZbrushOk.current !== true) {
-      if (pathname !== '/publisher') navigate('/publisher', { state: { zbrushConnected: true } })
+    if (zbrushPublishing && !prevZbrushPublishing.current) {
+      navigate('/publisher', { state: { zbrushConnected: true } })
     }
-    prevZbrushOk.current = zbrushServerOk
-  }, [zbrushServerOk, navigate, pathname])
+    prevZbrushPublishing.current = zbrushPublishing
+  }, [zbrushPublishing, navigate])
 
   // Server status toasts — only on transitions, skip very first render
   useEffect(() => {
@@ -850,6 +844,29 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             </div>
           )
         })}
+        {/* Tractor farm render (ADR 0015): not a DCC (not in SOFTWARE), but the row looks like one.
+            Play opens Tractor in its own window (single instance); the gear opens it in this window. */}
+        <div className="dcc-row">
+          <span className="dcc-logo-slot" title="Tractor" style={{ opacity: pathname === '/render' ? 1 : 0.62 }}>
+            <DccLogo dcc="tractor" size={18} title="Tractor" />
+          </span>
+          <button type="button" className="dcc-play" aria-label="Lancer Tractor" title="Ouvrir Tractor dans sa fenêtre"
+            onClick={() => { if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/render'); else navigate('/render') }}>
+            <Play size={11} strokeWidth={2} fill="currentColor" />
+          </button>
+          <Menu.Root modal={false}>
+            <Menu.Trigger asChild>
+              <button type="button" className="dcc-gear" aria-label="Tractor : actions" title="Plus d'actions">
+                <Settings size={13} strokeWidth={1.8} />
+              </button>
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
+                <Menu.Item className="launcher-menu-item" onSelect={() => navigate('/render')}><ServerCog size={13} />Ouvrir dans FLUX</Menu.Item>
+              </Menu.Content>
+            </Menu.Portal>
+          </Menu.Root>
+        </div>
       </NavGroup>
 
       <div style={{ flex: 1 }} />

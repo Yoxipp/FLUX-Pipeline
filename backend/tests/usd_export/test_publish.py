@@ -54,6 +54,7 @@ class PublishLightAsset(unittest.TestCase):
             self.assertFalse(stage.GetPrimAtPath("/DAVID/skel/Skeleton").IsValid())
             self.assertEqual(stage.GetPrimAtPath("/DAVID").GetTypeName(), "Xform")
             self.assertTrue(any("squelette" in w for w in res["warnings"]))
+            del stage  # Windows: a crate .usd stays memory-mapped while its stage lives, blocking cleanup
 
     def test_second_publish_keeps_versions_and_moves_last(self):
         with tempfile.TemporaryDirectory() as proj:
@@ -65,6 +66,7 @@ class PublishLightAsset(unittest.TestCase):
             self.assertEqual(lp.read_layer_flux(dest / "DAVID_LAST.usd")["version"], "v002")
             stage = Usd.Stage.Open(str(dest / "DAVID_v001" / "DAVID.usd"))
             self.assertTrue(stage.GetPrimAtPath("/DAVID/geo/render/body").IsValid())
+            del stage  # release the memory-mapped crate before cleanup (Windows)
 
     def test_department_keeps_only_its_data(self):
         anim = AnimData(joints=["Root"], times=[1.0, 2.0], translations=[[(0, 0, 0)], [(1, 0, 0)]],

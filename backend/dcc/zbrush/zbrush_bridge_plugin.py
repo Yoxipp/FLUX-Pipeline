@@ -81,10 +81,12 @@ def _log(msg: str) -> None:
     except Exception:
         pass
 
-# Reset log at every module load so we see a fresh trace
+# Keep the previous loads in the log (a double load or an earlier session holding the
+# port must stay visible), only reset it once it grows past 256 KB.
 try:
-    with open(_LOG_FILE, "w", encoding="utf-8") as _f:
-        _f.write("")
+    if os.path.getsize(_LOG_FILE) > 256 * 1024:
+        with open(_LOG_FILE, "w", encoding="utf-8") as _f:
+            _f.write("")
 except Exception:
     pass
 
@@ -159,9 +161,9 @@ def _apply_fbx_options(options: dict) -> None:
             pass
     scope = options.get("scope", "all")
     _FBX_SCOPE_BUTTONS = {
-        "all":      "FBXExportImport:ExportGrp:AllMeshes",
-        "selected": "FBXExportImport:ExportGrp:SelMesh",
-        "visible":  "FBXExportImport:ExportGrp:VisMeshes",
+        "all":      f"{_FBX_PALETTE}:All",
+        "selected": f"{_FBX_PALETTE}:Selected",
+        "visible":  f"{_FBX_PALETTE}:Visible",
     }
     btn = _FBX_SCOPE_BUTTONS.get(scope)
     if btn:
@@ -178,7 +180,9 @@ def _dispatch(cmd: dict) -> dict:
 
     if action == "ping":
         # No zbc.* call — ping must NEVER block on ZBrush's main thread.
-        return {"status": "ok", "version": "ZBrush 2026"}
+        # _dispatch only runs inside the freeze loop: the user clicked Export FLUX,
+        # "publishing" tells FLUX to open its Publisher page.
+        return {"status": "ok", "version": "ZBrush 2026", "publishing": True}
 
     if not _ZBRUSH_AVAILABLE:
         return {"status": "error", "msg": "zbrush module not available"}
@@ -197,9 +201,8 @@ def _dispatch(cmd: dict) -> dict:
         if not path:
             return {"status": "error", "msg": "Missing path"}
         try:
-            zbc.set_next_filename(path)
-            zbc.press("Tool:Save")
-            return {"status": "ok", "path": path}
+            _save_tool_to(path)
+            return _written(path, "ZTL")
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
@@ -212,7 +215,7 @@ def _dispatch(cmd: dict) -> dict:
             _apply_obj_options(options)
             zbc.set_next_filename(path)
             zbc.press("Tool:Export")
-            return {"status": "ok", "path": path}
+            return _written(path, "OBJ")
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
@@ -222,14 +225,57 @@ def _dispatch(cmd: dict) -> dict:
         if not path:
             return {"status": "error", "msg": "Missing path"}
         try:
+            # Native Tool:Export picks the exporter from the extension
+            # (ZData/3DFileFormats/EXP_FBX_fbx.zsc) and honours set_next_filename.
+            # The FBX ExportImport plugin's own Export button asks for a path in a
+            # Windows dialog instead, so the publish never ran by itself.
             _apply_fbx_options(options)
             zbc.set_next_filename(path)
-            zbc.press("FBXExportImport:Export")
-            return {"status": "ok", "path": path}
+            zbc.press("Tool:Export")
+            return _written(path, "FBX", wait=15.0)
         except Exception as exc:
             return {"status": "error", "msg": str(exc)}
 
     return {"status": "error", "msg": f"Unknown action: {action}"}
+
+
+# FBX export options live in the FBX ExportImport plugin (Zplugin palette).
+_FBX_PALETTE = "Zplugin:FBX ExportImport"
+
+
+def _written(path: str, label: str, wait: float = 3.0) -> dict:
+    """ok only if ZBrush really wrote the file (a press can silently do nothing).
+    Waits a little: some exporters finish writing just after press() returns."""
+    deadline = time.time() + wait
+    while True:
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            return {"status": "ok", "path": path}
+        if time.time() >= deadline:
+            return {"status": "error", "msg": f"ZBrush n'a pas ecrit le fichier {label} : {path}"}
+        time.sleep(0.2)
+
+
+def _save_tool_to(path: str) -> None:
+    """Save the active tool as .ztl at *path* (official SDK pattern: set_tool_path
+    then Tool:Save). set_next_filename is ignored by Tool:Save once the tool has a
+    path: ZBrush then overwrote the artist's own .ztl. The tool path is restored
+    afterwards so the artist's next save still goes to their own file."""
+    tid = zbc.get_active_tool_index()
+    old = zbc.get_tool_path(tid)
+    try:
+        for candidate in (path, path.replace("\\", "/")):
+            zbc.set_tool_path(tid, candidate)
+            zbc.press("Tool:Save")
+            if os.path.isfile(path):
+                return
+            _log(f"Tool:Save did not write {candidate!r}")
+    finally:
+        try:
+            if old:
+                zbc.set_tool_path(tid, old)
+            zbc.update(redraw_ui=True)
+        except Exception as exc:
+            _log(f"Restoring tool path {old!r} failed: {exc!r}")
 
 
 # ── Server socket singleton ───────────────────────────────────────────────────
@@ -242,8 +288,11 @@ _server_sock: "socket.socket | None" = None
 FREEZE_TIMEOUT = int(os.environ.get("FLUX_ZBRUSH_TIMEOUT", "180"))  # 3 min default
 
 
-def _init_server_socket() -> bool:
-    """Bind and listen on the main thread. Reuse existing socket if alive."""
+def _init_server_socket(attempts: int = 1, delay: float = 0.5) -> bool:
+    """Bind and listen on the main thread. Reuse existing socket if alive.
+
+    Retries *attempts* times: at ZBrush startup the port can still be held for a
+    moment by a previous ZBrush that is closing (WSAEADDRINUSE 10048)."""
     global _server_sock
     existing: "socket.socket | None" = getattr(sys, "_flux_zbrush_sock", None)
     if existing is not None:
@@ -254,18 +303,35 @@ def _init_server_socket() -> bool:
             return True
         except OSError:
             _log("Existing socket dead — recreating")
-    try:
+    for attempt in range(1, attempts + 1):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((HOST, PORT))
-        sock.listen(32)
-        sock.setblocking(False)  # required for select.select(timeout=0)
-        sys._flux_zbrush_sock = sock
-        _server_sock = sock
-        _log(f"Socket bound and listening on {HOST}:{PORT}")
-        return True
-    except OSError as exc:
-        _log(f"Bind failed: {exc!r}")
-        return False
+        try:
+            sock.bind((HOST, PORT))
+            sock.listen(32)
+            sock.setblocking(False)  # required for select.select(timeout=0)
+            sys._flux_zbrush_sock = sock
+            _server_sock = sock
+            _log(f"Socket bound and listening on {HOST}:{PORT}")
+            return True
+        except OSError as exc:
+            sock.close()
+            _log(f"Bind failed (attempt {attempt}/{attempts}): {exc!r}")
+            if attempt < attempts:
+                time.sleep(delay)
+    return False
+
+
+def _start_bg_responder() -> None:
+    """Start the idle ping responder once (survives plugin reload via the sys guard)."""
+    try:
+        if not getattr(sys, "_flux_zbrush_bg_started", False):
+            threading.Thread(
+                target=_bg_accept_loop, daemon=True, name="flux-zbrush-ping"
+            ).start()
+            sys._flux_zbrush_bg_started = True
+            _log("Background ping responder thread started")
+    except Exception as _te:
+        _log(f"BG ping thread start failed (non-critical): {_te!r}")
 
 
 # ── Connection handler ────────────────────────────────────────────────────────
@@ -274,20 +340,14 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
     """Read one JSON command, dispatch it, send response.
 
     Returns True if the action was 'stop' (caller should break the freeze loop).
-    SO_LINGER {1,0} forces RST on close to avoid CLOSE_WAIT zombies.
-
-    Struct layout differs per OS:
-      Windows : u_short l_onoff + u_short l_linger = 4 bytes → "HH"
-      Linux   : int     l_onoff + int     l_linger = 8 bytes → "ii"
+    The connection is closed gracefully (FIN): an abortive close (SO_LINGER 0, RST)
+    lets Windows drop the answer before FLUX reads it, and FLUX then gets
+    WinError 10054 although the export itself succeeded.
     """
-    import struct as _struct
-    _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
-    try:
-        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
-    except OSError as _le:
-        _log(f"SO_LINGER failed: {_le!r}")
     conn.settimeout(3.0)
     buf = b""
+    stop = False
+    action = ""
     try:
         while b"\n" not in buf:
             chunk = conn.recv(4096)
@@ -295,22 +355,39 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
                 return False  # probe-only connection (connected then immediately closed)
             buf += chunk
         cmd = json.loads(buf.split(b"\n")[0].decode("utf-8"))
-        if cmd.get("action") in ("stop", "cancel"):
-            conn.sendall(b'{"status":"ok"}\n')
-            conn.close()
-            return True
-        resp = _dispatch(cmd)
+        action = cmd.get("action", "")
+        if action in ("stop", "cancel"):
+            resp = {"status": "ok"}
+            stop = True
+        else:
+            if action != "ping":
+                _log(f"Command {action!r} received")
+            resp = _dispatch(cmd)
+            if action != "ping":
+                _log(f"Command {action!r} -> {resp!r}")
         conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         try:
             conn.sendall((json.dumps({"status": "error", "msg": str(exc)}) + "\n").encode("utf-8"))
         except OSError:
             pass
+    except OSError as exc:
+        _log(f"Connection error on {action or 'command'}: {exc!r}")
+    finally:
+        _close_gracefully(conn)
+    return stop
+
+
+def _close_gracefully(conn: socket.socket) -> None:
+    """Send FIN and close, so the answer already sent always reaches the client."""
+    try:
+        conn.shutdown(socket.SHUT_WR)
     except OSError:
         pass
-    finally:
+    try:
         conn.close()
-    return False
+    except OSError:
+        pass
 
 
 # ── Background ping responder (served OUTSIDE the freeze loop) ─────────────────
@@ -324,12 +401,6 @@ def _recv_and_dispatch(conn: socket.socket) -> bool:
 def _serve_idle(conn: "socket.socket") -> None:
     """Answer one request while idle. Only ping (and a stop/cancel ack) are safe;
     a real export received while idle is refused so the client fails fast."""
-    import struct as _struct
-    _linger = _struct.pack("HH" if sys.platform == "win32" else "ii", 1, 0)
-    try:
-        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, _linger)
-    except OSError:
-        pass
     conn.settimeout(2.0)
     buf = b""
     try:
@@ -349,10 +420,7 @@ def _serve_idle(conn: "socket.socket") -> None:
     except Exception:
         pass
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        _close_gracefully(conn)
 
 
 def _bg_accept_loop() -> None:
@@ -517,9 +585,14 @@ def _on_publish_click(*args: object, **kwargs: object) -> None:
             zbc.show_note("Publication en cours, FLUX est en train de publier.")
         return
     if _server_sock is None:
-        if _ZBRUSH_AVAILABLE:
-            zbc.show_note("Erreur : bridge FLUX non initialisé.\nRedémarre ZBrush.")
-        return
+        # The port was busy at startup: try again now that the old holder may be gone.
+        if _init_server_socket(attempts=3):
+            _start_bg_responder()
+        else:
+            if _ZBRUSH_AVAILABLE:
+                zbc.show_note(f"Bridge FLUX indisponible : le port {PORT} est pris par un autre programme.\n"
+                              "Ferme les autres ZBrush puis reclique.")
+            return
     _autosave_ztl()     # option 2: a .ztl at each FLUX click, before the publish
     _in_freeze = True
     _focus_flux_window()
@@ -584,9 +657,8 @@ def _autosave_ztl() -> None:
     try:
         target = autosave_ztl_path(_remember_project(), zbc.get_active_tool_path())
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        zbc.set_next_filename(target)
-        zbc.press("Tool:Save")
-        _log(f"Auto-save ztl -> {target}")
+        _save_tool_to(target)
+        _log(f"Auto-save ztl -> {target} (written={os.path.isfile(target)})")
     except Exception as exc:
         _log(f"Auto-save ztl failed (non-critical): {exc!r}")
 
@@ -686,21 +758,15 @@ def _register_zbrush_ui() -> None:
 # Singleton guards prevent double-bind if the plugin is reloaded.
 
 try:
-    if _init_server_socket():
-        _register_zbrush_ui()
-        # Start the idle ping responder once (survives plugin reload via the guard).
-        try:
-            if not getattr(sys, "_flux_zbrush_bg_started", False):
-                threading.Thread(
-                    target=_bg_accept_loop, daemon=True, name="flux-zbrush-ping"
-                ).start()
-                sys._flux_zbrush_bg_started = True
-                _log("Background ping responder thread started")
-        except Exception as _te:
-            _log(f"BG ping thread start failed (non-critical): {_te!r}")
+    # The buttons are always registered: if the port is busy now, the first click
+    # retries the bind instead of leaving ZBrush without any FLUX menu.
+    _bound = _init_server_socket(attempts=4)
+    _register_zbrush_ui()
+    if _bound:
+        _start_bg_responder()
         _log("=== PLUGIN INIT COMPLETE ===")
     else:
-        _log("=== SOCKET INIT FAILED — plugin disabled ===")
+        _log("=== SOCKET INIT FAILED — buttons registered, bind retried on click ===")
 except Exception as _e:
     _log(f"!!! PLUGIN INIT FAILED: {_e!r}")
     _log(traceback.format_exc())

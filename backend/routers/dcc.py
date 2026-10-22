@@ -518,6 +518,8 @@ async def ping_dcc(dcc_key: str) -> dict:
         answer = {"connected": bool(result.get("ok", False)), "version": result.get("version")}
         if result.get("busy"):
             answer["busy"] = True          # e.g. Mari exporting: reachable, just not answering
+        if result.get("publishing"):
+            answer["publishing"] = True    # ZBrush: Export FLUX clicked, waiting for the Publisher
         _ping_cache[dcc_key] = (time.monotonic(), answer)
         if dcc_key == "houdini":
             _on_houdini_ping(answer["connected"])
@@ -2933,6 +2935,13 @@ async def houdini_shot_switch_module() -> dict:
 async def houdini_flux_render_module() -> dict:
     """PythonModule of the FLUX Render HDA (render buttons at the end of a shot branch)."""
     from dcc.houdini.hda.flux_render_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
+@router.get("/houdini/flux_render_submit/module")
+async def houdini_flux_render_submit_module() -> dict:
+    """PythonModule of the FLUX Render Submit HDA (Tractor farm submission, ADR 0015)."""
+    from dcc.houdini.hda.flux_render_submit_hda import MODULE_FUNCTIONS
     return {"code": MODULE_FUNCTIONS}
 
 

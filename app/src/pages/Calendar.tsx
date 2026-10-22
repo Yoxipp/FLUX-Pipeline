@@ -15,6 +15,7 @@ import { calendarLinksShot } from './Production/shotCalendar'
 import { toast } from 'sonner'
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { api } from '../api/client'
+import { startAdaptivePoll } from '../lib/adaptivePoll'
 import { useProject } from '../ProjectContext'
 import { useI18n } from '../i18n'
 import { EMPTY_SLOTS, composeLink, parseLink, taskOptions, useCalendarLinkTokens } from '../hooks/useCalendarLinkTokens'
@@ -840,15 +841,16 @@ export function Calendar() {
 
   const load = useCallback(() => {
     if (!project) return
-    api.getCalendar(project)
+    return api.getCalendar(project)
       .then(r => { setItems(r.items); setMe(r.me); setLoadedProject(project) })
       .catch(e => toast.error(`${tr('Calendrier indisponible', 'Calendar unavailable')} : ${e instanceof Error ? e.message : String(e)}`))
   }, [project]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    load()
-    const t = setInterval(load, POLL_MS)
-    window.addEventListener('flux:refresh', load)
-    return () => { clearInterval(t); window.removeEventListener('flux:refresh', load) }
+    void load()
+    const stop = startAdaptivePoll('calendar', POLL_MS, async () => { await load() })
+    const onRefresh = () => { void load() }
+    window.addEventListener('flux:refresh', onRefresh)
+    return () => { stop(); window.removeEventListener('flux:refresh', onRefresh) }
   }, [load])
   useEffect(() => { api.listUsers().then(r => setUsers(r.users)).catch(() => setUsers([])) }, [])
 
@@ -950,12 +952,17 @@ export function Calendar() {
     if (!el || old === rowH || view !== 'month') return
     el.scrollTop = (el.scrollTop + anchor) * rowH / old - anchor
   }, [rowH, view])
-  // Entering the month view lands on the current month.
-  useEffect(() => {
-    if (view !== 'month') return
-    const id = requestAnimationFrame(() => scrollToMonth(visibleMonth, false))
-    return () => cancelAnimationFrame(id)
-  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Entering the month view lands on today's week at the top, like the Today button. The grid mounts
+  // late (project / data loading), so the landing waits until the scroll container exists.
+  const needsLanding = useRef(true)
+  const landedView = useRef(view)
+  useLayoutEffect(() => {
+    if (landedView.current !== view) { landedView.current = view; needsLanding.current = true }
+    const el = scrollRef.current
+    if (!needsLanding.current || view !== 'month' || !el || el.scrollHeight <= el.clientHeight) return
+    needsLanding.current = false
+    scrollToRow(weeksBetween(range.start, mondayOf(new Date())), false)
+  })
   const firstDay = iso(days[0])
   const lastDay = iso(days[days.length - 1])
   useEffect(() => {
@@ -965,8 +972,8 @@ export function Calendar() {
       .then(r => { if (alive) setPubs(r.publishes) })
       .catch(() => { if (alive) setPubs([]) })
     void fetchPubs()
-    const t = setInterval(() => { void fetchPubs() }, POLL_MS)
-    return () => { alive = false; clearInterval(t) }
+    const stop = startAdaptivePoll('calendar-pubs', POLL_MS, fetchPubs)
+    return () => { alive = false; stop() }
   }, [showPub, project, firstDay, lastDay])
   const pubsOn = (day: string) => pubs.filter(p => p.date === day && (!who || same(p.user, who)))
 

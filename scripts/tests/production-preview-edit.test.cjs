@@ -68,6 +68,26 @@ test('a shot department choice wins in the edit, falls back when empty', () => {
   assert.equal(m.pickShotMedia(s, s.shots[1], previews, 'auto').task, 'ANIM')
 })
 
+test('origin picks ref or publish per task, auto prefers ref, version swaps the file', () => {
+  const s = state(), cands = m.previewCandidates(s, s.shots[1])
+  const ref = { ...media('ANIM'), source: 'ref', versions: [{ version: 'v002', file: 'v002.mp4' }, { version: 'v001', file: 'v001.mp4' }] }
+  const pub = { ...media('ANIM'), file: 'A_LAST.mp4', abs_path: 'C:/p/A_LAST.mp4', rel_path: 'x/pub', source: 'publish',
+    versions: [{ version: 'v002', file: 'A_v002.mp4' }, { version: 'v001', file: 'A_v001.mp4' }] }
+  const list = [ref, pub]
+  assert.deepEqual(m.pickMedia(list, cands, 'auto').map(x => x.source), ['ref'])
+  assert.deepEqual(m.pickMedia([pub], cands, 'auto').map(x => x.source), ['publish'])
+  assert.deepEqual(m.pickMedia(list, cands, 'auto', 'publish').map(x => x.source), ['publish'])
+  assert.deepEqual(m.pickMedia([pub], cands, 'auto', 'ref'), [])
+  const sh = s.shots[1], previews = { a: list }
+  assert.equal(m.pickShotMedia(s, sh, previews, 'auto').source, 'ref')
+  assert.equal(m.pickShotMedia(s, sh, previews, 'auto', 'publish').source, 'publish')
+  sh.preview_origin = 'publish'; sh.preview_version = 'v001'
+  const v = m.pickShotMedia(s, sh, previews, 'auto', 'ref')
+  assert.deepEqual([v.source, v.file, v.version, v.abs_path], ['publish', 'A_v001.mp4', 'v001', 'C:/p/A_v001.mp4'])
+  sh.preview_version = 'v009'                       // missing version: LAST
+  assert.equal(m.pickShotMedia(s, sh, previews, 'auto').file, 'A_LAST.mp4')
+})
+
 test('montage follows sequence then shot order, keeps gaps and durations', () => {
   const s = state()
   const frames = sh => (typeof sh.frame_end === 'number' ? sh.frame_end - sh.frame_start + 1 : 50)

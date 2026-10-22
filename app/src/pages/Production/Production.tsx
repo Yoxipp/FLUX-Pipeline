@@ -12,6 +12,7 @@ import { MenuSpec } from './MenuSpec'
 import { ProductionTracking } from './ProductionTracking'
 import { NewProductionDialog } from './NewProductionDialog'
 import { ProductionSettings } from './ProductionSettings'
+import { ProjectSettingsDialog } from './ProjectSettingsDialog'
 import type { CreateKind } from './CreateMenu'
 
 export type Selection = { kind: 'none' } | { kind: 'asset' | 'group' | 'seq' | 'shot'; id: string }
@@ -84,12 +85,13 @@ export function Production() {
   </div>
 }
 
-// Shown when FLUX has no active project: projects are created here (the Folder Manager only browses).
+// Shown when FLUX has no active project: create one here (also from Create > Projet and the Folder Manager root).
 function NoProject() {
   const { projects, setProject, refreshProjects } = useProject()
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [created, setCreated] = useState('')
   const create = async () => {
     const clean = name.trim()
     if (!clean) return
@@ -97,10 +99,12 @@ function NoProject() {
     try {
       const r = await api.createProject(clean)
       await refreshProjects()
-      setProject(r.name)
+      setCreated(r.name)   // advanced settings first, the project opens when they close
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
   return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    {created && <ProjectSettingsDialog project={created} onClose={() => setProject(created)}
+      onCancel={async () => { await api.deleteProject(created); await refreshProjects(); setCreated('') }} />}
     <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{projects.length ? 'Aucun projet actif' : 'Aucun projet'}</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>

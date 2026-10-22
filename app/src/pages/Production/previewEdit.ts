@@ -16,6 +16,7 @@ export interface PreviewMedia {
   task: string; rel_path: string; file: string; ext: string; kind: string
   version: string; version_file: string; version_count: number; abs_path: string
   source?: 'ref' | 'publish'
+  versions?: Array<{ version: string; file: string }>     // newest first
 }
 export interface PreviewCandidate { token: string; group: string; label: string }
 export type PreviewSource = 'auto' | 'all' | string      // string = group id
@@ -72,20 +73,51 @@ export function mediaGroups(state: ProductionState, shots: ProductionShot[], pre
 /** The media a shot shows in the edit: its own department choice (shared in the
  *  project, `shot.preview_source`) when that stage holds something, else the
  *  global source ("Tout" has no single media: Auto). */
-export function pickShotMedia(state: ProductionState, shot: ProductionShot, previews: Record<string, PreviewMedia[]>, source: PreviewSource) {
+export function pickShotMedia(state: ProductionState, shot: ProductionShot, previews: Record<string, PreviewMedia[]>, source: PreviewSource, origin: PreviewOrigin = 'auto') {
   const media = previews[shot.id] ?? []
   const candidates = previewCandidates(state, shot)
+  const eff = shotOrigin(shot, origin)
+  const finish = <T extends PreviewMedia>(m: T | undefined): T | null => (m ? applyVersion(m, shot.preview_version) : null)
   if (shot.preview_source) {
-    const own = pickMedia(media, candidates, shot.preview_source)[0]
-    if (own) return own
+    const own = pickMedia(media, candidates, shot.preview_source, eff)[0]
+    if (own) return finish(own)
   }
-  return pickMedia(media, candidates, source === 'all' ? 'auto' : source)[0] ?? null
+  return finish(pickMedia(media, candidates, source === 'all' ? 'auto' : source, eff)[0])
 }
 
-/** Media of a shot for a source, in stage order (Auto: the most advanced one). */
-export function pickMedia(media: PreviewMedia[], candidates: PreviewCandidate[], source: PreviewSource): Array<PreviewMedia & { group: string; label: string }> {
+/** Where the preview media comes from: Auto (ref if present, else publish), Ref, Publish. */
+export type PreviewOrigin = 'auto' | 'ref' | 'publish'
+export const isOrigin = (v: unknown): v is PreviewOrigin => v === 'auto' || v === 'ref' || v === 'publish'
+
+/** Origin of a shot: its own override (`preview_origin`) else the global one. */
+export function shotOrigin(shot: ProductionShot, global: PreviewOrigin): PreviewOrigin {
+  return isOrigin(shot.preview_origin) ? shot.preview_origin : global
+}
+
+/** Same media pointing at version `version` (vNNN) instead of LAST. Unknown or
+ *  missing version: the media unchanged (LAST). */
+export function applyVersion<T extends PreviewMedia>(m: T, version?: string): T {
+  if (!version) return m
+  const v = (m.versions ?? []).find(x => x.version === version)
+  if (!v) return m
+  const abs = m.abs_path.endsWith(m.file) ? m.abs_path.slice(0, m.abs_path.length - m.file.length) + v.file : m.abs_path
+  return { ...m, file: v.file, version: v.version, version_file: v.file, abs_path: abs }
+}
+
+/** Media of a shot for a source, in stage order (Auto: the most advanced one).
+ *  A task can hold a ref entry and a publish entry: `origin` keeps one per task
+ *  (auto: ref first, else publish). */
+export function pickMedia(media: PreviewMedia[], candidates: PreviewCandidate[], source: PreviewSource, origin: PreviewOrigin = 'auto'): Array<PreviewMedia & { group: string; label: string }> {
   const rank = new Map(candidates.map((c, i) => [c.token, i]))
-  const tagged = media
+  const byTask = new Map<string, PreviewMedia>()
+  for (const m of media) {
+    const key = m.task.toUpperCase()
+    const kind = m.source ?? 'ref'
+    if (origin !== 'auto' && kind !== origin) continue
+    const cur = byTask.get(key)
+    if (!cur || (origin === 'auto' && kind === 'ref' && (cur.source ?? 'ref') !== 'ref')) byTask.set(key, m)
+  }
+  const tagged = [...byTask.values()]
     .filter(m => rank.has(m.task.toUpperCase()))
     .map(m => { const c = candidates[rank.get(m.task.toUpperCase())!]; return { ...m, group: c.group, label: c.label } })
     .sort((a, b) => rank.get(a.task.toUpperCase())! - rank.get(b.task.toUpperCase())!)
@@ -102,7 +134,7 @@ export interface MontageClip {
 
 /** Shots of the edit in order (sequence order, then shot order), each with its media. */
 export function buildMontage(state: ProductionState, previews: Record<string, PreviewMedia[]>, source: PreviewSource,
-  fps: number, framesOf: (shot: ProductionShot) => number, onlySeqId?: string): MontageClip[] {
+  fps: number, framesOf: (shot: ProductionShot) => number, onlySeqId?: string, origin: PreviewOrigin = 'auto'): MontageClip[] {
   const seqs = [...state.sequences].sort((a, b) => a.order - b.order).filter(s => !onlySeqId || s.id === onlySeqId)
   const out: MontageClip[] = []
   for (const seq of seqs) {
@@ -110,7 +142,7 @@ export function buildMontage(state: ProductionState, previews: Record<string, Pr
     for (const shot of shots) {
       const frames = framesOf(shot)
       out.push({ shotId: shot.id, seq: seq.name, shot: shot.name, frames, seconds: frames / (fps > 0 ? fps : 24),
-        media: pickShotMedia(state, shot, previews, source) })
+        media: pickShotMedia(state, shot, previews, source, origin) })
     }
   }
   return out

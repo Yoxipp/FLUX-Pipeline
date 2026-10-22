@@ -43,6 +43,9 @@ app_datas = [
      "features/usd_assembler/recipe"),
     (str(ROOT / "backend/dcc/houdini/flux_houdini_server.py"), "dcc/houdini"),
     (str(ROOT / "backend/dcc/mari/mari_bridge.py"), "dcc/mari"),
+    # Run by Tractor's own Python 2.7 as a subprocess, never imported (ADR 0015).
+    (str(ROOT / "backend/features/render/bridge/flux_tractor_bridge.py"),
+     "features/render/bridge"),
     # Nuke's init.py / menu.py blocks import these from _internal (stdlib + nuke only).
     (str(ROOT / "backend/dcc/nuke/flux_nuke_server.py"), "dcc/nuke"),
     (str(ROOT / "backend/dcc/nuke/flux_nuke_menu.py"), "dcc/nuke"),

@@ -146,6 +146,37 @@ export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'err
 // the X-Flux-Token header to every request to the backend, frames included).
 export const MANUAL_URL = `${BASE_URL}/system/manual`
 
+// Tractor farm render (backend features/render/team_settings.py, routers/render.py).
+export interface RenderSettings {
+  tractor_project: string; priority: number; maxactive: number; chunk_size: number
+  renderer: 'karma' | 'renderman'; freeze_by_default: boolean
+  schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
+  service_karma: string; service_renderman: string; envkeys: string[]
+  husk_path: string; bridge_python: string; bridge_script: string; engine: string; dry_run: boolean
+}
+export interface RenderShot { seq: string; shot: string; frame_start: number | null; frame_end: number | null; has_stage: boolean }
+export interface RenderSubmitResult {
+  dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
+  output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
+  start_at: string
+}
+export interface RenderJob {
+  jid: number; title: string; user: string; projects?: string[] | string; priority?: number
+  numTasks: number; numDone: number; numError: number; numActive: number
+  numBlocked?: number; numReady?: number
+  spooltime?: string | number; stoptime?: string; pausetime?: string; comment?: string; metadata?: unknown
+  // user = Tractor owner (the shared school login); flux_user = who spooled it from FLUX ('' otherwise)
+  flux_user?: string
+  state?: 'active' | 'error' | 'done' | 'paused' | 'waiting' | 'deleted'
+}
+export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string }
+export type RenderJobScope = 'all' | 'team' | 'mine'
+export interface RenderFarm {
+  blades: unknown[]; active_by_project: Record<string, number>
+  schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
+  tractor_project: string; dry_run?: boolean
+}
+
 export const api = {
   // Settings
   getSettings: () =>
@@ -203,7 +234,7 @@ export const api = {
     apiCall<{ dcc: string; launched: boolean }>('POST', '/dcc/launch', { dcc, exe_path }),
 
   pingDcc: (dcc: string) =>
-    apiCall<{ connected: boolean; version: string | null }>('GET', `/dcc/${dcc}/ping`),
+    apiCall<{ connected: boolean; version: string | null; busy?: boolean; publishing?: boolean }>('GET', `/dcc/${dcc}/ping`),
 
   // Photoshop (COM, no in-app plugin): actionable state + library bootstrap.
   photoshopStatus: () =>
@@ -609,6 +640,10 @@ export const api = {
     apiCall<{ events: ActivityEvent[]; followed_shots: FollowedShot[]; user: string }>(
       'GET', `/activity/notifications?${new URLSearchParams({ project, scope, limit: String(limit) })}`),
 
+  // Publish copies running / waiting on this machine (shown while a publish is pending).
+  getPublishQueue: () =>
+    apiCall<{ active: number; waiting: number; max_parallel: number; max_mbps: number }>('GET', '/publish/queue'),
+
   getMentionsConditional: (etag?: string) =>
     apiGetConditional<{ mentions: ChatMention[]; unread_count: number }>(
       '/activity/chat/mentions', etag),
@@ -701,6 +736,13 @@ export const api = {
     apiCall<{ profiles: unknown[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/work-profiles`),
   setProjectWorkProfiles: (project: string, profiles: unknown[]) =>
     apiCall<{ profiles: unknown[] }>('PUT', `/folder/projects/${encodeURIComponent(project)}/work-profiles`, { profiles }),
+
+  // project.json and its schema (the advanced settings window is generated from it).
+  getProjectConfig: (project: string) =>
+    apiCall<{ config: Record<string, unknown>; warnings: string[]; schema: Record<string, unknown> }>(
+      'GET', `/folder/projects/${encodeURIComponent(project)}/config`),
+  putProjectConfig: (project: string, settings: Record<string, unknown>) =>
+    apiCall<{ config: Record<string, unknown> }>('PUT', `/folder/projects/${encodeURIComponent(project)}/config`, { settings }),
 
   createProject: (name: string, painter_presets?: string[]) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name, painter_presets: painter_presets ?? null }),
@@ -980,6 +1022,9 @@ export const api = {
   // GET returns production + reconciled publishes; PUT replaces the store.
   getProduction: (project: string) =>
     apiCall<ProductionPayload>('GET', `/production/${encodeURIComponent(project)}`),
+  // Conditional variant used by useProduction: 304 when the server store is unchanged.
+  getProductionConditional: (project: string, etag?: string) =>
+    apiGetConditional<ProductionPayload>(`/production/${encodeURIComponent(project)}`, etag),
 
   // Saving production.json also mirrors the planning to disk (create-only) on the
   // backend — there is no separate "materialize" call any more; structure is kept
@@ -1035,6 +1080,33 @@ export const api = {
   // Team calendar of a project: commitments, proposals (ping) and answers.
   getCalendar: (project: string) =>
     apiCall<{ items: CalendarItem[]; me: string }>('GET', `/calendar/${encodeURIComponent(project)}`),
+  // Tractor farm render (ADR 0015, backend routers/render.py)
+  renderSettings: (project: string) =>
+    apiCall<{ settings: RenderSettings; warning: string | null }>('GET', `/render/settings?project=${encodeURIComponent(project)}`),
+  renderSaveSettings: (project: string, patch: Partial<RenderSettings>) =>
+    apiCall<{ settings: RenderSettings; warning: string | null }>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
+  renderShots: (project: string) =>
+    apiCall<{ shots: RenderShot[] }>('GET', `/render/shots?project=${encodeURIComponent(project)}`),
+  renderUsdRange: (project: string, path: string) =>
+    apiCall<{ frame_start: number | null; frame_end: number | null }>('GET',
+      `/render/usd_range?project=${encodeURIComponent(project)}&path=${encodeURIComponent(path)}`),
+  renderSubmit: (body: {
+    project: string; seq?: string; shot?: string; usd_path?: string
+    frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
+    start_at?: string   // "YYYY-MM-DDTHH:MM" local; omitted = now
+  }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
+  renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
+    apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
+      'GET', `/render/jobs?project=${encodeURIComponent(project)}&scope=${scope}&days=${days}`),
+  renderJobTasks: (project: string, jid: number) =>
+    apiCall<{ tasks: RenderTask[] }>('GET', `/render/jobs/${jid}/tasks?project=${encodeURIComponent(project)}`),
+  renderTaskLog: (project: string, jid: number, tid: number) =>
+    apiCall<{ log: string }>('GET', `/render/jobs/${jid}/tasks/${tid}/log?project=${encodeURIComponent(project)}`, undefined, 60000),
+  renderFarm: (project: string) =>
+    apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
+  renderJobAction: (project: string, jid: number, action: 'kill' | 'retry' | 'pause' | 'resume') =>
+    apiCall<unknown>('POST', `/render/jobs/${jid}/${action}?project=${encodeURIComponent(project)}`),
+
   getCalendarPublishes: (project: string, start: string, end: string) =>
     apiCall<{ publishes: CalendarPublish[] }>('GET', `/calendar/${encodeURIComponent(project)}/publishes?start=${start}&end=${end}`),
   createCalendarItem: (project: string, body: { title: string; owner: string; start: string; end: string; note: string; link: string }) =>
@@ -1146,10 +1218,20 @@ export const api = {
     apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
 
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
-  refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref') => {
-    const qs = new URLSearchParams({ rel_path: relPath, name, ...(scope === 'publish' ? { scope } : {}) })
+  refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref', rev?: number | string) => {
+    const qs = new URLSearchParams({ rel_path: relPath, name, ...(scope === 'publish' ? { scope } : {}), ...(rev ? { rev: String(rev) } : {}) })
     return `${BASE_URL}/production/${encodeURIComponent(project)}/ref/file?${qs}`
   },
+
+  // Delete one vNNN file of a /ref zone (LAST is re-pointed by the backend).
+  deleteRefVersion: (project: string, relPath: string, name: string) =>
+    apiCall<{ ok: boolean; deleted: string; last: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/ref/delete`, { rel_path: relPath, name }),
+
+  // Set an older version as LAST (re-deposited as the next version).
+  restoreRefVersion: (project: string, relPath: string, name: string) =>
+    apiCall<{ ok: boolean; version: string; file: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/ref/restore`, { rel_path: relPath, name }),
 
   exportRef: (project: string, relPath: string, name: string, destPath: string) =>
     apiCall<{ ok: boolean; dest: string }>(

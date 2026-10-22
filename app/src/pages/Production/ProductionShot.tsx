@@ -34,7 +34,7 @@ import { ArrowDownUp, Bookmark, ChevronLeft, ChevronRight, Maximize2, MoveVertic
 import { CreateMenu, type CreateKind } from './CreateMenu'
 import { TimelinePreview } from './TimelinePreview'
 import { buildMontage, pickShotMedia, previewCandidates, type PreviewMedia } from './previewEdit'
-import { usePreviewSource } from './previewSourceStore'
+import { REF_CHANGE_EVENT, usePreviewOrigin, usePreviewSource } from './previewSourceStore'
 import { openInKeyframe } from '../../lib/keyframe'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
@@ -219,6 +219,7 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
 
   // ── preview + auto edit (TimelinePreview) ─────────────────────────────────
   const [source, setSource] = usePreviewSource()
+  const [origin, setOrigin] = usePreviewOrigin()
   const [montage, setMontage] = useState<{ seqId?: string } | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [previews, setPreviews] = useState<Record<string, PreviewMedia[]>>({})
@@ -235,7 +236,8 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   useEffect(() => {
     const h = () => setRefreshTick(t => t + 1)
     window.addEventListener('flux:refresh', h)
-    return () => window.removeEventListener('flux:refresh', h)
+    window.addEventListener(REF_CHANGE_EVENT, h)         // a /ref zone was deposited / deleted / restored
+    return () => { window.removeEventListener('flux:refresh', h); window.removeEventListener(REF_CHANGE_EVENT, h) }
   }, [])
   useEffect(() => {
     let alive = true
@@ -261,14 +263,14 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
   }
   const keyframeShot = (shot: Shot) => {
     const seq = state.sequences.find(s => s.id === shot.seq_id)
-    const m = pickShotMedia(state, shot, previews, source)
+    const m = pickShotMedia(state, shot, previews, source, origin)
     const label = `${seq?.name ?? ''} ${shot.name}`
     if (!m) { void openInKeyframe(project || '', []); return }
     void openInKeyframe(project || '', [{ path: m.abs_path, label: `${label} · ${m.label} · ${m.version || 'LAST'}` }], { title: label, fallbackPath: m.abs_path })
   }
   const keyframeSeq = (seqId: string) => {
     const seq = state.sequences.find(s => s.id === seqId)
-    const clips = buildMontage(state, previews, source, fps, stableFrames, seqId).filter(c => c.media)
+    const clips = buildMontage(state, previews, source, fps, stableFrames, seqId, origin).filter(c => c.media)
     if (clips.length === 0) { void openInKeyframe(project || '', []); return }
     void openInKeyframe(project || '', clips.map(c => ({ path: c.media!.abs_path, label: `${c.seq} ${c.shot} · ${c.media!.label} · ${c.media!.version || 'LAST'}` })),
       { title: seq?.name ?? 'Montage', siblings: false, fallbackPath: clips[0].media!.abs_path })
@@ -780,10 +782,11 @@ export function ProductionShot({ state, setState, selection, setSelection, onEnt
       })()}
 
       {sequences.length > 0 && (
-        <TimelinePreview project={project || ''} state={state} selection={selection} previews={previews} loading={previewsLoading}
-          source={source} setSource={setSource} fps={fps} framesOf={stableFrames}
+        <TimelinePreview project={project || ''} state={state} selection={selection} previews={previews} loading={previewsLoading} rev={refreshTick}
+          source={source} setSource={setSource} origin={origin} setOrigin={setOrigin} fps={fps} framesOf={stableFrames}
           montage={montage} setMontage={setMontage} onPlayingShot={setPlayingId}
-          setShotSource={(id, group) => setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === id ? { ...s, preview_source: group || undefined } : s) }))} />
+          setShotSource={(id, group) => setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === id ? { ...s, preview_source: group || undefined } : s) }))}
+          setShotPreview={(id, patch) => setState(prev => ({ ...prev, shots: prev.shots.map(s => s.id === id ? { ...s, ...patch } : s) }))} />
       )}
 
       <Dropdown.Root open={!!ctx} onOpenChange={o => { if (!o) setCtx(null) }} modal={false}>

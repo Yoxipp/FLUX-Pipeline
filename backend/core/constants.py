@@ -268,6 +268,7 @@ PRODUCTION_MEDIA_DIR: str = "_production"   # Production Tab media (thumbnails),
 JSON_TOKENS: str     = "tokens.json"        # setup dir
 JSON_PROJECT: str    = "project.json"       # setup dir - project config + project_id (ADR 0006)
 JSON_PRODUCTION: str = "production.json"    # setup dir - Production Tab store
+JSON_RENDER: str     = "render.json"        # setup dir - team render (Tractor) settings, ADR 0015
 JSON_CALENDAR: str = "calendar.json"        # setup dir - team calendar (commitments)
 JSON_LOCKS: str      = "locks.json"         # setup dir - folder lock registry
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder
@@ -345,7 +346,7 @@ THEME_SECONDARY_PRESETS: tuple[str, ...] = THEME_ACCENT_PRESETS
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 APP_NAME:    str = "Flux"
-APP_VERSION: str = "0.9.002"
+APP_VERSION: str = "0.9.003"
 GITHUB_REPO: str = "Yoxipp/FluxPipeline"
 
 SOCKET_TIMEOUT_S:    float = 3.0    # seconds before connection attempt times out

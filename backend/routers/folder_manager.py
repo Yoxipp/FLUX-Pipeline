@@ -15,7 +15,8 @@ from core.paths import force_remove, force_rmtree, get_project_path, get_project
 from features.folder_manager.asset_creator import create_asset, heal_tokens_from_disk, list_assets
 from features.folder_manager.locks import is_locked, load_locks, set_lock, with_setup
 from features.folder_manager.project_config import (
-    ensure_project_config, is_direct_project_dir, read_work_profiles, write_work_profiles,
+    PROJECT_SCHEMA, ensure_project_config, is_direct_project_dir, read_work_profiles,
+    write_project_settings, write_work_profiles,
 )
 from features.folder_manager.project_init import create_project, list_projects, project_exists
 from features.folder_manager.seq_shot_creator import (
@@ -89,7 +90,27 @@ async def get_project_config(project_name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
     loop = asyncio.get_running_loop()
     config, warnings = await loop.run_in_executor(None, lambda: ensure_project_config(project_path))
-    return {"config": config, "warnings": warnings}
+    return {"config": config, "warnings": warnings, "schema": PROJECT_SCHEMA}
+
+
+class ProjectSettingsPayload(BaseModel):
+    settings: dict
+
+
+@router.put("/projects/{project_name}/config")
+async def put_project_config(project_name: str, payload: ProjectSettingsPayload) -> dict:
+    """Merge advanced settings into project.json (identity keys are kept)."""
+    project_path = get_project_path(project_name)
+    if not is_direct_project_dir(project_path, get_projects_dir()):
+        raise HTTPException(status_code=404, detail=f"Projet introuvable : {project_name}")
+    loop = asyncio.get_running_loop()
+    try:
+        config = await loop.run_in_executor(None, lambda: write_project_settings(project_path, payload.settings))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"config": config}
 
 
 class WorkProfilesPayload(BaseModel):
@@ -136,7 +157,8 @@ async def post_project(req: ProjectCreate) -> dict:
             None, lambda: create_project(req.name, painter_presets=req.painter_presets))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"name": req.name, "path": str(path)}
+    # The folder name is the formatted token (e.g. "my proj" -> "MY_PROJ").
+    return {"name": path.name, "path": str(path)}
 
 
 @router.delete("/projects/{project_name}")

@@ -9,6 +9,8 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { ChevronDown, Plus, X } from 'lucide-react'
 import { api } from '../../api/client'
 import { useProject } from '../../ProjectContext'
+import { ProjectSettingsDialog } from './ProjectSettingsDialog'
+import './tracking.css'   // dialog styles, also needed when opened from the Folder Manager
 
 export type CreateKind = 'shot' | 'seq' | 'asset' | 'group'
 
@@ -48,12 +50,15 @@ export function CreateMenu({ mode, hasSequences, onCreate }: {
   </>)
 }
 
-// A new project from Production (it creates the project folders on disk), then switches to it.
-function NewProjectDialog({ onClose }: { onClose: () => void }) {
+// A new project (it creates the project folders on disk), then its advanced settings,
+// then switches to it (switching unmounts the Production menu). Also used by the root
+// of the Folder Manager; onDone runs when the project is kept or cancelled.
+export function NewProjectDialog({ onClose, onDone }: { onClose: () => void; onDone?: () => void }) {
   const { setProject, refreshProjects } = useProject()
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [created, setCreated] = useState('')
   const create = async () => {
     const clean = name.trim()
     if (!clean) return
@@ -61,10 +66,11 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
     try {
       const r = await api.createProject(clean)
       await refreshProjects()
-      setProject(r.name)
-      onClose()
+      setCreated(r.name)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
+  if (created) return <ProjectSettingsDialog project={created} onClose={() => { onClose(); setProject(created); onDone?.() }}
+    onCancel={async () => { await api.deleteProject(created); await refreshProjects(); onClose(); onDone?.() }} />
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}><Dialog.Portal><Dialog.Overlay className="production-dialog-overlay" /><Dialog.Content className="production-dialog">
       <div className="production-dialog-heading"><Dialog.Title>Nouveau projet</Dialog.Title><Dialog.Close disabled={busy} aria-label="Fermer"><X size={16} /></Dialog.Close></div>

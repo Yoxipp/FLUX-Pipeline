@@ -20,6 +20,8 @@ from dcc.json_bridge import send_json_line
 
 ZBRUSH_BRIDGE_PORT = 9876
 ZBRUSH_BRIDGE_HOST = "127.0.0.1"
+# A heavy sculpt can take a while to write: exports must not time out at 10 s.
+_EXPORT_TIMEOUT_S = 120.0
 
 
 class ZBrushClient:
@@ -54,15 +56,17 @@ class ZBrushClient:
 
     def export_ztl(self, path: str) -> dict:
         """Save active tool as ZTL to *path*."""
-        return self._send({"action": "export_ztl", "path": path})
+        return self._send({"action": "export_ztl", "path": path}, timeout=_EXPORT_TIMEOUT_S)
 
     def export_obj(self, path: str, options: dict[str, Any] | None = None) -> dict:
         """Export active tool as OBJ to *path* with optional export options."""
-        return self._send({"action": "export_obj", "path": path, "options": options or {}})
+        return self._send({"action": "export_obj", "path": path, "options": options or {}},
+                          timeout=_EXPORT_TIMEOUT_S)
 
     def export_fbx(self, path: str, options: dict[str, Any] | None = None) -> dict:
         """Export active tool as FBX to *path* with optional export options."""
-        return self._send({"action": "export_fbx", "path": path, "options": options or {}})
+        return self._send({"action": "export_fbx", "path": path, "options": options or {}},
+                          timeout=_EXPORT_TIMEOUT_S)
 
     def stop(self) -> dict:
         """Send stop command to release ZBrush from the freeze loop."""

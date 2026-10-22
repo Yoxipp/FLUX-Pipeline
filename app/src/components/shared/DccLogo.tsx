@@ -22,6 +22,7 @@ const MONOGRAM: Record<string, { text: string; shape: 'square' | 'ring' }> = {
   zbrush:             { text: 'Z',  shape: 'square' },
   marvelous:          { text: 'MD', shape: 'square' },
   unreal:             { text: 'UE', shape: 'ring' },
+  tractor:            { text: 'Tr', shape: 'square' },   // farm window, not a DCC
 }
 
 // Display names used by the Publisher / Shelf (SoftwareSelector) -> launcher keys.

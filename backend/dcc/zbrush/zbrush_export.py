@@ -86,6 +86,11 @@ def publish_zbrush(
         temp_path.unlink(missing_ok=True)
         err = result.get("error") or result.get("msg", "Unknown error from ZBrush")
         log.error("ZBrush export failed: %s", err)
+        # Release ZBrush too, otherwise it stays frozen until the freeze timeout.
+        try:
+            zbrush_client.stop()
+        except Exception:
+            pass
         return {"ok": False, "error": err}
 
     # Release ZBrush from freeze ASAP, before any file I/O

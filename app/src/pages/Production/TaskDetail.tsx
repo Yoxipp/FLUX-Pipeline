@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Check, Clapperboard, Copy, Download, Film, FolderOpen, FolderTree, Heart, History,
-  Image as ImageIcon, List, Pin, RotateCcw, UploadCloud, X,
+  Image as ImageIcon, List, Pin, RotateCcw, Trash2, UploadCloud, X,
 } from 'lucide-react'
 import { api, type RefVersion } from '../../api/client'
 import { readSession, writeSession } from '../../hooks/useSessionState'
@@ -24,6 +24,7 @@ import type {
   ProductionTask, ProductionTaskDetail,
 } from '../../types'
 import { expandFluxPath, taskColorFromName } from './util'
+import { notifyRefChange } from './previewSourceStore'
 import { OpenInMenu, projectRelPath } from '../../components/shared/OpenInMenu'
 
 interface Props {
@@ -215,26 +216,14 @@ export function TaskDetail({
         {/* Left: notes / completion / subtasks / comments */}
         <div style={{ padding: '10px 14px', overflowY: 'auto', borderRight: '1px solid var(--rule)' }}>
           <Section label={t('prod.notes')}>
-            {/* The note the artist left when publishing the selected version. */}
-            <div style={{ ..._textarea, minHeight: 58, cursor: 'default', whiteSpace: 'pre-wrap' }}>
-              {selPublish ? (<>
-                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginBottom: 3 }}>
-                  {selVersion || selPublish.file} · {selPublish.user} · {selPublish.date} {selPublish.time}
-                </div>
-                {(selPublish.description || '').trim()
-                  ? selPublish.description
-                  : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishNote')}</span>}
-              </>) : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishes')}</span>}
-            </div>
-            {/* Free task notes written before publish notes took this place: kept, still editable. */}
-            {(detail.notes || '').trim() && (
-              <textarea
-                value={detail.notes || ''}
-                onChange={e => onPatchDetail({ notes: e.target.value })}
-                rows={2}
-                style={{ ..._textarea, marginTop: 6 }}
-              />
-            )}
+            {/* Global task note (task_details[key].notes), always editable, saved on change. */}
+            <textarea
+              value={detail.notes || ''}
+              onChange={e => onPatchDetail({ notes: e.target.value })}
+              placeholder={t('prod.taskNotePlaceholder')}
+              rows={4}
+              style={_textarea}
+            />
           </Section>
 
           <Section label={t('prod.progress')}>
@@ -418,6 +407,21 @@ export function TaskDetail({
               onCopy={() => copyPath(selPublish)}
               onExplorer={() => openInExplorer(selPublish)}
             />
+          )}
+
+          {/* Note the author left when publishing the selected version. */}
+          {selPublish && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ ..._lbl, marginBottom: 6 }}>{t('prod.publishNote')}</div>
+              <div style={{ ..._textarea, minHeight: 40, cursor: 'default', whiteSpace: 'pre-wrap' }}>
+                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--mono)', marginBottom: 3 }}>
+                  {selVersion || selPublish.file} · {selPublish.user} · {selPublish.date} {selPublish.time}
+                </div>
+                {(selPublish.description || '').trim()
+                  ? selPublish.description
+                  : <span style={{ color: 'var(--ink-4)' }}>{t('prod.noPublishNote')}</span>}
+              </div>
+            </div>
           )}
 
           <MediaEmbed project={project || ''} relPath={refBasePath} unresolved={refError} color={color}
@@ -861,6 +865,7 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
       setRev(v => v + 1)
       setViewing(null)                         // a new deposit is what you want to see
       refresh()
+      notifyRefChange()
       toast.success(list.length > 1 ? `${list.length} fichiers déposés` : 'Fichier déposé')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
@@ -911,6 +916,30 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  // Per-version actions of the list: export a copy, set as LAST (re-deposit), delete.
+  const exportVersion = async (v: RefVersion) => {
+    const ext = v.file.split('.').pop() ?? ''
+    const dest = await window.electronAPI?.saveFile?.(`${relPath.split('/').pop() || 'ref'}_${v.file}`, [
+      { name: v.kind === 'video' ? 'Vidéo' : 'Image', extensions: [ext] }, { name: 'Tous les fichiers', extensions: ['*'] },
+    ])
+    if (!dest) return
+    try { await api.exportRef(project, relPath, v.file, dest); toast.success('Téléchargé') }
+    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+  const changed = () => { setRev(r => r + 1); refresh(); notifyRefChange() }
+  const restoreVersion = async (v: RefVersion) => {
+    try { await api.restoreRefVersion(project, relPath, v.file); setViewing(null); changed(); toast.success(`${v.version} est la nouvelle dernière version`) }
+    catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
+  }
+  const deleteVersion = async (v: RefVersion) => {
+    if (!window.confirm(`Supprimer ${v.version} (${v.file}) ? Cette action est définitive.${v.latest ? '\nLa dernière version sera remplacée par la précédente.' : ''}`)) return
+    try {
+      await api.deleteRefVersion(project, relPath, v.file)
+      if (viewing === v.file) setViewing(null)
+      changed(); toast.success(`${v.version} supprimée`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
   }
 
   const { settings } = useSettings()
@@ -1016,7 +1045,7 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
               </button>
             )}
             <span style={{ flex: 1 }} />
-            {versions.length > 1 && (
+            {versions.length > 0 && (
               <button style={_stripBtn} aria-expanded={listOpen} onClick={() => setListOpen(o => !o)}
                 title="Voir les autres versions de cette zone">
                 <History size={10} strokeWidth={2} /> Versions ({versions.length})
@@ -1030,12 +1059,15 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
             )}
           </div>
         )}
-        {listOpen && versions.length > 1 && (
+        {listOpen && versions.length > 0 && (
           <VersionList
             project={project} relPath={relPath} versions={versions}
             current={watched?.file ?? newest?.file ?? ''}
             onPick={v => { setViewing(v.latest ? null : v.file); setListOpen(false) }}
             onKeyframe={v => openKeyframe(v.file, v.version)}
+            onExport={v => void exportVersion(v)}
+            onRestore={v => void restoreVersion(v)}
+            onDelete={v => void deleteVersion(v)}
             onClose={() => setListOpen(false)}
           />
         )}
@@ -1049,13 +1081,16 @@ function MediaEmbed({ project, relPath, unresolved, color, context }: {
 }
 
 // Every version of the zone, newest first. Arrow keys move, Enter watches, Escape closes.
-function VersionList({ project, relPath, versions, current, onPick, onKeyframe, onClose }: {
+function VersionList({ project, relPath, versions, current, onPick, onKeyframe, onExport, onRestore, onDelete, onClose }: {
   project:    string
   relPath:    string
   versions:   RefVersion[]
   current:    string
   onPick:     (v: RefVersion) => void
   onKeyframe: (v: RefVersion) => void
+  onExport:   (v: RefVersion) => void
+  onRestore:  (v: RefVersion) => void
+  onDelete:   (v: RefVersion) => void
   onClose:    () => void
 }) {
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -1108,6 +1143,21 @@ function VersionList({ project, relPath, versions, current, onPick, onKeyframe, 
               <button style={_miniIconBtn} title="Ouvrir cette version dans Keyframe Pro" onClick={() => onKeyframe(v)}>
                 <Clapperboard size={9} strokeWidth={1.75} />
               </button>
+            )}
+            {v.available && (
+              <>
+                <button style={_miniIconBtn} title="Exporter cette version" onClick={() => onExport(v)}>
+                  <Download size={9} strokeWidth={1.75} />
+                </button>
+                {!v.latest && (
+                  <button style={_miniIconBtn} title="Définir comme dernière version (copie en nouvelle version)" onClick={() => onRestore(v)}>
+                    <RotateCcw size={9} strokeWidth={1.75} />
+                  </button>
+                )}
+                <button style={_miniIconBtn} title="Supprimer cette version" onClick={() => onDelete(v)}>
+                  <Trash2 size={9} strokeWidth={1.75} />
+                </button>
+              </>
             )}
           </div>
         )

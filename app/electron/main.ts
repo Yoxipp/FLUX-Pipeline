@@ -138,7 +138,8 @@ async function createWindow(): Promise<void> {
       })
     }
     tryLoad()
-    win.webContents.openDevTools()
+    // Detached: docked DevTools break -webkit-app-region drag on a frameless window (Windows).
+    win.webContents.openDevTools({ mode: 'detach' })
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) =>
       console.error('[Electron] loadFile failed:', err))
@@ -166,10 +167,26 @@ const DETACHABLE_ROUTES = new Set([
   '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
   // Opened from Parametres avances (read-only node flow of the YAML actions).
   '/action-graph',
+  // Tractor farm page, opened from the launcher like a software (single window).
+  '/render',
 ])
+
+// Routes that only ever get one window: a second request focuses the existing one.
+const SINGLE_WINDOW_ROUTES = new Set(['/render'])
+const singleWindows = new Map<string, BrowserWindow>()
 
 function createDetachedWindow(route: string): void {
   if (!DETACHABLE_ROUTES.has(route)) return
+  const single = SINGLE_WINDOW_ROUTES.has(route)
+  if (single) {
+    const existing = singleWindows.get(route)
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore()
+      existing.show()
+      existing.focus()
+      return
+    }
+  }
   const cursor = screen.getCursorScreenPoint()
   const child = new BrowserWindow({
     width:           1100,
@@ -181,12 +198,17 @@ function createDetachedWindow(route: string): void {
     backgroundColor: '#0f0f0f',
     icon:            ICON,
     frame:           false,
+    title:           route === '/render' ? 'Tractor' : 'FLUX',
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration:  false,
     },
   })
+  if (single) {
+    singleWindows.set(route, child)
+    child.on('closed', () => { if (singleWindows.get(route) === child) singleWindows.delete(route) })
+  }
   if (!app.isPackaged) {
     child.loadURL(`http://localhost:5173/?detached=1#${route}`).catch((err) =>
       console.error('[Electron] detached loadURL failed:', err))
