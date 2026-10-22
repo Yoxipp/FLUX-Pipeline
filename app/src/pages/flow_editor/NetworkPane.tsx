@@ -1,5 +1,6 @@
 // NetworkPane.tsx — the graph (03_EDITEUR §1, @xyflow/react). Nodes and links are derived
 // from the FlowView; P0 is read-only (drag moves nodes locally, nothing is saved).
+// P2: runStates colours the nodes with the live (or opened) run.
 // Tab opens the Tab menu at the mouse, F frames, Shift+S switches curved / straight wires.
 // Pan: middle button, select: drag on the background. No +/- / frame buttons (2026-10-22).
 
@@ -15,7 +16,7 @@ import { FlowNode, type FlowRfNode } from './nodes/FlowNode'
 import { handleId } from './nodes/PortHandle'
 import { PortTooltipProvider } from './nodes/PortTooltip'
 import { TabMenu } from './TabMenu'
-import type { FlowView } from './types'
+import type { FlowView, NodeRunInfo } from './types'
 import type { CatalogEntry } from './v1_adapter'
 
 const nodeTypes: NodeTypes = { flow: FlowNode }
@@ -25,8 +26,9 @@ const edgeTypes: EdgeTypes = { flow: FlowEdge }
 const typing = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
 
-export function NetworkPane({ view, search, dots, straight, catalog, onSelect, onPick, onToggleWires }: {
+export function NetworkPane({ view, search, dots, straight, catalog, runStates, onSelect, onPick, onToggleWires }: {
   view: FlowView | null
+  runStates?: Record<string, NodeRunInfo>
   search: string
   dots: boolean
   straight: boolean
@@ -51,11 +53,11 @@ export function NetworkPane({ view, search, dots, straight, catalog, onSelect, o
     return view.nodes.map(n => ({
       id: n.id, type: 'flow', position: n.position,
       data: {
-        node: n, linked: linked[n.id] ?? [],
+        node: n, linked: linked[n.id] ?? [], run: runStates?.[n.id],
         dim: !!q && ![n.label, n.type, ...n.inputs.map(p => p.name)].some(t => t.toLowerCase().includes(q)),
       },
     }))
-  }, [view, q])
+  }, [view, q, runStates])
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowRfNode>(derived)
   useEffect(() => { setNodes(derived) }, [derived, setNodes])
   // Frame the whole flow once per flow loaded.

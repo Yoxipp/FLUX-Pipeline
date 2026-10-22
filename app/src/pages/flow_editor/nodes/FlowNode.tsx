@@ -1,13 +1,16 @@
 // FlowNode.tsx — a node of the Flows editor (03_EDITEUR §3): name band in the family colour
 // (2026-10-22), icon, DCC prefix badge, exec row on top, one 20 px row per data port
 // (value greyed or "<- n.port"). Hover shows a small toolbar like Houdini: bypass, info (doc).
+// P2: run state of the node (03_EDITEUR §7): running = accent border + spinning loader, ok =
+// check + count, error = --err border + message (values received in the tooltip),
+// error_handled = --warn border, skipped / cancelled = dashed border.
 
 import { memo, useRef, useState } from 'react'
 import { NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react'
-import { Ban, Info } from 'lucide-react'
+import { Ban, CircleCheck, CircleX, Info, LoaderCircle } from 'lucide-react'
 import { FAMILY_INFO } from '../families'
 import { iconFor } from '../icons'
-import type { FlowViewNode, PortSpec } from '../types'
+import type { FlowViewNode, NodeRunInfo, PortSpec } from '../types'
 import { formatValue, useTr } from '../useTr'
 import { PortHandle, handleId } from './PortHandle'
 import '../flow_editor.css'
@@ -18,7 +21,7 @@ const ROW_H = 20
 const VALUE_MAX = 24
 const HIDE_MS = 250   // time to reach the toolbar before it hides
 
-export type FlowNodeData = { node: FlowViewNode; linked: string[]; dim: boolean }
+export type FlowNodeData = { node: FlowViewNode; linked: string[]; dim: boolean; run?: NodeRunInfo }
 export type FlowRfNode = Node<FlowNodeData, 'flow'>
 
 const EXEC_IN: PortSpec = { name: 'exec', type: 'exec' }
@@ -66,9 +69,33 @@ function InfoCard({ node }: { node: FlowViewNode }) {
   )
 }
 
+function runBorder(run: NodeRunInfo | undefined, selected: boolean): { color: string; style: string } {
+  switch (run?.state) {
+    case 'running':       return { color: 'var(--accent)', style: 'solid' }
+    case 'error':         return { color: 'var(--err)', style: 'solid' }
+    case 'error_handled': return { color: 'var(--warn)', style: 'solid' }
+    case 'skipped':
+    case 'cancelled':     return { color: 'var(--ink-4)', style: 'dashed' }
+    default:              return { color: selected ? 'var(--ink-3)' : 'var(--rule-2)', style: 'solid' }
+  }
+}
+
+function RunBadge({ run }: { run?: NodeRunInfo }) {
+  if (!run || run.state === 'idle') return null
+  const count = run.count && run.count > 1 ? <span style={{ fontSize: 10 }}>x{run.count}</span> : null
+  if (run.state === 'running') return <LoaderCircle size={13} strokeWidth={2} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+  if (run.state === 'ok') return <>{count}<CircleCheck size={13} strokeWidth={2} style={{ flexShrink: 0 }} /></>
+  if (run.state === 'error' || run.state === 'error_handled') return <>{count}<CircleX size={13} strokeWidth={2} style={{ flexShrink: 0 }} /></>
+  return null
+}
+
 function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
   const { tr } = useTr()
-  const { node, dim } = data
+  const { node, dim, run } = data
+  const border = runBorder(run, !!selected)
+  const failed = run && (run.state === 'error' || run.state === 'error_handled') && run.error
+  const received = run?.values && Object.keys(run.values).length
+    ? Object.entries(run.values).map(([k, v]) => `${k} = ${v}`).join('\n') : undefined
   const [hover, setHover] = useState(false)
   const [info, setInfo] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
@@ -102,7 +129,7 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
       </NodeToolbar>
       <div style={{
         width: NODE_W, background: 'var(--paper-2)',
-        border: `1px solid ${selected ? 'var(--ink-3)' : 'var(--rule-2)'}`,
+        border: `1px ${border.style} ${border.color}`,
         borderRadius: radius,
         boxShadow: selected
           ? '0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent), var(--shadow-sm)'
@@ -124,7 +151,16 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
               {node.prefix}
             </span>
           )}
+          <RunBadge run={run} />
         </div>
+        {failed && (
+          <div
+            title={received ? tr(`Valeurs recues :\n${received}`, `Values received:\n${received}`) : undefined}
+            style={{ padding: '4px 10px', fontSize: 11, lineHeight: 1.35, color: run?.state === 'error' ? 'var(--err)' : 'var(--warn)', borderBottom: '1px solid var(--rule)', wordBreak: 'break-word' }}
+          >
+            {run?.error}
+          </div>
+        )}
         {Array.from({ length: rows }, (_, i) => (
           <Row key={i} left={left[i]} right={right[i]} linked={linked} />
         ))}

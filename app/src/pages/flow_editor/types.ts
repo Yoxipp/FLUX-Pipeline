@@ -152,3 +152,59 @@ export interface MigrateReport {
              unknown_commands?: string[]; unresolved_links?: string[] }[]
   nodes:   { file: string; status: string }[]
 }
+
+// -- runs (01 §4, §6, §10) ------------------------------------------------------
+
+export type RunStatus = 'queued' | 'running' | 'ok' | 'error' | 'cancelled' | 'interrupted' | 'skipped' | 'refused'
+export type NodeRunState = 'idle' | 'running' | 'ok' | 'error' | 'error_handled' | 'skipped' | 'cancelled'
+
+export interface NodeRunInfo {
+  state:    NodeRunState
+  started?: string
+  ended?:   string
+  error?:   string
+  count?:   number
+  values?:  Record<string, string>   // values received, shown on an error
+  logs?:    { at?: string; level: string; text: string }[]
+}
+
+export interface RunIssue { level: string; code: string; node: string | null; port: string | null; message_fr: string }
+
+// GET /flows/runs entry.
+export interface RunSummary {
+  run_id:      string
+  flow:        string
+  scope:       FlowScope
+  project:     string | null
+  version:     number | null
+  draft:       boolean
+  mode:        'real' | 'dry'
+  status:      RunStatus
+  trigger:     { event: string | null; values?: Record<string, unknown> }
+  user:        string | null
+  host:        string
+  started:     string | null
+  ended:       string | null
+  duration_ms: number | null
+  error:       string | null
+}
+
+// GET /flows/runs/{run_id}: the full record.
+export interface RunRecord extends RunSummary {
+  base_revision:   number | null
+  issues:          RunIssue[]
+  nodes:           Record<string, NodeRunInfo>
+  links:           Record<string, { value: string; count: number }>
+  report:          { node: string | null; kind: string; text_fr: string; path?: string | null }[]
+  nodes_simulated: string[]
+}
+
+// Messages of WS /flows/ws.
+export type FlowsWsMessage =
+  | { type: 'hello'; holder: string | null; me: string; running: RunSummary[] }
+  | { type: 'run_started'; run_id: string; flow: string; scope: FlowScope; mode: 'real' | 'dry'; user: string | null }
+  | { type: 'node_state'; run_id: string; flow: string; node: string; state: NodeRunState; started?: string; ended?: string; error?: string; count?: number }
+  | { type: 'link_value'; run_id: string; flow: string; link: string; preview: string; count: number }
+  | { type: 'log'; run_id: string; flow: string; node: string; level: string; text: string }
+  | { type: 'notify'; run_id: string; flow: string; node: string; level: 'info' | 'warn' | 'error'; text: string; path: string | null }
+  | { type: 'run_finished'; run_id: string; flow: string; status: RunStatus; duration_ms: number | null; error: string | null; mode: 'real' | 'dry' }

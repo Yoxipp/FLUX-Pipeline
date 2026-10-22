@@ -1,13 +1,23 @@
 // flows.ts — API calls of the Flows editor (03_EDITEUR §9).
-// P0: read-only, on top of the v1 action routes. P1 adds the /flows routes one by one.
+// P0: read-only, on top of the v1 action routes. P1 adds the /flows routes, P2 the runs.
 // The TD boxes themselves (flows_td, flows_team_td) are written through /settings/user-data.
 
 import { api, apiCall } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, MigrateReport } from '../pages/flow_editor/types'
+import type { FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, MigrateReport, RunRecord, RunStatus, RunSummary } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
+
+export interface RunOpts {
+  scope?: FlowScope
+  project?: string
+  event?: string
+  values?: Record<string, unknown>
+  dry_run?: boolean          // on the saved file (TD)
+  draft?: FlowDoc            // the open document, no version created (TD)
+  base_revision?: number
+}
 
 export interface SaveOpts { project?: string; base_revision?: number; force?: boolean; note?: string }
 
@@ -37,4 +47,14 @@ export const flowsApi = {
     apiCall('POST', `/flows/${encodeURIComponent(name)}/copy`, { from_scope, to_scope, ...opts }),
   migrate: (dry_run: boolean): Promise<MigrateReport> =>
     apiCall<MigrateReport>('POST', '/flows/migrate', { dry_run }),
+
+  // runs (01 §4, §6). 409 = refused (detail.issues), skipped (run_policy) or not active.
+  run: (name: string, opts: RunOpts): Promise<{ run_id: string; status: RunStatus; mode: 'real' | 'dry' }> =>
+    apiCall('POST', `/flows/${encodeURIComponent(name)}/run`, opts),
+  listRuns: (opts: { flow?: string; scope?: FlowScope; project?: string; status?: RunStatus; limit?: number } = {}): Promise<RunSummary[]> =>
+    apiCall<RunSummary[]>('GET', `/flows/runs${qs(opts)}`),
+  getRun: (runId: string, project?: string): Promise<RunRecord> =>
+    apiCall<RunRecord>('GET', `/flows/runs/${encodeURIComponent(runId)}${qs({ project })}`),
+  cancelRun: (runId: string, project?: string): Promise<{ status: string }> =>
+    apiCall('POST', `/flows/runs/${encodeURIComponent(runId)}/cancel${qs({ project })}`),
 }

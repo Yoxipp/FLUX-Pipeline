@@ -3,10 +3,11 @@
 // Save, Save as, Save and Increment, Migrate v1 actions (Team TD). Then the network tools
 // (backdrop, subnet, sticky note), the view toggles (background dots, wire style), search
 // and the way to the old editor. P1: the graph is read-only (editing comes with P4), Save
-// rewrites the loaded document.
+// rewrites the loaded document. P2: Run (the open document, no version created), Essai a
+// blanc (the saved file), Stop, and the Runs dock toggle (03_EDITEUR §7).
 
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FolderOpen, Grid3x3, History, Save, Spline, BoxSelect, StickyNote, Boxes } from 'lucide-react'
+import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -22,7 +23,18 @@ export interface FileActions {
   onMigrate: () => void
 }
 
-export function TopBar({ flows, current, scope, version, legacy, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, onSearch, onToggleDots, onToggleWires, onLegacy }: {
+export interface RunActions {
+  running: boolean
+  runBlocked?: string         // why Run is greyed (no box, no flow...)
+  dryBlocked?: string         // why Essai a blanc is greyed
+  runsOpen: boolean
+  onRun: () => void
+  onDry: () => void
+  onStop: () => void
+  onToggleRuns: () => void
+}
+
+export function TopBar({ flows, current, scope, version, legacy, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, onSearch, onToggleDots, onToggleWires, onLegacy }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -35,6 +47,7 @@ export function TopBar({ flows, current, scope, version, legacy, showPerso, save
   dots: boolean
   straight: boolean
   actions: FileActions
+  run: RunActions
   onSearch: (s: string) => void
   onToggleDots: () => void
   onToggleWires: () => void
@@ -101,6 +114,21 @@ export function TopBar({ flows, current, scope, version, legacy, showPerso, save
       {!!version && <span className="tag">v{String(version).padStart(3, '0')}</span>}
       {legacy && <span className="tag">v1</span>}
       <span className="tag" title={p4}>{tr('lecture seule', 'read-only')}</span>
+
+      <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
+      {run.running
+        ? <button type="button" className="flow-tool" onClick={run.onStop} title={tr('Annuler le run en cours', 'Cancel the running run')}><Square size={13} /> Stop</button>
+        : <button type="button" className="flow-tool" disabled={!!run.runBlocked} onClick={run.onRun}
+                  title={run.runBlocked ?? tr('Lance le document ouvert (aucune version creee)', 'Runs the open document (no version created)')}>
+            <Play size={13} /> Run
+          </button>}
+      <button type="button" className="flow-tool" disabled={run.running || !!run.dryBlocked} onClick={run.onDry}
+              title={run.dryBlocked ?? tr('Essai a blanc du fichier enregistre : rien n\'est ecrit, aucun logiciel lance', 'Dry run of the saved file: nothing written, no software started')}>
+        <FlaskConical size={13} /> {tr('Essai', 'Dry run')}
+      </button>
+      <button type="button" className={`flow-tool${run.runsOpen ? ' on' : ''}`} onClick={run.onToggleRuns} title={tr('Historique des runs', 'Run history')}>
+        <ListChecks size={13} /> Runs
+      </button>
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
       <button type="button" className="flow-tool" disabled title={p4}><BoxSelect size={13} /> Backdrop</button>

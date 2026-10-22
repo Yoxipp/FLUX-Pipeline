@@ -8,21 +8,27 @@
 // A v1 name kept from P0 ("publish") opens its legacy_ flow.
 // View prefs (background dots, wire style) are per-viewer conveniences in localStorage.
 // The old editor stays at /action-graph-legacy until P8.
+// P2 (03_EDITEUR §7): Run = the open document (POST /flows/{name}/run with draft, TD), Essai =
+// dry run of the saved file; node states arrive by WS /flows/ws (useFlowsWs) and are reread
+// from GET /flows/runs/{id} after a reconnection; Notify nodes show a toast; the Runs dock lists
+// the history and colours the graph with an opened run.
 // Entry needs the TD box (flows_td, 01 §7): without it the route shows "Acces refuse".
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { flowsApi } from '../../api/flows'
+import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
 import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
 import { NetworkPane } from './NetworkPane'
 import { ParamsPane } from './ParamsPane'
+import { RunsPanel } from './RunsPanel'
 import { ShelfBar } from './ShelfBar'
 import { TopBar, type FlowListEntry } from './TopBar'
-import type { FlowDoc, FlowRead, FlowRights, FlowScope, MigrateReport } from './types'
+import type { FlowDoc, FlowRead, FlowRights, FlowScope, FlowsWsMessage, MigrateReport, NodeRunInfo, RunIssue, RunRecord } from './types'
 import { adaptV1Catalog, type CatalogEntry } from './v1_adapter'
 import { adaptV2Flow } from './v2_adapter'
 import { useTr } from './useTr'
@@ -34,7 +40,8 @@ const LAST_OPEN_KEY = 'flows_last_open'
 const PREFS_KEY = 'flux.flow_editor.view'
 
 type ViewPrefs = { dots: boolean; straight: boolean }
-type HttpError = Error & { status?: number; detail?: { by?: string; at?: string } }
+type HttpError = Error & { status?: number; detail?: { by?: string; at?: string; status?: string; issues?: RunIssue[] } }
+type RunStates = Record<string, NodeRunInfo>
 
 function readPrefs(): ViewPrefs {
   try {
@@ -64,6 +71,14 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [dialog, setDialog] = useState<'new' | 'saveas' | null>(null)
   const [migration, setMigration] = useState<MigrateReport | null>(null)
   const [busy, setBusy] = useState(false)
+  // Runs: the run launched from this window (live), the node states shown, the Runs dock.
+  const [liveRun, setLiveRun] = useState<{ id: string; running: boolean } | null>(null)
+  const [runStates, setRunStates] = useState<RunStates>({})
+  const [runsOpen, setRunsOpen] = useState(false)
+  const [openRunId, setOpenRunId] = useState<string | null>(null)
+  const [runsKey, setRunsKey] = useState(0)
+  const runBuf = useRef<Record<string, RunStates>>({})   // states per run_id, also before POST answers
+  const liveRef = useRef<string | null>(null)
 
   const refreshList = useCallback(() => {
     flowsApi.list(project || undefined)
@@ -180,6 +195,87 @@ function Editor({ rights }: { rights: FlowRights }) {
       .finally(() => setBusy(false))
   }, [refreshList])
 
+  const showLive = useCallback((id: string) => {
+    liveRef.current = id
+    setOpenRunId(null)
+    setRunStates({ ...(runBuf.current[id] ?? {}) })
+  }, [])
+
+  const onWs = useCallback((msg: FlowsWsMessage) => {
+    if (msg.type === 'hello') return
+    if (msg.type === 'notify') {
+      const text = `${msg.flow} : ${msg.text}`
+      if (msg.level === 'error') toast.error(text)
+      else if (msg.level === 'warn') toast.warning(text)
+      else toast.info(text)
+      return
+    }
+    if (msg.type === 'node_state') {
+      const buf = (runBuf.current[msg.run_id] ??= {})
+      buf[msg.node] = { ...buf[msg.node], state: msg.state, started: msg.started, ended: msg.ended, count: msg.count,
+                        ...(msg.error ? { error: msg.error } : {}) }
+      if (msg.run_id === liveRef.current) setRunStates({ ...buf })
+      return
+    }
+    if (msg.type === 'run_finished' && msg.run_id === liveRef.current) {
+      setLiveRun(r => r && r.id === msg.run_id ? { ...r, running: false } : r)
+      setRunsKey(k => k + 1)
+      // The record has the values received of a failed node: reread it once.
+      flowsApi.getRun(msg.run_id, project || undefined).then(r => setRunStates(r.nodes)).catch(() => { /* WS states stay */ })
+      const secs = msg.duration_ms !== null ? ` (${(msg.duration_ms / 1000).toFixed(1)} s)` : ''
+      const what = msg.mode === 'dry' ? tr('Essai a blanc', 'Dry run') : 'Run'
+      if (msg.status === 'ok') toast.success(tr(`${what} fini${secs}`, `${what} done${secs}`))
+      else if (msg.status === 'cancelled') toast.info(tr(`${what} annule`, `${what} cancelled`))
+      else toast.error(`${what} : ${msg.error ?? msg.status}`)
+    }
+  }, [project, tr])
+
+  const onWsReconnect = useCallback(() => {
+    const id = liveRef.current
+    if (!id) return
+    flowsApi.getRun(id, project || undefined).then(r => {
+      setRunStates(r.nodes)
+      setLiveRun(cur => cur && cur.id === id ? { ...cur, running: r.status === 'queued' || r.status === 'running' } : cur)
+    }).catch(() => { /* run of a restarted backend: interrupted */ })
+  }, [project])
+
+  const wsUp = useFlowsWs(onWs, onWsReconnect)
+
+  const launch = useCallback((dry: boolean) => {
+    if (!loaded) return
+    const opts = dry
+      ? { scope: loaded.scope, project: project || undefined, dry_run: true }
+      : { scope: loaded.scope, project: project || undefined, draft: loaded.flow, base_revision: loaded.state.revision }
+    flowsApi.run(loaded.name, opts)
+      .then(r => { setLiveRun({ id: r.run_id, running: true }); showLive(r.run_id) })
+      .catch((e: HttpError) => {
+        const first = e.detail?.issues?.[0]
+        toast.error(first ? `${e.message} : ${first.message_fr}` : e.message)
+        if (e.detail?.status) setRunsKey(k => k + 1)
+      })
+  }, [loaded, project, showLive])
+
+  const stop = useCallback(() => {
+    if (!liveRun) return
+    flowsApi.cancelRun(liveRun.id, project || undefined).catch((e: Error) => toast.error(e.message))
+  }, [liveRun, project])
+
+  const openRecord = useCallback((r: RunRecord | null) => {
+    if (r) setRunStates(r.nodes)
+    else if (liveRef.current) setRunStates({ ...(runBuf.current[liveRef.current] ?? {}) })
+    else setRunStates({})
+  }, [])
+
+  // A new flow opened: no run states from the previous one.
+  useEffect(() => { liveRef.current = null; setLiveRun(null); setRunStates({}); setOpenRunId(null) }, [loaded?.name, loaded?.scope])
+
+  const running = !!liveRun?.running
+  const runBlocked = !loaded ? tr('Aucun flow ouvert', 'No open flow')
+    : !rights.can[loaded.scope]?.draft ? tr('Case TD requise', 'TD box required')
+    : !wsUp ? tr('Backend injoignable', 'Backend unreachable')
+    : undefined
+  const dryBlocked = runBlocked ?? (loaded?.version !== null ? tr('Version figee ouverte : ouvre le fichier de travail', 'Frozen version open: open the working file') : undefined)
+
   // Shortcuts of the File menu (Shift+S alone toggles the wires, NetworkPane).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -229,6 +325,11 @@ function Editor({ rights }: { rights: FlowRights }) {
           onIncrement: () => increment(),
           onMigrate: () => migrate(true),
         }}
+        run={{
+          running, runBlocked, dryBlocked, runsOpen,
+          onRun: () => launch(false), onDry: () => launch(true), onStop: stop,
+          onToggleRuns: () => setRunsOpen(v => !v),
+        }}
         onSearch={setSearch}
         onToggleDots={() => updatePrefs({ dots: !prefs.dots })}
         onToggleWires={toggleWires}
@@ -247,11 +348,17 @@ function Editor({ rights }: { rights: FlowRights }) {
               {tr(`Impossible de lire "${current}" : ${error}`, `Cannot read "${current}": ${error}`)}
             </div>
           : <NetworkPane
-              view={view} search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog}
+              view={view} search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
               onSelect={onSelect} onPick={onPick} onToggleWires={toggleWires}
             />}
         <ParamsPane view={view} selected={selected} />
       </div>
+      {runsOpen && loaded && (
+        <RunsPanel
+          flow={loaded.name} project={project || undefined} refreshKey={runsKey} openRunId={openRunId}
+          onOpen={setOpenRunId} onRecord={openRecord} onSelectNode={setSelectedId} onClose={() => setRunsOpen(false)}
+        />
+      )}
       <NameDialog
         open={dialog !== null}
         title={dialog === 'saveas' ? tr('Enregistrer sous', 'Save as') : tr('Nouveau flow', 'New flow')}
