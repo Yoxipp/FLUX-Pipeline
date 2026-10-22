@@ -640,7 +640,7 @@ class RunManager:
 
     def cancel(self, run_id: str) -> Optional[str]:
         run = self.live.get(run_id)
-        if run is None:
+        if run is None or run.record["status"] not in runs.LIVE_STATUSES:
             return None
         run.cancel()
         return "cancelling"
