@@ -20,13 +20,14 @@ from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from flux_flows.types import is_valid_type
+
 FORMAT_VERSION = 2
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 FIELD_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 NODE_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,30}$")
 NODE_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 PORT_REF_RE = re.compile(r"^([a-z][a-z0-9_]{0,30})\.([a-z][a-z0-9_]*)$")
-DATA_TYPE_RE = re.compile(r"^[a-z_]+(\[[a-z_*]+\])?$")
 
 # Static routes of /flows: a flow cannot take one of these names.
 RESERVED_NAMES = frozenset(
@@ -209,9 +210,10 @@ class Flow(_Strict):
         outs = [o.id for o in self.interface.outputs]
         if len(set(outs)) != len(outs) or any(not FIELD_ID_RE.match(o) for o in outs):
             raise ValueError("interface.outputs : ids invalides ou en double")
-        for var in self.variables:
-            if not DATA_TYPE_RE.match(var.type):
-                raise ValueError(f"variables : type '{var.type}' invalide")
+        for where, typed in (("variables", self.variables), ("interface.outputs", self.interface.outputs)):
+            for item in typed:
+                if item.type == "exec" or not is_valid_type(item.type):
+                    raise ValueError(f"{where} : type '{item.type}' invalide")
         _check_node_ids(self.nodes)
         count = sum(1 for _ in iter_nodes(self))
         if count > MAX_NODES:
