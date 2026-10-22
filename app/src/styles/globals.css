@@ -56,7 +56,7 @@
   --fam-bridge:   var(--ink-3);
 
   /* ── flows : une couleur par type de port (01_ARCHITECTURE §3) ── */
-  --port-exec:     var(--ink);
+  --port-exec:     #e9e6e2;   /* main flow: near white, stands out over data links */
   --port-any:      var(--ink-3);
   --port-bool:     oklch(66% 0.085 345);
   --port-int:      oklch(66% 0.085 175);

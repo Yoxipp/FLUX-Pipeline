@@ -1,10 +1,11 @@
 // NetworkPane.tsx — the graph (03_EDITEUR §1, @xyflow/react). Nodes and links are derived
 // from the FlowView; P0 is read-only (drag moves nodes locally, nothing is saved).
-// Tab opens the Tab menu at the mouse. Pan: middle button, select: drag on the background.
+// Tab opens the Tab menu at the mouse, F frames, Shift+S switches curved / straight wires.
+// Pan: middle button, select: drag on the background. No +/- / frame buttons (2026-10-22).
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useNodesState, useReactFlow,
+  Background, BackgroundVariant, MiniMap, ReactFlow, useNodesState, useReactFlow,
   type NodeTypes, type EdgeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -24,9 +25,12 @@ const edgeTypes: EdgeTypes = { flow: FlowEdge }
 const typing = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
 
-export function NetworkPane({ view, search, catalog, onSelect, onPick }: {
+export function NetworkPane({ view, search, dots, straight, catalog, onSelect, onPick, onToggleWires }: {
   view: FlowView | null
   search: string
+  dots: boolean
+  straight: boolean
+  onToggleWires: () => void
   catalog: CatalogEntry[] | null
   onSelect: (id: string | null) => void
   onPick: (e: CatalogEntry) => void
@@ -57,22 +61,26 @@ export function NetworkPane({ view, search, catalog, onSelect, onPick }: {
   // Frame the whole flow once per flow loaded.
   useEffect(() => { if (view) requestAnimationFrame(() => fitView({ padding: 0.15 })) }, [view, fitView])
 
-  const edges = useMemo<FlowRfEdge[]>(() => (view?.edges ?? []).map(e => ({
-    id: e.id, type: 'flow', source: e.source, target: e.target,
-    sourceHandle: handleId('out', e.sourcePort), targetHandle: handleId('in', e.targetPort),
-    data: { kind: e.kind, type: e.type, dim: !!q },
-  })), [view, q])
+  // Data links first so the exec chain (the main flow) is drawn on top.
+  const edges = useMemo<FlowRfEdge[]>(() => [...(view?.edges ?? [])]
+    .sort((a, b) => Number(a.kind === 'exec') - Number(b.kind === 'exec'))
+    .map(e => ({
+      id: e.id, type: 'flow', source: e.source, target: e.target,
+      sourceHandle: handleId('out', e.sourcePort), targetHandle: handleId('in', e.targetPort),
+      data: { kind: e.kind, type: e.type, dim: !!q, straight },
+    })), [view, q, straight])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target)) return
       if (e.key === 'Tab') { e.preventDefault(); setTab({ ...mouse.current }) }
+      else if (e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); onToggleWires() }
       else if (e.key === 'f' || e.key === 'F') fitView({ padding: 0.15 })
       else if (e.key === 'Escape') { setTab(null); onSelect(null) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fitView, onSelect])
+  }, [fitView, onSelect, onToggleWires])
 
   return (
     <div
@@ -100,8 +108,7 @@ export function NetworkPane({ view, search, catalog, onSelect, onPick }: {
           proOptions={{ hideAttribution: true }}
           colorMode="dark"
         >
-          <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--rule-2)" />
-          <Controls showInteractive={false} />
+          {dots && <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--rule-2)" />}
           <MiniMap
             pannable zoomable
             nodeColor={n => FAMILY_INFO[(n as FlowRfNode).data.node.family].color}
