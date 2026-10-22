@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
 from pathlib import Path
 
@@ -28,7 +29,8 @@ DEFAULTS: dict = {
     "husk_path": "husk",
     "bridge_python": "",           # Tractor's Python 2.7
     "bridge_script": "",
-    "engine": "",                  # host:port
+    "engine": "",                  # host:port, empty => TRACTOR_ENGINE of the machine
+    "engine_user": "",             # engine login, empty => "root" (read only for FLUX)
     "dry_run": True,               # stays True until school phase 0 is done
 }
 
@@ -38,8 +40,10 @@ BUNDLED_BRIDGE = Path(__file__).resolve().parent / "bridge" / "flux_tractor_brid
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _STR_KEYS = (
     "tractor_project", "service_karma", "service_renderman",
-    "husk_path", "bridge_python", "bridge_script", "engine",
+    "husk_path", "bridge_python", "bridge_script", "engine", "engine_user",
 )
+# Tractor client install on school machines (phase 0, 2026-10-22): its rmanpy.exe is Python 2.7.
+TRACTOR_PYTHON_CANDIDATES = (Path(r"C:\Program Files\Pixar\Tractor-2.4\bin\rmanpy.exe"),)
 _BOOL_KEYS = ("freeze_by_default", "dry_run")
 
 
@@ -163,6 +167,12 @@ def effective_settings(project_name: str, path=None) -> dict:
         settings["tractor_project"] = project_name
     if not settings["bridge_script"]:
         settings["bridge_script"] = str(BUNDLED_BRIDGE)
+    # Machine defaults: the Tractor client sets TRACTOR_ENGINE and ships rmanpy.exe.
+    if not settings["engine"]:
+        settings["engine"] = os.environ.get("TRACTOR_ENGINE", "").strip()
+    if not settings["bridge_python"]:
+        found = next((p for p in TRACTOR_PYTHON_CANDIDATES if p.is_file()), None)
+        settings["bridge_python"] = str(found) if found else ""
     return settings
 
 

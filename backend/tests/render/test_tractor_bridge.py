@@ -19,7 +19,12 @@ _OK_BRIDGE = textwrap.dedent("""
     if verb == "spool":
         res = {"jid": 42, "output": "spooled " + req["alf_path"]}
     elif verb == "jobs":
-        res = {"jobs": [{"jid": 1, "user": req["user"], "projects": ["team_a"]}], "echo": req}
+        res = {"jobs": [
+            {"jid": 7, "user": "3d1", "projects": ["team_a"], "numTasks": 4, "numDone": 4,
+             "metadata": json.dumps({"user": "adam"}), "echo": req},
+            {"jid": 8, "user": "3d1", "projects": ["FIE"], "numTasks": 6, "numError": 2,
+             "metadata": "", "echo": req},
+        ]}
     elif verb == "blades":
         res = {"blades": [{"name": "b1"}], "active_by_project": {"team_a": 2}}
     elif verb == "ping":
@@ -147,13 +152,39 @@ class QueryAndActionTests(BridgeTestCase):
         self.assertEqual(tb.blades(s, "adam"),
                          {"blades": [], "active_by_project": {}, "dry_run": True})
 
-    def test_jobs_real_filters_on_user(self):
-        mine = tb.jobs(self.settings(), "adam")
-        self.assertEqual(mine["echo"]["owner"], "adam")
-        everyone = tb.jobs(self.settings(), "adam", mine=False, project="team_a")
-        self.assertEqual(everyone["echo"]["user"], "adam")  # engine login stays the caller
-        self.assertIsNone(everyone["echo"]["owner"])
-        self.assertEqual(everyone["echo"]["project"], "team_a")
+    def test_jobs_lists_every_state_and_owner(self):
+        out = tb.jobs(self.settings(), "adam", project="team_a", days=14)
+        self.assertEqual([(j["jid"], j["state"], j["flux_user"]) for j in out["jobs"]],
+                         [(7, "done", "adam"), (8, "error", "")])
+        echo = out["jobs"][0]["echo"]
+        self.assertEqual((echo["login"], echo["user"]), ("root", "adam"))  # login is not the owner
+        self.assertEqual((echo["days"], echo["project"], echo.get("owner")), (14, "team_a", None))
+        self.assertEqual(out["jobs"][0]["metadata"], {"user": "adam"})
+
+    def test_jobs_mine_uses_flux_metadata(self):
+        # Every school job is owned by the shared Windows login, so "mine" reads the metadata.
+        self.assertEqual([j["jid"] for j in tb.jobs(self.settings(), "adam", mine=True)["jobs"]], [7])
+
+    def test_reads_hit_engine_in_dry_run_when_configured(self):
+        out = tb.jobs(self.settings(dry_run=True), "adam")
+        self.assertEqual((len(out["jobs"]), out["dry_run"]), (2, True))
+        self.assertEqual(tb.tasks(self.settings(dry_run=True), "adam", 7), {"jid": 7})
+
+    def test_engine_login_setting(self):
+        out = tb.jobs(self.settings(engine_user="farm"), "adam")
+        self.assertEqual(out["jobs"][0]["echo"]["login"], "farm")
+
+    def test_job_state(self):
+        cases = [({"deletetime": "x", "numActive": 1}, "deleted"), ({"pausetime": "x"}, "paused"),
+                 ({"numActive": 2, "numError": 1}, "active"), ({"numError": 1}, "error"),
+                 ({"numTasks": 3, "numDone": 3}, "done"), ({"numTasks": 3, "numDone": 1}, "waiting")]
+        for job, state in cases:
+            self.assertEqual(tb.job_state(job), state, job)
+
+    def test_task_log_needs_tid(self):
+        with self.assertRaises(tb.BridgeError):
+            tb.task_log(self.settings(), "adam", 7, "4")
+        self.assertEqual(tb.task_log(self.settings(), "adam", 7, 4), {"jid": 7})
 
     def test_blades_real(self):
         self.assertEqual(tb.blades(self.settings(), "adam")["active_by_project"], {"team_a": 2})
@@ -168,6 +199,13 @@ class QueryAndActionTests(BridgeTestCase):
     def test_actions_real(self):
         for fn in (tb.kill, tb.retry, tb.pause, tb.resume):
             self.assertEqual(fn(self.settings(), "adam", 7), {"jid": 7})
+
+    def test_actions_refused_on_other_jobs(self):
+        # FLUX logs in as root: it must not touch jobs another user (or Nuke, Maya) spooled.
+        for user in ("tom", ""):
+            with self.assertRaises(tb.BridgeError) as ctx:
+                tb.kill(self.settings(), user or "nobody", 7)
+            self.assertIn("pas ete lance par vous", str(ctx.exception))
 
 
 if __name__ == "__main__":
