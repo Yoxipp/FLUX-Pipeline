@@ -27,6 +27,8 @@ const SWITCH_LABELS: Record<string, { label: string; help: string }> = {
   conform_tx_colorconvert: { label: 'Convertir la couleur dans le .tx', help: 'Les maps couleur passent en lineaire dans le .tx (sinon espace source).' },
   proxy_usd:               { label: 'Proxy USD au publish', help: 'Un publish USD d\'asset ecrit aussi une geo proxy allegee (purpose proxy).' },
   proxy_reduction:         { label: 'Reduction du proxy', help: 'Part des triangles retiree (0.9 = il en reste 10 %).' },
+  publish_max_parallel:    { label: 'Publishs simultanés sur ce poste', help: 'Les suivants attendent leur tour. Défaut 10.' },
+  publish_max_mbps:        { label: 'Débit max par publish (Mo/s)', help: '0 = pas de limite. À régler après mesure.' },
   portable_paths:          { label: 'Chemins portables $FLUX', help: 'Les chemins donnes a Houdini sont ecrits en $FLUX/... (scenes portables).' },
 }
 const SOURCE_LABEL: Record<string, string> = { page: 'regle ici', lancement: 'variable au lancement', defaut: 'defaut' }
@@ -66,14 +68,17 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
   const [envText, setEnvText] = useState('')
   const [threshold, setThreshold] = useState('')
   const [modesText, setModesText] = useState('')
-  const [reduction, setReduction] = useState('')
+  // Numeric switches (proxy_reduction, publish_max_*): text drafts by switch name.
+  const [numDraft, setNumDraft] = useState<Record<string, string>>({})
+  const draftsOf = (sw: Record<string, AdvancedSwitch>) => Object.fromEntries(
+    Object.entries(sw).filter(([, s]) => typeof s.value === 'number').map(([k, s]) => [k, String(s.value)]))
 
   const load = () => {
     setError('')
     api.getAdvancedSettings(activeProject || undefined)
       .then(r => {
         setSwitches(r.switches)
-        setReduction(String(r.switches.proxy_reduction?.value ?? ''))
+        setNumDraft(draftsOf(r.switches))
         setProj(r.project)
         if (r.project) fill(r.project)
       })
@@ -113,7 +118,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
   const saveSwitch = (name: string, value: boolean | number | null) => {
     setError(''); setSaved('')
     api.putAdvancedSwitches({ [name]: value })
-      .then(r => { setSwitches(r); setReduction(String(r.proxy_reduction?.value ?? '')); setSaved('Reglage applique') })
+      .then(r => { setSwitches(r); setNumDraft(draftsOf(r)); setSaved('Reglage applique') })
       .catch(e => setError(errMsg(e)))
   }
 
@@ -214,8 +219,8 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input style={{ ...inputStyle, width: 70 }} value={reduction} onChange={e => setReduction(e.target.value)} />
-                  <Btn sm ghost onClick={() => saveSwitch(name, Number(reduction))}>Appliquer</Btn>
+                  <input style={{ ...inputStyle, width: 70 }} value={numDraft[name] ?? ''} onChange={e => setNumDraft(d => ({ ...d, [name]: e.target.value }))} />
+                  <Btn sm ghost onClick={() => saveSwitch(name, Number(numDraft[name]))}>Appliquer</Btn>
                 </div>
               )}
               <Btn sm ghost disabled={sw.saved === null || sw.saved === undefined} title="Revenir au defaut" onClick={() => saveSwitch(name, null)}>

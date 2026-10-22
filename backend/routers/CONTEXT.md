@@ -11,3 +11,7 @@ Ajouts : `review` (ADR 0047, `features/review/keyframe.py`) : `GET /review/keyfr
 `POST /review/keyframe/open` (echecs attendus renvoyes en `mode: none` + `code`, pas en HTTP 4xx).
 `production` : `GET /{p}/ref/versions` (versions d'une zone `/ref` depuis son modif log) et
 `POST /{p}/shot-previews` (LAST des zones `/ref` des taches des shots, apercu Timeline ; repli sur le dernier publish image/video de la tache). `GET /{p}/ref/file?scope=publish` streame ce publish. `POST /{p}/montage/export` exporte le montage (ADR 0053).
+`GET /production/{p}` (2026-10-22) passe par `features/production/scan_cache.py` : un seul calcul a la fois par projet
+(single-flight), resultat garde 1 s, ETag + 304 ; `main.py` vide ce cache apres toute requete non-GET hors
+`/activity`, `/logs`, `/calendar`. Le calcul tourne dans `core/executors.HEAVY` (pool borne, separe des feeds).
+`GET /publish/queue` : copies de publish actives / en attente (`features/publisher/copy_limits.py`).

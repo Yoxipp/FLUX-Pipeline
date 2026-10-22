@@ -794,6 +794,18 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   const [txOnly, setTxOnly]           = useSessionState(PUB + 'txOnly', false)
   const [description, setDescription] = useSessionState(PUB + 'description', '')
   const [publishing, setPublishing]   = useState(false)
+  // Publishs queued ahead of ours on this machine, polled every second while one is pending.
+  const [queueWaiting, setQueueWaiting] = useState(0)
+  useEffect(() => {
+    if (!publishing) { setQueueWaiting(0); return }
+    let alive = true
+    const poll = () => api.getPublishQueue()
+      .then(q => { if (alive) setQueueWaiting(q.waiting) })
+      .catch(() => {})
+    void poll()
+    const id = setInterval(() => { void poll() }, 1000)
+    return () => { alive = false; clearInterval(id) }
+  }, [publishing])
   // Optional published-name override (local file). null = follow the token composer.
   const [nameOverride, setNameOverride] = useSessionState<string | null>(PUB + 'nameOverride', null)
 
@@ -2928,6 +2940,12 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
             ? tr(`${localFiles.length} fichiers`, `${localFiles.length} files`)
             : (seqCapable && isSequence) ? `${filename}_v001/${filename}_v001.$F4${exportExt}` : `${filename}_LAST${dcc === 'Fichier local' ? '' : exportExt}`}
         </div>
+        {publishing && queueWaiting > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>
+            {tr(`En attente : ${queueWaiting} publish(s) avant le vôtre sur ce poste`,
+                `Waiting: ${queueWaiting} publish(es) ahead of yours on this machine`)}
+          </span>
+        )}
         <Btn ghost onClick={reset} title={tr('Réinitialiser', 'Reset')}><RotateCcw size={12} strokeWidth={2} /></Btn>
         {dcc === 'ZBrush' && (
           <Btn ghost onClick={handleCancelZBrush}>{tr('Annuler', 'Cancel')}</Btn>

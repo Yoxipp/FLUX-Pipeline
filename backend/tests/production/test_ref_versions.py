@@ -88,6 +88,55 @@ class RefVersions(unittest.TestCase):
         media = ref_media.shot_previews(self.root, "SEQ010", "SHOT020", ["ANIM"])
         self.assertEqual(media[0]["source"], "ref")
 
+    def test_both_origins_returned_with_versions(self):
+        pub = self.root / "shot/SEQ010/SHOT020/anim/main"
+        pub.mkdir(parents=True)
+        for name in ("A_v001.mp4", "A_v002.mp4", "A_LAST.mp4"):
+            (pub / name).write_bytes(b"x")
+        ref_media.deposit(self.root, "shot/SEQ010/SHOT020/anim", "a.png", b"a", "TOM")
+        ref_media.deposit(self.root, "shot/SEQ010/SHOT020/anim", "b.png", b"b", "TOM")
+        media = ref_media.shot_previews(self.root, "SEQ010", "SHOT020", ["ANIM"])
+        self.assertEqual([m["source"] for m in media], ["ref", "publish"])
+        self.assertEqual([v["version"] for v in media[0]["versions"]], ["v002", "v001"])
+        self.assertEqual(media[0]["versions"][1]["file"], "v001.png")
+        self.assertEqual([v["file"] for v in media[1]["versions"]], ["A_v002.mp4", "A_v001.mp4"])
+        # A chosen version streams for both origins.
+        rel = media[0]["rel_path"]
+        self.assertTrue(ref_media.resolve_file(self.root, rel, "v001.png").is_file())
+        self.assertTrue(ref_media.resolve_publish_file(self.root, media[1]["rel_path"], "A_v001.mp4").is_file())
+
+    def test_delete_version_repoints_last(self):
+        for n in ("a.mp4", "b.mp4", "c.mp4"):
+            ref_media.deposit(self.root, self.rel, n, n.encode(), "TOM")
+        ref_dir = self.root / self.rel / "ref"
+        r = ref_media.delete_version(self.root, self.rel, "v003.mp4")
+        self.assertEqual((r["deleted"], r["last"]), ("v003.mp4", "LAST.mp4"))
+        self.assertFalse((ref_dir / "v003.mp4").exists())
+        self.assertEqual((ref_dir / "LAST.mp4").read_bytes(), b"b.mp4")      # newest remaining
+        ref_media.delete_version(self.root, self.rel, "v001.mp4")
+        ref_media.delete_version(self.root, self.rel, "v002.mp4")
+        self.assertEqual(list(ref_dir.glob("LAST.*")), [])                   # none left: cleared
+        self.assertIsNone(ref_media.latest(self.root, self.rel))
+
+    def test_delete_refuses_last_and_escapes(self):
+        ref_media.deposit(self.root, self.rel, "a.mp4", b"a", "TOM")
+        for name in ("LAST.mp4", "../v001.mp4", "v001.exe", ""):
+            with self.assertRaises(ValueError):
+                ref_media.delete_version(self.root, self.rel, name)
+        with self.assertRaises(ValueError):
+            ref_media.delete_version(self.root, "../..", "v001.mp4")
+        with self.assertRaises(FileNotFoundError):
+            ref_media.delete_version(self.root, self.rel, "v009.mp4")
+        self.assertTrue((self.root / self.rel / "ref" / "v001.mp4").exists())
+
+    def test_restore_version_becomes_last(self):
+        ref_media.deposit(self.root, self.rel, "a.mp4", b"first", "TOM")
+        ref_media.deposit(self.root, self.rel, "b.mp4", b"second", "TOM")
+        r = ref_media.restore_version(self.root, self.rel, "v001.mp4", "ADAM")
+        self.assertEqual(r["version"], "v003")
+        self.assertEqual((self.root / self.rel / "ref" / "LAST.mp4").read_bytes(), b"first")
+        self.assertEqual(ref_media.versions(self.root, self.rel)[0]["source_name"], "v001.mp4")
+
     def test_publish_stream_refuses_other_files(self):
         (self.root / "shot").mkdir()
         (self.root / "shot" / "scene_LAST.ma").write_bytes(b"x")

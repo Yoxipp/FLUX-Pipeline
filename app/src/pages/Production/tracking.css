@@ -99,6 +99,16 @@
 .production-number-fields { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
 .production-dialog-actions { display:flex; justify-content:flex-end; gap:8px; padding-top:8px; }
 .production-dialog [role="alert"] { color:#e88b94; }
+.project-settings-dialog { width:min(520px,calc(100vw - 32px)); }
+.project-settings-form { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+.project-settings-form label { display:flex; flex-direction:column; gap:6px; color:var(--ink-2); }
+.project-settings-form label.project-settings-check { flex-direction:row; align-items:center; }
+.project-settings-form label.project-settings-check input { width:auto; }
+.project-settings-form textarea { box-sizing:border-box; width:100%; padding:8px 10px; font:12px var(--mono, monospace); color:var(--ink); background:var(--paper); border:1px solid var(--rule-2); border-radius:5px; resize:vertical; }
+.project-settings-group { display:flex; flex-direction:column; gap:10px; margin:0; padding:10px 12px 12px; border:1px solid var(--rule-2); border-radius:8px; }
+.project-settings-group legend { padding:0 4px; color:var(--ink); font-weight:600; }
+.project-settings-tuple { display:grid; grid-template-columns:repeat(auto-fit,minmax(0,1fr)); gap:8px; }
+.project-settings-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .production-artist-list { display:flex; flex-direction:column; gap:4px; max-height:320px; overflow:auto; margin-top:12px; }
 .production-artist-list button { justify-content:flex-start; width:100%; border:0; background:transparent; }
 .production-artist-list button svg:last-child { margin-left:auto; }

@@ -282,6 +282,12 @@ def _latest_publish_media(project_path: Path, task_rel: str) -> dict | None:
             nums.append(int(m.group("num")))
     ext = best.suffix.lower()
     top = max(nums) if nums else 0
+    by_num: dict[int, str] = {}
+    for f in best.parent.iterdir():
+        m = _PUBLISH_VERSION_RE.match(f.stem)
+        if f.is_file() and m and m.group("prefix") == prefix and f.suffix.lower() == best.suffix.lower():
+            by_num.setdefault(int(m.group("num")), f.name)
+    vlist = [{"version": f"v{n:03d}", "file": by_num[n]} for n in sorted(by_num, reverse=True)]
     return {
         "rel_path": best.parent.resolve().relative_to(project_path.resolve()).as_posix(),
         "file": best.name, "ext": ext, "kind": kind_for_ext(ext),
@@ -290,6 +296,7 @@ def _latest_publish_media(project_path: Path, task_rel: str) -> dict | None:
         "version_count": len(nums),
         "abs_path": str(best),
         "source": "publish",
+        "versions": vlist,
     }
 
 
@@ -317,9 +324,10 @@ def shot_previews(project_path: Path, seq: str, shot: str, tasks: list[str]) -> 
 
     Used by the Production Timeline (click on a shot) and the auto edit: one
     entry per task that holds an image or a video, with its project-relative
-    root (to stream it) and its absolute path (for Keyframe Pro). The /ref drop
-    zone wins; without one, the task's newest published image/video is used
-    (`source: "publish"`), so playblasts published from a DCC show up too.
+    root (to stream it) and its absolute path (for Keyframe Pro). Per task the
+    /ref entry (`source: "ref"`) comes first, then the newest published
+    image/video (`source: "publish"`) when both exist; the front picks the
+    origin. Each entry lists its `versions` ({version, file}, newest first).
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -333,24 +341,24 @@ def shot_previews(project_path: Path, seq: str, shot: str, tasks: list[str]) -> 
             info = latest(project_path, rel)
         except ValueError:
             continue
-        if not info:
-            try:
-                published = _latest_publish_media(project_path, rel)
-            except (ValueError, OSError):
-                published = None
-            if published:
-                out.append({"task": task_u, **published})
-            continue
-        vers = versions(project_path, rel)
-        top = next((v for v in vers if v["latest"]), None)
-        out.append({
-            "task": task_u, "rel_path": rel, **info,
-            "version": top["version"] if top else "",
-            "version_file": top["file"] if top else "",
-            "version_count": len(vers),
-            "abs_path": str(_safe_ref_dir(project_path, rel) / info["file"]),
-            "source": "ref",
-        })
+        if info:
+            vers = versions(project_path, rel)
+            top = next((v for v in vers if v["latest"]), None)
+            out.append({
+                "task": task_u, "rel_path": rel, **info,
+                "version": top["version"] if top else "",
+                "version_file": top["file"] if top else "",
+                "version_count": len(vers),
+                "abs_path": str(_safe_ref_dir(project_path, rel) / info["file"]),
+                "source": "ref",
+                "versions": [{"version": v["version"], "file": v["file"]} for v in vers if v["available"]],
+            })
+        try:
+            published = _latest_publish_media(project_path, rel)
+        except (ValueError, OSError):
+            published = None
+        if published:
+            out.append({"task": task_u, **published})
     return out
 
 
@@ -380,6 +388,47 @@ def resolve_file(project_path: Path, rel_path: str, name: str) -> Path:
     if not target.exists() or not target.is_file():
         raise FileNotFoundError(name)
     return target
+
+
+def _repoint_last(ref_dir: Path) -> str:
+    """Make LAST a copy of the newest remaining vNNN file, or clear it. Returns the LAST file name ('' = none)."""
+    for old in ref_dir.glob("LAST.*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    best: tuple[int, Path] | None = None
+    for f in ref_dir.iterdir():
+        m = _VERSION_RE.match(f.stem)
+        if f.is_file() and m and f.suffix.lower() in ALLOWED_EXTS and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), f)
+    if best is None:
+        return ""
+    last = ref_dir / f"LAST{best[1].suffix.lower()}"
+    shutil.copy2(best[1], last)
+    return last.name
+
+
+def delete_version(project_path: Path, rel_path: str, name: str) -> dict:
+    """Delete one vNNN file of a /ref zone (never LAST by name, never outside /ref).
+
+    LAST is then re-pointed to the newest remaining version, or cleared when none
+    is left. The modif log is kept (the row stays listed as unavailable).
+    """
+    if not _VERSION_RE.match(Path(name or "").stem):
+        raise ValueError("Seules les versions vNNN peuvent être supprimées")
+    target = resolve_file(project_path, rel_path, name)
+    target.unlink()
+    last = _repoint_last(target.parent)
+    return {"ok": True, "deleted": name, "last": last}
+
+
+def restore_version(project_path: Path, rel_path: str, name: str, user: str = "") -> dict:
+    """Make an older version the LAST one by depositing a copy of it as the next version."""
+    if not _VERSION_RE.match(Path(name or "").stem):
+        raise ValueError("Seules les versions vNNN peuvent être restaurées")
+    src = resolve_file(project_path, rel_path, name)
+    return deposit(project_path, rel_path, src.name, src.read_bytes(), user)
 
 
 def export_to(project_path: Path, rel_path: str, name: str, dest_path: str) -> Path:

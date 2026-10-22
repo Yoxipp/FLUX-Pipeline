@@ -27,6 +27,7 @@ from core import api_auth, config
 from core.api_auth import ApiAuthMiddleware
 from core.constants import APP_VERSION
 from core.logger import get_logger
+from features.production import scan_cache as production_scan_cache
 from routers import actions, activity, dcc, files, folder_manager, houdini_work, logs, production, project, publish, review, settings, shelf, system, team_calendar, usd_assembler
 
 log = get_logger("main")
@@ -124,12 +125,19 @@ app.add_middleware(ApiAuthMiddleware)
 # B3 (2026-09-28): measure before optimizing. Every request slower than
 # FLUX_SLOW_REQUEST_MS (default 300) is logged with its duration.
 _SLOW_MS = float(os.environ.get("FLUX_SLOW_REQUEST_MS", "300"))
+_NO_PRODUCTION_IMPACT = ("/activity", "/logs", "/calendar")
 
 
 @app.middleware("http")
 async def log_slow_requests(request, call_next):
     start = time.perf_counter()
     response = await call_next(request)
+    # Any local write may change what GET /production shows (folders, publishes,
+    # production.json): drop the short-lived production cache once it is done.
+    # Chat / read-state / logs / calendar writes never touch production data.
+    if request.method not in ("GET", "HEAD", "OPTIONS") and \
+            not request.url.path.startswith(_NO_PRODUCTION_IMPACT):
+        production_scan_cache.invalidate_all()
     ms = (time.perf_counter() - start) * 1000
     if ms >= _SLOW_MS:
         log.warning("[slow] %s %s %.0f ms", request.method, request.url.path, ms)

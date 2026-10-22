@@ -82,7 +82,6 @@ body {
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   user-select: none;
-  -webkit-app-region: no-drag;
 }
 
 /* ─── scrollbars ── */

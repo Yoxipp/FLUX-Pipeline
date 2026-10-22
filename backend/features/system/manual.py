@@ -34,7 +34,10 @@ def ensure_manual(doc_dir: Path, source: Path = MANUAL_SOURCE,
         return None
     dest = doc_dir / MANUAL_FILENAME
     try:
-        if not (dest.is_file() and dest.read_bytes() == source.read_bytes()):
+        # Size first: a different size means a different manual without reading the
+        # copy on the share (every backend start runs this).
+        if not (dest.is_file() and dest.stat().st_size == source.stat().st_size
+                and dest.read_bytes() == source.read_bytes()):
             doc_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, dest)
             log.info("[FLUX] Manual copied to %s", dest)

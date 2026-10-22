@@ -25,41 +25,50 @@ log = get_logger(__name__)
 SCHEMA_VERSION = 1
 
 # No Python expressions in the config (ADR 0006): plain JSON values only.
+# The "advanced settings" window of a new project is generated from this schema:
+# every property shows up with its "title", except those flagged "x-flux-hidden"
+# (identity or settings edited elsewhere). A new option = a property here (with a
+# title) + its default in default_project_config().
 PROJECT_SCHEMA: dict = {
     "type": "object",
     "required": ["project_id", "schema_version", "usd"],
     "properties": {
-        "project_id":     {"type": "string", "minLength": 1},
-        "schema_version": {"type": "integer", "minimum": 1},
-        "created_at":     {"type": "string"},
-        "fps":            {"type": "number", "exclusiveMinimum": 0},
+        "project_id":     {"type": "string", "minLength": 1, "x-flux-hidden": True},
+        "schema_version": {"type": "integer", "minimum": 1, "x-flux-hidden": True},
+        "created_at":     {"type": "string", "x-flux-hidden": True},
+        "fps":            {"type": "number", "exclusiveMinimum": 0, "title": "FPS"},
         "resolution": {
-            "type": "array", "minItems": 2, "maxItems": 2,
+            "type": "array", "minItems": 2, "maxItems": 2, "title": "Résolution",
             "items": {"type": "integer", "minimum": 1},
         },
         "usd": {
-            "type": "object",
+            "type": "object", "title": "USD",
             "required": ["meters_per_unit", "up_axis"],
             "properties": {
-                "meters_per_unit": {"type": "number", "exclusiveMinimum": 0},
-                "up_axis":         {"enum": ["Y", "Z"]},
+                "meters_per_unit": {"type": "number", "exclusiveMinimum": 0, "title": "Mètres par unité"},
+                "up_axis":         {"enum": ["Y", "Z"], "title": "Axe vertical"},
             },
         },
-        "ocio_config": {"type": "string"},
-        "env":         {"type": "object", "additionalProperties": {"type": "string"}},
-        "storage":     {"type": "object"},
+        "ocio_config": {"type": "string", "title": "Config OCIO"},
+        "env":         {"type": "object", "additionalProperties": {"type": "string"},
+                        "title": "Variables d'environnement"},
+        "storage":     {"type": "object", "x-flux-hidden": True},
         # Painter export presets of the project (Publisher offers only those).
         "texturing": {
-            "type": "object",
-            "properties": {"painter_presets": {"type": "array", "items": {"type": "string"}}},
+            "type": "object", "title": "Texturing",
+            "properties": {"painter_presets": {"type": "array", "items": {"type": "string"},
+                                               "title": "Presets d'export Painter"}},
         },
         # Work profiles shared by the project (role presets, see sanitize_work_profiles).
         "ui": {
-            "type": "object",
+            "type": "object", "x-flux-hidden": True,
             "properties": {"work_profiles": {"type": "array", "items": {"type": "object"}}},
         },
     },
 }
+
+# Keys the settings window can never change (project identity, ADR 0004).
+_PROTECTED_KEYS = ("project_id", "schema_version", "created_at")
 
 MAX_WORK_PROFILES = 20
 MAX_PROFILE_NAME = 40
@@ -160,6 +169,27 @@ def write_work_profiles(project_path: Path, profiles: object) -> list[dict]:
     if not write_json(project_config_path(project_path), cfg):
         raise OSError("project.json : ecriture impossible")
     return clean
+
+
+def write_project_settings(project_path: Path, settings: object) -> dict:
+    """Merge *settings* (top-level keys) into project.json and return the new config.
+
+    Identity keys are never taken from *settings*. Raises ValueError when the result
+    does not match PROJECT_SCHEMA, OSError when the file cannot be written.
+    """
+    if not isinstance(settings, dict):
+        raise ValueError("settings must be a JSON object")
+    cfg, _warnings = ensure_project_config(project_path)
+    merged = dict(cfg)
+    for key, value in settings.items():
+        if key not in _PROTECTED_KEYS:
+            merged[str(key)] = value
+    errors = validate_project_config(merged)
+    if errors:
+        raise ValueError("; ".join(errors))
+    if not write_json(project_config_path(project_path), merged):
+        raise OSError("project.json : ecriture impossible")
+    return merged
 
 
 def ensure_project_config(project_path: Path) -> tuple[dict, list[str]]:

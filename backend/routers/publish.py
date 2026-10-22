@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core import config
+from core.executors import HEAVY
 from core.logger import get_logger
 from core.paths import get_project_path
 from features.publisher.publish_core import publish_file
@@ -50,6 +51,14 @@ def publish_destination(project: str, base: str, ext: str, sequence: bool = Fals
     return info
 
 
+@router.get("/queue")
+def publish_queue() -> dict:
+    """Publish copies running / waiting in this backend (copy_limits caps)."""
+    from features.publisher import copy_limits
+
+    return copy_limits.status()
+
+
 @router.post("", response_model=PublishResult)
 async def publish(req: PublishRequest) -> PublishResult:
     """Publish a file into the pipeline folder structure."""
@@ -82,14 +91,14 @@ async def publish(req: PublishRequest) -> PublishResult:
         from flux_actions.runner import run_publish_action
 
         dest = await loop.run_in_executor(
-            None,
+            HEAVY,
             lambda: run_publish_action(
                 source, project_path, req.description, user, req.project_name, req.target_name
             ),
         )
     else:
         dest = await loop.run_in_executor(
-            None,
+            HEAVY,
             lambda: publish_file(source, project_path, req.description, user, req.project_name, req.target_name),
         )
 

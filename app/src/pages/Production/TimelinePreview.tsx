@@ -17,15 +17,19 @@ import type { ProductionShot, ProductionState } from '../../types'
 import type { Selection } from './Production'
 import './tracking.css'
 import {
-  buildMontage, mediaGroups, pickMedia, previewCandidates,
-  type MontageClip, type PreviewMedia, type PreviewSource,
+  applyVersion, buildMontage, mediaGroups, pickMedia, previewCandidates, shotOrigin,
+  type MontageClip, type PreviewMedia, type PreviewOrigin, type PreviewSource,
 } from './previewEdit'
+
+const ORIGIN_LABELS: Array<{ id: PreviewOrigin; label: string }> = [
+  { id: 'auto', label: 'Auto' }, { id: 'ref', label: 'Ref' }, { id: 'publish', label: 'Publish' },
+]
 
 // mov: H.264 playblasts play in Chromium; a codec it cannot decode (ProRes) ends in onError.
 const PLAYABLE = ['mp4', 'mov', 'webm', 'ogv', 'ogg', 'm4v', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg']
 const playable = (file: string) => PLAYABLE.includes(file.split('.').pop()?.toLowerCase() ?? '')
 
-export function TimelinePreview({ project, state, selection, previews, loading, source, setSource, fps, framesOf, montage, setMontage, onPlayingShot, setShotSource }: {
+export function TimelinePreview({ project, state, selection, previews, loading, source, setSource, origin, setOrigin, rev, fps, framesOf, montage, setMontage, onPlayingShot, setShotSource, setShotPreview }: {
   project:   string
   state:     ProductionState
   selection: Selection
@@ -33,12 +37,16 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
   loading:   boolean
   source:    PreviewSource
   setSource: (s: PreviewSource) => void
-  fps:       number
+  rev:       number                              // bumps when a /ref zone changes (cache buster)
+  origin:    PreviewOrigin
+  setOrigin: (o: PreviewOrigin) => void
+  fps:      number
   framesOf:  (shot: ProductionShot) => number
   montage:   { seqId?: string } | null          // null = shot preview
   setMontage: (m: { seqId?: string } | null) => void
   onPlayingShot: (id: string | null) => void
   setShotSource: (shotId: string, group: string | null) => void   // per-shot department of the edit (shared)
+  setShotPreview: (shotId: string, patch: { preview_origin?: PreviewOrigin; preview_version?: string }) => void   // per-shot origin / version (shared)
 }) {
   const shot = selection.kind === 'shot' ? state.shots.find(s => s.id === selection.id) : undefined
   const seq = selection.kind === 'seq' ? state.sequences.find(s => s.id === selection.id) : undefined
@@ -53,10 +61,19 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
     return out
   }, [state, shot, previews, source])
   const groupsOf = (s: ProductionShot) => mediaGroups(state, [s], previews)
+  // Versions offered for a shot: those of the media it shows (its source + origin), newest first.
+  const versionsOf = (s: ProductionShot) => {
+    const media = pickMedia(previews[s.id] ?? [], previewCandidates(state, s), s.preview_source || (source === 'all' ? 'auto' : source), shotOrigin(s, origin))[0]
+    return media?.versions ?? []
+  }
+  const shotPickers = (s: ProductionShot) => (<>
+    <ShotSourcePicker shot={s} groups={groupsOf(s)} onPick={g => setShotSource(s.id, g)} />
+    <ShotOriginPicker shot={s} versions={versionsOf(s)} onPick={patch => setShotPreview(s.id, patch)} />
+  </>)
 
   const clips = useMemo(
-    () => (montage ? buildMontage(state, previews, source, fps, framesOf, montage.seqId) : []),
-    [montage, state, previews, source, fps, framesOf],
+    () => (montage ? buildMontage(state, previews, source, fps, framesOf, montage.seqId, origin) : []),
+    [montage, state, previews, source, origin, fps, framesOf],
   )
 
   const sendToKeyframe = (list: MontageClip[], title: string) => {
@@ -69,7 +86,7 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
   // Montage open: its scope; else the selected sequence (or the shot's), else the film.
   const scope = () => {
     const seqId = montage ? montage.seqId : (seq?.id ?? shotSeq?.id)
-    const list = buildMontage(state, previews, source, fps, framesOf, seqId)
+    const list = buildMontage(state, previews, source, fps, framesOf, seqId, origin)
     const name = seqId ? state.sequences.find(s => s.id === seqId)?.name ?? 'Montage' : `${project} montage`
     return { list, name }
   }
@@ -110,6 +127,12 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
             {sources.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
         </label>
+        <label className="timeline-preview-source" title="Origine des médias : Auto (ref sinon publish), Ref (dépôt /ref), Publish (publiés)">
+          <span>Origine</span>
+          <select value={origin} onChange={e => setOrigin(e.target.value as PreviewOrigin)} aria-label="Origine de l’aperçu">
+            {ORIGIN_LABELS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+        </label>
         <span style={{ flex: 1 }} />
         {montage
           ? <button className="timeline-preview-btn" onClick={() => setMontage(null)}><X size={11} /> Fermer le montage</button>
@@ -134,17 +157,18 @@ export function TimelinePreview({ project, state, selection, previews, loading, 
       </div>
 
       {montage ? (
-        <MontagePlayer project={project} clips={clips} loading={loading} onPlayingShot={onPlayingShot}
+        <MontagePlayer project={project} rev={rev} clips={clips} loading={loading} onPlayingShot={onPlayingShot}
           shotPicker={c => {
             const s = state.shots.find(x => x.id === c.shotId)
-            return s ? <ShotSourcePicker shot={s} groups={groupsOf(s)} onPick={g => setShotSource(s.id, g)} /> : null
+            return s ? shotPickers(s) : null
           }} />
       ) : shot ? (<>
         <div className="timeline-preview-shotpick">
-          <ShotSourcePicker shot={shot} groups={groupsOf(shot)} onPick={g => setShotSource(shot.id, g)} />
+          {shotPickers(shot)}
         </div>
-        <ShotPreview project={project} label={`${shotSeq?.name ?? ''} ${shot.name}`} loading={loading}
-          media={pickMedia(previews[shot.id] ?? [], previewCandidates(state, shot), source)}
+        <ShotPreview project={project} rev={rev} label={`${shotSeq?.name ?? ''} ${shot.name}`} loading={loading}
+          media={pickMedia(previews[shot.id] ?? [], previewCandidates(state, shot), source, shotOrigin(shot, origin))
+            .map(m => applyVersion(m, shot.preview_version))}
           empty={source === 'auto' || source === 'all' ? 'Rien de publié en Production pour ce shot'
             : `Rien de publié en ${sources.find(o => o.id === source)?.label ?? source} pour ce shot`} />
       </>) : (
@@ -173,8 +197,38 @@ function ShotSourcePicker({ shot, groups, onPick }: {
   )
 }
 
-function ShotPreview({ project, label, media, loading, empty }: {
-  project: string; label: string; loading: boolean; empty: string
+// Origin and version this shot uses in the edit (shared in the project). Missing
+// = inherit the global origin / LAST. A version absent from the list falls back to LAST.
+function ShotOriginPicker({ shot, versions, onPick }: {
+  shot: ProductionShot; versions: Array<{ version: string; file: string }>
+  onPick: (patch: { preview_origin?: PreviewOrigin; preview_version?: string }) => void
+}) {
+  const origin = shot.preview_origin ?? ''
+  const version = shot.preview_version ?? ''
+  const missing = !!version && !versions.some(v => v.version === version)
+  return (<>
+    <label className="timeline-preview-source" title="Origine des médias de ce plan (partagé avec l'équipe)">
+      <span>Origine</span>
+      <select value={origin} onChange={e => onPick({ preview_origin: (e.target.value || undefined) as PreviewOrigin | undefined, preview_version: undefined })}
+        aria-label={`Origine de ${shot.name} dans le montage`}>
+        <option value="">Origine globale</option>
+        {ORIGIN_LABELS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+    </label>
+    <label className="timeline-preview-source" title="Version utilisée pour ce plan (LAST par défaut)">
+      <span>Version</span>
+      <select value={version} onChange={e => onPick({ preview_version: e.target.value || undefined })}
+        aria-label={`Version de ${shot.name} dans le montage`}>
+        <option value="">LAST</option>
+        {versions.map(v => <option key={v.version} value={v.version}>{v.version}</option>)}
+        {missing && <option value={version}>{version} (absente, LAST)</option>}
+      </select>
+    </label>
+  </>)
+}
+
+function ShotPreview({ rev, project, label, media, loading, empty }: {
+  rev: number; project: string; label: string; loading: boolean; empty: string
   media: Array<PreviewMedia & { group: string; label: string }>
 }) {
   const [failed, setFailed] = useState<Set<string>>(new Set())
@@ -187,9 +241,9 @@ function ShotPreview({ project, label, media, loading, empty }: {
             {!playable(m.file) || failed.has(m.rel_path + m.file)
               ? <div className="timeline-preview-gap"><Film size={16} /> Format non lisible dans FLUX (Keyframe)</div>
               : m.kind === 'video'
-                ? <video key={m.rel_path + m.version} src={api.refFileUrl(project, m.rel_path, m.file, m.source)} controls muted playsInline preload="metadata"
+                ? <video key={m.rel_path + m.version} src={api.refFileUrl(project, m.rel_path, m.file, m.source, rev)} controls muted playsInline preload="metadata"
                     onError={() => setFailed(f => new Set(f).add(m.rel_path + m.file))} />
-                : <img src={api.refFileUrl(project, m.rel_path, m.file, m.source)} alt={`${label} ${m.label}`} />}
+                : <img src={api.refFileUrl(project, m.rel_path, m.file, m.source, rev)} alt={`${label} ${m.label}`} />}
           </div>
           <figcaption>
             <strong>{m.label}</strong>
@@ -210,8 +264,8 @@ function ShotPreview({ project, label, media, loading, empty }: {
 
 // Shots one after the other. A video plays up to the shot duration (cut if longer);
 // an image, a gap or an unreadable file holds for the shot duration.
-function MontagePlayer({ project, clips, loading, onPlayingShot, shotPicker }: {
-  project: string; clips: MontageClip[]; loading: boolean; onPlayingShot: (id: string | null) => void
+function MontagePlayer({ rev, project, clips, loading, onPlayingShot, shotPicker }: {
+  rev: number; project: string; clips: MontageClip[]; loading: boolean; onPlayingShot: (id: string | null) => void
   shotPicker: (clip: MontageClip) => ReactNode
 }) {
   const [index, setIndex] = useState(0)
@@ -251,12 +305,12 @@ function MontagePlayer({ project, clips, loading, onPlayingShot, shotPicker }: {
     <div className="timeline-montage">
       <div className="timeline-preview-media montage">
         {isVideo ? (
-          <video ref={videoRef} key={clip.shotId} src={api.refFileUrl(project, clip.media!.rel_path, clip.media!.file, clip.media!.source)}
+          <video ref={videoRef} key={clip.shotId} src={api.refFileUrl(project, clip.media!.rel_path, clip.media!.file, clip.media!.source, rev)}
             autoPlay={playing} muted playsInline
             onTimeUpdate={e => { if (e.currentTarget.currentTime >= clip.seconds) next() }}
             onEnded={e => onVideoEnded(e.currentTarget)} onError={() => setFailed(f => new Set(f).add(clip.shotId))} />
         ) : clip.media && playable(clip.media.file) ? (
-          <img key={clip.shotId} src={api.refFileUrl(project, clip.media.rel_path, clip.media.file, clip.media.source)} alt={clip.shot} />
+          <img key={clip.shotId} src={api.refFileUrl(project, clip.media.rel_path, clip.media.file, clip.media.source, rev)} alt={clip.shot} />
         ) : (
           <div className="timeline-preview-gap">{clip.media ? 'Format non lisible dans FLUX (Keyframe ou Exporter)' : 'Rien de publié'}</div>
         )}

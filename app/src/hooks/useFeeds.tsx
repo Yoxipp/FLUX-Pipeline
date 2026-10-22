@@ -24,6 +24,7 @@ import { api } from '../api/client'
 import {
   FEED_POLL_INTERVAL_MS, IDLE_AFTER_MS, IDLE_POLL_INTERVAL_MS,
 } from '../lib/pollIntervals'
+import { adaptiveDelay, jitter, timed } from '../lib/adaptivePoll'
 import { useProject } from '../ProjectContext'
 import type { ActivityEvent, ChatMention, FollowedShot } from '../types'
 
@@ -71,7 +72,7 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
       return
     }
     try {
-      const r = await api.getNotifications(current, 'global', ACTIVITY_LIMIT)
+      const r = await timed('activity', api.getNotifications(current, 'global', ACTIVITY_LIMIT))
       if (projectRef.current !== current) return   // project switched meanwhile
       setEvents(r.events)
       setFollowedShots(r.followed_shots)
@@ -87,7 +88,7 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
     try {
       // No unread_only filter: the full list feeds the Activity page display,
       // while unread_count + the read flag feed the badge and the watcher.
-      const r = await api.getMentionsConditional(mentionsEtag.current)
+      const r = await timed('mentions', api.getMentionsConditional(mentionsEtag.current))
       mentionsEtag.current = r.etag
       if (r.notModified || !r.data) {
         setMentionsLoaded(true)
@@ -120,6 +121,7 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
     let mode: 'active' | 'idle' | 'paused' = 'active'
     let lastActivity = Date.now()
     let stopped = false
+    let firstTick = true   // jitter only the first scheduled tick (desync machines)
 
     const refetchAll = () => { void refreshActivity(); void refreshMentions() }
     const clear = () => { if (timer) { clearTimeout(timer); timer = undefined } }
@@ -129,7 +131,10 @@ export function FeedsProvider({ children }: { children: ReactNode }) {
       if (stopped || document.hidden) { mode = 'paused'; return }
       const idle = Date.now() - lastActivity >= IDLE_AFTER_MS
       mode = idle ? 'idle' : 'active'
-      const delay = idle ? IDLE_POLL_INTERVAL_MS : FEED_POLL_INTERVAL_MS
+      const base = idle ? IDLE_POLL_INTERVAL_MS : FEED_POLL_INTERVAL_MS
+      // Adaptive backoff: slow answers stretch the interval (x2 up to x8).
+      const delay = adaptiveDelay(['activity', 'mentions'], base) + (firstTick ? jitter(base) : 0)
+      firstTick = false
       timer = setTimeout(() => {
         refetchAll()
         schedule()   // recompute the mode AFTER each tick (may have gone idle)

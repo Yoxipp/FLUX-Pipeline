@@ -12,11 +12,12 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from core import config
 from core.constants import DEFAULT_TYPE_TOKENS, JSON_MODIF_LOG
+from core.executors import HEAVY
 from core.logger import get_logger
 from core.paths import get_project_path
 from features.activity.activity_reader import get_all_events
@@ -27,11 +28,13 @@ from core.constants import DEFAULT_CLASS_TOKENS
 from features.production import archive as prod_archive
 from features.production import lock as prod_lock
 from features.production import production_store as store
+from features.production import scan_cache
 from features.production import montage_export, ref_media
 from features.production.disk_scan import scan_project_assets, scan_project_shots
 from features.production.reconcile import reconcile
 from features.production.sync import sync_production_to_disk
 from features.publisher.modif_log import read_logs
+from routers.activity import _not_modified
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -133,13 +136,36 @@ def _attach_publish_comments(project_path, publishes_by_task: dict) -> None:
 
 
 @router.get("/{project}")
-async def get_production(project: str) -> dict:
+async def get_production(project: str, request: Request):
     """Load production.json + reconcile against publish events.
 
     Auto-created entities (from reconcile) are persisted before returning so
     later edits (renaming a task's label, etc.) survive.
+
+    Served through scan_cache (single-flight + 1 s TTL, dropped on any local
+    write) and answered 304 when the client's ETag still matches.
     """
     _ensure_project(project)
+    try:
+        result, etag = await scan_cache.get(project, lambda: _compute_production(project))
+    except RuntimeError as e:
+        # FLUX_ROOT not yet configured — return an empty shell rather than a 500.
+        log.warning("Production read fallback: %s", e)
+        return {
+            "production": store.default_schema(),
+            "publishes_by_task": {},
+            "publishes_unmatched": [],
+            "sequences_on_disk": [],
+            "shots_on_disk": [],
+        }
+    if _not_modified(request, etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    return JSONResponse(result, headers={"ETag": etag})
+
+
+async def _compute_production(project: str) -> dict:
+    """The full production read (disk scan + reconcile), run in a worker thread."""
+    loop = asyncio.get_running_loop()
     loop = asyncio.get_running_loop()
 
     def _do() -> dict:
@@ -205,18 +231,7 @@ async def get_production(project: str) -> dict:
             "shots_on_disk": [list(x) for x in shots_on_disk],
         }
 
-    try:
-        return await loop.run_in_executor(None, _do)
-    except RuntimeError as e:
-        # FLUX_ROOT not yet configured — return an empty shell rather than a 500.
-        log.warning("Production read fallback: %s", e)
-        return {
-            "production": store.default_schema(),
-            "publishes_by_task": {},
-            "publishes_unmatched": [],
-            "sequences_on_disk": [],
-            "shots_on_disk": [],
-        }
+    return await loop.run_in_executor(HEAVY, _do)
 
 
 
@@ -795,6 +810,42 @@ async def stream_ref(project: str, rel_path: str = "", name: str = "", scope: st
         raise HTTPException(status_code=404, detail="Fichier introuvable")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, media_type=media_type)
+
+
+class RefFileOp(BaseModel):
+    rel_path: str = ""
+    name: str            # vNNN.<ext>
+
+
+@router.post("/{project}/ref/delete")
+async def delete_ref_version(project: str, payload: RefFileOp) -> dict:
+    """Delete one version of a /ref zone; LAST is re-pointed to the newest remaining one."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, lambda: ref_media.delete_version(project_path, payload.rel_path, payload.name))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+
+
+@router.post("/{project}/ref/restore")
+async def restore_ref_version(project: str, payload: RefFileOp) -> dict:
+    """Set an older version as LAST (re-deposited as the next version)."""
+    _ensure_project(project)
+    project_path = get_project_path(project)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, lambda: ref_media.restore_version(
+                project_path, payload.rel_path, payload.name, config.get_current_user() or ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
 
 
 @router.post("/{project}/ref/export")

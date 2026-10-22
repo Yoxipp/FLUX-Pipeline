@@ -30,6 +30,9 @@ SWITCHES: dict[str, tuple[str, str]] = {
     "proxy_usd":               ("FLUX_PROXY_USD", "bool"),
     "proxy_reduction":         ("FLUX_PROXY_REDUCTION", "reduction"),
     "portable_paths":          ("FLUX_PORTABLE_PATHS", "bool"),
+    # Publish copy caps of this machine (features/publisher/copy_limits.py).
+    "publish_max_parallel":    ("FLUX_PUBLISH_MAX_PARALLEL", "count"),
+    "publish_max_mbps":        ("FLUX_PUBLISH_MAX_MBPS", "mbps"),
 }
 
 # Env vars present when the backend started (dev .bat, CI): restored when a saved value is cleared.
@@ -38,6 +41,7 @@ _launch_env: dict[str, str] = {}
 
 def _current(name: str) -> Any:
     """Effective value, as the publish code sees it right now."""
+    from features.publisher import copy_limits
     from flux_actions import switch
 
     return {
@@ -46,11 +50,17 @@ def _current(name: str) -> Any:
         "proxy_usd": switch.proxy_usd_enabled,
         "proxy_reduction": switch.proxy_usd_reduction,
         "portable_paths": switch.portable_paths_enabled,
+        "publish_max_parallel": copy_limits.max_parallel,
+        "publish_max_mbps": copy_limits.max_mbps,
     }[name]()
 
 
 def _to_env(kind: str, value: Any) -> str:
-    return ("1" if value else "0") if kind == "bool" else repr(float(value))
+    if kind == "bool":
+        return "1" if value else "0"
+    if kind == "count":
+        return str(int(value))
+    return repr(float(value))
 
 
 def _check(name: str, value: Any) -> Any:
@@ -63,7 +73,17 @@ def _check(name: str, value: Any) -> Any:
         if not isinstance(value, bool):
             raise ValueError(f"{name} : vrai ou faux attendu")
         return value
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 < float(value) < 1.0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} : nombre attendu")
+    if kind == "count":
+        if int(value) != value or not 1 <= value <= 64:
+            raise ValueError(f"{name} : entier entre 1 et 64 attendu")
+        return int(value)
+    if kind == "mbps":
+        if not 0.0 <= float(value) <= 10000.0:
+            raise ValueError(f"{name} : debit entre 0 (desactive) et 10000 Mo/s attendu")
+        return float(value)
+    if not 0.0 < float(value) < 1.0:
         raise ValueError(f"{name} : nombre entre 0 et 1 (exclus) attendu")
     return float(value)
 

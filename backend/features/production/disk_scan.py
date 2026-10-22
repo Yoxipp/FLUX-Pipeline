@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from core.constants import DEFAULT_TYPE_TOKENS
@@ -65,8 +67,9 @@ def scan_project_assets(
         class_dir = (project_path / rel).resolve()
         if not class_dir.is_dir():
             continue
-        for asset_dir in _sorted_subdirs(class_dir):
-            tasks = _walk_asset(asset_dir, disk_to_type)
+        asset_dirs = _sorted_subdirs(class_dir)
+        walked = _POOL.map(lambda d: _walk_asset(d, disk_to_type), asset_dirs)
+        for asset_dir, tasks in zip(asset_dirs, walked):
             if not tasks:
                 # Asset dir exists but has no non-empty task folder → still
                 # surface the asset (empty task list) so the artist sees it
@@ -137,20 +140,12 @@ def scan_project_shots(
             # Surface the seq even when it holds no shots yet.
             seq_key: tuple[str, str | None] = (seq_dir.name.upper(), None)
             out_map.setdefault(seq_key, {"seq": seq_key[0], "shot": None, "tasks": []})
-            for shot_dir in _sorted_subdirs(seq_dir):
-                if not shot_dir.name.upper().startswith("SHOT"):
-                    continue
+            shot_dirs = [d for d in _sorted_subdirs(seq_dir) if d.name.upper().startswith("SHOT")]
+            walked = _POOL.map(lambda d: _walk_shot(d, class_task_map), shot_dirs)
+            for shot_dir, shot_tasks in zip(shot_dirs, walked):
                 key: tuple[str, str | None] = (seq_dir.name.upper(), shot_dir.name.upper())
                 entry = out_map.setdefault(key, {"seq": key[0], "shot": key[1], "tasks": []})
-                for task_dir in _sorted_subdirs(shot_dir):
-                    if task_dir.name.lower() in _NOT_TASK_DIRS or not _dir_has_child(task_dir):
-                        continue
-                    token = class_task_map.get(task_dir.name.lower(), task_dir.name.upper())
-                    subtasks = [
-                        d.name.upper()
-                        for d in _sorted_subdirs(task_dir)
-                        if d.name.lower() not in _INSTANCE_IGNORED
-                    ]
+                for token, subtasks in shot_tasks:
                     # Merge if two prefixes hit the same shot with same task token.
                     existing = next((t for t in entry["tasks"] if t["token"] == token), None)
                     if existing is None:
@@ -164,16 +159,39 @@ def scan_project_shots(
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+# Asset / shot folders are listed concurrently: on the share each listing waits a
+# network round trip, so a few threads cut the scan time without more requests.
+_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="flux-disk-scan")
+
+
+def _walk_shot(shot_dir: Path, class_task_map: dict[str, str]) -> list[tuple[str, list[str]]]:
+    """(task token, subtasks) of one shot directory, non-empty task folders only."""
+    found: list[tuple[str, list[str]]] = []
+    for task_dir in _sorted_subdirs(shot_dir):
+        if task_dir.name.lower() in _NOT_TASK_DIRS:
+            continue
+        has_child, task_subdirs = _list_dir(task_dir)
+        if not has_child:
+            continue
+        token = class_task_map.get(task_dir.name.lower(), task_dir.name.upper())
+        found.append((token, [d.name.upper() for d in task_subdirs
+                              if d.name.lower() not in _INSTANCE_IGNORED]))
+    return found
+
+
 def _walk_asset(asset_dir: Path, disk_to_type: dict[str, str]) -> list[dict]:
     """Return the tasks (with subtasks) for one asset directory."""
     tasks: list[dict] = []
     for task_dir in _sorted_subdirs(asset_dir):
-        if task_dir.name.lower() in _NOT_TASK_DIRS or not _dir_has_child(task_dir):
+        if task_dir.name.lower() in _NOT_TASK_DIRS:
+            continue
+        has_child, task_subdirs = _list_dir(task_dir)
+        if not has_child:
             continue
         token = disk_to_type.get(task_dir.name.lower(), task_dir.name.upper())
         subtasks = [
             d.name.upper()
-            for d in _sorted_subdirs(task_dir)
+            for d in task_subdirs
             if d.name.lower() not in _INSTANCE_IGNORED
         ]
         tasks.append({"token": token.upper(), "subtasks": subtasks})
@@ -195,15 +213,30 @@ def _is_templated(rel: str) -> bool:
     return "{" in rel or "}" in rel
 
 
-def _sorted_subdirs(root: Path) -> list[Path]:
+# os.scandir, not Path.iterdir + is_dir: on Windows the directory listing already
+# carries the entry type, so a folder costs one network round trip on the share
+# instead of one per child (2026-10-22: scan ~850 ms -> see school_opti_prompt).
+
+def _list_dir(root: Path) -> tuple[bool, list[Path]]:
+    """(has any child, sorted child directories) of *root*, in one listing."""
     try:
-        return sorted((d for d in root.iterdir() if d.is_dir()), key=lambda p: p.name.lower())
+        with os.scandir(root) as it:
+            entries = list(it)
     except OSError:
-        return []
+        return False, []
+    dirs = []
+    for e in entries:
+        try:
+            if e.is_dir():
+                dirs.append(Path(e.path))
+        except OSError:
+            continue
+    return bool(entries), sorted(dirs, key=lambda p: p.name.lower())
+
+
+def _sorted_subdirs(root: Path) -> list[Path]:
+    return _list_dir(root)[1]
 
 
 def _dir_has_child(root: Path) -> bool:
-    try:
-        return any(True for _ in root.iterdir())
-    except OSError:
-        return False
+    return _list_dir(root)[0]

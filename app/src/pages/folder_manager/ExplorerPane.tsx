@@ -9,7 +9,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Copy, Lock, Search, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Lock, Plus, Search, X } from 'lucide-react'
+import { NewProjectDialog } from '../Production/CreateMenu'
 import { api } from '../../api/client'
 import type { LoadTargets } from '../../api/client'
 import { useProject } from '../../ProjectContext'
@@ -54,6 +55,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
   const { tr } = useTr()
   const navigateRoute = useNavigate()
   const { project: activeProject, refreshProjects } = useProject()
+  const [newProject, setNewProject] = useState(false)
 
   // Session-kept (U3): coming back to the Folder Manager reopens the same folder.
   // View 0 keeps the historical keys, so the single view behaves as before.
@@ -468,7 +470,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
       const t = e.target as HTMLElement | null
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
       if (typing || editingPath) return
-      if (renameTarget || moveTarget || deleteConfirm) return
+      if (renameTarget || moveTarget || deleteConfirm || newProject) return
       if (e.key === 'Delete') {
         if (selectedNames.size === 0 || nav.kind !== 'inside') return
         const targets = items.filter(it => selectedNames.has(it.name))
@@ -488,7 +490,7 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
     document.addEventListener('keydown', h)
     return () => document.removeEventListener('keydown', h)
   }, [active, copySelection, cutSelection, pasteClipboard, selectAll, editingPath, renameTarget, moveTarget,
-      deleteConfirm, selectedNames, items, nav, isItemLocked, fm])
+      deleteConfirm, newProject, selectedNames, items, nav, isItemLocked, fm])
 
   // Close context menu on outside click / Escape
   useEffect(() => {
@@ -632,6 +634,16 @@ export const ExplorerPane = forwardRef<PaneHandle, Props>(function ExplorerPane(
               </div>
             </div>
           )}
+
+          {/* Root of the projects: create a project (same window as Production) */}
+          {nav.kind === 'root' && (
+            <button type="button" onClick={e => { e.stopPropagation(); setNewProject(true) }}
+              title={tr('Créer un projet', 'Create a project')}
+              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, height: 24, padding: '0 8px', fontSize: 11, fontFamily: 'var(--sans)', color: 'var(--ink-2)', background: 'var(--paper-2)', border: '1px solid var(--rule-2)', borderRadius: 5, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <Plus size={11} strokeWidth={2} /> {tr('Nouveau projet', 'New project')}
+            </button>
+          )}
+          {newProject && <NewProjectDialog onClose={() => setNewProject(false)} onDone={() => void loadItems()} />}
 
           {/* Search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, border: '1px solid var(--rule-2)', padding: '0 6px', height: 24, flex: '0 1 150px', minWidth: 70, background: 'var(--bg-deep)', borderRadius: 5, boxShadow: 'var(--shadow-inset)' }}>

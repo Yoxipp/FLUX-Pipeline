@@ -138,7 +138,8 @@ async function createWindow(): Promise<void> {
       })
     }
     tryLoad()
-    win.webContents.openDevTools()
+    // Detached: docked DevTools break -webkit-app-region drag on a frameless window (Windows).
+    win.webContents.openDevTools({ mode: 'detach' })
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html')).catch((err) =>
       console.error('[Electron] loadFile failed:', err))

@@ -605,6 +605,10 @@ export const api = {
     apiCall<{ events: ActivityEvent[]; followed_shots: FollowedShot[]; user: string }>(
       'GET', `/activity/notifications?${new URLSearchParams({ project, scope, limit: String(limit) })}`),
 
+  // Publish copies running / waiting on this machine (shown while a publish is pending).
+  getPublishQueue: () =>
+    apiCall<{ active: number; waiting: number; max_parallel: number; max_mbps: number }>('GET', '/publish/queue'),
+
   getMentionsConditional: (etag?: string) =>
     apiGetConditional<{ mentions: ChatMention[]; unread_count: number }>(
       '/activity/chat/mentions', etag),
@@ -697,6 +701,13 @@ export const api = {
     apiCall<{ profiles: unknown[] }>('GET', `/folder/projects/${encodeURIComponent(project)}/work-profiles`),
   setProjectWorkProfiles: (project: string, profiles: unknown[]) =>
     apiCall<{ profiles: unknown[] }>('PUT', `/folder/projects/${encodeURIComponent(project)}/work-profiles`, { profiles }),
+
+  // project.json and its schema (the advanced settings window is generated from it).
+  getProjectConfig: (project: string) =>
+    apiCall<{ config: Record<string, unknown>; warnings: string[]; schema: Record<string, unknown> }>(
+      'GET', `/folder/projects/${encodeURIComponent(project)}/config`),
+  putProjectConfig: (project: string, settings: Record<string, unknown>) =>
+    apiCall<{ config: Record<string, unknown> }>('PUT', `/folder/projects/${encodeURIComponent(project)}/config`, { settings }),
 
   createProject: (name: string, painter_presets?: string[]) =>
     apiCall<{ name: string; path: string }>('POST', '/folder/projects', { name, painter_presets: painter_presets ?? null }),
@@ -976,6 +987,9 @@ export const api = {
   // GET returns production + reconciled publishes; PUT replaces the store.
   getProduction: (project: string) =>
     apiCall<ProductionPayload>('GET', `/production/${encodeURIComponent(project)}`),
+  // Conditional variant used by useProduction: 304 when the server store is unchanged.
+  getProductionConditional: (project: string, etag?: string) =>
+    apiGetConditional<ProductionPayload>(`/production/${encodeURIComponent(project)}`, etag),
 
   // Saving production.json also mirrors the planning to disk (create-only) on the
   // backend — there is no separate "materialize" call any more; structure is kept
@@ -1142,10 +1156,20 @@ export const api = {
     apiCall<KeyframeOpenResult>('POST', '/review/keyframe/open', { project, items, title, siblings }),
 
   // Streamable URL for the <img>/<video> src (Range-enabled backend).
-  refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref') => {
-    const qs = new URLSearchParams({ rel_path: relPath, name, ...(scope === 'publish' ? { scope } : {}) })
+  refFileUrl: (project: string, relPath: string, name: string, scope: 'ref' | 'publish' = 'ref', rev?: number | string) => {
+    const qs = new URLSearchParams({ rel_path: relPath, name, ...(scope === 'publish' ? { scope } : {}), ...(rev ? { rev: String(rev) } : {}) })
     return `${BASE_URL}/production/${encodeURIComponent(project)}/ref/file?${qs}`
   },
+
+  // Delete one vNNN file of a /ref zone (LAST is re-pointed by the backend).
+  deleteRefVersion: (project: string, relPath: string, name: string) =>
+    apiCall<{ ok: boolean; deleted: string; last: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/ref/delete`, { rel_path: relPath, name }),
+
+  // Set an older version as LAST (re-deposited as the next version).
+  restoreRefVersion: (project: string, relPath: string, name: string) =>
+    apiCall<{ ok: boolean; version: string; file: string }>(
+      'POST', `/production/${encodeURIComponent(project)}/ref/restore`, { rel_path: relPath, name }),
 
   exportRef: (project: string, relPath: string, name: string, destPath: string) =>
     apiCall<{ ok: boolean; dest: string }>(

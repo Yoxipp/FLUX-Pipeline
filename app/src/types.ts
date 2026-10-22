@@ -381,6 +381,8 @@ export interface ProductionShot {
   frame_end?: number
   locked?: ProductionLock
   preview_source?: string         // department shown for this shot in the Timeline edit (group id); unset = global source
+  preview_origin?: 'auto' | 'ref' | 'publish'   // origin of this shot's preview media; unset = global origin
+  preview_version?: string        // vNNN of the preview media; unset = LAST
 }
 
 export interface ProductionState {

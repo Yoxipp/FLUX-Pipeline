@@ -29,6 +29,7 @@ from core.project_setup import setup_path
 from core.json_manager import write_json
 from core.logger import get_logger
 from features.folder_manager.naming_validator import format_version
+from features.publisher import copy_limits
 
 log = get_logger(__name__)
 
@@ -61,7 +62,7 @@ _STRING_FIELDS = ("defaultPrim", "upAxis")
 _HEADER_BYTES = 65536
 
 
-# ── names ────────────────────────────────────────────────────────────────────────
+# â”€â”€ names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def full_ext(name: str) -> str:
     """Extension of *name* including compound ones ('a.bgeo.sc' -> '.bgeo.sc')."""
@@ -107,7 +108,7 @@ def link_path(dest: Path, base: str, ext: str) -> Path:
     return dest / f"{base}_{ACTIVE_VERSION_LABEL}{ext}{LINK_SUFFIX}"
 
 
-# ── settings + classification ────────────────────────────────────────────────────
+# â”€â”€ settings + classification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def load_storage_settings(start: Path) -> dict:
     """Read storage.last_mode / last_link_threshold_gb from the nearest project.json.
@@ -167,7 +168,7 @@ def classify(ext: str, size_bytes: int, *, is_sequence: bool = False,
     return MODE_COPY
 
 
-# ── low level writes ─────────────────────────────────────────────────────────────
+# â”€â”€ low level writes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _temp_sibling(dest: Path, ext: str) -> Path:
     return dest / f"{TMP_PREFIX}{uuid.uuid4().hex}{ext}"
@@ -203,10 +204,11 @@ def write_version(source: Path, dest: Path, base: str, ext: str, first_ver: int,
     """
     tmp = _temp_sibling(dest, ext)
     try:
+        # Parallel / throughput caps of this machine (copy_limits, Parametres avances).
         if source.is_dir():
-            shutil.copytree(source, tmp)
+            copy_limits.copy_tree(source, tmp)
         else:
-            shutil.copy2(source, tmp)
+            copy_limits.copy_file(source, tmp)
         ver = max(first_ver, 1)
         for _ in range(10000):
             target = dest / f"{base}_{format_version(ver, padding)}{ext}"
@@ -225,7 +227,7 @@ def write_version(source: Path, dest: Path, base: str, ext: str, first_ver: int,
             _remove(tmp)
 
 
-# ── USD layer pointer ────────────────────────────────────────────────────────────
+# â”€â”€ USD layer pointer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _usd_text_header(path: Path) -> str | None:
     """Text of a usda file header, or None when the file is not text USD."""
@@ -359,7 +361,7 @@ def _write_pointer_layer(target: Path, dest: Path, ext: str, text: str) -> bool:
     return True
 
 
-# ── LAST write ───────────────────────────────────────────────────────────────────
+# â”€â”€ LAST write â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -421,7 +423,7 @@ def write_last(dest: Path, base: str, ext: str, version_path: Path, ver: int, mo
         return None
 
 
-# ── LAST read ────────────────────────────────────────────────────────────────────
+# â”€â”€ LAST read â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def read_link(path: Path) -> dict | None:
     try:

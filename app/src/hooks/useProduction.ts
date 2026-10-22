@@ -43,11 +43,23 @@ export function useProduction(project: string | null | undefined): UseProduction
   const loaded                       = useRef(false)
   const projectRef                   = useRef<string | null | undefined>(project)
 
-  const reload = useCallback(async () => {
+  // Last ETag of GET /production/{project} (reset on project change). 304 = server unchanged
+  // vs the copy we hold, so state is kept as is. Cleared after every PUT and on errors.
+  const etagRef                      = useRef<string | undefined>(undefined)
+  const burst = useRef<{ timer: ReturnType<typeof setTimeout>; waiters: Array<() => void> } | null>(null)
+
+  // `force` skips If-None-Match (locked_kept: the server rejected our edits, so our state
+  // differs from the server even though its ETag did not move).
+  const reload = useCallback(async (force = false) => {
     if (!project) return
+    if (force) etagRef.current = undefined
     setLoading(true)
     try {
-      const r: ProductionPayload = await api.getProduction(project)
+      const c = await api.getProductionConditional(project, etagRef.current)
+      if (projectRef.current !== project) return
+      if (c.notModified || !c.data) return
+      etagRef.current = c.etag
+      const r: ProductionPayload = c.data
       setStateRaw(r.production)
       setPublishesByTask(r.publishes_by_task || {})
       setPublishesUnmatched((r.publishes_unmatched || []).length)
@@ -56,6 +68,7 @@ export function useProduction(project: string | null | undefined): UseProduction
       loaded.current = true
     } catch {
       // backend down / project gone — leave empty state so UI never explodes
+      etagRef.current = undefined
       setStateRaw(EMPTY_STATE)
       setPublishesByTask({})
       setPublishesUnmatched(0)
@@ -71,6 +84,8 @@ export function useProduction(project: string | null | undefined): UseProduction
   useEffect(() => {
     projectRef.current = project
     loaded.current = false
+    etagRef.current = undefined
+    if (burst.current) { clearTimeout(burst.current.timer); burst.current.waiters.forEach(w => w()); burst.current = null }
     if (!project) {
       setStateRaw(EMPTY_STATE)
       setPublishesByTask({})
@@ -82,12 +97,27 @@ export function useProduction(project: string | null | undefined): UseProduction
     void reload()
   }, [project, reload])
 
+  // Trailing coalescing: refresh events / sync reloads within 300 ms trigger a single reload.
+  const reloadCoalesced = useCallback((): Promise<void> => new Promise<void>(resolve => {
+    if (burst.current) {
+      clearTimeout(burst.current.timer)
+      burst.current.waiters.push(resolve)
+    } else {
+      burst.current = { timer: 0 as unknown as ReturnType<typeof setTimeout>, waiters: [resolve] }
+    }
+    const b = burst.current
+    b.timer = setTimeout(() => {
+      if (burst.current === b) burst.current = null
+      void reload().finally(() => b.waiters.forEach(w => w()))
+    }, 300)
+  }), [reload])
+
   // Global refresh event — same signal as the TitleBar refresh button.
   useEffect(() => {
-    const onRefresh = () => { void reload() }
+    const onRefresh = () => { void reloadCoalesced() }
     window.addEventListener('flux:refresh', onRefresh)
     return () => window.removeEventListener('flux:refresh', onRefresh)
-  }, [reload])
+  }, [reloadCoalesced])
 
   // Public setter that also triggers a debounced PUT (skips the initial load).
   const setState = useCallback((patch: (prev: ProductionState) => ProductionState) => {
@@ -103,9 +133,10 @@ export function useProduction(project: string | null | undefined): UseProduction
     const run = () => {
       pending.current = null
       return api.setProduction(proj, snapshot).then(r => {
+        etagRef.current = undefined   // the PUT changed the server copy: our ETag is stale
         if (r.locked_kept?.length) {
           toast.warning(`Verrouillé, modification annulée : ${r.locked_kept.join(', ')}`)
-          void reload()
+          void reload(true)
         }
       }).catch(() => { /* keep local edits; user sees them until next successful save */ })
     }
@@ -123,8 +154,10 @@ export function useProduction(project: string | null | undefined): UseProduction
       clearTimeout(p.timer)
       await p.run()
     }
-    productionSync.reload = reload
-  }, [reload])
+    productionSync.reload = reloadCoalesced
+  }, [reloadCoalesced])
 
-  return { state, setState, publishesByTask, publishesUnmatched, sequencesOnDisk, shotsOnDisk, loading, reload }
+  const reloadNow = useCallback(() => reload(), [reload])
+
+  return { state, setState, publishesByTask, publishesUnmatched, sequencesOnDisk, shotsOnDisk, loading, reload: reloadNow }
 }
