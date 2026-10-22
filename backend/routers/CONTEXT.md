@@ -15,3 +15,8 @@ Ajouts : `review` (ADR 0047, `features/review/keyframe.py`) : `GET /review/keyfr
 (single-flight), resultat garde 1 s, ETag + 304 ; `main.py` vide ce cache apres toute requete non-GET hors
 `/activity`, `/logs`, `/calendar`. Le calcul tourne dans `core/executors.HEAVY` (pool borne, separe des feeds).
 `GET /publish/queue` : copies de publish actives / en attente (`features/publisher/copy_limits.py`).
+
+## flows.py (2026-10-22, Flows P1)
+
+Prefixe `/flows` : routes statiques (`catalog`, `rights`, `migrate`) avant `/{name}` ; lecture pour tous, chaque mutation
+verifie d'abord les cases TD / Team TD (`flux_flows.rights`, garde-fou, pas une securite). Detail : `backend/flux_flows/CONTEXT.md`.
