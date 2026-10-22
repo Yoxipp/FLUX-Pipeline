@@ -268,6 +268,7 @@ PRODUCTION_MEDIA_DIR: str = "_production"   # Production Tab media (thumbnails),
 JSON_TOKENS: str     = "tokens.json"        # setup dir
 JSON_PROJECT: str    = "project.json"       # setup dir - project config + project_id (ADR 0006)
 JSON_PRODUCTION: str = "production.json"    # setup dir - Production Tab store
+JSON_RENDER: str     = "render.json"        # setup dir - team render (Tractor) settings, ADR 0015
 JSON_CALENDAR: str = "calendar.json"        # setup dir - team calendar (commitments)
 JSON_LOCKS: str      = "locks.json"         # setup dir - folder lock registry
 JSON_MODIF_LOG: str  = "modif_logs.json"    # inside each published folder

@@ -305,6 +305,12 @@ def get_project_calendar_path(project_name: str) -> Path:
     return setup_path(get_project_path(project_name), JSON_CALENDAR)
 
 
+def get_project_render_path(project_name: str) -> Path:
+    from core.constants import JSON_RENDER
+    from core.project_setup import setup_path
+    return setup_path(get_project_path(project_name), JSON_RENDER)
+
+
 # ── CONFIG / shared JSON paths ────────────────────────────────────────────────
 
 def get_activity_path() -> Path:
