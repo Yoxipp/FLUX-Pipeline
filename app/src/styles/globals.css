@@ -84,6 +84,8 @@
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
   --shadow-inset: inset 0 1px 4px rgba(0,0,0,0.35);
+  /* Popovers and dialogs used var(--shadow) without any definition (19 uses): same as --shadow-md. */
+  --shadow: var(--shadow-md);
 
   /* ── compat App.tsx ── */
   --color-bg:      var(--paper);
