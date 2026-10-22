@@ -31,7 +31,8 @@ FAMILIES: Tuple[str, ...] = (
 MARKER = "@flow_node"
 BUILTIN_MODULES: Tuple[str, ...] = (
     "flux_flows.nodes.event", "flux_flows.nodes.data", "flux_flows.nodes.logic",
-    "flux_flows.nodes.operator", "flux_flows.nodes.flux",
+    "flux_flows.nodes.operator", "flux_flows.nodes.action", "flux_flows.nodes.flux",
+    "flux_flows.nodes.subflow",
 )
 _TEAM_MODULE_PREFIX = "flux_flows_team_nodes."
 
@@ -75,6 +76,7 @@ class NodeSpec:
     doc_en: str = ""
     destructive: Any = None             # True, or {"param": .., "equals": ..}
     effect: bool = False                # acts on the world: simulated in a dry run
+    raw: Tuple[str, ...] = ()           # params the engine does not resolve ({token}, $FLUX, ${var})
     source: str = "flux"                # flux | team
     file: str = ""
     func: Optional[Callable[..., Any]] = None
@@ -86,7 +88,7 @@ class NodeSpec:
             "inputs": [p.to_dict() for p in self.inputs], "outputs": [p.to_dict() for p in self.outputs],
             "params": [p.to_dict() for p in self.params], "shelf": self.shelf, "aliases": list(self.aliases),
             "doc_fr": self.doc_fr, "doc_en": self.doc_en, "destructive": self.destructive,
-            "effect": self.effect, "source": self.source, "file": self.file,
+            "effect": self.effect, "raw": list(self.raw), "source": self.source, "file": self.file,
         }
 
 
@@ -114,6 +116,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
               outputs: Iterable[Port] = (), params: Iterable[Port] = (), shelf: Optional[int] = None,
               aliases: Iterable[str] = (), doc_fr: str = "", doc_en: str = "", destructive: Any = None,
               effect: bool = False, simulate: Optional[Callable[..., Any]] = None,
+              raw: Iterable[str] = (),
               ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare a node type. The decorated function is its body (run by the engine)."""
     if not NODE_TYPE_RE.match(type):
@@ -129,6 +132,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
         inputs=_check_ports(type, "entree", inputs), outputs=_check_ports(type, "sortie", outputs),
         params=_check_ports(type, "parametre", params), shelf=shelf, aliases=list(aliases),
         doc_fr=doc_fr, doc_en=doc_en, destructive=destructive, effect=effect, simulate=simulate,
+        raw=tuple(raw),
     )
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:

@@ -115,10 +115,16 @@ def check_pattern(text: str) -> Optional[str]:
 
 def filter_names(text: str, names: Iterable[str], case_sensitive: bool = False) -> List[str]:
     """Names kept by the pattern, in input order (duplicates kept as given)."""
-    words = compile_pattern(text, case_sensitive)
     items = list(names)
+    return [name for name, keep in zip(items, mask(text, items, case_sensitive)) if keep]
+
+
+def mask(text: str, names: Iterable[str], case_sensitive: bool = False) -> List[bool]:
+    """One bool per name: kept by the pattern or not."""
+    words = compile_pattern(text, case_sensitive)
+    items = [str(n) for n in names]
     if not words:
-        return []
+        return [False] * len(items)
     kept = [words[0].exclude] * len(items)
     for word in words:
         for idx, name in enumerate(items):
@@ -126,7 +132,7 @@ def filter_names(text: str, names: Iterable[str], case_sensitive: bool = False) 
                 continue  # already in the state this word would put it in
             if word.matches(name):
                 kept[idx] = not word.exclude
-    return [name for name, keep in zip(items, kept) if keep]
+    return kept
 
 
 def matches(text: str, name: str, case_sensitive: bool = False) -> bool:

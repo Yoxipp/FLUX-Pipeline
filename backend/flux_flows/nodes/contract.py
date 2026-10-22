@@ -69,8 +69,18 @@ class NodeContext:
         return self._run.interface
 
     @property
+    def interface_types(self) -> Dict[str, str]:
+        """Type of each interface input (str, path, dir...)."""
+        return {i.id: i.type for i in self._run.flow.interface.inputs}
+
+    @property
     def cancelled(self) -> threading.Event:
         return self._run.cancelled
+
+    def resolve(self, text: Any, path_field: bool = False, extra: Optional[Dict[str, Any]] = None) -> Any:
+        """The run's resolver ({token}, ${var}, $FLUX at the head of a path field);
+        ``extra`` adds {keys} (data.template values)."""
+        return self._run.resolve_text(text, path_field=path_field, extra=extra)
 
     # -- effects on the run -----------------------------------------------------
     def log(self, text: str, level: str = "info") -> None:
@@ -85,3 +95,10 @@ class NodeContext:
 
     def set_variable(self, name: str, value: Any) -> Any:
         return self._run.set_variable(name, value)
+
+    # -- subflows (subflow.flow_call / flow_output) ------------------------------
+    async def call_flow(self, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._run.call_flow(self.node_id, name, version, values)
+
+    def set_output(self, ident: str, value: Any) -> None:
+        self._run.set_output(ident, value)

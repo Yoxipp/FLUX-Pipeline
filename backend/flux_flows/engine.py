@@ -10,8 +10,12 @@
 # Memo validity = the loop frames the value depends on are still the current
 # ones, plus the variable write counter when a variable was read (01 §4).
 #
-# Blocks: ForEach (Begin / End paired by End.params.begin); If and any other
-# branching node pick their exec output with the EXEC_KEY of their result.
+# Blocks: ForEach, For, While (Begin / End paired by End.params.begin, BLOCK_ENDS);
+# BreakLoop leaves the innermost loop; Sequence runs its outputs one after the
+# other; If, Switch and any other branching node pick their exec output with the
+# EXEC_KEY of their result. FlowCall runs another flow inline (child Run, depth 8).
+# Params and unlinked literals go through resolver.py when the node runs; a
+# value that came through a link is never resolved again (01 §11).
 # Errors: on_error linked = error_handled (``error`` output, the flow follows it),
 # else the run stops in ``error``. Timeouts: ``params.timeout_s``, 120 s (600 s for
 # session / dcc nodes); a thread cannot be killed: abandoned, result ignored.
@@ -37,12 +41,14 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from flux_flows import events, runs
+from flux_flows import events, resolver, runs
 from flux_flows.model import SUBNET_TYPE, Flow, v1_limit_issues
 from flux_flows.nodes import registry
 from flux_flows.nodes.contract import EXEC_KEY, NodeContext, NodeError
 from flux_flows.nodes.data import cast_literal
-from flux_flows.nodes.operator import FOREACH_BEGIN, FOREACH_END, ITEMS_KEY
+from flux_flows.nodes.operator import (BLOCK_ENDS, BREAK_LOOP, CONDITION_KEY, FOR_BEGIN, FOREACH_BEGIN,
+                                       ITEMS_KEY, LIMIT_KEY, SEQUENCE_KEY, WHILE_BEGIN)
+from flux_flows.nodes.subflow import FLOW_CALL
 
 log = logging.getLogger("flux.flows.engine")
 
@@ -56,6 +62,10 @@ START_EVENTS = ("event.manual", "event.button")
 DRY_LIMITS_FR = ("Essai a blanc : apres un effet simule, les lectures voient le disque reel ; "
                  "l'essai estime, il ne garantit pas.")
 
+MAX_SUBFLOW_DEPTH = 8     # 01 §8, E_SUBFLOW_CYCLE beyond
+END_TYPES = frozenset(BLOCK_ENDS.values())
+_TEXT_TYPES = ("str", "path", "dir", "pattern", "any", "list[str]", "list[path]", "list[any]")
+
 Frames = Tuple[Tuple[str, int], ...]
 
 
@@ -63,6 +73,10 @@ class _StopRun(Exception):
     def __init__(self, status: str, error: str) -> None:
         super().__init__(error)
         self.status, self.error = status, error
+
+
+class _BreakLoop(Exception):
+    """Raised by BreakLoop, caught by the innermost running loop."""
 
 
 def _pool():
@@ -125,7 +139,8 @@ class Run:
                  mode: str = "real", draft: bool = False, version: Optional[int] = None,
                  base_revision: Optional[int] = None, event: Optional[str] = None,
                  values: Optional[Dict[str, Any]] = None, folder=None,
-                 context: Optional[Dict[str, Any]] = None) -> None:
+                 context: Optional[Dict[str, Any]] = None, depth: int = 0,
+                 call_stack: Tuple[str, ...] = (), flow_loader=None) -> None:
         if mode not in ("real", "dry"):
             raise ValueError(f"mode inconnu '{mode}'")
         self.flow = flow
@@ -151,7 +166,12 @@ class Run:
         self._var_types = {v.name: v.type for v in flow.variables}
         self._variables = {v.name: v.default for v in flow.variables if v.default is not None}
         self._var_writes = 0
-        # Indexes of the top level network (a subnet does not run before P3).
+        self.depth, self.call_stack = depth, tuple(call_stack)
+        self._flow_loader = flow_loader       # (name, version) -> Flow ; None = the store
+        self._outputs: Dict[str, Any] = {}    # subflow.flow_output values
+        self._loops = 0                       # loops running (BreakLoop outside one = error)
+        self._stop: Optional[str] = None      # End the current chain stops at
+        # Indexes of the top level network (a subnet does not run yet).
         self.nodes = flow.nodes
         self._exec_next: Dict[Tuple[str, str], str] = {}
         self._data_in: Dict[Tuple[str, str], Tuple[str, str]] = {}
@@ -279,6 +299,90 @@ class Run:
         self._var_writes += 1
         return converted
 
+    # -- resolver (01 §11) ---------------------------------------------------------
+    def _lookup_var(self, name: str) -> Any:
+        """${name}: flow variable first, then interface value; KeyError if neither."""
+        if name in self._var_types:
+            return self.get_variable(name)
+        if name in self.interface:
+            return self.interface[name]
+        raise KeyError(name)
+
+    def resolve_text(self, text: Any, path_field: bool = False,
+                     extra: Optional[Dict[str, Any]] = None) -> Any:
+        context = {**self.context, **extra} if extra else self.context
+        return resolver.resolve(text, context, self._lookup_var,
+                                list(self._var_types) + list(self.interface), path_field=path_field)
+
+    def _params(self, node, spec) -> Dict[str, Any]:
+        """The node's params with their texts resolved (spec.raw names left as typed)."""
+        kinds = {p.name: p.type for p in (*spec.params, *spec.inputs)}
+        out: Dict[str, Any] = {}
+        for key, val in node.params.items():
+            kind = kinds.get(key, "any")
+            if key in spec.raw or kind not in _TEXT_TYPES:
+                out[key] = val
+            elif isinstance(val, str):
+                out[key] = self.resolve_text(val, path_field=kind in ("path", "dir"))
+            elif isinstance(val, list) and kind.startswith("list[") and all(isinstance(v, str) for v in val):
+                out[key] = [self.resolve_text(v, path_field=kind == "list[path]") for v in val]
+            else:
+                out[key] = val
+        return out
+
+    # -- subflows (02 §10) ---------------------------------------------------------
+    def set_output(self, ident: str, value: Any) -> None:
+        declared = {o.id for o in self.flow.interface.outputs}
+        if ident not in declared:
+            raise NodeError(f"La sortie `{ident}` n'est pas declaree dans interface.outputs du flow")
+        self._outputs[ident] = value
+
+    def _load_flow(self, name: str, version: Any) -> Flow:
+        if self._flow_loader is not None:
+            return self._flow_loader(name, version)
+        from flux_flows import locations, store
+
+        roots = locations.roots_for(user=self.user, project=self.project)
+        scope = store.resolve(roots, name)
+        if scope is None:
+            raise NodeError(f"Flow `{name}` introuvable (perso, projet, equipe, livre)")
+        number = None if version in (None, "", "current") else int(version)
+        return store.read_flow(roots, scope, name, number)["flow"]
+
+    async def call_flow(self, nid: str, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
+        chain = self.call_stack + (self.flow_name,)
+        if name in chain:
+            raise NodeError(f"Sous-flow en boucle : {' > '.join(chain + (name,))}", code="E_SUBFLOW_CYCLE")
+        if self.depth + 1 > MAX_SUBFLOW_DEPTH:
+            raise NodeError(f"Plus de {MAX_SUBFLOW_DEPTH} sous-flows imbriques", code="E_SUBFLOW_CYCLE")
+        try:
+            flow = await asyncio.to_thread(self._load_flow, name, version)
+        except NodeError:
+            raise
+        except Exception as exc:
+            raise NodeError(f"Flow `{name}` illisible : {_message(exc)}") from None
+        manual = sorted(nid_ for nid_, n in flow.nodes.items() if n.type == "event.manual")
+        if not manual:
+            raise NodeError(f"Le flow `{name}` n'a pas de node Manual : il ne peut pas etre appele")
+        context = {k: v for k, v in self.context.items() if k not in ("flow", "run_id")}
+        child = Run(flow, scope=self.scope, project=self.project, user=self.user, mode=self.mode,
+                    event=manual[0], values=values, folder=None, context=context, depth=self.depth + 1,
+                    call_stack=chain, flow_loader=self._flow_loader)
+        child.cancelled = self.cancelled
+        errors = [i for i in child.issues if i.get("level") == "error"]
+        if errors:
+            raise NodeError(f"Le flow `{name}` a des erreurs : {errors[0]['message_fr']}")
+        self.node_log(nid, "info", f"appelle {name} (run {child.run_id})")
+        try:
+            await child._chain(child.event_id)
+        except _StopRun as stop:
+            raise NodeError(f"sous-flow {name} : {stop.error}") from None
+        finally:
+            for line in child.record["report"]:
+                if line.get("kind") != "limits":
+                    self.record["report"].append({**line, "node": f"{nid}/{line.get('node')}"})
+        return {"run_id": child.run_id, **child._outputs}
+
     # -- memo dependencies -------------------------------------------------------
     def _note_dep(self, frames: Frames, reads_vars: bool) -> None:
         if not self._dep_stack:
@@ -303,16 +407,19 @@ class Run:
             raise NodeError(f"Le node `{node.type}` est introuvable ou casse")
         return node, spec
 
-    def _timeout(self, node, spec) -> float:
+    def _timeout(self, node, spec) -> Optional[float]:
         raw = node.params.get("timeout_s")
         try:
             if raw is not None and float(raw) > 0:
                 return float(raw)
         except (TypeError, ValueError):
             pass
+        if spec.type == FLOW_CALL:
+            return None     # the called flow's nodes have their own timeouts
         return DCC_TIMEOUT_S if spec.family in ("session", "dcc") else DEFAULT_TIMEOUT_S
 
-    async def _invoke(self, nid: str, node, spec, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def _invoke(self, nid: str, node, spec, inputs: Dict[str, Any],
+                      params: Dict[str, Any]) -> Dict[str, Any]:
         ctx = NodeContext(self, nid)
         if self.mode == "dry" and spec.effect:
             fn = spec.simulate
@@ -322,9 +429,9 @@ class Run:
         threaded = not inspect.iscoroutinefunction(fn)
         if threaded:
             loop = asyncio.get_running_loop()
-            pending = loop.run_in_executor(_pool(), functools.partial(fn, ctx, inputs, dict(node.params)))
+            pending = loop.run_in_executor(_pool(), functools.partial(fn, ctx, inputs, dict(params)))
         else:
-            pending = fn(ctx, inputs, dict(node.params))
+            pending = fn(ctx, inputs, dict(params))
         try:
             result = await asyncio.wait_for(pending, timeout)
         except asyncio.TimeoutError:
@@ -342,13 +449,14 @@ class Run:
             return dict(result.get("outputs") or {})
         return result
 
-    async def _inputs(self, nid: str, node, spec, got: Dict[str, Any]) -> Dict[str, Any]:
+    async def _inputs(self, nid: str, node, spec, got: Dict[str, Any],
+                      params: Dict[str, Any]) -> Dict[str, Any]:
         declared = {p.name: p for p in spec.inputs if p.type != "exec"}
         for name in list(declared) + [p for p in self._data_ports.get(nid, []) if p not in declared]:
             if (nid, name) in self._data_in:
                 got[name] = await self._pull(nid, name)
-            elif name in node.params:
-                got[name] = node.params[name]
+            elif name in params:
+                got[name] = params[name]
             else:
                 got[name] = declared[name].default if name in declared else None
         for p in declared.values():
@@ -395,8 +503,9 @@ class Run:
         self._set_state(nid, "running")
         got: Dict[str, Any] = {}
         try:
-            await self._inputs(nid, node, spec, got)
-            outs = await self._invoke(nid, node, spec, got)
+            params = self._params(node, spec)
+            await self._inputs(nid, node, spec, got, params)
+            outs = await self._invoke(nid, node, spec, got, params)
         except asyncio.CancelledError:
             self._set_state(nid, "cancelled")
             raise
@@ -420,12 +529,16 @@ class Run:
     async def _chain(self, start: Optional[str], stop_at: Optional[str] = None) -> None:
         seen: set = set()
         current = start
-        while current is not None and current != stop_at:
-            if current in seen:
-                raise _StopRun("error", f"{current} : boucle de liens exec hors d'un bloc")
-            seen.add(current)
-            self._check_cancel()
-            current = await self._exec_node(current)
+        saved, self._stop = self._stop, stop_at
+        try:
+            while current is not None and current != stop_at:
+                if current in seen:
+                    raise _StopRun("error", f"{current} : boucle de liens exec hors d'un bloc")
+                seen.add(current)
+                self._check_cancel()
+                current = await self._exec_node(current)
+        finally:
+            self._stop = saved
 
     def _fail(self, nid: str, exc: BaseException, got: Dict[str, Any]) -> Optional[str]:
         msg = _message(exc)
@@ -450,59 +563,123 @@ class Run:
             self._set_state(nid, "skipped")
             self._exec_out[nid] = (tuple(self._frames), {})
             return self._exec_next.get((nid, "then"))
-        if node.type == FOREACH_END:
+        if node.type in END_TYPES:
             self._set_state(nid, "running")
-            return self._fail(nid, NodeError("ForEachEnd atteint hors de sa boucle"), got)
+            return self._fail(nid, NodeError(f"{spec.label} atteint hors de sa boucle"), got)
         self._set_state(nid, "running")
         try:
-            await self._inputs(nid, node, spec, got)
-            outs = await self._invoke(nid, node, spec, got)
+            params = self._params(node, spec)
+            await self._inputs(nid, node, spec, got, params)
+            outs = await self._invoke(nid, node, spec, got, params)
         except asyncio.CancelledError:
             self._set_state(nid, "cancelled")
             raise
         except Exception as exc:
             return self._fail(nid, exc, got)
         branch = outs.pop(EXEC_KEY, None) or "then"
-        if node.type == FOREACH_BEGIN:
-            return await self._foreach(nid, outs.pop(ITEMS_KEY, []) or [], got)
+        if node.type in BLOCK_ENDS:
+            return await self._loop(nid, node, outs, got)
+        if node.type == BREAK_LOOP:
+            if not self._loops:
+                return self._fail(nid, NodeError("BreakLoop hors d'une boucle"), got)
+            self._set_state(nid, "ok")
+            raise _BreakLoop()
+        sequence = outs.pop(SEQUENCE_KEY, None)
         self._exec_out[nid] = (tuple(self._frames), outs)
         self._set_state(nid, "ok")
+        if sequence is not None:
+            # operator.sequence: each output in order, one after the other (A3).
+            for out_port in sequence:
+                nxt = self._exec_next.get((nid, out_port))
+                if nxt is not None:
+                    await self._chain(nxt, stop_at=self._stop)
+            return None
         return self._exec_next.get((nid, branch))
 
-    def _end_of(self, begin: str) -> Optional[str]:
+    def _end_of(self, begin: str, begin_type: str) -> Optional[str]:
+        end_type = BLOCK_ENDS[begin_type]
         ends = sorted(nid for nid, n in self.nodes.items()
-                      if n.type == FOREACH_END and n.params.get("begin") == begin)
+                      if n.type == end_type and n.params.get("begin") == begin)
         return ends[0] if ends else None
 
-    async def _foreach(self, bid: str, items: List[Any], got: Dict[str, Any]) -> Optional[str]:
-        end = self._end_of(bid)
+    async def _condition(self, bid: str, node) -> bool:
+        if (bid, "condition") in self._data_in:
+            value = await self._pull(bid, "condition")
+        else:
+            value = node.params.get("condition")
+        if not isinstance(value, bool):
+            raise NodeError(f"While attend un booleen, recu {value!r} : utilise Compare")
+        return value
+
+    async def _loop(self, bid: str, node, outs: Dict[str, Any], got: Dict[str, Any]) -> Optional[str]:
+        """ForEach, For and While blocks: body = chain from ``loop`` up to the End."""
+        kind = node.type
+        end = self._end_of(bid, kind)
         if end is None:
-            return self._fail(bid, NodeError(f"ForEach Begin {bid} n'a pas de End"), got)
+            return self._fail(bid, NodeError(f"Le bloc {bid} n'a pas de End"), got)
         body = self._exec_next.get((bid, "loop"))
-        count = len(items)
+        items: List[Any] = outs.pop(ITEMS_KEY, None) or []
+        cond = bool(outs.pop(CONDITION_KEY, False))
+        limit = int(outs.pop(LIMIT_KEY, 0) or 0)
+        collect = kind == FOREACH_BEGIN and (end, "collect") in self._data_in
         results: List[Any] = []
-        self.node_log(bid, "info", f"{count} element(s)")
-        for index, item in enumerate(items):
-            self._check_cancel()
-            self._frames.append((bid, index))
-            try:
-                self._exec_out[bid] = (tuple(self._frames), {"item": item, "index": index, "count": count})
-                if body is not None and body != end:
-                    await self._chain(body, stop_at=end)
-                if (end, "collect") in self._data_in:
+        if kind != WHILE_BEGIN:
+            self.node_log(bid, "info", f"{len(items)} tour(s)")
+        index = 0
+        self._loops += 1
+        try:
+            while True:
+                if kind == WHILE_BEGIN:
+                    if not cond:
+                        break
+                    if self.mode == "dry" and index >= 1:   # 02 §5: evaluated once, never loops
+                        self.record["report"].append({"node": bid, "kind": "loop",
+                                                      "text_fr": "essai a blanc : un seul tour du While"})
+                        break
+                    if index >= limit:
+                        return self._fail(bid, NodeError(
+                            f"While : {limit} tours sans sortie (max_iterations) : la condition reste vraie"), got)
+                    turn: Dict[str, Any] = {"index": index}
+                elif index >= len(items):
+                    break
+                elif kind == FOR_BEGIN:
+                    turn = {"index": items[index]}
+                else:
+                    turn = {"item": items[index], "index": index, "count": len(items)}
+                self._check_cancel()
+                self._frames.append((bid, index))
+                broke = False
+                try:
+                    self._exec_out[bid] = (tuple(self._frames), turn)
                     try:
-                        results.append(await self._pull(end, "collect"))
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        self._set_state(end, "running")
-                        return self._fail(end, exc, {})
-            finally:
-                self._frames.pop()
-        self._exec_out[bid] = (tuple(self._frames), {"count": count})
+                        if body is not None and body != end:
+                            await self._chain(body, stop_at=end)
+                    except _BreakLoop:
+                        broke = True
+                        self.node_log(bid, "info", f"BreakLoop au tour {index}")
+                    if not broke:
+                        try:
+                            if collect:
+                                results.append(await self._pull(end, "collect"))
+                            if kind == WHILE_BEGIN:
+                                cond = await self._condition(bid, node)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            self._set_state(end, "running")
+                            return self._fail(end, exc, {})
+                finally:
+                    self._frames.pop()
+                index += 1
+                if broke:
+                    break
+        finally:
+            self._loops -= 1
+        final = {"count": len(items)} if kind == FOREACH_BEGIN else {"index": index}
+        self._exec_out[bid] = (tuple(self._frames), final)
         self._set_state(bid, "ok")
         self._set_state(end, "running")
-        self._exec_out[end] = (tuple(self._frames), {"results": results})
+        self._exec_out[end] = (tuple(self._frames), {"results": results} if kind == FOREACH_BEGIN else {})
         self._set_state(end, "ok")
         return self._exec_next.get((end, "done"))
 

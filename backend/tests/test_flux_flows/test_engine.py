@@ -229,7 +229,8 @@ class Admission(unittest.TestCase):
                  ["n1.then->a.exec", "i.value->a.value", "a.then->b.exec", "n1.values->b.value"],
                  interface=[{"id": "dest", "type": "dir", "default": "$FLUX/DAILY"}])
         run_flow(f)
-        self.assertEqual(h.CALLS[0], ("a", "$FLUX/DAILY"))
+        from core.paths import from_flux_token  # P3: a dir default is resolved by FlowInput
+        self.assertEqual(h.CALLS[0], ("a", str(from_flux_token("$FLUX/DAILY"))))
         h.reset()
         run_flow(f, values={"dest": "D:/X", "ignored": 1})
         self.assertEqual(h.CALLS, [("a", "D:/X"), ("b", {"dest": "D:/X"})])
