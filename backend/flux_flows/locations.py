@@ -71,3 +71,20 @@ def history_file(scope: str, *, project: Optional[str] = None) -> Optional[Path]
     if scope == "project":
         return scope_dir("project", project=project) / "history.jsonl"
     return None
+
+
+def roots_for(*, user: Optional[str], project: Optional[str]) -> dict:
+    """{scope: folder or None} for the store: None = scope unavailable (no FLUX_ROOT,
+    no project, no user). A project name is a single folder name, never a path."""
+    if project and (project in (".", "..") or Path(project).name != project or "\\" in project):
+        raise ValueError(f"nom de projet invalide '{project}'")
+    roots: dict = {"shipped": shipped_dir(), "team": None, "project": None, "perso": None}
+    try:
+        roots["team"] = scope_dir("team")
+        if user:
+            roots["perso"] = scope_dir("perso", user=user)
+        if project:
+            roots["project"] = scope_dir("project", project=project)
+    except RuntimeError:  # no FLUX_ROOT yet (first launch): shipped only
+        pass
+    return roots
