@@ -1,6 +1,17 @@
 // types.ts — TS types of the Flows editor (03_EDITEUR §9). P0 holds the view model
 // only; FlowDoc / FlowLink / Issue / RunRecord arrive with the v2 format (P1+).
 
+// GET /flows/rights (01 §7): TD / Team TD boxes of the current user. A guard, not security.
+export type FlowScope = 'perso' | 'project' | 'team' | 'shipped'
+export interface FlowRights {
+  user:    string | null
+  td:      boolean
+  team_td: boolean
+  can:     Record<FlowScope, { write: boolean; draft: boolean; admin: boolean }>
+  note_fr: string
+  note_en: string
+}
+
 export type Family =
   | 'event' | 'data' | 'logic' | 'operator' | 'action'
   | 'flux' | 'session' | 'dcc' | 'bridge' | 'subflow'

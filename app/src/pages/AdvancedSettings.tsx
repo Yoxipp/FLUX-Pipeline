@@ -14,6 +14,7 @@ import { api } from '../api/client'
 import type { AdvancedProject, AdvancedSwitch } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
 import { useProject } from '../ProjectContext'
+import { useFlowRights } from './flow_editor/useFlowRights'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 const mono = { fontFamily: 'var(--mono)', fontSize: 11 } as const
@@ -53,6 +54,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
   const adv = part === 'advanced'
   const { project: activeProject } = useProject()
   const navigate = useNavigate()
+  const flowRights = useFlowRights()
   const [proj, setProj] = useState<AdvancedProject | null>(null)
   const [switches, setSwitches] = useState<Record<string, AdvancedSwitch>>({})
   const [error, setError] = useState('')
@@ -187,7 +189,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
             Nouvel editeur de flows : actions (publish...) en lecture pour l'instant. L'ancien editeur reste dans la barre du haut.
           </div>
         </div>
-        <Btn sm ghost onClick={() => {
+        <Btn sm ghost disabled={!flowRights?.td} title={flowRights?.td ? undefined : 'Coche TD dans ton profil'} onClick={() => {
           // Own window when Electron can open one, else the page in this window.
           if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/action-graph')
           else navigate('/action-graph')

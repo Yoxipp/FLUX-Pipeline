@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from flux_flows import locations
+from flux_flows import locations, rights
 from flux_flows.nodes import registry
 
 router = APIRouter()
@@ -20,3 +20,9 @@ router = APIRouter()
 async def get_catalog() -> dict[str, Any]:
     """Node types, families, port types and the team node files that failed to load."""
     return await asyncio.to_thread(registry.catalog, locations.team_nodes_dir())
+
+
+@router.get("/rights")
+async def get_rights() -> dict[str, Any]:
+    """TD / Team TD boxes of the current user and what they allow (01 §7). A guard, not security."""
+    return rights.summary(await asyncio.to_thread(rights.current_rights))

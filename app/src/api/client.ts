@@ -42,7 +42,7 @@ export interface LogRecord {
   msg:     string
 }
 
-async function apiCall<T>(
+export async function apiCall<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   endpoint: string,
   body?: unknown,

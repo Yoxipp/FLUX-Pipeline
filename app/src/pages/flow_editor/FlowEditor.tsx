@@ -5,6 +5,7 @@
 // (user data `flows_last_open`, USER/<user>/UserSettings), else "publish".
 // View prefs (background dots, wire style) are per-viewer conveniences in localStorage.
 // The old editor stays at /action-graph-legacy until P8.
+// Entry needs the TD box (flows_td, 01 §7): without it the route shows "Acces refuse".
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
@@ -19,6 +20,7 @@ import { TopBar, type FlowListEntry } from './TopBar'
 import type { FlowView } from './types'
 import { adaptV1Action, adaptV1Catalog, type CatalogEntry } from './v1_adapter'
 import { useTr } from './useTr'
+import { useFlowRights } from './useFlowRights'
 
 const DEFAULT_FLOW = 'publish'
 const LAST_OPEN_KEY = 'flows_last_open'
@@ -132,6 +134,21 @@ function Editor() {
 }
 
 export function FlowEditor() {
+  const { tr } = useTr()
+  const rights = useFlowRights()
+  if (rights === undefined) return null
+  if (!rights?.td) {
+    return (
+      <div style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--paper)' }}>
+        <div style={{ fontSize: 13, color: 'var(--ink)' }}>{tr('Acces refuse', 'Access denied')}</div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+          {rights === null
+            ? tr('Droits illisibles : le backend ne repond pas.', 'Rights unreadable: the backend does not answer.')
+            : tr('Coche TD dans ton profil (Parametres > User > Flows).', 'Tick TD in your profile (Settings > User > Flows).')}
+        </div>
+      </div>
+    )
+  }
   return (
     <ReactFlowProvider>
       <Editor />
