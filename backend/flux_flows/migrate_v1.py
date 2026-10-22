@@ -15,7 +15,7 @@
 # value: {from: "step.cmd.key"} becomes a data link <producer>.<key> -> <consumer>.<param>:
 # the ports of these two nodes are dynamic, typed in params.ports (an output takes the
 # type of the input that reads it). Literals go to params, ask_user to the interface
-# + data.flow_input. One column per step (320 px), one row per command.
+# + data.flow_input. One column per step (320 px), commands stacked inside it.
 # legacy_* flows never activate (store.set_active): publish runs on v1 until P8.
 
 from __future__ import annotations
@@ -32,7 +32,9 @@ import yaml
 from flux_flows import store
 from flux_flows.model import LABEL_MAX, NAME_RE, RESERVED_NAMES, Flow, dump_flow, parse_flow
 
-COL, ROW = 320, 160
+# Layout: one column per step (320 px, node width 240); inside a column, each command
+# then its data.flow_input feeders, stacked with the editor's node height (v1_adapter.ts).
+COL, GAP, HEADER_H, ROW_H = 320, 28, 28, 20
 LEGACY_COMMAND = "flux.legacy_command"
 CALL_FUNCTION = "flux.call_function"
 _META_FIELDS = ("label", "tooltip", "hide", "prompt", "ask_user")
@@ -78,6 +80,24 @@ def _default_param(command_cls: type, cmd_name: str, param: str) -> Any:
         return None
 
 
+def _height(node: Dict[str, Any]) -> int:
+    # Same formula as nodeHeight (app/src/pages/flow_editor/v1_adapter.ts).
+    ports = node.get("params", {}).get("ports")
+    if ports:
+        rows = 1 + max(len(ports["inputs"]), len(ports["outputs"]))
+    else:
+        rows = 1   # event.manual: then; data.flow_input: value
+    return HEADER_H + ROW_H * rows + 8
+
+
+def _place(nodes: Dict[str, Dict[str, Any]], columns: List[List[str]]) -> None:
+    for col, ids in enumerate(columns):
+        y = 0
+        for node_id in ids:
+            nodes[node_id]["pos"] = [col * COL, y]
+            y += _height(nodes[node_id]) + GAP
+
+
 def flow_name_for(v1_name: str, *, legacy: bool) -> str:
     return f"{store.LEGACY_PREFIX}{v1_name}" if legacy else v1_name
 
@@ -117,9 +137,11 @@ def convert_action(path: Path, *, flow_name: str, search_paths: Optional[List[Pa
     pending: List[Tuple[str, str, str, Any]] = []   # (node, param, type, OutputRef)
     exec_prev, n = "n1", 1
     flow_inputs = 0
+    columns: List[List[str]] = [["n1"]]
 
-    for col, step in enumerate(action.ordered_steps(), start=1):
-        for row, (cmd_name, cmd) in enumerate(step.commands.items()):
+    for step in action.ordered_steps():
+        columns.append([])
+        for cmd_name, cmd in step.commands.items():
             n += 1
             node_id = f"n{n}"
             by_ref[(step.name, cmd_name)] = node_id
@@ -143,10 +165,8 @@ def convert_action(path: Path, *, flow_name: str, search_paths: Optional[List[Pa
                     itype = ptype if ptype in _INTERFACE_TYPES else "str"
                     inputs.append({"id": input_id, "type": itype, "label": param.label or pname,
                                    "default": param.value})
-                    # Between the previous column and the consumer, stacked under its row.
                     src = f"in{flow_inputs}"
-                    feeders[src] = {"type": "data.flow_input", "pos": [col * COL - COL // 2, row * ROW + len(feeders) * 80 + 80],
-                                    "params": {"id": input_id}}
+                    feeders[src] = {"type": "data.flow_input", "params": {"id": input_id}}
                     in_ports[pname] = ptype
                     links.append({"from": f"{src}.value", "to": f"{node_id}.{pname}"})
                 elif default is None or param.value != default.value:
@@ -162,9 +182,9 @@ def convert_action(path: Path, *, flow_name: str, search_paths: Optional[List[Pa
                     params["params"] = literals
                 node_type = LEGACY_COMMAND
             params["ports"] = {"inputs": in_ports, "outputs": {}}
-            nodes[node_id] = {"type": node_type, "pos": [col * COL, row * ROW], "params": params,
-                              "label": f"{step.name}.{cmd_name}"}
+            nodes[node_id] = {"type": node_type, "params": params, "label": f"{step.name}.{cmd_name}"}
             nodes.update(feeders)
+            columns[-1] += [node_id, *feeders]
             links.append({"from": f"{exec_prev}.then", "to": f"{node_id}.exec"})
             exec_prev = node_id
 
@@ -177,13 +197,14 @@ def convert_action(path: Path, *, flow_name: str, search_paths: Optional[List[Pa
         nodes[src]["params"]["ports"]["outputs"].setdefault(ref.key, ptype)
         links.append({"from": f"{src}.{ref.key}", "to": f"{node_id}.{pname}"})
 
+    _place(nodes, columns)
     doc: Dict[str, Any] = {
         "flux_flow": 2, "name": flow_name,
         "label": f"{action.name} (v1)"[:LABEL_MAX], "description": description,
         "origin": {"kind": "v1", "name": action.name, "shelf": action.shelf, "thumbnail": action.thumbnail,
                    "extends": raw.get("extends"), "params": origin_params},
         "interface": inputs, "nodes": nodes, "links": links,
-        "notes": [{"id": "k1", "pos": [0, 3 * ROW], "text": notes_text}] if notes_text else [],
+        "notes": [{"id": "k1", "pos": [0, _height(nodes["n1"]) + GAP], "text": notes_text}] if notes_text else [],
     }
     try:
         flow = parse_flow(doc)

@@ -9,9 +9,9 @@ interface:
 nodes:
   n1: {type: event.manual, pos: [0, 0], params: {}}
   n2: {type: flux.legacy_command, pos: [320, 0], params: {command: conform_texture, ports: {inputs: {source: path}, outputs: {}}}, label: conform.conform}
-  in1: {type: data.flow_input, pos: [160, 80], params: {id: conform_source}}
+  in1: {type: data.flow_input, pos: [320, 104], params: {id: conform_source}}
 links:
   - {from: in1.value, to: n2.source}
   - {from: n1.then, to: n2.exec}
 notes:
-  - {id: k1, pos: [0, 480], text: "conform_texture.yml - conform a texture / UDIM set to mipped, tiled .tx.\n\nOne step, one command. The command expands the source (file, folder, or a\n\"<UDIM>\" pattern), converts each tile to a Karma-friendly .tx via OpenImageIO,\nand skips tiles whose source is unchanged. Colorspace is converted only for\ncolor maps in an integer (sRGB-authored) container.\n\nsource / out_dir are set at run time (UI or runner). Placement into the\nversioned publish layout is wired in a later phase; here the source parameter\nnames the texture directly.\n\nsource is set at run time; colorconvert/force keep their defaults."}
+  - {id: k1, pos: [0, 84], text: "conform_texture.yml - conform a texture / UDIM set to mipped, tiled .tx.\n\nOne step, one command. The command expands the source (file, folder, or a\n\"<UDIM>\" pattern), converts each tile to a Karma-friendly .tx via OpenImageIO,\nand skips tiles whose source is unchanged. Colorspace is converted only for\ncolor maps in an integer (sRGB-authored) container.\n\nsource / out_dir are set at run time (UI or runner). Placement into the\nversioned publish layout is wired in a later phase; here the source parameter\nnames the texture directly.\n\nsource is set at run time; colorconvert/force keep their defaults."}
