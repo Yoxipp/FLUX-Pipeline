@@ -13,7 +13,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict, List, Optional
 
 from flux_core import CommandBase, register
 
@@ -27,6 +27,98 @@ def _path(value: Any, action_query: Any) -> Path:
     p = Path(str(value))
     root = _ctx(action_query).get("project_path")
     return p if p.is_absolute() or not root else Path(root) / p
+
+
+# -- shared file helpers (plain functions, also used by the Flows v2 action nodes) --
+
+def make_dir(path: Path) -> Path:
+    """Create *path* and its parents; nothing happens when it exists."""
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def copy_target(src: Path, dst: Path) -> Path:
+    """Where a copy of *src* to *dst* lands: a file copied onto a folder keeps its name."""
+    src, dst = Path(src), Path(dst)
+    return dst / src.name if dst.is_dir() and src.is_file() else dst
+
+
+def copy_path(src: Path, dst: Path, overwrite: bool = False) -> Path:
+    """Copy a file or a folder. Refuses to overwrite unless *overwrite*."""
+    src = Path(src)
+    dst = copy_target(src, dst)
+    if dst.exists() and not overwrite:
+        raise ValueError(f"existe deja : {dst}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dst, dirs_exist_ok=bool(overwrite))
+    else:
+        shutil.copy2(src, dst)
+    return dst
+
+
+def move_target(src: Path, dst: Path) -> Path:
+    """Where a move of *src* to *dst* lands: onto a folder = into it (keeps the name)."""
+    src, dst = Path(src), Path(dst)
+    return dst / src.name if dst.is_dir() else dst
+
+
+def move_path(src: Path, dst: Path) -> Path:
+    """Move (or rename) a file or a folder. Never overwrites."""
+    src = Path(src)
+    dst = move_target(src, dst)
+    if dst.exists():
+        raise ValueError(f"existe deja : {dst}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    return dst
+
+
+def list_paths(folder: Path, recursive: bool = False, kind: str = "file",
+               match: Optional[Callable[[str], bool]] = None) -> List[str]:
+    """Sorted entries of *folder* (kind: file, dir or both) whose name passes *match*."""
+    folder = Path(folder)
+    walk = folder.rglob("*") if recursive else folder.glob("*")
+    keep = {"file": Path.is_file, "dir": Path.is_dir}.get(kind)
+    return sorted(str(p) for p in walk
+                  if (keep(p) if keep else (p.is_file() or p.is_dir())) and (match is None or match(p.name)))
+
+
+def write_json_atomic(path: Path, data: Any) -> Path:
+    """Write *data* as JSON next to *path* first, then swap it in."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def write_text_file(path: Path, text: Any, append: bool = False) -> Path:
+    """Write (or append) a UTF-8 text file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a" if append else "w", encoding="utf-8") as fh:
+        fh.write(str(text or ""))
+    return path
+
+
+def zip_dir(folder: Path, dest_base: Path) -> str:
+    """Zip *folder* into ``<dest_base>.zip``. Returns the zip path."""
+    return shutil.make_archive(str(dest_base), "zip", str(folder))
+
+
+def convert_image_file(src: Path, dst: Path) -> Path:
+    """Convert an image with OpenImageIO (the extension of *dst* picks the format)."""
+    import OpenImageIO as oiio
+
+    src, dst = Path(src), Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    buf = oiio.ImageBuf(str(src))
+    if buf.has_error or not buf.write(str(dst)):
+        raise ValueError(f"conversion impossible : {buf.geterror() or src}")
+    return dst
 
 
 @register("project_context")
@@ -85,8 +177,7 @@ class MakeFolder(CommandBase):
     parameters = {"path": {"type": "str", "label": "Dossier"}}
 
     async def run(self, parameters, action_query, logger):
-        path = _path(parameters["path"], action_query)
-        path.mkdir(parents=True, exist_ok=True)
+        path = make_dir(_path(parameters["path"], action_query))
         return {"path": str(path)}
 
 
@@ -101,15 +192,7 @@ class CopyFile(CommandBase):
     async def run(self, parameters, action_query, logger):
         src = _path(parameters["source"], action_query)
         dst = _path(parameters["destination"], action_query)
-        if dst.is_dir() and src.is_file():
-            dst = dst / src.name
-        if dst.exists() and not parameters.get("overwrite"):
-            raise ValueError(f"existe deja : {dst}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_dir():
-            await asyncio.to_thread(shutil.copytree, src, dst, dirs_exist_ok=bool(parameters.get("overwrite")))
-        else:
-            await asyncio.to_thread(shutil.copy2, src, dst)
+        dst = await asyncio.to_thread(copy_path, src, dst, bool(parameters.get("overwrite")))
         return {"path": str(dst)}
 
 
@@ -123,12 +206,7 @@ class MoveFile(CommandBase):
     async def run(self, parameters, action_query, logger):
         src = _path(parameters["source"], action_query)
         dst = _path(parameters["destination"], action_query)
-        if dst.is_dir():
-            dst = dst / src.name
-        if dst.exists():
-            raise ValueError(f"existe deja : {dst}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(shutil.move, str(src), str(dst))
+        dst = await asyncio.to_thread(move_path, src, dst)
         return {"path": str(dst)}
 
 
@@ -143,8 +221,8 @@ class ListFiles(CommandBase):
     async def run(self, parameters, action_query, logger):
         folder = _path(parameters["folder"], action_query)
         pattern = parameters.get("pattern") or "*"
-        walk = folder.rglob("*") if parameters.get("recursive") else folder.glob("*")
-        files = sorted(str(p) for p in walk if p.is_file() and fnmatch.fnmatch(p.name, pattern))
+        files = list_paths(folder, bool(parameters.get("recursive")), "file",
+                           lambda name: fnmatch.fnmatch(name, pattern))
         return {"files": files, "count": len(files), "first": files[0] if files else None}
 
 
@@ -167,11 +245,7 @@ class WriteJson(CommandBase):
                   "data": {"type": "any", "label": "Donnees"}}
 
     async def run(self, parameters, action_query, logger):
-        path = _path(parameters["path"], action_query)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(parameters.get("data"), indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        path = write_json_atomic(_path(parameters["path"], action_query), parameters.get("data"))
         return {"path": str(path)}
 
 
@@ -184,10 +258,8 @@ class WriteText(CommandBase):
                   "append": {"type": "bool", "value": False, "label": "Ajouter a la fin"}}
 
     async def run(self, parameters, action_query, logger):
-        path = _path(parameters["path"], action_query)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a" if parameters.get("append") else "w", encoding="utf-8") as fh:
-            fh.write(str(parameters.get("text") or ""))
+        path = write_text_file(_path(parameters["path"], action_query), parameters.get("text"),
+                               bool(parameters.get("append")))
         return {"path": str(path)}
 
 
@@ -201,7 +273,7 @@ class ZipFolder(CommandBase):
     async def run(self, parameters, action_query, logger):
         folder = _path(parameters["folder"], action_query)
         dest = _path(parameters.get("destination") or str(folder), action_query)
-        out = await asyncio.to_thread(shutil.make_archive, str(dest), "zip", str(folder))
+        out = await asyncio.to_thread(zip_dir, folder, dest)
         return {"zip_path": out}
 
 
@@ -249,14 +321,8 @@ class ConvertImage(CommandBase):
                   "destination": {"type": "str", "label": "Image de sortie (l'extension choisit le format)"}}
 
     async def run(self, parameters, action_query, logger):
-        import OpenImageIO as oiio
-
         src = _path(parameters["source"], action_query)
-        dst = _path(parameters["destination"], action_query)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        buf = oiio.ImageBuf(str(src))
-        if buf.has_error or not buf.write(str(dst)):
-            raise ValueError(f"conversion impossible : {buf.geterror() or src}")
+        dst = convert_image_file(src, _path(parameters["destination"], action_query))
         return {"path": str(dst)}
 
 
