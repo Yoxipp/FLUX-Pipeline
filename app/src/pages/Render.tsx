@@ -24,7 +24,7 @@ type Tab = 'launch' | 'jobs' | 'farm'
 
 function useTr() {
   const { lang } = useI18n()
-  return { tr: (fr: string, en: string) => (lang === 'en' ? en : fr) }
+  return { tr: (fr: string, en: string) => (lang === 'en' ? en : fr), locale: lang === 'en' ? 'en-GB' : 'fr-FR' }
 }
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -123,7 +123,7 @@ function diffPatch(s: RenderSettings, d: Draft): Partial<RenderSettings> {
 
 export function Render() {
   const { project } = useProject()
-  const { tr } = useTr()
+  const { tr, locale } = useTr()
   const [tab, setTab] = useState<Tab>('launch')
   const [settings, setSettings] = useState<RenderSettings | null>(null)
   const [settingsWarning, setSettingsWarning] = useState<string | null>(null)
@@ -207,13 +207,43 @@ export function Render() {
   const pickShot = (id: string) => {
     setShotKey(id)
     const s = shots.find(x => shotId(x) === id)
-    if (s) { setFrameStart(String(s.frame_start)); setFrameEnd(String(s.frame_end)) }
+    setFrameStart(s?.frame_start != null ? String(s.frame_start) : '')
+    setFrameEnd(s?.frame_end != null ? String(s.frame_end) : '')
   }
 
+  // Frame range read from the USD root layer, as soon as a file is picked.
+  const detectUsdRange = async (p: string) => {
+    if (!project || !p.trim()) return
+    try {
+      const r = await api.renderUsdRange(project, p.trim())
+      setFrameStart(r.frame_start != null ? String(r.frame_start) : '')
+      setFrameEnd(r.frame_end != null ? String(r.frame_end) : '')
+      if (r.frame_start == null) toast.message(tr('Pas de plage dans ce USD : la saisir', 'No frame range in this USD: type it'))
+    } catch (e) { toast.error(errMsg(e)) }
+  }
   const browseUsd = async () => {
     const p = await window.electronAPI?.openFile?.([{ name: 'USD', extensions: ['usd', 'usda', 'usdc'] }])
-    if (p) setUsdPath(p)
+    if (p) { setUsdPath(p); void detectUsdRange(p) }
   }
+  const pickSource = (s: 'shot' | 'usd') => {
+    setSource(s)
+    if (s === 'shot') pickShot(shotKey)
+    else if (usdPath.trim()) void detectUsdRange(usdPath)
+    else { setFrameStart(''); setFrameEnd('') }
+  }
+
+  // "Start at" as dropdowns: day (today + 6), hour, minute. startAt stays "YYYY-MM-DDTHH:MM".
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const dayOptions = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() + i)
+    const name = i === 0 ? tr("Aujourd'hui", 'Today') : i === 1 ? tr('Demain', 'Tomorrow')
+      : d.toLocaleDateString(locale, { weekday: 'short', day: '2-digit', month: '2-digit' })
+    return { value: isoDay(d), label: name }
+  })
+  const [atDay, atTime] = startAt ? startAt.split('T') : ['', '']
+  const [atHour, atMin] = atTime ? atTime.split(':') : ['', '']
+  const setWhen = (day: string, hour: string, min: string) => setStartAt(day ? `${day}T${hour || '20'}:${min || '00'}` : '')
 
   const canSubmit = !submitting && (source === 'shot' ? !!shotKey : !!usdPath.trim())
   const submit = async () => {
@@ -285,6 +315,7 @@ export function Render() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={{ padding: '14px 16px 0', fontSize: 15, fontWeight: 700, letterSpacing: '0.12em', color: 'var(--ink)' }}>TRACTOR</div>
       <div className="page-toolbar" style={{ gap: 6 }}>
         <Toggle value={tab} options={tabs} onChange={id => setTab(id as Tab)} />
       </div>
@@ -300,7 +331,7 @@ export function Render() {
           <>
             <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 640 }}>
               <div style={lbl}>{tr('Lancer un rendu', 'Launch a render')}</div>
-              <Toggle value={source} onChange={id => setSource(id as 'shot' | 'usd')}
+              <Toggle value={source} onChange={id => pickSource(id as 'shot' | 'usd')}
                 options={[{ id: 'shot', label: 'Shot' }, { id: 'usd', label: tr('USD publie', 'Published USD') }]} />
 
               {source === 'shot' ? (
@@ -319,17 +350,18 @@ export function Render() {
               ) : (
                 <Row label={tr('Fichier USD', 'USD file')}>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <input style={input} value={usdPath} placeholder="C:\...\shot.usd" onChange={e => setUsdPath(e.target.value)} />
+                    <input style={input} value={usdPath} placeholder="C:\...\shot.usd" onChange={e => setUsdPath(e.target.value)}
+                      onBlur={() => void detectUsdRange(usdPath)} />
                     <button type="button" style={btn()} onClick={() => void browseUsd()}>{tr('Parcourir', 'Browse')}</button>
                   </div>
                 </Row>
               )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <Row label={tr('Image debut', 'Start frame')}>
+                <Row label={tr('Image debut (auto)', 'Start frame (auto)')}>
                   <input type="number" style={input} value={frameStart} onChange={e => setFrameStart(e.target.value)} />
                 </Row>
-                <Row label={tr('Image fin', 'End frame')}>
+                <Row label={tr('Image fin (auto)', 'End frame (auto)')}>
                   <input type="number" style={input} value={frameEnd} onChange={e => setFrameEnd(e.target.value)} />
                 </Row>
                 <Row label={tr('Moteur', 'Renderer')}>
@@ -343,10 +375,31 @@ export function Render() {
                 </Row>
               </div>
 
-              <Row label={tr('Lancer a (vide = maintenant)', 'Start at (empty = now)')}>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input type="datetime-local" style={input} value={startAt} onChange={e => setStartAt(e.target.value)} />
-                  {startAt && <button type="button" style={btn()} onClick={() => setStartAt('')}>{tr('Effacer', 'Clear')}</button>}
+              <Row label={tr('Lancer a', 'Start at')}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 6 }}>
+                  <Select value={atDay || 'now'} onValueChange={v => setWhen(v === 'now' ? '' : v, atHour, atMin)}>
+                    <SelectTrigger style={sel} />
+                    <SelectContent>
+                      <SelectItem value="now">{tr('Maintenant', 'Now')}</SelectItem>
+                      {dayOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {atDay && (
+                    <>
+                      <Select value={atHour} onValueChange={v => setWhen(atDay, v, atMin)}>
+                        <SelectTrigger style={sel} />
+                        <SelectContent>
+                          {Array.from({ length: 24 }, (_, h) => <SelectItem key={h} value={pad(h)}>{pad(h)} h</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Select value={atMin} onValueChange={v => setWhen(atDay, atHour, v)}>
+                        <SelectTrigger style={sel} />
+                        <SelectContent>
+                          {['00', '15', '30', '45'].map(m => <SelectItem key={m} value={m}>{m} min</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </>
+                  )}
                 </div>
               </Row>
 

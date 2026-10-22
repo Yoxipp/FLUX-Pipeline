@@ -70,11 +70,39 @@ def shots(project: str):
     production, _ = shot_stage.load_project_production(root)
     out = []
     for item in shot_stage.list_shots(root, production):
+        stage = shot_stage.last_file(root, item["seq"], item["shot"])
         rng = shot_stage.read_frame_range(production, item["seq"], item["shot"])
+        if not rng and stage.is_file():
+            rng = _usd_range(stage)
         out.append({"seq": item["seq"], "shot": item["shot"],
                     "frame_start": rng[0] if rng else None, "frame_end": rng[1] if rng else None,
-                    "has_stage": shot_stage.last_file(root, item["seq"], item["shot"]).is_file()})
+                    "has_stage": stage.is_file()})
     return {"shots": out}
+
+
+def _usd_range(path: Path) -> tuple[int, int] | None:
+    """Frame range authored on the root layer (startTimeCode / endTimeCode), if any."""
+    from features.publisher.last_pointer import read_usd_root_info
+
+    try:
+        info = read_usd_root_info(path)
+    except Exception as exc:  # unreadable USD: the user types the range
+        log.warning("Frame range unreadable on %s: %s", path, exc)
+        return None
+    if "startTimeCode" in info and "endTimeCode" in info:
+        return int(float(info["startTimeCode"])), int(float(info["endTimeCode"]))
+    return None
+
+
+@router.get("/usd_range")
+def usd_range(project: str, path: str):
+    """Frame range of a published USD, to pre-fill the submit form."""
+    _ensure_project(project)
+    usd = Path(path)
+    if not usd.is_file():
+        raise HTTPException(status_code=404, detail=f"USD introuvable : {usd}")
+    rng = _usd_range(usd)
+    return {"frame_start": rng[0] if rng else None, "frame_end": rng[1] if rng else None}
 
 
 # ── submit ──────────────────────────────────────────────────────────────────
@@ -114,13 +142,14 @@ def _submit(body: SubmitBody, user: str) -> dict:
 
     if not body.usd_path and not (body.seq and body.shot):
         raise HTTPException(status_code=400, detail="Choisir un shot ou un USD publie")
+    rng = None
     if body.usd_path:
         # A published USD, or a stage written by the Houdini HDA (with its shot).
         usd = Path(body.usd_path)
         if not usd.is_file():
             raise HTTPException(status_code=404, detail=f"USD introuvable : {usd}")
         frozen = freeze.freeze_usd(usd, freeze=do_freeze)
-        name, folder, rng = usd.stem.replace("_LAST", ""), usd.parent, None
+        name, folder, rng = usd.stem.replace("_LAST", ""), usd.parent, _usd_range(usd)
     if body.seq and body.shot:
         seq, shot = body.seq.upper(), body.shot.upper()
         if not body.usd_path:
@@ -131,7 +160,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         name = shot_stage.entity(seq, shot)
         folder = shot_stage.shot_dir(root, seq, shot)
         production, _ = shot_stage.load_project_production(root)
-        rng = shot_stage.read_frame_range(production, seq, shot)
+        rng = shot_stage.read_frame_range(production, seq, shot) or rng
 
     start = body.frame_start if body.frame_start is not None else (rng[0] if rng else None)
     end = body.frame_end if body.frame_end is not None else (rng[1] if rng else None)

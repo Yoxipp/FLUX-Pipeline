@@ -154,7 +154,7 @@ export interface RenderSettings {
   service_karma: string; service_renderman: string; envkeys: string[]
   husk_path: string; bridge_python: string; bridge_script: string; engine: string; dry_run: boolean
 }
-export interface RenderShot { seq: string; shot: string; frame_start: number; frame_end: number; has_stage: boolean }
+export interface RenderShot { seq: string; shot: string; frame_start: number | null; frame_end: number | null; has_stage: boolean }
 export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
@@ -1077,6 +1077,9 @@ export const api = {
     apiCall<{ settings: RenderSettings; warning: string | null }>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
   renderShots: (project: string) =>
     apiCall<{ shots: RenderShot[] }>('GET', `/render/shots?project=${encodeURIComponent(project)}`),
+  renderUsdRange: (project: string, path: string) =>
+    apiCall<{ frame_start: number | null; frame_end: number | null }>('GET',
+      `/render/usd_range?project=${encodeURIComponent(project)}&path=${encodeURIComponent(path)}`),
   renderSubmit: (body: {
     project: string; seq?: string; shot?: string; usd_path?: string
     frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number

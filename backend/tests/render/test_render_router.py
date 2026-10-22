@@ -62,6 +62,22 @@ class RenderRouter(unittest.TestCase):
         r = self.client.put("/render/settings", params={"project": "P"}, json={"nope": 1})
         self.assertEqual(r.status_code, 400)
 
+    # frame range detection
+    def test_usd_range_reads_root_layer_time_codes(self):
+        usd = self._usda()
+        r = self.client.get("/render/usd_range", params={"project": "P", "path": str(usd)})
+        self.assertEqual(r.json(), {"frame_start": None, "frame_end": None})
+        usd.write_text('#usda 1.0\n(\n    startTimeCode = 1001\n    endTimeCode = 1048\n)\n', encoding="utf-8")
+        r = self.client.get("/render/usd_range", params={"project": "P", "path": str(usd)})
+        self.assertEqual(r.json(), {"frame_start": 1001, "frame_end": 1048})
+
+    def test_submit_usd_without_range_uses_the_usd_range(self):
+        usd = self._usda()
+        usd.write_text('#usda 1.0\n(\n    startTimeCode = 1001\n    endTimeCode = 1010\n)\n', encoding="utf-8")
+        r = self.client.post("/render/submit", json={"project": "P", "usd_path": str(usd)})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["frames"], [1001, 1010])
+
     # submit
     def test_submit_usd_dry_run_writes_job_files(self):
         usd = self._usda()
