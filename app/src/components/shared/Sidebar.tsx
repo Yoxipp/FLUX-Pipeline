@@ -529,6 +529,19 @@ export function Sidebar({ dccStatus }: Props) {
     }
   }
 
+  // Marvelous 2024 cannot start a script by itself: the artist pastes this line in
+  // Script > Python once per session. No " and no \ : its editor mangles them.
+  const handleCopyMarvelousLine = async () => {
+    try {
+      const { startup_file } = await api.getDccAutostart('marvelous')
+      if (!startup_file) throw new Error('script absent, installe le bridge')
+      await navigator.clipboard.writeText(`exec(open('${startup_file.replace(/\\/g, '/')}').read())`)
+      toast.success('Ligne copiée', { description: 'Dans Marvelous : Script > Python, colle la ligne puis Run.', duration: 6000 })
+    } catch (e) {
+      toast.error(`Copie impossible · ${e instanceof Error ? e.message : String(e)}`, { duration: 6000 })
+    }
+  }
+
   const handlePickPath = async (key: string) => {
     const path = await window.electronAPI?.openFile([{ name: 'Executable', extensions: ['exe', 'app', ''] }])
     if (!path) return
@@ -765,6 +778,12 @@ export function Sidebar({ dccStatus }: Props) {
             {psReason === 'lib_missing' ? 'Installer photoshop-python-api' : 'Vérifier Photoshop'}
             <span className="launcher-menu-hint">{psReason === 'ok' ? 'connecté' : psReason === 'not_running' ? 'fermé' : ''}</span>
           </Menu.Item>}
+      {soft === 'marvelous' && installed && (
+        <Menu.Item className="launcher-menu-item" onSelect={() => void handleCopyMarvelousLine()}>
+          <ClipboardList size={13} />Copier la ligne Script &gt; Python
+          <span className="launcher-menu-hint">{plugOk ? '' : 'à coller'}</span>
+        </Menu.Item>
+      )}
       <Menu.Item className="launcher-menu-item" disabled={findingAll} onSelect={() => void handleAutoFindAll()}>
         <Search size={13} />Auto-détecter les chemins
       </Menu.Item>
