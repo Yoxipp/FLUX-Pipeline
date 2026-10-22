@@ -32,6 +32,8 @@ DEFAULTS: dict = {
 }
 
 RENDERERS = ("karma", "renderman")
+# Shipped beside this module (scripts/backend.spec copies it in frozen mode).
+BUNDLED_BRIDGE = Path(__file__).resolve().parent / "bridge" / "flux_tractor_bridge.py"
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _STR_KEYS = (
     "tractor_project", "service_karma", "service_renderman",
@@ -158,6 +160,8 @@ def effective_settings(project_name: str, path=None) -> dict:
     settings = read_settings(project_name, path)
     if not settings["tractor_project"]:
         settings["tractor_project"] = project_name
+    if not settings["bridge_script"]:
+        settings["bridge_script"] = str(BUNDLED_BRIDGE)
     return settings
 
 
