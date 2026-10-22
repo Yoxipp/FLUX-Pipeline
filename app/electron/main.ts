@@ -165,40 +165,51 @@ async function createWindow(): Promise<void> {
 // page. The renderer shows a sidebar-less shell when the URL carries ?detached=1.
 const DETACHABLE_ROUTES = new Set([
   '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
-  // Opened from Parametres avances (read-only node flow of the YAML actions).
-  '/action-graph',
+  // Opened from Parametres avances: Flows editor, and the old YAML action editor until P8.
+  '/action-graph', '/action-graph-legacy',
   // Tractor farm page, opened from the launcher like a software (single window).
   '/render',
 ])
 
 // Routes that only ever get one window: a second request focuses the existing one.
-const SINGLE_WINDOW_ROUTES = new Set(['/render'])
+const SINGLE_WINDOW_ROUTES = new Set(['/render', '/action-graph', '/action-graph-legacy'])
 const singleWindows = new Map<string, BrowserWindow>()
 
+// Routes that need room (node editors): bigger window and minimum size.
+const LARGE_ROUTES = new Set(['/action-graph', '/action-graph-legacy'])
+
+// `route` may carry a query for a deep link (/action-graph?flow=publish): only its
+// path is checked against the lists, the whole route goes into the hash.
 function createDetachedWindow(route: string): void {
-  if (!DETACHABLE_ROUTES.has(route)) return
-  const single = SINGLE_WINDOW_ROUTES.has(route)
+  const routePath = route.split('?')[0]
+  if (!DETACHABLE_ROUTES.has(routePath)) return
+  const single = SINGLE_WINDOW_ROUTES.has(routePath)
   if (single) {
-    const existing = singleWindows.get(route)
+    const existing = singleWindows.get(routePath)
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore()
+      if (route !== routePath) {
+        existing.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(route)}`)
+          .catch((err) => console.error('[Electron] detached deep link failed:', err))
+      }
       existing.show()
       existing.focus()
       return
     }
   }
+  const large = LARGE_ROUTES.has(routePath)
   const cursor = screen.getCursorScreenPoint()
   const child = new BrowserWindow({
-    width:           1100,
-    height:          760,
-    minWidth:        640,
-    minHeight:       480,
+    width:           large ? 1440 : 1100,
+    height:          large ? 900 : 760,
+    minWidth:        large ? 960 : 640,
+    minHeight:       large ? 600 : 480,
     x:               Math.max(0, cursor.x - 120),
     y:               Math.max(0, cursor.y - 16),
     backgroundColor: '#0f0f0f',
     icon:            ICON,
     frame:           false,
-    title:           route === '/render' ? 'Tractor' : 'FLUX',
+    title:           routePath === '/render' ? 'Tractor' : 'FLUX',
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -206,8 +217,8 @@ function createDetachedWindow(route: string): void {
     },
   })
   if (single) {
-    singleWindows.set(route, child)
-    child.on('closed', () => { if (singleWindows.get(route) === child) singleWindows.delete(route) })
+    singleWindows.set(routePath, child)
+    child.on('closed', () => { if (singleWindows.get(routePath) === child) singleWindows.delete(routePath) })
   }
   if (!app.isPackaged) {
     child.loadURL(`http://localhost:5173/?detached=1#${route}`).catch((err) =>
