@@ -163,8 +163,14 @@ export interface RenderSubmitResult {
 export interface RenderJob {
   jid: number; title: string; user: string; projects?: string[] | string; priority?: number
   numTasks: number; numDone: number; numError: number; numActive: number
-  spooltime?: string | number; metadata?: unknown
+  numBlocked?: number; numReady?: number
+  spooltime?: string | number; stoptime?: string; pausetime?: string; comment?: string; metadata?: unknown
+  // user = Tractor owner (the shared school login); flux_user = who spooled it from FLUX ('' otherwise)
+  flux_user?: string
+  state?: 'active' | 'error' | 'done' | 'paused' | 'waiting' | 'deleted'
 }
+export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string }
+export type RenderJobScope = 'all' | 'team' | 'mine'
 export interface RenderFarm {
   blades: unknown[]; active_by_project: Record<string, number>
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
@@ -1085,9 +1091,13 @@ export const api = {
     frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
     start_at?: string   // "YYYY-MM-DDTHH:MM" local; omitted = now
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
-  renderJobs: (project: string, mine: boolean) =>
-    apiCall<{ jobs: RenderJob[]; dry_run?: boolean; finished?: { jid: number; title: string; output?: string }[] }>(
-      'GET', `/render/jobs?project=${encodeURIComponent(project)}&mine=${mine}`),
+  renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
+    apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
+      'GET', `/render/jobs?project=${encodeURIComponent(project)}&scope=${scope}&days=${days}`),
+  renderJobTasks: (project: string, jid: number) =>
+    apiCall<{ tasks: RenderTask[] }>('GET', `/render/jobs/${jid}/tasks?project=${encodeURIComponent(project)}`),
+  renderTaskLog: (project: string, jid: number, tid: number) =>
+    apiCall<{ log: string }>('GET', `/render/jobs/${jid}/tasks/${tid}/log?project=${encodeURIComponent(project)}`, undefined, 60000),
   renderFarm: (project: string) =>
     apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
   renderJobAction: (project: string, jid: number, action: 'kill' | 'retry' | 'pause' | 'resume') =>

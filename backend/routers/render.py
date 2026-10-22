@@ -212,15 +212,20 @@ async def submit(body: SubmitBody):
 
 # ── follow-up ───────────────────────────────────────────────────────────────
 
+_FINAL_STATES = ("done", "error", "deleted")
+
+
 def _notify_finished(jobs: list[dict], user: str) -> list[dict]:
-    """Jobs seen running that left the "not done" list: log them once in the activity feed."""
-    live = {j.get("jid") for j in jobs}
+    """The user's jobs seen running that reached a final state (or left the list): log them once."""
+    by_jid = {j.get("jid"): j for j in jobs}
     for j in jobs:
-        if isinstance(j.get("jid"), int) and j["jid"] not in _running:
+        if (isinstance(j.get("jid"), int) and j["jid"] not in _running
+                and j.get("flux_user") == user and j.get("state") not in _FINAL_STATES):
             _running[j["jid"]] = {"project": "", "title": j.get("title") or "", "output": "",
-                                  "user": j.get("user") or user, "seen": time.time()}
+                                  "user": user, "seen": time.time()}
     finished = []
-    for jid in [jid for jid, info in _running.items() if jid not in live and info["user"] == user]:
+    for jid in [jid for jid, info in _running.items() if info["user"] == user
+                and (jid not in by_jid or by_jid[jid].get("state") in _FINAL_STATES)]:
         info = _running.pop(jid)
         finished.append({"jid": jid, **info})
         try:
@@ -232,21 +237,58 @@ def _notify_finished(jobs: list[dict], user: str) -> list[dict]:
     return finished
 
 
-def _jobs(project: str, mine: bool, user: str) -> dict:
+_SCOPES = ("all", "team", "mine")
+
+
+def _jobs(project: str, scope: str, days: int, user: str) -> dict:
+    """Every Tractor job (all states, all owners) like the Dashboard; the UI filters further."""
     _ensure_project(project)
+    if scope not in _SCOPES:
+        raise HTTPException(status_code=400, detail=f"Filtre inconnu : {scope}")
     settings = team_settings.effective_settings(project)
     try:
-        out = tractor_bridge.jobs(settings, user, mine=mine,
-                                  project=None if mine else settings["tractor_project"])
+        out = tractor_bridge.jobs(settings, user, mine=(scope == "mine"), days=max(1, min(days, 365)),
+                                  project=settings["tractor_project"] if scope == "team" else None)
     except tractor_bridge.BridgeError as exc:
         raise _bridge_error(exc)
-    out["finished"] = _notify_finished(out.get("jobs", []), user) if mine and not out.get("dry_run") else []
+    # A team-filtered list can miss a running job of the user: notify only on the full list.
+    full = scope != "team" and tractor_bridge.is_configured(settings)
+    out["finished"] = _notify_finished(out.get("jobs", []), user) if full else []
+    out["tractor_project"] = settings["tractor_project"]
     return out
 
 
 @router.get("/jobs")
-async def jobs(project: str, mine: bool = True):
-    return await asyncio.to_thread(_jobs, project, mine, _user())
+async def jobs(project: str, scope: str = "all", days: int = 30):
+    return await asyncio.to_thread(_jobs, project, scope, days, _user())
+
+
+def _tasks(project: str, jid: int, user: str) -> dict:
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    try:
+        return tractor_bridge.tasks(settings, user, jid)
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+
+
+@router.get("/jobs/{jid}/tasks")
+async def job_tasks(jid: int, project: str):
+    return await asyncio.to_thread(_tasks, project, jid, _user())
+
+
+def _task_log(project: str, jid: int, tid: int, user: str) -> dict:
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    try:
+        return tractor_bridge.task_log(settings, user, jid, tid)
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+
+
+@router.get("/jobs/{jid}/tasks/{tid}/log")
+async def job_task_log(jid: int, tid: int, project: str):
+    return await asyncio.to_thread(_task_log, project, jid, tid, _user())
 
 
 def _farm_state(project: str, user: str) -> dict:

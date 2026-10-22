@@ -33,6 +33,9 @@ class RenderRouter(unittest.TestCase):
             mock.patch("core.paths.get_project_render_path", return_value=self.render_json),
             mock.patch.object(render.config, "get_current_user", return_value="adam"),
             mock.patch.object(render.farm_paths, "_unc_of_drive", return_value=None),
+            # Hermetic: never reach the school machine's real Tractor client and engine.
+            mock.patch.object(render.team_settings, "TRACTOR_PYTHON_CANDIDATES", ()),
+            mock.patch.dict("os.environ", {"TRACTOR_ENGINE": ""}),
         ]
         for p in patches:
             p.start()
@@ -155,16 +158,44 @@ class RenderRouter(unittest.TestCase):
         r = self.client.post("/render/jobs/12/explode", params={"project": "P"})
         self.assertEqual(r.status_code, 400)
 
+    def test_jobs_scope_and_days_reach_the_bridge(self):
+        with mock.patch.object(render.tractor_bridge, "jobs", return_value={"jobs": []}) as jobs:
+            r = self.client.get("/render/jobs", params={"project": "P", "scope": "team", "days": 900})
+            self.assertEqual(r.status_code, 200, r.text)
+            _, kwargs = jobs.call_args
+            self.assertEqual((kwargs["mine"], kwargs["project"], kwargs["days"]), (False, "P", 365))
+            self.client.get("/render/jobs", params={"project": "P", "scope": "mine"})
+            self.assertEqual((jobs.call_args[1]["mine"], jobs.call_args[1]["project"]), (True, None))
+        r = self.client.get("/render/jobs", params={"project": "P", "scope": "boss"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_tasks_and_log_endpoints(self):
+        with mock.patch.object(render.tractor_bridge, "tasks", return_value={"tasks": [{"tid": 4}]}) as tasks, \
+                mock.patch.object(render.tractor_bridge, "task_log", return_value={"log": "boom"}) as tlog:
+            r = self.client.get("/render/jobs/34025/tasks", params={"project": "P"})
+            self.assertEqual(r.json(), {"tasks": [{"tid": 4}]})
+            self.assertEqual(tasks.call_args[0][1:], ("adam", 34025))
+            r = self.client.get("/render/jobs/34025/tasks/4/log", params={"project": "P"})
+            self.assertEqual(r.json(), {"log": "boom"})
+            self.assertEqual(tlog.call_args[0][1:], ("adam", 34025, 4))
+
     # notification
     def test_notify_finished_once(self):
+        running = {"jid": 5, "title": "t", "flux_user": "adam", "state": "active"}
         with mock.patch("features.activity.activity_writer.log_event") as log_event:
-            first = render._notify_finished([{"jid": 5, "title": "t", "user": "adam"}], "adam")
-            self.assertEqual(first, [])
-            second = render._notify_finished([], "adam")
-            self.assertEqual(len(second), 1)
-            self.assertEqual(second[0]["jid"], 5)
-            self.assertEqual(render._notify_finished([], "adam"), [])
+            self.assertEqual(render._notify_finished([running], "adam"), [])
+            # Finished jobs now stay in the list: the final state triggers the notification.
+            second = render._notify_finished([{**running, "state": "done"}], "adam")
+            self.assertEqual([j["jid"] for j in second], [5])
+            self.assertEqual(render._notify_finished([{**running, "state": "done"}], "adam"), [])
             log_event.assert_called_once()
+
+    def test_notify_ignores_other_users_and_old_jobs(self):
+        with mock.patch("features.activity.activity_writer.log_event") as log_event:
+            render._notify_finished([{"jid": 6, "flux_user": "tom", "state": "active"},
+                                     {"jid": 7, "flux_user": "adam", "state": "error"}], "adam")
+            self.assertEqual(render._notify_finished([], "adam"), [])
+            log_event.assert_not_called()
 
 
 if __name__ == "__main__":
