@@ -20,7 +20,8 @@ DEFAULTS: dict = {
     "chunk_size": 5,
     "renderer": "karma",
     "freeze_by_default": True,
-    "schedule": {"enabled": True, "start": "18:00", "end": "08:00", "kill_at_end": True},
+    # Night window off by default (2026-10-22): opt-in in the advanced settings.
+    "schedule": {"enabled": False, "start": "18:00", "end": "08:00", "kill_at_end": False},
     "service_karma": "",
     "service_renderman": "",
     "envkeys": [],

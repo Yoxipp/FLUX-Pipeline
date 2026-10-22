@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -49,6 +50,16 @@ class RenderJobSpec:
     envkeys: List[str] = field(default_factory=list)
     husk: str = "husk"
     metadata: Dict[str, str] = field(default_factory=dict)
+    start_after: str = ""  # "YYYY-MM-DDTHH:MM" local time, empty = start now
+
+
+def after_clause(start_after: str) -> str:
+    """Alfred '-after {month day hour:minute}' value (format to confirm at school, phase 0)."""
+    try:
+        when = datetime.strptime(start_after[:16], "%Y-%m-%dT%H:%M")
+    except ValueError:
+        raise JobValidationError(f"date de lancement invalide : '{start_after}' (attendu AAAA-MM-JJTHH:MM)") from None
+    return f"{when.month} {when.day} {when.hour:02d}:{when.minute:02d}"
 
 
 def is_drive_letter_path(path: str) -> bool:
@@ -109,6 +120,8 @@ def validate_spec(spec: RenderJobSpec, strict: bool = True) -> RenderJobSpec:
         if _UNSAFE_TCL.search(text.replace("$F", "")):
             raise JobValidationError(f"unsupported character in '{text}' (braces, brackets, backslash, $)")
     chunk_frames(spec.frame_start, spec.frame_end, spec.chunk_size, spec.frame_step)
+    if spec.start_after:
+        after_clause(spec.start_after)
     return spec
 
 
@@ -130,6 +143,8 @@ def to_alf(spec: RenderJobSpec, strict: bool = True) -> str:
     ]
     if spec.maxactive > 0:
         job_attrs.append(f"-maxactive {spec.maxactive}")
+    if spec.start_after:
+        job_attrs.append(f"-after {_tcl(after_clause(spec.start_after))}")
     if spec.service:
         job_attrs.append(f"-service {_tcl(spec.service)}")
     if spec.envkeys:

@@ -72,6 +72,12 @@ class AlfTests(unittest.TestCase):
         self.assertIn("--renderer BRAY_HdKarma --frame 1011 --frame-count 2", alf)
         self.assertEqual(alf.count("{"), alf.count("}"))
 
+    def test_scheduled_start(self):
+        self.assertIn("-after {3 7 21:05}", jb.to_alf(_spec(start_after="2027-03-07T21:05")))
+        self.assertNotIn("-after", jb.to_alf(_spec()))
+        with self.assertRaises(jb.JobValidationError):
+            jb.to_alf(_spec(start_after="demain"))
+
     def test_renderman_delegate(self):
         self.assertIn("HdPrmanLoaderRendererPlugin", jb.to_alf(_spec(renderer="renderman")))
 

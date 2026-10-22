@@ -89,6 +89,7 @@ class SubmitBody(BaseModel):
     renderer: Optional[str] = None
     freeze: Optional[bool] = None
     chunk_size: Optional[int] = None
+    start_at: Optional[str] = None  # "YYYY-MM-DDTHH:MM": Tractor holds the job until then
 
 
 def _farm(path: Path | str, what: str, simulate: bool) -> str:
@@ -111,26 +112,26 @@ def _submit(body: SubmitBody, user: str) -> dict:
     do_freeze = settings["freeze_by_default"] if body.freeze is None else body.freeze
     renderer = body.renderer or settings["renderer"]
 
-    if body.seq and body.shot:
-        seq, shot = body.seq.upper(), body.shot.upper()
-        try:
-            frozen = freeze.freeze_shot(root, seq, shot, user=user, freeze=do_freeze)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        name = shot_stage.entity(seq, shot)
-        folder = shot_stage.shot_dir(root, seq, shot)
-        production, _ = shot_stage.load_project_production(root)
-        rng = shot_stage.read_frame_range(production, seq, shot)
-    elif body.usd_path:
+    if not body.usd_path and not (body.seq and body.shot):
+        raise HTTPException(status_code=400, detail="Choisir un shot ou un USD publie")
+    if body.usd_path:
+        # A published USD, or a stage written by the Houdini HDA (with its shot).
         usd = Path(body.usd_path)
         if not usd.is_file():
             raise HTTPException(status_code=404, detail=f"USD introuvable : {usd}")
         frozen = freeze.freeze_usd(usd, freeze=do_freeze)
-        name = usd.stem.replace("_LAST", "")
-        folder = usd.parent
-        rng = None
-    else:
-        raise HTTPException(status_code=400, detail="Choisir un shot ou un USD publie")
+        name, folder, rng = usd.stem.replace("_LAST", ""), usd.parent, None
+    if body.seq and body.shot:
+        seq, shot = body.seq.upper(), body.shot.upper()
+        if not body.usd_path:
+            try:
+                frozen = freeze.freeze_shot(root, seq, shot, user=user, freeze=do_freeze)
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+        name = shot_stage.entity(seq, shot)
+        folder = shot_stage.shot_dir(root, seq, shot)
+        production, _ = shot_stage.load_project_production(root)
+        rng = shot_stage.read_frame_range(production, seq, shot)
 
     start = body.frame_start if body.frame_start is not None else (rng[0] if rng else None)
     end = body.frame_end if body.frame_end is not None else (rng[1] if rng else None)
@@ -154,6 +155,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         service=service,
         envkeys=settings["envkeys"],
         husk=settings["husk_path"],
+        start_after=body.start_at or "",
         metadata={"flux_project": body.project, "entity": name, "user": user,
                   "output": _farm(out_dir, "Le dossier de rendu", simulate), "frozen": "1" if frozen["frozen"] else "0"},
     )
@@ -169,7 +171,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
     log.info("Render %s %s (%s) -> %s", "simulated" if result["dry_run"] else "spooled", spec.title,
              renderer, result.get("jid"))
     return {**result, "title": spec.title, "output": str(out_dir), "usd": frozen["usd"],
-            "frozen": frozen["frozen"], "frames": [start, end], "warnings": frozen["warnings"],
+            "frozen": frozen["frozen"], "frames": [start, end], "start_at": spec.start_after, "warnings": frozen["warnings"],
             "priority_warning": team_settings.priority_warning(settings)}
 
 

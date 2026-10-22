@@ -68,7 +68,8 @@ class TeamSettingsTests(unittest.TestCase):
         out = ts.write_settings("proj", {"schedule": {"start": "22:00", "end": "06:00"}})
         self.assertEqual(out["schedule"]["start"], "22:00")
         self.assertEqual(out["schedule"]["end"], "06:00")
-        self.assertTrue(out["schedule"]["kill_at_end"])
+        self.assertFalse(out["schedule"]["kill_at_end"])  # opt-in, off by default
+        self.assertFalse(ts.DEFAULTS["schedule"]["enabled"])
 
     def test_bad_hhmm_rejected(self):
         for bad in ("24:00", "9:00", "18:60", "abc", 1800):
