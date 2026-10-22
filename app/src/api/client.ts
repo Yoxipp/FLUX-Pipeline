@@ -158,6 +158,7 @@ export interface RenderShot { seq: string; shot: string; frame_start: number; fr
 export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
+  start_at: string
 }
 export interface RenderJob {
   jid: number; title: string; user: string; projects?: string[] | string; priority?: number
@@ -1079,6 +1080,7 @@ export const api = {
   renderSubmit: (body: {
     project: string; seq?: string; shot?: string; usd_path?: string
     frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
+    start_at?: string   // "YYYY-MM-DDTHH:MM" local; omitted = now
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
   renderJobs: (project: string, mine: boolean) =>
     apiCall<{ jobs: RenderJob[]; dry_run?: boolean; finished?: { jid: number; title: string; output?: string }[] }>(

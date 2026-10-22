@@ -844,8 +844,29 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             </div>
           )
         })}
-        {/* Tractor farm render (ADR 0015): not a DCC, so a plain row after the software list. */}
-        <NavItem icon={ServerCog} label="Tractor" active={pathname === '/render'} route="/render" onClick={() => navigate('/render')} />
+        {/* Tractor farm render (ADR 0015): not a DCC (not in SOFTWARE), but the row looks like one.
+            Play opens Tractor in its own window (single instance); the gear opens it in this window. */}
+        <div className="dcc-row">
+          <span className="dcc-logo-slot" title="Tractor" style={{ opacity: pathname === '/render' ? 1 : 0.62 }}>
+            <DccLogo dcc="tractor" size={18} title="Tractor" />
+          </span>
+          <button type="button" className="dcc-play" aria-label="Lancer Tractor" title="Ouvrir Tractor dans sa fenêtre"
+            onClick={() => { if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/render'); else navigate('/render') }}>
+            <Play size={11} strokeWidth={2} fill="currentColor" />
+          </button>
+          <Menu.Root modal={false}>
+            <Menu.Trigger asChild>
+              <button type="button" className="dcc-gear" aria-label="Tractor : actions" title="Plus d'actions">
+                <Settings size={13} strokeWidth={1.8} />
+              </button>
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Content className="launcher-menu" side="right" align="start" sideOffset={6} collisionPadding={10}>
+                <Menu.Item className="launcher-menu-item" onSelect={() => navigate('/render')}><ServerCog size={13} />Ouvrir dans FLUX</Menu.Item>
+              </Menu.Content>
+            </Menu.Portal>
+          </Menu.Root>
+        </div>
       </NavGroup>
 
       <div style={{ flex: 1 }} />

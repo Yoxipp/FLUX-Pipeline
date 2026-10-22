@@ -137,6 +137,7 @@ export function Render() {
   const [frameEnd, setFrameEnd] = useState('')
   const [renderer, setRenderer] = useState<'karma' | 'renderman'>('karma')
   const [freeze, setFreeze] = useState(true)
+  const [startAt, setStartAt] = useState('')   // datetime-local value, empty = now
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<RenderSubmitResult | null>(null)
 
@@ -222,6 +223,7 @@ export function Render() {
     else body.usd_path = usdPath.trim()
     if (frameStart !== '') body.frame_start = Number(frameStart)
     if (frameEnd !== '') body.frame_end = Number(frameEnd)
+    if (startAt) body.start_at = startAt
     setSubmitting(true)
     try {
       const r = await api.renderSubmit(body)
@@ -230,6 +232,9 @@ export function Render() {
         toast.success(tr("Simulation : job ecrit, rien n'est envoye a la farm", 'Simulation: job written, nothing sent to the farm'), {
           action: { label: tr('Ouvrir le dossier', 'Open folder'), onClick: () => openFolder(r.files.alf) },
         })
+      } else if (startAt) {
+        const when = (r.start_at || startAt).replace('T', ' ')
+        toast.success(tr(`Job envoye (jid ${r.jid}), demarrera le ${when}`, `Job sent (jid ${r.jid}), will start on ${when}`))
       } else toast.success(`${tr('Job envoye', 'Job sent')} (jid ${r.jid})`)
       void loadJobs()
     } catch (e) { toast.error(errMsg(e)) }
@@ -338,6 +343,13 @@ export function Render() {
                 </Row>
               </div>
 
+              <Row label={tr('Lancer a (vide = maintenant)', 'Start at (empty = now)')}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input type="datetime-local" style={input} value={startAt} onChange={e => setStartAt(e.target.value)} />
+                  {startAt && <button type="button" style={btn()} onClick={() => setStartAt('')}>{tr('Effacer', 'Clear')}</button>}
+                </div>
+              </Row>
+
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-2)', cursor: 'pointer' }}>
                 <input type="checkbox" checked={freeze} onChange={e => setFreeze(e.target.checked)} />
                 {tr('Geler la version', 'Freeze the version')}
@@ -383,10 +395,14 @@ export function Render() {
                     {txtField('Bridge script', 'bridge_script')}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
-                    {chk(tr('Plage horaire', 'Schedule'), 'sch_enabled')}
-                    <div style={{ width: 90 }}>{txtField(tr('Debut', 'Start'), 'sch_start', '18:00')}</div>
-                    <div style={{ width: 90 }}>{txtField('Fin', 'sch_end', '08:00')}</div>
-                    {chk(tr('Tuer les taches a la fin', 'Kill tasks at end'), 'sch_kill')}
+                    {chk(tr('Activer la plage de rendu (sinon rendu a toute heure)', 'Enable the render window (otherwise render at any hour)'), 'sch_enabled')}
+                    {draft.sch_enabled && (
+                      <>
+                        <div style={{ width: 90 }}>{txtField(tr('Debut', 'Start'), 'sch_start', '18:00')}</div>
+                        <div style={{ width: 90 }}>{txtField('Fin', 'sch_end', '08:00')}</div>
+                        {chk(tr('Tuer les taches restantes a la fin de la plage', 'Kill remaining tasks at the end of the window'), 'sch_kill')}
+                      </>
+                    )}
                   </div>
                   {chk(tr('Mode simulation (rien envoye a la farm)', 'Simulation mode (nothing sent to the farm)'), 'dry_run')}
                   <div>
@@ -451,7 +467,7 @@ export function Render() {
                     {farm.blades.length} blades. {farm.schedule.enabled
                       ? tr(`Rendu de ${farm.schedule.start} a ${farm.schedule.end}${farm.schedule.kill_at_end ? `, taches restantes tuees a ${farm.schedule.end}` : ''}`,
                            `Render from ${farm.schedule.start} to ${farm.schedule.end}${farm.schedule.kill_at_end ? `, remaining tasks killed at ${farm.schedule.end}` : ''}`)
-                      : tr('Rendu de jour autorise', 'Daytime rendering allowed')}
+                      : tr('Rendu a toute heure', 'Rendering at any hour')}
                   </div>
                   {entries.length === 0 && (
                     <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
