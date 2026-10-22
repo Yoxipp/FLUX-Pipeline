@@ -54,8 +54,13 @@ class _Strict(BaseModel):
 
 
 class Origin(_Strict):
+    # Migrated v1 action (01 §15): what the v2 format has no place for is kept here.
     kind: Literal["v1"]
     name: str
+    shelf: Optional[str] = None
+    thumbnail: Optional[str] = None
+    extends: Optional[str] = None
+    params: Dict[str, Dict[str, Any]] = {}   # "<node>.<param>" -> {label, tooltip, hide, prompt, ask_user}
 
 
 class InterfaceInput(_Strict):
@@ -377,7 +382,8 @@ def dump_flow(flow: Flow, *, scope: Optional[str] = None, version: Optional[int]
             out.append(f"{key}: {_scalar(value)}")
     out.append(f"run_policy: {flow.run_policy}")
     if flow.origin:
-        out.append(f"origin: {_flow_style(flow.origin.model_dump())}")
+        origin = {k: v for k, v in flow.origin.model_dump().items() if v not in (None, {})}
+        out.append(f"origin: {_flow_style(origin)}")
     if flow.node_type:
         out.append(f"node_type: {flow.node_type}")
     inputs = [_drop_none(i.model_dump(), keep=("default",)) for i in flow.interface.inputs]

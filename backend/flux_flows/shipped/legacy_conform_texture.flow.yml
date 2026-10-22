@@ -1,0 +1,17 @@
+flux_flow: 2
+name: legacy_conform_texture
+label: "conform_texture (v1)"
+description: "Conversion des textures en .tx (OpenImageIO) au publish, pour que Karma ne refasse pas les mipmaps au rendu."
+run_policy: skip_if_running
+origin: {kind: v1, name: conform_texture, shelf: publish}
+interface:
+  - {id: conform_source, type: path, label: "Texture source", default: null}
+nodes:
+  n1: {type: event.manual, pos: [0, 0], params: {}}
+  n2: {type: flux.legacy_command, pos: [320, 0], params: {command: conform_texture, ports: {inputs: {source: path}, outputs: {}}}, label: conform.conform}
+  in1: {type: data.flow_input, pos: [160, 80], params: {id: conform_source}}
+links:
+  - {from: in1.value, to: n2.source}
+  - {from: n1.then, to: n2.exec}
+notes:
+  - {id: k1, pos: [0, 480], text: "conform_texture.yml - conform a texture / UDIM set to mipped, tiled .tx.\n\nOne step, one command. The command expands the source (file, folder, or a\n\"<UDIM>\" pattern), converts each tile to a Karma-friendly .tx via OpenImageIO,\nand skips tiles whose source is unchanged. Colorspace is converted only for\ncolor maps in an integer (sRGB-authored) container.\n\nsource / out_dir are set at run time (UI or runner). Placement into the\nversioned publish layout is wired in a later phase; here the source parameter\nnames the texture directly.\n\nsource is set at run time; colorconvert/force keep their defaults."}

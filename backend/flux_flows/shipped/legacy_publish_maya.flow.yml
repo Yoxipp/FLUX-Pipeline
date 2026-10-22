@@ -1,0 +1,39 @@
+flux_flow: 2
+name: legacy_publish_maya
+label: "publish_maya (v1)"
+description: "Publish depuis Maya : choix, destination, export depuis le Maya ouvert, puis la meme copie que le publish local."
+run_policy: skip_if_running
+origin: {kind: v1, name: publish_maya, shelf: publish}
+interface:
+  - {id: select_base_name, type: str, label: "Nom de la scene", default: null}
+  - {id: select_extension, type: str, label: Format, default: ".mb"}
+  - {id: select_scope, type: str, label: Portee, default: scene}
+  - {id: publish_description, type: str, label: Description, default: ""}
+nodes:
+  n1: {type: event.manual, pos: [0, 0], params: {}}
+  n2: {type: flux.legacy_command, pos: [320, 0], params: {command: select_dcc_publish, ports: {inputs: {base_name: str, extension: str, scope: str}, outputs: {filename: str, extension: str, scope: str}}}, label: select.select}
+  in1: {type: data.flow_input, pos: [160, 80], params: {id: select_base_name}}
+  in2: {type: data.flow_input, pos: [160, 160], params: {id: select_extension}}
+  in3: {type: data.flow_input, pos: [160, 240], params: {id: select_scope}}
+  n3: {type: flux.legacy_command, pos: [640, 0], params: {command: build_output_path, ports: {inputs: {filename: str}, outputs: {output_path: path}}}, label: resolve.output}
+  n4: {type: flux.legacy_command, pos: [960, 0], params: {command: maya_export, ports: {inputs: {filename: str, extension: str, scope: str}, outputs: {source_path: path}}}, label: export.export}
+  n5: {type: flux.legacy_command, pos: [1280, 0], params: {command: copy_publish, ports: {inputs: {source_path: path, output_path: path, filename: str, description: str}, outputs: {}}}, label: publish.publish}
+  in4: {type: data.flow_input, pos: [1120, 80], params: {id: publish_description}}
+links:
+  - {from: in1.value, to: n2.base_name}
+  - {from: in2.value, to: n2.extension}
+  - {from: in3.value, to: n2.scope}
+  - {from: in4.value, to: n5.description}
+  - {from: n1.then, to: n2.exec}
+  - {from: n2.extension, to: n4.extension}
+  - {from: n2.filename, to: n3.filename}
+  - {from: n2.filename, to: n4.filename}
+  - {from: n2.filename, to: n5.filename}
+  - {from: n2.scope, to: n4.scope}
+  - {from: n2.then, to: n3.exec}
+  - {from: n3.output_path, to: n5.output_path}
+  - {from: n3.then, to: n4.exec}
+  - {from: n4.source_path, to: n5.source_path}
+  - {from: n4.then, to: n5.exec}
+notes:
+  - {id: k1, pos: [0, 480], text: "publish_maya.yml — publish the open Maya scene as a declarative action.\n\nFour ordered steps, one command each:\nselect  -> select_dcc_publish : validate the scene name + format\nresolve -> build_output_path  : resolve the destination folder\nexport  -> maya_export        : export the scene to a temp file (over the port)\npublish -> copy_publish       : versioned copy + logs into the resolved folder\n\nSame engine and same copy step as the local publish; only the source changes:\nhere the source_path is produced by the export step, not picked by the user.\nData flows by named reference (value: {from: \"step.command.output_key\"}).\nProduction context (project_path, user, project_name) is injected at run time.\n\nbase_name / extension / scope are set at run time (UI or runner).\nport / frame_range / options are set at run time when needed.\ndescription is set at run time (UI or runner)."}
