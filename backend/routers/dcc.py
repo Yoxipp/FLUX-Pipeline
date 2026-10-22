@@ -2884,6 +2884,13 @@ async def houdini_flux_render_module() -> dict:
     return {"code": MODULE_FUNCTIONS}
 
 
+@router.get("/houdini/flux_render_submit/module")
+async def houdini_flux_render_submit_module() -> dict:
+    """PythonModule of the FLUX Render Submit HDA (Tractor farm submission, ADR 0015)."""
+    from dcc.houdini.hda.flux_render_submit_hda import MODULE_FUNCTIONS
+    return {"code": MODULE_FUNCTIONS}
+
+
 @router.get("/houdini/flux_unreal_live/module")
 async def houdini_flux_unreal_live_module() -> dict:
     """PythonModule of the FLUX Unreal Live HDA (Houdini /stage shown live in Unreal, ADR 0052)."""
