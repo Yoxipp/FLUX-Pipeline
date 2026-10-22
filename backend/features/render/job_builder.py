@@ -60,11 +60,11 @@ def is_unc_path(path: str) -> bool:
     return p.startswith("\\\\") or p.startswith("//")
 
 
-def validate_farm_path(path: str, what: str) -> str:
-    """Return the path with forward slashes, refuse drive letters."""
+def validate_farm_path(path: str, what: str, strict: bool = True) -> str:
+    """Return the path with forward slashes, refuse drive letters (unless not strict: simulation)."""
     if not path:
         raise JobValidationError(f"{what}: empty path")
-    if is_drive_letter_path(path):
+    if strict and is_drive_letter_path(path):
         raise JobValidationError(
             f"{what}: drive letter path '{path}' is not visible from the farm service account, use a UNC path"
         )
@@ -95,11 +95,11 @@ def husk_command(spec: RenderJobSpec, first: int, last: int) -> List[str]:
     ]
 
 
-def validate_spec(spec: RenderJobSpec) -> RenderJobSpec:
+def validate_spec(spec: RenderJobSpec, strict: bool = True) -> RenderJobSpec:
     if spec.renderer not in RENDERER_DELEGATES:
         raise JobValidationError(f"unknown renderer '{spec.renderer}' (expected: {', '.join(RENDERER_DELEGATES)})")
-    spec.usd_path = validate_farm_path(spec.usd_path, "USD")
-    spec.output_pattern = validate_farm_path(spec.output_pattern, "output")
+    spec.usd_path = validate_farm_path(spec.usd_path, "USD", strict)
+    spec.output_pattern = validate_farm_path(spec.output_pattern, "output", strict)
     if not spec.project:
         raise JobValidationError("missing Tractor project (team)")
     texts = [spec.title, spec.project, spec.user, spec.service, spec.husk, spec.usd_path, spec.output_pattern]
@@ -120,9 +120,9 @@ def _tcl_cmd(argv: List[str]) -> str:
     return "{" + " ".join(_tcl(a) if " " in a or not a else a for a in argv) + "}"
 
 
-def to_alf(spec: RenderJobSpec) -> str:
+def to_alf(spec: RenderJobSpec, strict: bool = True) -> str:
     """Alfred job script. Only documented Job / Task / RemoteCmd attributes are used."""
-    spec = validate_spec(spec)
+    spec = validate_spec(spec, strict)
     job_attrs = [
         f"-title {_tcl(spec.title)}",
         f"-projects {_tcl(spec.project)}",
@@ -149,20 +149,21 @@ def to_alf(spec: RenderJobSpec) -> str:
     return "\n".join(lines) + "\n"
 
 
-def to_submission(spec: RenderJobSpec) -> Dict:
+def to_submission(spec: RenderJobSpec, strict: bool = True) -> Dict:
     """JSON sent to the external bridge (verb 'spool')."""
-    spec = validate_spec(spec)
+    spec = validate_spec(spec, strict)
     return {
         "verb": "spool",
         "spec": asdict(spec),
         "chunks": chunk_frames(spec.frame_start, spec.frame_end, spec.chunk_size, spec.frame_step),
-        "alf": to_alf(spec),
+        "alf": to_alf(spec, strict),
     }
 
 
-def dry_run(spec: RenderJobSpec, out_dir: Path, name: Optional[str] = None) -> Dict[str, str]:
+def dry_run(spec: RenderJobSpec, out_dir: Path, name: Optional[str] = None,
+            strict: bool = True) -> Dict[str, str]:
     """Write <name>.alf and <name>.json without spooling (phase 0 not done yet)."""
-    submission = to_submission(spec)
+    submission = to_submission(spec, strict)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = name or re.sub(r"[^A-Za-z0-9_.-]+", "_", spec.title) or "job"

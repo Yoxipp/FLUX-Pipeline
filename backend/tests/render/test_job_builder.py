@@ -57,6 +57,9 @@ class PathTests(unittest.TestCase):
         with self.assertRaises(jb.JobValidationError):
             jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr"))
 
+    def test_simulation_accepts_drive_letter(self):
+        self.assertIn("C:/render/a.$F4.exr", jb.to_alf(_spec(output_pattern="C:/render/a.$F4.exr"), strict=False))
+
 
 class AlfTests(unittest.TestCase):
     def test_alf_structure(self):
