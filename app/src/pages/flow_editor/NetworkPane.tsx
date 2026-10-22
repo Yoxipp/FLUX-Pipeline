@@ -74,7 +74,7 @@ export function NetworkPane({ view, search, dots, straight, catalog, onSelect, o
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target)) return
       if (e.key === 'Tab') { e.preventDefault(); setTab({ ...mouse.current }) }
-      else if (e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); onToggleWires() }
+      else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); onToggleWires() }
       else if (e.key === 'f' || e.key === 'F') fitView({ padding: 0.15 })
       else if (e.key === 'Escape') { setTab(null); onSelect(null) }
     }

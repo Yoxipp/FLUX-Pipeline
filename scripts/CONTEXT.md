@@ -8,3 +8,8 @@ Build et outils : `build.cjs` (entree de `npm run build` : bump de version x.x.x
 Test de charge serveur : `loadtest/` (`flux_loadtest.py` seed / run / cleanup, `flux_instance.py` = un backend isole). Hors build, voir `loadtest/README.md`.
 
 Details : `docs/development/BUILD.md`.
+
+## backend.spec : flows livres (2026-10-22)
+
+`app_datas` copie le dossier `backend/flux_flows/shipped` (recursif) vers `flux_flows/shipped` : flows v2 livres (`legacy_*`, puis
+`publish_<soft>` en P8). `tests/system/test_frozen_bundle.py` verifie chaque `*.flow.yml`.

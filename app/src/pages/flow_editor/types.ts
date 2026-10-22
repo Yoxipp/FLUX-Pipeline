@@ -66,3 +66,89 @@ export interface FlowView {
   readOnly: boolean
   origin?: string
 }
+
+// -- v2 format and store (01 §2, §6, §14, ADR 0058) -----------------------------
+
+export type FlowCategory = 'pipe' | 'project' | 'perso'
+
+export interface FlowDocNode {
+  type:    string
+  pos?:    [number, number]
+  params?: Record<string, unknown>
+  label?:  string
+  bypass?: boolean
+  nodes?:  Record<string, FlowDocNode>   // subnet only
+  links?:  FlowDocLink[]
+}
+
+export interface FlowDocLink { from: string; to: string }
+
+export interface FlowOrigin {
+  kind: 'v1'
+  name: string
+  shelf?: string
+  thumbnail?: string
+  extends?: string
+  params?: Record<string, Record<string, unknown>>
+}
+
+export interface FlowDoc {
+  flux_flow:   2
+  name:        string
+  label?:      string
+  description?: string
+  run_policy?: 'skip_if_running' | 'queue'
+  origin?:     FlowOrigin
+  node_type?:  string
+  interface?:  unknown
+  variables?:  unknown[]
+  nodes:       Record<string, FlowDocNode>
+  links:       FlowDocLink[]
+  groups?:     unknown[]
+  notes?:      { id: string; pos: [number, number]; text: string }[]
+}
+
+// state.json of a flow (store.py): current = last frozen version (0 = none).
+export interface FlowState {
+  current:        number
+  active_version: number | null
+  active:         boolean
+  revision:       number
+  saved_by?:      string | null
+  saved_at?:      string | null
+}
+
+// GET /flows entry.
+export interface FlowListItem {
+  name:        string
+  scope:       FlowScope
+  category:    FlowCategory
+  label:       string
+  description: string
+  legacy:      boolean
+  shadowed:    boolean
+  origin:      FlowOrigin | null
+  error:       string | null
+  current?:    number
+  active?:     boolean
+  revision?:   number
+}
+
+// GET /flows/{name}.
+export interface FlowRead {
+  name:     string
+  scope:    FlowScope
+  category: FlowCategory
+  version:  number | null
+  flow:     FlowDoc
+  state:    FlowState
+  legacy:   boolean
+  issues:   { code: string; node?: string; message?: string }[]
+}
+
+export interface MigrateReport {
+  dry_run: boolean
+  actions: { action: string; flow: string; status: string; nodes?: number; error?: string | null;
+             unknown_commands?: string[]; unresolved_links?: string[] }[]
+  nodes:   { file: string; status: string }[]
+}

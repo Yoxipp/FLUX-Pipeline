@@ -12,10 +12,10 @@ interface:
 nodes:
   n1: {type: event.manual, pos: [0, 0], params: {}}
   n2: {type: flux.legacy_command, pos: [320, 0], params: {command: select_houdini_publish, ports: {inputs: {base_name: str, extension: str, rop_node_path: str, is_sequence: bool}, outputs: {base_name: str, extension: str, rop_node_path: str, is_sequence: bool}}}, label: select.select}
-  in1: {type: data.flow_input, pos: [160, 80], params: {id: select_base_name}}
-  in2: {type: data.flow_input, pos: [160, 160], params: {id: select_extension}}
-  in3: {type: data.flow_input, pos: [160, 240], params: {id: select_rop_node_path}}
-  in4: {type: data.flow_input, pos: [160, 320], params: {id: select_is_sequence}}
+  in1: {type: data.flow_input, pos: [320, 164], params: {id: select_base_name}}
+  in2: {type: data.flow_input, pos: [320, 248], params: {id: select_extension}}
+  in3: {type: data.flow_input, pos: [320, 332], params: {id: select_rop_node_path}}
+  in4: {type: data.flow_input, pos: [320, 416], params: {id: select_is_sequence}}
   n3: {type: flux.legacy_command, pos: [640, 0], params: {command: houdini_export, ports: {inputs: {base_name: str, extension: str, rop_node_path: str, is_sequence: bool}, outputs: {}}}, label: cook.cook}
 links:
   - {from: in1.value, to: n2.base_name}
@@ -29,4 +29,4 @@ links:
   - {from: n2.rop_node_path, to: n3.rop_node_path}
   - {from: n2.then, to: n3.exec}
 notes:
-  - {id: k1, pos: [0, 480], text: "publish_houdini.yml — publish the open Houdini scene as a declarative action.\n\nTwo ordered steps, one command each:\nselect -> select_houdini_publish : validate the scene name + format, carry intent\ncook   -> houdini_export         : cook the ROP straight into the resolved dest\n\nHoudini writes big caches (muscle sims) DIRECTLY to the destination, so there is\nNO temp file and NO copy step (unlike publish_maya.yml). The cook command reuses\ndcc.houdini.houdini_export.publish_houdini_rop whole — it resolves the versioned\npath, archives the previous LAST, sets the ROP output and cooks in one block.\nData flows by named reference (value: {from: \"step.command.output_key\"}).\nProduction context (project_path, user, project_name) is injected at run time.\n\nbase_name / extension / rop_node_path / is_sequence set at run time (UI or runner).\nframe_range / frame_padding / options / attr_filter / description\nset at run time when needed (fed by the runner, like frame_range)."}
+  - {id: k1, pos: [0, 84], text: "publish_houdini.yml — publish the open Houdini scene as a declarative action.\n\nTwo ordered steps, one command each:\nselect -> select_houdini_publish : validate the scene name + format, carry intent\ncook   -> houdini_export         : cook the ROP straight into the resolved dest\n\nHoudini writes big caches (muscle sims) DIRECTLY to the destination, so there is\nNO temp file and NO copy step (unlike publish_maya.yml). The cook command reuses\ndcc.houdini.houdini_export.publish_houdini_rop whole — it resolves the versioned\npath, archives the previous LAST, sets the ROP output and cooks in one block.\nData flows by named reference (value: {from: \"step.command.output_key\"}).\nProduction context (project_path, user, project_name) is injected at run time.\n\nbase_name / extension / rop_node_path / is_sequence set at run time (UI or runner).\nframe_range / frame_padding / options / attr_filter / description\nset at run time when needed (fed by the runner, like frame_range)."}

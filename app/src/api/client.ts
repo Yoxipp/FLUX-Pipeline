@@ -74,12 +74,15 @@ export async function apiCall<T>(
   }
 
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`
+    let detail: unknown = `HTTP ${response.status}`
     try {
       const err = await response.json()
       detail = err.detail ?? detail
     } catch {}
-    throw new Error(detail)
+    // Object details ({message, ...} of the /flows routes) keep their fields on the error.
+    const message = typeof detail === 'string' ? detail
+      : (detail as { message?: string } | null)?.message ?? JSON.stringify(detail)
+    throw Object.assign(new Error(message), { status: response.status, detail })
   }
 
   return response.json() as Promise<T>

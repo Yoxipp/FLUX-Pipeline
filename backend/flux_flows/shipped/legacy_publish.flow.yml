@@ -10,10 +10,10 @@ interface:
 nodes:
   n1: {type: event.manual, pos: [0, 0], params: {}}
   n2: {type: flux.legacy_command, pos: [320, 0], params: {command: select_publish, ports: {inputs: {source_path: path}, outputs: {filename: str, source_path: path}}}, label: select.select}
-  in1: {type: data.flow_input, pos: [160, 80], params: {id: select_source_path}}
+  in1: {type: data.flow_input, pos: [320, 124], params: {id: select_source_path}}
   n3: {type: flux.legacy_command, pos: [640, 0], params: {command: build_output_path, ports: {inputs: {filename: str}, outputs: {output_path: path}}}, label: resolve.output}
   n4: {type: flux.legacy_command, pos: [960, 0], params: {command: copy_publish, ports: {inputs: {source_path: path, output_path: path, filename: str, description: str}, outputs: {}}}, label: publish.publish}
-  in2: {type: data.flow_input, pos: [800, 80], params: {id: publish_description}}
+  in2: {type: data.flow_input, pos: [960, 164], params: {id: publish_description}}
 links:
   - {from: in1.value, to: n2.source_path}
   - {from: in2.value, to: n4.description}
@@ -25,4 +25,4 @@ links:
   - {from: n3.output_path, to: n4.output_path}
   - {from: n3.then, to: n4.exec}
 notes:
-  - {id: k1, pos: [0, 480], text: "publish.yml — reproduce the current local publish as a declarative action.\n\nThree ordered steps, one command each:\nselect  -> select_publish     : pick source, compute the FLUX filename\nresolve -> build_output_path  : resolve the destination folder\npublish -> copy_publish       : versioned copy + logs into the resolved folder\n\nThe copy step CONSUMES the resolve step's output (output_path) instead of\nrecomputing the path: one resolution, fed forward by reference.\n\nData flows by named reference (value: {from: \"step.command.output_key\"}).\nProduction context (project_path, user, project_name) is injected at run time\nvia the action context snapshot, not through parameters.\n\nsource_path / target_name are set at run time (UI or runner).\ndescription is set at run time (UI or runner)."}
+  - {id: k1, pos: [0, 84], text: "publish.yml — reproduce the current local publish as a declarative action.\n\nThree ordered steps, one command each:\nselect  -> select_publish     : pick source, compute the FLUX filename\nresolve -> build_output_path  : resolve the destination folder\npublish -> copy_publish       : versioned copy + logs into the resolved folder\n\nThe copy step CONSUMES the resolve step's output (output_path) instead of\nrecomputing the path: one resolution, fed forward by reference.\n\nData flows by named reference (value: {from: \"step.command.output_key\"}).\nProduction context (project_path, user, project_name) is injected at run time\nvia the action context snapshot, not through parameters.\n\nsource_path / target_name are set at run time (UI or runner).\ndescription is set at run time (UI or runner)."}

@@ -81,3 +81,25 @@
 .flow-node-toolbar button:hover { background: var(--paper-2); color: var(--ink); }
 .flow-node-toolbar button.on { background: var(--accent-soft); color: var(--ink); }
 .flow-node-toolbar button:disabled { opacity: 0.4; cursor: default; background: transparent; }
+
+/* File menu dialogs (FileDialogs.tsx): flat panel, light elevation. */
+.flow-dialog-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 60; }
+.flow-dialog {
+  position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 61;
+  width: 380px; max-width: calc(100vw - 32px); padding: 14px 16px;
+  background: var(--paper); border: 1px solid var(--rule-2); border-radius: 8px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 4px; color: var(--ink);
+}
+.flow-dialog-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.flow-dialog-heading h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.flow-dialog-heading button { background: none; border: none; color: var(--ink-3); cursor: pointer; padding: 2px; }
+.flow-dialog-label { font-size: 11px; color: var(--ink-3); margin-top: 6px; }
+.flow-dialog-input {
+  font-size: 12px; padding: 5px 8px; background: var(--paper-2); border: 1px solid var(--rule-2);
+  border-radius: 5px; color: var(--ink); outline: none; font-family: var(--mono);
+}
+.flow-dialog-hint { font-size: 11px; color: var(--ink-4); }
+.flow-banner {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 11.5px;
+  color: var(--ink-2); background: color-mix(in oklch, var(--warn) 12%, var(--paper)); border-bottom: 1px solid var(--rule);
+}
