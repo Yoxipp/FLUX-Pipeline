@@ -250,5 +250,30 @@ class Admission(unittest.TestCase):
         self.assertEqual(asyncio.run(scenario()), engine.MAX_RUNNING)
 
 
+class Examples(unittest.TestCase):
+    """The shipped example flows (P2 step 7): one runs to the end, one fails."""
+
+    def _load(self, name: str):
+        from flux_flows import locations
+        from flux_flows.model import load_flow_text
+
+        return load_flow_text((locations.shipped_dir() / f"{name}.flow.yml").read_text(encoding="utf-8"))
+
+    def test_example_foreach_runs_and_dry_runs(self) -> None:
+        rec = run_flow(self._load("example_foreach"))
+        self.assertEqual(rec["status"], "ok")
+        self.assertEqual(rec["nodes"]["n5"]["count"], 3)
+        self.assertEqual(rec["links"]["n10.value->n9.path"]["value"], "shot_030")
+        dry = run_flow(self._load("example_foreach"), mode="dry")
+        self.assertEqual((dry["status"], dry["nodes_simulated"]), ("ok", ["n9"]))
+
+    def test_example_error_fails_with_the_values_received(self) -> None:
+        rec = run_flow(self._load("example_error"))
+        self.assertEqual(rec["status"], "error")
+        self.assertIn("douze", rec["nodes"]["n3"]["error"])
+        self.assertEqual(rec["nodes"]["n3"]["values"], {"value": "douze"})
+        self.assertEqual(rec["nodes"]["n4"]["state"], "idle")
+
+
 if __name__ == "__main__":
     unittest.main()
