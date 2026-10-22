@@ -182,9 +182,9 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
       <div className="card" style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
         <Workflow size={14} strokeWidth={1.75} color="var(--ink-3)" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: 'var(--ink)' }}>Graph YAML</div>
+          <div style={{ fontSize: 11, color: 'var(--ink)' }}>Flows (graph YAML)</div>
           <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
-            Node flow des actions (publish...), en lecture seule : le YAML reste la source.
+            Nouvel editeur de flows : actions (publish...) en lecture pour l'instant. L'ancien editeur reste dans la barre du haut.
           </div>
         </div>
         <Btn sm ghost onClick={() => {
