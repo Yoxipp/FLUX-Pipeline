@@ -164,7 +164,57 @@ class ShotStage(unittest.TestCase):
         self.assertTrue(any("layout" in w for w in res["warnings"]))
         entry = Sdf.Layer.FindOrOpen(str(res["entry"]))
         # No department published: the casting only (ADR 0038: no shot light layer made).
-        self.assertEqual(list(entry.subLayerPaths), ["./SEQ001_SHOT010_casting.usda"])
+        self.assertEqual(list(entry.subLayerPaths),
+                         ["./SEQ001_SHOT010_render.usda", "./SEQ001_SHOT010_casting.usda"])
+
+    def _publish_layout(self, *names: str) -> None:
+        from features.usd_export.contract import CameraData
+
+        cams = [CameraData(name=n, transform=(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)) for n in names]
+        publish_light_asset(LightAsset(asset="tmp", skeleton=SkeletonData([], [], []), cameras=cams),
+                            self.project, fmt="usda", dest_dir=self.project / "shot/SEQ001/SHOT010/layout/null",
+                            base_name="SEQ001_SHOT010_LAYOUT_null", user="adam")
+
+    def test_render_layer_holds_one_settings_per_renderer(self) -> None:
+        from pxr import UsdRender
+
+        self._publish_layout("witness", "cam_SHOT010")
+        res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        entry = Sdf.Layer.FindOrOpen(str(res["entry"]))
+        self.assertEqual(entry.subLayerPaths[0], "./SEQ001_SHOT010_render.usda")
+        self.assertEqual(entry.pseudoRoot.GetInfo("renderSettingsPrimPath"), "/Render/karma")
+        stage = Usd.Stage.Open(str(res["last"]))
+        for renderer, aovs in (("karma", ["C"]), ("renderman", ["Ci", "a"])):
+            rs = UsdRender.Settings(stage.GetPrimAtPath(f"/Render/{renderer}"))
+            self.assertTrue(rs, renderer)
+            self.assertEqual(rs.GetCameraRel().GetTargets(), [Sdf.Path("/cameras/cam_SHOT010")])
+            self.assertEqual(tuple(rs.GetResolutionAttr().Get()), (1920, 1080))
+            self.assertEqual(list(rs.GetIncludedPurposesAttr().Get()), ["default", "render"])
+            product = UsdRender.Product(stage.GetPrimAtPath(rs.GetProductsRel().GetTargets()[0]))
+            self.assertEqual(product.GetProductNameAttr().Get(), "SEQ001_SHOT010.$F4.exr")
+            names = [UsdRender.Var(stage.GetPrimAtPath(p)).GetSourceNameAttr().Get()
+                     for p in product.GetOrderedVarsRel().GetTargets()]
+            self.assertEqual(names, aovs)
+        self.assertTrue(any("2 cameras" in w for w in res["warnings"]), res["warnings"])
+
+    def test_render_settings_for_tractor(self) -> None:
+        from features.usd_assembler.shot_render import stage_settings
+
+        self._publish_layout("shotCam")
+        res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        self.assertEqual(stage_settings(res["entry"], "renderman"), "/Render/renderman")
+        self.assertEqual(stage_settings(res["last"], "karma"), "/Render/karma")
+        self.assertEqual(stage_settings(res["entry"], "arnold"), "")
+        summary = ss.shot_summary(self.project, "SEQ001", "SHOT010",
+                                  _production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        self.assertEqual(summary["render"], {"camera": "/cameras/shotCam", "resolution": [1920, 1080]})
+
+    def test_old_stage_without_render_layer_gets_no_settings(self) -> None:
+        from features.usd_assembler.shot_render import stage_settings
+
+        res = self._write(_production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}]))
+        (res["entry"].parent / "SEQ001_SHOT010_render.usda").unlink()
+        self.assertEqual(stage_settings(res["entry"], "karma"), "")
 
     def test_the_old_template_root_is_retired_by_the_first_stage(self) -> None:
         from features.folder_manager.sequence_template import create_sequence_usd_template
@@ -215,6 +265,19 @@ class ShotStage(unittest.TestCase):
         self.assertEqual(summary["casting"][0]["prim"], "/assets/CHAR/DINGO_01")
         prod["sequences"][0]["assets"][0]["count"] = 3
         self.assertEqual(ss.shot_summary(self.project, "SEQ001", "SHOT010", prod)["state"], "outdated")
+
+    def test_route_returns_one_shot_for_the_task_panel(self) -> None:
+        import asyncio
+        from routers import usd_assembler as router
+
+        prod = _production([{"id": "asset_dingo", "ref": "CHAR/DINGO"}])
+        self._write(prod)
+        with mock.patch.object(router, "_resolve_project", return_value=("PROJ", str(self.project))), \
+                mock.patch.object(ss, "load_project_production", return_value=(prod, True)), \
+                mock.patch.object(ss, "list_shots", side_effect=AssertionError("all shots summarised")):
+            out = asyncio.run(router.list_usd_shots(project="PROJ", seq="SEQ001", shot="SHOT010"))
+        self.assertEqual([(s["seq"], s["shot"], s["state"]) for s in out["shots"]],
+                         [("SEQ001", "SHOT010", "up_to_date")])
 
     def test_the_importer_library_offers_the_shot_as_a_sublayer(self) -> None:
         from features.importer.library_import import (

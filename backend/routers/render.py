@@ -284,6 +284,12 @@ def _submit(body: SubmitBody, user: str) -> dict:
     if start is None or end is None:
         raise HTTPException(status_code=400, detail="Plage de frames inconnue : la saisir")
 
+    # Published shot: its render layer's settings (ADR 0060). A stage from the HDA keeps Houdini's.
+    render_settings = ""
+    if not body.usd_path:
+        from features.usd_assembler.shot_render import stage_settings
+
+        render_settings = stage_settings(Path(frozen["usd"]), renderer)
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
     out_dir = freeze.reserve_render_dir(folder)
     render_usd = _farm(frozen["usd"], "Le USD", simulate)
@@ -303,6 +309,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         project=settings["tractor_project"],
         user=user,
         usd_path=render_usd,
+        render_settings=render_settings,
         **freeze_at_start,
         output_pattern=_farm(out_dir / f"{name}.$F4.exr", "Le dossier de rendu", simulate),
         frame_start=start,

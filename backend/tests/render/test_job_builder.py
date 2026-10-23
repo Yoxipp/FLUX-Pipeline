@@ -81,6 +81,12 @@ class AlfTests(unittest.TestCase):
     def test_renderman_delegate(self):
         self.assertIn("HdPrmanLoaderRendererPlugin", jb.to_alf(_spec(renderer="renderman")))
 
+    def test_shot_render_settings(self):
+        # ADR 0060: the published shot renders with its render layer's settings.
+        alf = jb.to_alf(_spec(renderer="renderman", render_settings="/Render/renderman"))
+        self.assertIn("--renderer HdPrmanLoaderRendererPlugin --settings /Render/renderman -Va1", alf)
+        self.assertNotIn("--settings", jb.to_alf(_spec()))
+
     def test_unknown_renderer(self):
         with self.assertRaises(jb.JobValidationError):
             jb.to_alf(_spec(renderer="arnold"))

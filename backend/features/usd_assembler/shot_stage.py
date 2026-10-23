@@ -4,9 +4,10 @@
 #       <SEQ>_<SHOT>.usda            entry: fps, frame range, units, sublayers (strong -> weak)
 #       <SEQ>_<SHOT>_animation.usda  one reference per animated character, onto its casting prim
 #       <SEQ>_<SHOT>_casting.usda    /assets/<CLASS>/<NAME>_NN (components), /sets/<NAME> (decors)
+#       <SEQ>_<SHOT>_render.usda     /Render: camera + RenderSettings per renderer (ADR 0060)
 #   <SHOT_path>/usd/<SEQ>_<SHOT>_LAST.usda   pointer (ADR 0017)
 #
-# Entry sublayers: lighting > fx > simulation > crowd > animation > layout > casting > <SEQ>.usda.
+# Entry sublayers: lighting > render > fx > simulation > crowd > animation > layout > casting > <SEQ>.usda.
 # FLUX decides WHAT is in the shot (Production casting, published departments, versions);
 # the DCC decides WHERE (layout, animation, lights). Relative paths only (ADR 0010).
 
@@ -450,12 +451,17 @@ def collect(project_path: str | Path, seq: str, shot: str, production: dict) -> 
             if r and (r[0] < frame_range[0] or r[1] > frame_range[1]):
                 warnings.append(f"anim {a['instance']} ({int(r[0])}-{int(r[1])}) hors de la plage du shot "
                                 f"({frame_range[0]}-{frame_range[1]})")
-    if not any(d["files"] for d in departments if d["task"] == "LAYOUT"):
+    layout_files = next(d["files"] for d in departments if d["task"] == "LAYOUT")
+    if not layout_files:
         warnings.append("pas de layout publie : pas de camera")
     if not casting:
         warnings.append("casting vide : rien a charger dans le shot")
+    # Render layer (ADR 0060): camera of the layout, project resolution, one settings per renderer.
+    from . import shot_render
 
-    return {"casting": casting, "departments": departments, "anims": anim_items,
+    render = shot_render.plan(project, seq, shot, layout_files, warnings)
+
+    return {"casting": casting, "departments": departments, "anims": anim_items, "render": render,
             "range": frame_range, "fps": units["fps"], "units": units,
             "auto_cast": auto_cast, "warnings": warnings}
 
@@ -479,7 +485,7 @@ def _layer_list(project: Path, seq: str, shot: str, plan: dict, folder: Path,
         return _rel(_frozen(p) if frozen else p, folder)
 
     name = entity(seq, shot)
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str]] = [("render", f"./{name}_render{STAGE_EXT}")]   # ADR 0060
     for dept in plan["departments"]:
         if dept["task"] == "LAYOUT":
             continue
@@ -498,7 +504,7 @@ def _layer_list(project: Path, seq: str, shot: str, plan: dict, folder: Path,
     if root is not None:
         out.append(("sequence", _rel(root, folder)))
     # The strongest sublayer comes first: keep the lighting > fx > simulation order.
-    order = {"lighting": 0, "fx": 1, "simulation": 2, "crowd": 3, "animation": 4, "layout": 5,
+    order = {"lighting": 0, "render": 0.5, "fx": 1, "simulation": 2, "crowd": 3, "animation": 4, "layout": 5,
              "casting": 6, "sequence": 7}
     return sorted(out, key=lambda kv: order.get(kv[0], 9))
 
@@ -521,6 +527,7 @@ def signature(project_path: str | Path, seq: str, shot: str, plan: dict, *, froz
                   for a in plan["anims"]],
         "range": list(plan["range"]) if plan["range"] else None,
         "fps": plan["fps"],
+        "render": [plan["render"]["camera"], list(plan["render"]["resolution"]), plan["render"]["renderers"]],
         "frozen": frozen,
     }
 
@@ -585,7 +592,12 @@ def _author(folder: Path, project: Path, seq: str, shot: str, version: str, plan
             spec.variantSelections[ANIM_VARIANT_SET] = a["default"]
         anim.Save()
 
-    # 3. entry: time, units, sublayers.
+    # 3. render: camera + RenderSettings per renderer, what Tractor's husk reads (ADR 0060).
+    from . import shot_render
+
+    shot_render.write_layer(folder / f"{name}_render{STAGE_EXT}", name, plan["render"])
+
+    # 4. entry: time, units, sublayers.
     entry_path = folder / f"{name}{STAGE_EXT}"
     entry = Sdf.Layer.CreateNew(str(entry_path))
     entry.subLayerPaths[:] = [p for _role, p in _layer_list(project, seq, shot, plan, folder, frozen)]
@@ -597,6 +609,7 @@ def _author(folder: Path, project: Path, seq: str, shot: str, version: str, plan
     root = entry.pseudoRoot
     root.SetInfo("metersPerUnit", units["meters_per_unit"])
     root.SetInfo("upAxis", units["up_axis"])
+    root.SetInfo("renderSettingsPrimPath", shot_render.settings_path(shot_render.DEFAULT_SETTINGS))
     entry.customLayerData = {"flux": {
         "role": "shot_stage", "sequence": seq.upper(), "shot": shot.upper(), "version": version,
         "frozen": bool(frozen),
@@ -792,5 +805,6 @@ def shot_summary(project_path: str | Path, seq: str, shot: str, production: dict
                          "files": [str(f) for f in d["files"]]} for d in plan["departments"]],
         "range": list(plan["range"]) if plan["range"] else None,
         "fps": plan["fps"],
+        "render": {"camera": plan["render"]["camera"], "resolution": plan["render"]["resolution"]},
         "warnings": plan["warnings"],
     }

@@ -59,6 +59,8 @@ class RenderJobSpec:
     freeze_script: str = ""
     freeze_python: str = ""   # Tractor's python on the blades (local path, drive letter allowed)
     freeze_houdini: str = ""  # Houdini folder on the blades: the script runs again with its python
+    # RenderSettings prim of the shot stage render layer (ADR 0060), "" = husk's default.
+    render_settings: str = ""
 
 
 def after_clause(start_after: str) -> str:
@@ -102,9 +104,11 @@ def chunk_frames(start: int, end: int, size: int, step: int = 1) -> List[Tuple[i
 
 def husk_command(spec: RenderJobSpec, first: int, last: int) -> List[str]:
     count = (last - first) // spec.frame_step + 1
+    settings = ["--settings", spec.render_settings] if spec.render_settings else []
     return [
         spec.husk,
         "--renderer", RENDERER_DELEGATES[spec.renderer],
+        *settings,
         # Verbosity 1 + Alfred progress: ALF_PROGRESS lines, read by Tractor as the task's % done.
         "-Va1",
         "--frame", str(first),
