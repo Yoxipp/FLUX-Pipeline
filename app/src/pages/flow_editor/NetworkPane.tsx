@@ -11,7 +11,9 @@
 // menu limited to the compatible nodes, the node created is linked. Shelf / Catalogue items
 // dropped here are created at the drop point (dataTransfer application/x-flux-node).
 // P4 issues: badge per node, red ring on the faulty port, the link named by an issue in --err;
-// lash makes a node blink once (zoom from the Problems panel).
+// `flash` makes a node blink once (zoom from the Problems panel).
+// P4 groups and notes: GroupBox ("group:<id>", drawn behind, follows its nodes, dragging it
+// moves them, Ctrl+G) and NoteNode ("note:<id>", N at the mouse); visual only (01 §2).
 // Pan: middle button, select: drag on the background. No +/- / frame buttons (2026-10-22).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

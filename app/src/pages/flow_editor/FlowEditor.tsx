@@ -40,6 +40,11 @@ import { ShelfBar } from './ShelfBar'
 import { TopBar, type FlowListEntry } from './TopBar'
 import type { FlowDoc, FlowRead, FlowRights, FlowScope, FlowsWsMessage, Issue, MigrateReport, NodeRunInfo, RunIssue, RunRecord } from './types'
 import { IssuesPanel, type CheckState } from './IssuesPanel'
+import { VersionsDialog } from './VersionsDialog'
+import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
+import { DestructiveDialog } from './DestructiveDialog'
+import { destructiveAdded } from './destructive'
+import { registerCloseGuard } from '../../components/shared/closeGuard'
 import { applyFix, autoBegin } from './fixes'
 import type { CatalogEntry } from './v1_adapter'
 import { adaptCatalog, adaptV2Flow, type SpecIndex } from './v2_adapter'
@@ -55,6 +60,7 @@ const DEFAULT_FLOW = 'legacy_publish'
 const LEGACY_PREFIX = 'legacy_'
 const LAST_OPEN_KEY = 'flows_last_open'
 const PREFS_KEY = 'flux.flow_editor.view'
+const DRAFT_PREFIX = 'flux.flow_draft.'
 
 type ViewPrefs = { dots: boolean; straight: boolean }
 type HttpError = Error & { status?: number; detail?: { by?: string; at?: string; status?: string; code?: string; issues?: RunIssue[] } }
@@ -79,6 +85,13 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [flows, setFlows] = useState<FlowListEntry[]>([])
   const [current, setCurrent] = useState<string | null>(params.get('flow'))
   const [wantedScope, setWantedScope] = useState<FlowScope | undefined>((params.get('scope') as FlowScope) || undefined)
+  const [wantedVersion, setWantedVersion] = useState<number | undefined>(undefined)   // Voir vNNN (read-only)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [versionsOpen, setVersionsOpen] = useState(false)
+  const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
+  // "!" nodes to confirm with the slider before a save; resolve(true) = confirmed.
+  const [destructive, setDestructive] = useState<{ ids: string[]; resolve: (ok: boolean) => void } | null>(null)
+  const askDestructive = useCallback((ids: string[]) => new Promise<boolean>(resolve => setDestructive({ ids, resolve })), [])
   const [loaded, setLoaded] = useState<FlowRead | null>(null)
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null)
   const [nodeErrors, setNodeErrors] = useState<{ file: string; error: string }[]>([])
@@ -139,9 +152,9 @@ function Editor({ rights }: { rights: FlowRights }) {
     if (fromUrl && fromUrl !== current) { setCurrent(fromUrl); setWantedScope((params.get('scope') as FlowScope) || undefined) }
   }, [params])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const load = useCallback(async (name: string, scope?: FlowScope): Promise<FlowRead> => {
+  const load = useCallback(async (name: string, scope?: FlowScope, version?: number): Promise<FlowRead> => {
     try {
-      return await flowsApi.get(name, { scope, project: project || undefined })
+      return await flowsApi.get(name, { scope, project: project || undefined, version })
     } catch (e) {
       // P0 kept v1 action names: "publish" is now the shipped flow "legacy_publish".
       if ((e as HttpError).status === 404 && !scope && !name.startsWith(LEGACY_PREFIX)) {
@@ -156,17 +169,51 @@ function Editor({ rights }: { rights: FlowRights }) {
     let alive = true
     setError(null)
     setSelection(new Set())
-    load(current, wantedScope)
-      .then(r => { if (alive) { setLoaded(r); store.load(r.flow) } })
+    load(current, wantedScope, wantedVersion)
+      .then(r => {
+        if (!alive) return
+        setLoaded(r)
+        store.load(r.flow)
+        if (r.version === null) offerDraft(r)
+      })
       .catch(e => { if (alive) { setLoaded(null); store.load(null); setError(String(e?.message ?? e)) } })
     return () => { alive = false }
-  }, [current, wantedScope, load, store])
+  }, [current, wantedScope, wantedVersion, load, store, reloadKey])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const open = useCallback((name: string, scope?: FlowScope) => {
+  // Local draft (03 §6): closing the main window closes the others without guard, so the
+  // edited document is kept in localStorage (flux.flow_draft.<scope>.<name>) and offered
+  // again at the next opening. Removed once saved or dropped.
+  const draftKey = (scope: FlowScope, name: string) => `${DRAFT_PREFIX}${scope}.${name}`
+  const offerDraft = (r: FlowRead) => {
+    let draft: { doc: FlowDoc; at: string } | null = null
+    try { draft = JSON.parse(localStorage.getItem(draftKey(r.scope, r.name)) ?? 'null') } catch { draft = null }
+    if (!draft?.doc || JSON.stringify(draft.doc) === JSON.stringify(r.flow)) return
+    const key = draftKey(r.scope, r.name)
+    toast.info(tr(`Brouillon non enregistre de ${r.name} (${draft.at.slice(0, 16).replace('T', ' ')})`, `Unsaved draft of ${r.name} (${draft.at.slice(0, 16).replace('T', ' ')})`), {
+      duration: 20000,
+      action: { label: tr('Reprendre', 'Restore'), onClick: () => store.apply(() => draft!.doc) },
+      cancel: { label: tr('Ignorer', 'Drop'), onClick: () => { try { localStorage.removeItem(key) } catch { /* nothing kept */ } } },
+    })
+  }
+  useEffect(() => {
+    if (!loaded || loaded.version !== null) return
+    const key = draftKey(loaded.scope, loaded.name)
+    const t = setTimeout(() => {
+      try {
+        if (dirty && doc) localStorage.setItem(key, JSON.stringify({ doc, at: new Date().toISOString() }))
+        else localStorage.removeItem(key)
+      } catch { /* private mode: no draft */ }
+    }, dirty ? 1000 : 0)
+    return () => clearTimeout(t)
+  }, [doc, dirty, loaded?.scope, loaded?.name, loaded?.version])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const switchTo = useCallback((name: string, scope?: FlowScope, version?: number) => {
     setCurrent(name)
     setWantedScope(scope)
+    setWantedVersion(version)
+    setReloadKey(k => k + 1)
     setParams(scope ? { flow: name, scope } : { flow: name }, { replace: true })
-    api.setUserData({ [LAST_OPEN_KEY]: name }).catch(() => { /* not kept: reopens the default */ })
+    if (version === undefined) api.setUserData({ [LAST_OPEN_KEY]: name }).catch(() => { /* not kept: reopens the default */ })
   }, [setParams])
 
   // After a save: the document stays (and its undo pile), only the state moves on.
@@ -198,45 +245,92 @@ function Editor({ rights }: { rights: FlowRights }) {
   const specs = useMemo<SpecIndex>(() => Object.fromEntries((catalog ?? []).filter(e => e.spec).map(e => [e.type, e.spec!])), [catalog])
   const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope, specs }) : null, [doc, loaded, saveBlocked, specs])
 
-  const conflict = (e: HttpError, retry: () => void) => {
-    // Destructive nodes added without confirmation (the guard dialog comes with step 9).
-    if (e.status !== 409 || e.detail?.code) { toast.error(e.message); return }
-    const who = e.detail?.by ? tr(` par ${e.detail.by}`, ` by ${e.detail.by}`) : ''
-    toast.warning(tr(`Enregistre entre-temps${who}.`, `Saved in the meantime${who}.`), {
-      action: { label: tr('Ecraser', 'Overwrite'), onClick: retry }, duration: 10000,
-    })
-  }
+  // Save core (03 §6), used by Ctrl+S, Save and increment, quit (closeGuard, flow switch).
+  // Resolves true when the document is saved (or there was nothing to save), false when it
+  // stays open: cancelled slider, conflict, error. Saving with errors is allowed (00 §11).
+  const saveDoc = useCallback(async (kind: 'save' | 'increment', opts: { force?: boolean; confirmed?: string[]; quiet?: boolean } = {}): Promise<boolean> => {
+    const s = store.get()
+    const sent = docOf(s)
+    if (!loaded || !sent || saveBlocked) return true
+    if (kind === 'save' && !isDirty(s) && !opts.force) {
+      if (!opts.quiet) toast.info(tr('Deja enregistre', 'Already saved'))
+      return true
+    }
+    let confirmed = opts.confirmed ?? []
+    const added = destructiveAdded(sent, s.saved, specs).filter(id => !confirmed.includes(id))
+    if (added.length) {
+      if (!(await askDestructive(added))) return false
+      confirmed = [...confirmed, ...added]
+    }
+    const base = { project: project || undefined, base_revision: loaded.state.revision, force: opts.force, confirmed_destructive: confirmed }
+    try {
+      const r = kind === 'save'
+        ? await flowsApi.save(sent, loaded.scope, base)
+        : await flowsApi.increment(loaded.name, loaded.scope, sent, base)
+      const created = 'created' in r ? (r as { created: number | null }).created : null
+      const errors = r.issues.filter(i => i.level === 'error').length
+      const what = kind === 'increment'
+        ? created ? tr(`${loaded.name} enregistre (v${String(created).padStart(3, '0')})`, `${loaded.name} saved (v${String(created).padStart(3, '0')})`)
+          : tr('Contenu identique a la derniere version : rien de fige', 'Same content as the last version: nothing frozen')
+        : tr(`Flow ${loaded.name} enregistre`, `Flow ${loaded.name} saved`)
+      if (errors) toast.warning(tr(`${what}, invalide (${errors} erreur(s)), non activable`, `${what}, invalid (${errors} error(s)), cannot be activated`))
+      else if (!opts.quiet || kind === 'increment') toast.success(what)
+      saved(sent, r.state)
+      return true
+    } catch (err) {
+      const e = err as HttpError
+      if (e.status === 409 && e.detail?.code === 'E_DESTRUCTIVE_UNCONFIRMED') {
+        // The backend found `!` nodes the editor did not: ask for them, then retry once.
+        const ids = (e.detail.issues ?? []).map(i => i.node).filter((x): x is string => !!x && !confirmed.includes(x))
+        if (!ids.length || !(await askDestructive(ids))) return false
+        return saveDoc(kind, { ...opts, confirmed: [...confirmed, ...ids] })
+      }
+      if (e.status === 409 && !e.detail?.code) {
+        setConflictInfo({ by: e.detail?.by, at: e.detail?.at, retry: () => { void saveDoc(kind, { ...opts, force: true, confirmed }) } })
+        return false
+      }
+      toast.error(e.message)
+      return false
+    }
+  }, [loaded, saveBlocked, project, specs, saved, store, askDestructive, tr])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save = useCallback((force = false) => {
-    if (!loaded || !doc || saveBlocked) return
-    const sent = doc
-    flowsApi.save(sent, loaded.scope, { project: project || undefined, base_revision: loaded.state.revision, force })
-      .then(r => { toast.success(tr('Enregistre', 'Saved')); saved(sent, r.state) })
-      .catch(e => conflict(e, () => save(true)))
-  }, [loaded, doc, saveBlocked, project, saved])  // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useCallback(() => { void saveDoc('save') }, [saveDoc])
+  const increment = useCallback(() => { void saveDoc('increment') }, [saveDoc])
 
-  const increment = useCallback((force = false) => {
-    if (!loaded || !doc || saveBlocked) return
-    const sent = doc
-    flowsApi.increment(loaded.name, loaded.scope, sent, { project: project || undefined, base_revision: loaded.state.revision, force })
+  // Quit = Ctrl+S (decision 13): closing a detached window, switching flow.
+  const quit = useCallback(() => saveDoc('save', { quiet: true }), [saveDoc])
+  useEffect(() => registerCloseGuard(quit), [quit])
+  const open = useCallback(async (name: string, scope?: FlowScope, version?: number) => {
+    if (!(await quit())) return
+    switchTo(name, scope, version)
+  }, [quit, switchTo])
+
+  const revert = useCallback((version: number) => {
+    if (!loaded) return
+    flowsApi.revert(loaded.name, loaded.scope, version, project || undefined)
       .then(r => {
         toast.success(r.created
-          ? tr(`Version v${String(r.created).padStart(3, '0')} figee`, `Version v${String(r.created).padStart(3, '0')} frozen`)
-          : tr('Contenu identique a la derniere version : rien de fige', 'Same content as the last version: nothing frozen'))
-        saved(sent, r.state)
+          ? tr(`v${String(r.created).padStart(3, '0')} creee, identique a v${String(version).padStart(3, '0')}`, `v${String(r.created).padStart(3, '0')} created, identical to v${String(version).padStart(3, '0')}`)
+          : tr('Deja la derniere version', 'Already the latest version'))
+        setVersionsOpen(false)
+        switchTo(loaded.name, loaded.scope)
       })
-      .catch(e => conflict(e, () => increment(true)))
-  }, [loaded, doc, saveBlocked, project, saved])  // eslint-disable-line react-hooks/exhaustive-deps
+      .catch((e: Error) => toast.error(e.message))
+  }, [loaded, project, switchTo, tr])
 
-  const create = useCallback((name: string, scope: FlowScope) => {
-    // Nouveau: an empty flow headed by event.manual. Enregistrer sous: the open document renamed.
+  const create = useCallback(async (name: string, scope: FlowScope) => {
+    // Nouveau: an empty flow headed by event.manual. Enregistrer sous: the open document renamed
+    // (a new file: every `!` node is confirmed with the slider, 01 §8).
     const next: FlowDoc = dialog === 'saveas' && doc
       ? { ...doc, name }
       : { flux_flow: 2, name, label: name, nodes: { n1: { type: 'event.manual', pos: [0, 0], params: {} } }, links: [] }
-    flowsApi.save(next, scope, { project: project || undefined })
-      .then(() => { setDialog(null); refreshList(); open(name, scope); toast.success(tr(`${name} cree`, `${name} created`)) })
+    const bang = destructiveAdded(next, null, specs)
+    if (bang.length && !(await askDestructive(bang))) return
+    flowsApi.save(next, scope, { project: project || undefined, confirmed_destructive: bang })
+      // switchTo, not open: Save as must not save the original document first.
+      .then(() => { setDialog(null); refreshList(); switchTo(name, scope); toast.success(tr(`${name} cree`, `${name} created`)) })
       .catch((e: HttpError) => toast.error(e.status === 409 && !e.detail?.code ? tr('Un flow de ce nom existe deja dans cette categorie', 'A flow with this name already exists there') : e.message))
-  }, [dialog, doc, project, refreshList, open, tr])
+  }, [dialog, doc, project, specs, refreshList, switchTo, askDestructive, tr])
 
   const migrate = useCallback((dryRun: boolean) => {
     setBusy(true)
@@ -449,13 +543,15 @@ function Editor({ rights }: { rights: FlowRights }) {
   }, [saveBlocked, rf, edit])
 
   // Problems panel: a click frames the node (250 ms), selects it, it blinks once.
-  const zoomTo = useCallback((i: Issue) => {
-    if (!i.node || !docOf(store.get())?.nodes[i.node]) return
-    const id = i.node
+  const goToNode = useCallback((id: string) => {
+    if (!docOf(store.get())?.nodes[id]) return
     rf.fitView({ nodes: [{ id }], duration: 250, padding: 0.6, maxZoom: 1.4 })
     setSelection(new Set([id]))
     setFlash(f => ({ id, n: (f?.n ?? 0) + 1 }))
   }, [rf, store])
+  const zoomTo = useCallback((i: Issue) => { if (i.node) goToNode(i.node) }, [goToNode])
+  const closeDestructive = (ok: boolean) => { destructive?.resolve(ok); setDestructive(null) }
+  const destructiveNodes = useMemo(() => destructive ? (view?.nodes ?? []).filter(n => destructive.ids.includes(n.id)) : null, [destructive, view])
   const canFix = useCallback((i: Issue) => !!i.fix && !saveBlocked, [saveBlocked])
   const fixIssue = useCallback((i: Issue) => {
     const d = docOf(store.get())
@@ -518,7 +614,16 @@ function Editor({ rights }: { rights: FlowRights }) {
           edit.onNote([p.x, p.y])
         }}
         onLegacy={() => navigate('/action-graph-legacy')}
+        onVersions={() => setVersionsOpen(true)}
       />
+      {loaded && loaded.version !== null && (
+        <div className="flow-banner">
+          {tr(`Lecture v${String(loaded.version).padStart(3, '0')} (version figee, lecture seule)`, `Reading v${String(loaded.version).padStart(3, '0')} (frozen version, read-only)`)}
+          <button type="button" className="flow-tool" onClick={() => switchTo(loaded.name, loaded.scope)}>
+            {tr('Retour au fichier de travail', 'Back to the working file')}
+          </button>
+        </div>
+      )}
       {loaded?.legacy && (
         <div className="flow-banner">
           {tr('Flow migre des actions v1. Le publish tourne encore sur les actions v1 (jusqu\'a P8) : ce flow ne s\'active pas.',
@@ -565,6 +670,30 @@ function Editor({ rights }: { rights: FlowRights }) {
         onConfirm={create}
       />
       <NodeWriterDialog open={writing} onClose={() => setWriting(false)} onSaved={loadCatalog} />
+      {loaded && (
+        <VersionsDialog
+          open={versionsOpen} name={loaded.name} scope={loaded.scope} project={project || undefined}
+          canRevert={loaded.scope === 'shipped' || !rights.can[loaded.scope]?.write ? tr('Droits d\'ecriture requis', 'Write rights required')
+            : dirty ? tr('Enregistre d\'abord (Ctrl+S)', 'Save first (Ctrl+S)') : undefined}
+          onView={v => { setVersionsOpen(false); void open(loaded.name, loaded.scope, v) }}
+          onRevert={revert} onClose={() => setVersionsOpen(false)}
+        />
+      )}
+      <ConflictDialog
+        conflict={conflictInfo} onClose={() => setConflictInfo(null)}
+        onTheirs={() => {
+          // Keep this document as the local draft (offered at the reopening), then load theirs.
+          if (loaded && doc) {
+            try { localStorage.setItem(`${DRAFT_PREFIX}${loaded.scope}.${loaded.name}`, JSON.stringify({ doc, at: new Date().toISOString() })) } catch { /* no draft */ }
+          }
+          setConflictInfo(null)
+          if (loaded) switchTo(loaded.name, loaded.scope)
+        }}
+      />
+      <DestructiveDialog
+        nodes={destructiveNodes} params={Object.fromEntries(Object.entries(doc?.nodes ?? {}).map(([id, n]) => [id, n.params ?? {}]))}
+        onGoTo={goToNode} onConfirm={() => closeDestructive(true)} onCancel={() => closeDestructive(false)}
+      />
       <MigrateDialog report={migration} busy={busy} onClose={() => setMigration(null)} onConfirm={() => migrate(false)} />
     </div>
   )

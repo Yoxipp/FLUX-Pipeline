@@ -40,7 +40,7 @@ export interface RunActions {
 
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onLegacy }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onLegacy, onVersions }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -63,6 +63,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   onBackdrop: () => void
   onNote: () => void
   onLegacy: () => void
+  onVersions: () => void
 }) {
   const { tr } = useTr()
   const groups: { key: FlowCategory; label: string }[] = [
@@ -110,6 +111,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
             <Menu.Item className="flow-menu-item" disabled={!!saveBlocked} title={saveBlocked} onSelect={actions.onSave}><Save size={13} /> {tr('Enregistrer', 'Save')}<span className="shortcut">Ctrl+S</span></Menu.Item>
             <Menu.Item className="flow-menu-item" disabled={!current} onSelect={actions.onSaveAs}>{tr('Enregistrer sous…', 'Save as…')}<span className="shortcut">Ctrl+Maj+S</span></Menu.Item>
             <Menu.Item className="flow-menu-item" disabled={!!saveBlocked} title={saveBlocked} onSelect={actions.onIncrement}>{tr('Enregistrer et incrementer', 'Save and increment')}<span className="shortcut">Alt+Maj+S</span></Menu.Item>
+            <Menu.Item className="flow-menu-item" disabled={!current} onSelect={onVersions}><History size={13} /> {tr('Versions…', 'Versions…')}</Menu.Item>
             <Menu.Separator className="flow-menu-sep" />
             <Menu.Item className="flow-menu-item" disabled={!canMigrate} title={canMigrate ? undefined : tr('Case Team TD requise', 'Team TD box required')} onSelect={actions.onMigrate}>
               <ArrowUpFromLine size={13} /> {tr('Migrer les actions v1…', 'Migrate v1 actions…')}
@@ -121,7 +123,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
 
       <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', marginLeft: 4 }}>{current || '…'}</span>
       {scope && <span className="tag">{scopeTag[scope]}</span>}
-      {!!version && <span className="tag">v{String(version).padStart(3, '0')}</span>}
+      {!!version && <span className="tag" style={{ cursor: 'pointer' }} onClick={onVersions} title={tr('Versions et historique', 'Versions and history')}>v{String(version).padStart(3, '0')}</span>}
       {legacy && <span className="tag">v1</span>}
       {saveBlocked && current && <span className="tag" title={saveBlocked}>{tr('lecture seule', 'read-only')}</span>}
       {problems.errors > 0 && <span className="tag err" title={tr('Enregistrable, mais non activable tant qu\'il reste des erreurs', 'Can be saved, but not activated while errors remain')}>{tr('invalide', 'invalid')}</span>}

@@ -47,6 +47,7 @@ export interface FlowViewNode {
   position: { x: number; y: number }
   meta?:    Record<string, string>   // shown in Params (step, module...)
   spec?:    NodeSpec                 // catalogue entry (P4), absent for unknown / legacy types
+  destructive?: boolean              // `!` node (flag true for its params, not bypassed)
 }
 
 export interface FlowViewEdge {
@@ -236,8 +237,10 @@ export interface Issue {
 export interface SaveResult { state: FlowState; issues: Issue[]; valid: boolean }
 
 // GET /flows/{name}/versions.
-export interface VersionInfo { version: number; at: string; size: number }
-export interface VersionList { scope: FlowScope; name: string; state: FlowState; versions: VersionInfo[] }
+export interface VersionInfo { version: number; at: string; size: number; user?: string | null }
+// history.jsonl line of the flow (team / project scopes): who, when, what.
+export interface HistoryEntry { at: string; user: string | null; host?: string; kind: string; flow: string; version?: number; to_version?: number; from_version?: number; note?: string }
+export interface VersionList { scope: FlowScope; name: string; state: FlowState; versions: VersionInfo[]; history: HistoryEntry[] }
 
 // -- runs (01 §4, §6, §10) ------------------------------------------------------
 

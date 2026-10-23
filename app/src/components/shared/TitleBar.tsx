@@ -6,6 +6,7 @@ import { Avatar } from './ui'
 import { FluxLogo } from './Logo'
 import { Console } from './Console'
 import { SlideToConfirm } from './SlideToConfirm'
+import { runCloseGuards } from './closeGuard'
 import { useI18n } from '../../i18n'
 import { useShareLatency } from '../../lib/adaptivePoll'
 
@@ -240,9 +241,13 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
       <div className="no-drag" style={{ display: 'flex', gap: 7, alignItems: 'center', marginLeft: 4, flexShrink: 0 }}>
         <WinBtn hoverBg="#ffbd2e" icon={Minus}     action={() => window.electronAPI?.windowMinimize()} />
         <WinBtn hoverBg="#28c940" icon={Maximize2} action={() => window.electronAPI?.windowMaximize()} />
-        {/* A detached page window (U4) closes at once; the slide-to-confirm is only for
-            the main window, which quits FLUX. */}
-        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => (IS_DETACHED_WINDOW ? window.electronAPI?.windowClose() : setConfirmClose(true))} />
+        {/* A detached page window (U4) closes at once, once the page guards agree
+            (closeGuard.ts: the Flows editor saves first); the slide-to-confirm is only
+            for the main window, which quits FLUX. */}
+        <WinBtn hoverBg="#ff5f57" icon={X}         action={() => {
+          if (!IS_DETACHED_WINDOW) { setConfirmClose(true); return }
+          runCloseGuards().then(ok => { if (ok) window.electronAPI?.windowClose() })
+        }} />
       </div>
 
       {/* slide-to-confirm quit overlay */}
@@ -264,7 +269,10 @@ export function TitleBar({ username, unreadCount, onUserChange }: Props) {
             <div style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'center', maxWidth: 300, lineHeight: 1.5 }}>
               {t('titlebar.closeHint')}
             </div>
-            <SlideToConfirm label={t('titlebar.slideToClose')} onConfirm={() => { window.electronAPI?.windowClose() }} />
+            <SlideToConfirm label={t('titlebar.slideToClose')} onConfirm={() => {
+              setConfirmClose(false)
+              runCloseGuards().then(ok => { if (ok) window.electronAPI?.windowClose() })
+            }} />
             <div
               onClick={() => setConfirmClose(false)}
               style={{ fontSize: 11, color: 'var(--ink-4)', cursor: 'pointer', padding: '4px 8px' }}

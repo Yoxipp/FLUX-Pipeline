@@ -155,6 +155,10 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
               {node.prefix}
             </span>
           )}
+          {node.destructive && (
+            <span title={tr('Node destructif : efface, ecrase ou deplace des fichiers (validation au curseur a l\'enregistrement)', 'Destructive node: erases, overwrites or moves files (slider confirmation on save)')}
+                  className="flow-issue-badge" style={{ background: 'var(--err)' }}>!</span>
+          )}
           <RunBadge run={run} />
           {issues && issues.errors + issues.warnings > 0 && (
             <span className="flow-issue-badge" style={{ background: issues.errors ? 'var(--err)' : 'var(--warn)' }}

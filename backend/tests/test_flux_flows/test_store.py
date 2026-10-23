@@ -84,6 +84,11 @@ class Store(unittest.TestCase):
         self.assertEqual(store.read_flow(self.roots, "team", "daily")["flow"], v1)
         self.assertEqual([v["version"] for v in store.list_versions(self.roots, "team", "daily")["versions"]], [3, 2, 1])
         self.assertEqual(self._history()[-1]["to_version"], 1)
+        # P4: the versions dialog gets who froze each version and the flow's history, newest first.
+        listed = store.list_versions(self.roots, "team", "daily")
+        self.assertEqual([v["user"] for v in listed["versions"]], ["ADAM", "ADAM", "ADAM"])
+        self.assertEqual(listed["history"][0]["kind"], "revert")
+        self.assertTrue(all(h["flow"] == "daily" for h in listed["history"]))
 
     def test_orphan_version_is_skipped(self) -> None:
         store.save_flow(self.roots, "team", _flow(), user="ADAM")

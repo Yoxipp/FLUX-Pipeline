@@ -1,8 +1,8 @@
 // TabMenu.tsx — Tab menu at the mouse, like Houdini (2026-10-22): one sub-menu per node
 // family, its nodes inside; typing searches every node (names starting with the search first).
 // Keys: arrows, Right / Enter opens a family, Left goes back, Enter picks, Escape closes.
-// P4: picking adds the node (at the mouse). ilter limits the menu (a link dropped in the
-// void: the compatible nodes only, 03 §4), 	itle replaces the footer.
+// P4: picking adds the node (at the mouse). `filter` limits the menu (a link dropped in the
+// void: the compatible nodes only, 03 §4), `title` replaces the footer.
 
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'

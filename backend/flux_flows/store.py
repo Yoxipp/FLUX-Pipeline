@@ -246,12 +246,31 @@ def list_versions(roots: Mapping[str, Optional[Path]], scope: str, name: str) ->
     root = _root(roots, scope)
     if not working_file(root, name).is_file():
         raise FlowStoreError(f"flow {name} introuvable ({scope})", 404)
+    history = read_history(roots, scope, name)
+    by_version = {h["version"]: h.get("user") for h in history if isinstance(h.get("version"), int)}
     versions = []
     for n in reversed(_version_numbers(root, name)):
         st = version_file(root, name, n).stat()
         versions.append({"version": n, "at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
-                         "size": st.st_size})
-    return {"scope": scope, "name": name, "state": read_state(root, name), "versions": versions}
+                         "size": st.st_size, "user": by_version.get(n)})
+    return {"scope": scope, "name": name, "state": read_state(root, name), "versions": versions,
+            "history": history}
+
+
+def read_history(roots: Mapping[str, Optional[Path]], scope: str, name: str, limit: int = 200) -> List[Dict[str, Any]]:
+    """Last *limit* history.jsonl lines of *name* (who, when, what), newest first; [] for perso."""
+    path = history_path(roots, scope)
+    if path is None or not path.is_file():
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("flow") == name:
+            out.append(entry)
+    return list(reversed(out[-limit:]))
 
 
 # -- write --------------------------------------------------------------------

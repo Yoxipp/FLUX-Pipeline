@@ -14,6 +14,7 @@
 import { FAMILIES } from './families'
 import { familyOfV1, pascal, prefixOfV1, type CatalogEntry } from './v1_adapter'
 import { editorConnect } from './portTypes'
+import { flagOn } from './destructive'
 import type { CatalogPort, Family, FlowCatalog, FlowDoc, FlowDocNode, FlowView, FlowViewEdge, FlowViewNode, NodeSpec, PortSpec, PortType } from './types'
 
 export type SpecIndex = Record<string, NodeSpec>
@@ -50,6 +51,7 @@ function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowV
     icon: spec.icon || undefined, doc_fr: spec.doc_fr, doc_en: spec.doc_en,
     hasExec: false, inputs, outputs,
     position: { x: node.pos?.[0] ?? 0, y: node.pos?.[1] ?? 0 }, meta, spec,
+    destructive: !node.bypass && flagOn(spec.destructive, spec, params),
   }
 }
 
