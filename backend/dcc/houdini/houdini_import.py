@@ -35,6 +35,9 @@ def _node_name_from(file_path: str | Path) -> str:
 from core.logger import get_logger
 from dcc.houdini.client import houdini_client
 
+# Every function that talks to Houdini takes ``client=`` (the Flows session of a chosen
+# instance, P6a); None = the singleton (behaviour of every existing caller).
+
 log = get_logger(__name__)
 
 # (node_type, path_parm_name)
@@ -62,7 +65,7 @@ def _get_ext(file_path: str | Path) -> str:
     return Path(s).suffix.lower()
 
 
-def create_import_node(network_path: str, file_path: str | Path) -> dict:
+def create_import_node(network_path: str, file_path: str | Path, *, client=None) -> dict:
     """Create a Houdini import node in *network_path* for *file_path*.
 
     The node type is selected automatically from the file extension.
@@ -99,7 +102,7 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
         result = {{"ok": True, "node_path": _node.path(), "node_type": {node_type!r}, "file_set": _set}}
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         if (resp.get("result") or {}).get("file_set") is False:
             log.warning("create_import_node: no file parm found on %s for %s", node_type, Path(file_path).name)
@@ -109,7 +112,7 @@ def create_import_node(network_path: str, file_path: str | Path) -> dict:
     return resp
 
 
-def create_character_import_node(network_path: str, file_path: str | Path) -> dict:
+def create_character_import_node(network_path: str, file_path: str | Path, *, client=None) -> dict:
     """Import a skinned asset as a KineFX character → mesh carries `boneCapture`.
 
     ``.usd/.usda/.usdc/.usdz`` → ``kinefx::usdcharacterimport``
@@ -177,7 +180,7 @@ def create_character_import_node(network_path: str, file_path: str | Path) -> di
                    "file_set": _set, "has_bonecapture": _has_bc, "point_count": _npt}}
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         r = resp.get("result") or {}
         if not r.get("file_set"):
@@ -208,6 +211,8 @@ def create_flux_importer_node(
     flux_instance: str = "",
     flux_iter: str = "LAST",
     resolved_path: str = "",
+    *,
+    client=None,
 ) -> dict:
     """Create a FLUX import node in the active Houdini network pane.
 
@@ -310,7 +315,7 @@ def create_flux_importer_node(
             _mode = "native"
         result = {{"ok": True, "node_path": _node.path(), "resolved_path": _resolved, "mode": _mode}}
     """)
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         r = resp.get("result") or {}
         if not r.get("resolved_path"):
@@ -326,7 +331,7 @@ def create_flux_importer_node(
     return resp
 
 
-def set_import_path(node_path: str, file_path: str | Path) -> dict:
+def set_import_path(node_path: str, file_path: str | Path, *, client=None) -> dict:
     """Update the file path parameter on an existing Houdini import node.
 
     The correct parameter name is inferred from the file extension.
@@ -350,7 +355,7 @@ def set_import_path(node_path: str, file_path: str | Path) -> dict:
         result = {{"ok": True, "node_path": {node_path!r}}}
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         log.info("Updated import path on %s → %s", node_path, Path(file_path).name)
     else:
@@ -372,7 +377,7 @@ _REPATHABLE_NODE_EXTS: dict[str, set[str]] = {
 }
 
 
-def set_path_on_selected_if_match(resolved_path: str | Path) -> dict:
+def set_path_on_selected_if_match(resolved_path: str | Path, *, client=None) -> dict:
     """Re-path the currently selected Houdini node when it fits *resolved_path*.
 
     "Open in Houdini" prefers this over creating a new node: if the user has an
@@ -440,7 +445,7 @@ def set_path_on_selected_if_match(resolved_path: str | Path) -> dict:
                                "node_type": _core, "mode": "replaced"}}
     """)
 
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if not resp.get("ok"):
         log.error("set_path_on_selected_if_match failed: %s", resp.get("error"))
         return resp
@@ -453,7 +458,7 @@ def set_path_on_selected_if_match(resolved_path: str | Path) -> dict:
     return r
 
 
-def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) -> dict:
+def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None, *, client=None) -> dict:
     """Copy *file_path* into a local folder, conflict-safe.
 
     *dest_folder* : an explicit local directory. When omitted, the copy lands in
@@ -473,7 +478,7 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
     if dest_folder:
         dest_dir = Path(dest_folder)
     else:
-        hip_resp = houdini_client.run("result = hou.hipFile.path()")
+        hip_resp = (client or houdini_client).run("result = hou.hipFile.path()")
         if not hip_resp.get("ok"):
             return {"ok": False, "error": "Impossible de lire $HIP : " + hip_resp.get("error", "inconnu")}
         dest_dir = Path(hip_resp["result"]).parent / "sourceimages"
@@ -504,7 +509,7 @@ def move_to_local(file_path: str | Path, dest_folder: str | Path | None = None) 
     return {"ok": True, "local_path": local_path, "abs_path": str(dest)}
 
 
-def create_native_import_in_context(file_path: str | Path) -> dict:
+def create_native_import_in_context(file_path: str | Path, *, client=None) -> dict:
     """Import *file_path* natively (no flux_importer HDA) in the active pane.
 
     The FLUX importer HDA is USD-specific: for a non-USD file (bgeo, abc, fbx, obj,
@@ -573,7 +578,7 @@ def create_native_import_in_context(file_path: str | Path) -> dict:
         result = {{"node_path": _node.path(), "mode": "native_" + {node_type!r},
                    "resolved_path": {file_str!r}, "file_set": _set}}
     """)
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         r = resp.get("result") or {}
         log.info("Native import %s -> %s (%s)", Path(file_str).name, r.get("node_path"), r.get("mode"))
@@ -586,7 +591,7 @@ NEED_HDA = "FLUX_NEED_HDA"
 
 
 def create_usd_context_import(file_path: str, probe: dict, importer: dict | None = None,
-                              allow_fallback: bool = False) -> dict:
+                              allow_fallback: bool = False, *, client=None) -> dict:
     """Import a USD file according to the active network pane (2026-09-17).
 
     * LOP network (/stage, lopnet): the LOP ``flux_importer`` HDA (same parms as in
@@ -693,7 +698,7 @@ def create_usd_context_import(file_path: str, probe: dict, importer: dict | None
         _node.setSelected(True, clear_all_selected=True)
         result = {{"node_path": _node.path(), "mode": _mode, "resolved_path": {file_str!r}}}
     """)
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         r = resp.get("result") or {}
         log.info("USD context import %s -> %s (%s)", Path(file_str).name, r.get("node_path"), r.get("mode"))
@@ -716,7 +721,7 @@ LOP_FILE_EXTS: frozenset[str] = frozenset({
 LOP_IMPORT_MODES = ("auto", "reference", "payload", "sublayer")
 
 
-def import_into_lop(file_path: str, mode: str = "auto", abs_path: str | None = None) -> dict:
+def import_into_lop(file_path: str, mode: str = "auto", abs_path: str | None = None, *, client=None) -> dict:
     """Load *file_path* in a LOP network as a Reference, a Payload or a Sublayer.
 
     *mode*:
@@ -828,7 +833,7 @@ def import_into_lop(file_path: str, mode: str = "auto", abs_path: str | None = N
             else:
                 result = {{"handled": False, "reason": "USD without Reference/Sublayer selected"}}
     """)
-    resp = houdini_client.run(code)
+    resp = (client or houdini_client).run(code)
     if resp.get("ok"):
         r = resp.get("result") or {}
         if r.get("handled"):
