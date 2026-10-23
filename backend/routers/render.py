@@ -314,6 +314,8 @@ def _submit(body: SubmitBody, user: str) -> dict:
         service=service,
         envkeys=settings["envkeys"],
         husk=settings["husk_path"],
+        max_task_minutes=settings["max_task_minutes"],
+        retry_exit_codes=settings["retry_exit_codes"],
         start_after=body.start_at or "",
         metadata={"flux_project": body.project, "entity": name, "user": user, "cap": str(own_cap),
                   "output": _farm(out_dir, "Le dossier de rendu", simulate), "frozen": "start" if at_start else ("1" if frozen["frozen"] else "0")},

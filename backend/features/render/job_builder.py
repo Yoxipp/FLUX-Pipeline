@@ -51,6 +51,8 @@ class RenderJobSpec:
     husk: str = "husk"
     metadata: Dict[str, str] = field(default_factory=dict)
     start_after: str = ""  # "YYYY-MM-DDTHH:MM" local time, empty = start now
+    max_task_minutes: int = 0  # RemoteCmd -maxrunsecs: a chunk running longer is killed (error). 0 = no bound
+    retry_exit_codes: List[int] = field(default_factory=list)  # RemoteCmd -retryrc: ready again on these codes
     # Freeze when the job starts (scheduled job): a first task writes usd_path from this
     # source with blade/flux_freeze_at_start.py, then the chunks render it. Empty = no such task.
     freeze_source: str = ""
@@ -103,6 +105,8 @@ def husk_command(spec: RenderJobSpec, first: int, last: int) -> List[str]:
     return [
         spec.husk,
         "--renderer", RENDERER_DELEGATES[spec.renderer],
+        # Verbosity 1 + Alfred progress: ALF_PROGRESS lines, read by Tractor as the task's % done.
+        "-Va1",
         "--frame", str(first),
         "--frame-count", str(count),
         "--frame-inc", str(spec.frame_step),
@@ -138,6 +142,10 @@ def validate_spec(spec: RenderJobSpec, strict: bool = True) -> RenderJobSpec:
         if _UNSAFE_TCL.search(text.replace("$F", "")):
             raise JobValidationError(f"unsupported character in '{text}' (braces, brackets, backslash, $)")
     chunk_frames(spec.frame_start, spec.frame_end, spec.chunk_size, spec.frame_step)
+    if not isinstance(spec.max_task_minutes, int) or spec.max_task_minutes < 0:
+        raise JobValidationError("max_task_minutes must be an integer >= 0 (0 = no bound)")
+    if not all(isinstance(c, int) and not isinstance(c, bool) and c != 0 for c in spec.retry_exit_codes):
+        raise JobValidationError("retry exit codes must be non-zero integers (0 = success)")
     if spec.start_after:
         after_clause(spec.start_after)
     return spec
@@ -183,10 +191,16 @@ def to_alf(spec: RenderJobSpec, strict: bool = True) -> str:
         lines.append("    }")
         lines.append("    Task -title {rendu} -subtasks {")
         pad = "        "
+    # Render commands only: the freeze task is short and must never be retried blindly.
+    render_opts = service
+    if spec.max_task_minutes > 0:
+        render_opts += f" -maxrunsecs {spec.max_task_minutes * 60}"
+    if spec.retry_exit_codes:
+        render_opts += f" -retryrc {_tcl(' '.join(str(c) for c in spec.retry_exit_codes))}"
     for first, last in chunk_frames(spec.frame_start, spec.frame_end, spec.chunk_size, spec.frame_step):
         cmd = _tcl_cmd(husk_command(spec, first, last))
         lines.append(f"{pad}Task -title {_tcl(f'frames {first}-{last}')} -cmds {{")
-        lines.append(f"{pad}    RemoteCmd {cmd}{service}")
+        lines.append(f"{pad}    RemoteCmd {cmd}{render_opts}")
         lines.append(f"{pad}}}")
     if spec.freeze_source:
         lines.append("    }")

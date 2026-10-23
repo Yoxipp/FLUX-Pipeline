@@ -23,6 +23,10 @@ DEFAULTS: dict = {
     "priority": DEFAULT_PRIORITY,  # 1..10000
     "maxactive": 0,                # 0 = no cap
     "chunk_size": 5,
+    # Per render chunk (2026-10-23): killed past this many minutes (Tractor -maxrunsecs), 0 = no bound;
+    # ready again when husk exits with one of these codes (-retryrc), [] = never.
+    "max_task_minutes": 0,
+    "retry_exit_codes": [],
     "renderer": "renderman",       # 2026-10-23
     "freeze_by_default": True,
     # Scheduled job ("Lancer a"): freeze when the render starts (on the blade) or at submit (2026-10-23).
@@ -127,6 +131,14 @@ def _check_value(key: str, value):
         if not _is_int(value) or value < 0:
             raise ValueError("maxactive must be an integer >= 0 (0 = no cap)")
         return value
+    if key == "max_task_minutes":
+        if not _is_int(value) or value < 0:
+            raise ValueError("max_task_minutes must be an integer >= 0 (0 = no bound)")
+        return value
+    if key == "retry_exit_codes":
+        if not isinstance(value, list) or not all(_is_int(v) and v != 0 for v in value):
+            raise ValueError("retry_exit_codes must be a list of non-zero integers (0 = success)")
+        return sorted(set(value))
     if key == "chunk_size":
         if not _is_int(value) or value < 1:
             raise ValueError("chunk_size must be an integer >= 1")

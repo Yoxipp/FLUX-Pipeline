@@ -28,7 +28,8 @@ except NameError:
 JOB_COLUMNS = ["jid", "title", "owner", "projects", "priority", "maxactive", "numtasks",
                "numdone", "numerror", "numactive", "numblocked", "numready",
                "spooltime", "stoptime", "pausetime", "deletetime", "comment", "metadata"]
-TASK_COLUMNS = ["jid", "tid", "title", "state", "service"]
+# progress: 0-100 of an active task, from the ALF_PROGRESS lines its command prints (husk -Va1).
+TASK_COLUMNS = ["jid", "tid", "title", "state", "service", "progress"]
 BLADE_COLUMNS = ["bladeid", "name", "profile", "status", "nimby", "heartbeattime", "numslots"]
 LOG_TAIL = 20000
 _JID = re.compile(r"jid[:= ]+(\d+)", re.IGNORECASE)
@@ -132,6 +133,7 @@ def _jobs(req):
         clauses.append("projects like " + req["project"])
     rows = tq.jobs(" and ".join(clauses), columns=JOB_COLUMNS, sortby=["-spooltime"],
                          limit=int(req.get("limit") or 500), archive=bool(req.get("archive")))
+    progress = _active_progress(tq, [r.get("jid") for r in rows if running.get(r.get("jid"))])
     jobs = []
     for r in rows:
         projects = r.get("projects") or []
@@ -146,8 +148,25 @@ def _jobs(req):
             "spooltime": _str(r.get("spooltime")), "stoptime": _str(r.get("stoptime")),
             "pausetime": _str(r.get("pausetime")), "deletetime": _str(r.get("deletetime")),
             "comment": r.get("comment") or "", "metadata": r.get("metadata") or "",
+            "activeProgress": progress.get(r.get("jid"), 0),
         })
     return {"jobs": jobs}
+
+
+def _active_progress(tq, jids):
+    """{jid: sum of the % of its active tasks} for running jobs only (one query, none when idle)."""
+    jids = sorted(set(int(j) for j in jids if j is not None))
+    if not jids:
+        return {}
+    out = {}
+    clause = "jid in [%s] and state=active" % ",".join(str(j) for j in jids)
+    for r in tq.tasks(clause, columns=["jid", "progress"]):
+        try:
+            value = float(r.get("progress") or 0)
+        except (TypeError, ValueError):
+            continue
+        out[r.get("jid")] = out.get(r.get("jid"), 0) + max(0.0, min(100.0, value))
+    return out
 
 
 def _tasks(req):

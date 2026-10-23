@@ -162,6 +162,18 @@ def job_state(job: dict) -> str:
     return "waiting"
 
 
+def job_percent(job: dict) -> int:
+    """Done tasks plus the progress of the running ones (husk -Va1 -> ALF_PROGRESS), 0-100."""
+    total = _int(job.get("numTasks"))
+    if total <= 0:
+        return 0
+    try:
+        active = float(job.get("activeProgress") or 0)
+    except (TypeError, ValueError):
+        active = 0.0
+    return max(0, min(100, int((_int(job.get("numDone")) * 100 + active) / total)))
+
+
 def _normalize(job: dict) -> dict:
     meta = _metadata(job.get("metadata"))
     out = dict(job)
@@ -169,6 +181,7 @@ def _normalize(job: dict) -> dict:
     # Every school job is owned by the shared Windows login: the FLUX user lives in the metadata.
     out["flux_user"] = str(meta.get("user") or "")
     out["state"] = job_state(job)
+    out["percent"] = job_percent(job)
     return out
 
 

@@ -69,7 +69,7 @@ class AlfTests(unittest.TestCase):
         self.assertIn("-maxactive 4", alf)
         self.assertIn('-metadata {{"shot": "SQ01_SH010"}}', alf)
         self.assertEqual(alf.count("RemoteCmd"), 3)
-        self.assertIn("--renderer BRAY_HdKarma --frame 1011 --frame-count 2", alf)
+        self.assertIn("--renderer BRAY_HdKarma -Va1 --frame 1011 --frame-count 2", alf)
         self.assertEqual(alf.count("{"), alf.count("}"))
 
     def test_scheduled_start(self):
