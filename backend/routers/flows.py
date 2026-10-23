@@ -17,7 +17,8 @@
 # ``host``, ``activation`` and ``flow_changed``; a dry run of version `current` that ends
 # ``ok`` writes state.json ``dry_run_ok``.
 # P6c: GET /flows/bridges (extension bridges + install state), POST
-# /flows/bridges/{soft}/install | uninstall (this machine, never a silent overwrite).
+# /flows/bridges/{soft}/install | uninstall (this machine, never a silent overwrite),
+# POST /flows/bridges/{soft}/flows (Team TD: its Instance and publish nodes in the team scope).
 
 from __future__ import annotations
 
@@ -457,6 +458,30 @@ async def uninstall_bridge(soft: str, body: BridgeInstallBody) -> dict[str, Any]
 
     ext = _bridge(soft)
     return await asyncio.to_thread(installer.uninstall, ext, body.exe or extension.find_exe(ext))
+
+
+class BridgeFlowsBody(BaseModel):
+    scene_ext: str = ".scene"       # extension of the soft's scene (.max): the publish template
+    overwrite: bool = False
+
+
+@router.post("/bridges/{soft}/flows")
+async def create_bridge_flows(soft: str, body: BridgeFlowsBody) -> dict[str, Any]:
+    """Write <prefix>_instance and <prefix>_publish (team nodes) from the bridge (Team TD)."""
+    from flux_flows.bridges import flow_templates
+
+    current = await _require(rights.ADMIN, "team")
+    ext = _bridge(soft)
+    try:
+        done = await _call(flow_templates.create_flows, ext, _roots(current["user"], None),
+                           user=current["user"] or "", scene_ext=body.scene_ext, overwrite=body.overwrite)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+    for row in done:
+        if row["status"] == "written":
+            events.emit({"type": "flow_changed", "flow": row["name"], "scope": "team", "project": None,
+                         "by": current["user"]})
+    return {"flows": done}
 
 
 @router.get("")

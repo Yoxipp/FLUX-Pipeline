@@ -127,6 +127,67 @@ def frame_range(value: Any) -> Optional[tuple]:
 
 # -- the Instance node of a soft ---------------------------------------------------------
 
+def _scene(ctx, inputs) -> str:
+    return path_input(ctx, inputs.get("scene"), "scene", required=False)
+
+
+def instance_body(ctx, inputs, params, spec, modes):
+    """Run of an Instance core (shipped softs and extension bridges, P6c)."""
+    from flux_flows.bridges import headless as hl
+    from flux_flows.bridges import session as sess
+
+    mode = str(params.get("mode") or "live_connect_or_open")
+    if mode == "farm":
+        raise NodeError("mode farm : reserve a la V2 (Tractor)")
+    if mode not in modes:
+        raise NodeError(f"mode inconnu `{mode}` ({', '.join(modes)})")
+    scene = _scene(ctx, inputs)
+    if mode == "headless":
+        template = path_input(ctx, inputs.get("template"), "template", required=False)
+        s = bridge(hl.start_worker, spec.soft, scene or template, cancelled=ctx.cancelled)
+        ctx.add_cleanup(s.close)
+        ctx.log(f"{spec.headless} lance (pid {s.pid}) : une licence {spec.label} pour la duree du run")
+        state = "headless"
+    else:
+        s = bridge(sess.connect_live, spec.soft, mode=mode, pick=str(params.get("pick") or "active"),
+                   scene=scene, pid=params.get("pid"), wait_s=float(params.get("wait_s") or 60),
+                   cancelled=ctx.cancelled, log=ctx.log)
+        state = "live"
+    return {"session": s, "scene": s.scene, "version": s.version, "state": state}
+
+
+def instance_simulate(ctx, inputs, params, spec):
+    """Dry run of an Instance core: never opens a soft, connects to an open one for the readers."""
+    from flux_flows.bridges import session as sess
+
+    mode = str(params.get("mode") or "live_connect_or_open")
+    scene = _scene(ctx, inputs)
+    empty = {"session": None, "scene": scene, "version": "", "state": "skipped"}
+    if mode == "headless":
+        return {"lines": [{"kind": "licence", "text_fr": f"lancerait {spec.headless} (1 licence {spec.label}), "
+                           "saute en essai a blanc"}], "outputs": empty}
+    try:
+        inst = sess.find_instance(spec.soft, pick=str(params.get("pick") or "active"), scene=scene,
+                                  pid=params.get("pid"))
+    except Exception as exc:  # noqa: BLE001 - a dry run reports, never fails on a scan
+        inst, why = None, str(exc)
+    else:
+        why = ""
+    if inst is not None:
+        try:
+            s = sess.live_session(spec.soft, inst.get("port"), inst.get("pid"))
+            s.scene = sess.scene_of(spec.soft, s.port) if s.port else ""
+            return {"lines": [{"kind": "dcc", "text_fr": f"se connecterait a {s.label} (lectures seulement "
+                               "en essai a blanc)"}],
+                    "outputs": {"session": s, "scene": s.scene, "version": "", "state": "live"}}
+        except Exception as exc:  # noqa: BLE001
+            why = str(exc)
+    text = (f"aucune instance {spec.label} : le run echouerait (live_connect_only)" if mode == "live_connect_only"
+            else f"ouvrirait {spec.label}" + (f" avec {scene}" if scene else "") + ", saute en essai a blanc")
+    return {"lines": [{"kind": "dcc", "text_fr": text + (f" ({why})" if why else ""), "path": scene or None}],
+            "outputs": empty}
+
+
 def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) -> None:
     """Register session.<prefix>_instance_core for *soft* (decision 24, 02 §8): the Python core of
     the <Soft>Instance node, which is the locked subflow around it."""
@@ -137,61 +198,11 @@ def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) ->
     label = spec.label.replace(" ", "")
     modes = MODES if headless else tuple(m for m in MODES if m != "headless")
 
-    def _scene(ctx, inputs) -> str:
-        return path_input(ctx, inputs.get("scene"), "scene", required=False)
-
     def body(ctx, inputs, params):
-        from flux_flows.bridges import headless as hl
-        from flux_flows.bridges import session as sess
-
-        mode = str(params.get("mode") or "live_connect_or_open")
-        if mode == "farm":
-            raise NodeError("mode farm : reserve a la V2 (Tractor)")
-        if mode not in modes:
-            raise NodeError(f"mode inconnu `{mode}` ({', '.join(modes)})")
-        scene = _scene(ctx, inputs)
-        if mode == "headless":
-            template = path_input(ctx, inputs.get("template"), "template", required=False)
-            s = bridge(hl.start_worker, spec.soft, scene or template, cancelled=ctx.cancelled)
-            ctx.add_cleanup(s.close)
-            ctx.log(f"{spec.headless} lance (pid {s.pid}) : une licence {spec.label} pour la duree du run")
-            state = "headless"
-        else:
-            s = bridge(sess.connect_live, spec.soft, mode=mode, pick=str(params.get("pick") or "active"),
-                       scene=scene, pid=params.get("pid"), wait_s=float(params.get("wait_s") or 60),
-                       cancelled=ctx.cancelled, log=ctx.log)
-            state = "live"
-        return {"session": s, "scene": s.scene, "version": s.version, "state": state}
+        return instance_body(ctx, inputs, params, spec, modes)
 
     def simulate(ctx, inputs, params):
-        from flux_flows.bridges import session as sess
-
-        mode = str(params.get("mode") or "live_connect_or_open")
-        scene = _scene(ctx, inputs)
-        empty = {"session": None, "scene": scene, "version": "", "state": "skipped"}
-        if mode == "headless":
-            return {"lines": [{"kind": "licence", "text_fr": f"lancerait {spec.headless} (1 licence {spec.label}), "
-                               "saute en essai a blanc"}], "outputs": empty}
-        try:
-            inst = sess.find_instance(spec.soft, pick=str(params.get("pick") or "active"), scene=scene,
-                                      pid=params.get("pid"))
-        except Exception as exc:  # noqa: BLE001 - a dry run reports, never fails on a scan
-            inst, why = None, str(exc)
-        else:
-            why = ""
-        if inst is not None:
-            try:
-                s = sess.live_session(spec.soft, inst.get("port"), inst.get("pid"))
-                s.scene = sess.scene_of(spec.soft, s.port) if s.port else ""
-                return {"lines": [{"kind": "dcc", "text_fr": f"se connecterait a {s.label} (lectures seulement "
-                                   "en essai a blanc)"}],
-                        "outputs": {"session": s, "scene": s.scene, "version": "", "state": "live"}}
-            except Exception as exc:  # noqa: BLE001
-                why = str(exc)
-        text = (f"aucune instance {spec.label} : le run echouerait (live_connect_only)" if mode == "live_connect_only"
-                else f"ouvrirait {spec.label}" + (f" avec {scene}" if scene else "") + ", saute en essai a blanc")
-        return {"lines": [{"kind": "dcc", "text_fr": text + (f" ({why})" if why else ""), "path": scene or None}],
-                "outputs": empty}
+        return instance_simulate(ctx, inputs, params, spec)
 
     # The core leaf of the shipped locked subflow shipped/dcc/<soft>/<prefix>_instance.flow.yml
     # (node_type session.<prefix>_instance, dcc_nodes.py): hidden from Tab / Shelf.

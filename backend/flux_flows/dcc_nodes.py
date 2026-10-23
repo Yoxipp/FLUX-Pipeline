@@ -9,7 +9,8 @@
 #   team     CONFIG/extensions/flows/<name>.flow.yml with the same node_type = "Deverrouiller"
 #            (POST /flows/{name}/unlock, Team TD): it replaces the shipped node for the whole
 #            team; deleting it ("Revenir au defaut") brings the shipped one back.
-# A team flow with a node_type no shipped flow has is a team node built from nodes.
+# A team flow with a node_type no shipped flow has is a team node built from nodes (the
+# flows of an extension bridge, P6c: bridges/flow_templates.py).
 # Flags (session, live_only, licence, effect, destructive, icon) come from the core leaf
 # ``<node_type>_core`` when there is one (the Python node inside, hidden from Tab / Shelf).
 
@@ -138,6 +139,15 @@ def _interface_port(item: Any, required: bool = False):
     return port(item.id, item.type, doc, doc, item.default, default=item.default, required=required)
 
 
+def _inner_look(flow):
+    """A team node without its own core (extension bridges, P6c): the look of its internal
+    core node, else of its last effect node (flux.publish_file in a publish)."""
+    from flux_flows.nodes import registry
+
+    specs = [s for s in (registry.get_core(n.type) for n in flow.nodes.values()) if s is not None]
+    return next((s for s in specs if s.internal), None) or next((s for s in reversed(specs) if s.effect), None)
+
+
 def spec_for(entry: DccFlow):
     """The NodeSpec of a DCC flow (ports = interface, flags of its core leaf)."""
     from flux_flows.nodes import registry
@@ -147,6 +157,7 @@ def spec_for(entry: DccFlow):
     node_type = flow.node_type
     family = node_type.split(".", 1)[0]
     core = registry.get_core(f"{node_type}_core")
+    look = core or _inner_look(flow)        # icon, Shelf rank, aliases of a team node (P6c)
     inputs = [port("exec", "exec", required=True)]
     params = []
     for item in flow.interface.inputs:
@@ -169,9 +180,9 @@ def spec_for(entry: DccFlow):
     effect = bool(core.effect) if core else any(
         (s := registry.get_core(n.type)) is not None and s.effect for n in flow.nodes.values())
     spec = NodeSpec(
-        type=node_type, label=flow.label or node_type, family=family, icon=core.icon if core else "",
-        inputs=inputs, outputs=outputs, params=params, shelf=core.shelf if core else None,
-        aliases=list(core.aliases) if core else [], doc_fr=flow.description or (core.doc_fr if core else ""),
+        type=node_type, label=flow.label or node_type, family=family, icon=look.icon if look else "",
+        inputs=inputs, outputs=outputs, params=params, shelf=look.shelf if look else None,
+        aliases=list(look.aliases) if look else [], doc_fr=flow.description or (core.doc_fr if core else ""),
         doc_en=core.doc_en if core else flow.description, destructive=core.destructive if core else None,
         effect=effect, session=core.session if core else None, live_only=core.live_only if core else False,
         licence=core.licence if core else None, source="flux" if scope == "shipped" else "team",
