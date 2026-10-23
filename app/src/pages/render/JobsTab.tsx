@@ -69,7 +69,7 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
       ) : (
         <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
           {shownJobs.map(j => {
-            const pct = j.numTasks > 0 ? Math.round((j.numDone / j.numTasks) * 100) : 0
+            const pct = j.percent ?? (j.numTasks > 0 ? Math.round((j.numDone / j.numTasks) * 100) : 0)
             const out = jobOutput(j)
             const state = j.state ?? 'waiting'
             const projects = Array.isArray(j.projects) ? j.projects.join(', ') : (j.projects ?? '')
@@ -119,6 +119,9 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
                         <div onClick={() => void showLog(j.jid, t.tid)} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 0', cursor: 'pointer' }}>
                           <span style={{ width: 60, color: t.state === TASK_ERROR ? 'var(--err)' : 'var(--ink-3)' }}>{t.state}</span>
                           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.title}>{t.title}</span>
+                          {t.state === 'active' && typeof t.progress === 'number' && (
+                            <span style={{ color: 'var(--ink-3)', minWidth: 32, textAlign: 'right' }}>{Math.round(t.progress)}%</span>
+                          )}
                           <button type="button" style={btn()}>Log</button>
                         </div>
                         {logOf?.tid === t.tid && (

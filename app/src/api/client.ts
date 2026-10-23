@@ -149,6 +149,7 @@ export const MANUAL_URL = `${BASE_URL}/system/manual`
 // Tractor farm render (backend features/render/team_settings.py, routers/render.py).
 export interface RenderSettings {
   tractor_project: string; priority: number; maxactive: number; chunk_size: number
+  max_task_minutes: number; retry_exit_codes: number[]   // per render chunk: kill past N min (0 = none), retry on codes
   renderer: 'karma' | 'renderman'; freeze_by_default: boolean
   // scheduled job: freeze on the blade when it starts, or at submit
   freeze_when: RenderFreezeWhen; houdini_path: string
@@ -182,8 +183,9 @@ export interface RenderJob {
   // user = Tractor owner (the shared school login); flux_user = who spooled it from FLUX ('' otherwise)
   flux_user?: string
   state?: 'active' | 'error' | 'done' | 'paused' | 'waiting' | 'deleted'
+  percent?: number   // done tasks + progress of the running ones (husk ALF_PROGRESS), 0-100
 }
-export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string }
+export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string; progress?: number | null }
 export type RenderJobScope = 'all' | 'team' | 'mine'
 export type RenderBladeState = 'free' | 'busy' | 'nimby' | 'offline'
 export interface RenderBlade {

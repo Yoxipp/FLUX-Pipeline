@@ -28,7 +28,8 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
   const [editGroup, setEditGroup] = useState<string | null>(null)
   const [newGroup, setNewGroup] = useState('')
   const [techOpen, setTechOpen] = useState(false)
-  useEffect(() => { setDraft(settings) }, [settings])
+  const [codesDraft, setCodesDraft] = useState((settings.retry_exit_codes ?? []).join(', '))
+  useEffect(() => { setDraft(settings); setCodesDraft((settings.retry_exit_codes ?? []).join(', ')) }, [settings])
   const [knownProjects, setKnownProjects] = useState<{ name: string; jobs: number }[]>([])
   useEffect(() => {
     let live = true
@@ -52,12 +53,14 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
     finally { setSaving(false) }
   }
 
-  const num = (k: 'priority' | 'maxactive' | 'chunk_size', label: string, help?: string) => (
+  const num = (k: 'priority' | 'maxactive' | 'chunk_size' | 'max_task_minutes', label: string, help?: string) => (
     <Row label={label} help={help}>
       <input type="number" style={input} value={draft[k]}
-        onChange={e => set(k, Math.max(k === 'maxactive' ? 0 : 1, Math.round(Number(e.target.value) || 0)))} />
+        onChange={e => set(k, Math.max(k === 'maxactive' || k === 'max_task_minutes' ? 0 : 1, Math.round(Number(e.target.value) || 0)))} />
     </Row>
   )
+  // Exit codes typed freely, parsed on blur: integers only, 0 dropped (success).
+  const parseCodes = (s: string) => [...new Set(s.split(/[,\s]+/).map(x => Number(x)).filter(n => Number.isInteger(n) && n !== 0))]
   const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
     label: string, placeholder?: string) => (
     <Row label={label}>
@@ -191,6 +194,14 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
                   onChange={e => set('envkeys', e.target.value.split(',').map(x => x.trim()).filter(Boolean))} />
               </Row>
               {num('maxactive', tr('Maximum fixe par job (0 = aucun)', 'Fixed max per job (0 = none)'))}
+              {num('max_task_minutes', tr('Duree max d\'un morceau (min)', 'Max time per chunk (min)'),
+                tr('Au-dela, Tractor le tue et le met en erreur. 0 = sans limite.', 'Past it, Tractor kills it (error). 0 = no limit.'))}
+              <Row label={tr('Relancer sur les codes', 'Retry on exit codes')}
+                help={tr('Codes de sortie de husk passagers (licence, reseau), separes par des virgules. Vide = jamais.', 'Transient husk exit codes (license, network), comma separated. Empty = never.')}>
+                <input style={input} value={codesDraft} placeholder="3, 4"
+                  onChange={e => setCodesDraft(e.target.value)}
+                  onBlur={() => set('retry_exit_codes', parseCodes(codesDraft))} />
+              </Row>
               {txt('husk_path', 'Husk')}
               {txt('engine', 'Engine (host:port)', 'TRACTOR_ENGINE')}
               {txt('engine_user', tr('Login moteur', 'Engine login'), 'root')}
