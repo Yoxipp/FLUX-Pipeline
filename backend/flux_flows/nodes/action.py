@@ -21,7 +21,9 @@ from flux_actions.commands.utility import (
     convert_image_file, copy_path, list_paths, make_dir, move_path, move_target, write_json_atomic,
     write_text_file, zip_dir,
 )
-from flux_flows.nodes.common import as_bool, as_path, check_destructive_target, in_project
+from flux_flows.nodes.common import (
+    archive_into_project, archive_preview, as_bool, as_path, check_destructive_target,
+)
 from flux_flows.nodes.contract import NodeError
 from flux_flows.nodes.registry import flow_node, port
 
@@ -350,15 +352,6 @@ def _delete_args(ctx, inputs, params) -> Tuple[Path, str]:
     return as_path(ctx, inputs.get("path"), "chemin a supprimer"), _mode(params, DELETE_MODES, "archive")
 
 
-def _archive_rel(ctx, path: Path) -> Tuple[Path, str]:
-    project = (ctx.context or {}).get("project_path")
-    if not project or not in_project(ctx, path):
-        raise NodeError(f"Refus : `{path}` est hors projet (archive : seulement dans le projet du flow)",
-                        code="E_PATH_OUTSIDE")
-    root = Path(project)
-    return root, path.resolve().relative_to(root.resolve()).as_posix()
-
-
 def _simulate_delete(ctx, inputs, params):
     path, mode = _delete_args(ctx, inputs, params)
     if mode == "erase":
@@ -368,12 +361,7 @@ def _simulate_delete(ctx, inputs, params):
         if not target.exists():
             lines.append(_line("warn", f"{target} n'existe pas encore", target))
         return {"lines": lines, "outputs": {"archived_to": None}}
-    from features.production.archive import ARCHIVE_ROOT, _safe_entity_dir, archive_label
-
-    root, rel = _archive_rel(ctx, path)
-    if _safe_entity_dir(root, rel) is None:
-        raise NodeError(f"Refus d'archiver `{rel}` (racine du projet ou dossier ARCHIVE)", code="E_PATH_OUTSIDE")
-    dest = root / ARCHIVE_ROOT / archive_label((ctx.context or {}).get("user") or None) / rel
+    dest = archive_preview(ctx, path)
     return {"lines": [_line("archive", f"deplacerait {path} vers {dest}", path)],
             "outputs": {"archived_to": str(dest)}}
 
@@ -403,20 +391,7 @@ def delete(ctx, inputs, params):
             force_remove(target)
         ctx.log(f"efface : {target}")
         return {"archived_to": None}
-    from features.production.archive import archive_folder
-
-    root, rel = _archive_rel(ctx, path)
-    _existing(path, "Chemin")
-    try:
-        archived = archive_folder(root, rel, (ctx.context or {}).get("user") or None)
-    except ValueError:
-        raise NodeError(f"Refus d'archiver `{rel}` (racine du projet ou dossier ARCHIVE)",
-                        code="E_PATH_OUTSIDE") from None
-    except FileNotFoundError:
-        raise NodeError(f"Chemin introuvable : {path}") from None
-    except OSError as exc:
-        raise NodeError(f"Archivage : {exc}") from None
-    dest = root / archived
+    dest = archive_into_project(ctx, path)
     ctx.log(f"archive : {path} -> {dest}")
     return {"archived_to": str(dest)}
 

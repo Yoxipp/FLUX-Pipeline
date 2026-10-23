@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Tuple
 
 from flux_flows.nodes.contract import NodeError
 
@@ -93,3 +93,45 @@ def in_project(ctx, path: Path) -> bool:
         return True
     except (ValueError, OSError):
         return False
+
+
+# -- project archive (action.delete mode archive, flux.archive) ----------------------
+
+def archive_rel(ctx, path: Path) -> Tuple[Path, str]:
+    """(project root, project-relative path) of *path*; outside the run's project = NodeError."""
+    project = (ctx.context or {}).get("project_path")
+    if not project or not in_project(ctx, path):
+        raise NodeError(f"Refus : `{path}` est hors projet (archive : seulement dans le projet du flow)",
+                        code="E_PATH_OUTSIDE")
+    root = Path(project)
+    return root, path.resolve().relative_to(root.resolve()).as_posix()
+
+
+def archive_preview(ctx, path: Path) -> Path:
+    """Where *path* would land in ARCHIVE/<date>_<ARTIST>/ (dry run: moves nothing)."""
+    from features.production.archive import ARCHIVE_ROOT, _safe_entity_dir, archive_label
+
+    root, rel = archive_rel(ctx, path)
+    if _safe_entity_dir(root, rel) is None:
+        raise NodeError(f"Refus d'archiver `{rel}` (racine du projet ou dossier ARCHIVE)", code="E_PATH_OUTSIDE")
+    return root / ARCHIVE_ROOT / archive_label((ctx.context or {}).get("user") or None) / rel
+
+
+def archive_into_project(ctx, path: Path) -> Path:
+    """Move *path* into the project ARCHIVE (features.production.archive:archive_folder).
+    Returns the archived path. Never erases."""
+    from features.production.archive import archive_folder
+
+    root, rel = archive_rel(ctx, path)
+    if not path.exists():
+        raise NodeError(f"Chemin introuvable : {path}")
+    try:
+        archived = archive_folder(root, rel, (ctx.context or {}).get("user") or None)
+    except ValueError:
+        raise NodeError(f"Refus d'archiver `{rel}` (racine du projet ou dossier ARCHIVE)",
+                        code="E_PATH_OUTSIDE") from None
+    except FileNotFoundError:
+        raise NodeError(f"Chemin introuvable : {path}") from None
+    except OSError as exc:
+        raise NodeError(f"Archivage : {exc}") from None
+    return root / archived
