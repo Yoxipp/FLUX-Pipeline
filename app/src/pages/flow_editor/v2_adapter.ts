@@ -152,6 +152,8 @@ export function adaptV2Flow(flow: FlowDoc, opts: { readOnly: boolean; origin?: s
     description: flow.description,
     nodes,
     edges,
+    groups: flow.groups,
+    notes: flow.notes,
     readOnly: opts.readOnly,
     origin: opts.origin,
   }

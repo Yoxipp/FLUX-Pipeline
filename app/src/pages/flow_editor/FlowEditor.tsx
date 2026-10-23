@@ -30,7 +30,7 @@ import { flowsApi } from '../../api/flows'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
 import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
-import { NetworkPane, type EditActions } from './NetworkPane'
+import { GROUP_PREFIX, NetworkPane, NOTE_PREFIX, type EditActions } from './NetworkPane'
 import { NodePalette } from './NodePalette'
 import { NodeWriterDialog } from './NodeWriterDialog'
 import { ParamsPane, type NodeEdits } from './ParamsPane'
@@ -44,7 +44,7 @@ import { applyFix, autoBegin } from './fixes'
 import type { CatalogEntry } from './v1_adapter'
 import { adaptCatalog, adaptV2Flow, type SpecIndex } from './v2_adapter'
 import { createDocStore, docOf, isDirty, useStore } from './store'
-import { addNode, connect, disconnect, insertBlock, moveNodes, nextNodeId, removeItems, setFlowFields, setNodeFields, setParam } from './reducers'
+import { addNode, connect, disconnect, insertBlock, moveNodes, nextId, nextNodeId, removeGroup, removeItems, setFlowFields, setNodeFields, setParam, upsertGroup, upsertNote } from './reducers'
 import { checkLink } from './portTypes'
 import { clipToText, copySelection, parseClip, pasteBlock } from './clipboard'
 import { layoutFlow } from './layout'
@@ -349,7 +349,17 @@ function Editor({ rights }: { rights: FlowRights }) {
   }, [])
   const toggleWires = useCallback(() => setPrefs(p => { const next = { ...p, straight: !p.straight }; writePrefs(next); return next }), [])
 
-  const selectedId = selection.size === 1 ? [...selection][0] : null
+  // Selection ids: node ids as is, notes and group boxes prefixed (NetworkPane NOTE_PREFIX / GROUP_PREFIX).
+  const picked = useMemo(() => {
+    const nodes: string[] = [], notes: string[] = [], groups: string[] = []
+    for (const id of selection) {
+      if (id.startsWith(NOTE_PREFIX)) notes.push(id.slice(NOTE_PREFIX.length))
+      else if (id.startsWith(GROUP_PREFIX)) groups.push(id.slice(GROUP_PREFIX.length))
+      else nodes.push(id)
+    }
+    return { nodes, notes, groups }
+  }, [selection])
+  const selectedId = selection.size === 1 && picked.nodes.length === 1 ? picked.nodes[0] : null
   const selected = useMemo(() => view?.nodes.find(n => n.id === selectedId) ?? null, [view, selectedId])
   // xyflow reports the selection after each render: keep the same Set when nothing changed.
   const onSelect = useCallback((ids: string[]) => setSelection(cur =>
@@ -358,13 +368,17 @@ function Editor({ rights }: { rights: FlowRights }) {
 
   const edit = useMemo<EditActions>(() => ({
     onMove: positions => store.apply(d => moveNodes(d, positions)),
-    onDelete: () => { if (selection.size) { store.apply(d => removeItems(d, selection)); setSelection(new Set()) } },
+    onDelete: () => {
+      if (!selection.size) return
+      store.apply(d => picked.groups.reduce(removeGroup, removeItems(d, [...picked.nodes, ...picked.notes])))
+      setSelection(new Set())
+    },
     onUndo: store.undo,
     onRedo: store.redo,
-    onSelectAll: () => { const d = docOf(store.get()); if (d) setSelection(new Set([...Object.keys(d.nodes), ...(d.notes ?? []).map(n => n.id)])) },
+    onSelectAll: () => { const d = docOf(store.get()); if (d) setSelection(new Set([...Object.keys(d.nodes), ...(d.notes ?? []).map(n => NOTE_PREFIX + n.id)])) },
     onCopy: () => {
       const d = docOf(store.get())
-      const clip = d && copySelection(d, selection)
+      const clip = d && copySelection(d, [...picked.nodes, ...picked.notes])
       if (clip) navigator.clipboard.writeText(clipToText(clip)).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
     },
     onPaste: at => {
@@ -374,12 +388,35 @@ function Editor({ rights }: { rights: FlowRights }) {
         if (!d || !clip) return
         const block = pasteBlock(d, clip, at)
         store.apply(cur => insertBlock(cur, block))
-        setSelection(new Set(block.ids))
+        setSelection(new Set([...Object.keys(block.nodes), ...block.notes.map(n => NOTE_PREFIX + n.id)]))
       }).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
     },
     onConnect: (from, to) => store.apply(d => connect(d, from, to)),
     onDisconnect: links => store.apply(d => disconnect(d, links)),
     // One undo entry: the node and, from a link dropped in the void, its link.
+    onGroup: () => {
+      if (!picked.nodes.length) return
+      const d = docOf(store.get())
+      if (!d) return
+      const id = nextId((d.groups ?? []).map(g => g.id), 'g')
+      store.apply(cur => upsertGroup(cur, { id, label: tr('Groupe', 'Group'), nodes: [...picked.nodes] }))
+      setSelection(new Set([GROUP_PREFIX + id]))
+    },
+    onNote: at => {
+      const d = docOf(store.get())
+      if (!d) return
+      const id = nextId([...(d.notes ?? []).map(n => n.id), ...Object.keys(d.nodes)], 'k')
+      store.apply(cur => upsertNote(cur, { id, pos: at, text: '' }))
+      setSelection(new Set([NOTE_PREFIX + id]))
+    },
+    onRenameGroup: (id, label) => store.apply(d => {
+      const g = d.groups?.find(x => x.id === id)
+      return g ? upsertGroup(d, { ...g, label }) : d
+    }),
+    onNoteText: (id, text) => store.apply(d => {
+      const k = d.notes?.find(x => x.id === id)
+      return k ? upsertNote(d, { ...k, text }) : d
+    }),
     onAdd: (entry, at, link) => {
       const d = docOf(store.get())
       if (!d) return
@@ -395,7 +432,7 @@ function Editor({ rights }: { rights: FlowRights }) {
       store.apply(() => next)
       setSelection(new Set([id]))
     },
-  }), [store, selection, specs, tr, lang])
+  }), [store, selection, picked, specs, tr, lang])
 
   // Layout (03 §4): the only thing that arranges the graph; one undo entry, then frames.
   const arrange = useCallback(() => {
@@ -474,6 +511,12 @@ function Editor({ rights }: { rights: FlowRights }) {
         onToggleDots={() => updatePrefs({ dots: !prefs.dots })}
         onToggleWires={toggleWires}
         onLayout={arrange}
+        onBackdrop={edit.onGroup}
+        onNote={() => {
+          const r = document.querySelector('.react-flow')?.getBoundingClientRect()
+          const p = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 }
+          edit.onNote([p.x, p.y])
+        }}
         onLegacy={() => navigate('/action-graph-legacy')}
       />
       {loaded?.legacy && (

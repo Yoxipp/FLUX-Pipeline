@@ -66,6 +66,8 @@ export interface FlowView {
   description?: string
   nodes: FlowViewNode[]
   edges: FlowViewEdge[]
+  groups?: FlowGroup[]
+  notes?:  FlowNote[]
   readOnly: boolean
   origin?: string
 }

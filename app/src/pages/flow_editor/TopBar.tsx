@@ -40,7 +40,7 @@ export interface RunActions {
 
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onLegacy }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onLegacy }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -60,10 +60,11 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   onToggleDots: () => void
   onToggleWires: () => void
   onLayout: () => void
+  onBackdrop: () => void
+  onNote: () => void
   onLegacy: () => void
 }) {
   const { tr } = useTr()
-  const p4 = tr('Arrive avec l\'edition (P4)', 'Comes with editing (P4)')
   const groups: { key: FlowCategory; label: string }[] = [
     { key: 'pipe', label: tr('Pipe', 'Pipe') },
     { key: 'project', label: tr('Projet', 'Project') },
@@ -150,9 +151,9 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onLayout} title={saveBlocked ?? tr('Range le graph de gauche a droite (annulable)', 'Arranges the graph left to right (undoable)')}>
         <LayoutGrid size={13} /> Layout
       </button>
-      <button type="button" className="flow-tool" disabled title={p4}><BoxSelect size={13} /> Backdrop</button>
-      <button type="button" className="flow-tool" disabled title={p4}><Boxes size={13} /> Subnet</button>
-      <button type="button" className="flow-tool" disabled title={p4}><StickyNote size={13} /> {tr('Note', 'Sticky note')}</button>
+      <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onBackdrop} title={saveBlocked ?? tr('Boite autour des nodes selectionnes (Ctrl+G)', 'Box around the selected nodes (Ctrl+G)')}><BoxSelect size={13} /> Backdrop</button>
+      <button type="button" className="flow-tool" disabled title={tr('Sous-flows : phase P6', 'Sub-flows: phase P6')}><Boxes size={13} /> Subnet</button>
+      <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onNote} title={saveBlocked ?? tr('Note au centre de la vue (N : a la souris)', 'Note at the view centre (N: at the mouse)')}><StickyNote size={13} /> {tr('Note', 'Sticky note')}</button>
 
       <div style={{ flex: 1 }} />
       <button type="button" className={`flow-tool${dots ? ' on' : ''}`} onClick={onToggleDots} title={tr('Points du fond', 'Background dots')}>
