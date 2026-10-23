@@ -161,6 +161,26 @@ export interface ActivationGate {
   reason?:        string
 }
 
+// P6c: an extension bridge (CONFIG/extensions/bridges/<soft>/bridge.yml), GET /flows/bridges.
+export type BridgeInstallState = 'installed' | 'absent' | 'partial' | 'outdated' | 'conflict' | 'error'
+export interface BridgeInfo {
+  soft: string
+  folder: string
+  ok: boolean
+  errors: string[]
+  manifest: {
+    soft: string; label: string; icon: string; prefix: string; exe_hints: string[]
+    port_range: [number, number]; transport: 'tcp_json' | 'file_mailbox' | 'http'; mailbox: string | null
+    install: { target: string; files: string[] }
+  } | null
+  exe: string | null
+  install: { target: string | null; state: BridgeInstallState; files: { name: string; path: string; state: string }[]; error: string | null } | null
+}
+export interface BridgeInstallResult {
+  success: boolean; message: string; target?: string | null; conflicts?: string[]; backups?: string[]
+  removed?: string[]; kept?: string[]; restored?: string[]
+}
+
 // GET /flows/host: who runs the shared active flows (host lock, 01 §9).
 export interface HostHolder { host: string; user: string | null; pid: number; expires: number }
 export interface HostInfo {

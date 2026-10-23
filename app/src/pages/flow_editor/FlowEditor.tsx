@@ -49,6 +49,7 @@ import { VersionsDialog } from './VersionsDialog'
 import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
 import { DestructiveDialog } from './DestructiveDialog'
 import { ActivationDialog } from './ActivationDialog'
+import { BridgesDialog } from './BridgesDialog'
 import { DccBanner } from './DccBanner'
 import { destructiveAdded } from './destructive'
 import { registerCloseGuard } from '../../components/shared/closeGuard'
@@ -96,6 +97,7 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [reloadKey, setReloadKey] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [activationOpen, setActivationOpen] = useState(false)
+  const [bridgesOpen, setBridgesOpen] = useState(false)
   const [trail, setTrail] = useState<{ name: string; scope: FlowScope }[]>([])   // DCC nodes entered
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   // "!" nodes to confirm with the slider before a save; resolve(true) = confirmed.
@@ -664,6 +666,7 @@ function Editor({ rights }: { rights: FlowRights }) {
           edit.onNote([p.x, p.y])
         }}
         onVersions={() => setVersionsOpen(true)}
+        onBridges={() => setBridgesOpen(true)}
         trail={trail.map(t => t.name)}
         onCrumb={i => { void upTo(i) }}
         activation={loaded && !loaded.dcc ? {
@@ -750,6 +753,8 @@ function Editor({ rights }: { rights: FlowRights }) {
           onRevert={revert} onClose={() => setVersionsOpen(false)}
         />
       )}
+      <BridgesDialog open={bridgesOpen} canCreate={rights.team_td} onClose={() => setBridgesOpen(false)}
+                     onNodes={() => { refreshList(); loadCatalog() }} />
       {loaded && (
         <ActivationDialog
           open={activationOpen} name={loaded.name} scope={loaded.scope} project={project || undefined} dirty={dirty}

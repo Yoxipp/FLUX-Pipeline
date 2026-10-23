@@ -12,9 +12,10 @@
 // "invalide" badge (.tag.err) while the document has errors (03 §5).
 // P5: Activer opens ActivationDialog; tag "actif vN", and "vM non activee" when a newer
 // version exists (03 §6: the active version keeps running until the next activation).
+// P6c: Bridges opens BridgesDialog (extension bridges).
 
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert, Power } from 'lucide-react'
+import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert, Power, Plug } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -45,7 +46,7 @@ export interface ActivationInfo { active: boolean; activeVersion: number | null;
 
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, activation, trail, onCrumb, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, activation, trail, onCrumb, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions, onBridges }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -71,6 +72,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   onBackdrop: () => void
   onNote: () => void
   onVersions: () => void
+  onBridges?: () => void       // P6c: Flows > Bridges (extension bridges)
 }) {
   const { tr } = useTr()
   const groups: { key: FlowCategory; label: string }[] = [
@@ -182,6 +184,11 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onNote} title={saveBlocked ?? tr('Note au centre de la vue (N : a la souris)', 'Note at the view centre (N: at the mouse)')}><StickyNote size={13} /> {tr('Note', 'Sticky note')}</button>
 
       <div style={{ flex: 1 }} />
+      {onBridges && (
+        <button type="button" className="flow-tool" onClick={onBridges} title={tr('Bridges d\'extension : logiciels ajoutes sans recompiler FLUX', 'Extension bridges: software added without rebuilding FLUX')}>
+          <Plug size={13} /> Bridges
+        </button>
+      )}
       <button type="button" className={`flow-tool${dots ? ' on' : ''}`} onClick={onToggleDots} title={tr('Points du fond', 'Background dots')}>
         <Grid3x3 size={13} />
       </button>

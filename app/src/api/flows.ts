@@ -4,7 +4,7 @@
 
 import { api, apiCall } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { ActivationGate, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
+import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -76,6 +76,15 @@ export const flowsApi = {
     apiCall('DELETE', `/flows/${encodeURIComponent(name)}${qs({ scope, project })}`),
   migrate: (dry_run: boolean): Promise<MigrateReport> =>
     apiCall<MigrateReport>('POST', '/flows/migrate', { dry_run }),
+  // P6c: extension bridges. install / uninstall act on this machine (no right needed);
+  // a conflict without overwrite changes nothing ({success: false, conflicts}). flows = Team TD.
+  bridges: (): Promise<{ dir: string | null; bridges: BridgeInfo[] }> => apiCall('GET', '/flows/bridges'),
+  installBridge: (soft: string, overwrite = false): Promise<BridgeInstallResult> =>
+    apiCall('POST', `/flows/bridges/${encodeURIComponent(soft)}/install`, { overwrite }),
+  uninstallBridge: (soft: string): Promise<BridgeInstallResult> =>
+    apiCall('POST', `/flows/bridges/${encodeURIComponent(soft)}/uninstall`, {}),
+  bridgeFlows: (soft: string, scene_ext: string, overwrite = false): Promise<{ flows: { kind: string; name: string; status: 'written' | 'kept' }[] }> =>
+    apiCall('POST', `/flows/bridges/${encodeURIComponent(soft)}/flows`, { scene_ext, overwrite }),
 
   // runs (01 §4, §6). 409 = refused (detail.issues), skipped (run_policy) or not active.
   run: (name: string, opts: RunOpts): Promise<{ run_id: string; status: RunStatus; mode: 'real' | 'dry' }> =>
