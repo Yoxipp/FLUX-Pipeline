@@ -249,6 +249,11 @@ def _literal(node: Node, name: str) -> Any:
     return None if value == "" else value
 
 
+def _in_choices(value: Any, choices: Iterable[Any]) -> bool:
+    """A literal against the choices of its param (exact value, the editor offers them in a menu)."""
+    return any(value == c and type(value) is type(c) for c in choices)
+
+
 def _templated(value: Any) -> bool:
     return isinstance(value, str) and any(c in value for c in "{$")
 
@@ -292,6 +297,12 @@ def _check_links(net: _Net, issues: List[Issue]) -> None:
             else:
                 fr, en = f"{net.name(dst)} n'a pas d'entree `{dport}`", f"{net.name(dst)} has no input `{dport}`"
             issues.append(_issue("E_LINK_INVALID", dst, fr, en, port=dport, fix=remove, link=link))
+            continue
+        if dport in ins and not ins[dport].wirable:
+            issues.append(_issue("E_LINK_INVALID", dst,
+                                 f"`{dport}` de {net.name(dst)} est une constante : saisis sa valeur, pas de lien",
+                                 f"`{dport}` of {net.name(dst)} is a constant: type its value, no link",
+                                 port=dport, fix=remove, link=link))
             continue
         src_type = outs.get(sport, "any")
         dst_type = ins[dport].type if dport in ins else "any"
@@ -365,6 +376,12 @@ def _check_nodes(net: _Net, issues: List[Issue], env: Env) -> None:
                                      f"{net.name(nid)} : `{pname}` attend {port.type}, recu {value!r}",
                                      f"{net.name(nid)}: `{pname}` expects {port.type}, got {value!r}", port=pname))
                 continue
+            if port.choices and not _templated(value) and not _in_choices(value, port.choices):
+                shown = ", ".join(str(c) for c in port.choices)
+                issues.append(_issue("E_PARAM_INVALID", nid,
+                                     f"{net.name(nid)} : `{pname}` vaut {value!r}, attendu : {shown}",
+                                     f"{net.name(nid)}: `{pname}` is {value!r}, expected: {shown}", port=pname))
+                continue
             if port.type == "pattern" and isinstance(value, str) and not _templated(value):
                 bad = patterns.check_pattern(value)
                 if bad:
@@ -415,9 +432,7 @@ def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> N
             issues.append(_issue("W_SCAN_TOO_FAST", nid, f"Scan toutes les {every:g} s : charge reseau",
                                  f"Scan every {every:g} s: network load", port="every_s",
                                  fix=_fix("set_param", node=nid, param="every_s", value=30)))
-    if node.type == "data.value" and str(params.get("type") or "str") not in VALUE_TYPES:
-        issues.append(_issue("E_PARAM_INVALID", nid, f"Type inconnu `{params.get('type')}` ({', '.join(VALUE_TYPES)})",
-                             f"Unknown type `{params.get('type')}` ({', '.join(VALUE_TYPES)})", port="type"))
+    # data.value ``type`` is checked by its choices (VALUE_TYPES), in _check_nodes.
     if node.type == FOR_BEGIN and (nid, "step") not in net.data_in and params.get("step") in (0, 0.0, "0"):
         issues.append(_issue("E_PARAM_INVALID", nid, "step ne peut pas valoir 0", "step cannot be 0", port="step"))
     if node.type == "data.flow_input":

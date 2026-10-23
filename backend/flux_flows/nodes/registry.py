@@ -50,15 +50,25 @@ class Port:
     example: Any = None
     required: bool = False
     default: Any = None
+    # Editor hints (params): the allowed values of a choice param, in menu order;
+    # wirable=False = a constant (never promoted to an input, no link into it);
+    # tokens = a project token section (CLASS, NAME, TYPE, SEQ...) offered in a menu.
+    choices: Optional[Tuple[Any, ...]] = None
+    wirable: bool = True
+    tokens: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "type": self.type, "doc_fr": self.doc_fr, "doc_en": self.doc_en,
-                "example": self.example, "required": self.required, "default": self.default}
+                "example": self.example, "required": self.required, "default": self.default,
+                "choices": list(self.choices) if self.choices is not None else None,
+                "wirable": self.wirable, "tokens": self.tokens}
 
 
 def port(name: str, type: str, doc_fr: str = "", doc_en: str = "", example: Any = None,
-         required: bool = False, default: Any = None) -> Port:
-    return Port(name, type, doc_fr, doc_en, example, required, default)
+         required: bool = False, default: Any = None, *, choices: Optional[Iterable[Any]] = None,
+         wirable: bool = True, tokens: Optional[str] = None) -> Port:
+    return Port(name, type, doc_fr, doc_en, example, required, default,
+                tuple(choices) if choices is not None else None, bool(wirable), tokens or None)
 
 
 @dataclass

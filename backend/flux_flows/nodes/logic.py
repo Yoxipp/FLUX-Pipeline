@@ -54,7 +54,8 @@ def _switch_cast(kind: str, value: Any) -> Any:
                     port("default", "exec", "Aucun cas", "No case"), port("on_error", "exec")],
            params=[port("cases", "list[any]", "Valeurs exactes, une sortie case_<rang> par valeur",
                         "Exact values, one case_<rank> output each", ["maya", "houdini"], default=[]),
-                   port("type", "str", "str, int ou float", "str, int or float", "str", default="str")],
+                   port("type", "str", "str, int ou float", "str, int or float", "str", default="str",
+                        choices=_SWITCH_TYPES)],
            shelf=21, aliases=["cas", "selon", "switch"],
            doc_fr="Prend la sortie du cas egal a la valeur (valeur exacte, pas de motif), sinon default.",
            doc_en="Takes the output of the case equal to the value (exact value, no pattern), else default.")
@@ -112,7 +113,8 @@ def _compare(op: str, a: Any, b: Any) -> bool:
                    port("b", "any", "Seconde valeur (motif pour matches)", "Second value (pattern for matches)",
                         "*.abc", required=True)],
            outputs=[port("result", "bool", "Resultat", "Result", True)],
-           params=[port("op", "str", ", ".join(_COMPARE_OPS), ", ".join(_COMPARE_OPS), "eq", default="eq")],
+           params=[port("op", "str", ", ".join(_COMPARE_OPS), ", ".join(_COMPARE_OPS), "eq", default="eq",
+                        choices=_COMPARE_OPS)],
            shelf=22, aliases=["comparer", "egal", "superieur"],
            doc_fr="Compare a et b ; matches teste a contre le motif b (`*.abc ^*_tmp*`).",
            doc_en="Compares a and b; matches tests a against the pattern b (`*.abc ^*_tmp*`).")

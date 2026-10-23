@@ -138,6 +138,13 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   lit `state.json.dry_run_ok {version, nodes_simulated}` (ecrit en P5) : d'ici la, chaque `!` l'affiche. Enregistrer sous / nouveau
   fichier : tous les `!` sont "ajoutes".
 * W_SHIPPED_CHANGED : l'unlock garde `shipped_hash` dans `state.json`, compare au flow livre courant.
+* **Params du catalogue** (2026-10-23) : `port(..., choices=(..), wirable=True, tokens=None)`, serialises
+  `"choices": [..] | null`, `"wirable": bool`, `"tokens": "CLASS" | null` (section de tokens du projet proposee en menu par
+  l'editeur). Un lien vers un param `wirable=False` (constante, ex. `data.path.value`) = E_LINK_INVALID ; une valeur saisie
+  hors de `choices` (texte non templatise, comparaison exacte) = E_PARAM_INVALID (remplace le controle propre a Value.type).
+  Un param promu (relie) arrive dans `inputs`, pas dans `params` : les nodes recents lisent `{**params, **inputs}`
+  (`action._values`). `data.token_path` reproduit la resolution de dossier de `resolve_publish_path` sans toucher
+  publish_core (layout plat : `level: last` = fichier `<base>_LAST.<ext>`, pas de dossier LAST).
 
 ## Tests
 

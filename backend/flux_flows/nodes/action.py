@@ -35,6 +35,8 @@ WRITE_MODES_JSON = ("create", "overwrite")
 WRITE_MODES_TEXT = ("create", "overwrite", "append")
 DELETE_MODES = ("archive", "erase")
 LIST_KINDS = ("file", "dir", "both")
+COPY_DEST_IS = ("auto", "folder", "file")
+_NAME_FORBIDDEN = "/\\:"
 
 # action.run: scene extension -> launcher key (features.launcher.launcher_core).
 RUN_EXTENSIONS: Dict[str, str] = {
@@ -56,6 +58,7 @@ RUN_SOFTS: Dict[str, str] = {
     "zbrush": "zbrush", "marvelous": "marvelous", "mari": "mari",
     "photoshop": "photoshop", "unreal": "unreal",
 }
+RUN_SOFT_CHOICES: Tuple[str, ...] = ("auto", *RUN_SOFTS)
 
 
 # -- helpers ------------------------------------------------------------------------
@@ -117,8 +120,65 @@ def _mode(params, allowed: Tuple[str, ...], default: str) -> str:
     return mode
 
 
+def _choice(values, name: str, allowed: Tuple[str, ...], default: str) -> str:
+    got = str(values.get(name) or default).strip().lower()
+    if got not in allowed:
+        raise NodeError(f"{name} inconnu '{got}' ({', '.join(allowed)})", code="E_PARAM_INVALID")
+    return got
+
+
 def _line(kind: str, text: str, path: Any = None) -> Dict[str, Any]:
     return {"kind": kind, "text_fr": text, "path": str(path) if path is not None else None}
+
+
+def _values(inputs, params) -> Dict[str, Any]:
+    """Params with the value of a promoted (linked) param on top: the engine gives a
+    linked param in ``inputs``, a typed one in ``params``."""
+    return {**params, **{k: v for k, v in inputs.items() if k != "exec"}}
+
+
+def _text(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _file_name(name: str, what: str = "name") -> str:
+    """A bare file name (no folder): else NodeError E_PARAM_INVALID."""
+    if not name or name in (".", "..") or any(c in name for c in _NAME_FORBIDDEN):
+        raise NodeError(f"{what} invalide `{name}` : un nom seul, sans dossier", code="E_PARAM_INVALID")
+    return name
+
+
+def _missing_dirs(folder: Path) -> List[Path]:
+    """The folders of *folder* (itself included) that do not exist yet, top first."""
+    out: List[Path] = []
+    while not folder.exists() and folder.parent != folder:
+        out.append(folder)
+        folder = folder.parent
+    return out[::-1]
+
+
+def _check_parents(folder: Path, make_dirs: bool) -> List[Path]:
+    """Missing folders of *folder*; refused when make_dirs is off."""
+    missing = _missing_dirs(folder)
+    if missing and not make_dirs:
+        raise NodeError(f"Dossier introuvable : {missing[0]} (active make_dirs pour le creer)")
+    if not missing and not folder.is_dir():
+        raise NodeError(f"Refus : `{folder}` existe et c'est un fichier, pas un dossier")
+    return missing
+
+
+def _dirs_line(missing: List[Path]) -> List[Dict[str, Any]]:
+    if not missing:
+        return []
+    return [_line("make_dir", f"creerait le dossier {missing[-1]}"
+                  + (f" (et {len(missing) - 1} parents)" if len(missing) > 1 else ""), missing[-1])]
+
+
+def _ends_with_sep(value: Any) -> bool:
+    """The raw text of a path ends with / or \\ (as_path drops it): "a folder"."""
+    if isinstance(value, dict):
+        value = value.get("path")
+    return _text(value).endswith(("/", "\\"))
 
 
 # -- action.run ---------------------------------------------------------------------
@@ -151,7 +211,7 @@ def _simulate_run(ctx, inputs, params):
            outputs=[*_EXITS, port("launched", "bool", "Le logiciel a demarre", "The software started", True)],
            params=[port("soft", "str", "Logiciel : auto (par extension), maya, houdini, nuke, painter...",
                         "Software: auto (from the extension), maya, houdini, nuke, painter...", "auto",
-                        default="auto")],
+                        default="auto", choices=RUN_SOFT_CHOICES)],
            effect=True, simulate=_simulate_run, shelf=50, aliases=["ouvrir", "open", "lancer", "launch"],
            doc_fr="Ouvre un fichier dans son logiciel (Maya, Houdini, Nuke...), detache de FLUX.",
            doc_en="Opens a file in its software (Maya, Houdini, Nuke...), detached from FLUX.")
@@ -262,12 +322,22 @@ def move(ctx, inputs, params):
 
 # -- action.copy --------------------------------------------------------------------
 
-def _copy_args(ctx, inputs, params) -> Tuple[Path, Path, bool]:
+def _copy_args(ctx, inputs, params) -> Tuple[Path, Path, bool, List[Path]]:
+    values = _values(inputs, params)
     src = as_path(ctx, inputs.get("source"), "source")
-    dest = as_path(ctx, inputs.get("dest"), "destination")
-    overwrite = as_bool(params.get("overwrite"), False)
-    # An existing folder as destination = copy into it, keeping the name (file or folder).
-    target = dest / src.name if dest.is_dir() else dest
+    raw = inputs.get("dest")
+    dest = as_path(ctx, raw, "destination")
+    overwrite = as_bool(values.get("overwrite"), False)
+    dest_is = _choice(values, "dest_is", COPY_DEST_IS, "auto")
+    # Into a folder (keeping the source name): folder mode, or auto with an existing
+    # folder or a text ending with / or \\. Else dest is the exact target path.
+    into = dest_is == "folder" or (dest_is == "auto" and (dest.is_dir() or _ends_with_sep(raw)))
+    if into and dest.exists() and not dest.is_dir():
+        raise NodeError(f"Refus : `{dest}` est un fichier, pas un dossier")
+    if dest_is == "file" and dest.is_dir() and not src.is_dir():
+        raise NodeError(f"Refus : `{dest}` est un dossier (dest_is file attend le chemin du fichier)")
+    target = dest / src.name if into else dest
+    missing = _check_parents(target.parent, as_bool(values.get("make_dirs"), True))
     if target.exists():
         if not overwrite:
             raise NodeError(f"Refus : `{target}` existe deja (active overwrite pour ecraser)", code="E_EXISTS")
@@ -276,11 +346,11 @@ def _copy_args(ctx, inputs, params) -> Tuple[Path, Path, bool]:
         check_destructive_target(target)
     if src.is_dir() and _inside(target, src):
         raise NodeError(f"Refus : `{target}` est dans la source `{src}`")
-    return src, target, overwrite
+    return src, target, overwrite, missing
 
 
 def _simulate_copy(ctx, inputs, params):
-    src, target, _overwrite = _copy_args(ctx, inputs, params)
+    src, target, _overwrite, missing = _copy_args(ctx, inputs, params)
     files = _files_of(src)
     size = sum(f.stat().st_size for f in files if f.exists())
     if src.is_dir():
@@ -290,7 +360,7 @@ def _simulate_copy(ctx, inputs, params):
     text = f"copierait {len(files)} fichiers ({_size_text(size)}) vers {target}"
     if clash:
         text += f" ; en ecraserait {clash}"
-    lines = [_line("copy", text, target)]
+    lines = [*_dirs_line(missing), _line("copy", text, target)]
     if not src.exists():
         lines.append(_line("warn", f"{src} n'existe pas encore", src))
     return {"lines": lines, "outputs": {"path": str(target)}}
@@ -300,19 +370,30 @@ def _simulate_copy(ctx, inputs, params):
            inputs=[_EXEC,
                    port("source", "path", "Fichier ou dossier a copier", "File or folder to copy",
                         "assets/CHR/HERO/publish/LAST", required=True),
-                   port("dest", "path", "Destination (un dossier existant = dedans)",
-                        "Destination (an existing folder = into it)", "$FLUX/LIVRAISON/", required=True)],
+                   port("dest", "path", "Destination : un dossier (existant ou finissant par /) = dedans",
+                        "Destination: a folder (existing or ending with /) = into it", "$FLUX/LIVRAISON/",
+                        required=True)],
            outputs=[*_EXITS, port("path", "path", "Chemin de la copie", "Path of the copy")],
            params=[port("overwrite", "bool", "Ecraser si la destination existe", "Overwrite when the destination exists",
-                        False, default=False)],
+                        False, default=False),
+                   port("dest_is", "str", "auto (dossier existant ou finissant par /), folder (copie dedans) "
+                        "ou file (chemin exact de la copie)",
+                        "auto (existing folder or ending with /), folder (copy into it) or file (exact path of the copy)",
+                        "auto", default="auto", choices=COPY_DEST_IS),
+                   port("make_dirs", "bool", "Creer les dossiers manquants", "Create the missing folders", True,
+                        default=True)],
            destructive={"param": "overwrite", "equals": True}, simulate=_simulate_copy, shelf=51,
            aliases=["copier", "dupliquer"],
-           doc_fr="Copie un fichier ou un dossier. N'ecrase rien sauf avec overwrite.",
-           doc_en="Copies a file or a folder. Overwrites nothing unless overwrite is on.")
+           doc_fr="Copie un fichier ou un dossier, dans un dossier ou vers un chemin exact. Cree les dossiers "
+                  "manquants. N'ecrase rien sauf avec overwrite.",
+           doc_en="Copies a file or a folder, into a folder or to an exact path. Creates the missing folders. "
+                  "Overwrites nothing unless overwrite is on.")
 def copy(ctx, inputs, params):
-    src, target, overwrite = _copy_args(ctx, inputs, params)
+    src, target, overwrite, missing = _copy_args(ctx, inputs, params)
     _existing(src, "Source")
     with _fs_errors("Copie"):
+        if missing:
+            make_dir(target.parent)
         target = copy_path(src, target, overwrite)
     return {"path": str(target)}
 
@@ -373,7 +454,7 @@ def _simulate_delete(ctx, inputs, params):
                                   "Where it was archived (archive mode)")],
            params=[port("mode", "str", "archive (deplace dans ARCHIVE du projet) ou erase (efface)",
                         "archive (moves into the project ARCHIVE) or erase (deletes)", "archive",
-                        default="archive")],
+                        default="archive", choices=DELETE_MODES)],
            destructive={"param": "mode", "equals": "erase"}, simulate=_simulate_delete, shelf=55,
            aliases=["supprimer", "effacer", "archiver", "remove"],
            doc_fr="Archive un fichier ou un dossier du projet dans ARCHIVE/<date>_<ARTISTE>/, "
@@ -398,9 +479,9 @@ def delete(ctx, inputs, params):
 
 # -- action.write_json / write_text -------------------------------------------------
 
-def _write_target(ctx, inputs, params, allowed: Tuple[str, ...]) -> Tuple[Path, str]:
-    path = as_path(ctx, inputs.get("path"), "fichier")
-    mode = _mode(params, allowed, "create")
+def _check_write(path: Path, mode: str, make_dirs: bool) -> List[Path]:
+    """Refusals of a file write (folder, exists in create mode, containment of an
+    overwrite, missing parents without make_dirs). Returns the folders to create."""
     if path.is_dir():
         raise NodeError(f"Refus : `{path}` est un dossier")
     if path.exists():
@@ -408,7 +489,50 @@ def _write_target(ctx, inputs, params, allowed: Tuple[str, ...]) -> Tuple[Path, 
             raise NodeError(f"Refus : `{path}` existe deja (mode overwrite pour ecraser)", code="E_EXISTS")
         if mode == "overwrite":
             check_destructive_target(path)
-    return path, mode
+    return _check_parents(path.parent, make_dirs)
+
+
+def _write_file(ctx, inputs, values) -> Path:
+    """The file of write_json / write_text: ``dir`` + ``name``, else ``path`` (an
+    existing folder as ``path`` = ``path``/``name``)."""
+    name = _text(values.get("name"))
+    if _text(inputs.get("dir")):
+        if not name:
+            raise NodeError("`dir` est relie : donne aussi `name`, le nom du fichier a ecrire dedans",
+                            code="E_PARAM_INVALID")
+        return as_path(ctx, inputs.get("dir"), "dossier") / _file_name(name)
+    if inputs.get("path") is None or _text(inputs.get("path")) == "":
+        raise NodeError("Donne `path` (le fichier) ou `dir` et `name` (un dossier et un nom de fichier)")
+    path = as_path(ctx, inputs.get("path"), "fichier")
+    if path.is_dir():
+        if not name:
+            raise NodeError(f"`{path}` est un dossier : donne `name` pour le fichier a ecrire dedans",
+                            code="E_PARAM_INVALID")
+        path = path / _file_name(name)
+    return path
+
+
+def _write_target(ctx, inputs, params, allowed: Tuple[str, ...]) -> Tuple[Path, str, List[Path]]:
+    values = _values(inputs, params)
+    path = _write_file(ctx, inputs, values)
+    mode = _mode(values, allowed, "create")
+    return path, mode, _check_write(path, mode, as_bool(values.get("make_dirs"), True))
+
+
+def _write_ports(example: str) -> list:
+    """path / dir inputs of write_json / write_text (one of them is needed)."""
+    return [port("path", "path", "Fichier (ou un dossier existant + name)", "File (or an existing folder + name)",
+                 example),
+            port("dir", "dir", "Dossier ou ecrire (avec name), a la place de path",
+                 "Folder to write into (with name), instead of path", "review/")]
+
+
+def _write_params(modes: Tuple[str, ...], doc_fr: str, doc_en: str, example: str) -> list:
+    return [port("mode", "str", doc_fr, doc_en, "create", default="create", choices=modes),
+            port("name", "str", "Nom du fichier quand dir est donne (ou path est un dossier)",
+                 "File name when dir is given (or path is a folder)", example),
+            port("make_dirs", "bool", "Creer les dossiers manquants", "Create the missing folders", True,
+                 default=True)]
 
 
 def _json_text(data: Any) -> str:
@@ -419,59 +543,108 @@ def _json_text(data: Any) -> str:
 
 
 def _simulate_write_json(ctx, inputs, params):
-    path, mode = _write_target(ctx, inputs, params, WRITE_MODES_JSON)
+    path, mode, missing = _write_target(ctx, inputs, params, WRITE_MODES_JSON)
     _json_text(inputs.get("data"))
     text = f"ecrirait {path}" + (" (ecrase l'existant)" if path.exists() else "")
-    return {"lines": [_line("write", text, path)], "outputs": {"path": str(path)}}
+    return {"lines": [*_dirs_line(missing), _line("write", text, path)], "outputs": {"path": str(path)}}
 
 
 @flow_node("action.write_json", "WriteJson", icon="FileJson",
-           inputs=[_EXEC,
-                   port("path", "path", "Fichier JSON", "JSON file", "review/notes.json", required=True),
+           inputs=[_EXEC, *_write_ports("review/notes.json"),
                    port("data", "any", "Donnees a ecrire", "Data to write", {"status": "ok"}, required=True)],
            outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file")],
-           params=[port("mode", "str", "create (erreur si existe) ou overwrite", "create (error when it exists) or overwrite",
-                        "create", default="create")],
+           params=_write_params(WRITE_MODES_JSON, "create (erreur si existe) ou overwrite",
+                                "create (error when it exists) or overwrite", "notes.json"),
            destructive={"param": "mode", "equals": "overwrite"}, simulate=_simulate_write_json, shelf=56,
            aliases=["json", "ecrire json", "save json"],
            doc_fr="Ecrit des donnees dans un fichier JSON (ecrit a cote puis remplace). N'ecrase qu'en mode overwrite.",
            doc_en="Writes data to a JSON file (written next to it, then swapped in). Overwrites only in overwrite mode.")
 def write_json(ctx, inputs, params):
-    path, _mode_ = _write_target(ctx, inputs, params, WRITE_MODES_JSON)
+    path, _mode_, _missing = _write_target(ctx, inputs, params, WRITE_MODES_JSON)
     data = inputs.get("data")
     _json_text(data)
     with _fs_errors("Ecriture JSON"):
+        make_dir(path.parent)
         write_json_atomic(path, data)
     return {"path": str(path)}
 
 
 def _simulate_write_text(ctx, inputs, params):
-    path, mode = _write_target(ctx, inputs, params, WRITE_MODES_TEXT)
+    path, mode, missing = _write_target(ctx, inputs, params, WRITE_MODES_TEXT)
     if mode == "append" and path.exists():
         text = f"ajouterait a la fin de {path}"
     else:
         text = f"ecrirait {path}" + (" (ecrase l'existant)" if path.exists() else "")
-    return {"lines": [_line("write", text, path)], "outputs": {"path": str(path)}}
+    return {"lines": [*_dirs_line(missing), _line("write", text, path)], "outputs": {"path": str(path)}}
 
 
 @flow_node("action.write_text", "WriteText", icon="FileText",
-           inputs=[_EXEC,
-                   port("path", "path", "Fichier texte", "Text file", "review/notes.txt", required=True),
+           inputs=[_EXEC, *_write_ports("review/notes.txt"),
                    port("text", "str", "Texte a ecrire", "Text to write", "Retake : lumiere trop forte",
                         required=True)],
            outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file")],
-           params=[port("mode", "str", "create (erreur si existe), overwrite ou append (ajoute a la fin)",
-                        "create (error when it exists), overwrite or append (adds at the end)", "create",
-                        default="create")],
+           params=_write_params(WRITE_MODES_TEXT, "create (erreur si existe), overwrite ou append (ajoute a la fin)",
+                                "create (error when it exists), overwrite or append (adds at the end)", "notes.txt"),
            destructive={"param": "mode", "equals": "overwrite"}, simulate=_simulate_write_text, shelf=57,
            aliases=["texte", "ecrire", "note", "rapport"],
-           doc_fr="Ecrit un fichier texte (note, rapport). N'ecrase qu'en mode overwrite ; append ajoute a la fin.",
-           doc_en="Writes a text file (note, report). Overwrites only in overwrite mode; append adds at the end.")
+           doc_fr="Ecrit un fichier texte (note, rapport) : un chemin, ou un dossier et un nom. N'ecrase qu'en "
+                  "mode overwrite ; append ajoute a la fin.",
+           doc_en="Writes a text file (note, report): a path, or a folder and a name. Overwrites only in overwrite "
+                  "mode; append adds at the end.")
 def write_text(ctx, inputs, params):
-    path, mode = _write_target(ctx, inputs, params, WRITE_MODES_TEXT)
+    path, mode, _missing = _write_target(ctx, inputs, params, WRITE_MODES_TEXT)
     text = inputs.get("text")
     with _fs_errors("Ecriture"):
         write_text_file(path, "" if text is None else text, append=(mode == "append"))
+    return {"path": str(path)}
+
+
+# -- action.create_file -------------------------------------------------------------
+
+def _create_file_args(ctx, inputs, params) -> Tuple[Path, str, List[Path], str]:
+    values = _values(inputs, params)
+    folder = as_path(ctx, inputs.get("dir"), "dossier")
+    name = _file_name(_text(values.get("name")))
+    ext = _text(values.get("ext")).lstrip(".")
+    if ext:
+        _file_name(ext, "ext")
+    path = folder / (f"{name}.{ext}" if ext else name)
+    mode = _mode(values, WRITE_MODES_JSON, "create")
+    missing = _check_write(path, mode, as_bool(values.get("make_dirs"), True))
+    text = values.get("text")
+    return path, mode, missing, "" if text is None else str(text)
+
+
+def _simulate_create_file(ctx, inputs, params):
+    path, _mode_, missing, _text_ = _create_file_args(ctx, inputs, params)
+    text = f"creerait {path}" + (" (ecrase l'existant)" if path.exists() else "")
+    return {"lines": [*_dirs_line(missing), _line("write", text, path)], "outputs": {"path": str(path)}}
+
+
+@flow_node("action.create_file", "CreateFile", icon="FilePlus",
+           inputs=[_EXEC, port("dir", "dir", "Dossier ou creer le fichier", "Folder to create the file in",
+                               "review/", required=True)],
+           outputs=[*_EXITS, port("path", "path", "Fichier cree", "Created file", "review/notes.txt")],
+           params=[port("name", "str", "Nom du fichier (sans dossier)", "File name (no folder)", "notes",
+                        required=True),
+                   port("ext", "str", "Extension (txt, json... ; le point est optionnel, vide = aucune)",
+                        "Extension (txt, json...; the dot is optional, empty = none)", "txt"),
+                   port("text", "str", "Contenu initial (vide par defaut)", "Initial content (empty by default)",
+                        "", default=""),
+                   port("mode", "str", "create (erreur si existe) ou overwrite", "create (error when it exists) or overwrite",
+                        "create", default="create", choices=WRITE_MODES_JSON),
+                   port("make_dirs", "bool", "Creer les dossiers manquants", "Create the missing folders", True,
+                        default=True)],
+           destructive={"param": "mode", "equals": "overwrite"}, simulate=_simulate_create_file, shelf=56,
+           aliases=["creer fichier", "nouveau fichier", "new file", "touch"],
+           doc_fr="Cree un fichier (vide ou avec un texte) dans un dossier, a partir d'un nom et d'une extension. "
+                  "N'ecrase qu'en mode overwrite.",
+           doc_en="Creates a file (empty or with a text) in a folder, from a name and an extension. "
+                  "Overwrites only in overwrite mode.")
+def create_file(ctx, inputs, params):
+    path, _mode_, _missing, text = _create_file_args(ctx, inputs, params)
+    with _fs_errors("Creation du fichier"):
+        write_text_file(path, text)
     return {"path": str(path)}
 
 
@@ -488,7 +661,8 @@ def write_text(ctx, inputs, params):
            params=[port("pattern", "pattern", "Motif facon Houdini sur le nom (^ exclut)",
                         "Houdini style pattern on the name (^ excludes)", "*.exr ^*_tmp*", default="*"),
                    port("recursive", "bool", "Sous-dossiers aussi", "Sub-folders too", False, default=False),
-                   port("kind", "str", "file, dir ou both", "file, dir or both", "file", default="file")],
+                   port("kind", "str", "file, dir ou both", "file, dir or both", "file", default="file",
+                        choices=LIST_KINDS)],
            shelf=58, aliases=["lister", "fichiers", "glob", "ls"],
            doc_fr="Liste les fichiers (ou dossiers) d'un dossier qui passent un motif. Lecture : tourne aussi en essai a blanc.",
            doc_en="Lists the files (or folders) of a folder that pass a pattern. Read only: also runs in a dry run.")
