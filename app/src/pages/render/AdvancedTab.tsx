@@ -29,6 +29,12 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
   const [newGroup, setNewGroup] = useState('')
   const [techOpen, setTechOpen] = useState(false)
   useEffect(() => { setDraft(settings) }, [settings])
+  const [knownProjects, setKnownProjects] = useState<{ name: string; jobs: number }[]>([])
+  useEffect(() => {
+    let live = true
+    api.renderTractorProjects(project).then(r => { if (live) setKnownProjects(r.projects) }).catch(() => { if (live) setKnownProjects([]) })
+    return () => { live = false }
+  }, [project])
 
   const changed = useMemo(() => changedKeys(settings, draft), [settings, draft])
   const set = <K extends Key>(k: K, v: RenderSettings[K]) => setDraft(d => ({ ...d, [k]: v }))
@@ -48,7 +54,8 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
 
   const num = (k: 'priority' | 'maxactive' | 'chunk_size', label: string, help?: string) => (
     <Row label={label} help={help}>
-      <input type="number" style={input} value={draft[k]} onChange={e => set(k, Math.max(0, Math.round(Number(e.target.value) || 0)))} />
+      <input type="number" style={input} value={draft[k]}
+        onChange={e => set(k, Math.max(k === 'maxactive' ? 0 : 1, Math.round(Number(e.target.value) || 0)))} />
     </Row>
   )
   const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
@@ -57,7 +64,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
       <input style={input} value={draft[k]} placeholder={placeholder} onChange={e => set(k, e.target.value)} />
     </Row>
   )
-  const shareField = (k: 'job_share' | 'team_cap', label: string, help: string) => {
+  const shareField = (k: 'team_cap', label: string, help: string) => {
     const s: RenderShare = draft[k]
     const n = capFromPercent(s.percent, counts ? counts[s.of] : 0)
     return (
@@ -94,20 +101,29 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
         'These settings apply to your whole team (render.json of the project). Priority and farm share also affect other teams.')}</Banner>
 
       <Section title={tr('Equipe et part de la farm', 'Team and farm share')}>
+        <Row label={tr('Projet Tractor (equipe)', 'Tractor project (team)')}
+          help={tr("Nom de l'equipe sur la farm. Reprendre celui de l'equipe s'il existe deja.", "Team name on the farm. Reuse the team's one if it already exists.")}>
+          <input style={input} value={draft.tractor_project} onChange={e => set('tractor_project', e.target.value)} />
+          {knownProjects.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+              {knownProjects.map(p => (
+                <button key={p.name} type="button" title={tr(`${p.jobs} job(s) en 90 jours`, `${p.jobs} job(s) in 90 days`)}
+                  style={{ ...btn(), background: draft.tractor_project === p.name ? 'var(--accent-soft)' : 'var(--paper-2)' }}
+                  onClick={() => set('tractor_project', p.name)}>{p.name}</button>
+              ))}
+            </div>
+          )}
+        </Row>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {txt('tractor_project', tr('Projet Tractor (equipe)', 'Tractor project (team)'))}
-          {num('priority', tr('Priorite (1 a 10000, defaut 100)', 'Priority (1 to 10000, default 100)'))}
-        </div>
-        {warning && <div style={warnText}>{warning}</div>}
-        {shareField('job_share', tr('Part par defaut de chaque job', 'Default share of each job'),
-          tr('Pre-rempli dans "Ou et combien", modifiable a chaque lancement. 0 = sans limite.', 'Pre-filled in "Where and how much", changeable at each launch. 0 = no limit.'))}
-        {shareField('team_cap', tr("Plafond de toute l'equipe", 'Whole team cap'),
-          tr("Budget partage par tous les jobs FLUX de l'equipe. Tant qu'un FLUX de l'equipe est ouvert, il repartit ce budget entre les jobs (maxactive). 0 = pas de plafond.",
-            'Budget shared by every FLUX job of the team. While a FLUX of the team is open, it splits this budget between the jobs (maxactive). 0 = no cap.'))}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {num('maxactive', tr('Maximum fixe par job (0 = aucun)', 'Fixed max per job (0 = none)'))}
+          {num('priority', tr('Priorite (defaut 1)', 'Priority (default 1)'),
+            tr("Plus grand = passe avant. Tous les jobs de l'ecole sont a 1 : rester a 1 pour etre a egalite.",
+              'Higher goes first. Every school job is at 1: stay at 1 to be even.'))}
           {num('chunk_size', tr('Images par morceau (chunk)', 'Frames per chunk'))}
         </div>
+        {warning && <div style={warnText}>{warning}</div>}
+        {shareField('team_cap', tr("Plafond de toute l'equipe", 'Whole team cap'),
+          tr("Budget partage par tous les jobs FLUX de l'equipe. Tant qu'un FLUX de l'equipe est ouvert, il repartit ce budget entre les jobs. 0 = pas de plafond. Un job peut en plus etre limite au lancement.",
+            'Budget shared by every FLUX job of the team. While a FLUX of the team is open, it splits this budget between the jobs. 0 = no cap. A job can also be limited at launch.'))}
       </Section>
 
       <Section title={tr('Groupes de machines', 'Machine groups')}
@@ -173,6 +189,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
                 <input style={input} value={draft.envkeys.join(', ')}
                   onChange={e => set('envkeys', e.target.value.split(',').map(x => x.trim()).filter(Boolean))} />
               </Row>
+              {num('maxactive', tr('Maximum fixe par job (0 = aucun)', 'Fixed max per job (0 = none)'))}
               {txt('husk_path', 'Husk')}
               {txt('engine', 'Engine (host:port)', 'TRACTOR_ENGINE')}
               {txt('engine_user', tr('Login moteur', 'Engine login'), 'root')}

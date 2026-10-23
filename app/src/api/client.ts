@@ -157,6 +157,12 @@ export interface RenderSettings {
   job_share: RenderShare; team_cap: RenderShare
   host_groups: Record<string, string[]>; exclude_hosts: string[]
 }
+// Last launch form of the artist (backend <project>/_flux_setup/render_last/<user>.json).
+export interface RenderLastForm {
+  source: 'shot' | 'usd'; seq: string; shot: string; usd_path: string; renderer: 'karma' | 'renderman'
+  freeze: boolean; limit_job: boolean; share_percent: number; share_of: RenderShareBase
+  target: 'any' | 'pick'; hosts: string[]; groups: string[]
+}
 export type RenderShareBase = 'alive' | 'free'
 export interface RenderShare { percent: number; of: RenderShareBase }
 export interface RenderShot { seq: string; shot: string; frame_start: number | null; frame_end: number | null; has_stage: boolean }
@@ -1113,6 +1119,13 @@ export const api = {
     apiCall<{ tasks: RenderTask[] }>('GET', `/render/jobs/${jid}/tasks?project=${encodeURIComponent(project)}`),
   renderTaskLog: (project: string, jid: number, tid: number) =>
     apiCall<{ log: string }>('GET', `/render/jobs/${jid}/tasks/${tid}/log?project=${encodeURIComponent(project)}`, undefined, 60000),
+  renderLast: (project: string) =>
+    apiCall<{ last: Partial<RenderLastForm> }>('GET', `/render/last?project=${encodeURIComponent(project)}`),
+  renderSaveLast: (project: string, last: RenderLastForm) =>
+    apiCall<{ ok: boolean }>('PUT', `/render/last?project=${encodeURIComponent(project)}`, last),
+  renderTractorProjects: (project: string) =>
+    apiCall<{ projects: { name: string; jobs: number }[]; current: string }>('GET',
+      `/render/tractor_projects?project=${encodeURIComponent(project)}`),
   renderFarm: (project: string) =>
     apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
   renderJobAction: (project: string, jid: number, action: 'kill' | 'retry' | 'pause' | 'resume') =>

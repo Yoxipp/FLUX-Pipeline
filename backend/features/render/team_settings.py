@@ -11,8 +11,11 @@ from core import paths
 from core.json_manager import read_json, write_json
 from features.render import farm_targets
 
-SCHEMA_VERSION = 1
-DEFAULT_PRIORITY = 100
+# 2 (2026-10-23): default priority 100 -> 1. A v1 file holding 100 had the old default, not a choice.
+SCHEMA_VERSION = 2
+_OLD_DEFAULT_PRIORITY = 100
+# Tractor: a higher number goes first (tq chpri help). Every school job is at 1 (2026-10-23): same as everyone.
+DEFAULT_PRIORITY = 1
 
 DEFAULTS: dict = {
     "schema_version": SCHEMA_VERSION,
@@ -20,7 +23,7 @@ DEFAULTS: dict = {
     "priority": DEFAULT_PRIORITY,  # 1..10000
     "maxactive": 0,                # 0 = no cap
     "chunk_size": 5,
-    "renderer": "karma",
+    "renderer": "renderman",       # 2026-10-23
     "freeze_by_default": True,
     # Night window off by default (2026-10-22): opt-in in the advanced settings.
     "schedule": {"enabled": False, "start": "18:00", "end": "08:00", "kill_at_end": False},
@@ -165,6 +168,8 @@ def read_settings(project_name: str, path=None) -> dict:
     raw = read_json(_resolve(project_name, path))
     if not isinstance(raw, dict):
         raw = {}
+    if raw.get("schema_version", 1) < 2 and raw.get("priority") == _OLD_DEFAULT_PRIORITY:
+        raw = {**raw, "priority": DEFAULT_PRIORITY}
     out = copy.deepcopy(DEFAULTS)
     for key in DEFAULTS:
         if key not in raw:
@@ -228,6 +233,6 @@ def priority_warning(settings: dict) -> str | None:
     """Short warning when priority is above the default (it impacts other teams)."""
     priority = settings.get("priority", DEFAULT_PRIORITY)
     if _is_int(priority) and priority > DEFAULT_PRIORITY:
-        return (f"Priorite {priority} au-dessus du defaut ({DEFAULT_PRIORITY}) : "
+        return (f"Priorite {priority} au-dessus des autres jobs de l'ecole ({DEFAULT_PRIORITY}) : "
                 "vos jobs passent avant ceux des autres equipes.")
     return None

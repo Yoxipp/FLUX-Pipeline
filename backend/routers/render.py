@@ -47,7 +47,43 @@ def _bridge_error(exc: Exception) -> HTTPException:
 def get_settings(project: str):
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
-    return {"settings": settings, "warning": team_settings.priority_warning(settings)}
+    return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user()}
+
+
+# ── last launch form of each artist (follows the artist from desk to desk: stored in the project) ──
+
+_LAST_MAX_BYTES = 20_000
+
+
+def _last_path(project: str, user: str) -> Path:
+    from core import paths
+
+    safe = "".join(c for c in user if c.isalnum() or c in "_.-") or "unknown"
+    return Path(paths.get_project_render_path(project)).parent / "render_last" / f"{safe}.json"
+
+
+@router.get("/last")
+def get_last(project: str):
+    _ensure_project(project)
+    from core.json_manager import read_json
+
+    data = read_json(_last_path(project, _user()))
+    return {"last": data if isinstance(data, dict) else {}}
+
+
+@router.put("/last")
+def put_last(project: str, last: dict):
+    _ensure_project(project)
+    from core.json_manager import write_json
+    import json as _json
+
+    if len(_json.dumps(last)) > _LAST_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Derniere saisie trop grande")
+    target = _last_path(project, _user())
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not write_json(target, last):
+        raise HTTPException(status_code=500, detail="Derniere saisie non enregistree")
+    return {"ok": True}
 
 
 @router.put("/settings")
@@ -455,6 +491,28 @@ def _farm_state(project: str, user: str) -> dict:
 @router.get("/farm")
 async def farm(project: str):
     return await asyncio.to_thread(_farm_state, project, _user())
+
+
+def _tractor_projects(project: str, user: str) -> dict:
+    """Tractor projects (teams) seen on the engine in the last 90 days, most used first, to pre-fill the setting."""
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    try:
+        listing = tractor_bridge.jobs(settings, user, days=90)
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    seen: dict[str, int] = {}
+    for j in listing.get("jobs", []):
+        for p in j.get("projects") or []:
+            if isinstance(p, str) and p.strip():
+                seen[p] = seen.get(p, 0) + 1
+    names = sorted(seen, key=lambda p: (-seen[p], p))
+    return {"projects": [{"name": p, "jobs": seen[p]} for p in names], "current": settings["tractor_project"]}
+
+
+@router.get("/tractor_projects")
+async def tractor_projects(project: str):
+    return await asyncio.to_thread(_tractor_projects, project, _user())
 
 
 _ACTIONS = {"kill": tractor_bridge.kill, "retry": tractor_bridge.retry,

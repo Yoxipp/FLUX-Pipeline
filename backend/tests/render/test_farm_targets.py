@@ -206,6 +206,27 @@ class RouterTargeting(unittest.TestCase):
         setter.assert_not_called()
 
 
+class TractorProjects(RouterTargeting):
+    def test_known_projects_most_used_first(self):
+        listing = {"jobs": [{"projects": ["FIE"]}, {"projects": ["CEB"]}, {"projects": ["FIE"]}, {"projects": []}]}
+        with mock.patch.object(render.tractor_bridge, "jobs", return_value=listing):
+            r = self.client.get("/render/tractor_projects", params={"project": "P"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), {"projects": [{"name": "FIE", "jobs": 2}, {"name": "CEB", "jobs": 1}], "current": "P"})
+
+
+class LastForm(RouterTargeting):
+    def test_last_form_per_artist(self):
+        self.assertEqual(self.client.get("/render/last", params={"project": "P"}).json(), {"last": {}})
+        r = self.client.put("/render/last", params={"project": "P"}, json={"seq": "SQ01", "shot": "SH010"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue((self.tmp / "render_last" / "adam.json").is_file())
+        self.assertEqual(self.client.get("/render/last", params={"project": "P"}).json()["last"]["shot"], "SH010")
+        with mock.patch.object(render.config, "get_current_user", return_value="bob"):
+            self.assertEqual(self.client.get("/render/last", params={"project": "P"}).json(), {"last": {}})
+        self.assertEqual(self.client.put("/render/last", params={"project": "P"}, json={"x": "a" * 30000}).status_code, 400)
+
+
 class SafetyGuards(RouterTargeting):
     """Real farm by default (2026-10-23): what keeps FLUX from touching what is not ours."""
 

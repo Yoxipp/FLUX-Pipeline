@@ -2,11 +2,11 @@
 // Default view = what / frames / renderer / Launch. "Where and how much" (farm share, machines)
 // and "When" are folded with a one-line summary; team-wide settings live in the Advanced tab.
 
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronRight, Play } from 'lucide-react'
 import { api } from '../../api/client'
-import type { RenderFarm, RenderSettings, RenderShareBase, RenderShot, RenderSubmitResult } from '../../api/client'
+import type { RenderFarm, RenderLastForm, RenderSettings, RenderShareBase, RenderShot, RenderSubmitResult } from '../../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../../components/shared/ui'
 import { MachinePicker } from './MachinePicker'
 import {
@@ -14,7 +14,6 @@ import {
 } from './renderUi'
 
 type Source = 'shot' | 'usd'
-type ShareMode = 'team' | 'none' | 'custom'
 const SHARE_PRESETS = [10, 25, 50]
 
 function Fold({ title, summary, open, onToggle, children }: {
@@ -51,12 +50,23 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   // where and how much
   const [whereOpen, setWhereOpen] = useState(false)
   const [whenOpen, setWhenOpen] = useState(false)
-  const [shareMode, setShareMode] = useState<ShareMode>('team')
+  const [limitJob, setLimitJob] = useState(false)   // off = the team cap manages it (2026-10-23)
   const [sharePct, setSharePct] = useState(25)
   const [shareOf, setShareOf] = useState<RenderShareBase>('free')
   const [targetMode, setTargetMode] = useState<'any' | 'pick'>('any')
   const [hosts, setHosts] = useState<string[]>([])
   const [groups, setGroups] = useState<string[]>([])
+
+  // ── sequence, then shot ──
+  const [seq, setSeq] = useState('')
+  const seqs = useMemo(() => [...new Set(shots.map(s => s.seq))].sort(), [shots])
+  const seqShots = useMemo(() => shots.filter(s => s.seq === seq), [shots, seq])
+  const pickSeq = (q: string) => {
+    setSeq(q)
+    const only = shots.filter(s => s.seq === q && s.has_stage)
+    if (only.length === 1) pickShot(shotId(only[0]))
+    else { setShotKey(''); setFrameStart(''); setFrameEnd('') }
+  }
 
   const shotId = (s: RenderShot) => `${s.seq}/${s.shot}`
   const pickShot = (id: string) => {
@@ -81,7 +91,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   }
   const pickSource = (s: Source) => {
     setSource(s)
-    if (s === 'shot') pickShot(shotKey)
+    if (s === 'shot') { if (shotKey) pickShot(shotKey); else { setFrameStart(''); setFrameEnd('') } }
     else if (usdPath.trim()) void detectUsdRange(usdPath)
     else { setFrameStart(''); setFrameEnd('') }
   }
@@ -89,18 +99,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   // ── share preview (same rule as the backend) ──
   const counts = farm?.counts
   const pool = (of: RenderShareBase) => (counts ? counts[of] : 0)
-  const share = shareMode === 'team' ? settings?.job_share ?? { percent: 0, of: 'alive' as RenderShareBase }
-    : shareMode === 'none' ? { percent: 0, of: shareOf } : { percent: sharePct, of: shareOf }
+  const share = limitJob ? { percent: sharePct, of: shareOf } : { percent: 0, of: shareOf }
   const jobCap = capFromPercent(share.percent, pool(share.of))
   const teamCap = settings ? capFromPercent(settings.team_cap.percent, pool(settings.team_cap.of)) : 0
+  function teamCapSummary() {
+    return teamCap ? tr(`gere par l'equipe (plafond ${teamCap})`, `managed by the team (cap ${teamCap})`) : tr('sans limite', 'no limit')
+  }
   const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('libres maintenant', 'free right now') : tr('allumes', 'alive'))
   const shareSummary = share.percent
     ? tr(`${share.percent} % des blades ${ofLabel(share.of)} (${jobCap} en parallele)`, `${share.percent} % of ${ofLabel(share.of)} blades (${jobCap} at once)`)
-    : tr('sans limite', 'no limit')
+    : teamCapSummary()
   const teamGroups = settings?.host_groups ?? {}
   const pickedCount = new Set([...hosts, ...groups.flatMap(g => teamGroups[g] ?? [])]).size
   const whereSummary = `${targetMode === 'any' ? tr('Toute la farm', 'Whole farm') : tr(`${pickedCount} machine(s)`, `${pickedCount} machine(s)`)}, ${shareSummary}`
-    + (teamCap ? tr(` ; plafond equipe ${teamCap}`, `; team cap ${teamCap}`) : '')
 
   // ── when ──
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -116,6 +127,48 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const setWhen = (day: string, hour: string, min: string) => setStartAt(day ? `${day}T${hour || '20'}:${min || '00'}` : '')
   const whenSummary = `${startAt ? startAt.replace('T', ' ') : tr('Maintenant', 'Now')}, ${freeze ? tr('version gelee', 'version frozen') : tr('version LAST', 'LAST version')}`
 
+  // ── last form of this artist: restored once shots are known, saved (debounced) on change ──
+  const restored = useRef(false)
+  const lastRef = useRef<Partial<RenderLastForm> | null>(null)
+  const [lastReady, setLastReady] = useState(false)
+  useEffect(() => {
+    let live = true
+    api.renderLast(project).then(r => { if (live) lastRef.current = r.last })
+      .catch(() => { /* first launch or offline: empty form */ })
+      .finally(() => { if (live) setLastReady(true) })
+    return () => { live = false }
+  }, [project])
+  useEffect(() => {
+    if (restored.current || !lastReady) return
+    const l = lastRef.current ?? {}
+    if (l.source === 'shot' && l.seq && !shots.length) return  // wait for the shot list
+    restored.current = true
+    if (l.renderer) setRenderer(l.renderer)
+    if (typeof l.freeze === 'boolean') setFreeze(l.freeze)
+    if (typeof l.limit_job === 'boolean') setLimitJob(l.limit_job)
+    if (typeof l.share_percent === 'number' && l.share_percent > 0) setSharePct(l.share_percent)
+    if (l.share_of) setShareOf(l.share_of)
+    if (l.target) setTargetMode(l.target)
+    if (Array.isArray(l.hosts)) setHosts(l.hosts)
+    if (Array.isArray(l.groups)) setGroups(l.groups.filter(g => g in (settings?.host_groups ?? {})))
+    if (l.source === 'usd' && l.usd_path) { setSource('usd'); setUsdPath(l.usd_path); void detectUsdRange(l.usd_path) }
+    else if (l.seq && seqs.includes(l.seq)) {
+      setSeq(l.seq)
+      const s = shots.find(x => x.seq === l.seq && x.shot === l.shot && x.has_stage)
+      if (s) pickShot(shotId(s))
+    }
+  }, [lastReady, shots]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!restored.current) return
+    const [, shot] = shotKey.split('/')
+    const form: RenderLastForm = {
+      source, seq, shot: shot ?? '', usd_path: usdPath, renderer, freeze, limit_job: limitJob,
+      share_percent: sharePct, share_of: shareOf, target: targetMode, hosts, groups,
+    }
+    const t = window.setTimeout(() => { api.renderSaveLast(project, form).catch(() => { /* not critical */ }) }, 800)
+    return () => window.clearTimeout(t)
+  }, [project, source, seq, shotKey, usdPath, renderer, freeze, limitJob, sharePct, shareOf, targetMode, hosts, groups])
+
   const targetEmpty = targetMode === 'pick' && pickedCount === 0
   const canSubmit = !submitting && !targetEmpty && (source === 'shot' ? !!shotKey : !!usdPath.trim())
   const submit = async () => {
@@ -126,7 +179,8 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     if (frameStart !== '') body.frame_start = Number(frameStart)
     if (frameEnd !== '') body.frame_end = Number(frameEnd)
     if (startAt) body.start_at = startAt
-    if (shareMode !== 'team') { body.share_percent = shareMode === 'none' ? 0 : sharePct; body.share_of = shareOf }
+    body.share_percent = limitJob ? sharePct : 0
+    body.share_of = shareOf
     if (targetMode === 'pick') { body.hosts = hosts; body.groups = groups }
     setSubmitting(true)
     try {
@@ -151,18 +205,28 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         options={[{ id: 'shot', label: 'Shot' }, { id: 'usd', label: tr('USD publie', 'Published USD') }]} />
 
       {source === 'shot' ? (
-        <Row label="Shot">
-          <Select value={shotKey} onValueChange={pickShot}>
-            <SelectTrigger style={sel}>{!shotKey && <span style={{ color: 'var(--ink-3)' }}>{tr('Choisir un shot', 'Pick a shot')}</span>}</SelectTrigger>
-            <SelectContent>
-              {shots.map(s => (
-                <SelectItem key={shotId(s)} value={shotId(s)} disabled={!s.has_stage}>
-                  {s.seq} / {s.shot}{!s.has_stage ? ` (${tr('pas de stage', 'no stage')})` : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Row>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Row label={tr('Sequence', 'Sequence')}>
+            <Select value={seq} onValueChange={pickSeq}>
+              <SelectTrigger style={sel}>{!seq && <span style={{ color: 'var(--ink-3)' }}>{tr('Choisir', 'Pick')}</span>}</SelectTrigger>
+              <SelectContent>
+                {seqs.map(q => <SelectItem key={q} value={q}>{q}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Row>
+          <Row label="Shot">
+            <Select value={shotKey} onValueChange={pickShot}>
+              <SelectTrigger style={{ ...sel, ...disabledIf(!seq) }}>{!shotKey && <span style={{ color: 'var(--ink-3)' }}>{tr('Choisir', 'Pick')}</span>}</SelectTrigger>
+              <SelectContent>
+                {seqShots.map(s => (
+                  <SelectItem key={shotId(s)} value={shotId(s)} disabled={!s.has_stage}>
+                    {s.shot}{!s.has_stage ? ` (${tr('pas de stage', 'no stage')})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Row>
+        </div>
       ) : (
         <Row label={tr('Fichier USD', 'USD file')}>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -195,28 +259,24 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         <Row label={tr('Part de la farm pour ce job', 'Farm share for this job')}
           help={tr('Nombre maximum de morceaux (chunks) rendus en meme temps. 1 blade = 1 morceau.',
             'Max chunks rendered at once. 1 blade = 1 chunk.')}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-            <Toggle value={shareMode !== 'custom' ? shareMode : SHARE_PRESETS.includes(sharePct) ? String(sharePct) : 'other'}
-              onChange={id => {
-                if (id === 'team' || id === 'none') setShareMode(id)
-                else if (id === 'other') { setShareMode('custom'); if (SHARE_PRESETS.includes(sharePct)) setSharePct(33) }
-                else { setShareMode('custom'); setSharePct(Number(id)) }
-              }}
-              options={[
-                { id: 'team', label: tr('Defaut equipe', 'Team default'), title: settings?.job_share.percent ? `${settings.job_share.percent} %` : tr('sans limite', 'no limit') },
-                { id: 'none', label: tr('Sans limite', 'No limit') },
-                ...SHARE_PRESETS.map(p => ({ id: String(p), label: `${p} %` })),
-                { id: 'other', label: tr('Autre', 'Other') },
-              ]} />
-            {shareMode === 'custom' && !SHARE_PRESETS.includes(sharePct) && (
-              <input type="number" min={1} max={100} style={{ ...input, width: 70 }} value={sharePct}
-                onChange={e => setSharePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
-            )}
-            {shareMode !== 'team' && shareMode !== 'none' && (
+          <Check label={tr('Limiter ce job (sinon gere par le plafond de l\'equipe)', 'Limit this job (otherwise managed by the team cap)')}
+            checked={limitJob} onChange={setLimitJob} />
+          {limitJob && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 6 }}>
+              <Toggle value={SHARE_PRESETS.includes(sharePct) ? String(sharePct) : 'other'}
+                onChange={id => {
+                  if (id === 'other') { if (SHARE_PRESETS.includes(sharePct)) setSharePct(33) }
+                  else setSharePct(Number(id))
+                }}
+                options={[...SHARE_PRESETS.map(p => ({ id: String(p), label: `${p} %` })), { id: 'other', label: tr('Autre', 'Other') }]} />
+              {!SHARE_PRESETS.includes(sharePct) && (
+                <input type="number" min={1} max={100} style={{ ...input, width: 70 }} value={sharePct}
+                  onChange={e => setSharePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
+              )}
               <Toggle value={shareOf} onChange={id => setShareOf(id as RenderShareBase)}
                 options={[{ id: 'free', label: tr('des blades libres', 'of free blades') }, { id: 'alive', label: tr('des blades allumes', 'of alive blades') }]} />
-            )}
-          </div>
+            </div>
+          )}
           <div style={{ ...hint, marginTop: 4 }}>
             {counts ? tr(`Farm : ${counts.alive} allumes, ${counts.free} libres. Ce job : ${shareSummary}.`,
               `Farm: ${counts.alive} alive, ${counts.free} free. This job: ${shareSummary}.`) : tr('Etat de la farm inconnu', 'Farm state unknown')}

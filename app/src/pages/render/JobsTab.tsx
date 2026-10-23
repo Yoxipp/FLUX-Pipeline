@@ -96,10 +96,11 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
                   <div style={{ color: j.numError > 0 ? 'var(--err)' : 'var(--ink-3)' }} title={tr('Erreurs', 'Errors')}>{j.numError} {tr('err.', 'err.')}</div>
                   <div style={{ color: 'var(--ink-3)' }} title={String(j.spooltime ?? '')}>{shortDate(j.spooltime)}</div>
                   <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                    {j.flux_user && <>
-                      {j.numActive > 0
-                        ? <button type="button" style={btn()} title="Pause" onClick={() => void jobAction(j, 'pause')}><Pause size={11} /></button>
-                        : <button type="button" style={btn()} title={tr('Reprendre', 'Resume')} onClick={() => void jobAction(j, 'resume')}><Play size={11} /></button>}
+                    {/* Actions only on FLUX jobs that can still change (never on a finished or deleted job). */}
+                    {j.flux_user && state !== 'done' && state !== 'deleted' && <>
+                      {state === 'paused'
+                        ? <button type="button" style={btn()} title={tr('Reprendre', 'Resume')} onClick={() => void jobAction(j, 'resume')}><Play size={11} /></button>
+                        : <button type="button" style={btn()} title="Pause" onClick={() => void jobAction(j, 'pause')}><Pause size={11} /></button>}
                       {j.numError > 0 && <button type="button" style={btn()} title={tr('Relancer les erreurs', 'Retry errors')} onClick={() => void jobAction(j, 'retry')}><RotateCcw size={11} /></button>}
                       <button type="button" style={btn(false, true)} title={tr('Arreter', 'Kill')} onClick={() => void jobAction(j, 'kill')}><Square size={11} /></button>
                     </>}

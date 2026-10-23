@@ -110,8 +110,10 @@ def _str(value):
 
 
 def _running(tq):
-    """Running commands (one per busy slot): the engine's numactive column stays 0 at school (2026-10-23)."""
-    return tq.invocations("current", columns=["bladeid", "jid"])
+    """Commands running now (one per busy slot). "current" = the LATEST invocation of each command,
+    finished ones included (school 2026-10-23): only those without a stop time are running."""
+    rows = tq.invocations("current", columns=["bladeid", "jid", "stoptime"])
+    return [r for r in rows if not r.get("stoptime")]
 
 
 def _jobs(req):
