@@ -11,9 +11,12 @@ moteur, runs, essai a blanc, WS, 11 types de node. Pas encore de validation comp
 |---|---|
 | `model.py` | Schema v2 strict (pydantic `extra="forbid"`), `parse_flow`, `load_flow_text`, `dump_flow` (emission YAML stable, sert aussi de forme canonique), `to_document`, `v1_limit_issues`. Nom `^[a-z][a-z0-9_]{1,40}$`, noms reserves (routes statiques + `rights`), 1 Mo, 500 nodes. Node `subnet` (ses `nodes` / `links`), flag `bypass`. `origin` d'un flow migre : `kind`, `name`, `shelf`, `thumbnail`, `extends`, `params`. |
 | `types.py` | Types de ports, `can_connect` -> ok / implicite / incompatible + raison fr / en (ADR 0058 : un lien incompatible est accepte par le modele, la validation P4 le signale). |
-| `nodes/registry.py` | `@flow_node` (doc fr / en, exemple par port, shelf, alias, `effect`), 10 familles, chargeur des nodes d'equipe (`CONFIG/extensions/nodes/`, seulement les fichiers qui contiennent `@flow_node`). Un node a effet (`effect=True` ou destructif) sans `simulate` est refuse. `ensure_builtin()` importe les modules FLUX (`BUILTIN_MODULES`). |
+| `nodes/registry.py` | `@flow_node` (doc fr / en, exemple par port, shelf, alias, `effect`), 10 familles, chargeur des nodes d'equipe (`CONFIG/extensions/nodes/`, seulement les fichiers qui contiennent `@flow_node`, portee team seulement). P3 : rechargement **par fichier** (mtime + taille ; seul le fichier change est reimporte, un fichier supprime retire ses nodes), builtins charges avant (un fichier d'equipe ne peut pas prendre un type FLUX : erreur du fichier), fichier casse = `node_errors` du catalogue, les autres marchent. Le moteur recharge l'equipe avant de refuser un type inconnu. Modele : `shipped/team_node_template.py` (`GET /flows/nodes/template`). Un node a effet (`effect=True` ou destructif) sans `simulate` est refuse. `ensure_builtin()` importe les modules FLUX (`BUILTIN_MODULES`). |
+| `resolver.py` | Resolveur de texte unique (01 §11) : `{token}`, `{date:%Y%m%d}`, `${var}`, `$FLUX` en tete d'un champ path / dir, `{{ }}`. Token inconnu = `E_UNKNOWN_TOKEN` + suggestion Levenshtein <= 2 ; `tokens_in` pour le validateur (P4). Applique par le moteur aux params et litteraux non lies (`spec.raw` les exclut), jamais a une valeur arrivee par un lien. |
+| `patterns.py` | Motifs facon Houdini (01 §11) : `*`, `**`, `?`, `[abc]`, `^` / `!`, gauche a droite ; motif vide = ne garde rien. |
+| `nodes/common.py` | `as_path`, `in_project`, `check_destructive_target` (erase / overwrite seulement sous FLUX_ROOT, jamais une racine ni un dossier projet), archive projet partagee (`archive_preview`, `archive_into_project`, via `archive_folder`). |
 | `nodes/contract.py` | Contrat d'un corps de node : `body(ctx, inputs, params) -> {port: valeur}`, `simulate(...) -> {lines, outputs}`, `NodeError` (message affiche sur le node), `NodeContext` (`context`, `interface`, `cancelled`, `log`, `notify`, variables), `EXEC_KEY` (`_exec`) pour choisir la sortie exec. |
-| `nodes/event.py`, `data.py`, `logic.py`, `operator.py`, `flux.py` | Nodes P2 (02 §11) : `event.button`, `event.manual` ; `data.value`, `get_variable`, `set_variable`, `flow_input` ; `logic.if` ; `operator.foreach_begin`, `foreach_end` ; `flux.notify`, `flux.legacy_command`. |
+| `nodes/event.py`, `data.py`, `logic.py`, `operator.py`, `action.py`, `flux.py`, `subflow.py` | Nodes P2 + P3 (02 §11, liste exacte). P3 : data (path, python_value lu par AST sans executer, json_value, template, context), logic (8), operator (26, dont sequence, for, while au plafond 1000, break_loop), action (12, logique partagee avec les commandes v1 de `flux_actions/commands/utility.py` ; `delete` archive par defaut, `erase` destructif), flux (19 : `find_publishes` deduit soft / type / version du nom et de l'extension, une capture sans soft connu passe le filtre soft ; `publish_file` appelle `run_publish_action`, `publish_core` non modifie ; `call_function` v2 reutilise la garde v1 `features`, `core`, `dcc` ; `ping` = message de chat), subflow (`flow_call` profondeur 8 + cycle, `flow_output`). Chaque node a effet a un `simulate` qui n'ecrit rien. |
 | `engine.py` | Moteur exec + data (01 §4), `Run` (un run) et `RunManager` (admission, un par boucle asyncio : `engine.manager()`). |
 | `runs.py` | Enregistrements de run (01 §6) : id, ecriture atomique, liste, retention, `interrupted`. |
 | `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. |
@@ -21,7 +24,7 @@ moteur, runs, essai a blanc, WS, 11 types de node. Pas encore de validation comp
 | `store.py` | Portees, fichier de travail, versions figees, `state.json`, `history.jsonl`, `_trash/`, verrou, ecriture atomique, conflit 409. |
 | `rights.py` | Cases TD / Team TD, table de 01 §7, 403. |
 | `migrate_v1.py` | Actions v1 -> flows (script de dev pour `shipped/`, `POST /flows/migrate` pour l'equipe). |
-| `shipped/` | Flows livres, lecture seule, dans l'exe (`scripts/backend.spec`, dossier copie recursivement). Les 5 `legacy_*` et 2 exemples P2 (`example_foreach`, `example_error`, a la racine pour etre ouvrables : le store ne liste que ce niveau). |
+| `shipped/` | Flows livres, lecture seule, dans l'exe (`scripts/backend.spec`, dossier copie recursivement). Les 5 `legacy_*`, 2 exemples P2 (`example_foreach`, `example_error`) et l'exemple P3 `example_daily_render` (bouton `daily_render` ; le Schedule viendra en P5), a la racine pour etre ouvrables : le store ne liste que ce niveau. `team_node_template.py` : modele de node d'equipe (ignore par le store). |
 
 ## Stockage (ADR 0058, prime sur 01 §6)
 
@@ -84,6 +87,8 @@ P2 : `GET /runs`, `GET /runs/{run_id}`, `POST /runs/{run_id}/cancel` (TD ou lanc
 `POST /{name}/run {scope, project?, event?, values, dry_run, draft?, base_revision?}` : `draft` = document de l'editeur (TD,
 aucune version), `dry_run` = fichier enregistre (TD), sinon `active_version` d'un flow actif (409 "flow non actif") ;
 409 aussi si `refused` / `skipped` (`detail.issues`).
+P3 : `POST /preview {kind: resolve | pattern, text, names?, variables?, path_field?, scope, project?}` -> `{result, error, code?,
+suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/template` (modele de node d'equipe + dossier cible).
 
 ## Moteur et runs (P2, 01 §4 a §6, §10)
 
@@ -118,5 +123,5 @@ aucune version), `dry_run` = fichier enregistre (TD), sinon `active_version` d'u
 ## Tests
 
 `backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
-flows_ws, legacy_command ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+flows_ws, legacy_command ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.

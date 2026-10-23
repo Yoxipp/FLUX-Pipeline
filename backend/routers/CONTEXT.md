@@ -23,3 +23,4 @@ verifie d'abord les cases TD / Team TD (`flux_flows.rights`, garde-fou, pas une 
 P2 : `POST /{name}/run` (brouillon de l'editeur, essai a blanc du fichier enregistre, version active), `GET /runs`,
 `GET /runs/{run_id}`, `POST /runs/{run_id}/cancel` (TD ou lanceur), `WS /ws` (messages de run, file de 500 par client ;
 `ApiAuthMiddleware` le couvre comme `/dcc/ws/status`). Les runs sont des taches asyncio du backend (`flux_flows.engine`).
+P3 : `POST /preview` (apercu resolve | pattern, aucun node lance), `GET /nodes/template` (modele de node d'equipe), statiques.
