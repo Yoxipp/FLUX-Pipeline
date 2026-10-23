@@ -25,6 +25,11 @@ DEFAULTS: dict = {
     "chunk_size": 5,
     "renderer": "renderman",       # 2026-10-23
     "freeze_by_default": True,
+    # Scheduled job ("Lancer a"): freeze when the render starts (on the blade) or at submit (2026-10-23).
+    "freeze_when": "start",
+    # Houdini on the blades (20.5 to 22): its embedded python + pxr freeze at start (no Houdini
+    # license, probe job 34027). A blade without it uses its newest Houdini.
+    "houdini_path": "C:/Program Files/Side Effects Software/Houdini 20.5.445",
     # Night window off by default (2026-10-22): opt-in in the advanced settings.
     "schedule": {"enabled": False, "start": "18:00", "end": "08:00", "kill_at_end": False},
     "service_karma": "",
@@ -47,6 +52,7 @@ _SHARE_KEYS = ("job_share", "team_cap")
 _OBJECT_KEYS = ("schedule",) + _SHARE_KEYS
 
 RENDERERS = ("karma", "renderman")
+FREEZE_WHEN = ("start", "submit")
 # Shipped beside this module (scripts/backend.spec copies it in frozen mode).
 BUNDLED_BRIDGE = Path(__file__).resolve().parent / "bridge" / "flux_tractor_bridge.py"
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -56,6 +62,8 @@ _STR_KEYS = (
 )
 # Tractor client install on school machines (phase 0, 2026-10-22): its rmanpy.exe is Python 2.7.
 TRACTOR_PYTHON_CANDIDATES = (Path(r"C:\Program Files\Pixar\Tractor-2.4\bin\rmanpy.exe"),)
+# Same install on every blade (blade service, probe job 34027): starts the freeze-at-start script.
+BLADE_TRACTOR_PYTHON = "C:/Program Files/Pixar/Tractor-2.4/bin/rmanpy.exe"
 _BOOL_KEYS = ("freeze_by_default", "dry_run")
 
 
@@ -127,6 +135,14 @@ def _check_value(key: str, value):
         if value not in RENDERERS:
             raise ValueError(f"renderer must be one of: {', '.join(RENDERERS)}")
         return value
+    if key == "freeze_when":
+        if value not in FREEZE_WHEN:
+            raise ValueError(f"freeze_when must be one of: {', '.join(FREEZE_WHEN)}")
+        return value
+    if key == "houdini_path":
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("houdini_path must be the Houdini install folder of the blades")
+        return value.strip().replace("\\", "/").rstrip("/")
     if key in _BOOL_KEYS:
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be true or false")

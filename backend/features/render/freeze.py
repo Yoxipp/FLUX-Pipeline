@@ -14,6 +14,7 @@ asset LAST) and unresolved paths are reported as warnings, never blocking.
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Dict, List
 
@@ -90,6 +91,35 @@ def freeze_shot(project_path: Path, seq: str, shot: str, *, user: str = "", free
         raise FileNotFoundError(f"Pas de stage pour {shot_stage.entity(seq, shot)}")
     audit = audit_dependencies(last)
     return {"usd": str(last), "version": None, "frozen": False, "audit": audit, "warnings": _warnings(audit)}
+
+
+def live_shot(project_path: Path, seq: str, shot: str, *, user: str = "") -> Dict:
+    """Shot stage still reading LAST, regenerated now (casting and departments as at the click).
+
+    For a scheduled job frozen when it starts: the blade replaces its LAST paths then
+    (blade/flux_freeze_at_start.py). A version, not the shot LAST: that pointer may target a
+    frozen stage written by an earlier submit.
+    """
+    from features.usd_assembler import shot_stage
+
+    result = shot_stage.write_stage(project_path, seq, shot, user=user, frozen=False)
+    entry = result.get("entry")
+    if entry is None:
+        raise FileNotFoundError(f"Pas de stage pour {shot_stage.entity(seq, shot)}")
+    return {"usd": str(entry), "version": result.get("version"), "frozen": False,
+            "audit": {}, "warnings": list(result.get("warnings") or [])}
+
+
+FREEZE_AT_START_SCRIPT = Path(__file__).resolve().parent / "blade" / "flux_freeze_at_start.py"
+
+
+def copy_freeze_script(job_dir: Path) -> Path:
+    """Copy the blade freeze script into the job folder: the job never depends on this FLUX install."""
+    job_dir = Path(job_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    target = job_dir / FREEZE_AT_START_SCRIPT.name
+    shutil.copyfile(FREEZE_AT_START_SCRIPT, target)
+    return target
 
 
 def next_render_dir(shot_folder: Path) -> Path:

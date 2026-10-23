@@ -155,6 +155,7 @@ class SubmitBody(BaseModel):
     freeze: Optional[bool] = None
     chunk_size: Optional[int] = None
     start_at: Optional[str] = None  # "YYYY-MM-DDTHH:MM": Tractor holds the job until then
+    freeze_when: Optional[str] = None  # scheduled job: "start" (on the blade) | "submit", None = team default
     hosts: list[str] = []           # only these machines (empty = any)
     groups: list[str] = []          # team groups (render.json host_groups) or rooms (ROOM17)
     share_percent: Optional[int] = None  # % of the farm for this job, None = team default
@@ -247,6 +248,11 @@ def _submit(body: SubmitBody, user: str) -> dict:
         raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un rendu sur la farm")
     do_freeze = settings["freeze_by_default"] if body.freeze is None else body.freeze
     renderer = body.renderer or settings["renderer"]
+    freeze_when = body.freeze_when or settings["freeze_when"]
+    if freeze_when not in team_settings.FREEZE_WHEN:
+        raise HTTPException(status_code=400, detail=f"freeze_when inconnu : {freeze_when}")
+    # Scheduled job: freeze on the blade when it starts (latest LAST then), not now. Immediate: same thing, freeze now.
+    at_start = do_freeze and bool(body.start_at) and freeze_when == "start"
 
     if not body.usd_path and not (body.seq and body.shot):
         raise HTTPException(status_code=400, detail="Choisir un shot ou un USD publie")
@@ -256,13 +262,16 @@ def _submit(body: SubmitBody, user: str) -> dict:
         usd = Path(body.usd_path)
         if not usd.is_file():
             raise HTTPException(status_code=404, detail=f"USD introuvable : {usd}")
-        frozen = freeze.freeze_usd(usd, freeze=do_freeze)
+        frozen = freeze.freeze_usd(usd, freeze=do_freeze and not at_start)
         name, folder, rng = usd.stem.replace("_LAST", ""), usd.parent, _usd_range(usd)
     if body.seq and body.shot:
         seq, shot = body.seq.upper(), body.shot.upper()
         if not body.usd_path:
             try:
-                frozen = freeze.freeze_shot(root, seq, shot, user=user, freeze=do_freeze)
+                if at_start:
+                    frozen = freeze.live_shot(root, seq, shot, user=user)
+                else:
+                    frozen = freeze.freeze_shot(root, seq, shot, user=user, freeze=do_freeze)
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc))
         name = shot_stage.entity(seq, shot)
@@ -277,11 +286,24 @@ def _submit(body: SubmitBody, user: str) -> dict:
 
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
     out_dir = freeze.reserve_render_dir(folder)
+    render_usd = _farm(frozen["usd"], "Le USD", simulate)
+    freeze_at_start = {}
+    if at_start:
+        # The blade writes <name>_frozen.usda in _job, the chunks render it.
+        script = freeze.copy_freeze_script(out_dir / "_job")
+        freeze_at_start = {
+            "freeze_source": render_usd,
+            "freeze_script": _farm(script, "Le script de gel", simulate),
+            "freeze_python": team_settings.BLADE_TRACTOR_PYTHON,
+            "freeze_houdini": settings["houdini_path"],
+        }
+        render_usd = _farm(out_dir / "_job" / f"{name}_frozen.usda", "Le dossier de rendu", simulate)
     spec = job_builder.RenderJobSpec(
         title=f"{body.project} {name} {out_dir.name}",
         project=settings["tractor_project"],
         user=user,
-        usd_path=_farm(frozen["usd"], "Le USD", simulate),
+        usd_path=render_usd,
+        **freeze_at_start,
         output_pattern=_farm(out_dir / f"{name}.$F4.exr", "Le dossier de rendu", simulate),
         frame_start=start,
         frame_end=end,
@@ -294,7 +316,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         husk=settings["husk_path"],
         start_after=body.start_at or "",
         metadata={"flux_project": body.project, "entity": name, "user": user, "cap": str(own_cap),
-                  "output": _farm(out_dir, "Le dossier de rendu", simulate), "frozen": "1" if frozen["frozen"] else "0"},
+                  "output": _farm(out_dir, "Le dossier de rendu", simulate), "frozen": "start" if at_start else ("1" if frozen["frozen"] else "0")},
     )
     try:
         result = tractor_bridge.spool(spec, settings, user, out_dir / "_job")
@@ -307,8 +329,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
                                         "output": str(out_dir), "user": user, "seen": time.time()}
     log.info("Render %s %s (%s) -> %s", "simulated" if result["dry_run"] else "spooled", spec.title,
              renderer, result.get("jid"))
-    return {**result, "title": spec.title, "output": str(out_dir), "usd": frozen["usd"],
-            "frozen": frozen["frozen"], "frames": [start, end], "start_at": spec.start_after,
+    return {**result, "title": spec.title, "output": str(out_dir), "usd": spec.usd_path if at_start else frozen["usd"],
+            "frozen": frozen["frozen"] or at_start, "freeze_when": "start" if at_start else "submit",
+            "frames": [start, end], "start_at": spec.start_after,
             "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes,
             "priority_warning": team_settings.priority_warning(settings)}
 
