@@ -17,8 +17,8 @@ from typing import Dict, Optional
 
 from features.render import job_builder
 
-VERBS = ("spool", "jobs", "tasks", "log", "blades", "kill", "retry", "pause", "resume", "ping")
-_JID_VERBS = ("tasks", "log", "kill", "retry", "pause", "resume")
+VERBS = ("spool", "jobs", "tasks", "log", "blades", "kill", "retry", "pause", "resume", "maxactive", "ping")
+_JID_VERBS = ("tasks", "log", "kill", "retry", "pause", "resume", "maxactive")
 DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
@@ -221,4 +221,13 @@ def pause(settings: dict, user: str, jid: int) -> dict:
 
 def resume(settings: dict, user: str, jid: int) -> dict:
     return _action("resume", settings, user, jid)
+
+
+def set_maxactive(settings: dict, user: str, jid: int, value: int) -> dict:
+    """Team cap balancing. The caller only passes FLUX jobs of its own team (router)."""
+    if settings.get("dry_run") is True:
+        raise BridgeError(_SIMULATION_MSG)
+    if not _is_int(value) or value < 0:
+        raise BridgeError("Tractor : maxactive demande un entier >= 0")
+    return call("maxactive", settings, user, jid=jid, value=value)
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from core import paths
 from core.json_manager import read_json, write_json
+from features.render import farm_targets
 
 SCHEMA_VERSION = 1
 DEFAULT_PRIORITY = 100
@@ -32,7 +33,14 @@ DEFAULTS: dict = {
     "engine": "",                  # host:port, empty => TRACTOR_ENGINE of the machine
     "engine_user": "",             # engine login, empty => "root" (read only for FLUX)
     "dry_run": True,               # stays True until school phase 0 is done
+    # Farm throttling (2026-10-23). percent 0 = off; "of" = alive blades or blades free right now.
+    "job_share": {"percent": 0, "of": "alive"},   # default per-job share, overridable at submit
+    "team_cap": {"percent": 0, "of": "alive"},    # budget shared by every FLUX job of the team
+    "host_groups": {},             # team machine groups {"name": ["ROOM1701", ...]}
+    "exclude_hosts": [],           # never render on these machines
 }
+_SHARE_KEYS = ("job_share", "team_cap")
+_OBJECT_KEYS = ("schedule",) + _SHARE_KEYS
 
 RENDERERS = ("karma", "renderman")
 # Shipped beside this module (scripts/backend.spec copies it in frozen mode).
@@ -69,6 +77,30 @@ def _check_schedule(value) -> dict:
     return out
 
 
+def _check_share(key: str, value) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be an object")
+    unknown = sorted(set(value) - set(DEFAULTS[key]))
+    if unknown:
+        raise ValueError(f"unknown {key} key: {', '.join(unknown)}")
+    out = {**DEFAULTS[key], **value}
+    if not _is_int(out["percent"]) or not 0 <= out["percent"] <= 100:
+        raise ValueError(f"{key}.percent must be an integer between 0 and 100")
+    if out["of"] not in farm_targets.SHARE_BASES:
+        raise ValueError(f"{key}.of must be one of: {', '.join(farm_targets.SHARE_BASES)}")
+    return out
+
+
+def _check_hosts(key: str, value) -> list:
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a list of machine names")
+    return sorted({farm_targets.check_host(str(h).strip()) for h in value if str(h).strip()})
+
+
+def _check_object(key: str, value) -> dict:
+    return _check_schedule(value) if key == "schedule" else _check_share(key, value)
+
+
 def _check_value(key: str, value):
     """Return the normalized value or raise ValueError with a readable message."""
     if key == "schema_version":
@@ -95,8 +127,23 @@ def _check_value(key: str, value):
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be true or false")
         return value
-    if key == "schedule":
-        return _check_schedule(value)
+    if key in _OBJECT_KEYS:
+        return _check_object(key, value)
+    if key == "exclude_hosts":
+        try:
+            return _check_hosts(key, value)
+        except ValueError as exc:
+            raise ValueError(f"exclude_hosts: {exc}") from None
+    if key == "host_groups":
+        if not isinstance(value, dict):
+            raise ValueError("host_groups must be an object {name: [machines]}")
+        groups = {}
+        for name, hosts in value.items():
+            name = str(name).strip()
+            if not name or not farm_targets.check_host(name):
+                raise ValueError(f"host_groups: invalid group name '{name}'")
+            groups[name] = _check_hosts(f"host_groups.{name}", hosts)
+        return dict(sorted(groups.items()))
     if key == "envkeys":
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ValueError("envkeys must be a list of strings")
@@ -121,16 +168,16 @@ def read_settings(project_name: str, path=None) -> dict:
     for key in DEFAULTS:
         if key not in raw:
             continue
-        if key == "schedule" and isinstance(raw[key], dict):
+        if key in _OBJECT_KEYS and isinstance(raw[key], dict):
             # per sub-key fallback so one bad field keeps the others
-            sched = dict(DEFAULTS["schedule"])
-            for sub, default in DEFAULTS["schedule"].items():
+            obj = dict(DEFAULTS[key])
+            for sub, default in DEFAULTS[key].items():
                 if sub in raw[key]:
                     try:
-                        sched[sub] = _check_schedule({**DEFAULTS["schedule"], sub: raw[key][sub]})[sub]
+                        obj[sub] = _check_object(key, {**DEFAULTS[key], sub: raw[key][sub]})[sub]
                     except ValueError:
-                        sched[sub] = default
-            out[key] = sched
+                        obj[sub] = default
+            out[key] = obj
             continue
         try:
             out[key] = _check_value(key, raw[key])
@@ -149,9 +196,9 @@ def write_settings(project_name: str, patch: dict, path=None) -> dict:
     for key, value in patch.items():
         if key not in DEFAULTS:
             raise ValueError(f"unknown setting: {key}")
-        if key == "schedule" and isinstance(value, dict):
+        if key in _OBJECT_KEYS and isinstance(value, dict):
             # partial patch: keep the stored sub-keys it does not name
-            value = {**merged["schedule"], **value}
+            value = {**merged[key], **value}
         clean[key] = _check_value(key, value)
     merged.update(clean)
     merged["schema_version"] = SCHEMA_VERSION

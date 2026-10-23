@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from core import config
 from core.logger import get_logger
-from features.render import farm_paths, freeze, job_builder, team_settings, tractor_bridge
+from features.render import farm_paths, farm_targets, freeze, job_builder, team_settings, tractor_bridge
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -118,6 +118,74 @@ class SubmitBody(BaseModel):
     freeze: Optional[bool] = None
     chunk_size: Optional[int] = None
     start_at: Optional[str] = None  # "YYYY-MM-DDTHH:MM": Tractor holds the job until then
+    hosts: list[str] = []           # only these machines (empty = any)
+    groups: list[str] = []          # team groups (render.json host_groups) or rooms (ROOM17)
+    share_percent: Optional[int] = None  # % of the farm for this job, None = team default
+    share_of: Optional[str] = None       # "alive" | "free"
+
+
+# ── farm snapshot (shared by /farm, /submit and the team balancer) ──────────
+
+_SNAPSHOT_TTL = 20.0
+_snapshot: dict = {}
+
+
+def _farm_snapshot(settings: dict, user: str) -> dict:
+    """Classified blades, counts and rooms. Cached a few seconds: one engine query per poll at most."""
+    key = settings.get("engine") or ""
+    cached = _snapshot.get(key)
+    if cached and time.time() - cached["at"] < _SNAPSHOT_TTL:
+        return cached["data"]
+    raw = tractor_bridge.blades(settings, user)
+    blades = farm_targets.classify(raw.get("blades", []))
+    data = {"blades": blades, "counts": farm_targets.counts(blades), "rooms": farm_targets.rooms(blades),
+            "active_by_project": raw.get("active_by_project", {}), "dry_run": raw.get("dry_run", False)}
+    _snapshot[key] = {"at": time.time(), "data": data}
+    return data
+
+
+def _min_cap(*caps: int) -> int:
+    real = [c for c in caps if c > 0]
+    return min(real) if real else 0
+
+
+def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tuple[str, int, int, list[str]]:
+    """(service expression, job maxactive, own cap, notes) from the form and the team settings."""
+    base = settings["service_karma"] if renderer == "karma" else settings["service_renderman"]
+    notes: list[str] = []
+    share = {**settings["job_share"]}
+    if body.share_percent is not None:
+        share["percent"] = body.share_percent
+    if body.share_of:
+        share["of"] = body.share_of
+    team = settings["team_cap"]
+    snap = None
+    if body.groups or share["percent"] or team["percent"]:
+        try:
+            snap = _farm_snapshot(settings, user)
+        except tractor_bridge.BridgeError as exc:
+            notes.append(f"Etat de la farm indisponible ({exc}) : pourcentages ignores")
+    rooms = snap["rooms"] if snap else {}
+    counts = snap["counts"] if snap else {}
+    try:
+        include = farm_targets.resolve_hosts(body.hosts, body.groups, settings["host_groups"], rooms)
+        service = farm_targets.service_expression(base, include, settings["exclude_hosts"])
+        own = 0
+        team_total = 0
+        if snap:
+            if not 0 <= int(share["percent"]) <= 100:
+                raise ValueError("pourcentage entre 0 et 100")
+            own = farm_targets.cap_from_percent(int(share["percent"]), share["of"], counts)
+            team_total = farm_targets.cap_from_percent(team["percent"], team["of"], counts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if (body.hosts or body.groups) and not include:
+        raise HTTPException(status_code=400, detail="Aucune machine dans la selection")
+    if include and not farm_targets.FLUX_HOST_TARGETING_VERIFIED:
+        notes.append("Ciblage par nom de machine pas encore valide sur la farm (job test a faire)")
+    own = _min_cap(settings["maxactive"], own)
+    # The team balancer refines this on the next farm poll; start under the team budget.
+    return service, _min_cap(own, team_total), own, notes
 
 
 def _farm(path: Path | str, what: str, simulate: bool) -> str:
@@ -167,8 +235,8 @@ def _submit(body: SubmitBody, user: str) -> dict:
     if start is None or end is None:
         raise HTTPException(status_code=400, detail="Plage de frames inconnue : la saisir")
 
+    service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
     out_dir = freeze.next_render_dir(folder)
-    service = settings["service_karma"] if renderer == "karma" else settings["service_renderman"]
     spec = job_builder.RenderJobSpec(
         title=f"{body.project} {name} {out_dir.name}",
         project=settings["tractor_project"],
@@ -180,12 +248,12 @@ def _submit(body: SubmitBody, user: str) -> dict:
         renderer=renderer,
         chunk_size=body.chunk_size or settings["chunk_size"],
         priority=settings["priority"],
-        maxactive=settings["maxactive"],
+        maxactive=maxactive,
         service=service,
         envkeys=settings["envkeys"],
         husk=settings["husk_path"],
         start_after=body.start_at or "",
-        metadata={"flux_project": body.project, "entity": name, "user": user,
+        metadata={"flux_project": body.project, "entity": name, "user": user, "cap": str(own_cap),
                   "output": _farm(out_dir, "Le dossier de rendu", simulate), "frozen": "1" if frozen["frozen"] else "0"},
     )
     try:
@@ -200,7 +268,8 @@ def _submit(body: SubmitBody, user: str) -> dict:
     log.info("Render %s %s (%s) -> %s", "simulated" if result["dry_run"] else "spooled", spec.title,
              renderer, result.get("jid"))
     return {**result, "title": spec.title, "output": str(out_dir), "usd": frozen["usd"],
-            "frozen": frozen["frozen"], "frames": [start, end], "start_at": spec.start_after, "warnings": frozen["warnings"],
+            "frozen": frozen["frozen"], "frames": [start, end], "start_at": spec.start_after,
+            "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes,
             "priority_warning": team_settings.priority_warning(settings)}
 
 
@@ -291,15 +360,67 @@ async def job_task_log(jid: int, tid: int, project: str):
     return await asyncio.to_thread(_task_log, project, jid, tid, _user())
 
 
+_BALANCE_MAX_CHANGES = 20  # engine writes per poll, at most (never flood the engine)
+_DONE_STATES = ("done", "deleted")
+
+
+def _as_int(value) -> int:
+    try:
+        return max(0, int(str(value or "0")))
+    except ValueError:
+        return 0
+
+
+def _balance_team(project: str, settings: dict, user: str, counts: dict) -> dict:
+    """Split the team cap between the team's unfinished FLUX jobs (jattr maxactive).
+
+    Every FLUX window of the team runs the same deterministic split, so they agree.
+    Only jobs with metadata.flux_project == project and the team's Tractor project are touched.
+    """
+    team = settings["team_cap"]
+    total = farm_targets.cap_from_percent(team["percent"], team["of"], counts) if team["percent"] else 0
+    out = {"enabled": bool(total), "slots": total, "used": 0, "targets": {}, "changed": 0, "errors": []}
+    if not total:
+        return out
+    listing = tractor_bridge.jobs(settings, user, project=settings["tractor_project"], days=30)
+    team_jobs = [j for j in listing.get("jobs", [])
+                 if j.get("metadata", {}).get("flux_project") == project and j.get("state") not in _DONE_STATES
+                 and settings["tractor_project"] in (j.get("projects") or [])]
+    out["used"] = sum(int(j.get("numActive") or 0) for j in team_jobs)
+    live = [j for j in team_jobs if j.get("state") != "paused"]
+    targets = farm_targets.split_team_cap(total, [
+        {"jid": j["jid"], "remaining": int(j.get("numTasks") or 0) - int(j.get("numDone") or 0),
+         "cap": _as_int(j.get("metadata", {}).get("cap"))} for j in live])
+    out["targets"] = targets
+    if settings.get("dry_run") is True:
+        return out  # computed and shown, never applied in simulation
+    current = {j["jid"]: int(j.get("maxactive") or 0) for j in live}
+    for jid, value in sorted(targets.items()):
+        if current.get(jid) == value:
+            continue
+        if out["changed"] >= _BALANCE_MAX_CHANGES:
+            break
+        try:
+            tractor_bridge.set_maxactive(settings, user, jid, value)
+            out["changed"] += 1
+        except tractor_bridge.BridgeError as exc:
+            out["errors"].append(f"{jid}: {exc}")
+    return out
+
+
 def _farm_state(project: str, user: str) -> dict:
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
     try:
-        out = tractor_bridge.blades(settings, user)
+        out = dict(_farm_snapshot(settings, user))
+        out["team_cap"] = _balance_team(project, settings, user, out["counts"])
     except tractor_bridge.BridgeError as exc:
         raise _bridge_error(exc)
     out["schedule"] = settings["schedule"]
     out["tractor_project"] = settings["tractor_project"]
+    out["host_groups"] = settings["host_groups"]
+    out["exclude_hosts"] = settings["exclude_hosts"]
+    out["host_targeting_verified"] = farm_targets.FLUX_HOST_TARGETING_VERIFIED
     return out
 
 

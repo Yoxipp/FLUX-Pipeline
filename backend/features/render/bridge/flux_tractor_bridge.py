@@ -25,11 +25,11 @@ except NameError:
 
 # ── TRACTOR (only place that touches the Tractor API) ────────────────────────
 
-JOB_COLUMNS = ["jid", "title", "owner", "projects", "priority", "numtasks",
+JOB_COLUMNS = ["jid", "title", "owner", "projects", "priority", "maxactive", "numtasks",
                "numdone", "numerror", "numactive", "numblocked", "numready",
                "spooltime", "stoptime", "pausetime", "deletetime", "comment", "metadata"]
 TASK_COLUMNS = ["jid", "tid", "title", "state", "service"]
-BLADE_COLUMNS = ["name", "profile", "status", "nimby"]
+BLADE_COLUMNS = ["bladeid", "name", "profile", "status", "nimby", "heartbeattime", "numslots"]
 LOG_TAIL = 20000
 _JID = re.compile(r"jid[:= ]+(\d+)", re.IGNORECASE)
 
@@ -68,8 +68,17 @@ def _str(value):
     return "" if value is None else str(value)
 
 
+def _running(tq):
+    """Running commands (one per busy slot): the engine's numactive column stays 0 at school (2026-10-23)."""
+    return tq.invocations("current", columns=["bladeid", "jid"])
+
+
 def _jobs(req):
     # Every state (active, error, done, paused), like the Dashboard: only the age bounds the list.
+    tq = _tq(req)
+    running = {}
+    for inv in _running(tq):
+        running[inv.get("jid")] = running.get(inv.get("jid"), 0) + 1
     if req.get("jid") is not None:
         clauses = ["jid=%d" % int(req["jid"])]
     else:
@@ -78,7 +87,7 @@ def _jobs(req):
         clauses.append("owner=" + req["owner"])
     if req.get("project"):
         clauses.append("projects like " + req["project"])
-    rows = _tq(req).jobs(" and ".join(clauses), columns=JOB_COLUMNS, sortby=["-spooltime"],
+    rows = tq.jobs(" and ".join(clauses), columns=JOB_COLUMNS, sortby=["-spooltime"],
                          limit=int(req.get("limit") or 500), archive=bool(req.get("archive")))
     jobs = []
     for r in rows:
@@ -86,9 +95,10 @@ def _jobs(req):
         jobs.append({
             "jid": r.get("jid"), "title": r.get("title"), "user": r.get("owner"),
             "projects": projects if isinstance(projects, list) else [projects],
-            "priority": r.get("priority"),
+            "priority": r.get("priority"), "maxactive": r.get("maxactive") or 0,
             "numTasks": r.get("numtasks"), "numDone": r.get("numdone"),
-            "numError": r.get("numerror"), "numActive": r.get("numactive"),
+            "numError": r.get("numerror"),
+            "numActive": max(int(r.get("numactive") or 0), running.get(r.get("jid"), 0)),
             "numBlocked": r.get("numblocked"), "numReady": r.get("numready"),
             "spooltime": _str(r.get("spooltime")), "stoptime": _str(r.get("stoptime")),
             "pausetime": _str(r.get("pausetime")), "deletetime": _str(r.get("deletetime")),
@@ -112,15 +122,40 @@ def _log(req):
 
 def _blades(req):
     tq = _tq(req)
-    blades = [dict((k, r.get(k)) for k in BLADE_COLUMNS) for r in tq.blades("name like .", columns=BLADE_COLUMNS)]
+    rows = tq.blades("name like .", columns=BLADE_COLUMNS)
+    names = dict((r.get("bladeid"), r.get("name")) for r in rows)
+    running = _running(tq)
+    jids = sorted(set(inv.get("jid") for inv in running if inv.get("jid") is not None))
+    projects_of = {}
+    if jids:
+        clause = "jid in [%s]" % ",".join(str(int(j)) for j in jids)
+        for r in tq.jobs(clause, columns=["jid", "projects"]):
+            projects = r.get("projects") or ["(none)"]
+            projects_of[r.get("jid")] = projects if isinstance(projects, list) else [projects]
     active = {}
-    for r in tq.jobs("numactive > 0", columns=["projects", "numactive"]):
-        projects = r.get("projects") or ["(none)"]
-        if not isinstance(projects, list):
-            projects = [projects]
+    busy = {}
+    for inv in running:
+        projects = projects_of.get(inv.get("jid"), ["(none)"])
         for p in projects:
-            active[p] = active.get(p, 0) + int(r.get("numactive") or 0)
+            active[p] = active.get(p, 0) + 1
+        name = names.get(inv.get("bladeid"))
+        if name:
+            busy[name] = {"jid": inv.get("jid"), "project": projects[0]}
+    blades = []
+    for r in rows:
+        blade = dict((k, _str(r.get(k)) if k == "heartbeattime" else r.get(k)) for k in BLADE_COLUMNS if k != "bladeid")
+        blade["busy"] = busy.get(r.get("name"))
+        blades.append(blade)
     return {"blades": blades, "active_by_project": active}
+
+
+def _maxactive(req):
+    # Team cap balancing (FLUX jobs of the team only, checked by the backend): change a job's maxactive.
+    value = int(req["value"])
+    if value < 0:
+        raise ValueError("maxactive >= 0")
+    _tq(req).jattr("jid=%d" % int(req["jid"]), key="maxactive", value=value)
+    return {"jid": int(req["jid"]), "maxactive": value}
 
 
 def _job_op(name):
@@ -149,7 +184,7 @@ def _ping(req):
 VERBS = {
     "spool": _spool, "jobs": _jobs, "tasks": _tasks, "log": _log, "blades": _blades, "ping": _ping,
     "kill": _job_op("kill"), "retry": _job_op("retry"),
-    "pause": _job_op("pause"), "resume": _job_op("resume"),
+    "pause": _job_op("pause"), "resume": _job_op("resume"), "maxactive": _maxactive,
 }
 
 
