@@ -159,7 +159,7 @@ class RouterTargeting(unittest.TestCase):
         # ROOM1702 is both in the picked room and excluded: picked wins (explicit choice).
         self.assertEqual(body["service"], "(H1 || N1 || ROOM1701 || ROOM1702)")
         self.assertEqual(body["maxactive"], 10)
-        self.assertTrue(any("pas encore valide" in w for w in body["warnings"]))
+        self.assertFalse(any("pas encore valide" in w for w in body["warnings"]))  # validated 2026-10-23
         alf = next((self.usd.parent / "render" / "v001" / "_job").glob("*.alf")).read_text(encoding="utf-8")
         self.assertIn("-maxactive 10", alf)
         self.assertIn('"cap": "10"', alf)

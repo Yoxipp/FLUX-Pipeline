@@ -50,18 +50,59 @@ def _tq(req):
 
 
 def _spool(req):
-    cmd = [req.get("spool_cmd") or "tractor-spool"]
+    if not req.get("review") and not req.get("spool_cmd"):
+        return _spool_api(req)
+    # Review (parse only, nothing sent): tractor-spool.bat only runs "rmanpy -m tractor.apps.spooler",
+    # so call it with this same Python (a .bat cannot be started without a shell).
+    cmd = [req["spool_cmd"]] if req.get("spool_cmd") else [sys.executable, "-m", "tractor.apps.spooler"]
     if req.get("engine"):
         cmd.append("--engine=" + req["engine"])
-    if req.get("user"):
-        cmd.append("--user=" + req["user"])
+    cmd.append("--no-spool" if req.get("review") else "--status-json")
     cmd.append(req["alf_path"])
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = proc.communicate()[0].decode("utf-8", "replace")
     if proc.returncode != 0:
         raise RuntimeError("tractor-spool a echoue : " + out.strip()[-300:])
-    match = _JID.search(out)
-    return {"jid": int(match.group(1)) if match else None, "output": out.strip()}
+    jid = None
+    for line in out.splitlines():
+        try:
+            status = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(status, dict) and status.get("jid"):
+            jid = int(status["jid"])
+    if jid is None:
+        match = _JID.search(out)
+        jid = int(match.group(1)) if match else None
+    return {"jid": jid, "output": out.strip()[-2000:]}
+
+
+def _spool_api(req):
+    # Same path as the school's Nuke submitter (EngineClient.spool). tractor-spool cannot be used:
+    # it writes the owner unquoted in its JSON and the school login "3d1" starts with a digit
+    # ("Invalid JSON generated from job script parse", 2026-10-23). Owner = the Windows login,
+    # like every other job; the FLUX user is in the job metadata.
+    import getpass
+    import socket
+    import tractor.api.author.base as author  # noqa: Tractor's Python only
+
+    client = author.ModuleEngineClient
+    engine = req.get("engine") or ""
+    if engine:
+        host, _, port = engine.partition(":")
+        client.conn = None  # new connection to this engine (see author.base Job.spool)
+        client.setParam(hostname=host)
+        if port:
+            client.setParam(port=int(port))
+    with open(req["alf_path"]) as handle:
+        script = handle.read()
+    result = client.spool(script, skipLogin=True, block=True, owner=getpass.getuser(),
+                          filename=req["alf_path"], hostname=socket.gethostname())
+    status = json.loads(result) if isinstance(result, basestring_) else (result or {})
+    jid = status.get("jid") if isinstance(status, dict) else None
+    if not jid:
+        raise RuntimeError("spool refuse par le moteur : %s" % _str(result)[-300:])
+    return {"jid": int(jid), "output": _str(result)[-2000:]}
 
 
 def _str(value):

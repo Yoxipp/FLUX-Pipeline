@@ -2,8 +2,8 @@
 
 * Blade states from the bridge 'blades' verb: free / busy / nimby / offline.
 * Machine targeting (list of PCs, room groups, team groups, exclusions) -> a Tractor
-  service key expression. A blade name used as a service key is NOT validated at school yet
-  (echo test job pending): FLUX_HOST_TARGETING_VERIFIED stays False until then.
+  service key expression. A blade name is a valid service key: validated at school on
+  2026-10-23 (echo job 34026, -service {ROOM0321}, ran on ROOM0321).
 * "X % of the farm" -> a job maxactive (max chunks running at once, 1 slot per blade at school).
 * Team cap: one budget shared by every FLUX job of the team, split into per-job maxactive.
   Deterministic, so every FLUX window of the team computes the same split.
@@ -15,7 +15,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
-FLUX_HOST_TARGETING_VERIFIED = False
+FLUX_HOST_TARGETING_VERIFIED = True
 # Blade seen by the engine within this delay = alive (heartbeat every few minutes).
 ALIVE_MINUTES = 15
 SHARE_BASES = ("alive", "free")
