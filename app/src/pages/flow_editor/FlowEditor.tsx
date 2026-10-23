@@ -20,6 +20,8 @@
 // from GET /flows/runs/{id} after a reconnection; Notify nodes show a toast; the Runs dock lists
 // the history and colours the graph with an opened run.
 // Entry needs the TD box (flows_td, 01 §7): without it the route shows "Acces refuse".
+// P5: Activer (ActivationDialog, 03 §5) on the frozen version `current`; WS `activation`
+// of the open flow refreshes its state.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
@@ -43,6 +45,7 @@ import { IssuesPanel, type CheckState } from './IssuesPanel'
 import { VersionsDialog } from './VersionsDialog'
 import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
 import { DestructiveDialog } from './DestructiveDialog'
+import { ActivationDialog } from './ActivationDialog'
 import { destructiveAdded } from './destructive'
 import { registerCloseGuard } from '../../components/shared/closeGuard'
 import { applyFix, autoBegin } from './fixes'
@@ -88,6 +91,7 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [wantedVersion, setWantedVersion] = useState<number | undefined>(undefined)   // Voir vNNN (read-only)
   const [reloadKey, setReloadKey] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [activationOpen, setActivationOpen] = useState(false)
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   // "!" nodes to confirm with the slider before a save; resolve(true) = confirmed.
   const [destructive, setDestructive] = useState<{ ids: string[]; resolve: (ok: boolean) => void } | null>(null)
@@ -350,7 +354,12 @@ function Editor({ rights }: { rights: FlowRights }) {
   }, [])
 
   const onWs = useCallback((msg: FlowsWsMessage) => {
-    if (msg.type === 'hello') return
+    if (msg.type === 'hello' || msg.type === 'host' || msg.type === 'flow_changed') return
+    if (msg.type === 'activation') {
+      setLoaded(l => l && l.name === msg.flow && l.scope === msg.scope
+        ? { ...l, state: { ...l.state, active: msg.active, active_version: msg.version } } : l)
+      return
+    }
     if (msg.type === 'notify') {
       const text = `${msg.flow} : ${msg.text}`
       if (msg.level === 'error') toast.error(text)
@@ -635,6 +644,10 @@ function Editor({ rights }: { rights: FlowRights }) {
           edit.onNote([p.x, p.y])
         }}
         onVersions={() => setVersionsOpen(true)}
+        activation={loaded ? {
+          active: loaded.state.active, activeVersion: loaded.state.active_version, current: loaded.state.current,
+          onOpen: () => setActivationOpen(true),
+        } : undefined}
       />
       {loaded && loaded.version !== null && (
         <div className="flow-banner">
@@ -697,6 +710,17 @@ function Editor({ rights }: { rights: FlowRights }) {
             : dirty ? tr('Enregistre d\'abord (Ctrl+S)', 'Save first (Ctrl+S)') : undefined}
           onView={v => { setVersionsOpen(false); void open(loaded.name, loaded.scope, v) }}
           onRevert={revert} onClose={() => setVersionsOpen(false)}
+        />
+      )}
+      {loaded && (
+        <ActivationDialog
+          open={activationOpen} name={loaded.name} scope={loaded.scope} project={project || undefined} dirty={dirty}
+          blocked={loaded.scope === 'shipped' ? tr('Flow livre : Deverrouiller (copie equipe) pour l\'activer', 'Shipped flow: Unlock (team copy) to activate it')
+            : loaded.legacy ? tr('Flow legacy : publish v1 jusqu\'a P8', 'Legacy flow: v1 publish until P8')
+            : !rights.can[loaded.scope]?.write ? (loaded.scope === 'perso' ? tr('Case TD requise', 'TD box required') : tr('Case Team TD requise', 'Team TD box required'))
+            : undefined}
+          onClose={() => setActivationOpen(false)}
+          onChanged={state => setLoaded(l => l ? { ...l, state: { ...l.state, ...state } } : l)}
         />
       )}
       <ConflictDialog

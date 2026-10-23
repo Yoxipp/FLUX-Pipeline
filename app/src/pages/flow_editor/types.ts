@@ -140,6 +140,41 @@ export interface FlowState {
   revision:       number
   saved_by?:      string | null
   saved_at?:      string | null
+  // P5: dry run passed (activation), warnings read, last Schedule slots.
+  dry_run_ok?:    { version: number; run_id: string; nodes_simulated: string[]; at?: string | null } | null
+  acked?:         { version: number; items: { code: string; node: string | null; port: string | null }[] } | null
+  last_schedule?: Record<string, { slot: string; ran_at: string | null }>
+}
+
+// GET /flows/{name}/activation: the three lines of the activation dialog (03 §5), on `current`.
+export interface ActivationWarning extends Issue { acked: boolean }
+export interface ActivationGate {
+  version:        number
+  active:         boolean
+  active_version: number | null
+  legacy:         boolean
+  errors:         Issue[]
+  warnings:       ActivationWarning[]
+  dry_run:        { ok: boolean; run_id: string | null; version: number | null }
+  destructive:    string[]          // `!` nodes of the version: Activer becomes a SlideToConfirm
+  ready:          boolean
+  reason?:        string
+}
+
+// GET /flows/host: who runs the shared active flows (host lock, 01 §9).
+export interface HostHolder { host: string; user: string | null; pid: number; expires: number }
+export interface HostInfo {
+  holder:       HostHolder | null
+  me:           string | null
+  is_holder:    boolean
+  since:        number | null
+  enabled:      boolean
+  running:      boolean
+  idle_reason:  string | null
+  active_flows: { flow: string; scope: FlowScope; project: string | null; version: number }[]
+  watchers:     { flow: string; scope: FlowScope; node: string; kind: string; next?: string; last_fire?: string; error?: string }[]
+  over_cap:     string[]
+  max_watchers: number
 }
 
 // GET /flows entry.
@@ -299,7 +334,10 @@ export interface RunRecord extends RunSummary {
 
 // Messages of WS /flows/ws.
 export type FlowsWsMessage =
-  | { type: 'hello'; holder: string | null; me: string; running: RunSummary[] }
+  | { type: 'hello'; holder: HostHolder | null; me: string; since?: number | null; running: RunSummary[] }
+  | { type: 'host'; holder: HostHolder | null; me: string | null; is_holder: boolean; since: number | null }
+  | { type: 'activation'; flow: string; scope: FlowScope; project: string | null; active: boolean; version: number | null; by: string | null }
+  | { type: 'flow_changed'; flow: string; scope: FlowScope; project: string | null; version: number; revision: number; by: string | null }
   | { type: 'run_started'; run_id: string; flow: string; scope: FlowScope; mode: 'real' | 'dry'; user: string | null }
   | { type: 'node_state'; run_id: string; flow: string; node: string; state: NodeRunState; started?: string; ended?: string; error?: string; count?: number }
   | { type: 'link_value'; run_id: string; flow: string; link: string; preview: string; count: number }

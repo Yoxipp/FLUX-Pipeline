@@ -4,7 +4,7 @@
 
 import { api, apiCall } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { FlowCatalog, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
+import type { ActivationGate, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -17,6 +17,7 @@ export interface RunOpts {
   dry_run?: boolean          // on the saved file (TD)
   draft?: FlowDoc            // the open document, no version created (TD)
   base_revision?: number
+  version?: number           // dry run of a frozen version (activation dialog)
 }
 
 // confirmed_destructive: ids of the `!` nodes validated with the slider (409 E_DESTRUCTIVE_UNCONFIRMED otherwise).
@@ -59,6 +60,14 @@ export const flowsApi = {
     apiCall('POST', `/flows/${encodeURIComponent(name)}/revert`, { scope, project, to_version }),
   copy: (name: string, from_scope: FlowScope, to_scope: FlowScope, opts: { project?: string; new_name?: string } = {}): Promise<{ state: FlowState; scope: FlowScope; name: string }> =>
     apiCall('POST', `/flows/${encodeURIComponent(name)}/copy`, { from_scope, to_scope, ...opts }),
+  // P5 activation (01 §8): 0 error, warnings read (acked), dry run passed on `current`.
+  activation: (name: string, scope: FlowScope, project?: string): Promise<ActivationGate> =>
+    apiCall<ActivationGate>('GET', `/flows/${encodeURIComponent(name)}/activation${qs({ scope, project })}`),
+  activate: (name: string, scope: FlowScope, acked: { code: string; node: string | null; port: string | null }[], project?: string): Promise<FlowState> =>
+    apiCall('POST', `/flows/${encodeURIComponent(name)}/activate`, { scope, project, acked }),
+  deactivate: (name: string, scope: FlowScope, project?: string): Promise<FlowState> =>
+    apiCall('POST', `/flows/${encodeURIComponent(name)}/deactivate`, { scope, project }),
+  host: (): Promise<HostInfo> => apiCall<HostInfo>('GET', '/flows/host'),
   migrate: (dry_run: boolean): Promise<MigrateReport> =>
     apiCall<MigrateReport>('POST', '/flows/migrate', { dry_run }),
 

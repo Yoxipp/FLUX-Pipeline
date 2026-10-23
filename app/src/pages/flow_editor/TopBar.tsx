@@ -10,9 +10,11 @@
 // cannot be saved (reason in the tooltip), Layout arranges the graph (one undo entry).
 // Problems button (errors / warnings of the validation, toggles the dock) and the
 // "invalide" badge (.tag.err) while the document has errors (03 §5).
+// P5: Activer opens ActivationDialog; tag "actif vN", and "vM non activee" when a newer
+// version exists (03 §6: the active version keeps running until the next activation).
 
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert } from 'lucide-react'
+import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert, Power } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -39,9 +41,11 @@ export interface RunActions {
   onToggleRuns: () => void
 }
 
+export interface ActivationInfo { active: boolean; activeVersion: number | null; current: number; onOpen: () => void }
+
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, activation, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -57,6 +61,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   actions: FileActions
   run: RunActions
   problems: ProblemsInfo
+  activation?: ActivationInfo
   onSearch: (s: string) => void
   onToggleDots: () => void
   onToggleWires: () => void
@@ -127,6 +132,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       {saveBlocked && current && <span className="tag" title={saveBlocked}>{tr('lecture seule', 'read-only')}</span>}
       {problems.errors > 0 && <span className="tag err" title={tr('Enregistrable, mais non activable tant qu\'il reste des erreurs', 'Can be saved, but not activated while errors remain')}>{tr('invalide', 'invalid')}</span>}
       {dirty && !saveBlocked && <span className="tag" title={tr('Ctrl+S pour enregistrer', 'Ctrl+S to save')}>{tr('modifie', 'modified')}</span>}
+      {activation?.active && <span className="tag" title={tr('Version lancee par les evenements', 'Version started by the events')}>{tr('actif', 'active')} v{String(activation.activeVersion ?? 0).padStart(3, '0')}</span>}
+      {activation?.active && activation.current > (activation.activeVersion ?? 0) && (
+        <span className="tag" title={tr('L\'ancienne version tourne jusqu\'a la prochaine activation', 'The old version runs until the next activation')}>
+          v{String(activation.current).padStart(3, '0')} {tr('non activee', 'not activated')}
+        </span>
+      )}
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
       {run.running
@@ -147,6 +158,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       <button type="button" className={`flow-tool${run.runsOpen ? ' on' : ''}`} onClick={run.onToggleRuns} title={tr('Historique des runs', 'Run history')}>
         <ListChecks size={13} /> Runs
       </button>
+      {activation && (
+        <button type="button" className={`flow-tool${activation.active ? ' on' : ''}`} onClick={activation.onOpen}
+                title={tr('Activer : 0 erreur, avertissements lus, essai a blanc reussi', 'Activate: 0 error, warnings read, dry run passed')}>
+          <Power size={13} /> {activation.active ? tr('Actif', 'Active') : tr('Activer', 'Activate')}
+        </button>
+      )}
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
       <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onLayout} title={saveBlocked ?? tr('Range le graph de gauche a droite (annulable)', 'Arranges the graph left to right (undoable)')}>
