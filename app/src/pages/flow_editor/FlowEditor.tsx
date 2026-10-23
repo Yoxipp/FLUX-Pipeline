@@ -1,8 +1,12 @@
 // FlowEditor.tsx — shell of the Flows editor (route /action-graph, 03_EDITEUR §1):
 // top bar (File menu), Shelf, Network, Params. P1: reads v2 flows from the store
 // (GET /flows, /flows/{name}) through v2_adapter.ts; the File menu writes through the
-// /flows routes (ADR 0058: Save overwrites, Save and increment freezes vNNN). The graph
-// itself stays read-only until P4. The Shelf still lists the v1 commands (catalogue P2).
+// /flows routes (ADR 0058: Save overwrites, Save and increment freezes vNNN). The Shelf
+// still lists the v1 commands (catalogue P2).
+// P4: the document is edited in a DocStore (store.ts, undo / redo, history.ts) through pure
+// reducers (reducers.ts); the view is derived from it. Move, delete, copy / paste
+// (clipboard.ts), Layout (layout.ts). Read-only where Save is blocked (shipped, frozen
+// version, no box). A save keeps the document and its undo pile.
 // Open flow: deep link /action-graph?flow=<name>, else the last flow this user opened
 // (user data `flows_last_open`, USER/<user>/UserSettings), else "legacy_publish".
 // A v1 name kept from P0 ("publish") opens its legacy_ flow.
@@ -15,7 +19,7 @@
 // Entry needs the TD box (flows_td, 01 §7): without it the route shows "Acces refuse".
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ReactFlowProvider } from '@xyflow/react'
+import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
@@ -23,7 +27,7 @@ import { flowsApi } from '../../api/flows'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
 import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
-import { NetworkPane } from './NetworkPane'
+import { NetworkPane, type EditActions } from './NetworkPane'
 import { ParamsPane } from './ParamsPane'
 import { RunsPanel } from './RunsPanel'
 import { ShelfBar } from './ShelfBar'
@@ -31,6 +35,10 @@ import { TopBar, type FlowListEntry } from './TopBar'
 import type { FlowDoc, FlowRead, FlowRights, FlowScope, FlowsWsMessage, MigrateReport, NodeRunInfo, RunIssue, RunRecord } from './types'
 import { adaptV1Catalog, type CatalogEntry } from './v1_adapter'
 import { adaptV2Flow } from './v2_adapter'
+import { createDocStore, docOf, isDirty, useStore } from './store'
+import { insertBlock, moveNodes, removeItems } from './reducers'
+import { clipToText, copySelection, parseClip, pasteBlock } from './clipboard'
+import { layoutFlow } from './layout'
 import { useTr } from './useTr'
 import { useFlowRights } from './useFlowRights'
 
@@ -40,7 +48,7 @@ const LAST_OPEN_KEY = 'flows_last_open'
 const PREFS_KEY = 'flux.flow_editor.view'
 
 type ViewPrefs = { dots: boolean; straight: boolean }
-type HttpError = Error & { status?: number; detail?: { by?: string; at?: string; status?: string; issues?: RunIssue[] } }
+type HttpError = Error & { status?: number; detail?: { by?: string; at?: string; status?: string; code?: string; issues?: RunIssue[] } }
 type RunStates = Record<string, NodeRunInfo>
 
 function readPrefs(): ViewPrefs {
@@ -64,7 +72,13 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [wantedScope, setWantedScope] = useState<FlowScope | undefined>((params.get('scope') as FlowScope) || undefined)
   const [loaded, setLoaded] = useState<FlowRead | null>(null)
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // P4: the document being edited lives in the store (undo / redo); `loaded` keeps what the
+  // backend answered (scope, version, state).
+  const store = useMemo(() => createDocStore<FlowDoc>(), [])
+  const doc = useStore(store, docOf)
+  const dirty = useStore(store, isDirty)
+  const rf = useReactFlow()
+  const [selection, setSelection] = useState<ReadonlySet<string>>(new Set())
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [prefs, setPrefs] = useState<ViewPrefs>(readPrefs)
@@ -121,12 +135,12 @@ function Editor({ rights }: { rights: FlowRights }) {
     if (!current) return
     let alive = true
     setError(null)
-    setSelectedId(null)
+    setSelection(new Set())
     load(current, wantedScope)
-      .then(r => { if (alive) setLoaded(r) })
-      .catch(e => { if (alive) { setLoaded(null); setError(String(e?.message ?? e)) } })
+      .then(r => { if (alive) { setLoaded(r); store.load(r.flow) } })
+      .catch(e => { if (alive) { setLoaded(null); store.load(null); setError(String(e?.message ?? e)) } })
     return () => { alive = false }
-  }, [current, wantedScope, load])
+  }, [current, wantedScope, load, store])
 
   const open = useCallback((name: string, scope?: FlowScope) => {
     setCurrent(name)
@@ -135,13 +149,12 @@ function Editor({ rights }: { rights: FlowRights }) {
     api.setUserData({ [LAST_OPEN_KEY]: name }).catch(() => { /* not kept: reopens the default */ })
   }, [setParams])
 
-  const reload = useCallback(() => {
-    if (!loaded) return
+  // After a save: the document stays (and its undo pile), only the state moves on.
+  const saved = useCallback((sent: FlowDoc, state: FlowRead['state']) => {
+    store.markSaved(sent)
+    setLoaded(l => l ? { ...l, state } : l)
     refreshList()
-    load(loaded.name, loaded.scope).then(setLoaded).catch(() => { /* keeps the last view */ })
-  }, [loaded, load, refreshList])
-
-  const view = useMemo(() => loaded ? adaptV2Flow(loaded.flow, { readOnly: true, origin: loaded.scope }) : null, [loaded])
+  }, [store, refreshList])
 
   // Why Save / Increment are greyed for the open flow (null = allowed).
   const saveBlocked = !loaded ? tr('Aucun flow ouvert', 'No open flow')
@@ -149,9 +162,12 @@ function Editor({ rights }: { rights: FlowRights }) {
     : loaded.version !== null ? tr('Version figee ouverte : lecture seule', 'Frozen version open: read-only')
     : !rights.can[loaded.scope]?.write ? (loaded.scope === 'perso' ? tr('Case TD requise', 'TD box required') : tr('Case Team TD requise', 'Team TD box required'))
     : undefined
+  // The graph is editable where it can be saved (a shipped flow: Save as first).
+  const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope }) : null, [doc, loaded, saveBlocked])
 
   const conflict = (e: HttpError, retry: () => void) => {
-    if (e.status !== 409) { toast.error(e.message); return }
+    // Destructive nodes added without confirmation (the guard dialog comes with step 9).
+    if (e.status !== 409 || e.detail?.code) { toast.error(e.message); return }
     const who = e.detail?.by ? tr(` par ${e.detail.by}`, ` by ${e.detail.by}`) : ''
     toast.warning(tr(`Enregistre entre-temps${who}.`, `Saved in the meantime${who}.`), {
       action: { label: tr('Ecraser', 'Overwrite'), onClick: retry }, duration: 10000,
@@ -159,33 +175,35 @@ function Editor({ rights }: { rights: FlowRights }) {
   }
 
   const save = useCallback((force = false) => {
-    if (!loaded || saveBlocked) return
-    flowsApi.save(loaded.flow, loaded.scope, { project: project || undefined, base_revision: loaded.state.revision, force })
-      .then(() => { toast.success(tr('Enregistre', 'Saved')); reload() })
+    if (!loaded || !doc || saveBlocked) return
+    const sent = doc
+    flowsApi.save(sent, loaded.scope, { project: project || undefined, base_revision: loaded.state.revision, force })
+      .then(r => { toast.success(tr('Enregistre', 'Saved')); saved(sent, r.state) })
       .catch(e => conflict(e, () => save(true)))
-  }, [loaded, saveBlocked, project, reload])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loaded, doc, saveBlocked, project, saved])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const increment = useCallback((force = false) => {
-    if (!loaded || saveBlocked) return
-    flowsApi.increment(loaded.name, loaded.scope, loaded.flow, { project: project || undefined, base_revision: loaded.state.revision, force })
+    if (!loaded || !doc || saveBlocked) return
+    const sent = doc
+    flowsApi.increment(loaded.name, loaded.scope, sent, { project: project || undefined, base_revision: loaded.state.revision, force })
       .then(r => {
         toast.success(r.created
           ? tr(`Version v${String(r.created).padStart(3, '0')} figee`, `Version v${String(r.created).padStart(3, '0')} frozen`)
           : tr('Contenu identique a la derniere version : rien de fige', 'Same content as the last version: nothing frozen'))
-        reload()
+        saved(sent, r.state)
       })
       .catch(e => conflict(e, () => increment(true)))
-  }, [loaded, saveBlocked, project, reload])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loaded, doc, saveBlocked, project, saved])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = useCallback((name: string, scope: FlowScope) => {
     // Nouveau: an empty flow headed by event.manual. Enregistrer sous: the open document renamed.
-    const doc: FlowDoc = dialog === 'saveas' && loaded
-      ? { ...loaded.flow, name }
+    const next: FlowDoc = dialog === 'saveas' && doc
+      ? { ...doc, name }
       : { flux_flow: 2, name, label: name, nodes: { n1: { type: 'event.manual', pos: [0, 0], params: {} } }, links: [] }
-    flowsApi.save(doc, scope, { project: project || undefined })
+    flowsApi.save(next, scope, { project: project || undefined })
       .then(() => { setDialog(null); refreshList(); open(name, scope); toast.success(tr(`${name} cree`, `${name} created`)) })
-      .catch((e: HttpError) => toast.error(e.status === 409 ? tr('Un flow de ce nom existe deja dans cette categorie', 'A flow with this name already exists there') : e.message))
-  }, [dialog, loaded, project, refreshList, open, tr])
+      .catch((e: HttpError) => toast.error(e.status === 409 && !e.detail?.code ? tr('Un flow de ce nom existe deja dans cette categorie', 'A flow with this name already exists there') : e.message))
+  }, [dialog, doc, project, refreshList, open, tr])
 
   const migrate = useCallback((dryRun: boolean) => {
     setBusy(true)
@@ -242,10 +260,10 @@ function Editor({ rights }: { rights: FlowRights }) {
   const wsUp = useFlowsWs(onWs, onWsReconnect)
 
   const launch = useCallback((dry: boolean) => {
-    if (!loaded) return
+    if (!loaded || !doc) return
     const opts = dry
       ? { scope: loaded.scope, project: project || undefined, dry_run: true }
-      : { scope: loaded.scope, project: project || undefined, draft: loaded.flow, base_revision: loaded.state.revision }
+      : { scope: loaded.scope, project: project || undefined, draft: doc, base_revision: loaded.state.revision }
     flowsApi.run(loaded.name, opts)
       .then(r => { setLiveRun({ id: r.run_id, running: true }); showLive(r.run_id) })
       .catch((e: HttpError) => {
@@ -253,7 +271,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         toast.error(first ? `${e.message} : ${first.message_fr}` : e.message)
         if (e.detail?.status) setRunsKey(k => k + 1)
       })
-  }, [loaded, project, showLive])
+  }, [loaded, doc, project, showLive])
 
   const stop = useCallback(() => {
     if (!liveRun) return
@@ -274,7 +292,9 @@ function Editor({ rights }: { rights: FlowRights }) {
     : !rights.can[loaded.scope]?.draft ? tr('Case TD requise', 'TD box required')
     : !wsUp ? tr('Backend injoignable', 'Backend unreachable')
     : undefined
-  const dryBlocked = runBlocked ?? (loaded?.version !== null ? tr('Version figee ouverte : ouvre le fichier de travail', 'Frozen version open: open the working file') : undefined)
+  const dryBlocked = runBlocked
+    ?? (loaded?.version !== null ? tr('Version figee ouverte : ouvre le fichier de travail', 'Frozen version open: open the working file')
+      : dirty ? tr('Enregistre d\'abord (Ctrl+S)', 'Save first (Ctrl+S)') : undefined)
 
   // Shortcuts of the File menu (Shift+S alone toggles the wires, NetworkPane).
   useEffect(() => {
@@ -295,8 +315,41 @@ function Editor({ rights }: { rights: FlowRights }) {
   }, [])
   const toggleWires = useCallback(() => setPrefs(p => { const next = { ...p, straight: !p.straight }; writePrefs(next); return next }), [])
 
+  const selectedId = selection.size === 1 ? [...selection][0] : null
   const selected = useMemo(() => view?.nodes.find(n => n.id === selectedId) ?? null, [view, selectedId])
-  const onSelect = useCallback((id: string | null) => setSelectedId(id), [])
+  // xyflow reports the selection after each render: keep the same Set when nothing changed.
+  const onSelect = useCallback((ids: string[]) => setSelection(cur =>
+    ids.length === cur.size && ids.every(id => cur.has(id)) ? cur : new Set(ids)), [])
+  const selectNode = useCallback((id: string) => onSelect([id]), [onSelect])
+
+  const edit = useMemo<EditActions>(() => ({
+    onMove: positions => store.apply(d => moveNodes(d, positions)),
+    onDelete: () => { if (selection.size) { store.apply(d => removeItems(d, selection)); setSelection(new Set()) } },
+    onUndo: store.undo,
+    onRedo: store.redo,
+    onSelectAll: () => { const d = docOf(store.get()); if (d) setSelection(new Set([...Object.keys(d.nodes), ...(d.notes ?? []).map(n => n.id)])) },
+    onCopy: () => {
+      const d = docOf(store.get())
+      const clip = d && copySelection(d, selection)
+      if (clip) navigator.clipboard.writeText(clipToText(clip)).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
+    },
+    onPaste: at => {
+      navigator.clipboard.readText().then(text => {
+        const d = docOf(store.get())
+        const clip = parseClip(text)
+        if (!d || !clip) return
+        const block = pasteBlock(d, clip, at)
+        store.apply(cur => insertBlock(cur, block))
+        setSelection(new Set(block.ids))
+      }).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
+    },
+  }), [store, selection, tr])
+
+  // Layout (03 §4): the only thing that arranges the graph; one undo entry, then frames.
+  const arrange = useCallback(() => {
+    store.apply(d => moveNodes(d, layoutFlow(d, id => rf.getNode(id)?.measured?.height ?? 110)))
+    requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 250 }))
+  }, [store, rf])
   const onPick = useCallback((e: CatalogEntry) => {
     toast.info(tr(`${e.label} : l'ajout de nodes arrive avec l'edition (P4)`, `${e.label}: adding nodes comes with editing (P4)`))
   }, [tr])
@@ -311,6 +364,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         scope={loaded?.scope}
         version={loaded?.version ?? (loaded?.state.current || undefined)}
         legacy={!!loaded?.legacy}
+        dirty={dirty}
         showPerso={rights.td}
         saveBlocked={saveBlocked}
         canMigrate={rights.team_td}
@@ -333,6 +387,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         onSearch={setSearch}
         onToggleDots={() => updatePrefs({ dots: !prefs.dots })}
         onToggleWires={toggleWires}
+        onLayout={arrange}
         onLegacy={() => navigate('/action-graph-legacy')}
       />
       {loaded?.legacy && (
@@ -348,7 +403,9 @@ function Editor({ rights }: { rights: FlowRights }) {
               {tr(`Impossible de lire "${current}" : ${error}`, `Cannot read "${current}": ${error}`)}
             </div>
           : <NetworkPane
-              view={view} search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
+              view={view} flowKey={loaded ? `${loaded.scope}:${loaded.name}:${loaded.version ?? ''}` : ''}
+              selection={selection} edit={edit}
+              search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
               onSelect={onSelect} onPick={onPick} onToggleWires={toggleWires}
             />}
         <ParamsPane view={view} selected={selected} />
@@ -356,7 +413,7 @@ function Editor({ rights }: { rights: FlowRights }) {
       {runsOpen && loaded && (
         <RunsPanel
           flow={loaded.name} project={project || undefined} refreshKey={runsKey} openRunId={openRunId}
-          onOpen={setOpenRunId} onRecord={openRecord} onSelectNode={setSelectedId} onClose={() => setRunsOpen(false)}
+          onOpen={setOpenRunId} onRecord={openRecord} onSelectNode={selectNode} onClose={() => setRunsOpen(false)}
         />
       )}
       <NameDialog

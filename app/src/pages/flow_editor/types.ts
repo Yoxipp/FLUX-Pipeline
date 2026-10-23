@@ -83,6 +83,11 @@ export interface FlowDocNode {
 
 export interface FlowDocLink { from: string; to: string }
 
+// Visual only, no effect on execution (01 §2).
+export interface FlowGroup { id: string; label?: string; nodes: string[]; color?: string | null }
+export interface FlowNote  { id: string; pos: [number, number]; text: string }
+export interface FlowVariable { name: string; type: string; default?: unknown }
+
 export interface FlowOrigin {
   kind: 'v1'
   name: string
@@ -101,11 +106,11 @@ export interface FlowDoc {
   origin?:     FlowOrigin
   node_type?:  string
   interface?:  unknown
-  variables?:  unknown[]
+  variables?:  FlowVariable[]
   nodes:       Record<string, FlowDocNode>
   links:       FlowDocLink[]
-  groups?:     unknown[]
-  notes?:      { id: string; pos: [number, number]; text: string }[]
+  groups?:     FlowGroup[]
+  notes?:      FlowNote[]
 }
 
 // state.json of a flow (store.py): current = last frozen version (0 = none).

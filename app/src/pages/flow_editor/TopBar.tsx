@@ -5,9 +5,11 @@
 // and the way to the old editor. P1: the graph is read-only (editing comes with P4), Save
 // rewrites the loaded document. P2: Run (the open document, no version created), Essai a
 // blanc (the saved file), Stop, and the Runs dock toggle (03_EDITEUR §7).
+// P4: tag "modifie" while the document differs from the saved one, "lecture seule" where it
+// cannot be saved (reason in the tooltip), Layout arranges the graph (one undo entry).
 
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes } from 'lucide-react'
+import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -34,12 +36,13 @@ export interface RunActions {
   onToggleRuns: () => void
 }
 
-export function TopBar({ flows, current, scope, version, legacy, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, onSearch, onToggleDots, onToggleWires, onLegacy }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, onSearch, onToggleDots, onToggleWires, onLayout, onLegacy }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
   version?: number
   legacy: boolean
+  dirty: boolean
   showPerso: boolean
   saveBlocked?: string        // why Save / Increment are greyed (no box, shipped flow...)
   canMigrate: boolean
@@ -51,6 +54,7 @@ export function TopBar({ flows, current, scope, version, legacy, showPerso, save
   onSearch: (s: string) => void
   onToggleDots: () => void
   onToggleWires: () => void
+  onLayout: () => void
   onLegacy: () => void
 }) {
   const { tr } = useTr()
@@ -113,7 +117,8 @@ export function TopBar({ flows, current, scope, version, legacy, showPerso, save
       {scope && <span className="tag">{scopeTag[scope]}</span>}
       {!!version && <span className="tag">v{String(version).padStart(3, '0')}</span>}
       {legacy && <span className="tag">v1</span>}
-      <span className="tag" title={p4}>{tr('lecture seule', 'read-only')}</span>
+      {saveBlocked && current && <span className="tag" title={saveBlocked}>{tr('lecture seule', 'read-only')}</span>}
+      {dirty && !saveBlocked && <span className="tag" title={tr('Ctrl+S pour enregistrer', 'Ctrl+S to save')}>{tr('modifie', 'modified')}</span>}
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
       {run.running
@@ -131,6 +136,9 @@ export function TopBar({ flows, current, scope, version, legacy, showPerso, save
       </button>
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
+      <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onLayout} title={saveBlocked ?? tr('Range le graph de gauche a droite (annulable)', 'Arranges the graph left to right (undoable)')}>
+        <LayoutGrid size={13} /> Layout
+      </button>
       <button type="button" className="flow-tool" disabled title={p4}><BoxSelect size={13} /> Backdrop</button>
       <button type="button" className="flow-tool" disabled title={p4}><Boxes size={13} /> Subnet</button>
       <button type="button" className="flow-tool" disabled title={p4}><StickyNote size={13} /> {tr('Note', 'Sticky note')}</button>

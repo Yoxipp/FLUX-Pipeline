@@ -1,7 +1,11 @@
 // NetworkPane.tsx — the graph (03_EDITEUR §1, @xyflow/react). Nodes and links are derived
-// from the FlowView; P0 is read-only (drag moves nodes locally, nothing is saved).
+// from the FlowView (itself derived from the document in the store, P4); the selection is
+// owned by the editor so it survives every edit. A drag stays local to xyflow and is
+// committed once at onNodeDragStop (one undo entry, 03 §4).
 // P2: runStates colours the nodes with the live (or opened) run.
 // Tab opens the Tab menu at the mouse, F frames, Shift+S switches curved / straight wires.
+// P4 editing keys (off in a field and when read-only): Suppr / Retour arriere, Ctrl+Z,
+// Ctrl+Y / Ctrl+Maj+Z, Ctrl+C, Ctrl+V (at the mouse), Ctrl+A, Echap.
 // Pan: middle button, select: drag on the background. No +/- / frame buttons (2026-10-22).
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -26,21 +30,35 @@ const edgeTypes: EdgeTypes = { flow: FlowEdge }
 const typing = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
 
-export function NetworkPane({ view, search, dots, straight, catalog, runStates, onSelect, onPick, onToggleWires }: {
+export interface EditActions {
+  onMove:      (positions: Record<string, [number, number]>) => void
+  onDelete:    () => void
+  onCopy:      () => void
+  onPaste:     (at: [number, number]) => void
+  onUndo:      () => void
+  onRedo:      () => void
+  onSelectAll: () => void
+}
+
+export function NetworkPane({ view, flowKey, selection, search, dots, straight, catalog, runStates, edit, onSelect, onPick, onToggleWires }: {
   view: FlowView | null
+  flowKey: string              // changes when another flow is loaded: frames it once
+  selection: ReadonlySet<string>
   runStates?: Record<string, NodeRunInfo>
   search: string
   dots: boolean
   straight: boolean
   onToggleWires: () => void
   catalog: CatalogEntry[] | null
-  onSelect: (id: string | null) => void
+  edit: EditActions
+  onSelect: (ids: string[]) => void
   onPick: (e: CatalogEntry) => void
 }) {
-  const { fitView } = useReactFlow()
+  const { fitView, screenToFlowPosition } = useReactFlow()
   const wrap = useRef<HTMLDivElement>(null)
-  const mouse = useRef({ x: 80, y: 80 })
+  const mouse = useRef({ x: 80, y: 80, cx: 0, cy: 0 })
   const [tab, setTab] = useState<{ x: number; y: number } | null>(null)
+  const readOnly = !view || view.readOnly
 
   const q = search.trim().toLowerCase()
   const derived = useMemo<FlowRfNode[]>(() => {
@@ -51,17 +69,17 @@ export function NetworkPane({ view, search, dots, straight, catalog, runStates, 
       ;(linked[e.target] ??= []).push(handleId('in', e.targetPort))
     }
     return view.nodes.map(n => ({
-      id: n.id, type: 'flow', position: n.position,
+      id: n.id, type: 'flow', position: n.position, selected: selection.has(n.id),
       data: {
         node: n, linked: linked[n.id] ?? [], run: runStates?.[n.id],
         dim: !!q && ![n.label, n.type, ...n.inputs.map(p => p.name)].some(t => t.toLowerCase().includes(q)),
       },
     }))
-  }, [view, q, runStates])
+  }, [view, q, runStates, selection])
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowRfNode>(derived)
   useEffect(() => { setNodes(derived) }, [derived, setNodes])
-  // Frame the whole flow once per flow loaded.
-  useEffect(() => { if (view) requestAnimationFrame(() => fitView({ padding: 0.15 })) }, [view, fitView])
+  // Frame the whole flow once per flow loaded (not on each edit).
+  useEffect(() => { if (flowKey) requestAnimationFrame(() => fitView({ padding: 0.15 })) }, [flowKey, fitView])
 
   // Data links first so the exec chain (the main flow) is drawn on top.
   const edges = useMemo<FlowRfEdge[]>(() => [...(view?.edges ?? [])]
@@ -75,14 +93,30 @@ export function NetworkPane({ view, search, dots, straight, catalog, runStates, 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target)) return
-      if (e.key === 'Tab') { e.preventDefault(); setTab({ ...mouse.current }) }
-      else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); onToggleWires() }
-      else if (e.key === 'f' || e.key === 'F') fitView({ padding: 0.15 })
-      else if (e.key === 'Escape') { setTab(null); onSelect(null) }
+      const k = e.key.toLowerCase()
+      const ctrl = e.ctrlKey || e.metaKey
+      if (e.key === 'Tab') { e.preventDefault(); setTab({ x: mouse.current.x, y: mouse.current.y }) }
+      else if (e.shiftKey && !ctrl && !e.altKey && k === 's') { e.preventDefault(); onToggleWires() }
+      else if (!ctrl && !e.altKey && k === 'f') {
+        const sel = [...selection].map(id => ({ id }))
+        fitView({ padding: 0.15, ...(sel.length ? { nodes: sel } : {}) })
+      }
+      else if (e.key === 'Escape') { setTab(null); onSelect([]) }
+      else if (ctrl && k === 'a') { e.preventDefault(); edit.onSelectAll() }
+      else if (ctrl && k === 'c') { e.preventDefault(); edit.onCopy() }
+      else if (readOnly) return
+      else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); edit.onDelete() }
+      else if (ctrl && !e.shiftKey && k === 'z') { e.preventDefault(); edit.onUndo() }
+      else if (ctrl && (k === 'y' || (e.shiftKey && k === 'z'))) { e.preventDefault(); edit.onRedo() }
+      else if (ctrl && k === 'v') {
+        e.preventDefault()
+        const p = screenToFlowPosition({ x: mouse.current.cx, y: mouse.current.cy })
+        edit.onPaste([p.x, p.y])
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [fitView, onSelect, onToggleWires])
+  }, [fitView, screenToFlowPosition, onSelect, onToggleWires, edit, readOnly, selection])
 
   return (
     <div
@@ -90,7 +124,7 @@ export function NetworkPane({ view, search, dots, straight, catalog, runStates, 
       style={{ position: 'relative', flex: 1, minWidth: 480, minHeight: 0 }}
       onMouseMove={e => {
         const r = wrap.current?.getBoundingClientRect()
-        if (r) mouse.current = { x: e.clientX - r.left, y: e.clientY - r.top }
+        if (r) mouse.current = { x: e.clientX - r.left, y: e.clientY - r.top, cx: e.clientX, cy: e.clientY }
       }}
     >
       <PortTooltipProvider>
@@ -100,7 +134,11 @@ export function NetworkPane({ view, search, dots, straight, catalog, runStates, 
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
-          onSelectionChange={({ nodes: sel }) => onSelect(sel.length === 1 ? sel[0].id : null)}
+          onSelectionChange={({ nodes: sel }) => onSelect(sel.map(n => n.id))}
+          onNodeDragStop={(_, __, dragged) => {
+            if (!readOnly) edit.onMove(Object.fromEntries(dragged.map(n => [n.id, [n.position.x, n.position.y] as [number, number]])))
+          }}
+          nodesDraggable={!readOnly}
           nodesConnectable={false}
           edgesFocusable={false}
           deleteKeyCode={null}
