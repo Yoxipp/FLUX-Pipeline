@@ -52,6 +52,8 @@ class FrozenBundleData(unittest.TestCase):
             "dcc/houdini/flux_houdini_server.py",
             "dcc/substance_designer/substance_designer_bridge.py",
             "dcc/marvelous/marvelous_bridge.py",
+            "flux_flows/bridges/templates/tcp_json_server.py",
+            "flux_flows/bridges/templates/file_mailbox_server.py",
         ):
             self.assertIn(str((_BACKEND / rel).resolve()), bundled, rel)
 

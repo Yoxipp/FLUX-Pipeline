@@ -45,6 +45,8 @@ app_datas = [
      "features/usd_assembler/recipe"),
     (str(ROOT / "backend/dcc/houdini/flux_houdini_server.py"), "dcc/houdini"),
     (str(ROOT / "backend/dcc/mari/mari_bridge.py"), "dcc/mari"),
+    # Flows P6c: dcc_side templates of the extension bridges, copied by the installer.
+    (str(ROOT / "backend/flux_flows/bridges/templates/*_server.py"), "flux_flows/bridges/templates"),
     # Run by Tractor's own Python 2.7 as a subprocess, never imported (ADR 0015).
     (str(ROOT / "backend/features/render/bridge/flux_tractor_bridge.py"),
      "features/render/bridge"),
