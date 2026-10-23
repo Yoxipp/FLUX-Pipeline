@@ -202,7 +202,9 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
         )}
       </div>
 
-      <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: 8, alignItems: 'center', padding: '8px 0', background: 'var(--paper)' }}>
+      {/* Sticky over the scroll container's 16 px bottom padding (Render.tsx), else content shows under it. */}
+      <div style={{ position: 'sticky', bottom: -16, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center',
+        margin: '0 -16px -16px', padding: '10px 16px 16px', background: 'var(--paper)', borderTop: '1px solid var(--rule-2)' }}>
         <button type="button" style={{ ...btn(true), ...disabledIf(saving || !changed.length) }} onClick={() => void save()}>
           {changed.length ? tr(`Enregistrer (${changed.length})`, `Save (${changed.length})`) : tr('Enregistrer', 'Save')}
         </button>
