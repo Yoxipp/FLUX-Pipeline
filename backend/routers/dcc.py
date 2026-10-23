@@ -1206,10 +1206,11 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     Resolves the absolute path from project_name + rel_path, then sends
     import_file() to Maya. Supports .obj .fbx .ma .mb .abc (Alembic cache) and USD
     (binary crate is transcoded to ASCII .usda so Maya 2024's mayaUsd can read it).
+    The logic lives in dcc/maya/maya_hub.py (shared with the Flows node mayImport).
     """
     from pathlib import Path as _PLib
     from core.paths import get_project_path
-    from dcc.maya.maya_connection import send_command_direct
+    from dcc.maya.maya_hub import MayaHubError, import_into_maya
 
     ext = _PLib(req.rel_path).suffix.lower()
     if ext not in _MAYA_IMPORT_EXTS:
@@ -1223,104 +1224,16 @@ async def maya_import_file(req: MayaImportRequest) -> dict:
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {file_path}")
     _refuse_legacy(project_path, file_path)
-    proxy_mode = req.mode == "proxy"
-    if proxy_mode and ext not in _USD_IMPORT_EXTS:
+    if req.mode == "proxy" and ext not in _USD_IMPORT_EXTS:
         raise HTTPException(status_code=400, detail="Le mode proxy USD ne s'applique qu'a un fichier USD")
-
-    import json as _json
-    import os as _os
-    import shutil as _shutil
-    import tempfile as _tempfile
-
-    _backend_root = str(_PLib(__file__).resolve().parent.parent)
-    # Maya writes a JSON result envelope here so the hub knows if the import actually
-    # succeeded (Maya runs in another process; a plain call always looked like success).
-    result_dir = _tempfile.mkdtemp(prefix="flux_maya_import_")
-    result_path = result_dir.replace("\\", "/") + "/_flux_import_result.json"
-
-    # Maya 2024's mayaUsd cannot read recent crates nor accented paths: flatten USD to a
-    # temp ASCII .usda (in result_dir, cleaned up with it). Other formats pass through.
-    if proxy_mode:
-        # The stage itself (no flattening): mayaUsd reads the sublayers and variants. An
-        # accented folder goes through its Windows short name (mayaUsd fails on accents).
-        fp_fwd = _ascii_path(file_path)
-        if fp_fwd is None:
-            _shutil.rmtree(result_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=(
-                "Chemin avec accents sans nom court Windows : ouvre plutot l'import aplati"))
-    elif ext in _USD_IMPORT_EXTS:
-        fp_fwd = _maya_usd_source(file_path, result_dir)
-    else:
-        fp_fwd = str(file_path).replace("\\", "/")
-
-    # Every path travels as base64(UTF-8) and is decoded inside Maya. Maya's commandPort
-    # decodes the incoming bytes with the system locale (cp1252 on a French Windows), so a
-    # raw accented path (e.g. "OneDrive - Example School") gets mojibaked and
-    # Maya reads a corrupt path → "Error reading file". base64 is pure ASCII, so it survives
-    # any decode; we rebuild the real UTF-8 string on the Maya side. Same rationale as the
-    # export options below.
-    import base64 as _b64
-
-    def _enc(_s: str) -> str:
-        return _b64.b64encode(_s.encode("utf-8")).decode("ascii")
-
-    from features.importer.import_tracking import source_stamp
-
-    tag = _json.dumps({"project": req.project_name, "source": req.rel_path.replace("\\", "/"),
-                       "stamp": source_stamp(file_path), "mode": "proxy" if proxy_mode else "import"})
-    cmd = (
-        f"import sys, base64 as _b64; "
-        f"sys.path.insert(0, _b64.b64decode('{_enc(_backend_root)}').decode('utf-8')); "
-        f"sys.modules.pop('dcc.maya.maya_import', None); "
-        f"sys.modules.pop('dcc.maya.maya_update', None); "
-        f"from dcc.maya.maya_import import run_import; "
-        f"run_import(_b64.b64decode('{_enc(fp_fwd)}').decode('utf-8'), "
-        f"_b64.b64decode('{_enc(result_path)}').decode('utf-8'), "
-        f"mode={'proxy' if proxy_mode else 'import'!r}, "
-        f"tag_json=_b64.b64decode('{_enc(tag)}').decode('utf-8'))"
-    )
 
     target_port = await _maya_target(req.port)
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, lambda: send_command_direct(cmd, timeout=30.0, port=target_port))
-        if result is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Maya ne répond pas. Assure-toi que Maya est ouvert et le commandPort actif.",
-            )
-
-        # Read the envelope; mirror Maya's logs into the hub logger (Flux console) and
-        # keep error lines for the failure detail.
-        ok = False
-        maya_errors: list[str] = []
-        if _os.path.exists(result_path):
-            try:
-                with open(result_path, encoding="utf-8") as _fh:
-                    envelope = _json.load(_fh)
-            except (OSError, ValueError):
-                envelope = None
-            if envelope:
-                ok = bool(envelope.get("ok"))
-                for rec in envelope.get("logs", []):
-                    lvl = str(rec.get("level", "INFO")).upper()
-                    text = f"[Maya] {rec.get('msg', '')}"
-                    if lvl in ("ERROR", "CRITICAL"):
-                        log.error(text)
-                        maya_errors.append(str(rec.get("msg", "")))
-                    elif lvl == "WARNING":
-                        log.warning(text)
-                    else:
-                        log.info(text)
-
-        if not ok:
-            reason = f" ({' | '.join(maya_errors)})" if maya_errors else ""
-            log.error("Import Maya échoué : %s%s", fp_fwd, reason)
-            raise HTTPException(status_code=500, detail=f"Import Maya échoué : {_PLib(fp_fwd).name}{reason}")
-
-        return {"ok": True, "file": fp_fwd}
-    finally:
-        await loop.run_in_executor(None, lambda: _shutil.rmtree(result_dir, ignore_errors=True))
+        return await loop.run_in_executor(None, lambda: import_into_maya(
+            file_path, port=target_port, project_name=req.project_name, rel_path=req.rel_path, mode=req.mode))
+    except MayaHubError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from None
 
 
 class MayaUpdateImportsRequest(BaseModel):
@@ -1331,51 +1244,17 @@ class MayaUpdateImportsRequest(BaseModel):
 async def maya_update_imports(req: MayaUpdateImportsRequest) -> dict:
     """Bring the FLUX imports of the Maya scene to their LAST (X4): each tagged import whose
     published file changed is re-imported in place (same parent and transform); vNNN
-    imports stay frozen. Called by the shelf button "MAJ" of the Maya that asks."""
-    import json as _json
-    import shutil as _shutil
-    import tempfile as _tempfile
-
-    from core.paths import get_project_path
-    from features.importer.import_tracking import plan_updates, summary
+    imports stay frozen. Called by the shelf button "MAJ" of the Maya that asks.
+    The logic lives in dcc/maya/maya_hub.py (shared with the Flows node mayUpdateRef)."""
+    from dcc.maya.maya_hub import MayaHubError, update_imports
 
     port = await _maya_target(req.port)
     loop = asyncio.get_running_loop()
-    listed = await loop.run_in_executor(None, lambda: _maya_call_json(port, "run_list"))
-    if listed is None:
-        raise HTTPException(status_code=503, detail="Maya ne repond pas (commandPort).")
-    items = listed.get("items", [])
-    projects = {p: get_project_path(p) for p in {str(i.get("project") or "") for i in items} if p}
-    plan = plan_updates(items, {k: v for k, v in projects.items() if v.exists()})
-    done, failed = 0, []
-    for entry in plan:
-        if entry["status"] != "update":
-            continue
-        project_path = projects[entry["project"]]
-        file_path = project_path / entry["source"]
-        tmp = _tempfile.mkdtemp(prefix="flux_maya_update_src_")
-        try:
-            if entry["mode"] == "proxy":
-                fp = str(file_path).replace("\\", "/")
-            elif file_path.suffix.lower() in _USD_IMPORT_EXTS:
-                fp = await loop.run_in_executor(None, lambda: _maya_usd_source(file_path, tmp))
-            else:
-                fp = str(file_path).replace("\\", "/")
-            tag = _json.dumps({"project": entry["project"], "source": entry["source"],
-                               "stamp": entry["stamp"], "mode": entry["mode"] or "import"})
-            res = await loop.run_in_executor(
-                None, lambda: _maya_call_json(port, "run_replace", entry["node"], fp, tag, timeout=120.0))
-        finally:
-            await loop.run_in_executor(None, lambda: _shutil.rmtree(tmp, ignore_errors=True))
-        if res and res.get("ok"):
-            done += 1
-            entry["status"] = "updated"
-        else:
-            failed.append(entry["node"].rsplit("|", 1)[-1])
-            log.warning("[Maya] MAJ import %s echouee : %s", entry["node"], (res or {}).get("error"))
-    message = summary(plan, done, failed)
-    log.info("[Maya] %s", message)
-    return {"ok": not failed, "message": message, "items": plan}
+    try:
+        out = await loop.run_in_executor(None, lambda: update_imports(port, call=_maya_call_json))
+    except MayaHubError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from None
+    return {"ok": out["ok"], "message": out["message"], "items": out["items"]}
 
 
 @router.get("/maya/anim-range")
