@@ -268,7 +268,7 @@ class Examples(unittest.TestCase):
         rec = run_flow(self._load("example_foreach"))
         self.assertEqual(rec["status"], "ok")
         self.assertEqual(rec["nodes"]["n5"]["count"], 3)
-        self.assertEqual(rec["links"]["n10.value->n9.path"]["value"], "shot_030")
+        self.assertEqual(rec["links"]["n10.value->n9.text"]["value"], "shot_030")
         dry = run_flow(self._load("example_foreach"), mode="dry")
         self.assertEqual((dry["status"], dry["nodes_simulated"]), ("ok", ["n9"]))
 

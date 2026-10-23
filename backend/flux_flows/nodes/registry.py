@@ -76,6 +76,10 @@ class NodeSpec:
     doc_en: str = ""
     destructive: Any = None             # True, or {"param": .., "equals": ..}
     effect: bool = False                # acts on the world: simulated in a dry run
+    # DCC flags (02 §1), read by the validation (P4); the nodes using them come in P6.
+    session: Optional[str] = None       # S:<soft>: the "session" input must be linked (E_NO_SESSION)
+    live_only: bool = False             # L: refused on a headless session (E_LIVE_ONLY)
+    licence: Any = None                 # $: True, or {"param": .., "equals": ..} like destructive (W_LICENCE)
     raw: Tuple[str, ...] = ()           # params the engine does not resolve ({token}, $FLUX, ${var})
     source: str = "flux"                # flux | team
     file: str = ""
@@ -89,7 +93,23 @@ class NodeSpec:
             "params": [p.to_dict() for p in self.params], "shelf": self.shelf, "aliases": list(self.aliases),
             "doc_fr": self.doc_fr, "doc_en": self.doc_en, "destructive": self.destructive,
             "effect": self.effect, "raw": list(self.raw), "source": self.source, "file": self.file,
+            "session": self.session, "live_only": self.live_only, "licence": self.licence,
         }
+
+
+def flag_on(flag: Any, spec: "NodeSpec", params: Dict[str, Any]) -> bool:
+    """Is a conditional flag (destructive, licence) true for these params?
+    ``{"param": p, "equals": v}`` compares the param, or its default when unset."""
+    if not flag:
+        return False
+    if not isinstance(flag, dict):
+        return True
+    name = flag.get("param")
+    if name in params:
+        value = params[name]
+    else:
+        value = next((p.default for p in (*spec.params, *spec.inputs) if p.name == name), None)
+    return value == flag.get("equals")
 
 
 _REGISTRY: Dict[str, NodeSpec] = {}
@@ -116,7 +136,8 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
               outputs: Iterable[Port] = (), params: Iterable[Port] = (), shelf: Optional[int] = None,
               aliases: Iterable[str] = (), doc_fr: str = "", doc_en: str = "", destructive: Any = None,
               effect: bool = False, simulate: Optional[Callable[..., Any]] = None,
-              raw: Iterable[str] = (),
+              raw: Iterable[str] = (), session: Optional[str] = None, live_only: bool = False,
+              licence: Any = None,
               ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare a node type. The decorated function is its body (run by the engine)."""
     if not NODE_TYPE_RE.match(type):
@@ -132,7 +153,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
         inputs=_check_ports(type, "entree", inputs), outputs=_check_ports(type, "sortie", outputs),
         params=_check_ports(type, "parametre", params), shelf=shelf, aliases=list(aliases),
         doc_fr=doc_fr, doc_en=doc_en, destructive=destructive, effect=effect, simulate=simulate,
-        raw=tuple(raw),
+        raw=tuple(raw), session=session, live_only=bool(live_only), licence=licence,
     )
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:

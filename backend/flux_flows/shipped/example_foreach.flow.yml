@@ -20,7 +20,7 @@ nodes:
   n10: {type: data.get_variable, pos: [1600, 200], params: {name: last}}
 links:
   - {from: n1.then, to: n4.exec}
-  - {from: n10.value, to: n9.path}
+  - {from: n10.value, to: n9.text}
   - {from: n2.then, to: n4.exec}
   - {from: n3.value, to: n4.list}
   - {from: n4.item, to: n5.value}
