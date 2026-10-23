@@ -1,10 +1,13 @@
 // useTr.ts — FR / EN text of the Flows editor (copied from ActionGraph.tsx, removed there in P8).
 
+import { useMemo } from 'react'
 import { useI18n } from '../../i18n'
 
+// Stable per language: `tr` sits in the deps of the editor callbacks (a new one per render
+// rebuilt every xyflow node, NetworkPane).
 export function useTr() {
   const { lang } = useI18n()
-  return { lang, tr: (fr: string, en: string) => (lang === 'en' ? en : fr) }
+  return useMemo(() => ({ lang, tr: (fr: string, en: string) => (lang === 'en' ? en : fr) }), [lang])
 }
 
 // A literal value, short enough for a port row or a tooltip.

@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background, BackgroundVariant, MiniMap, ReactFlow, useNodesState, useReactFlow,
-  type NodeTypes, type EdgeTypes, type Connection as RfConnection, type Edge,
+  type NodeTypes, type EdgeTypes, type Connection as RfConnection, type Edge, type OnSelectionChangeParams,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { toast } from 'sonner'
@@ -154,7 +154,23 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
   }, [view, byId, selection, readOnly, edit])
   const all = useMemo<AnyRfNode[]>(() => [...extras, ...derived], [extras, derived])
   const [nodes, setNodes, onNodesChange] = useNodesState<AnyRfNode>(all)
-  useEffect(() => { setNodes(all) }, [all, setNodes])
+  // Keep the sizes xyflow measured: a node passed without `measured` is hidden and measured
+  // again, so every derivation made the whole graph blink.
+  useEffect(() => {
+    setNodes(cur => {
+      const seen = new Map(cur.map(n => [n.id, n.measured]))
+      return all.map(n => { const m = seen.get(n.id); return m ? { ...n, measured: m } as AnyRfNode : n })
+    })
+  }, [all, setNodes])
+  // Stable on purpose: xyflow calls onSelectionChange again each time this prop changes, with
+  // the selection it holds then. During a render where the editor already selected something
+  // (new node, paste, Problems panel) that selection is the stale one: an inline handler sent
+  // it back to the editor, which re-derived the nodes, and both sides flipped forever.
+  const onSelectionChange = useCallback(({ nodes: sel, edges: esel }: OnSelectionChangeParams) => {
+    onSelect(sel.map(n => n.id))
+    const ids = esel.map(x => x.id)
+    setEdgeSel(cur => cur.length === ids.length && ids.every(id => cur.includes(id)) ? cur : ids)
+  }, [onSelect])
   // Dragging a box moves its nodes along (local), committed at the drop with the box.
   const boxDrag = useRef<{ x: number; y: number; members: Record<string, { x: number; y: number }> } | null>(null)
   // Frame the whole flow once per flow loaded (not on each edit).
@@ -272,11 +288,7 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
-            onSelectionChange={({ nodes: sel, edges: esel }) => {
-              onSelect(sel.map(n => n.id))
-              const ids = esel.map(x => x.id)
-              setEdgeSel(cur => cur.length === ids.length && ids.every(id => cur.includes(id)) ? cur : ids)
-            }}
+            onSelectionChange={onSelectionChange}
             onNodeDragStart={(_, node) => {
               if (node.type !== 'box') return
               const g = view?.groups?.find(x => `${GROUP_PREFIX}${x.id}` === node.id)
