@@ -20,8 +20,8 @@ MARI_BRIDGE_HOST = "127.0.0.1"
 MARI_BRIDGE_PORT = DCC_PORTS.get("Mari", 7070)
 
 
-def _send(payload: dict, timeout: float = 120.0) -> dict:
-    return send_json_line(MARI_BRIDGE_HOST, MARI_BRIDGE_PORT, payload, timeout)
+def _send(payload: dict, timeout: float = 120.0, port: int | None = None) -> dict:
+    return send_json_line(MARI_BRIDGE_HOST, port or MARI_BRIDGE_PORT, payload, timeout)
 
 
 # A big UDIM export freezes Mari for minutes (2026-09-26): its bridge cannot answer
@@ -94,19 +94,25 @@ def busy_since() -> float | None:
 
 
 class MariClient:
+    """*port* = one instance of the range (Flows session, P6b); None = the base port. The
+    "one export at a time" guard stays module wide (one Mari export on this backend)."""
+
+    def __init__(self, port: int | None = None) -> None:
+        self.port = port
+
     def ping(self) -> dict:
         if _busy_since is not None:
             mins = int((time.monotonic() - _busy_since) // 60)
             prog = _progress()
             return {"ok": True, "busy": True,
                     "version": f"export en cours ({mins} min)" + (f", {prog}" if prog else "")}
-        return _send({"action": "ping"}, timeout=2.0)
+        return _send({"action": "ping"}, timeout=2.0, port=self.port)
 
     def info(self) -> dict:
         """Channels of Mari's current geo: {ok, geo, channels}."""
         if _busy_since is not None:
             return {"ok": False, "error": "Mari exporte en ce moment : attends la fin de l'export"}
-        return _send({"action": "info"}, timeout=20.0)
+        return _send({"action": "info"}, timeout=20.0, port=self.port)
 
     def export(self, export_path: str, file_format: str = "tif",
                channels: list[str] | None = None, formats: dict[str, str] | None = None,
@@ -124,7 +130,7 @@ class MariClient:
             box["result"] = _send({"action": "export", "export_path": export_path, "file_format": file_format,
                                    "channels": channels or [], "formats": formats or {},
                                    "sizes": sizes or {}},
-                                  timeout=EXPORT_TIMEOUT_S)
+                                  timeout=EXPORT_TIMEOUT_S, port=self.port)
 
         worker = threading.Thread(target=run, daemon=True)
         try:
