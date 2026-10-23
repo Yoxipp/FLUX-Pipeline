@@ -194,6 +194,6 @@ def tokens_in(text: Any) -> List[str]:
     if not isinstance(text, str):
         return []
     cleaned = text.replace("{{", "").replace("}}", "")
-    found = [m.group(1) for m in _TOKEN_RE.finditer(cleaned)]
-    found += ["$" + m.group(1) for m in _VAR_RE.finditer(cleaned) if m.group(1) != "FLUX"]
+    variables = ["$" + m.group(1) for m in _VAR_RE.finditer(cleaned) if m.group(1) != "FLUX"]
+    found = [m.group(1) for m in _TOKEN_RE.finditer(_VAR_RE.sub("", cleaned))] + variables
     return found

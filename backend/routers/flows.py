@@ -17,10 +17,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import engine, events, locations, migrate_v1, rights, runs, store
+from flux_flows import engine, events, locations, migrate_v1, patterns, resolver, rights, runs, store
 from flux_flows.model import FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
+from flux_flows.nodes.contract import NodeError
 
 router = APIRouter()
 
@@ -67,7 +68,39 @@ async def post_migrate(body: MigrateBody) -> dict[str, Any]:
         raise _http(exc) from exc
 
 
-# -- runs (static, before /{name}) ---------------------------------------------
+class PreviewBody(BaseModel):
+    kind: str                           # resolve | pattern
+    text: str = ""
+    names: Optional[list[str]] = None   # pattern: names to filter
+    variables: Optional[dict[str, Any]] = None  # resolve: ${name} values (flow variables, interface)
+    path_field: bool = False            # resolve: $FLUX at the head is resolved
+    scope: str = "team"
+    project: Optional[str] = None
+
+
+@router.post("/preview")
+async def post_preview(body: PreviewBody) -> dict[str, Any]:
+    """Live result of a token text or a pattern in the editor (01 §14). Never runs a node."""
+    if body.kind == "pattern":
+        try:
+            return {"result": patterns.filter_names(body.text, body.names or []), "error": None}
+        except patterns.PatternError as exc:
+            return {"result": None, "error": exc.message, "code": patterns.ERROR_CODE}
+    if body.kind != "resolve":
+        raise HTTPException(status_code=400, detail={"message": f"kind inconnu `{body.kind}` (resolve, pattern)"})
+    current = await asyncio.to_thread(rights.current_rights)
+    project = body.project if body.scope == "project" else None
+    context = await asyncio.to_thread(engine.base_context, current["user"], project, "preview", "preview")
+    variables = body.variables or {}
+    try:
+        result = resolver.resolve(body.text, context, variables.__getitem__, list(variables),
+                                  path_field=body.path_field)
+    except NodeError as exc:
+        return {"result": None, "error": exc.message, "code": exc.code, **exc.details}
+    return {"result": result, "error": None}
+
+
+# -- runs (static, before /{name})---------------------------------------------
 
 def _run_folders(user: Optional[str], project: Optional[str]) -> list:
     folders = [runs.runs_dir("team"), runs.runs_dir("perso", user=user)]
