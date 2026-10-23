@@ -58,13 +58,13 @@ MAX_RUNNING = 4
 MAX_QUEUE = 20
 PUSH_TICK_S = 0.1          # node_state / link_value grouped: 10 pushes per second per run at most
 WRITE_EVERY_S = 1.0        # record rewritten once per second at most
-START_EVENTS = ("event.manual", "event.button")
+START_EVENTS = ("event.manual", "event.button", "event.publish_request")
 DRY_LIMITS_FR = ("Essai a blanc : apres un effet simule, les lectures voient le disque reel ; "
                  "l'essai estime, il ne garantit pas.")
 
 MAX_SUBFLOW_DEPTH = 8     # 01 §8, E_SUBFLOW_CYCLE beyond
 END_TYPES = frozenset(BLOCK_ENDS.values())
-_TEXT_TYPES = ("str", "path", "dir", "pattern", "any", "list[str]", "list[path]", "list[any]")
+_TEXT_TYPES = ("str", "path", "dir", "pattern", "any", "dcc_node", "list[str]", "list[path]", "list[any]")
 
 Frames = Tuple[Tuple[str, int], ...]
 

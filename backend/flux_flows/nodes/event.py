@@ -157,3 +157,20 @@ async def scene_opened(ctx, inputs, params):
     p = ctx.payload
     return {"scene": p.get("scene") or "", "soft": p.get("soft") or params.get("soft") or "maya",
             "session": p.get("session")}
+
+
+# -- P6a: the start of the shipped publish_<soft> flows (01 §13) ----------------------------
+
+@flow_node("event.publish_request", "PublishRequest", icon="Upload",
+           outputs=[_THEN, _VALUES, port("soft", "str", "Logiciel qui demande le publish", "Software asking for the "
+                                         "publish", "maya")],
+           params=[port("soft", "str", "Logiciel du formulaire de publish", "Software of the publish form", "maya",
+                        default="maya", wirable=False)],
+           shelf=7, aliases=["publish", "publier", "formulaire", "publisher"],
+           doc_fr="Part quand le Publisher d'un logiciel envoie son formulaire (valeurs de l'interface du flow). "
+                  "Depart des flows publish_<soft> ; d'ici P8 on les lance avec Run.",
+           doc_en="Starts when the Publisher of a software sends its form (values of the flow interface). Start of "
+                  "the publish_<soft> flows; until P8 they are started with Run.")
+async def publish_request(ctx, inputs, params):
+    values = dict(ctx.interface)
+    return {**values, "values": values, "soft": ctx.payload.get("soft") or params.get("soft") or ""}
