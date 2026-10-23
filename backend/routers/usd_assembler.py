@@ -503,14 +503,22 @@ class ShotStageRequest(BaseModel):
 
 
 @router.get("/shots")
-async def list_usd_shots(project: str | None = None) -> dict:
-    """Every shot of Production with its stage state, casting, animations and layers."""
+async def list_usd_shots(project: str | None = None, seq: str = "", shot: str = "") -> dict:
+    """Every shot of Production with its stage state, casting, animations and layers.
+
+    seq + shot: only that shot (Production task panel), without summarising the others.
+    """
     name, project_path = _resolve_project(project)
-    from features.usd_assembler.shot_stage import list_shots
+    from features.usd_assembler.shot_stage import list_shots, load_project_production, shot_summary
+
+    def _one() -> list[dict]:
+        production, _ = load_project_production(Path(project_path))
+        return [shot_summary(project_path, seq, shot, production)]
 
     loop = asyncio.get_running_loop()
     try:
-        shots = await loop.run_in_executor(None, lambda: list_shots(project_path))
+        shots = await loop.run_in_executor(
+            None, _one if seq and shot else lambda: list_shots(project_path))
     except Exception as exc:
         log.exception("USD shots failed")
         raise HTTPException(status_code=400, detail=str(exc))

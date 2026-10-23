@@ -1030,6 +1030,14 @@ export const api = {
   getUsdAsset: (project: string, name: string) =>
     apiCall<UsdAssetInfo>('GET', `/usd/asset?${new URLSearchParams({ project, name })}`),
 
+  // Shot stage (ADR 0020) of one shot: state, version, layers.
+  getUsdShot: (project: string, seq: string, shot: string) =>
+    apiCall<{ project: string; shots: UsdShotInfo[] }>('GET', `/usd/shots?${new URLSearchParams({ project, seq, shot })}`),
+
+  generateUsdShot: (project: string, seq: string, shot: string, user: string, frozen = false) =>
+    apiCall<{ ok: boolean; changed: boolean; version: string; last: string; warnings: string[] }>(
+      'POST', '/usd/shot/generate', { project, seq, shot, user, frozen }),
+
   getUsdDepartments: () =>
     apiCall<{ tasks: Record<string, UsdTaskContribution>; order: Record<string, number>
               shot_tasks?: Record<string, UsdTaskContribution> }>(
@@ -1397,6 +1405,14 @@ export interface UsdAssetInfo {
     instances: { prim: string; component: string | null; broken: boolean }[]
   }
   used_by: string[]
+}
+export interface UsdShotInfo {
+  seq: string; shot: string; entity: string
+  state: 'none' | 'up_to_date' | 'outdated' | 'frozen'
+  versions: string[]; last_version: string | null; last: string | null; rel_last: string | null
+  departments: { department: string; task: string; files: string[] }[]
+  range: [number, number] | null; fps: number | null; warnings: string[]
+  render?: { camera: string; resolution: [number, number] }   // render layer (ADR 0060)
 }
 export interface MayaUsdTreeNode { name: string; path: string; type: 'group' | 'joint'; children: MayaUsdTreeNode[] }
 export interface MayaUsdPreview {
