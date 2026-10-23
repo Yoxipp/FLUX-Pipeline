@@ -1,5 +1,7 @@
 // types.ts — TS types of the Flows editor (03_EDITEUR §9). P0 holds the view model
 // only; FlowDoc / FlowLink / Issue / RunRecord arrive with the v2 format (P1+).
+// CatalogPort / PortSpec carry choices (menu), wirable (false = constant param, listed in
+// FlowViewNode.constants, never a port) and tokens (project token section menu).
 
 // GET /flows/rights (01 §7): TD / Team TD boxes of the current user. A guard, not security.
 export type FlowScope = 'perso' | 'project' | 'team' | 'shipped'
@@ -29,6 +31,9 @@ export interface PortSpec {
   example?: string
   value?:   unknown       // literal value of an input (shown greyed)
   wiredFrom?: string      // "<node label>.<port>" when the input is linked
+  choices?: unknown[]     // allowed values (menu, catalogue order)
+  wirable?: boolean       // false = constant param: never a port, edited in Params only
+  tokens?:  string        // project token section offered in a menu (CLASS, NAME, SEQ...)
 }
 
 // One node as the editor draws it.
@@ -44,6 +49,7 @@ export interface FlowViewNode {
   hasExec:  boolean       // exec in + then out
   inputs:   PortSpec[]
   outputs:  PortSpec[]
+  constants?: PortSpec[]  // spec params with wirable false: not drawn, edited in Params
   position: { x: number; y: number }
   meta?:    Record<string, string>   // shown in Params (step, module...)
   spec?:    NodeSpec                 // catalogue entry (P4), absent for unknown / legacy types
@@ -181,6 +187,9 @@ export interface CatalogPort {
   example:  unknown
   required: boolean
   default:  unknown
+  choices?: unknown[] | null   // allowed values of a choice param, in menu order
+  wirable?: boolean            // absent (old catalogue) = true; false = constant, no link
+  tokens?:  string | null      // project token section ("CLASS", "NAME", "SEQ"...) offered in a menu
 }
 
 // True, or {param, equals}: compares the param (or its default).

@@ -10,6 +10,8 @@
 // exec input first, inputs, then every param (each param is promotable to an input, 02 §1,
 // like validate.py), outputs with the exec ones first. Unknown types keep the P1 fallback.
 // Also adaptCatalog: NodeSpec -> CatalogEntry for the Shelf, the Tab menu and the palette.
+// Ports carry choices / wirable / tokens. A param with wirable false (constant, e.g. the
+// Path value) is not an input port: it goes to node.constants, edited in Params only.
 
 import { FAMILIES } from './families'
 import { familyOfV1, pascal, prefixOfV1, type CatalogEntry } from './v1_adapter'
@@ -31,13 +33,21 @@ const toPort = (p: CatalogPort, value?: unknown): PortSpec => ({
   name: p.name, type: p.type, required: p.required, doc_fr: p.doc_fr, doc_en: p.doc_en,
   example: p.example === null || p.example === undefined ? undefined : String(p.example),
   value: value !== undefined ? value : p.default ?? undefined,
+  choices: Array.isArray(p.choices) ? p.choices : undefined,
+  wirable: p.wirable === false ? false : undefined,
+  tokens: p.tokens || undefined,
 })
 
 function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowViewNode {
   const params = node.params ?? {}
   const inputs: PortSpec[] = []
+  const constants: PortSpec[] = []
   const seen = new Set<string>()
-  const add = (p: CatalogPort) => { if (!seen.has(p.name)) { seen.add(p.name); inputs.push(toPort(p, p.type === 'exec' ? undefined : params[p.name])) } }
+  const add = (p: CatalogPort) => {
+    if (seen.has(p.name)) return
+    seen.add(p.name)
+    ;(p.wirable === false ? constants : inputs).push(toPort(p, p.type === 'exec' ? undefined : params[p.name]))
+  }
   spec.inputs.filter(p => p.type === 'exec').forEach(add)
   spec.inputs.filter(p => p.type !== 'exec').forEach(add)
   spec.params.forEach(add)
@@ -49,7 +59,7 @@ function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowV
     id, type: node.type, label: node.label || spec.label,
     family: (FAMILIES.includes(spec.family) ? spec.family : 'action') as Family,
     icon: spec.icon || undefined, doc_fr: spec.doc_fr, doc_en: spec.doc_en,
-    hasExec: false, inputs, outputs,
+    hasExec: false, inputs, outputs, constants: constants.length ? constants : undefined,
     position: { x: node.pos?.[0] ?? 0, y: node.pos?.[1] ?? 0 }, meta, spec,
     destructive: !node.bypass && flagOn(spec.destructive, spec, params),
   }

@@ -4,15 +4,40 @@
 // bypass, every input / param of the spec with a ParamWidget by port type. A linked input
 // shows its source, read-only. Nodes without a spec (legacy v1, unknown type) stay read-only.
 // The flow part (interface, variables) is FlowSettings (FlowParams.tsx).
+// 2026-10-23: the pane is resizable (drag its left edge, width remembered per viewer in
+// localStorage); a param with choices is a menu in catalogue order (data.value type falls
+// back to a local list until the catalogue sends choices); constant params (wirable false,
+// node.constants) are listed with the inputs in spec order; a param with tokens is a
+// TokenField (project token menu + free text); TokenPath params unused by its mode are greyed.
 
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { ParamWidget, type ParamKind } from '../../components/shared/ParamWidget'
+import { useProject } from '../../ProjectContext'
 import { FAMILY_INFO } from './families'
 import { portColor } from './portTypes'
+import { TokenField, paramRelevant, tokenKeys, useProjectTokens, type ProjectTokens } from './TokenField'
 import type { FlowViewNode, PortSpec } from './types'
 import { formatValue, useTr } from './useTr'
 
-export const PARAMS_W = 320
+export const PARAMS_W = 320          // default width; the viewer can drag it
+const PARAMS_MIN = 260
+const PARAMS_MAX = 900
+const WIDTH_KEY = 'flux.flows.paramsWidth'
+
+const maxWidth = () => Math.max(PARAMS_MIN, Math.min(PARAMS_MAX, Math.round(window.innerWidth * 0.7)))
+const clampWidth = (w: number) => Math.min(maxWidth(), Math.max(PARAMS_MIN, Math.round(w)))
+
+function readWidth(): number {
+  try {
+    const n = Number(localStorage.getItem(WIDTH_KEY))
+    return Number.isFinite(n) && n > 0 ? clampWidth(n) : PARAMS_W
+  } catch { return PARAMS_W }
+}
+
+// Choices sent by an older catalogue that does not have them yet (backend VALUE_TYPES).
+const FALLBACK_CHOICES: Record<string, Record<string, unknown[]>> = {
+  'data.value': { type: ['str', 'int', 'float', 'bool', 'list', 'dict', 'pattern'] },
+}
 
 export function kindOf(type: string): ParamKind {
   if (type === 'bool' || type === 'int' || type === 'float' || type === 'path' || type === 'dir') return type
@@ -53,31 +78,62 @@ export function Row({ label, children }: { label: ReactNode; children: ReactNode
   )
 }
 
-function ParamRow({ p, editable, raw, onChange }: { p: PortSpec; editable: boolean; raw: unknown; onChange: (v: unknown) => void }) {
+function ParamRow({ p, editable, raw, onChange, choices, tokens, tokenOptions, muted }: {
+  p: PortSpec; editable: boolean; raw: unknown; onChange: (v: unknown) => void
+  choices?: unknown[]            // menu, in this order
+  tokens: ProjectTokens | null   // project tokens, null = no project (or not loaded)
+  tokenOptions: string[]         // keys offered for p.tokens
+  muted: boolean                 // unused by the node's current mode
+}) {
   const { tr, lang } = useTr()
   const doc = lang === 'en' ? p.doc_en || p.doc_fr : p.doc_fr || p.doc_en
+  const tip = muted ? `${doc ?? ''}${doc ? ' ' : ''}${tr('(inutilise dans ce mode)', '(unused in this mode)')}` : doc
+  const row = (child: ReactNode) => (
+    <div style={muted ? { opacity: 0.45 } : undefined}><Row label={<Label p={p} />}>{child}</Row></div>
+  )
   if (p.wiredFrom || !editable) {
     const value = p.wiredFrom ? `<- ${p.wiredFrom}` : formatValue(p.value, 400)
-    return (
-      <Row label={<Label p={p} />}>
-        <span style={{
-          flex: 1, fontSize: 11.5, padding: '3px 6px', borderRadius: 4, minHeight: 22, wordBreak: 'break-all',
-          background: p.wiredFrom ? 'transparent' : 'var(--paper-2)', border: '1px solid var(--rule-2)',
-          color: p.wiredFrom ? 'var(--ink-4)' : 'var(--ink)',
-        }}>
-          {value || <span style={{ color: 'var(--ink-4)' }}>{tr('(vide)', '(empty)')}</span>}
-        </span>
-      </Row>
+    return row(
+      <span style={{
+        flex: 1, fontSize: 11.5, padding: '3px 6px', borderRadius: 4, minHeight: 22, wordBreak: 'break-all',
+        background: p.wiredFrom ? 'transparent' : 'var(--paper-2)', border: '1px solid var(--rule-2)',
+        color: p.wiredFrom ? 'var(--ink-4)' : 'var(--ink)',
+      }}>
+        {value || <span style={{ color: 'var(--ink-4)' }}>{tr('(vide)', '(empty)')}</span>}
+      </span>,
+    )
+  }
+  const placeholder = p.example ?? (raw === undefined && p.value !== undefined ? formatValue(p.value, 60) : undefined)
+  if (choices && choices.length) {
+    // Menu in the given order; a value outside the list stays shown as an extra option.
+    const cur = raw !== undefined ? raw : p.value
+    return row(
+      <ParamWidget kind="select" value={cur === undefined || cur === null ? '' : String(cur)} tip={tip}
+                   options={choices.map(String)}
+                   onChange={v => onChange(v === '' ? undefined : choices.find(c => String(c) === v) ?? v)} />,
+    )
+  }
+  if (p.tokens) {
+    return row(
+      <TokenField value={raw} section={p.tokens} options={tokens ? tokenOptions : []} tip={tip} placeholder={placeholder}
+                  onChange={v => onChange(storedValue(p.type, v))} />,
     )
   }
   const kind = kindOf(p.type)
   const shown = p.type === 'dict' && raw !== undefined && typeof raw !== 'string' ? JSON.stringify(raw) : raw
-  return (
-    <Row label={<Label p={p} />}>
-      <ParamWidget kind={kind} value={shown} tip={doc} placeholder={p.example ?? (raw === undefined && p.value !== undefined ? formatValue(p.value, 60) : undefined)}
-                   onChange={v => onChange(storedValue(p.type, v))} />
-    </Row>
+  return row(
+    <ParamWidget kind={kind} value={shown} tip={tip} placeholder={placeholder}
+                 onChange={v => onChange(storedValue(p.type, v))} />,
   )
+}
+
+// Inputs (ports) and constants (wirable false), in spec order when the node has a spec.
+function paramPorts(node: FlowViewNode): PortSpec[] {
+  const all = [...node.inputs, ...(node.constants ?? [])].filter(p => p.type !== 'exec')
+  if (!node.spec || !node.constants?.length) return all
+  const order = [...node.spec.inputs, ...node.spec.params].map(p => p.name)
+  const rank = (n: string) => { const i = order.indexOf(n); return i < 0 ? order.length : i }
+  return all.sort((a, b) => rank(a.name) - rank(b.name))
 }
 
 export interface NodeEdits {
@@ -89,7 +145,15 @@ function NodeParams({ node, params, editable, edits }: { node: FlowViewNode; par
   const { tr } = useTr()
   const fam = FAMILY_INFO[node.family]
   const canEdit = editable && !!node.spec
-  const ports = node.inputs.filter(p => p.type !== 'exec')
+  const { project } = useProject()
+  const ports = paramPorts(node)
+  const needsTokens = ports.some(p => p.tokens)
+  const tokens = useProjectTokens(needsTokens ? project : null)
+  const valueOf = (name: string) => {
+    const p = ports.find(x => x.name === name)
+    return params[name] !== undefined ? params[name] : p?.value
+  }
+  const mode = valueOf('mode')
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -118,6 +182,9 @@ function NodeParams({ node, params, editable, edits }: { node: FlowViewNode; par
         ? <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>{tr('Ce node n\'a pas de parametre.', 'This node has no parameter.')}</div>
         : ports.map(p => (
             <ParamRow key={p.name} p={p} editable={canEdit} raw={params[p.name]}
+                      choices={p.choices ?? FALLBACK_CHOICES[node.type]?.[p.name]}
+                      tokens={tokens} tokenOptions={p.tokens ? tokenKeys(tokens, p.tokens, valueOf('class')) : []}
+                      muted={!paramRelevant(node.type, p.name, mode)}
                       onChange={v => edits.onParam(node.id, p.name, v)} />
           ))}
     </>
@@ -131,9 +198,53 @@ export function ParamsPane({ selected, params, editable, edits, flowPart }: {
   edits: NodeEdits
   flowPart: ReactNode                      // shown when no node is selected
 }) {
+  const { tr } = useTr()
+  const [width, setWidth] = useState(readWidth)
+  const [dragging, setDragging] = useState(false)
+  const drag = useRef<{ x: number; w: number; last: number } | null>(null)
+
+  // Keep the width inside the window when it shrinks.
+  useEffect(() => {
+    const onResize = () => setWidth(w => clampWidth(w))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const onPointerDown = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drag.current = { x: e.clientX, w: width, last: width }
+    setDragging(true)
+  }, [width])
+  const onPointerMove = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return
+    drag.current.last = clampWidth(drag.current.w + drag.current.x - e.clientX)   // dragging left widens
+    setWidth(drag.current.last)
+  }, [])
+  const onPointerUp = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return
+    const w = drag.current.last
+    drag.current = null
+    setDragging(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* storage blocked: width kept for the session */ }
+  }, [])
+  const onDoubleClick = useCallback(() => {
+    setWidth(PARAMS_W)
+    try { localStorage.removeItem(WIDTH_KEY) } catch { /* ignore */ }
+  }, [])
+
   return (
-    <aside style={{ width: PARAMS_W, flexShrink: 0, borderLeft: '1px solid var(--rule)', background: 'var(--paper)', overflowY: 'auto', padding: '10px 12px' }}>
-      {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} /> : flowPart}
+    <aside style={{ width, flexShrink: 0, position: 'relative', borderLeft: '1px solid var(--rule)', background: 'var(--paper)', display: 'flex', minHeight: 0 }}>
+      <div role="separator" aria-orientation="vertical" title={tr('Glisser pour redimensionner (double clic : largeur par defaut)', 'Drag to resize (double click: default width)')}
+           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+           onDoubleClick={onDoubleClick}
+           style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5,
+                    background: dragging ? 'var(--accent)' : 'transparent', opacity: dragging ? 0.5 : 1, touchAction: 'none' }} />
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '10px 12px' }}>
+        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} /> : flowPart}
+      </div>
     </aside>
   )
 }
