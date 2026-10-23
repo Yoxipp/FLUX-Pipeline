@@ -68,6 +68,12 @@ export const flowsApi = {
   deactivate: (name: string, scope: FlowScope, project?: string): Promise<FlowState> =>
     apiCall('POST', `/flows/${encodeURIComponent(name)}/deactivate`, { scope, project }),
   host: (): Promise<HostInfo> => apiCall<HostInfo>('GET', '/flows/host'),
+  // P6a: Deverrouiller a shipped flow / DCC node = team copy (Team TD); remove = to _trash/ (on that
+  // copy: Revenir au defaut).
+  unlock: (name: string, project?: string): Promise<{ state: FlowState; scope: FlowScope; name: string }> =>
+    apiCall('POST', `/flows/${encodeURIComponent(name)}/unlock`, { scope: 'team', project }),
+  remove: (name: string, scope: FlowScope, project?: string): Promise<{ trash: string }> =>
+    apiCall('DELETE', `/flows/${encodeURIComponent(name)}${qs({ scope, project })}`),
   migrate: (dry_run: boolean): Promise<MigrateReport> =>
     apiCall<MigrateReport>('POST', '/flows/migrate', { dry_run }),
 

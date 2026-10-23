@@ -105,7 +105,7 @@ export interface EditActions {
 
 type TabAt = { x: number; y: number; fx: number; fy: number; from?: { end: PortEnd; type: string } }
 
-export function NetworkPane({ view, flowKey, selection, search, dots, straight, catalog, runStates, runLinks, issues, flash, edit, onSelect, onToggleWires }: {
+export function NetworkPane({ view, flowKey, selection, search, dots, straight, catalog, runStates, runLinks, issues, flash, edit, onSelect, onToggleWires, onEnter, onUp }: {
   view: FlowView | null
   issues: Issue[]
   flash: { id: string; n: number } | null
@@ -120,6 +120,8 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
   catalog: CatalogEntry[] | null
   edit: EditActions
   onSelect: (ids: string[]) => void
+  onEnter?: (node: FlowViewNode) => void   // double click / Enter on a DCC subflow node (P6a)
+  onUp?: () => void                         // U: back to the flow we entered from
 }) {
   const { tr, lang } = useTr()
   const { fitView, screenToFlowPosition, getViewport, setViewport } = useReactFlow()
@@ -338,6 +340,11 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
         fitView({ padding: 0.15, ...(sel.length ? { nodes: sel } : {}) })
       }
       else if (e.key === 'Escape') { setTab(null); onSelect([]); setEdgeSel([]); knifeOff() }
+      else if (!ctrl && !e.altKey && !e.shiftKey && k === 'u' && onUp) { e.preventDefault(); onUp() }
+      else if (e.key === 'Enter' && onEnter && selection.size === 1) {
+        const one = byId[[...selection][0]]
+        if (one?.spec?.subflow) { e.preventDefault(); onEnter(one) }
+      }
       else if (ctrl && k === 'a') { e.preventDefault(); edit.onSelectAll() }
       else if (ctrl && k === 'c') { e.preventDefault(); edit.onCopy() }
       else if (readOnly) return
@@ -379,7 +386,7 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', knifeOff)
     }
-  }, [fitView, screenToFlowPosition, onSelect, onToggleWires, edit, readOnly, selection, deleteEdges, knifeOff])
+  }, [fitView, screenToFlowPosition, onSelect, onToggleWires, edit, readOnly, selection, deleteEdges, knifeOff, onEnter, onUp, byId])
 
   // Right drag = zoom around the press point (also with Alt or Space held: the press never
   // reaches xyflow, so Space + right does not pan). No context menu on the graph.
@@ -477,6 +484,7 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
             edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
             onSelectionChange={onSelectionChange}
+            onNodeDoubleClick={(_ev, n) => { const v = byId[n.id]; if (v?.spec?.subflow && onEnter) onEnter(v) }}
             onNodeDragStart={(ev, node, dragged) => {
               dup.current = null
               shake.current = { x: clientX(ev), dir: 0, ext: clientX(ev), times: [], done: false }

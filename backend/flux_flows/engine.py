@@ -48,7 +48,7 @@ from flux_flows.nodes.contract import EXEC_KEY, NodeContext, NodeError
 from flux_flows.nodes.data import cast_literal
 from flux_flows.nodes.operator import (BLOCK_ENDS, BREAK_LOOP, CONDITION_KEY, FOR_BEGIN, FOREACH_BEGIN,
                                        ITEMS_KEY, LIMIT_KEY, SEQUENCE_KEY, WHILE_BEGIN)
-from flux_flows.nodes.subflow import FLOW_CALL
+from flux_flows.nodes.subflow import FLOW_CALL, FLOW_OUTPUT
 
 log = logging.getLogger("flux.flows.engine")
 
@@ -365,14 +365,16 @@ class Run:
         number = None if version in (None, "", "current") else int(version)
         return store.read_flow(roots, scope, name, number)["flow"]
 
-    async def call_flow(self, nid: str, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_flow(self, nid: str, name: str, version: Any, values: Dict[str, Any],
+                        flow: Optional[Flow] = None) -> Dict[str, Any]:
         chain = self.call_stack + (self.flow_name,)
         if name in chain:
             raise NodeError(f"Sous-flow en boucle : {' > '.join(chain + (name,))}", code="E_SUBFLOW_CYCLE")
         if self.depth + 1 > MAX_SUBFLOW_DEPTH:
             raise NodeError(f"Plus de {MAX_SUBFLOW_DEPTH} sous-flows imbriques", code="E_SUBFLOW_CYCLE")
         try:
-            flow = await asyncio.to_thread(self._load_flow, name, version)
+            if flow is None:      # a DCC subflow node hands its flow (dcc_nodes.py)
+                flow = await asyncio.to_thread(self._load_flow, name, version)
         except NodeError:
             raise
         except Exception as exc:
@@ -431,7 +433,7 @@ class Run:
                 return float(raw)
         except (TypeError, ValueError):
             pass
-        if spec.type == FLOW_CALL:
+        if spec.type == FLOW_CALL or spec.subflow:
             return None     # the called flow's nodes have their own timeouts
         return DCC_TIMEOUT_S if spec.family in ("session", "dcc") else DEFAULT_TIMEOUT_S
 
@@ -483,6 +485,10 @@ class Run:
             # Dry run: an Instance without an open instance gives a null session, the DCC
             # nodes behind it are skipped by their simulate / readers (01 §5).
             if self.mode == "dry" and p.type.startswith("session[") and got.get(p.name) is None:
+                continue
+            # A FlowOutput may give back an empty value it received (nothing found, a skipped
+            # Instance in a dry run); an unlinked one is E_REQUIRED_EMPTY at validation.
+            if spec.type == FLOW_OUTPUT and (nid, p.name) in self._data_in:
                 continue
             if p.required and got.get(p.name) in (None, ""):
                 raise NodeError(f"{spec.label} attend `{p.name}` : relie un lien ou saisis une valeur")

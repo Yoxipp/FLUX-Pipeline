@@ -96,6 +96,10 @@ class NodeSpec:
     file: str = ""
     func: Optional[Callable[..., Any]] = None
     simulate: Optional[Callable[..., Any]] = None
+    # P6a: internal = the core leaf of a DCC subflow node, hidden from Tab / Shelf;
+    # subflow = {name, scope, locked, shipped} of a node shipped as a locked subflow (dcc_nodes.py).
+    internal: bool = False
+    subflow: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -105,6 +109,7 @@ class NodeSpec:
             "doc_fr": self.doc_fr, "doc_en": self.doc_en, "destructive": self.destructive,
             "effect": self.effect, "raw": list(self.raw), "source": self.source, "file": self.file,
             "session": self.session, "live_only": self.live_only, "licence": self.licence,
+            "internal": self.internal, "subflow": self.subflow,
         }
 
 
@@ -148,7 +153,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
               aliases: Iterable[str] = (), doc_fr: str = "", doc_en: str = "", destructive: Any = None,
               effect: bool = False, simulate: Optional[Callable[..., Any]] = None,
               raw: Iterable[str] = (), session: Optional[str] = None, live_only: bool = False,
-              licence: Any = None,
+              licence: Any = None, internal: bool = False,
               ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare a node type. The decorated function is its body (run by the engine)."""
     if not NODE_TYPE_RE.match(type):
@@ -164,7 +169,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
         inputs=_check_ports(type, "entree", inputs), outputs=_check_ports(type, "sortie", outputs),
         params=_check_ports(type, "parametre", params), shelf=shelf, aliases=list(aliases),
         doc_fr=doc_fr, doc_en=doc_en, destructive=destructive, effect=effect, simulate=simulate,
-        raw=tuple(raw), session=session, live_only=bool(live_only), licence=licence,
+        raw=tuple(raw), session=session, live_only=bool(live_only), licence=licence, internal=bool(internal),
     )
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -201,16 +206,32 @@ def ensure_builtin() -> None:
                 importlib.import_module(name)
 
 
-def get_node(node_type: str) -> Optional[NodeSpec]:
+def get_core(node_type: str) -> Optional[NodeSpec]:
+    """A node registered in Python (FLUX or team), never a DCC subflow node."""
     ensure_builtin()
     with _LOCK:
         return _REGISTRY.get(node_type)
 
 
+def get_node(node_type: str) -> Optional[NodeSpec]:
+    """Python nodes first, then the DCC nodes shipped as locked subflows (dcc_nodes.py)."""
+    spec = get_core(node_type)
+    if spec is not None:
+        return spec
+    from flux_flows import dcc_nodes
+
+    return dcc_nodes.get_spec(node_type)
+
+
 def all_nodes() -> List[NodeSpec]:
+    from flux_flows import dcc_nodes
+
     ensure_builtin()
     with _LOCK:
-        return sorted(_REGISTRY.values(), key=lambda s: (FAMILIES.index(s.family), s.type))
+        nodes = dict(_REGISTRY)
+    for node_type, spec in dcc_nodes.specs().items():
+        nodes.setdefault(node_type, spec)
+    return sorted(nodes.values(), key=lambda s: (FAMILIES.index(s.family), s.type))
 
 
 @dataclass

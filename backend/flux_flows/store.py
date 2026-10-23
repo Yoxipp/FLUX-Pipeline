@@ -73,6 +73,20 @@ def working_file(root: Path, name: str) -> Path:
     return _contained(root / f"{_check_name(name)}{SUFFIX}", root)
 
 
+def shipped_file(root: Path, name: str) -> Path:
+    """A shipped flow: top level, else a DCC node flow of shipped/dcc/<soft>/ (P6a)."""
+    path = working_file(root, name)
+    if path.is_file():
+        return path
+    from flux_flows import dcc_nodes
+
+    if Path(root).resolve() == dcc_nodes.shipped_dcc_dir().parent.resolve():
+        found = dcc_nodes.shipped_file(name)
+        if found is not None:
+            return found
+    return path
+
+
 def flow_folder(root: Path, name: str) -> Path:
     return _contained(root / _check_name(name), root)
 
@@ -173,7 +187,7 @@ def shipped_changed(roots: Mapping[str, Optional[Path]], scope: str, name: str) 
         return False
     started = read_state(Path(roots[scope]), name).get("shipped_hash")
     try:
-        text = working_file(Path(roots["shipped"]), name).read_text(encoding="utf-8")
+        text = shipped_file(Path(roots["shipped"]), name).read_text(encoding="utf-8")
     except OSError:
         return False
     return bool(started) and started != shipped_hash(text)
@@ -191,7 +205,10 @@ def resolve(roots: Mapping[str, Optional[Path]], name: str) -> Optional[str]:
     _check_name(name)
     for scope in SCOPE_ORDER:
         root = roots.get(scope)
-        if root is not None and working_file(Path(root), name).is_file():
+        if root is None:
+            continue
+        path = shipped_file(Path(root), name) if scope == "shipped" else working_file(Path(root), name)
+        if path.is_file():
             return scope
     return None
 
@@ -229,7 +246,10 @@ def read_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str,
               version: Optional[int] = None) -> Dict[str, Any]:
     """The working file (version None) or a frozen version, with its state."""
     root = _root(roots, scope)
-    path = working_file(root, name) if version is None else version_file(root, name, version)
+    if scope == "shipped" and version is None:
+        path = shipped_file(root, name)
+    else:
+        path = working_file(root, name) if version is None else version_file(root, name, version)
     if scope == "shipped" and version is not None:
         raise FlowStoreError("un flow livre n'a pas de versions", 404)
     try:

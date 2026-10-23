@@ -1,5 +1,6 @@
 # dcc_publish.py — mayPublish / houPublish, the publish black boxes (02_NODES §8, 01 §13,
-# decision 9). P6a.
+# decision 9). P6a. Registered as the cores dcc.<p>_publish_core of the locked subflows
+# shipped/dcc/<soft>/<p>_publish.flow.yml (node_type dcc.<p>_publish, dcc_nodes.py).
 #
 # They call the SAME code as the Publisher, nothing is cut: run_maya_publish_action /
 # run_houdini_publish_action (flux_actions/runner.py, publish_core.py untouched). The runner
@@ -103,7 +104,7 @@ _OUTS = [dc.THEN, dc.ERR, port("publish", "publish", "Le publish (PublishFields 
          port("version", "int", "Version ecrite", "Written version", 3)]
 
 
-@flow_node("dcc.may_publish", "mayPublish", icon="PackagePlus",
+@flow_node("dcc.may_publish_core", "mayPublishCore", icon="PackagePlus", internal=True,
            inputs=[dc.EXEC, dc.session_port("maya", "Maya"),
                    port("name", "str", "Nom FLUX du publish (tokens, sans version)", "FLUX publish name (tokens, no version)",
                         "CHAR_MODEL_chair_null", required=True)],
@@ -139,7 +140,7 @@ def may_publish(ctx, inputs, params):
     return _result(Path(dest), ext, user)
 
 
-@flow_node("dcc.hou_publish", "houPublish", icon="PackagePlus",
+@flow_node("dcc.hou_publish_core", "houPublishCore", icon="PackagePlus", internal=True,
            inputs=[dc.EXEC, dc.session_port("houdini", "Houdini"),
                    port("name", "str", "Nom FLUX du publish (vide = nom du node)", "FLUX publish name (empty = node name)",
                         "FX_SIM_smoke_null"),

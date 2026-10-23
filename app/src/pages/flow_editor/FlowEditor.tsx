@@ -22,6 +22,9 @@
 // Entry needs the TD box (flows_td, 01 §7): without it the route shows "Acces refuse".
 // P5: Activer (ActivationDialog, 03 §5) on the frozen version `current`; WS `activation`
 // of the open flow refreshes its state.
+// P6a (03 §8): double click / Enter on a DCC node shipped as a locked subflow enters it (trail
+// shown as a breadcrumb in the top bar, U goes back up); DccBanner: Deverrouiller (team copy) and
+// Revenir au defaut. The core leaves (spec.internal) are left out of Tab / Shelf / Catalogue.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
@@ -46,6 +49,7 @@ import { VersionsDialog } from './VersionsDialog'
 import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
 import { DestructiveDialog } from './DestructiveDialog'
 import { ActivationDialog } from './ActivationDialog'
+import { DccBanner } from './DccBanner'
 import { destructiveAdded } from './destructive'
 import { registerCloseGuard } from '../../components/shared/closeGuard'
 import { applyFix, autoBegin } from './fixes'
@@ -92,6 +96,7 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [reloadKey, setReloadKey] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [activationOpen, setActivationOpen] = useState(false)
+  const [trail, setTrail] = useState<{ name: string; scope: FlowScope }[]>([])   // DCC nodes entered
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   // "!" nodes to confirm with the slider before a save; resolve(true) = confirmed.
   const [destructive, setDestructive] = useState<{ ids: string[]; resolve: (ok: boolean) => void } | null>(null)
@@ -248,6 +253,8 @@ function Editor({ rights }: { rights: FlowRights }) {
     return () => { alive = false; clearTimeout(t) }
   }, [doc, loaded?.scope, loaded?.name, project])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Tab, Shelf and Catalogue never offer the core leaves of the DCC nodes (they live inside them).
+  const menuCatalog = useMemo(() => catalog ? catalog.filter(e => !e.spec?.internal) : null, [catalog])
   const specs = useMemo<SpecIndex>(() => Object.fromEntries((catalog ?? []).filter(e => e.spec).map(e => [e.type, e.spec!])), [catalog])
   const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope, specs }) : null, [doc, loaded, saveBlocked, specs])
 
@@ -307,9 +314,22 @@ function Editor({ rights }: { rights: FlowRights }) {
   const quit = useCallback(() => saveDoc('save', { quiet: true }), [saveDoc])
   useEffect(() => registerCloseGuard(quit), [quit])
   const open = useCallback(async (name: string, scope?: FlowScope, version?: number) => {
-    if (!(await quit())) return
+    if (!(await quit())) return false
     switchTo(name, scope, version)
+    return true
   }, [quit, switchTo])
+
+  // Enter a DCC node (its locked subflow, or the team copy), and back up (U, breadcrumb).
+  const enter = useCallback(async (node: { spec?: { subflow?: { name: string; scope: FlowScope } | null } }) => {
+    const sub = node.spec?.subflow
+    if (!sub || !loaded) return
+    const here = { name: loaded.name, scope: loaded.scope }
+    if (await open(sub.name, sub.scope)) setTrail(t => [...t, here])
+  }, [loaded, open])
+  const upTo = useCallback(async (index: number) => {
+    const target = trail[index]
+    if (target && await open(target.name, target.scope)) setTrail(t => t.slice(0, index))
+  }, [trail, open])
 
   const revert = useCallback((version: number) => {
     if (!loaded) return
@@ -618,7 +638,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         straight={prefs.straight}
         actions={{
           onNew: () => setDialog('new'),
-          onOpen: f => open(f.name, f.scope),
+          onOpen: f => { void open(f.name, f.scope).then(ok => { if (ok) setTrail([]) }) },
           onSave: () => save(),
           onSaveAs: () => setDialog('saveas'),
           onIncrement: () => increment(),
@@ -644,7 +664,9 @@ function Editor({ rights }: { rights: FlowRights }) {
           edit.onNote([p.x, p.y])
         }}
         onVersions={() => setVersionsOpen(true)}
-        activation={loaded ? {
+        trail={trail.map(t => t.name)}
+        onCrumb={i => { void upTo(i) }}
+        activation={loaded && !loaded.dcc ? {
           active: loaded.state.active, activeVersion: loaded.state.active_version, current: loaded.state.current,
           onOpen: () => setActivationOpen(true),
         } : undefined}
@@ -657,15 +679,30 @@ function Editor({ rights }: { rights: FlowRights }) {
           </button>
         </div>
       )}
+      {loaded?.dcc && (
+        <DccBanner
+          name={loaded.name} locked={loaded.dcc.locked} teamCopy={loaded.dcc.team_copy} canUnlock={rights.team_td}
+          onUnlock={() => {
+            flowsApi.unlock(loaded.name, project || undefined)
+              .then(() => { toast.success(tr(`${loaded.name} deverrouille : copie d'equipe creee`, `${loaded.name} unlocked: team copy created`)); refreshList(); loadCatalog(); switchTo(loaded.name, 'team') })
+              .catch((e: Error) => toast.error(e.message))
+          }}
+          onRevert={() => {
+            flowsApi.remove(loaded.name, 'team', project || undefined)
+              .then(() => { toast.success(tr(`${loaded.name} : node livre retabli`, `${loaded.name}: shipped node restored`)); refreshList(); loadCatalog(); switchTo(loaded.name, 'shipped') })
+              .catch((e: Error) => toast.error(e.message))
+          }}
+        />
+      )}
       {loaded?.legacy && (
         <div className="flow-banner">
           {tr('Flow migre des actions v1. Le publish tourne encore sur les actions v1 (jusqu\'a P8) : ce flow ne s\'active pas.',
               'Flow migrated from the v1 actions. Publishing still runs on the v1 actions (until P8): this flow does not activate.')}
         </div>
       )}
-      <ShelfBar catalog={catalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)} />
+      <ShelfBar catalog={menuCatalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {paletteOpen && <NodePalette catalog={catalog} errors={nodeErrors} canWriteNode={rights.team_td} onNewNode={() => setWriting(true)}
+        {paletteOpen && <NodePalette catalog={menuCatalog} errors={nodeErrors} canWriteNode={rights.team_td} onNewNode={() => setWriting(true)}
                                      onPick={onPick} onClose={() => setPaletteOpen(false)} />}
         {error
           ? <div style={{ flex: 1, padding: 20, fontSize: 12, color: 'var(--ink-3)' }}>
@@ -674,7 +711,8 @@ function Editor({ rights }: { rights: FlowRights }) {
           : <NetworkPane
               view={view} flowKey={loaded ? `${loaded.scope}:${loaded.name}:${loaded.version ?? ''}` : ''}
               selection={selection} edit={edit}
-              search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates} runLinks={runLinks}
+              search={search} dots={prefs.dots} straight={prefs.straight} catalog={menuCatalog} runStates={runStates} runLinks={runLinks}
+              onEnter={n => { void enter(n) }} onUp={trail.length ? () => { void upTo(trail.length - 1) } : undefined}
               issues={issues} flash={flash}
               onSelect={onSelect} onToggleWires={toggleWires}
             />}

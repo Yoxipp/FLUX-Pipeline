@@ -423,9 +423,16 @@ async def get_flow(name: str, scope: Optional[str] = None, project: Optional[str
             raise HTTPException(status_code=404, detail={"message": f"flow {name} introuvable"})
     got = await _call(store.read_flow, roots, scope, name, version)
     flow = got["flow"]
+    dcc = None
+    if flow.node_type:   # a DCC node shipped as a locked subflow, or its team copy (P6a, 03 §8)
+        from flux_flows import dcc_nodes
+
+        shipped = await asyncio.to_thread(dcc_nodes.shipped_file, name)
+        dcc = {"node_type": flow.node_type, "locked": scope == "shipped",
+               "team_copy": scope == "team" and shipped is not None}
     return {"scope": scope, "category": _category(scope), "name": name, "version": version,
             "flow": to_document(flow), "state": got["state"], "legacy": name.startswith(store.LEGACY_PREFIX),
-            "issues": v1_limit_issues(flow)}
+            "issues": v1_limit_issues(flow), "dcc": dcc}
 
 
 @router.get("/{name}/versions")
@@ -612,16 +619,40 @@ async def copy(name: str, body: CopyBody) -> dict[str, Any]:
     """Enregistrer sous to another scope / name, or unlock a shipped flow (copy to team, Team TD)."""
     action = rights.ADMIN if body.from_scope == "shipped" and body.to_scope == "team" else rights.WRITE
     current = await _require(action, body.to_scope)
-    return await _call(store.copy_flow, _roots(current["user"], body.project), name, body.from_scope,
-                       body.to_scope, user=current["user"] or "", new_name=body.new_name)
+    from flux_flows import dcc_nodes
+
+    got = await _call(store.copy_flow, _roots(current["user"], body.project), name, body.from_scope,
+                      body.to_scope, user=current["user"] or "", new_name=body.new_name)
+    dcc_nodes.reset_cache()
+    return got
+
+
+@router.post("/{name}/unlock")
+async def unlock(name: str, body: ScopeBody) -> dict[str, Any]:
+    """Deverrouiller a shipped flow or DCC node (decision 19, 03 §8): a team copy of the same
+    name that replaces it for the whole team (Team TD). DELETE of the copy = Revenir au defaut."""
+    from flux_flows import dcc_nodes
+
+    current = await _require(rights.ADMIN, "team")
+    got = await _call(store.copy_flow, _roots(current["user"], body.project), name, "shipped", "team",
+                      user=current["user"] or "")
+    dcc_nodes.reset_cache()
+    events.emit({"type": "flow_changed", "flow": name, "scope": "team", "project": None,
+                 "version": got["state"].get("current"), "revision": got["state"].get("revision"),
+                 "by": current["user"]})
+    return got
 
 
 @router.delete("/{name}")
 async def delete(name: str, scope: str, project: Optional[str] = None) -> dict[str, Any]:
     """To <scope>/_trash/; on a team copy of a shipped flow = Revenir au defaut."""
+    from flux_flows import dcc_nodes
+
     current = await _require(rights.WRITE, scope)
-    return await _call(store.delete_flow, _roots(current["user"], project), scope, name,
-                       user=current["user"] or "")
+    got = await _call(store.delete_flow, _roots(current["user"], project), scope, name,
+                      user=current["user"] or "")
+    dcc_nodes.reset_cache()
+    return got
 
 
 def _note_dry_run(run: engine.Run, root: Path, name: str, version: int) -> None:

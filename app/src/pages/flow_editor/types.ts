@@ -203,6 +203,7 @@ export interface FlowRead {
   state:    FlowState
   legacy:   boolean
   issues:   { code: string; node?: string; message?: string }[]
+  dcc?:     { node_type: string; locked: boolean; team_copy: boolean } | null   // DCC node flow (P6a, 03 §8)
 }
 
 export interface MigrateReport {
@@ -250,6 +251,8 @@ export interface NodeSpec {
   session:     string | null
   live_only:   boolean
   licence:     CondFlag
+  internal?:   boolean          // core leaf of a DCC subflow node: hidden from Tab / Shelf (P6a)
+  subflow?:    { name: string; scope: FlowScope; locked: boolean; shipped: boolean } | null   // DCC node shipped as a locked subflow
 }
 
 export interface FlowCatalog {

@@ -36,6 +36,14 @@ RESERVED_NAMES = frozenset(
 # Flow variable / interface ids that would shadow $FLUX or a context key.
 RESERVED_VARS = frozenset("flux project asset shot seq user date time".split())
 INTERFACE_TYPES = frozenset("bool int float str path dir pattern list[str] select".split())
+# P6a: a DCC node shipped as a locked subflow (node_type) takes a session and DCC nodes
+# from its caller; these inputs are linked, never typed in a page form.
+LINK_ONLY_TYPES = frozenset({"dcc_node", "list[dcc_node]", "publish"})
+SESSION_TYPE_RE = re.compile(r"^session\[([a-z][a-z0-9_]*|\*)\]$")
+
+
+def interface_type_ok(kind: str) -> bool:
+    return kind in INTERFACE_TYPES or kind in LINK_ONLY_TYPES or bool(SESSION_TYPE_RE.match(kind))
 SUBNET_TYPE = "subnet"
 
 MAX_BYTES = 1024 * 1024
@@ -72,8 +80,9 @@ class InterfaceInput(_Strict):
 
     @model_validator(mode="after")
     def _check(self) -> "InterfaceInput":
-        if self.type not in INTERFACE_TYPES:
-            raise ValueError(f"type '{self.type}' inconnu (attendu : {', '.join(sorted(INTERFACE_TYPES))})")
+        if not interface_type_ok(self.type):
+            raise ValueError(f"type '{self.type}' inconnu (attendu : {', '.join(sorted(INTERFACE_TYPES))}, "
+                             "ou session[<logiciel>], dcc_node, publish pour un node DCC)")
         if (self.options is not None) != (self.type == "select"):
             raise ValueError("'options' va avec le type select, et seulement lui")
         return self

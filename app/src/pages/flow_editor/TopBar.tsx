@@ -45,7 +45,7 @@ export interface ActivationInfo { active: boolean; activeVersion: number | null;
 
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, activation, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, activation, trail, onCrumb, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -62,6 +62,8 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   run: RunActions
   problems: ProblemsInfo
   activation?: ActivationInfo
+  trail?: string[]             // flows we entered a DCC node from (breadcrumb, P6a)
+  onCrumb?: (index: number) => void
   onSearch: (s: string) => void
   onToggleDots: () => void
   onToggleWires: () => void
@@ -125,6 +127,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
         </Menu.Portal>
       </Menu.Root>
 
+      {(trail ?? []).map((name, i) => (
+        <span key={`${i}:${name}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+          <button type="button" className="flow-tool" onClick={() => onCrumb?.(i)} title={tr('Remonter (U)', 'Go up (U)')}>{name}</button>
+          <ChevronRight size={12} color="var(--ink-3)" />
+        </span>
+      ))}
       <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', marginLeft: 4 }}>{current || '…'}</span>
       {scope && <span className="tag">{scopeTag[scope]}</span>}
       {!!version && <span className="tag" style={{ cursor: 'pointer' }} onClick={onVersions} title={tr('Versions et historique', 'Versions and history')}>v{String(version).padStart(3, '0')}</span>}

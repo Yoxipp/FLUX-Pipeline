@@ -106,8 +106,9 @@ class NodeContext:
         self._run.add_cleanup(fn)
 
     # -- subflows (subflow.flow_call / flow_output) ------------------------------
-    async def call_flow(self, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
-        return await self._run.call_flow(self.node_id, name, version, values)
+    async def call_flow(self, name: str, version: Any, values: Dict[str, Any], flow: Any = None) -> Dict[str, Any]:
+        """Run flow *name* inline (or the given *flow*: a DCC subflow node)."""
+        return await self._run.call_flow(self.node_id, name, version, values, flow=flow)
 
     def set_output(self, ident: str, value: Any) -> None:
         self._run.set_output(ident, value)

@@ -128,7 +128,8 @@ def frame_range(value: Any) -> Optional[tuple]:
 # -- the Instance node of a soft ---------------------------------------------------------
 
 def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) -> None:
-    """Register session.<prefix>_instance for *soft* (decision 24, 02 §8)."""
+    """Register session.<prefix>_instance_core for *soft* (decision 24, 02 §8): the Python core of
+    the <Soft>Instance node, which is the locked subflow around it."""
     from flux_flows.bridges import softs
     from flux_flows.bridges.session import MODES, PICKS
 
@@ -192,7 +193,9 @@ def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) ->
         return {"lines": [{"kind": "dcc", "text_fr": text + (f" ({why})" if why else ""), "path": scene or None}],
                 "outputs": empty}
 
-    flow_node(f"session.{spec.prefix}_instance", f"{label}Instance", icon=icon,
+    # The core leaf of the shipped locked subflow shipped/dcc/<soft>/<prefix>_instance.flow.yml
+    # (node_type session.<prefix>_instance, dcc_nodes.py): hidden from Tab / Shelf.
+    flow_node(f"session.{spec.prefix}_instance_core", f"{label}InstanceCore", icon=icon, internal=True,
               inputs=[EXEC, port("scene", "path", "Scene : ouverte au lancement, ou cherchee avec pick scene",
                                  "Scene: opened at start, or looked for with pick scene", "$FLUX/PROJ/shot010_v003"),
                       *([port("template", "path", "Headless : scene de depart si pas de scene",

@@ -9,10 +9,12 @@
 // (i) shows the node's section of docs/flows/03_INDEX_NODES.md (nodeDoc.tsx), else the registry doc,
 // then every current value (2026-10-23): Inputs (literal value or "<- node.port", plus the
 // value received in the run when known) and Outputs (last value of the run when known).
+// P6a: a DCC node shipped as a locked subflow shows a lock (shipped) or a team tag (its team
+// copy); double click enters it (NetworkPane), like a Houdini HDA (03_EDITEUR §8).
 
 import { memo, useRef, useState } from 'react'
 import { NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react'
-import { Ban, CircleCheck, CircleX, Info, LoaderCircle } from 'lucide-react'
+import { Ban, CircleCheck, CircleX, Info, LoaderCircle, Lock, Users } from 'lucide-react'
 import { FAMILY_INFO } from '../families'
 import { NodeDocText, nodeDocSection } from '../nodeDoc'
 import { iconFor } from '../icons'
@@ -180,6 +182,14 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
           {node.prefix && (
             <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: 'color-mix(in oklch, var(--on-accent) 18%, transparent)' }}>
               {node.prefix}
+            </span>
+          )}
+          {node.spec?.subflow && (
+            <span title={node.spec.subflow.scope === 'shipped'
+                    ? tr('Node livre verrouille : double clic pour voir dedans', 'Locked shipped node: double click to look inside')
+                    : tr('Copie d\'equipe du node livre : double clic pour l\'editer', 'Team copy of the shipped node: double click to edit it')}
+                  style={{ display: 'inline-flex', flexShrink: 0 }}>
+              {node.spec.subflow.scope === 'shipped' ? <Lock size={12} /> : <Users size={12} />}
             </span>
           )}
           {node.destructive && (
