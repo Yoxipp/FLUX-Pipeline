@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -25,7 +26,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
 
 from flux_flows.model import NAME_RE, Flow, FlowSchemaError, dump_flow, load_flow_text
 
@@ -114,8 +115,9 @@ def _write_text(path: Path, text: str) -> None:
 
 
 def _default_state() -> Dict[str, Any]:
+    # valid: validation of the working file at its last write (P4, None = never validated).
     return {"current": 0, "active_version": None, "active": False, "revision": 0,
-            "saved_by": None, "saved_at": None}
+            "saved_by": None, "saved_at": None, "valid": None}
 
 
 def read_state(root: Path, name: str) -> Dict[str, Any]:
@@ -158,6 +160,23 @@ def _history(roots: Mapping[str, Optional[Path]], scope: str, entry: Dict[str, A
 
 def _canonical(text: str) -> str:
     return dump_flow(load_flow_text(text))
+
+
+def shipped_hash(text: str) -> str:
+    """Fingerprint of a shipped flow's canonical content (W_SHIPPED_CHANGED)."""
+    return hashlib.sha1(_canonical(text).encode("utf-8")).hexdigest()[:16]
+
+
+def shipped_changed(roots: Mapping[str, Optional[Path]], scope: str, name: str) -> bool:
+    """A team copy (unlock) whose shipped original changed since the copy."""
+    if scope != "team" or roots.get("shipped") is None or roots.get(scope) is None:
+        return False
+    started = read_state(Path(roots[scope]), name).get("shipped_hash")
+    try:
+        text = working_file(Path(roots["shipped"]), name).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return bool(started) and started != shipped_hash(text)
 
 
 def _require_writable(scope: str) -> None:
@@ -249,19 +268,24 @@ def _check_revision(state: Dict[str, Any], base_revision: Optional[int], exists:
                              {"revision": state["revision"], "by": state["saved_by"], "at": state["saved_at"]})
 
 
-def _write_working(root: Path, scope: str, flow: Flow, state: Dict[str, Any], user: str) -> Dict[str, Any]:
+def _write_working(root: Path, scope: str, flow: Flow, state: Dict[str, Any], user: str,
+                   valid: Optional[bool] = None) -> Dict[str, Any]:
     text = dump_flow(flow, scope=scope, version=state["current"] or None, active=bool(state["active"]))
     _write_text(working_file(root, flow.name), text)
     state.update(revision=int(state["revision"]) + 1, saved_by=user, saved_at=_now())
+    if valid is not None:
+        state["valid"] = bool(valid)
     _write_state(root, flow.name, state)
     return state
 
 
 def save_flow(roots: Mapping[str, Optional[Path]], scope: str, flow: Flow, *, user: str,
-              base_revision: Optional[int] = None, force: bool = False, note: str = "") -> Dict[str, Any]:
+              base_revision: Optional[int] = None, force: bool = False, note: str = "",
+              valid: Optional[bool] = None, extra_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Enregistrer: overwrite the working file. ``base_revision`` None = a new flow
     (Nouveau, Enregistrer sous): refused if the name exists. ``force`` skips the
-    conflict check (the user chose to overwrite after a 409)."""
+    conflict check (the user chose to overwrite after a 409). ``valid`` = result of
+    the validation (P4), kept in state.json; ``extra_state`` = more state keys."""
     _require_writable(scope)
     root = _root(roots, scope)
     name = flow.name
@@ -270,7 +294,8 @@ def save_flow(roots: Mapping[str, Optional[Path]], scope: str, flow: Flow, *, us
         state = read_state(root, name)
         if not force:
             _check_revision(state, base_revision, working_file(root, name).is_file())
-        state = _write_working(root, scope, flow, state, user)
+        state.update(extra_state or {})
+        state = _write_working(root, scope, flow, state, user, valid)
     _history(roots, scope, {"kind": "save", "user": user, "flow": name, "revision": state["revision"],
                             "version": state["current"] or None, "note": note})
     return state
@@ -294,7 +319,7 @@ def _freeze(root: Path, scope: str, name: str, state: Dict[str, Any], user: str)
 
 def increment_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str, *, user: str,
                    flow: Optional[Flow] = None, base_revision: Optional[int] = None,
-                   force: bool = False, note: str = "") -> Dict[str, Any]:
+                   force: bool = False, note: str = "", valid: Optional[bool] = None) -> Dict[str, Any]:
     """Enregistrer et incrementer: optional save of *flow*, then freeze a version
     only if the content changed. Returns ``{state, created}``."""
     _require_writable(scope)
@@ -308,7 +333,7 @@ def increment_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str, *
         if flow is not None:
             if not force:
                 _check_revision(state, base_revision, exists)
-            state = _write_working(root, scope, flow, state, user)
+            state = _write_working(root, scope, flow, state, user, valid)
         elif not exists:
             raise FlowStoreError(f"flow {name} introuvable ({scope})", 404)
         from_version = state["current"] or None
@@ -323,7 +348,7 @@ def increment_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str, *
 
 
 def revert_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str, version: int, *,
-                user: str) -> Dict[str, Any]:
+                user: str, validator: Optional[Callable[[Flow], bool]] = None) -> Dict[str, Any]:
     """Revenir a vN: the working file becomes vN and is frozen as v(max+1)
     (nothing is lost; no new version if vN is already the latest content)."""
     _require_writable(scope)
@@ -335,7 +360,8 @@ def revert_flow(roots: Mapping[str, Optional[Path]], scope: str, name: str, vers
             raise FlowStoreError(f"version {version} de {name} introuvable", 404) from None
         state = read_state(root, name)
         from_version = state["current"] or None
-        state = _write_working(root, scope, load_flow_text(text), state, user)
+        restored = load_flow_text(text)
+        state = _write_working(root, scope, restored, state, user, validator(restored) if validator else None)
         created = _freeze(root, scope, name, state, user)
     _history(roots, scope, {"kind": "revert", "user": user, "flow": name, "version": created or state["current"],
                             "from_version": from_version, "to_version": version, "note": ""})
@@ -367,7 +393,9 @@ def copy_flow(roots: Mapping[str, Optional[Path]], name: str, from_scope: str, t
     copy to team; Enregistrer sous elsewhere). Refused if the target exists."""
     src = read_flow(roots, from_scope, name)
     flow = src["flow"].model_copy(update={"name": _check_name(new_name or name)})
-    state = save_flow(roots, to_scope, flow, user=user, note=f"copie de {from_scope}/{name}")
+    # Unlock: remember which shipped content the copy started from (W_SHIPPED_CHANGED, P4).
+    extra = {"shipped_hash": shipped_hash(src["text"])} if from_scope == "shipped" and flow.name == name else None
+    state = save_flow(roots, to_scope, flow, user=user, note=f"copie de {from_scope}/{name}", extra_state=extra)
     return {"state": state, "scope": to_scope, "name": flow.name}
 
 

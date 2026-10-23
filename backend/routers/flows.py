@@ -6,19 +6,24 @@
 # local user first (flux_flows.rights, 01 §7: a guard, not security). Scope and
 # project come from the query or the body; the user is the local config user.
 # P2: runs (draft run, dry run, active version), run history, cancel, WS /flows/ws
-# (01 §10). No validation gate yet (P4): the engine prechecks unknown nodes / events.
+# (01 §10). P4: POST /flows/validate (flux_flows.validate is the truth); a save keeps
+# ``valid`` in state.json (saving with errors is allowed); PUT / increment refuse a
+# destructive node added without being in ``confirmed_destructive`` (409,
+# E_DESTRUCTIVE_UNCONFIRMED); activation refuses a frozen version with errors; the
+# engine refuses a run with errors (a type mismatch only blocks real runs, ADR 0058).
 
 from __future__ import annotations
 
 import asyncio
 import socket
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import engine, events, locations, migrate_v1, patterns, resolver, rights, runs, store
-from flux_flows.model import FlowSchemaError, parse_flow, to_document, v1_limit_issues
+from flux_flows import engine, events, locations, migrate_v1, patterns, resolver, rights, runs, store, validate
+from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
 from flux_flows.nodes.contract import NodeError
@@ -107,6 +112,55 @@ async def post_preview(body: PreviewBody) -> dict[str, Any]:
     except NodeError as exc:
         return {"result": None, "error": exc.message, "code": exc.code, **exc.details}
     return {"result": result, "error": None}
+
+
+# -- validation (static, before /{name}) ------------------------------------------
+
+def _validation_env(roots: dict, scope: str, name: str, project: Optional[str]) -> validate.Env:
+    """Env of a flow of *scope*: its project, FlowCall loader, dry-run result, shipped copy."""
+    def loader(other: str) -> Optional[Flow]:
+        found = store.resolve(roots, other)
+        return store.read_flow(roots, found, other)["flow"] if found else None
+
+    state: dict[str, Any] = {}
+    root = roots.get(scope)
+    if root is not None and scope != "shipped":
+        state = store.read_state(Path(root), name)
+    done = state.get("dry_run_ok") or {}
+    tested = done.get("nodes_simulated") if done.get("version") == state.get("current") else None
+    return validate.default_env(project if scope == "project" else None, flow_loader=loader, tested=tested,
+                                shipped_changed=store.shipped_changed(roots, scope, name))
+
+
+def _issues(roots: dict, scope: str, flow: Flow, project: Optional[str]) -> list[validate.Issue]:
+    return validate.validate(flow, _validation_env(roots, scope, flow.name, project))
+
+
+def _dicts(issues: list[validate.Issue]) -> list[dict[str, Any]]:
+    return [i.to_dict() for i in issues]
+
+
+class ValidateBody(BaseModel):
+    flow: dict[str, Any]
+    scope: str = "team"
+    project: Optional[str] = None
+
+
+@router.post("/validate")
+async def post_validate(body: ValidateBody) -> dict[str, Any]:
+    """Issues of an editor document (debounced by the editor). Never writes anything."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _roots(current["user"], body.project)
+
+    def work() -> list[validate.Issue]:
+        try:
+            flow = parse_flow(body.flow)
+        except FlowSchemaError:
+            return validate.validate_document(body.flow)[1]
+        return _issues(roots, body.scope, flow, body.project)
+
+    issues = await asyncio.to_thread(work)
+    return {"issues": _dicts(issues), "valid": not validate.errors(issues)}
 
 
 # -- runs (static, before /{name})---------------------------------------------
@@ -243,6 +297,7 @@ class SaveBody(BaseModel):
     base_revision: Optional[int] = None   # None = new flow (Nouveau, Enregistrer sous)
     force: bool = False                   # overwrite after a 409
     note: str = ""
+    confirmed_destructive: list[str] = [] # `!` nodes the user confirmed with the slider
 
 
 class IncrementBody(BaseModel):
@@ -252,6 +307,7 @@ class IncrementBody(BaseModel):
     base_revision: Optional[int] = None
     force: bool = False
     note: str = ""
+    confirmed_destructive: list[str] = []
 
 
 class ScopeBody(BaseModel):
@@ -301,40 +357,82 @@ async def get_versions(name: str, scope: str, project: Optional[str] = None) -> 
     return await _call(store.list_versions, _roots(current["user"], project), scope, name)
 
 
+def _check_confirmed(roots: dict, scope: str, flow: Flow, confirmed: list[str]) -> list[validate.Issue]:
+    """E_DESTRUCTIVE_UNCONFIRMED against the working file of *scope* (none = a new file)."""
+    try:
+        previous = store.read_flow(roots, scope, flow.name)["flow"]
+    except (FlowStoreError, FlowSchemaError):
+        previous = None
+    return validate.unconfirmed_destructive(flow, previous, confirmed)
+
+
+async def _gate_save(roots: dict, scope: str, flow: Flow, confirmed: list[str],
+                     project: Optional[str]) -> list[validate.Issue]:
+    """409 when a `!` node was added without the slider; else the issues of *flow*."""
+    refused = await asyncio.to_thread(_check_confirmed, roots, scope, flow, confirmed)
+    if refused:
+        raise HTTPException(status_code=409, detail={
+            "message": "Des nodes destructifs doivent etre valides au curseur", "code": "E_DESTRUCTIVE_UNCONFIRMED",
+            "issues": _dicts(refused)})
+    return await asyncio.to_thread(_issues, roots, scope, flow, project)
+
+
 @router.put("/{name}")
 async def save(name: str, body: SaveBody) -> dict[str, Any]:
-    """Enregistrer: overwrite the working file (409 on a revision conflict)."""
+    """Enregistrer: overwrite the working file (409 on a revision conflict or an unconfirmed `!`).
+    Saving with errors is allowed: state.json ``valid`` = false, the flow does not activate."""
     current = await _require(rights.WRITE, body.scope)
     flow = _parse(body.flow, name)
-    state = await _call(store.save_flow, _roots(current["user"], body.project), body.scope, flow,
-                        user=current["user"] or "", base_revision=body.base_revision, force=body.force,
-                        note=body.note)
-    return {"state": state, "issues": v1_limit_issues(flow)}
+    roots = _roots(current["user"], body.project)
+    issues = await _gate_save(roots, body.scope, flow, body.confirmed_destructive, body.project)
+    valid = not validate.errors(issues)
+    state = await _call(store.save_flow, roots, body.scope, flow, user=current["user"] or "",
+                        base_revision=body.base_revision, force=body.force, note=body.note, valid=valid)
+    return {"state": state, "issues": _dicts(issues), "valid": valid}
 
 
 @router.post("/{name}/increment")
 async def increment(name: str, body: IncrementBody) -> dict[str, Any]:
     """Enregistrer et incrementer: optional save, then a frozen version if the content changed."""
     current = await _require(rights.WRITE, body.scope)
-    flow = _parse(body.flow, name) if body.flow is not None else None
-    return await _call(store.increment_flow, _roots(current["user"], body.project), body.scope, name,
-                       user=current["user"] or "", flow=flow, base_revision=body.base_revision,
-                       force=body.force, note=body.note)
+    roots = _roots(current["user"], body.project)
+    flow, issues, valid = None, [], None
+    if body.flow is not None:
+        flow = _parse(body.flow, name)
+        issues = await _gate_save(roots, body.scope, flow, body.confirmed_destructive, body.project)
+        valid = not validate.errors(issues)
+    got = await _call(store.increment_flow, roots, body.scope, name, user=current["user"] or "", flow=flow,
+                      base_revision=body.base_revision, force=body.force, note=body.note, valid=valid)
+    return {**got, "issues": _dicts(issues), "valid": got["state"].get("valid")}
 
 
 @router.post("/{name}/revert")
 async def revert(name: str, body: RevertBody) -> dict[str, Any]:
     current = await _require(rights.WRITE, body.scope)
-    return await _call(store.revert_flow, _roots(current["user"], body.project), body.scope, name,
-                       body.to_version, user=current["user"] or "")
+    roots = _roots(current["user"], body.project)
+
+    def is_valid(flow: Flow) -> bool:
+        return not validate.errors(_issues(roots, body.scope, flow, body.project))
+
+    return await _call(store.revert_flow, roots, body.scope, name, body.to_version,
+                       user=current["user"] or "", validator=is_valid)
 
 
 @router.post("/{name}/activate")
 async def activate(name: str, body: ScopeBody) -> dict[str, Any]:
-    """Refused for legacy_* flows (the publish runs on v1 until P8) and without a frozen version."""
+    """Refused for legacy_* flows (the publish runs on v1 until P8), without a frozen version
+    and when the frozen version has errors (409 ``gate``). Warnings and dry run: P5."""
     current = await _require(rights.WRITE, body.scope)
-    return await _call(store.set_active, _roots(current["user"], body.project), body.scope, name, True,
-                       user=current["user"] or "")
+    roots = _roots(current["user"], body.project)
+    state = (await _call(store.read_flow, roots, body.scope, name))["state"]
+    if state.get("current") and not name.startswith(store.LEGACY_PREFIX):
+        frozen = (await _call(store.read_flow, roots, body.scope, name, state["current"]))["flow"]
+        gate = validate.errors(await asyncio.to_thread(_issues, roots, body.scope, frozen, body.project))
+        if gate:
+            raise HTTPException(status_code=409, detail={
+                "message": f"v{state['current']} a {len(gate)} erreur(s) : corrige puis incremente",
+                "gate": _dicts(gate)})
+    return await _call(store.set_active, roots, body.scope, name, True, user=current["user"] or "")
 
 
 @router.post("/{name}/deactivate")

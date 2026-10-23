@@ -78,7 +78,7 @@ class ForLoop(unittest.TestCase):
         self.assertEqual([n for n, _ in h.CALLS], ["after"])
 
     def test_step_zero_and_ceiling(self):
-        self.assertEqual(self._for(start=1, end=3, step=0)["status"], "error")
+        self.assertEqual(h.refused_codes(self._for(start=1, end=3, step=0)), ["E_PARAM_INVALID"])
         rec = self._for(start=1, end=20, max_iterations=5)
         self.assertEqual(rec["status"], "error")
         self.assertIn("max_iterations", rec["nodes"]["b"]["error"])

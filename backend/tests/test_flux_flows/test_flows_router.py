@@ -17,7 +17,7 @@ from routers import flows as flows_router
 
 def _doc(name: str = "daily", label: str = "Daily") -> dict:
     return {"flux_flow": 2, "name": name, "label": label,
-            "nodes": {"n1": {"type": "data.value", "params": {"value": 1}}}}
+            "nodes": {"ev": {"type": "event.manual"}, "n1": {"type": "data.value", "params": {"value": 1}}}}
 
 
 class Router(unittest.TestCase):

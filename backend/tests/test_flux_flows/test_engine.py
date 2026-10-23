@@ -43,7 +43,8 @@ class Exec(unittest.TestCase):
     def test_data_read_before_produced(self) -> None:
         f = flow({"n1": "event.manual", "a": "action.t_record", "b": "action.t_record"},
                  ["n1.then->a.exec", "a.then->b.exec", "b.out->a.value"])
-        rec = run_flow(f)
+        self.assertEqual(h.refused_codes(run_flow(f)), ["E_DATA_BEFORE_PRODUCED"])
+        rec = run_flow(f, checked=False)
         self.assertEqual(rec["status"], "error")
         self.assertIn("avant d'etre produite", rec["nodes"]["a"]["error"])
         self.assertEqual(h.CALLS, [])
@@ -58,7 +59,8 @@ class Exec(unittest.TestCase):
     def test_exec_cycle_stops(self) -> None:
         f = flow({"n1": "event.manual", "a": "action.t_record", "b": "action.t_record"},
                  ["n1.then->a.exec", "a.then->b.exec", "b.then->a.exec"])
-        rec = run_flow(f)
+        self.assertIn("E_EXEC_CYCLE", h.refused_codes(run_flow(f)))
+        rec = run_flow(f, checked=False)
         self.assertEqual(rec["status"], "error")
         self.assertIn("boucle", rec["error"])
 
@@ -85,7 +87,8 @@ class Blocks(unittest.TestCase):
     def test_if_needs_a_bool(self) -> None:
         f = flow({"n1": "event.manual", "i": "logic.if", "c": _value(1)},
                  ["n1.then->i.exec", "c.value->i.condition"])
-        self.assertEqual(run_flow(f)["status"], "error")
+        self.assertEqual(h.refused_codes(run_flow(f)), ["E_TYPE_MISMATCH"])
+        self.assertEqual(run_flow(f, checked=False)["status"], "error")
 
     def _foreach(self, items):
         f = flow({"n1": "event.manual", "l": ("data.value", {"type": "list", "value": items}),
@@ -114,7 +117,8 @@ class Blocks(unittest.TestCase):
     def test_foreach_without_end(self) -> None:
         f = flow({"n1": "event.manual", "l": ("data.value", {"type": "list", "value": [1]}),
                   "b": "operator.foreach_begin"}, ["n1.then->b.exec", "l.value->b.list"])
-        rec = run_flow(f)
+        self.assertEqual(h.refused_codes(run_flow(f)), ["E_BLOCK_UNBALANCED"])
+        rec = run_flow(f, checked=False)
         self.assertIn("n'a pas de End", rec["error"])
 
     def test_body_node_read_after_end_is_refused(self) -> None:
@@ -123,7 +127,8 @@ class Blocks(unittest.TestCase):
                   "e": ("operator.foreach_end", {"begin": "b"}), "after": "action.t_record"},
                  ["n1.then->b.exec", "l.value->b.list", "b.loop->r.exec", "b.item->r.value", "r.then->e.exec",
                   "e.done->after.exec", "r.out->after.value"])
-        rec = run_flow(f)
+        self.assertEqual(h.refused_codes(run_flow(f)), ["E_DATA_BEFORE_PRODUCED"])
+        rec = run_flow(f, checked=False)
         self.assertEqual(rec["status"], "error")
         self.assertIn("results de End", rec["nodes"]["after"]["error"])
 
@@ -141,7 +146,8 @@ class Blocks(unittest.TestCase):
     def test_variable_without_default_never_written(self) -> None:
         f = flow({"n1": "event.manual", "g": ("data.get_variable", {"name": "x"}), "a": "action.t_record"},
                  ["n1.then->a.exec", "g.value->a.value"], variables=[{"name": "x", "type": "int"}])
-        self.assertIn("jamais ecrite", run_flow(f)["nodes"]["a"]["error"])
+        self.assertEqual(h.refused_codes(run_flow(f)), ["E_VAR_NEVER_SET"])
+        self.assertIn("jamais ecrite", run_flow(f, checked=False)["nodes"]["a"]["error"])
 
 
 class Errors(unittest.TestCase):
@@ -165,7 +171,8 @@ class Errors(unittest.TestCase):
     def test_required_input_empty(self) -> None:
         f = flow({"n1": "event.manual", "s": ("data.set_variable", {"name": "x"})}, ["n1.then->s.exec"],
                  variables=[{"name": "x", "type": "int"}])
-        self.assertIn("attend `value`", run_flow(f)["nodes"]["s"]["error"])
+        self.assertEqual(h.refused_codes(run_flow(f)), ["E_REQUIRED_EMPTY"])
+        self.assertIn("attend `value`", run_flow(f, checked=False)["nodes"]["s"]["error"])
 
     def test_timeout(self) -> None:
         f = flow({"n1": "event.manual", "s": ("action.t_sleep", {"seconds": 5, "timeout_s": 0.1})},

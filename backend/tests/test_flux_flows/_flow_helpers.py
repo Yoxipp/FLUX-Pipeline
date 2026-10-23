@@ -92,7 +92,11 @@ def flow(nodes: Dict[str, Any], links: List[str], **extra: Any):
 
 
 def run_flow(flow_obj, *, mode: str = "real", folder=None, values: Optional[dict] = None,
-             event: Optional[str] = None) -> Dict[str, Any]:
+             event: Optional[str] = None, checked: bool = True) -> Dict[str, Any]:
+    """Run *flow_obj* to its end. ``checked=False`` skips the validation (P4) to test
+    the engine's own guards, which stay for documents the validation did not see."""
+    from unittest import mock
+
     from flux_flows import engine
 
     async def scenario():
@@ -102,6 +106,20 @@ def run_flow(flow_obj, *, mode: str = "real", folder=None, values: Optional[dict
         rec = await mgr.submit(run)
         return await mgr.wait(rec["run_id"])
 
-    return asyncio.run(scenario())
+    if checked:
+        return asyncio.run(scenario())
+    original = engine.precheck
+
+    def lenient(flow_doc, start, run_mode="real", project=None):
+        event_id, issues = original(flow_doc, start, run_mode, project)
+        return event_id, [i for i in issues if i["code"] == "E_NO_EVENT"]
+
+    with mock.patch.object(engine, "precheck", lenient):
+        return asyncio.run(scenario())
+
+
+def refused_codes(rec: Dict[str, Any]) -> List[str]:
+    """Codes of the issues that refused a run (validation, P4)."""
+    return sorted({i["code"] for i in rec.get("issues") or []}) if rec["status"] == "refused" else []
 
 

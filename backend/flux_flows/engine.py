@@ -42,7 +42,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from flux_flows import events, resolver, runs
-from flux_flows.model import SUBNET_TYPE, Flow, v1_limit_issues
+from flux_flows.model import SUBNET_TYPE, Flow
 from flux_flows.nodes import registry
 from flux_flows.nodes.contract import EXEC_KEY, NodeContext, NodeError
 from flux_flows.nodes.data import cast_literal
@@ -107,20 +107,15 @@ def base_context(user: Optional[str], project: Optional[str], flow: str, run_id:
             "date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H-%M-%S"), "flow": flow, "run_id": run_id}
 
 
-def precheck(flow: Flow, event: Optional[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
-    """(start event id, issues). Minimal until validate.py (P4)."""
-    issues: List[Dict[str, Any]] = []
-    if any(n.type != SUBNET_TYPE and registry.get_node(n.type) is None for n in flow.nodes.values()):
-        from flux_flows.locations import team_nodes_dir
+def precheck(flow: Flow, event: Optional[str], mode: str = "real",
+             project: Optional[str] = None) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    """(start event id, blocking issues): the validation of 01 §8 (P4). A type mismatch
+    does not block a dry run (ADR 0058, 5); warnings never block."""
+    from flux_flows import validate
 
-        registry.load_team_nodes(team_nodes_dir())   # a team node the catalog has not loaded yet
-    for node_id, node in flow.nodes.items():
-        if node.type != SUBNET_TYPE and registry.get_node(node.type) is None:
-            issues.append({"level": "error", "code": "E_UNKNOWN_NODE", "node": node_id, "port": None,
-                           "message_fr": f"Le node `{node.type}` est introuvable ou casse"})
-    for issue in v1_limit_issues(flow):
-        issues.append({"level": "error", "code": issue["code"], "node": issue["node"], "port": None,
-                       "message_fr": issue["message"]})
+    found = validate.validate(flow, validate.Env(project=project))
+    issues: List[Dict[str, Any]] = [i.to_dict() for i in validate.errors(found, dry_run=mode == "dry")
+                                    if i.code != "E_NO_EVENT"]
     event_ids = [nid for nid, n in flow.nodes.items() if n.type.startswith("event.")]
     if event is not None:
         if event not in event_ids:
@@ -154,7 +149,7 @@ class Run:
         self.run_id = runs.make_run_id(user)
         self.cancelled = threading.Event()
         self.task: Optional[asyncio.Task] = None
-        self.event_id, self.issues = precheck(flow, event)
+        self.event_id, self.issues = precheck(flow, event, mode, project)
         self.values = dict(values or {})
         self.record = runs.new_record(run_id=self.run_id, flow=flow.name, scope=scope, project=project,
                                       version=version, draft=draft, mode=mode, user=user,

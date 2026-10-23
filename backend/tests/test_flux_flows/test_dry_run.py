@@ -88,7 +88,7 @@ class DryRunRoute(unittest.TestCase):
         self.assertEqual(self.client.post("/flows/daily/run", json=body).status_code, 404)
         r = self.client.post("/flows/daily/run", json={**body, "draft": _doc()})
         self.assertEqual(r.status_code, 400)
-        self.assertEqual(self.client.put("/flows/daily", json={"flow": _doc(), "scope": "perso"}).status_code, 200)
+        self.assertEqual(self.client.put("/flows/daily", json={"flow": _doc(), "scope": "perso", "confirmed_destructive": ["l"]}).status_code, 200)
         with mock.patch("features.activity.activity_writer.log_event"):
             r = self.client.post("/flows/daily/run", json=body)
             self.assertEqual(r.json()["mode"], "dry")
@@ -98,7 +98,7 @@ class DryRunRoute(unittest.TestCase):
 
     def test_real_run_needs_an_active_flow(self) -> None:
         self.boxes = {"flows_td": True}
-        self.client.put("/flows/daily", json={"flow": _doc(), "scope": "perso"})
+        self.client.put("/flows/daily", json={"flow": _doc(), "scope": "perso", "confirmed_destructive": ["l"]})
         r = self.client.post("/flows/daily/run", json={"scope": "perso"})
         self.assertEqual((r.status_code, r.json()["detail"]["message"]), (409, "flow non actif"))
 
