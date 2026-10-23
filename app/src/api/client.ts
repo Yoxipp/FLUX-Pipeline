@@ -152,16 +152,21 @@ export interface RenderSettings {
   renderer: 'karma' | 'renderman'; freeze_by_default: boolean
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   service_karma: string; service_renderman: string; envkeys: string[]
-  husk_path: string; bridge_python: string; bridge_script: string; engine: string; dry_run: boolean
+  husk_path: string; bridge_python: string; bridge_script: string; engine: string; engine_user: string; dry_run: boolean
+  // percent 0 = off; of = alive blades or blades free right now
+  job_share: RenderShare; team_cap: RenderShare
+  host_groups: Record<string, string[]>; exclude_hosts: string[]
 }
+export type RenderShareBase = 'alive' | 'free'
+export interface RenderShare { percent: number; of: RenderShareBase }
 export interface RenderShot { seq: string; shot: string; frame_start: number | null; frame_end: number | null; has_stage: boolean }
 export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
-  start_at: string
+  start_at: string; service: string; maxactive: number
 }
 export interface RenderJob {
-  jid: number; title: string; user: string; projects?: string[] | string; priority?: number
+  jid: number; title: string; user: string; projects?: string[] | string; priority?: number; maxactive?: number
   numTasks: number; numDone: number; numError: number; numActive: number
   numBlocked?: number; numReady?: number
   spooltime?: string | number; stoptime?: string; pausetime?: string; comment?: string; metadata?: unknown
@@ -171,8 +176,16 @@ export interface RenderJob {
 }
 export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string }
 export type RenderJobScope = 'all' | 'team' | 'mine'
+export type RenderBladeState = 'free' | 'busy' | 'nimby' | 'offline'
+export interface RenderBlade {
+  name: string; state: RenderBladeState; room: string; slots: number; nimby: string
+  job: number | null; project: string | null; heartbeat: string
+}
 export interface RenderFarm {
-  blades: unknown[]; active_by_project: Record<string, number>
+  blades: RenderBlade[]; active_by_project: Record<string, number>
+  counts: Record<RenderBladeState | 'alive', number>; rooms: Record<string, string[]>
+  team_cap: { enabled: boolean; slots: number; used: number; targets: Record<string, number>; changed: number; errors: string[] }
+  host_groups: Record<string, string[]>; exclude_hosts: string[]; host_targeting_verified: boolean
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   tractor_project: string; dry_run?: boolean
 }
@@ -1090,6 +1103,8 @@ export const api = {
     project: string; seq?: string; shot?: string; usd_path?: string
     frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
     start_at?: string   // "YYYY-MM-DDTHH:MM" local; omitted = now
+    hosts?: string[]; groups?: string[]   // only these machines / groups (team groups or rooms)
+    share_percent?: number; share_of?: RenderShareBase   // omitted = team default (job_share)
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
   renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
     apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
