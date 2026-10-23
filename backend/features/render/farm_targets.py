@@ -20,7 +20,7 @@ FLUX_HOST_TARGETING_VERIFIED = True
 ALIVE_MINUTES = 15
 SHARE_BASES = ("alive", "free")
 _HOST = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-# School names: TLSS + 2 digit room + 2 chars (ROOM1720, ROOM17PROF). Room meaning not confirmed.
+# School names: TLSS + 2 digit room + desk (ROOM1720 = room 17, ROOM17PROF = teacher desk), confirmed by 2026-10-23.
 _ROOM = re.compile(r"^([A-Za-z]+)(\d{2})[A-Za-z0-9]+$")
 OTHER_GROUP = "autres"
 

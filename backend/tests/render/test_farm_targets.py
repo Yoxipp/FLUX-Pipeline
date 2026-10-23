@@ -123,6 +123,9 @@ class RouterTargeting(unittest.TestCase):
         self.project_dir = self.tmp / "proj"
         self.project_dir.mkdir()
         self.render_json = self.tmp / "render.json"
+        self.render_json.write_text('{"dry_run": true}', encoding="utf-8")  # simulation unless a test says otherwise
+        render._submits.clear()
+        self.addCleanup(render._submits.clear)
         app = FastAPI()
         app.include_router(render.router, prefix="/render")
         self.client = TestClient(app)
@@ -201,6 +204,38 @@ class RouterTargeting(unittest.TestCase):
             r = self.client.get("/render/farm", params={"project": "P"})
         self.assertEqual(r.json()["team_cap"]["targets"], {"1": 9})
         setter.assert_not_called()
+
+
+class SafetyGuards(RouterTargeting):
+    """Real farm by default (2026-10-23): what keeps FLUX from touching what is not ours."""
+
+    def test_two_submits_never_share_a_render_version(self):
+        from features.render import freeze
+        a = freeze.reserve_render_dir(self.tmp / "shot")
+        b = freeze.reserve_render_dir(self.tmp / "shot")
+        self.assertEqual((a.name, b.name), ("v001", "v002"))
+
+    def test_real_submit_needs_a_flux_user(self):
+        team_settings.write_settings("P", {"dry_run": False}, path=self.render_json)
+        with mock.patch.object(render.config, "get_current_user", return_value=None):
+            r = self._submit()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Connecte-toi", r.text)
+
+    def test_actions_refused_without_flux_user(self):
+        from features.render import tractor_bridge
+        with mock.patch.object(tractor_bridge, "call") as call:
+            with self.assertRaises(tractor_bridge.BridgeError):
+                tractor_bridge.kill({"dry_run": False}, "unknown", 12)
+        call.assert_not_called()
+
+    def test_submit_rate_cap(self):
+        team_settings.write_settings("P", {"dry_run": False}, path=self.render_json)
+        fake = {"dry_run": False, "jid": 1, "files": {"alf": "x", "json": "y"}}
+        with mock.patch.object(render, "_submit", return_value=fake):
+            codes = [self._submit().status_code for _ in range(render._SUBMIT_MAX + 1)]
+        self.assertEqual(codes[:-1], [200] * render._SUBMIT_MAX)
+        self.assertEqual(codes[-1], 429)
 
 
 if __name__ == "__main__":

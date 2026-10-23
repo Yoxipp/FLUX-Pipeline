@@ -23,6 +23,8 @@ DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq d
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
 _SIMULATION_MSG = "Mode simulation : aucune action sur la farm"
+ANONYMOUS_USERS = ("", "unknown")  # routers/render._user() when nobody is logged in to FLUX
+_SPOOL_TIMEOUT_S = 60
 
 
 class BridgeError(RuntimeError):
@@ -103,7 +105,13 @@ def spool(spec: job_builder.RenderJobSpec, settings: dict, user: str, out_dir: P
     files = job_builder.dry_run(spec, out_dir, strict=not simulate)
     if simulate:
         return {"dry_run": True, "jid": None, "files": files}
-    result = call("spool", settings, user, alf_path=files["alf"])
+    try:
+        result = call("spool", settings, user, timeout=_SPOOL_TIMEOUT_S, alf_path=files["alf"])
+    except BridgeError as exc:
+        if "delai depasse" in str(exc):
+            # The engine may have accepted it anyway: a blind retry would spool the job twice.
+            raise BridgeError(f"{exc}. Le job est peut-etre parti : verifier l'onglet Jobs avant de relancer") from None
+        raise
     return {"dry_run": False, "jid": result.get("jid"), "files": files, "output": result.get("output", "")}
 
 
@@ -199,6 +207,8 @@ def blades(settings: dict, user: str) -> dict:
 def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
     if settings.get("dry_run") is True:
         raise BridgeError(_SIMULATION_MSG)
+    if user in ANONYMOUS_USERS:
+        raise BridgeError("Action refusee : connecte-toi a FLUX (utilisateur)")
     # FLUX logs in as an engine admin: only act on jobs this FLUX user spooled (2026-10-22).
     found = [j for j in call("jobs", settings, user, jid=jid).get("jobs") or []
              if isinstance(j, dict) and j.get("jid") == jid]

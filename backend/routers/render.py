@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -205,6 +206,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
     root = _ensure_project(body.project)
     settings = team_settings.effective_settings(body.project)
     simulate = settings["dry_run"] is True
+    if not simulate and user in tractor_bridge.ANONYMOUS_USERS:
+        # Actions are allowed on a job only to the FLUX user written in it: an anonymous job would be everyone's.
+        raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un rendu sur la farm")
     do_freeze = settings["freeze_by_default"] if body.freeze is None else body.freeze
     renderer = body.renderer or settings["renderer"]
 
@@ -236,7 +240,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         raise HTTPException(status_code=400, detail="Plage de frames inconnue : la saisir")
 
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
-    out_dir = freeze.next_render_dir(folder)
+    out_dir = freeze.reserve_render_dir(folder)
     spec = job_builder.RenderJobSpec(
         title=f"{body.project} {name} {out_dir.name}",
         project=settings["tractor_project"],
@@ -273,10 +277,34 @@ def _submit(body: SubmitBody, user: str) -> dict:
             "priority_warning": team_settings.priority_warning(settings)}
 
 
+_SUBMIT_LOCK = threading.Lock()
+_SUBMIT_WINDOW_S = 600
+_SUBMIT_MAX = 10  # per backend and per 10 minutes: never flood the engine (2026-10-23)
+_submits: list[float] = []
+
+
+def _guarded_submit(body: SubmitBody, user: str) -> dict:
+    """One submit at a time per backend, and a rate cap (a double click or a loop never floods the farm)."""
+    if not _SUBMIT_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="Un lancement est deja en cours, attendre la fin")
+    try:
+        now = time.time()
+        _submits[:] = [t for t in _submits if now - t < _SUBMIT_WINDOW_S]
+        if len(_submits) >= _SUBMIT_MAX:
+            raise HTTPException(status_code=429, detail=(
+                f"Trop de lancements ({_SUBMIT_MAX} en {_SUBMIT_WINDOW_S // 60} min) : attendre un peu"))
+        result = _submit(body, user)
+        if not result.get("dry_run"):
+            _submits.append(now)
+        return result
+    finally:
+        _SUBMIT_LOCK.release()
+
+
 @router.post("/submit")
 async def submit(body: SubmitBody):
     # Freezing writes a stage version and audits USD dependencies: off the event loop.
-    return await asyncio.to_thread(_submit, body, _user())
+    return await asyncio.to_thread(_guarded_submit, body, _user())
 
 
 # ── follow-up ───────────────────────────────────────────────────────────────

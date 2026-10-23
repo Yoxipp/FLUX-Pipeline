@@ -1,9 +1,9 @@
 // MachinePicker.tsx: pick farm machines by room or one by one (submit targeting, team groups, exclusions).
-// Rooms are guessed from the school names (ROOM17xx -> ROOM17), see backend features/render/farm_targets.py.
+// Rooms come from the school names (ROOM17xx = room 17), see backend features/render/farm_targets.py.
 
 import { useMemo, useState } from 'react'
 import type { RenderBlade, RenderBladeState } from '../../api/client'
-import { BLADE_COLOR, Toggle, bladeStateLabel, btn, hint, input, useTr } from './renderUi'
+import { BLADE_COLOR, Toggle, bladeStateLabel, btn, hint, input, roomLabel, useTr } from './renderUi'
 
 type StateFilter = 'all' | RenderBladeState
 
@@ -51,7 +51,7 @@ export function MachinePicker({ blades, selected, onChange, hideOffline = true, 
         {rooms.map(([r, c]) => (
           <button key={r} type="button" title={tr(`${c.free} libres sur ${c.total}`, `${c.free} free of ${c.total}`)}
             style={{ ...btn(), background: room === r ? 'var(--accent-soft)' : 'var(--paper-2)' }} onClick={() => setRoom(r)}>
-            {r} <span style={{ color: 'var(--ink-3)' }}>{c.free}/{c.total}</span>
+            {roomLabel(r, tr)} <span style={{ color: 'var(--ink-3)' }}>{c.free}/{c.total}</span>
           </button>
         ))}
       </div>

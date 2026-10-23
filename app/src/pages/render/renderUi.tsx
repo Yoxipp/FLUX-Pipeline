@@ -138,6 +138,12 @@ export function Section({ title, children, note }: { title: string; children: Re
   )
 }
 
+// School machine names: TLSS + room number + desk (ROOM1720 = room 17, 2026-10-23). Group key stays "ROOM17".
+export function roomLabel(room: string, tr: Tr): string {
+  const m = /^TLSS(\d{2})$/.exec(room)
+  return m ? tr(`Salle ${m[1]}`, `Room ${m[1]}`) : room === 'autres' ? tr('Autres', 'Others') : room
+}
+
 // "% of the farm" -> number of chunks at once, same rule as the backend (farm_targets.cap_from_percent).
 export function capFromPercent(percent: number, pool: number): number {
   return percent > 0 ? Math.max(1, Math.floor((pool * percent) / 100)) : 0

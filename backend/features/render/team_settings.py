@@ -32,7 +32,8 @@ DEFAULTS: dict = {
     "bridge_script": "",
     "engine": "",                  # host:port, empty => TRACTOR_ENGINE of the machine
     "engine_user": "",             # engine login, empty => "root" (read only for FLUX)
-    "dry_run": True,               # stays True until school phase 0 is done
+    # Real farm by default since the school echo test (job 34026, 2026-10-23, the maintainer); simulation stays opt-in.
+    "dry_run": False,
     # Farm throttling (2026-10-23). percent 0 = off; "of" = alive blades or blades free right now.
     "job_share": {"percent": 0, "of": "alive"},   # default per-job share, overridable at submit
     "team_cap": {"percent": 0, "of": "alive"},    # budget shared by every FLUX job of the team

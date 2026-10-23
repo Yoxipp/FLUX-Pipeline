@@ -190,28 +190,43 @@ def _blades(req):
     return {"blades": blades, "active_by_project": active}
 
 
+def _one_job(tq, jid):
+    """[{"jid": jid}] after checking the job exists. Every write passes this exact list, never a
+    search clause: a Tractor operation applies to everything its search matches."""
+    jid = int(jid)
+    found = [r for r in tq.jobs("jid=%d" % jid, columns=["jid"], limit=2) if r.get("jid") == jid]
+    if len(found) != 1:
+        raise ValueError("job %d introuvable" % jid)
+    return [{"jid": jid}]
+
+
 def _maxactive(req):
     # Team cap balancing (FLUX jobs of the team only, checked by the backend): change a job's maxactive.
     value = int(req["value"])
     if value < 0:
         raise ValueError("maxactive >= 0")
-    _tq(req).jattr("jid=%d" % int(req["jid"]), key="maxactive", value=value)
+    tq = _tq(req)
+    tq.jattr(_one_job(tq, req["jid"]), key="maxactive", value=value)
     return {"jid": int(req["jid"]), "maxactive": value}
 
 
 def _job_op(name):
     def run(req):
-        clause = "jid=" + str(int(req["jid"]))
+        jid = int(req["jid"])
         tq = _tq(req)
+        job = _one_job(tq, jid)
         if name == "kill":
-            tq.interrupt(clause)  # stop running tasks
-            tq.pause(clause)      # and keep the job from restarting
+            tq.interrupt(job)  # stop running tasks
+            tq.pause(job)      # and keep the job from restarting
         elif name == "retry":
-            tq.retry(clause + " and error")
+            failed = [{"jid": jid, "tid": t["tid"]} for t in tq.tasks("jid=%d and error" % jid, columns=["jid", "tid"])
+                      if t.get("jid") == jid]
+            if failed:
+                tq.retry(failed)
         elif name == "pause":
-            tq.pause(clause)
+            tq.pause(job)
         elif name == "resume":
-            tq.unpause(clause)
+            tq.unpause(job)
         return {"jid": int(req["jid"])}
     return run
 

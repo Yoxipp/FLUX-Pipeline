@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react'
 import type { RenderBladeState, RenderFarm } from '../../api/client'
 import { MachinePicker } from './MachinePicker'
-import { BLADE_COLOR, Bar, Section, bladeStateLabel, card, hint, useTr, warnText } from './renderUi'
+import { BLADE_COLOR, Bar, Section, bladeStateLabel, card, hint, roomLabel, useTr, warnText } from './renderUi'
 
 const STATES: RenderBladeState[] = ['free', 'busy', 'nimby', 'offline']
 
@@ -87,13 +87,12 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
         })}
       </Section>
 
-      <Section title={tr('Par salle', 'Per room')}
-        note={<div style={hint}>{tr('Salle devinee du nom (ROOM17xx = ROOM17), a confirmer.', 'Room guessed from the name (ROOM17xx = ROOM17), to confirm.')}</div>}>
+      <Section title={tr('Par salle', 'Per room')}>
         {byRoom.map(([room, n]) => {
           const total = n.free + n.busy + n.nimby
           return (
             <div key={room} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px', gap: 10, alignItems: 'center', fontSize: 11.5 }}>
-              <div style={{ color: 'var(--ink-2)' }}>{room}</div>
+              <div style={{ color: 'var(--ink-2)' }}>{roomLabel(room, tr)}</div>
               <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--rule-2)' }}>
                 {(['busy', 'nimby', 'free'] as const).map(s => (
                   <div key={s} style={{ width: `${total ? (n[s] / total) * 100 : 0}%`, background: BLADE_COLOR[s] }} />

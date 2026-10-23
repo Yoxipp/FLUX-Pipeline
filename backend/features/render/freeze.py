@@ -97,3 +97,16 @@ def next_render_dir(shot_folder: Path) -> Path:
     root = Path(shot_folder) / "render"
     used = [int(m.group(1)) for p in root.glob("v*") if p.is_dir() and (m := _VERSION_DIR.match(p.name))]
     return root / f"v{(max(used) + 1) if used else 1:03d}"
+
+
+def reserve_render_dir(shot_folder: Path, attempts: int = 50) -> Path:
+    """Create the next <shot>/render/vNNN atomically: two submits never share (and overwrite) a version."""
+    for _ in range(attempts):
+        target = next_render_dir(shot_folder)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target.mkdir()
+        except FileExistsError:
+            continue  # taken by another submit meanwhile: next one
+        return target
+    raise RuntimeError(f"no free render version in {Path(shot_folder) / 'render'}")
