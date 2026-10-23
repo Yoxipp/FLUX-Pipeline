@@ -32,7 +32,8 @@ MARKER = "@flow_node"
 BUILTIN_MODULES: Tuple[str, ...] = (
     "flux_flows.nodes.event", "flux_flows.nodes.data", "flux_flows.nodes.logic",
     "flux_flows.nodes.operator", "flux_flows.nodes.action", "flux_flows.nodes.flux",
-    "flux_flows.nodes.subflow", "flux_flows.nodes.bridge",
+    "flux_flows.nodes.subflow", "flux_flows.nodes.bridge", "flux_flows.nodes.dcc_houdini",
+    "flux_flows.nodes.dcc_maya", "flux_flows.nodes.headless",
 )
 _TEAM_MODULE_PREFIX = "flux_flows_team_nodes."
 

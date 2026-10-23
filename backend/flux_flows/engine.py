@@ -156,6 +156,7 @@ class Run:
         # Payload of the event that started the run (scheduler, hooks: 01 §9), read by event nodes.
         self.payload = dict(payload or {})
         self.interrupted: Optional[str] = None   # reason when the scheduler stops the run (lock lost, stop)
+        self._cleanups: List[Any] = []          # closed at the end of the run (headless sessions, P6a)
         self.record = runs.new_record(run_id=self.run_id, flow=flow.name, scope=scope, project=project,
                                       version=version, draft=draft, mode=mode, user=user,
                                       base_revision=base_revision,
@@ -384,6 +385,7 @@ class Run:
                     event=manual[0], values=values, folder=None, context=context, depth=self.depth + 1,
                     call_stack=chain, flow_loader=self._flow_loader)
         child.cancelled = self.cancelled
+        child._cleanups = self._cleanups      # a session opened in a subflow lives until the end of the caller
         errors = [i for i in child.issues if i.get("level") == "error"]
         if errors:
             raise NodeError(f"Le flow `{name}` a des erreurs : {errors[0]['message_fr']}")
@@ -478,6 +480,10 @@ class Run:
             else:
                 got[name] = declared[name].default if name in declared else None
         for p in declared.values():
+            # Dry run: an Instance without an open instance gives a null session, the DCC
+            # nodes behind it are skipped by their simulate / readers (01 §5).
+            if self.mode == "dry" and p.type.startswith("session[") and got.get(p.name) is None:
+                continue
             if p.required and got.get(p.name) in (None, ""):
                 raise NodeError(f"{spec.label} attend `{p.name}` : relie un lien ou saisis une valeur")
         return got
@@ -751,10 +757,23 @@ class Run:
             status, error = "error", f"erreur interne du moteur : {_message(exc)}"
         finally:
             ticker.cancel()
+            await self._run_cleanups()
             self._close(status, error)
             self._flush_pushes()
             await self._write()
             events.emit(self._finished_msg())
+
+    def add_cleanup(self, fn) -> None:
+        """Call *fn()* at the end of the run, whatever its outcome (01 §4 ``finally``)."""
+        self._cleanups.append(fn)
+
+    async def _run_cleanups(self) -> None:
+        while self._cleanups:
+            fn = self._cleanups.pop()
+            try:
+                await asyncio.wait_for(asyncio.to_thread(fn), 30.0)
+            except Exception as exc:  # noqa: BLE001 - a cleanup never changes the run status
+                log.warning("run %s: cleanup failed: %s", self.run_id, exc)
 
     def stop_reason(self) -> Tuple[str, str]:
         """(status, error) of a run stopped before its start."""

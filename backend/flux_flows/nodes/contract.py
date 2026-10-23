@@ -101,6 +101,10 @@ class NodeContext:
     def set_variable(self, name: str, value: Any) -> Any:
         return self._run.set_variable(name, value)
 
+    def add_cleanup(self, fn) -> None:
+        """*fn()* runs at the end of the run, whatever its outcome (a headless session closes)."""
+        self._run.add_cleanup(fn)
+
     # -- subflows (subflow.flow_call / flow_output) ------------------------------
     async def call_flow(self, name: str, version: Any, values: Dict[str, Any]) -> Dict[str, Any]:
         return await self._run.call_flow(self.node_id, name, version, values)
