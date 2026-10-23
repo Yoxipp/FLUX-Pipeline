@@ -30,22 +30,26 @@ BLOCKED = ("Marvelous est occupe (une fenetre ouverte ou une simulation bloque l
            "ferme-la, le bridge reprend tout seul")
 
 
-def mailbox_dir() -> Path:
-    """Same folder as the bridge: FLUX_MD_MAILBOX_ROOT or the user's TEMP."""
-    return Path(os.environ.get("FLUX_MD_MAILBOX_ROOT") or tempfile.gettempdir()) / "flux_marvelous_bridge"
+MAILBOX_NAME = "flux_marvelous_bridge"
 
 
-def _read_alive() -> dict | None:
+def mailbox_dir(name: str = MAILBOX_NAME) -> Path:
+    """Same folder as the bridge: FLUX_MD_MAILBOX_ROOT or the user's TEMP. *name* = another
+    mailbox with the same protocol (Flows bridge.file_mailbox_call, extension bridges P6c)."""
+    return Path(os.environ.get("FLUX_MD_MAILBOX_ROOT") or tempfile.gettempdir()) / name
+
+
+def _read_alive(box: Path | None = None) -> dict | None:
     try:
-        data = json.loads((mailbox_dir() / "alive.json").read_text(encoding="utf-8"))
+        data = json.loads(((box or mailbox_dir()) / "alive.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
 
 
-def heartbeat() -> dict | None:
+def heartbeat(box: Path | None = None) -> dict | None:
     """The bridge's last heartbeat when it is fresh, else None."""
-    data = _read_alive()
+    data = _read_alive(box)
     if data is None or time.time() - float(data.get("time", 0)) > ALIVE_MAX_AGE_S:
         return None
     return data
@@ -79,9 +83,9 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def blocked() -> bool:
+def blocked(box: Path | None = None) -> bool:
     """The bridge stopped beating but its Marvelous still runs: busy, not gone."""
-    data = _read_alive()
+    data = _read_alive(box)
     if data is None:
         return False
     age = time.time() - float(data.get("time", 0))
@@ -102,13 +106,13 @@ def _answer(resp: Any) -> dict:
     return resp
 
 
-def call(payload: dict, timeout: float) -> dict:
-    """Send one request through the mailbox and wait for the answer."""
-    if heartbeat() is None:
-        if blocked():
+def call(payload: dict, timeout: float, box: Path | None = None) -> dict:
+    """Send one request through the mailbox *box* (default: Marvelous') and wait for the answer."""
+    box = Path(box) if box is not None else mailbox_dir()
+    if heartbeat(box) is None:
+        if blocked(box):
             return {"ok": False, "error": BLOCKED}
-        return {"ok": False, "error": f"{NOT_RUNNING} (aucun battement dans {mailbox_dir()})"}
-    box = mailbox_dir()
+        return {"ok": False, "error": f"{NOT_RUNNING} (aucun battement dans {box})"}
     rid = uuid.uuid4().hex
     req, resp = box / f"{rid}.req", box / f"{rid}.resp"
     tmp = box / f"{rid}.req.tmp"
