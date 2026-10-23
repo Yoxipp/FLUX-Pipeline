@@ -2,9 +2,10 @@
 // (ADR 0058): File > New, Open (flows by category: Pipe = shipped + team, Project, Perso),
 // Save, Save as, Save and Increment, Migrate v1 actions (Team TD). Then the network tools
 // (backdrop, subnet, sticky note), the view toggles (background dots, wire style), search
-// and the way to the old editor. P1: the graph is read-only (editing comes with P4), Save
-// rewrites the loaded document. P2: Run (the open document, no version created), Essai a
-// blanc (the saved file), Stop, and the Runs dock toggle (03_EDITEUR §7).
+// and search. P2: Run (the open document, no version created), Essai a blanc (the saved
+// file), Stop, and the Runs dock toggle (03_EDITEUR §7).
+// P4: File > Versions (and a click on the version tag) opens VersionsDialog; Backdrop
+// (Ctrl+G) and Note work; the old editor is no longer here (Parametres avances, until P8).
 // P4: tag "modifie" while the document differs from the saved one, "lecture seule" where it
 // cannot be saved (reason in the tooltip), Layout arranges the graph (one undo entry).
 // Problems button (errors / warnings of the validation, toggles the dock) and the
@@ -40,7 +41,7 @@ export interface RunActions {
 
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onLegacy, onVersions }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -62,7 +63,6 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   onLayout: () => void
   onBackdrop: () => void
   onNote: () => void
-  onLegacy: () => void
   onVersions: () => void
 }) {
   const { tr } = useTr()
@@ -116,7 +116,6 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
             <Menu.Item className="flow-menu-item" disabled={!canMigrate} title={canMigrate ? undefined : tr('Case Team TD requise', 'Team TD box required')} onSelect={actions.onMigrate}>
               <ArrowUpFromLine size={13} /> {tr('Migrer les actions v1…', 'Migrate v1 actions…')}
             </Menu.Item>
-            <Menu.Item className="flow-menu-item" onSelect={onLegacy}><History size={13} /> {tr('Ancien editeur', 'Old editor')}</Menu.Item>
           </Menu.Content>
         </Menu.Portal>
       </Menu.Root>

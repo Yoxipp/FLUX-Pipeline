@@ -186,7 +186,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: 'var(--ink)' }}>Flows (graph YAML)</div>
           <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
-            Nouvel editeur de flows : actions (publish...) en lecture pour l'instant. L'ancien editeur reste dans la barre du haut.
+            Editeur de flows. Le publish tourne encore sur les actions v1 jusqu'a P8 : seul l'ancien editeur les modifie.
           </div>
         </div>
         <Btn sm ghost disabled={!flowRights?.td} title={flowRights?.td ? undefined : 'Coche TD dans ton profil'} onClick={() => {
@@ -196,6 +196,15 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
         }}>
           <ExternalLink size={11} strokeWidth={2} /> Ouvrir le graph
         </Btn>
+        {/* P4: the old v1 action editor, the only UI that edits the real publish until P8
+            (which removes it). Kept out of the new editor's bar on purpose. */}
+        <span
+          onClick={() => navigate('/action-graph-legacy')}
+          title="Ancien editeur des actions v1 (publish reel), retire en P8"
+          style={{ fontSize: 10.5, color: 'var(--ink-4)', cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap' }}
+        >
+          Ancien editeur
+        </span>
       </div>
 
       <SecTitle>Publish (ce poste)</SecTitle>

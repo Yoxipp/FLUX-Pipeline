@@ -14,7 +14,7 @@
 // (user data `flows_last_open`, USER/<user>/UserSettings), else "legacy_publish".
 // A v1 name kept from P0 ("publish") opens its legacy_ flow.
 // View prefs (background dots, wire style) are per-viewer conveniences in localStorage.
-// The old editor stays at /action-graph-legacy until P8.
+// The old editor stays at /action-graph-legacy until P8, reached from Parametres avances only.
 // P2 (03_EDITEUR §7): Run = the open document (POST /flows/{name}/run with draft, TD), Essai =
 // dry run of the saved file; node states arrive by WS /flows/ws (useFlowsWs) and are reread
 // from GET /flows/runs/{id} after a reconnection; Notify nodes show a toast; the Runs dock lists
@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { flowsApi } from '../../api/flows'
@@ -79,7 +79,6 @@ function writePrefs(p: ViewPrefs): void {
 
 function Editor({ rights }: { rights: FlowRights }) {
   const { tr, lang } = useTr()
-  const navigate = useNavigate()
   const { project } = useProject()
   const [params, setParams] = useSearchParams()
   const [flows, setFlows] = useState<FlowListEntry[]>([])
@@ -613,7 +612,6 @@ function Editor({ rights }: { rights: FlowRights }) {
           const p = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 }
           edit.onNote([p.x, p.y])
         }}
-        onLegacy={() => navigate('/action-graph-legacy')}
         onVersions={() => setVersionsOpen(true)}
       />
       {loaded && loaded.version !== null && (
