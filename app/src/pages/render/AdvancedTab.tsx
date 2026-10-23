@@ -9,6 +9,7 @@ import { api } from '../../api/client'
 import type {
   RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderSettingsResponse, RenderShare, RenderShareBase,
 } from '../../api/client'
+import { EnvPanel } from './EnvPanel'
 import { MachinePicker } from './MachinePicker'
 import {
   Banner, Check, Row, Section, ShareBaseInfo, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
@@ -257,6 +258,8 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
           </div>
         )}
       </div>
+
+      <EnvPanel project={project} configDir={settings.engine_config_dir} onDirSaved={onSaved} />
 
       {/* Sticky over the scroll container's 16 px bottom padding (Render.tsx), else content shows under it. */}
       <div style={{ position: 'sticky', bottom: -16, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center',

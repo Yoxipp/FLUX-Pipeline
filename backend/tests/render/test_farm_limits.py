@@ -1,8 +1,11 @@
-"""Farm Shares read from the engine limits.config (read only): parse, warn, cache, router."""
+"""Farm Shares of the engine limits.config: parse, warn, cache, and the locked environment edit."""
 from __future__ import annotations
 
 import io
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from features.render import farm_limits as fl
@@ -102,6 +105,72 @@ class Fetch(unittest.TestCase):
             self.assertIsNone(fl.fetch_shares("192.0.2.10"))  # failure cached a minute
         get.assert_called_once()
         self.assertIsNone(fl.fetch_shares(""))
+
+
+TEAMS = {"Andhakara": {"nominal": 0.2, "cap": 0.99}, "Annee4": {"nominal": 0.1, "cap": 0.3},
+         "default": {"nominal": 0.1, "cap": 0.1}}
+
+
+class EditShares(unittest.TestCase):
+    """Environment screen. Never the real engine: temp folders and a mocked engine only."""
+
+    def test_unlock(self):
+        fl.check_unlock("Understand", "root")
+        for phrase, password in (("understand", "root"), ("Understand", ""), ("", "root"), ("Understand", "Root")):
+            with self.assertRaises(fl.LimitsError):
+                fl.check_unlock(phrase, password)
+
+    def test_check_teams(self):
+        for bad in ({}, {"A": {"nominal": 0.2, "cap": 0.5}},  # no default
+                    {"a b": {"nominal": 0.1, "cap": 0.1}, "default": {"nominal": 0.1, "cap": 0.1}},
+                    {"default": {"nominal": 1.5, "cap": 0.1}}, {"default": {"nominal": 0.1, "cap": 0}}):
+            with self.assertRaises(fl.LimitsError):
+                fl.check_teams(bad)
+
+    def test_apply_keeps_comments_and_rules(self):
+        new = fl.apply_shares(SAMPLE, TEAMS)
+        self.assertEqual(fl.parse_shares(new), {"prman": TEAMS, "husk": TEAMS})
+        self.assertIn('#       "Shares": {"Old": {"nominal": 1}}', new)  # commented block untouched
+        self.assertIn('//"TaggedBlades": "Windows",', new)
+        self.assertIn('"NoShares": {"SiteMax": 4},', new)
+        self.assertEqual(fl._rules_without_shares(new), fl._rules_without_shares(SAMPLE))
+        self.assertLess(new.index('"Annee4"'), new.index('"default"', new.index('"Annee4"')))  # default last
+
+    def test_apply_needs_a_shares_block(self):
+        with self.assertRaises(fl.LimitsError):
+            fl.apply_shares('{"Limits": {"prman": {"SiteMax": 1}}}', TEAMS)
+
+    def _folder(self, text=SAMPLE):
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / "limits.config").write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+        return folder
+
+    def test_write_backs_up_then_replaces(self):
+        folder = self._folder()
+        with mock.patch.object(fl, "engine_text", return_value=SAMPLE):
+            out = fl.write_shares(str(folder), "eng", TEAMS, "Understand", "root")
+        self.assertEqual(out["shares"]["husk"], TEAMS)
+        written = (folder / "limits.config").read_bytes().decode("utf-8")
+        self.assertEqual(fl.parse_shares(written)["husk"], TEAMS)
+        self.assertIn("\r\n", written)  # line endings kept
+        backup = Path(out["backup"])
+        self.assertTrue(backup.is_file())
+        self.assertTrue(fl.same_text(backup.read_bytes().decode("utf-8"), SAMPLE))
+        self.assertEqual(sorted(p.name for p in folder.iterdir() if p.name.startswith(".")), [])  # no temp left
+
+    def test_write_refused_on_wrong_folder_or_engine_down(self):
+        folder = self._folder()
+        before = (folder / "limits.config").read_bytes()
+        for served in (None, SAMPLE.replace("0.1}", "0.2}")):
+            with mock.patch.object(fl, "engine_text", return_value=served), self.assertRaises(fl.LimitsError):
+                fl.write_shares(str(folder), "eng", TEAMS, "Understand", "root")
+        with mock.patch.object(fl, "engine_text", return_value=SAMPLE), self.assertRaises(fl.LimitsError):
+            fl.write_shares(str(folder), "eng", TEAMS, "Understand", "wrong")
+        with self.assertRaises(fl.LimitsError):
+            fl.write_shares("", "eng", TEAMS, "Understand", "root")
+        self.assertEqual((folder / "limits.config").read_bytes(), before)
+        self.assertEqual([p.name for p in folder.iterdir()], ["limits.config"])  # no backup either
 
 
 if __name__ == "__main__":

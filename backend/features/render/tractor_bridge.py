@@ -20,8 +20,9 @@ from features.render import job_builder
 # Job menu of the Dashboard (2026-10-23): retry / skip errors, restart, archive / restore, lock, shuffle, trace.
 JOB_ACTIONS = ("kill", "retry", "pause", "resume", "skip_errors", "restart", "archive", "restore",
                "lock", "unlock", "shuffle_top")
-VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace") + JOB_ACTIONS
-_JID_VERBS = ("tasks", "log", "maxactive", "trace") + JOB_ACTIONS
+VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace", "priority",
+         "reload_limits") + JOB_ACTIONS
+_JID_VERBS = ("tasks", "log", "maxactive", "trace", "priority") + JOB_ACTIONS
 DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
@@ -229,7 +230,7 @@ def blades(settings: dict, user: str) -> dict:
     return call("blades", settings, user)
 
 
-def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
+def _action(verb: str, settings: dict, user: str, jid: int, **args) -> dict:
     if settings.get("dry_run") is True:
         raise BridgeError(_SIMULATION_MSG)
     if user in ANONYMOUS_USERS:
@@ -241,7 +242,7 @@ def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
              if isinstance(j, dict) and j.get("jid") == jid]
     if not found or not user or _normalize(found[0])["flux_user"] != user:
         raise BridgeError("Action refusee : ce job n'a pas ete lance par vous depuis FLUX")
-    return call(verb, settings, user, jid=jid)
+    return call(verb, settings, user, jid=jid, **args)
 
 
 def job_action(verb: str, settings: dict, user: str, jid: int) -> dict:
@@ -272,6 +273,22 @@ def trace(settings: dict, user: str, jid: int) -> dict:
     if _reads_off(settings):
         return {"trace": "", "dry_run": True}
     return call("trace", settings, user, jid=jid)
+
+
+def set_priority(settings: dict, user: str, jid: int, value: int) -> dict:
+    """Priority of one FLUX job of this user (tq chpri). Higher = dispatched first, within the team's Share."""
+    if not _is_int(value) or not 1 <= value <= 10000:
+        raise BridgeError("Tractor : priorite entre 1 et 10000")
+    return _action("priority", settings, user, jid, value=value)
+
+
+def reload_limits(settings: dict, user: str) -> dict:
+    """The engine rereads limits.config. Only from the locked environment screen (router)."""
+    if settings.get("dry_run") is True:
+        raise BridgeError(_SIMULATION_MSG)
+    if user in ANONYMOUS_USERS:
+        raise BridgeError("Action refusee : connecte-toi a FLUX (utilisateur)")
+    return call("reload_limits", settings, user)
 
 
 def set_maxactive(settings: dict, user: str, jid: int, value: int) -> dict:

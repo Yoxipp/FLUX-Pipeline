@@ -44,6 +44,8 @@ DEFAULTS: dict = {
     "bridge_script": "",
     "engine": "",                  # host:port, empty => TRACTOR_ENGINE of the machine
     "engine_user": "",             # engine login, empty => "root" (read only for FLUX)
+    # Network folder of the engine's limits.config (UNC). Only the locked environment screen writes there.
+    "engine_config_dir": "",
     # Real farm by default since the school echo test (job 34026, 2026-10-23, the maintainer); simulation stays opt-in.
     "dry_run": False,
     # Farm throttling (2026-10-23). percent 0 = off; "of" = alive blades or blades free right now.
@@ -62,7 +64,7 @@ BUNDLED_BRIDGE = Path(__file__).resolve().parent / "bridge" / "flux_tractor_brid
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _STR_KEYS = (
     "tractor_project", "service_karma", "service_renderman",
-    "husk_path", "bridge_python", "bridge_script", "engine", "engine_user",
+    "husk_path", "bridge_python", "bridge_script", "engine", "engine_user", "engine_config_dir",
 )
 # Tractor client install on school machines (phase 0, 2026-10-22): its rmanpy.exe is Python 2.7.
 TRACTOR_PYTHON_CANDIDATES = (Path(r"C:\Program Files\Pixar\Tractor-2.4\bin\rmanpy.exe"),)

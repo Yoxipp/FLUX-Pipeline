@@ -160,6 +160,7 @@ export interface RenderSettings {
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   service_karma: string; service_renderman: string; envkeys: string[]
   husk_path: string; bridge_python: string; bridge_script: string; engine: string; engine_user: string; dry_run: boolean
+  engine_config_dir: string   // network folder of the engine limits.config (environment screen only)
   // percent 0 = off; of = alive blades or blades free right now
   job_share: RenderShare; team_cap: RenderShare
   host_groups: Record<string, string[]>; exclude_hosts: string[]
@@ -167,6 +168,12 @@ export interface RenderSettings {
 // farm_teams / team_warning: Shares of the engine limits.config (read only, Tractor balances the teams itself)
 export interface RenderSettingsResponse {
   settings: RenderSettings; warning: string | null; farm_teams?: string[]; team_warning?: string | null
+}
+export interface RenderEnvUnlock { phrase: string; password: string }
+export interface RenderShareRule { nominal: number | null; cap: number | null }   // 0..1 (school limits.config)
+export interface RenderEnvState {
+  engine: string; config_dir: string; folder_ok: boolean; folder_error: string | null
+  engine_shares: Record<string, Record<string, RenderShareRule>> | null   // per limit tag (husk, prman...)
 }
 // Last launch form of the artist (backend <project>/_flux_setup/render_last/<user>.json).
 export interface RenderLastForm {
@@ -1143,6 +1150,7 @@ export const api = {
     freeze_when?: RenderFreezeWhen   // with start_at: freeze when the job starts or now; omitted = team default
     hosts?: string[]; groups?: string[]   // only these machines / groups (team groups or rooms)
     share_percent?: number; share_of?: RenderShareBase   // omitted = team default (job_share)
+    priority?: number   // this job only, omitted = team default
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
   renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
     apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
@@ -1166,6 +1174,17 @@ export const api = {
     apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
   renderJobAction: (project: string, jid: number, action: RenderJobAction) =>
     apiCall<unknown>('POST', `/render/jobs/${jid}/${action}?project=${encodeURIComponent(project)}`),
+  renderJobPriority: (project: string, jid: number, priority: number) =>
+    apiCall<{ jid: number; priority: number; priority_warning: string | null }>('POST',
+      `/render/jobs/${jid}/priority?project=${encodeURIComponent(project)}`, { priority }),
+  // Environment screen (school farm config, locked by "Understand" + password; backend checks both)
+  renderEnvState: (project: string, unlock: RenderEnvUnlock) =>
+    apiCall<RenderEnvState>('POST', `/render/env/state?project=${encodeURIComponent(project)}`, unlock),
+  renderEnvShares: (project: string, unlock: RenderEnvUnlock, teams: Record<string, RenderShareRule>) =>
+    apiCall<{ path: string; backup: string; shares: Record<string, Record<string, RenderShareRule>> }>('PUT',
+      `/render/env/shares?project=${encodeURIComponent(project)}`, { ...unlock, teams }),
+  renderEnvReload: (project: string, unlock: RenderEnvUnlock) =>
+    apiCall<{ reloaded: string }>('POST', `/render/env/reload?project=${encodeURIComponent(project)}`, unlock),
   // Engine dispatch trace of a job ("Trace Job"), read only, any job.
   renderJobTrace: (project: string, jid: number) =>
     apiCall<{ trace: string }>('GET', `/render/jobs/${jid}/trace?project=${encodeURIComponent(project)}`, undefined, 60000),

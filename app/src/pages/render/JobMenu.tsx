@@ -5,12 +5,12 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import {
-  ArchiveX, ArrowUpToLine, Lock, Pause, Pin, PinOff, Play, RefreshCcw, RotateCcw, ScanSearch, SkipForward, Unlock,
+  ArchiveX, ArrowUpDown, ArrowUpToLine, Lock, Pause, Pin, PinOff, Play, RefreshCcw, RotateCcw, ScanSearch, SkipForward, Unlock,
 } from 'lucide-react'
 import type { RenderJob, RenderJobAction } from '../../api/client'
 import { useTr } from './renderUi'
 
-export type JobMenuChoice = RenderJobAction | 'trace' | 'pin' | 'unpin'
+export type JobMenuChoice = RenderJobAction | 'trace' | 'pin' | 'unpin' | 'priority'
 
 type Item = { id: JobMenuChoice; label: string; icon: ReactNode; danger?: boolean }
 
@@ -44,6 +44,7 @@ export function JobMenu({ job, pinned, x, y, onPick, onClose }: {
     // The engine only shuffles a job still in its queue ("unknown status" on a finished one, job 34031).
     if (state === 'waiting' || state === 'active' || state === 'paused') {
       items.push({ id: 'shuffle_top', label: tr('Passer en tete de file', 'Shuffle to top'), icon: <ArrowUpToLine size={12} /> })
+      items.push({ id: 'priority', label: tr(`Priorite (${job.priority ?? '?'})...`, `Priority (${job.priority ?? '?'})...`), icon: <ArrowUpDown size={12} /> })
     }
     items.push({ id: 'lock', label: tr('Verrouiller', 'Lock'), icon: <Lock size={12} /> })
     items.push({ id: 'unlock', label: tr('Deverrouiller', 'Unlock'), icon: <Unlock size={12} /> })

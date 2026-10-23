@@ -1,4 +1,4 @@
-"""Farm Shares from the engine's limits.config (read only, FLUX never writes it).
+"""Farm Shares from the engine's limits.config (read; written only by the locked environment screen).
 
 The school sets the teams and their share of the farm once a year in limits.config (Tractor Limits,
 "Shares" per limit tag: nominal = fair share, cap = max part of the farm). Tractor balances the
@@ -11,11 +11,14 @@ http://<engine>/Tractor/config?file=limits.config (read at school on 2026-10-23)
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import threading
 import time
 import urllib.request
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
 # FLUX runs husk on the blades: its commands count in the "husk" limit (implicit tag = application name).
 RENDER_TAG = "husk"
@@ -90,6 +93,177 @@ def fetch_shares(engine: str) -> Optional[Dict[str, Dict[str, dict]]]:
 def teams(shares: Optional[Dict[str, Dict[str, dict]]], tag: str = RENDER_TAG) -> list:
     """Team names of the render tag (the Shares of FLUX's commands), 'default' excluded."""
     return sorted(t for t in ((shares or {}).get(tag) or {}) if t != DEFAULT_SHARE)
+
+
+# ── environment screen: edit the Shares (2026-10-23, locked by "Understand" + password) ──
+# The password is in this open source code: a guard against mistakes, not a security.
+
+ENV_PHRASE = "Understand"
+ENV_PASSWORD = "root"
+LIMITS_FILE = "limits.config"
+_TEAM = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+class LimitsError(ValueError):
+    """Readable French message: nothing was written."""
+
+
+def check_unlock(phrase: str, password: str) -> None:
+    if phrase != ENV_PHRASE or password != ENV_PASSWORD:
+        raise LimitsError("Reglages de l'environnement verrouilles : phrase ou mot de passe incorrect")
+
+
+def check_teams(teams: Dict[str, dict]) -> Dict[str, dict]:
+    """{team: {"nominal": 0..1, "cap": 0..1}} with 'default' kept. Raises LimitsError."""
+    if not isinstance(teams, dict) or not teams:
+        raise LimitsError("Aucune equipe")
+    out: Dict[str, dict] = {}
+    for name, v in teams.items():
+        if not _TEAM.match(str(name)):
+            raise LimitsError(f"Nom d'equipe invalide : '{name}' (lettres, chiffres, _ . -)")
+        nominal, cap = _num((v or {}).get("nominal")), _num((v or {}).get("cap"))
+        if nominal is None or not 0 <= nominal <= 1:
+            raise LimitsError(f"{name} : part nominale entre 0 et 100 %")
+        if cap is None or not 0 < cap <= 1:
+            raise LimitsError(f"{name} : plafond entre 1 et 100 %")
+        out[str(name)] = {"nominal": nominal, "cap": cap}
+    if DEFAULT_SHARE not in out:
+        raise LimitsError(f"La part '{DEFAULT_SHARE}' est obligatoire (jobs des equipes inconnues)")
+    return out
+
+
+def _commented_lines(text: str) -> set:
+    return {i for i, ln in enumerate(text.splitlines()) if ln.lstrip().startswith(("#", "//"))}
+
+
+def _share_blocks(text: str) -> List[tuple]:
+    """(start, end) of the '{...}' of every active "Shares" entry (commented lines skipped)."""
+    commented = _commented_lines(text)
+    line_of = [0] * (len(text) + 1)
+    n = 0
+    for i, ch in enumerate(text):
+        line_of[i] = n
+        if ch == "\n":
+            n += 1
+    blocks = []
+    for m in re.finditer(r'"Shares"\s*:\s*\{', text):
+        if line_of[m.start()] in commented:
+            continue
+        depth, i = 0, m.end() - 1
+        while i < len(text):
+            if line_of[i] not in commented:
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        blocks.append((m.end() - 1, i + 1))
+                        break
+            i += 1
+        else:
+            raise LimitsError("limits.config illisible : bloc Shares non ferme")
+    return blocks
+
+
+def _fmt(x: float) -> str:
+    return format(x, "g")
+
+
+def apply_shares(text: str, teams: Dict[str, dict]) -> str:
+    """Same file with every active Shares block replaced by these teams. Comments and every other
+    rule kept as they are; checked by parsing both versions before anything is written."""
+    teams = check_teams(teams)
+    nl = "\r\n" if "\r\n" in text else "\n"
+    blocks = _share_blocks(text)
+    if not blocks:
+        raise LimitsError("Aucun bloc Shares dans limits.config : rien a modifier")
+    out, last = [], 0
+    for start, end in blocks:
+        line_start = text.rfind("\n", 0, start) + 1
+        indent = re.match(r"[ \t]*", text[line_start:start]).group(0)
+        names = [t for t in teams if t != DEFAULT_SHARE] + [DEFAULT_SHARE]
+        rows = [f'{indent}\t"{t}": {{"nominal": {_fmt(teams[t]["nominal"])}, "cap": {_fmt(teams[t]["cap"])}}}'
+                for t in names]
+        out.append(text[last:start])
+        out.append("{" + nl + ("," + nl).join(rows) + nl + indent + "\t}")
+        last = end
+    out.append(text[last:])
+    new = "".join(out)
+    _check_same_rules(text, new, teams)
+    return new
+
+
+def _rules_without_shares(text: str) -> dict:
+    data = json.loads(_strip_comments(text))
+    for spec in (data.get("Limits") or {}).values():
+        if isinstance(spec, dict):
+            spec.pop("Shares", None)
+    return data
+
+
+def _check_same_rules(old: str, new: str, teams: Dict[str, dict]) -> None:
+    try:
+        same = _rules_without_shares(old) == _rules_without_shares(new)
+    except ValueError:
+        raise LimitsError("limits.config illisible apres modification : rien n'est ecrit") from None
+    if not same:
+        raise LimitsError("La modification toucherait d'autres regles que les Shares : rien n'est ecrit")
+    for tag, by_team in parse_shares(new).items():
+        if by_team != teams:
+            raise LimitsError(f"Shares du tag '{tag}' differentes apres modification : rien n'est ecrit")
+
+
+def same_text(a: str, b: str) -> bool:
+    """Same config file, BOM and line endings aside."""
+    def norm(text: str) -> str:
+        return text.lstrip("﻿").replace("\r\n", "\n").strip()
+    return norm(a) == norm(b)
+
+
+def read_local(config_dir: str) -> tuple:
+    """(path, text) of limits.config in the configured network folder. Raises LimitsError."""
+    folder = Path(str(config_dir or "").strip())
+    if not str(config_dir or "").strip():
+        raise LimitsError("Dossier de config du moteur non renseigne")
+    path = folder / LIMITS_FILE
+    if not path.is_file():
+        raise LimitsError(f"{LIMITS_FILE} introuvable dans {folder}")
+    return path, path.read_bytes().decode("utf-8")
+
+
+def engine_text(engine: str) -> Optional[str]:
+    """limits.config as the engine serves it (read only), None if unreachable."""
+    url = config_url(engine)
+    if url is None:
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=_TIMEOUT_S) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except (OSError, ValueError):
+        return None
+
+
+def write_shares(config_dir: str, engine: str, teams: Dict[str, dict], phrase: str, password: str) -> dict:
+    """Write the new Shares into the engine's limits.config (backup first). Raises LimitsError.
+
+    Refused unless the file in that folder is the one the engine serves (wrong folder = never written).
+    """
+    check_unlock(phrase, password)
+    path, text = read_local(config_dir)
+    served = engine_text(engine)
+    if served is None:
+        raise LimitsError("Moteur injoignable : impossible de verifier que ce dossier est le sien, rien n'est ecrit")
+    if not same_text(served, text):
+        raise LimitsError(f"{path} n'est pas le {LIMITS_FILE} que sert le moteur : mauvais dossier, rien n'est ecrit")
+    new = apply_shares(text, teams)
+    backup = path.with_name(f"{LIMITS_FILE}.flux_{time.strftime('%Y%m%d_%H%M%S')}.bak")
+    shutil.copy2(path, backup)
+    tmp = path.with_name(f".{LIMITS_FILE}.flux_tmp")
+    tmp.write_bytes(new.encode("utf-8"))
+    os.replace(tmp, path)
+    with _lock:
+        _cache.clear()
+    return {"path": str(path), "backup": str(backup), "shares": parse_shares(new)}
 
 
 def team_warning(team: str, shares: Optional[Dict[str, Dict[str, dict]]], tag: str = RENDER_TAG) -> Optional[str]:

@@ -230,6 +230,32 @@ class FarmTeams(RouterTargeting):
             self.client.put("/render/settings", params={"project": "P"}, json={"tractor_project": "Lum"})
             self.assertIsNone(self.client.get("/render/settings", params={"project": "P"}).json()["team_warning"])
 
+    def test_priority_per_job(self):
+        body = self._submit(priority=7).json()
+        self.assertEqual(body["priority"], 7)
+        self.assertIn("Priorite 7", body["priority_warning"])
+        alf = next((self.usd.parent / "render" / "v001" / "_job").glob("*.alf")).read_text(encoding="utf-8")
+        self.assertIn("-priority 7", alf)
+        self.assertEqual(self._submit(priority=0).status_code, 400)
+        with mock.patch.object(render.tractor_bridge, "set_priority", return_value={"jid": 5, "priority": 3}) as setter:
+            r = self.client.post("/render/jobs/5/priority", params={"project": "P"}, json={"priority": 3})
+        self.assertEqual(r.status_code, 200, r.text)  # not swallowed by /jobs/{jid}/{action}
+        setter.assert_called_once_with(mock.ANY, "adam", 5, 3)
+
+    def test_env_locked_and_never_in_simulation(self):
+        for path in ("/render/env/state", "/render/env/reload"):
+            self.assertEqual(self.client.post(path, params={"project": "P"}, json={"phrase": "Understand", "password": "x"}).status_code, 403)
+        teams = {"default": {"nominal": 0.1, "cap": 0.1}}
+        with mock.patch.object(render.farm_limits, "write_shares") as writer:
+            r = self.client.put("/render/env/shares", params={"project": "P"},
+                                json={"phrase": "Understand", "password": "root", "teams": teams})
+        self.assertEqual(r.status_code, 400)  # setUp: simulation
+        writer.assert_not_called()
+        with mock.patch.object(render.farm_limits, "engine_text", return_value=None):
+            r = self.client.post("/render/env/state", params={"project": "P"}, json={"phrase": "Understand", "password": "root"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["folder_ok"])
+
     def test_no_engine_no_warning(self):
         body = self.client.get("/render/settings", params={"project": "P"}).json()
         self.assertEqual((body["farm_teams"], body["team_warning"]), ([], None))

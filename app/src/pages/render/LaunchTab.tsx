@@ -47,6 +47,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const [freeze, setFreeze] = useState(settings?.freeze_by_default ?? true)
   const [freezeWhen, setFreezeWhen] = useState<RenderFreezeWhen>(settings?.freeze_when ?? 'start')
   const [startAt, setStartAt] = useState('')   // "YYYY-MM-DDTHH:MM", empty = now
+  const [priority, setPriority] = useState(settings?.priority ?? 1)   // this job only (team default first)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<RenderSubmitResult | null>(null)
 
@@ -179,7 +180,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const canSubmit = !submitting && !targetEmpty && (source === 'shot' ? !!shotKey : !!usdPath.trim())
   const submit = async () => {
     if (!canSubmit) return
-    const body: Parameters<typeof api.renderSubmit>[0] = { project, renderer, freeze }
+    const body: Parameters<typeof api.renderSubmit>[0] = { project, renderer, freeze, priority }
     if (source === 'shot') { const [seq, shot] = shotKey.split('/'); body.seq = seq; body.shot = shot }
     else body.usd_path = usdPath.trim()
     if (frameStart !== '') body.frame_start = Number(frameStart)
@@ -258,6 +259,12 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
               <SelectItem value="renderman">RenderMan</SelectItem>
             </SelectContent>
           </Select>
+        </Row>
+        <Row label={tr('Priorite', 'Priority')}
+          help={tr("Plus haut = passe avant. 1 = comme tout le monde. Au-dessus, passe aussi avant les autres equipes (dans leur part de la farm).",
+            'Higher = goes first. 1 = like everyone. Above, also goes before other teams (within their farm share).')}>
+          <input type="number" min={1} max={10000} style={input} value={priority}
+            onChange={e => setPriority(Math.max(1, Math.min(10000, Math.round(Number(e.target.value) || 1))))} />
         </Row>
       </div>
 

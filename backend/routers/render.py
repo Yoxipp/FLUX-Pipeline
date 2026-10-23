@@ -55,6 +55,73 @@ def get_settings(project: str):
             "team_warning": farm_limits.team_warning(settings["tractor_project"], shares)}
 
 
+# ── environment: the school's farm config (locked screen, 2026-10-23) ──
+
+class EnvUnlock(BaseModel):
+    phrase: str = ""
+    password: str = ""
+
+
+class EnvShares(EnvUnlock):
+    teams: dict  # {team: {"nominal": 0..1, "cap": 0..1}}
+
+
+@router.post("/env/state")
+def env_state(project: str, body: EnvUnlock):
+    """Shares as the engine serves them, and whether the configured folder holds that same file."""
+    _ensure_project(project)
+    try:
+        farm_limits.check_unlock(body.phrase, body.password)
+    except farm_limits.LimitsError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    settings = team_settings.effective_settings(project)
+    served = farm_limits.engine_text(settings["engine"])
+    out = {"engine": settings["engine"], "config_dir": settings["engine_config_dir"],
+           "engine_shares": farm_limits.parse_shares(served) if served else None, "folder_ok": False, "folder_error": None}
+    try:
+        _path, text = farm_limits.read_local(settings["engine_config_dir"])
+        out["folder_ok"] = served is not None and farm_limits.same_text(served, text)
+        if not out["folder_ok"]:
+            out["folder_error"] = ("Moteur injoignable" if served is None
+                                   else "Ce dossier ne contient pas le limits.config que sert le moteur")
+    except (farm_limits.LimitsError, OSError, UnicodeDecodeError) as exc:
+        out["folder_error"] = str(exc)
+    return out
+
+
+@router.put("/env/shares")
+def env_shares(project: str, body: EnvShares):
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    if settings["dry_run"] is True:
+        raise HTTPException(status_code=400, detail="Mode simulation : la config de la farm n'est jamais modifiee")
+    try:
+        out = farm_limits.write_shares(settings["engine_config_dir"], settings["engine"], body.teams,
+                                       body.phrase, body.password)
+    except farm_limits.LimitsError as exc:
+        raise HTTPException(status_code=403 if "verrouilles" in str(exc) else 400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Ecriture impossible : {exc}")
+    log.warning("Farm limits.config Shares changed by %s (%s), backup %s", _user(), project, out["backup"])
+    return out
+
+
+@router.post("/env/reload")
+def env_reload(project: str, body: EnvUnlock):
+    _ensure_project(project)
+    try:
+        farm_limits.check_unlock(body.phrase, body.password)
+    except farm_limits.LimitsError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    settings = team_settings.effective_settings(project)
+    try:
+        out = tractor_bridge.reload_limits(settings, _user())
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    log.warning("Farm limits.config reloaded by %s (%s)", _user(), project)
+    return out
+
+
 # ── last launch form of each artist (follows the artist from desk to desk: stored in the project) ──
 
 _LAST_MAX_BYTES = 20_000
@@ -165,6 +232,7 @@ class SubmitBody(BaseModel):
     groups: list[str] = []          # team groups (render.json host_groups) or rooms (ROOM17)
     share_percent: Optional[int] = None  # % of the farm for this job, None = team default
     share_of: Optional[str] = None       # "alive" | "free"
+    priority: Optional[int] = None       # this job only, None = team default (higher = dispatched first)
 
 
 # ── farm snapshot (shared by /farm, /submit and the team balancer) ──────────
@@ -300,6 +368,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
         from features.usd_assembler.shot_render import stage_settings
 
         render_settings = stage_settings(Path(frozen["usd"]), renderer)
+    priority = settings["priority"] if body.priority is None else body.priority
+    if not isinstance(priority, int) or not 1 <= priority <= 10000:
+        raise HTTPException(status_code=400, detail="Priorite entre 1 et 10000")
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
     out_dir = freeze.reserve_render_dir(folder)
     render_usd = _farm(frozen["usd"], "Le USD", simulate)
@@ -326,7 +397,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         frame_end=end,
         renderer=renderer,
         chunk_size=body.chunk_size or settings["chunk_size"],
-        priority=settings["priority"],
+        priority=priority,
         maxactive=maxactive,
         service=service,
         envkeys=settings["envkeys"],
@@ -352,7 +423,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
             "frozen": frozen["frozen"] or at_start, "freeze_when": "start" if at_start else "submit",
             "frames": [start, end], "start_at": spec.start_after,
             "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes + _team_note(settings),
-            "priority_warning": team_settings.priority_warning(settings)}
+            "priority": priority, "priority_warning": team_settings.priority_warning({**settings, "priority": priority})}
 
 
 _SUBMIT_LOCK = threading.Lock()
@@ -601,6 +672,26 @@ def _action(project: str, jid: int, action: str, user: str) -> dict:
         return tractor_bridge.job_action(action, settings, user, jid)
     except tractor_bridge.BridgeError as exc:
         raise _bridge_error(exc)
+
+
+class PriorityBody(BaseModel):
+    priority: int
+
+
+def _set_priority(project: str, jid: int, value: int, user: str) -> dict:
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    try:
+        out = tractor_bridge.set_priority(settings, user, jid, value)
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    return {**out, "priority_warning": team_settings.priority_warning({**settings, "priority": value})}
+
+
+# Declared before /jobs/{jid}/{action}: FastAPI matches routes in order.
+@router.post("/jobs/{jid}/priority")
+async def job_priority(jid: int, project: str, body: PriorityBody):
+    return await asyncio.to_thread(_set_priority, project, jid, body.priority, _user())
 
 
 @router.post("/jobs/{jid}/{action}")
