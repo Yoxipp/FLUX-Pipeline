@@ -50,8 +50,8 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
     <>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <Toggle value={scope} onChange={id => setScope(id as RenderJobScope)}
-          options={[{ id: 'mine', label: tr('Mes jobs FLUX', 'My FLUX jobs') }, { id: 'team', label: tr('Equipe', 'Team') },
-            { id: 'all', label: tr('Toute la farm', 'Whole farm') }]} />
+          options={[{ id: 'all', label: tr('Toute la farm', 'Whole farm') }, { id: 'team', label: tr('Equipe', 'Team') },
+            { id: 'mine', label: tr('Mes jobs FLUX', 'My FLUX jobs') }]} />
         <Toggle value={stateFilter} onChange={id => setStateFilter(id as StateFilter)}
           options={[{ id: 'all', label: tr('Tous etats', 'Any state') }, { id: 'active', label: tr('En cours', 'Running') },
             { id: 'error', label: tr('Erreur', 'Error') }, { id: 'done', label: tr('Fini', 'Done') },

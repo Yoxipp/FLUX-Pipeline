@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronRight, Layers, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
-import type { RenderFarm, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
+import type { RenderFarm, RenderFreezeWhen, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
 import { MachinePicker } from './MachinePicker'
 import {
   Banner, Check, Row, Section, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
@@ -58,7 +58,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
         onChange={e => set(k, Math.max(k === 'maxactive' ? 0 : 1, Math.round(Number(e.target.value) || 0)))} />
     </Row>
   )
-  const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
+  const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
     label: string, placeholder?: string) => (
     <Row label={label}>
       <input style={input} value={draft[k]} placeholder={placeholder} onChange={e => set(k, e.target.value)} />
@@ -74,7 +74,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
             onChange={e => set(k, { ...s, percent: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} />
           <span style={hint}>%</span>
           <Toggle value={s.of} onChange={id => set(k, { ...s, of: id as RenderShareBase })}
-            options={[{ id: 'alive', label: tr('des allumees', 'of alive') }, { id: 'free', label: tr('des libres', 'of free') }]} />
+            options={[{ id: 'alive', label: tr('des machines allumees', 'of machines on') }, { id: 'free', label: tr('des machines libres', 'of free machines') }]} />
           <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{s.percent ? <><Layers size={11} />{n}</> : tr('off', 'off')}</span>
         </div>
       </Row>
@@ -178,6 +178,11 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
               <Row label={tr('Gel par defaut', 'Freeze by default')}>
                 <Check label={tr('Geler la version', 'Freeze the version')} checked={draft.freeze_by_default} onChange={v => set('freeze_by_default', v)} />
               </Row>
+              <Row label={tr('Gel d\'un job programme', 'Scheduled job freeze')}>
+                <Toggle value={draft.freeze_when} onChange={id => set('freeze_when', id as RenderFreezeWhen)}
+                  options={[{ id: 'start', label: tr('Au demarrage', 'At start') }, { id: 'submit', label: tr('Au lancement', 'At submit') }]} />
+              </Row>
+              {txt('houdini_path', tr('Houdini des blades', 'Blades Houdini'), 'C:/Program Files/Side Effects Software/Houdini 20.5.445')}
               {txt('service_karma', 'Service Karma', 'PixarRender')}
               {txt('service_renderman', 'Service RenderMan', 'PixarRender')}
               <Row label={tr('Envkeys (separes par des virgules)', 'Envkeys (comma separated)')}>

@@ -4,9 +4,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, ChevronRight, Circle, Layers, Monitor, Play } from 'lucide-react'
+import { Ban, ChevronDown, ChevronRight, Circle, Layers, Monitor, Play, Snowflake } from 'lucide-react'
 import { api } from '../../api/client'
-import type { RenderFarm, RenderLastForm, RenderSettings, RenderShareBase, RenderShot, RenderSubmitResult } from '../../api/client'
+import type {
+  RenderFarm, RenderFreezeWhen, RenderLastForm, RenderSettings, RenderShareBase, RenderShot, RenderSubmitResult,
+} from '../../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../../components/shared/ui'
 import { MachinePicker } from './MachinePicker'
 import {
@@ -43,6 +45,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const [frameEnd, setFrameEnd] = useState('')
   const [renderer, setRenderer] = useState<'karma' | 'renderman'>(settings?.renderer ?? 'karma')
   const [freeze, setFreeze] = useState(settings?.freeze_by_default ?? true)
+  const [freezeWhen, setFreezeWhen] = useState<RenderFreezeWhen>(settings?.freeze_when ?? 'start')
   const [startAt, setStartAt] = useState('')   // "YYYY-MM-DDTHH:MM", empty = now
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<RenderSubmitResult | null>(null)
@@ -105,7 +108,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   function teamCapSummary() {
     return teamCap ? `${tr('equipe', 'team')} · ${teamCap}` : tr('sans limite', 'no limit')
   }
-  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('libres', 'free') : tr('allumees', 'alive'))
+  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('des machines libres', 'of free machines') : tr('des machines allumees', 'of machines on'))
   const shareSummary = share.percent
     ? `${share.percent} % ${ofLabel(share.of)} · ${jobCap}`
     : teamCapSummary()
@@ -125,7 +128,9 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const [atDay, atTime] = startAt ? startAt.split('T') : ['', '']
   const [atHour, atMin] = atTime ? atTime.split(':') : ['', '']
   const setWhen = (day: string, hour: string, min: string) => setStartAt(day ? `${day}T${hour || '20'}:${min || '00'}` : '')
-  const whenSummary = `${startAt ? startAt.replace('T', ' ') : tr('Maintenant', 'Now')}  ·  ${freeze ? tr('gele', 'frozen') : 'LAST'}`
+  const freezeAtStart = freeze && !!startAt && freezeWhen === 'start'
+  const freezeSummary = !freeze ? 'LAST' : freezeAtStart ? tr('gele au demarrage', 'frozen at start') : tr('gele', 'frozen')
+  const whenSummary = `${startAt ? startAt.replace('T', ' ') : tr('Maintenant', 'Now')}  ·  ${freezeSummary}`
 
   // ── last form of this artist: restored once shots are known, saved (debounced) on change ──
   const restored = useRef(false)
@@ -145,6 +150,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     restored.current = true
     if (l.renderer) setRenderer(l.renderer)
     if (typeof l.freeze === 'boolean') setFreeze(l.freeze)
+    if (l.freeze_when === 'start' || l.freeze_when === 'submit') setFreezeWhen(l.freeze_when)
     if (typeof l.limit_job === 'boolean') setLimitJob(l.limit_job)
     if (typeof l.share_percent === 'number' && l.share_percent > 0) setSharePct(l.share_percent)
     if (l.share_of) setShareOf(l.share_of)
@@ -163,11 +169,11 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     const [, shot] = shotKey.split('/')
     const form: RenderLastForm = {
       source, seq, shot: shot ?? '', usd_path: usdPath, renderer, freeze, limit_job: limitJob,
-      share_percent: sharePct, share_of: shareOf, target: targetMode, hosts, groups,
+      share_percent: sharePct, share_of: shareOf, target: targetMode, hosts, groups, freeze_when: freezeWhen,
     }
     const t = window.setTimeout(() => { api.renderSaveLast(project, form).catch(() => { /* not critical */ }) }, 800)
     return () => window.clearTimeout(t)
-  }, [project, source, seq, shotKey, usdPath, renderer, freeze, limitJob, sharePct, shareOf, targetMode, hosts, groups])
+  }, [project, source, seq, shotKey, usdPath, renderer, freeze, freezeWhen, limitJob, sharePct, shareOf, targetMode, hosts, groups])
 
   const targetEmpty = targetMode === 'pick' && pickedCount === 0
   const canSubmit = !submitting && !targetEmpty && (source === 'shot' ? !!shotKey : !!usdPath.trim())
@@ -178,7 +184,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     else body.usd_path = usdPath.trim()
     if (frameStart !== '') body.frame_start = Number(frameStart)
     if (frameEnd !== '') body.frame_end = Number(frameEnd)
-    if (startAt) body.start_at = startAt
+    if (startAt) { body.start_at = startAt; body.freeze_when = freezeWhen }
     body.share_percent = limitJob ? sharePct : 0
     body.share_of = shareOf
     if (targetMode === 'pick') { body.hosts = hosts; body.groups = groups }
@@ -261,8 +267,8 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
             <Check label={tr('Limiter ce job', 'Limit this job')} checked={limitJob} onChange={setLimitJob} />
             {counts && (
               <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-                <span title={tr('Blades allumees', 'Alive blades')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Monitor size={11} />{counts.alive}</span>
-                <span title={tr('Blades libres', 'Free blades')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ok)' }}><Circle size={8} fill="currentColor" />{counts.free}</span>
+                <span title={tr('Machines allumees', 'Machines on')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Monitor size={11} />{counts.alive}</span>
+                <span title={tr('Machines libres', 'Free machines')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ok)' }}><Circle size={8} fill="currentColor" />{counts.free}</span>
                 <span title={tr('Maximum en parallele pour ce job', 'Max at once for this job')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ink-2)' }}>
                   <Layers size={11} />{limitJob ? jobCap : teamCap ? `${teamCap} (${tr('equipe', 'team')})` : '∞'}
                 </span>
@@ -282,7 +288,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
                   onChange={e => setSharePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
               )}
               <Toggle value={shareOf} onChange={id => setShareOf(id as RenderShareBase)}
-                options={[{ id: 'free', label: tr('des libres', 'of free') }, { id: 'alive', label: tr('des allumees', 'of alive') }]} />
+                options={[{ id: 'free', label: tr('des machines libres', 'of free machines') }, { id: 'alive', label: tr('des machines allumees', 'of machines on') }]} />
             </div>
           )}
         </Row>
@@ -339,7 +345,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
             )}
           </div>
         </Row>
-        <Check label={tr('Geler la version', 'Freeze the version')} checked={freeze} onChange={setFreeze} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Check label={tr('Geler la version', 'Freeze the version')} checked={freeze} onChange={setFreeze} />
+          {freeze && atDay && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Snowflake size={11} style={{ color: 'var(--ink-3)' }} />
+              <Toggle value={freezeWhen} onChange={id => setFreezeWhen(id as RenderFreezeWhen)}
+                options={[
+                  { id: 'start', label: tr('Au demarrage', 'At start'), title: tr('Derniers publishs au moment du rendu', 'Latest publishes when the render starts') },
+                  { id: 'submit', label: tr('Maintenant', 'Now'), title: tr('Versions publiees en ce moment', 'Versions published right now') },
+                ]} />
+            </span>
+          )}
+        </div>
       </Fold>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

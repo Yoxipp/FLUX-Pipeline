@@ -150,6 +150,8 @@ export const MANUAL_URL = `${BASE_URL}/system/manual`
 export interface RenderSettings {
   tractor_project: string; priority: number; maxactive: number; chunk_size: number
   renderer: 'karma' | 'renderman'; freeze_by_default: boolean
+  // scheduled job: freeze on the blade when it starts, or at submit
+  freeze_when: RenderFreezeWhen; houdini_path: string
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   service_karma: string; service_renderman: string; envkeys: string[]
   husk_path: string; bridge_python: string; bridge_script: string; engine: string; engine_user: string; dry_run: boolean
@@ -161,15 +163,16 @@ export interface RenderSettings {
 export interface RenderLastForm {
   source: 'shot' | 'usd'; seq: string; shot: string; usd_path: string; renderer: 'karma' | 'renderman'
   freeze: boolean; limit_job: boolean; share_percent: number; share_of: RenderShareBase
-  target: 'any' | 'pick'; hosts: string[]; groups: string[]
+  target: 'any' | 'pick'; hosts: string[]; groups: string[]; freeze_when?: RenderFreezeWhen
 }
 export type RenderShareBase = 'alive' | 'free'
+export type RenderFreezeWhen = 'start' | 'submit'
 export interface RenderShare { percent: number; of: RenderShareBase }
 export interface RenderShot { seq: string; shot: string; frame_start: number | null; frame_end: number | null; has_stage: boolean }
 export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
-  start_at: string; service: string; maxactive: number
+  start_at: string; service: string; maxactive: number; freeze_when?: RenderFreezeWhen
 }
 export interface RenderJob {
   jid: number; title: string; user: string; projects?: string[] | string; priority?: number; maxactive?: number
@@ -1109,6 +1112,7 @@ export const api = {
     project: string; seq?: string; shot?: string; usd_path?: string
     frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
     start_at?: string   // "YYYY-MM-DDTHH:MM" local; omitted = now
+    freeze_when?: RenderFreezeWhen   // with start_at: freeze when the job starts or now; omitted = team default
     hosts?: string[]; groups?: string[]   // only these machines / groups (team groups or rooms)
     share_percent?: number; share_of?: RenderShareBase   // omitted = team default (job_share)
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow

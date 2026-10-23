@@ -45,7 +45,7 @@ export function Render() {
   const [settings, setSettings] = useState<RenderSettings | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const [shots, setShots] = useState<RenderShot[]>([])
-  const [scope, setScope] = useState<RenderJobScope>('mine')
+  const [scope, setScope] = useState<RenderJobScope>('all')   // whole farm by default (2026-10-23)
   const [days, setDays] = useState(30)
   const [jobs, setJobs] = useState<RenderJob[]>([])
   const [jobsDry, setJobsDry] = useState(false)
