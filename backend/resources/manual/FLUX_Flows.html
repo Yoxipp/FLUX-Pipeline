@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>FLUX Flows</title>
+<style>
+/* Dark theme mirroring the FLUX app tokens (app/src/styles/globals.css). */
+:root { --ink:#e4e2df; --mute:#a3a09c; --line:#3a3836; --soft:#2a2927; --paper:#242321; --bg:#1d1c1b; --deep:#161514; --acc:#d08a52; --acchi:#e6a170; --acc2:#e6a170; --accsoft:rgba(208,138,82,.13); --err:#c2564b; --ok:#5fa86a; }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; scroll-padding-top:18px; scrollbar-color:var(--line) transparent; }
+body { font-family:"Segoe UI",Arial,sans-serif; color:var(--ink); font-size:14.5px; line-height:1.6; margin:0; background:var(--bg); }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-track { background:var(--deep); }
+::-webkit-scrollbar-thumb { background:var(--line); border-radius:6px; border:3px solid var(--deep); }
+::-webkit-scrollbar-thumb:hover { background:var(--acc); }
+::-webkit-scrollbar-button { display:none; height:0; width:0; }
+.side::-webkit-scrollbar { width:6px; }
+.side::-webkit-scrollbar-track { background:transparent; }
+.side::-webkit-scrollbar-thumb { border:none; border-radius:3px; }
+a { color:var(--acchi); }
+.layout { display:flex; align-items:flex-start; gap:28px; max-width:1240px; margin:0 auto; padding:24px 20px 80px; }
+.side { position:sticky; top:16px; width:250px; flex-shrink:0; max-height:calc(100vh - 32px); overflow-y:auto; background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:10px 8px; font-size:12.5px; }
+.side a { display:flex; gap:8px; padding:4px 8px; border-radius:6px; color:var(--ink); text-decoration:none; line-height:1.35; }
+.side a span { color:var(--mute); min-width:26px; }
+.side a:hover { background:var(--soft); }
+.side a.on { background:var(--accsoft); color:var(--acchi); font-weight:600; }
+.side a.on span { color:var(--acc); }
+.side .brand { font-weight:800; color:var(--acc); font-size:16px; letter-spacing:2px; margin-bottom:4px; }
+.side .brand small { color:var(--mute); font-weight:500; letter-spacing:0; font-size:12px; }
+.side .grp { margin:10px 8px 4px; font-size:10.5px; font-weight:700; letter-spacing:.08em; color:var(--mute); text-transform:uppercase; }
+main { flex:1; min-width:0; max-width:900px; }
+section { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:22px 30px 18px; margin:0 0 18px; }
+h1 { font-size:22px; margin:0 0 14px; color:#fff; border-bottom:2px solid var(--acc); padding-bottom:8px; }
+h2 { font-size:17px; margin:22px 0 8px; color:#fff; }
+h3 { font-size:15px; margin:18px 0 6px; color:#fff; }
+p { margin:0 0 10px; }
+ul, ol { margin:0 0 12px; padding-left:22px; }
+li { margin-bottom:4px; }
+b, strong { color:#fff; }
+code { font-family:Consolas,monospace; font-size:12.5px; background:var(--deep); color:var(--acchi); padding:1px 5px; border-radius:4px; }
+pre { font-family:Consolas,monospace; font-size:12.5px; background:var(--deep); border:1px solid var(--line); border-radius:8px; padding:12px 14px; white-space:pre-wrap; margin:0 0 12px; overflow-x:auto; }
+pre code { background:none; padding:0; color:var(--ink); }
+table { border-collapse:collapse; width:100%; margin:0 0 14px; font-size:13px; }
+th, td { border:1px solid var(--line); padding:6px 9px; vertical-align:top; text-align:left; }
+th { background:var(--soft); color:#fff; }
+.cover { padding:28px 30px 24px; border-top:4px solid var(--acc); }
+.cover .logo { font-size:30px; font-weight:800; color:var(--acc); letter-spacing:4px; line-height:1; }
+.cover .sub { font-size:16px; color:var(--mute); margin-top:4px; }
+.cover p { max-width:680px; margin-top:12px; }
+.cover .meta { margin-top:14px; color:var(--mute); font-size:12px; }
+.cover .go { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+.part { padding:16px 30px; border-left:4px solid var(--acc); background:var(--soft); }
+.part .n { color:var(--mute); font-weight:700; letter-spacing:.1em; font-size:11px; }
+.part .t { font-size:20px; font-weight:700; color:#fff; }
+.part p { color:var(--mute); margin:4px 0 0; max-width:680px; }
+.toc-head { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+.pill-link { display:inline-block; padding:7px 14px; border-radius:999px; border:1px solid var(--line); background:var(--soft); color:var(--acchi); text-decoration:none; font-weight:600; font-size:13px; }
+.pill-link:hover { background:var(--acc); border-color:var(--acc); color:#fff; }
+.pill-link.acc { border-color:var(--acc); color:var(--acchi); background:transparent; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:8px; }
+.tile { display:flex; gap:8px; align-items:baseline; padding:9px 11px; border:1px solid var(--line); border-left:3px solid var(--acc); border-radius:8px; text-decoration:none; color:var(--ink); background:var(--soft); font-size:13px; line-height:1.3; }
+.tile span { font-weight:700; color:var(--acc); min-width:28px; }
+.tile:hover { border-color:var(--acc); background:var(--accsoft); }
+.note { border-left:3px solid var(--acc); background:var(--accsoft); padding:8px 12px; margin:0 0 12px; border-radius:0 6px 6px 0; }
+.warn { border-left:3px solid var(--err); background:rgba(194,86,75,.12); padding:8px 12px; margin:0 0 12px; border-radius:0 6px 6px 0; }
+.tag { display:inline-block; font-size:11px; padding:0 6px; border-radius:4px; border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
+.tag.ok { border-color:var(--ok); color:var(--ok); }
+.tag.exp { border-color:var(--acc); color:var(--acchi); }
+.flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 14px; }
+.box { border:1.5px solid var(--line); border-radius:6px; padding:6px 10px; font-size:12.5px; background:var(--soft); text-align:center; }
+.box b { display:block; color:#fff; }
+.box.a { border-color:var(--acc); }
+.box.a b { color:var(--acchi); }
+.arr { color:var(--mute); }
+.stack { display:flex; flex-direction:column; gap:5px; margin:0 0 14px; }
+.layer { display:flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; font-size:13px; }
+.layer .k { width:150px; flex-shrink:0; background:var(--soft); color:#fff; padding:6px 10px; font-weight:600; border-right:1px solid var(--line); }
+.layer .v { padding:6px 10px; flex:1; }
+.layer.o .k { background:var(--acc); }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+.card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--soft); }
+.card h4 { margin:0 0 4px; font-size:13.5px; color:var(--acchi); }
+.small { font-size:12.5px; color:var(--mute); }
+.top { position:fixed; right:18px; bottom:18px; background:var(--acc); color:#fff; border:1px solid var(--acc); border-radius:6px; padding:6px 12px; text-decoration:none; font-weight:600; font-size:12.5px; box-shadow:0 2px 6px rgba(0,0,0,.35); }
+@media (max-width: 900px) {
+  .layout { display:block; padding:12px; }
+  .side { position:static; width:auto; max-height:none; margin-bottom:12px; }
+  section { padding:16px; }
+  .grid2 { grid-template-columns:1fr; }
+}
+@media print {
+  :root { --ink:#1d2330; --mute:#5b6475; --line:#dde1e8; --soft:#f3f5f8; --paper:#fff; --bg:#fff; --deep:#f3f5f8; --acchi:#a4531a; --acc2:#2f5d8a; }
+  h1, h2, h3, b, strong, th, .part .t, .box b { color:var(--ink); }
+  .side, .top { display:none; }
+  .layout { display:block; padding:0; }
+  section { border:none; page-break-before:always; }
+}
+
+/* Flows manual additions (features/system/flows_doc.py). */
+.node { border:1px solid var(--line); border-left:4px solid var(--fam, var(--acc)); border-radius:8px; background:var(--soft); padding:10px 14px 4px; margin:0 0 12px; scroll-margin-top:18px; }
+.node-h { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.node-h b { font-size:15px; color:#fff; }
+.node-h code { font-size:11.5px; }
+.node p.ex { border-left:3px solid var(--fam, var(--acc)); background:var(--deep); padding:6px 10px; border-radius:0 6px 6px 0; }
+.tile i { font-style:normal; color:var(--mute); font-size:11.5px; }
+.tile.fam { border-left-color:var(--fam); flex-direction:column; align-items:flex-start; gap:2px; }
+.tile.fam span { color:var(--fam); min-width:0; }
+.find { width:100%; padding:7px 10px; margin:4px 0 12px; border:1px solid var(--line); border-radius:6px; background:var(--deep); color:var(--ink); font:inherit; }
+.find:focus { outline:none; border-color:var(--acc); }
+.hide { display:none !important; }
+</style>
+</head>
+<body id="top">
+<div class="layout">
+<nav class="side">
+<a class="brand" href="#top">FLUX <small>Flows</small></a>
+<div class="grp">1 · Global</div>
+<a href="#g1" data-id="g1"><span>1</span>Un flow, c'est quoi</a>
+<a href="#g2" data-id="g2"><span>2</span>Objectifs</a>
+<a href="#g3" data-id="g3"><span>3</span>Vocabulaire</a>
+<a href="#g4" data-id="g4"><span>4</span>Comment un flow s'execute</a>
+<a href="#g5" data-id="g5"><span>5</span>Ouvrir l'editeur</a>
+<a href="#g6" data-id="g6"><span>6</span>Creer un flow</a>
+<a href="#g7" data-id="g7"><span>7</span>Editer</a>
+<a href="#g8" data-id="g8"><span>8</span>Enregistrer, versions, lancer</a>
+<a href="#g9" data-id="g9"><span>9</span>Activer</a>
+<a href="#g10" data-id="g10"><span>10</span>Ou vivent les flows</a>
+<div class="grp">2 · Dispo et a venir</div>
+<a href="#d1" data-id="d1"><span>1</span>Disponible maintenant</a>
+<a href="#d2" data-id="d2"><span>2</span>A venir, par phase</a>
+<a href="#d3" data-id="d3"><span>3</span>Hors V1 (pas prevu pour l'instant)</a>
+<div class="grp">3 · Index des nodes</div>
+<a href="#f-index" data-id="f-index"><span>≡</span>Tous les nodes</a>
+<a href="#f-event" data-id="f-event"><span>2</span>Evenements</a>
+<a href="#f-data" data-id="f-data"><span>9</span>Data</a>
+<a href="#f-logic" data-id="f-logic"><span>9</span>Logique</a>
+<a href="#f-operator" data-id="f-operator"><span>28</span>Operateurs</a>
+<a href="#f-action" data-id="f-action"><span>12</span>Actions</a>
+<a href="#f-flux" data-id="f-flux"><span>21</span>FLUX</a>
+<a href="#f-subflow" data-id="f-subflow"><span>2</span>Sous-flow</a>
+</nav>
+<main>
+
+<section class="cover">
+  <div class="logo">FLUX</div>
+  <div class="sub">Flows : le graph d'automatisation</div>
+  <p>Des petites automatisations du pipeline dessinees en nodes, comme un reseau Houdini : copier les dailies, archiver, publier, convertir, prevenir l'equipe. Partie 1 : comprendre et utiliser l'editeur. Partie 2 : ce qui marche aujourd'hui et ce qui arrive. Partie 3 : les 83 nodes, avec un exemple chacun.</p>
+  <div class="flow"><div class="box a"><b>Button</b>depart</div><span class="arr">→</span><div class="box"><b>FindPublishes</b>publishs du jour</div><span class="arr">→</span><div class="box"><b>ForEach</b>un tour par publish</div><span class="arr">→</span><div class="box"><b>Copy</b>vers les dailies</div><span class="arr">→</span><div class="box"><b>Notify</b>previent l'equipe</div></div>
+  <div class="go"><a class="pill-link" href="#global">1. Global</a><a class="pill-link" href="#dispo">2. Dispo et a venir</a><a class="pill-link" href="#nodes">3. Index des nodes</a></div>
+  <div class="meta">Genere depuis <code>docs/flows/</code> · le bouton (i) d'un node dans l'editeur affiche la meme description · Licence Apache-2.0</div>
+</section>
+
+<section class="part" id="global">
+  <div class="n">PARTIE 1</div>
+  <div class="t">Flows : vue globale</div>
+</section>
+
+<section class="chap">
+<p>Etat au 2026-10-23 (phases P0 a P4 codees). Ce qui manque encore est dans <a href="#dispo">Dispo et a venir</a>.</p>
+</section>
+
+<section class="chap" id="g1">
+<h1>1. Un flow, c'est quoi</h1>
+<p>Un flow est une petite automatisation du pipeline dessinee en nodes, comme un reseau Houdini ou un Blueprint Unreal : "chaque soir, copie les playblasts du jour dans le dossier des dailies", "quand je clique ce bouton, archive les anciennes versions", "apres un publish de modeling, regenere le proxy". Chaque node fait une seule chose (lire une valeur, tester une condition, copier un fichier, publier) ; les liens disent dans quel ordre et avec quelles donnees.</p>
+<p>Un flow est un fichier texte <code>&lt;nom&gt;.flow.yml</code> : lisible, comparable d'une version a l'autre, versionne. L'editeur n'est qu'une facon de le dessiner ; rien n'est cache dans l'app.</p>
+</section>
+
+<section class="chap" id="g2">
+<h1>2. Objectifs</h1>
+<ul><li><b>Automatiser sans coder</b> : les TD du projet montent eux-memes leurs outils avec des briques sures, au lieu de demander un script Python.</li><li><b>Difficile de se tromper</b> : les ports sont types (un lien impossible est refuse pendant le glisser, avec la raison), chaque probleme est liste avec sa correction en un clic, les nodes qui effacent ou ecrasent sont marques et demandent une confirmation, un essai a blanc montre ce qui se passerait sans rien ecrire.</li><li><b>Rien n'est perdu</b> : chaque enregistrement important fige une version, revenir en arriere cree une nouvelle version, supprimer met a la corbeille, l'effacement d'un fichier du projet passe par defaut par <code>ARCHIVE/</code>.</li><li><b>Remplacer les actions YAML v1</b> : le publish de chaque logiciel deviendra un flow (phase P8). En attendant, les actions v1 sont visibles comme flows <code>legacy_*</code> (lecture seule) et le publish tourne toujours sur v1.</li><li><b>Zero licence</b> : tout ce que FLUX sait faire seul (textures <code>.tx</code>, proxy USD, controle USD, copie, zip) se fait sans ouvrir de logiciel.</li></ul>
+</section>
+
+<section class="chap" id="g3">
+<h1>3. Vocabulaire</h1>
+<table><tr><th>Mot</th><th>Sens</th></tr><tr><td>Node</td><td>Une brique. Bande de titre a la couleur de sa famille, une ligne par port.</td></tr><tr><td>Famille</td><td>Le role du node : Evenements, Data, Logique, Operateurs, Actions, FLUX, Instances, DCC, Bridges, Sous-flow.</td></tr><tr><td>Port</td><td>Une entree (a gauche) ou une sortie (a droite). Il a un type : <code>exec</code>, <code>str</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>path</code>, <code>dir</code>, <code>list[...]</code>, <code>dict</code>, <code>publish</code>, <code>any</code>... Survoler un port montre son type, sa doc et un exemple.</td></tr><tr><td>Lien exec</td><td>Lien blanc entre ports <code>exec</code> / <code>then</code> : l'ordre d'execution. Une sortie exec n'a qu'un seul lien (pour plusieurs suites : Sequence).</td></tr><tr><td>Lien data</td><td>Lien colore : une valeur passe d'une sortie vers une entree. Une entree non reliee prend la valeur ecrite dans ses parametres.</td></tr><tr><td>Evenement</td><td>Le node de depart d'un flow (Button, Manual ; plus tard Schedule, NewFile, OnPublish...). Il n'a pas d'entree exec.</td></tr><tr><td>Node a effet</td><td>Agit sur le monde (copie, publie, notifie). Pendant un essai a blanc il ne fait rien et dit ce qu'il aurait fait.</td></tr><tr><td>Node destructif <code>!</code></td><td>Peut effacer ou ecraser (Delete en mode erase, Copy avec overwrite...). Marque <code>!</code>, demande une confirmation a l'enregistrement.</td></tr><tr><td>Portee</td><td>Ou vit le flow : livre (FLUX), Pipe / equipe, Projet, Perso.</td></tr><tr><td>Version</td><td>Copie figee <code>vNNN</code> du flow. Le fichier de travail est ce qu'on edite ; une version est ce qui s'active.</td></tr><tr><td>Run</td><td>Une execution. Chaque run est enregistre (etat de chaque node, logs, valeurs).</td></tr><tr><td>Essai a blanc</td><td>Run de la version enregistree ou les nodes a effet sont simules : rien n'est ecrit, aucun logiciel lance.</td></tr></table>
+</section>
+
+<section class="chap" id="g4">
+<h1>4. Comment un flow s'execute</h1>
+<ol><li><b>Depart</b> : un evenement part (clic sur Run dans l'editeur, bouton de page, appel par un autre flow).</li><li><b>Chaine exec</b> : le moteur suit le lien <code>then</code> de l'evenement, execute le node relie, puis suit son <code>then</code>, et ainsi de suite. Un node de branchement (If, Switch, Sequence) choisit la sortie exec a suivre.</li><li><b>Donnees tirees a la demande</b> : quand un node s'execute, ses entrees reliees vont chercher leur valeur. Un node sans port exec (Value, Path, Compare, Math...) est calcule a ce moment-la, une seule fois par tour. Un node de la chaine exec donne ses dernieres sorties ; lire une sortie d'un node pas encore execute est une erreur ("donnee lue avant d'etre produite").</li><li><b>Boucles en blocs</b> comme Houdini : <code>ForEachBegin</code> ... <code>ForEachEnd</code>, <code>ForBegin</code> ... <code>ForEnd</code>, <code>WhileBegin</code> ... <code>WhileEnd</code>. Ce qui est relie entre les deux tourne a chaque tour ; <code>BreakLoop</code> sort de la boucle. Un While a toujours un plafond de tours : jamais de boucle infinie.</li><li><b>Erreurs</b> : un node qui echoue s'entoure de rouge avec le message et le run s'arrete. Pour gerer l'erreur soi-meme (comme un try / except), relier sa sortie <code>on_error</code> : le node passe en "erreur geree" et la suite part de la.</li><li><b>Bypass</b> : un node bypasse est saute, le flux continue par son <code>then</code>.</li><li><b>Fin</b> : le run se termine quand la chaine exec n'a plus de suite. Chaque node garde son etat (fini, erreur, saute).</li></ol>
+<p>Limites : 4 runs a la fois sur le poste ; un node a 120 s par defaut (<code>timeout_s</code>). Le reglage du flow "Si deja en cours" (<code>run_policy</code>) dit quoi faire quand un run est demande alors qu'un autre tourne : <code>skip_if_running</code> (ignore) ou <code>queue</code> (file d'attente, 20 max).</p>
+<h2>Textes : tokens, variables, motifs</h2>
+<p>Dans les parametres texte et chemin (pas dans une valeur arrivee par un lien) :</p>
+<ul><li><code>{token}</code> : un token du projet ou du run (<code>{project}</code>, <code>{user}</code>, <code>{shot}</code>, <code>{date:%Y%m%d}</code>...). Un token inconnu est une erreur avec une suggestion (<code>{shto}</code> -&gt; <code>{shot}</code>).</li><li><code>${variable}</code> : une variable du flow (panneau Params du flow &gt; Variables).</li><li><code>$FLUX/...</code> en tete d'un chemin : la racine FLUX, pour un chemin portable entre postes.</li><li>Motifs facon Houdini (ListFilter, ListFiles, FindPublishes...) : <code>*</code> n'importe quoi, <code>**</code> sous-dossiers, <code>?</code> un caractere, <code>[abc]</code> un caractere parmi, <code>^</code> ou <code>!</code> exclut. Plusieurs motifs separes par des espaces, lus de gauche a droite : <code>*.abc ^*_tmp*</code> garde les .abc sauf les temporaires. Motif vide = ne garde rien.</li></ul>
+<h2>Interface et variables d'un flow</h2>
+<p>Sans node selectionne, le panneau Params montre le flow lui-meme :</p>
+<ul><li><b>Proprietes</b> : libelle, description, "Si deja en cours".</li><li><b>Entrees (interface)</b> : les parametres exposes du flow (id, type, libelle, defaut, choix). Le Run de l'editeur les demande dans un formulaire ; une page TOOL les affichera (P7) ; un <code>FlowCall</code> les recoit en entrees. Un node <code>FlowInput</code> lit leur valeur dans le graph.</li><li><b>Sorties (sous-flow)</b> : les valeurs qu'un flow rend a celui qui l'appelle, ecrites par <code>FlowOutput</code>.</li><li><b>Variables</b> : valeurs locales a un run, lues par <code>GetVariable</code> ou <code>${nom}</code>, ecrites par <code>SetVariable</code>.</li></ul>
+</section>
+
+<section class="chap" id="g5">
+<h1>5. Ouvrir l'editeur</h1>
+<p>Parametres &gt; Avance &gt; carte "Actions (YAML)" &gt; <b>Ouvrir le graph</b>. La fenetre s'ouvre a part.</p>
+<ul><li>Il faut la <b>case TD</b> (Parametres &gt; User &gt; Flows) pour editer et lancer ; la <b>case Team TD</b> pour ecrire un flow d'equipe ou de projet, un node Python, ou migrer les actions v1. Ces cases sont un garde-fou, pas une securite.</li><li>L'ancien editeur d'actions v1 reste joignable depuis Parametres avances (lecture et edition des actions v1) jusqu'a P8.</li></ul>
+<p>Disposition : barre du haut (fichier, version, problemes, Run, Essai, Runs, Layout, groupe, note, recherche) ; Shelf (un onglet par famille, les nodes courants) ; le graph au centre ; le panneau Params a droite ; le dock en bas (Problemes, Runs) ; le tiroir Catalogue (tous les nodes, recherche).</p>
+</section>
+
+<section class="chap" id="g6">
+<h1>6. Creer un flow</h1>
+<ol><li><b>Fichier &gt; Nouveau</b> (Ctrl+N) : un nom en minuscules (<code>daily_render</code>, lettres, chiffres, <code>_</code>) et une portee :<ul><li><b>Perso</b> : pour soi (<code>USER/&lt;NOM&gt;/flows/</code>), case TD ;</li><li><b>Pipe (equipe)</b> : pour toute l'ecole (<code>CONFIG/extensions/flows/</code>), case Team TD ;</li><li><b>Projet</b> : pour le projet actif seulement (<code>&lt;projet&gt;/_flux_setup/flows/</code>), case Team TD.</li></ul></li><li><b>Poser un evenement</b> : onglet Evenements du Shelf &gt; <code>Manual</code> (lance par Run) ou <code>Button</code> (lance par un bouton de page).</li><li><b>Ajouter des nodes</b> : clic sur un node du Shelf (pose au centre), glisser depuis le Shelf ou le Catalogue (pose au point de depot), ou <b>Tab</b> dans le graph (recherche par nom, type, alias ou doc ; Entree pour poser a la souris).</li><li><b>Relier</b> : glisser d'une sortie vers une entree. Pendant le glisser, les ports compatibles sont entoures, les autres pales ; survoler un port refuse donne la raison ("Une liste de chemins ne va pas dans un chemin : mets un ForEach"). Lacher un lien dans le vide ouvre le menu Tab limite aux nodes compatibles, deja relies.</li><li><b>Regler</b> : cliquer un node, remplir ses parametres dans Params. Une entree reliee affiche <code>&lt;- n4.items</code> en gris.</li><li><b>Exposer</b> ce que l'artiste doit choisir : Params du flow &gt; Entrees (interface), puis un <code>FlowInput</code> dans le graph.</li><li><b>Verifier</b> : le dock Problemes se met a jour tout seul. Cliquer une ligne zoome sur le node ; "Corriger" applique la correction proposee.</li><li><b>Tester</b> : Run (brouillon), puis Enregistrer et Essai a blanc (voir §8).</li></ol>
+<p>Un flow livre (<code>legacy_*</code>, <code>example_*</code>) est en lecture seule : <b>Fichier &gt; Enregistrer sous</b> en fait une copie modifiable dans une autre portee.</p>
+<p>Exemple complet livre : <code>example_daily_render</code> (Button &gt; FindPublishes &gt; MakeDir &gt; ForEach(PublishFields &gt; Copy) &gt; Notify).</p>
+</section>
+
+<section class="chap" id="g7">
+<h1>7. Editer</h1>
+<table><tr><th>Geste</th><th>Effet</th></tr><tr><td>Clic node, Shift / Ctrl + clic</td><td>Selectionne, ajoute a la selection</td></tr><tr><td>Glisser le fond</td><td>Rectangle de selection. Pan : bouton du milieu ou Espace + glisser. Molette : zoom</td></tr><tr><td>Survol d'un node</td><td>Barre : bypass, (i) doc du node</td></tr><tr><td>Clic lien + Suppr</td><td>Supprime le lien. Une entree deja reliee : le nouveau lien remplace l'ancien</td></tr><tr><td>Tab</td><td>Ajouter un node a la souris</td></tr><tr><td>Suppr / Retour arriere</td><td>Supprime la selection</td></tr><tr><td>Ctrl+Z, Ctrl+Y</td><td>Annuler, refaire (200 pas)</td></tr><tr><td>Ctrl+C, Ctrl+V</td><td>Copier / coller des nodes (marche entre flows et entre fenetres)</td></tr><tr><td>Ctrl+G</td><td>Boite de groupe autour de la selection</td></tr><tr><td>N</td><td>Note a la souris</td></tr><tr><td>F</td><td>Cadrer la selection (sinon tout)</td></tr><tr><td>Ctrl+F</td><td>Chercher : les nodes qui correspondent ressortent</td></tr><tr><td>Maj+S</td><td>Liens droits ou courbes</td></tr><tr><td>Layout (barre)</td><td>Range le graph de gauche a droite (annulable). Rien ne se range tout seul sinon</td></tr></table>
+<p><b>Nouveau node Python</b> (tiroir Catalogue, case Team TD) : ecrit un node d'equipe dans <code>CONFIG/extensions/nodes/</code>, partage avec toute l'ecole, a partir d'un modele. Il apparait au catalogue avec le tag <code>equipe</code>.</p>
+</section>
+
+<section class="chap" id="g8">
+<h1>8. Enregistrer, versions, lancer</h1>
+<ul><li><b>Enregistrer</b> (Ctrl+S) : ecrase le fichier de travail. Permis meme avec des erreurs (le flow est alors marque "invalide", non activable).</li><li><b>Enregistrer et incrementer</b> (Alt+Maj+S) : fige une nouvelle version <code>vNNN</code> (seulement si le contenu a change).</li><li><b>Enregistrer sous</b> (Ctrl+Maj+S) : copie sous un autre nom ou une autre portee.</li><li><b>Versions</b> (clic sur <code>v003</code> dans la barre) : liste des versions (date, artiste), Voir (lecture seule), <b>Revenir a cette version</b> (cree une nouvelle version identique : rien n'est perdu), onglet Historique (qui a fait quoi).</li><li><b>Nodes destructifs</b> : enregistrer un flow ou un node <code>!</code> a ete ajoute ou passe en mode destructif ouvre un dialogue qui les liste ; il faut glisser pour valider.</li><li><b>Quitter = enregistrer</b> : fermer la fenetre ou changer de flow enregistre (avec le meme dialogue si besoin). Un brouillon est aussi garde localement en cas de fermeture brutale et propose a la reouverture.</li><li><b>Conflit</b> : si quelqu'un a enregistre pendant que tu editais, FLUX le dit (qui, quand) : voir sa version, enregistrer par-dessus (la sienne reste dans l'historique) ou annuler.</li><li><b>Run</b> : lance le document ouvert tel quel (brouillon, aucune version creee), avec le formulaire de l'interface. Les nodes s'allument en direct (en cours, fini, erreur, saute). <b>Stop</b> annule.</li><li><b>Essai</b> (essai a blanc) : lance le fichier <b>enregistre</b> ; les nodes a effet ne font rien et ecrivent ce qu'ils auraient fait dans le rapport. A faire avant toute activation.</li><li><b>Runs</b> (dock) : historique des runs du flow ; clic = logs et graph colore par l'etat de chaque node.</li></ul>
+</section>
+
+<section class="chap" id="g9">
+<h1>9. Activer</h1>
+<p>Un flow <b>actif</b> tourne tout seul quand son evenement arrive (bouton de page, horaire, nouveau fichier, publish...). C'est la version activee qui tourne, pas le fichier de travail : on peut continuer a editer un flow actif sans risque.</p>
+<p>Etat actuel : l'activation existe cote backend (refusee sans version figee, avec des erreurs, ou pour un <code>legacy_*</code>), mais <b>il n'y a pas encore de bouton Activer dans l'editeur ni d'evenement automatique</b> : ils arrivent en P5, avec le dialogue d'activation en 3 voyants (0 erreur, avertissements lus, essai a blanc reussi sur cette version). Aujourd'hui un flow se lance avec Run ou Essai, ou depuis un autre flow (<code>FlowCall</code>).</p>
+</section>
+
+<section class="chap" id="g10">
+<h1>10. Ou vivent les flows</h1>
+<table><tr><th>Portee</th><th>Dossier</th><th>Qui ecrit</th></tr><tr><td>Livre</td><td>dans FLUX (<code>backend/flux_flows/shipped/</code>)</td><td>personne (copie avec Enregistrer sous)</td></tr><tr><td>Pipe (equipe)</td><td><code>&lt;FLUX_ROOT&gt;/CONFIG/extensions/flows/</code></td><td>Team TD</td></tr><tr><td>Projet</td><td><code>&lt;projet&gt;/_flux_setup/flows/</code></td><td>Team TD</td></tr><tr><td>Perso</td><td><code>&lt;FLUX_ROOT&gt;/USER/&lt;NOM&gt;/flows/</code></td><td>TD proprietaire</td></tr></table>
+<p>A nom egal, perso gagne sur projet, projet sur equipe, equipe sur livre. Supprimer met le flow dans <code>_trash/</code>. Chaque flow a a cote de lui <code>versions/</code>, <code>state.json</code> (version courante, version active) et, sauf perso, un <code>history.jsonl</code>.</p>
+</section>
+
+<section class="part" id="dispo">
+  <div class="n">PARTIE 2</div>
+  <div class="t">Flows : ce qui est dispo, ce qui arrive</div>
+</section>
+
+<section class="chap">
+<p>Etat au 2026-10-23. Le chantier suit les phases P0 a P8 (<code>docs/yaml_update_refonte/prompts/README.md</code>, ADR 0057 et 0058). P0 a P4 sont codees ; leur verification live par le mainteneur reste a faire. Catalogue prevu au total : 185 types de node, dont <b>83 disponibles</b> aujourd'hui (liste dans <a href="#nodes">Index des nodes</a>).</p>
+</section>
+
+<section class="chap" id="d1">
+<h1>1. Disponible maintenant</h1>
+<table><tr><th>Domaine</th><th>Ce qui marche</th></tr><tr><td>Editeur</td><td>Shelf par famille, Tab, Catalogue, liens controles par type pendant le glisser, Params editable, undo / redo, copier / coller, groupes, notes, Layout, recherche, bypass, (i) doc du node</td></tr><tr><td>Fichiers</td><td>Nouveau, Ouvrir (Pipe, Projet, Perso), Enregistrer, Enregistrer sous, Enregistrer et incrementer, Versions (voir, revenir, historique), conflit entre postes, brouillon local, quitter = enregistrer</td></tr><tr><td>Garde-fous</td><td>Dock Problemes (erreurs et avertissements, zoom sur le node, Corriger en un clic), badge invalide, dialogue des nodes destructifs a l'enregistrement</td></tr><tr><td>Execution</td><td>Run du brouillon avec formulaire de l'interface, Stop, Essai a blanc du fichier enregistre, etats en direct sur les nodes, historique des runs avec logs</td></tr><tr><td>Logique</td><td>Branches (If, Switch, Sequence), boucles ForEach / For / While avec plafond, BreakLoop, variables, gestion d'erreur <code>on_error</code>, sous-flows (<code>FlowCall</code>, <code>FlowOutput</code>)</td></tr><tr><td>Pipeline</td><td>Lire la Production (assets, plans), trouver des publishs, resoudre un chemin publie, publier un fichier, archiver, notifier, pinguer, textures <code>.tx</code>, proxy USD, controle et aplatissement USD, mise a jour du component / stage</td></tr><tr><td>Extensions</td><td>Nodes Python d'equipe (<code>CONFIG/extensions/nodes/</code>, ecrits depuis l'editeur), migration des actions v1 de l'equipe en flows (Fichier &gt; Migrer)</td></tr><tr><td>Livres</td><td>5 flows <code>legacy_*</code> (actions v1 en lecture seule), 3 exemples (<code>example_foreach</code>, <code>example_error</code>, <code>example_daily_render</code>)</td></tr></table>
+<p>Limites actuelles a connaitre :</p>
+<ul><li><b>Aucun flow ne tourne tout seul</b> : pas de bouton Activer dans l'editeur, pas d'evenement automatique (P5).</li><li><b>Le publish tourne encore sur les actions v1</b> : un flow <code>legacy_publish_*</code> se lit mais ne s'active pas (P8).</li><li><b>Pas de node logiciel</b> (Maya, Houdini, Nuke...) : rien ne pilote un DCC ouvert depuis un flow (P6). <code>Run</code> ouvre seulement un fichier dans son logiciel.</li><li><b>Pas de page TOOL</b> : le node <code>Button</code> se lance par Run dans l'editeur ; le bouton de page arrive en P7.</li><li>Le bouton <b>Subnet</b> de la barre est grise (sous-reseau dans un flow : P6).</li><li>L'avertissement "destructif non teste" s'affiche partout tant que l'activation n'existe pas.</li></ul>
+</section>
+
+<section class="chap" id="d2">
+<h1>2. A venir, par phase</h1>
+<h2>P5 : evenements et flows actifs</h2>
+<ul><li><b>Bouton Activer</b> avec dialogue en 3 voyants : 0 erreur, avertissements lus, essai a blanc reussi sur la version a activer. Un flow avec un node <code>!</code> s'active en glissant pour confirmer. Le flow actif fait tourner sa version activee.</li><li><b>Execution partagee</b> : un seul poste execute un flow d'equipe (verrou dans <code>FLUX_ROOT</code>, repris si le poste se ferme) ; un flow perso ne tourne que sur son poste.</li><li><b>Nouveaux evenements</b> :<ul><li><code>Schedule</code> : a heure fixe, tous les jours ou certains jours ; rattrape une fois un declenchement manque.</li><li><code>NewFile</code> : un nouveau fichier qui correspond a un motif apparait dans un dossier (scan regle, 30 s par defaut).</li><li><code>When</code> : une condition passe de faux a vrai (scan regle).</li><li><code>OnPublish</code> : un publish vient de se terminer (filtre par logiciel, type, nom) ; sortie <code>publish</code>.</li><li><code>SceneOpened</code> : une scene est ouverte dans Maya ou Houdini.</li></ul></li></ul>
+<h2>P6a : socle DCC, Houdini et Maya</h2>
+<ul><li><b>Instances</b> (famille Instances) : <code>HoudiniInstance</code>, <code>MayaInstance</code> donnent une <code>session</code> du logiciel, soit un logiciel deja ouvert (live), soit un process sans interface (<code>hython</code>, <code>mayapy</code>, consomme une licence, marque <code>$</code>).</li><li><b>Nodes DCC</b> facon HDA (double clic pour entrer, deverrouillables en copie d'equipe). Verbes communs a chaque logiciel : OpenScene, SaveScene, SaveAs, RunScript, Export, Import, Publish (boite noire, jamais destructif).<ul><li>Maya (<code>may</code>) : en plus UpdateRef, Playblast, FindNodes, SetAttr, GetAttr.</li><li>Houdini (<code>hou</code>) : en plus FindNode, FindNodes, CookNode, Render, SetParm, GetParm, SelectedNodes.</li></ul></li><li><b>Bridges</b> (primitives de transport utilisees dans les nodes DCC) : ScanPorts, Launch, WaitReady, BridgePing, TcpJsonCall, HttpCall, CommandPortCall, FileMailboxCall, ComCall.</li><li><b>Actions</b> : <code>RunHeadless</code> (lance un script dans <code>hython</code> / <code>mayapy</code> / Nuke sans interface), <code>Batch</code> (meme script sur une liste de scenes, continue ou s'arrete a la premiere erreur).</li><li><b>Evenement</b> <code>PublishRequest</code> : depart des futurs flows de publish par logiciel.</li><li><b>Subnet</b> : regrouper des nodes dans un sous-reseau, U pour remonter.</li></ul>
+<h2>P6b : autres logiciels</h2>
+<p>Instances et nodes DCC pour Nuke (<code>nk</code> : verbes communs + Render, FindNodes), Substance Painter (<code>sp</code> : + Info), Substance Designer (<code>sd</code> : + Cook sans interface, Info), Marvelous Designer (<code>mvd</code> : + Info), ZBrush (<code>zb</code> : + MeshInfo), Mari (<code>mari</code> : + Info). Painter, Designer, Marvelous, ZBrush et Mari ne marchent qu'avec le logiciel ouvert (live). Certains verbes demandent une commande nouvelle dans le script du logiciel : un verbe impossible sera reporte, pas invente.</p>
+<h2>P6c : bridge maison</h2>
+<p>Brancher un logiciel que FLUX ne connait pas (exemple : 3ds Max) avec un <code>bridge.yml</code> et deux flows (<code>session</code>, <code>publish</code>) assembles avec les nodes Bridges. Aucun type de node en plus.</p>
+<h2>P7 : pages TOOL et panneau Publisher</h2>
+<ul><li><b>Pages TOOL</b> : pages d'outils construites sans code, avec des boutons relies a des flows actifs (<code>Button</code>) et les champs de l'interface du flow comme formulaire.</li><li><b>Panneau Publisher</b> genere depuis le flow de publish du logiciel.</li></ul>
+<h2>P8 : bascule du publish</h2>
+<ul><li>Le publish de chaque logiciel passe par des flows <code>publish_&lt;soft&gt;</code> (retour arriere possible par un switch).</li><li>Node <code>RefusePublish</code> : arrete un publish avec un message (controle maison avant publication).</li><li>Retrait de l'ancien editeur d'actions v1.</li></ul>
+</section>
+
+<section class="chap" id="d3">
+<h1>3. Hors V1 (pas prevu pour l'instant)</h1>
+<ul><li>ForEach en parallele (work items facon PDG) : le parametre <code>mode</code> est reserve.</li><li>Mode ferme de rendu (Tractor) pour les instances.</li><li>Photoshop (<code>ps</code>) et Unreal (<code>ue</code>) : prefixes reserves, clients existants, aucun node en V1.</li><li>Publish decoupe en petits nodes : le publish reste une boite noire.</li><li>Fusion de deux versions en conflit.</li></ul>
+</section>
+
+<section class="part" id="nodes">
+  <div class="n">PARTIE 3</div>
+  <div class="t">Flows : index des nodes</div>
+</section>
+
+<section class="chap" id="f-index">
+<h1>Tous les nodes</h1>
+<p>Les 83 nodes disponibles au 2026-10-23, par famille. Chaque section est aussi affichee par le bouton (i) du node dans l'editeur.</p>
+<p>Conventions : <code>exec</code> / <code>then</code> = liens d'ordre ; une entree marquee obligatoire doit etre reliee ou remplie ; <code>!</code> = destructif (efface ou ecrase), demande une confirmation. Tout node a effet a une sortie <code>on_error</code> : la relier pour gerer l'erreur soi-meme au lieu d'arreter le run. Les nodes a venir sont dans <a href="#dispo">Dispo et a venir</a>.</p>
+<input id="find" class="find" type="search" placeholder="Chercher un node (nom ou type)">
+<div data-find="event.button button event.manual manual"><h2><a href="#f-event">Evenements</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:oklch(66% 0.085 345)" href="#n-event.button" data-find="event.button button"><span>Button</span><i>event.button</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 345)" href="#n-event.manual" data-find="event.manual manual"><span>Manual</span><i>event.manual</i></a></div></div>
+<div data-find="data.value value data.get_variable getvariable data.set_variable setvariable data.flow_input flowinput data.path path data.python_value pythonvalue data.json_value jsonvalue data.template template data.context context"><h2><a href="#f-data">Data</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.value" data-find="data.value value"><span>Value</span><i>data.value</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.get_variable" data-find="data.get_variable getvariable"><span>GetVariable</span><i>data.get_variable</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.set_variable" data-find="data.set_variable setvariable"><span>SetVariable</span><i>data.set_variable</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.flow_input" data-find="data.flow_input flowinput"><span>FlowInput</span><i>data.flow_input</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.path" data-find="data.path path"><span>Path</span><i>data.path</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.python_value" data-find="data.python_value pythonvalue"><span>PythonValue</span><i>data.python_value</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.json_value" data-find="data.json_value jsonvalue"><span>JsonValue</span><i>data.json_value</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.template" data-find="data.template template"><span>Template</span><i>data.template</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 165)" href="#n-data.context" data-find="data.context context"><span>Context</span><i>data.context</i></a></div></div>
+<div data-find="logic.if if logic.switch switch logic.compare compare logic.and and logic.or or logic.not not logic.is_empty isempty logic.exists exists logic.select select"><h2><a href="#f-logic">Logique</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.if" data-find="logic.if if"><span>If</span><i>logic.if</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.switch" data-find="logic.switch switch"><span>Switch</span><i>logic.switch</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.compare" data-find="logic.compare compare"><span>Compare</span><i>logic.compare</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.and" data-find="logic.and and"><span>And</span><i>logic.and</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.or" data-find="logic.or or"><span>Or</span><i>logic.or</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.not" data-find="logic.not not"><span>Not</span><i>logic.not</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.is_empty" data-find="logic.is_empty isempty"><span>IsEmpty</span><i>logic.is_empty</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.exists" data-find="logic.exists exists"><span>Exists</span><i>logic.exists</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 315)" href="#n-logic.select" data-find="logic.select select"><span>Select</span><i>logic.select</i></a></div></div>
+<div data-find="operator.foreach_begin foreachbegin operator.foreach_end foreachend operator.sequence sequence operator.for_begin forbegin operator.for_end forend operator.while_begin whilebegin operator.while_end whileend operator.break_loop breakloop operator.math math operator.null null operator.str_join strjoin operator.str_split strsplit operator.str_replace strreplace operator.str_case strcase operator.str_format strformat operator.list_length listlength operator.list_get listget operator.list_filter listfilter operator.list_sort listsort operator.list_unique listunique operator.list_append listappend operator.path_join pathjoin operator.path_split pathsplit operator.path_relative pathrelative operator.path_flux_token pathfluxtoken operator.date_now datenow operator.date_format dateformat operator.date_add dateadd"><h2><a href="#f-operator">Operateurs</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.foreach_begin" data-find="operator.foreach_begin foreachbegin"><span>ForEachBegin</span><i>operator.foreach_begin</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.foreach_end" data-find="operator.foreach_end foreachend"><span>ForEachEnd</span><i>operator.foreach_end</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.sequence" data-find="operator.sequence sequence"><span>Sequence</span><i>operator.sequence</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.for_begin" data-find="operator.for_begin forbegin"><span>ForBegin</span><i>operator.for_begin</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.for_end" data-find="operator.for_end forend"><span>ForEnd</span><i>operator.for_end</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.while_begin" data-find="operator.while_begin whilebegin"><span>WhileBegin</span><i>operator.while_begin</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.while_end" data-find="operator.while_end whileend"><span>WhileEnd</span><i>operator.while_end</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.break_loop" data-find="operator.break_loop breakloop"><span>BreakLoop</span><i>operator.break_loop</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.math" data-find="operator.math math"><span>Math</span><i>operator.math</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.null" data-find="operator.null null"><span>Null</span><i>operator.null</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.str_join" data-find="operator.str_join strjoin"><span>StrJoin</span><i>operator.str_join</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.str_split" data-find="operator.str_split strsplit"><span>StrSplit</span><i>operator.str_split</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.str_replace" data-find="operator.str_replace strreplace"><span>StrReplace</span><i>operator.str_replace</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.str_case" data-find="operator.str_case strcase"><span>StrCase</span><i>operator.str_case</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.str_format" data-find="operator.str_format strformat"><span>StrFormat</span><i>operator.str_format</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.list_length" data-find="operator.list_length listlength"><span>ListLength</span><i>operator.list_length</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.list_get" data-find="operator.list_get listget"><span>ListGet</span><i>operator.list_get</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.list_filter" data-find="operator.list_filter listfilter"><span>ListFilter</span><i>operator.list_filter</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.list_sort" data-find="operator.list_sort listsort"><span>ListSort</span><i>operator.list_sort</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.list_unique" data-find="operator.list_unique listunique"><span>ListUnique</span><i>operator.list_unique</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.list_append" data-find="operator.list_append listappend"><span>ListAppend</span><i>operator.list_append</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.path_join" data-find="operator.path_join pathjoin"><span>PathJoin</span><i>operator.path_join</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.path_split" data-find="operator.path_split pathsplit"><span>PathSplit</span><i>operator.path_split</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.path_relative" data-find="operator.path_relative pathrelative"><span>PathRelative</span><i>operator.path_relative</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.path_flux_token" data-find="operator.path_flux_token pathfluxtoken"><span>PathFluxToken</span><i>operator.path_flux_token</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.date_now" data-find="operator.date_now datenow"><span>DateNow</span><i>operator.date_now</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.date_format" data-find="operator.date_format dateformat"><span>DateFormat</span><i>operator.date_format</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 225)" href="#n-operator.date_add" data-find="operator.date_add dateadd"><span>DateAdd</span><i>operator.date_add</i></a></div></div>
+<div data-find="action.run run action.rename rename action.move move action.copy copy action.make_dir makedir action.delete delete action.write_json writejson action.write_text writetext action.list_files listfiles action.wait wait action.zip_folder zipfolder action.convert_image convertimage"><h2><a href="#f-action">Actions</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.run" data-find="action.run run"><span>Run</span><i>action.run</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.rename" data-find="action.rename rename"><span>Rename</span><i>action.rename</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.move" data-find="action.move move"><span>Move</span><i>action.move</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.copy" data-find="action.copy copy"><span>Copy</span><i>action.copy</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.make_dir" data-find="action.make_dir makedir"><span>MakeDir</span><i>action.make_dir</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.delete" data-find="action.delete delete"><span>Delete</span><i>action.delete</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.write_json" data-find="action.write_json writejson"><span>WriteJson</span><i>action.write_json</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.write_text" data-find="action.write_text writetext"><span>WriteText</span><i>action.write_text</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.list_files" data-find="action.list_files listfiles"><span>ListFiles</span><i>action.list_files</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.wait" data-find="action.wait wait"><span>Wait</span><i>action.wait</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.zip_folder" data-find="action.zip_folder zipfolder"><span>ZipFolder</span><i>action.zip_folder</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 100)" href="#n-action.convert_image" data-find="action.convert_image convertimage"><span>ConvertImage</span><i>action.convert_image</i></a></div></div>
+<div data-find="flux.notify notify flux.legacy_command legacycommand flux.find_publishes findpublishes flux.publish_fields publishfields flux.resolve_path resolvepath flux.project_info projectinfo flux.asset_info assetinfo flux.shot_info shotinfo flux.list_assets listassets flux.list_shots listshots flux.ping ping flux.log_activity logactivity flux.archive archive flux.publish_file publishfile flux.call_function callfunction flux.conform_texture conformtexture flux.generate_proxy generateproxy flux.usd_check usdcheck flux.usd_flatten usdflatten flux.refresh_component refreshcomponent flux.refresh_shot_stage refreshshotstage"><h2><a href="#f-flux">FLUX</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.notify" data-find="flux.notify notify"><span>Notify</span><i>flux.notify</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.legacy_command" data-find="flux.legacy_command legacycommand"><span>LegacyCommand</span><i>flux.legacy_command</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.find_publishes" data-find="flux.find_publishes findpublishes"><span>FindPublishes</span><i>flux.find_publishes</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.publish_fields" data-find="flux.publish_fields publishfields"><span>PublishFields</span><i>flux.publish_fields</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.resolve_path" data-find="flux.resolve_path resolvepath"><span>ResolvePath</span><i>flux.resolve_path</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.project_info" data-find="flux.project_info projectinfo"><span>ProjectInfo</span><i>flux.project_info</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.asset_info" data-find="flux.asset_info assetinfo"><span>AssetInfo</span><i>flux.asset_info</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.shot_info" data-find="flux.shot_info shotinfo"><span>ShotInfo</span><i>flux.shot_info</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.list_assets" data-find="flux.list_assets listassets"><span>ListAssets</span><i>flux.list_assets</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.list_shots" data-find="flux.list_shots listshots"><span>ListShots</span><i>flux.list_shots</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.ping" data-find="flux.ping ping"><span>Ping</span><i>flux.ping</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.log_activity" data-find="flux.log_activity logactivity"><span>LogActivity</span><i>flux.log_activity</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.archive" data-find="flux.archive archive"><span>Archive</span><i>flux.archive</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.publish_file" data-find="flux.publish_file publishfile"><span>PublishFile</span><i>flux.publish_file</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.call_function" data-find="flux.call_function callfunction"><span>CallFunction</span><i>flux.call_function</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.conform_texture" data-find="flux.conform_texture conformtexture"><span>ConformTexture</span><i>flux.conform_texture</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.generate_proxy" data-find="flux.generate_proxy generateproxy"><span>GenerateProxy</span><i>flux.generate_proxy</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.usd_check" data-find="flux.usd_check usdcheck"><span>UsdCheck</span><i>flux.usd_check</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.usd_flatten" data-find="flux.usd_flatten usdflatten"><span>UsdFlatten</span><i>flux.usd_flatten</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.refresh_component" data-find="flux.refresh_component refreshcomponent"><span>RefreshComponent</span><i>flux.refresh_component</i></a><a class="tile fam" style="--fam:oklch(66% 0.085 195)" href="#n-flux.refresh_shot_stage" data-find="flux.refresh_shot_stage refreshshotstage"><span>RefreshShotStage</span><i>flux.refresh_shot_stage</i></a></div></div>
+<div data-find="subflow.flow_call flowcall subflow.flow_output flowoutput"><h2><a href="#f-subflow">Sous-flow</a></h2>
+<div class="tiles"><a class="tile fam" style="--fam:#a3a09c" href="#n-subflow.flow_call" data-find="subflow.flow_call flowcall"><span>FlowCall</span><i>subflow.flow_call</i></a><a class="tile fam" style="--fam:#a3a09c" href="#n-subflow.flow_output" data-find="subflow.flow_output flowoutput"><span>FlowOutput</span><i>subflow.flow_output</i></a></div></div>
+</section>
+
+<section class="chap" id="f-event">
+<h1>Evenements</h1>
+<p>Le point de depart d'un flow. Pas d'entree exec ; un flow peut en avoir plusieurs.</p>
+<div class="node" id="n-event.button" data-find="event.button button" style="--fam:oklch(66% 0.085 345)"><div class="node-h"><b>Button</b><code>event.button</code></div>
+<p>Part quand on clique un bouton d'une page TOOL (P7), ou quand on clique Run dans l'editeur. Les valeurs saisies dans le formulaire du flow sortent par <code>values</code>.</p>
+<ul><li>Sorties : <code>then</code>, <code>values</code> (dict des entrees de l'interface).</li><li>Reglage : <code>button_id</code>, l'identifiant du bouton de page qui lance ce flow.</li></ul>
+<p class="ex">Exemple : bouton "Daily" d'une page de prod : <code>Button (button_id: daily_render)</code> &gt; <code>FindPublishes</code> &gt; <code>Copy</code>.</p></div>
+<div class="node" id="n-event.manual" data-find="event.manual manual" style="--fam:oklch(66% 0.085 345)"><div class="node-h"><b>Manual</b><code>event.manual</code></div>
+<p>Depart a la main : Run dans l'editeur, ou appel par un autre flow avec <code>FlowCall</code> (c'est par lui que demarre un sous-flow). A utiliser pour tout flow d'outillage ou de test.</p>
+<ul><li>Sorties : <code>then</code>, <code>values</code> (les entrees de l'interface).</li></ul>
+<p class="ex">Exemple : un sous-flow <code>archive_old_versions</code> commence par <code>Manual</code> ; un autre flow l'appelle avec <code>FlowCall</code>.</p></div>
+</section>
+
+<section class="chap" id="f-data">
+<h1>Data</h1>
+<p>Des valeurs : constantes, parametres du flow, variables, lectures de fichiers. Pas de port exec (sauf SetVariable) : calcules quand un node les lit.</p>
+<div class="node" id="n-data.value" data-find="data.value value" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>Value</b><code>data.value</code></div>
+<p>Une valeur fixe tapee dans le node : texte, nombre, booleen, liste, dictionnaire ou motif. Le type choisi fixe le type de la sortie, donc ce qu'on peut y brancher.</p>
+<ul><li>Sortie : <code>value</code>.</li><li>Reglages : <code>type</code> (str, int, float, bool, list, dict, pattern), <code>value</code>.</li></ul>
+<p class="ex">Exemple : <code>Value (type: int, value: 3)</code> vers <code>max_items</code> d'un ForEach pour ne traiter que 3 elements pendant un test.</p></div>
+<div class="node" id="n-data.get_variable" data-find="data.get_variable getvariable" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>GetVariable</b><code>data.get_variable</code></div>
+<p>Lit une variable du flow (declaree dans Params du flow &gt; Variables). Une variable vit le temps d'un run ; elle vaut sa valeur initiale tant qu'aucun SetVariable ne l'a ecrite.</p>
+<ul><li>Sortie : <code>value</code>.</li><li>Reglage : <code>name</code>, la variable.</li></ul>
+<p class="ex">Exemple : compter les fichiers copies : <code>GetVariable (copied)</code> &gt; <code>Math add 1</code> &gt; <code>SetVariable (copied)</code> dans la boucle.</p></div>
+<div class="node" id="n-data.set_variable" data-find="data.set_variable setvariable" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>SetVariable</b><code>data.set_variable</code></div>
+<p>Ecrit une variable du flow, convertie dans le type declare. C'est un node exec : l'ecriture se fait a son tour dans la chaine, ce qui garantit l'ordre.</p>
+<ul><li>Entrees : <code>exec</code>, <code>value</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>value</code> (la valeur ecrite).</li><li>Reglage : <code>name</code>.</li></ul>
+<p class="ex">Exemple : garder le dernier publish trouve dans une boucle pour le notifier apres la fin.</p></div>
+<div class="node" id="n-data.flow_input" data-find="data.flow_input flowinput" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>FlowInput</b><code>data.flow_input</code></div>
+<p>Donne la valeur d'un parametre expose du flow (Params du flow &gt; Entrees) : ce que l'artiste a saisi dans le formulaire du Run ou de la page, sinon le defaut. C'est aussi par la qu'un sous-flow recoit les entrees de son <code>FlowCall</code>.</p>
+<ul><li>Sortie : <code>value</code>.</li><li>Reglage : <code>id</code>, le parametre de l'interface.</li></ul>
+<p class="ex">Exemple : interface <code>dest_folder</code> (dir, defaut <code>$FLUX/DAILY</code>) &gt; <code>FlowInput (dest_folder)</code> &gt; <code>PathJoin base</code>.</p></div>
+<div class="node" id="n-data.path" data-find="data.path path" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>Path</b><code>data.path</code></div>
+<p>Un chemin fixe. Accepte <code>$FLUX/...</code> (portable entre postes), <code>{token}</code> et <code>${variable}</code>. Un chemin relatif part du dossier du projet (ou reste tel quel avec <code>relative_to: absolute</code>).</p>
+<ul><li>Sorties : <code>path</code> (le chemin), <code>dir</code> (le meme, type dossier).</li><li>Reglages : <code>value</code>, <code>relative_to</code> (project ou absolute).</li></ul>
+<p class="ex">Exemple : <code>Path (value: {project_path}/ARCHIVE)</code> comme dossier a lister par ListFiles.</p></div>
+<div class="node" id="n-data.python_value" data-find="data.python_value pythonvalue" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>PythonValue</b><code>data.python_value</code></div>
+<p>Lit une variable d'un fichier <code>.py</code> sans l'executer (lecture du texte : nombres, textes, listes, dicts seulement). Sert a reutiliser une liste ou un reglage deja ecrit dans un script.</p>
+<ul><li>Sortie : <code>value</code>.</li><li>Reglages : <code>file</code> (le .py), <code>name</code> (la variable du module).</li></ul>
+<p class="ex">Exemple : lire <code>DEPARTMENTS = [&quot;mod&quot;, &quot;rig&quot;, &quot;surf&quot;]</code> d'un script d'outil pour boucler dessus avec ForEach.</p></div>
+<div class="node" id="n-data.json_value" data-find="data.json_value jsonvalue" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>JsonValue</b><code>data.json_value</code></div>
+<p>Lit une valeur dans un JSON par son chemin pointe <code>a.b[0].c</code>, depuis un fichier ou depuis un dict relie. <code>found</code> dit si la cle existe ; sinon la sortie vaut <code>default</code>.</p>
+<ul><li>Entree : <code>json</code> (dict, prioritaire sur le fichier). Sorties : <code>value</code>, <code>found</code>.</li><li>Reglages : <code>file</code>, <code>key</code>, <code>default</code>.</li></ul>
+<p class="ex">Exemple : <code>JsonValue (file: {project_path}/production.json, key: settings.fps, default: 24)</code> &gt; <code>Template</code>.</p></div>
+<div class="node" id="n-data.template" data-find="data.template template" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>Template</b><code>data.template</code></div>
+<p>Compose un texte a partir d'un modele : tokens du run (<code>{project}</code>, <code>{user}</code>, <code>{date:%Y%m%d}</code>), variables <code>${nom}</code>, <code>$FLUX</code>, et les cles du dict relie a <code>values</code> (<code>{name}</code>, <code>{version}</code>).</p>
+<ul><li>Entree : <code>values</code> (dict). Sortie : <code>text</code>.</li><li>Reglage : <code>text</code>, le modele.</li></ul>
+<p class="ex">Exemple : <code>Template (&quot;{shot}_daily_{date:%Y%m%d}.mov&quot;)</code> pour nommer un fichier de livraison.</p></div>
+<div class="node" id="n-data.context" data-find="data.context context" style="--fam:oklch(66% 0.085 165)"><div class="node-h"><b>Context</b><code>data.context</code></div>
+<p>Les valeurs du run en cours : projet et son dossier, asset, sequence, plan, artiste, date, heure, nom du flow. Vides si le depart ne les donne pas.</p>
+<ul><li>Sorties : <code>project</code>, <code>project_path</code>, <code>asset</code>, <code>seq</code>, <code>shot</code>, <code>user</code>, <code>date</code>, <code>time</code>, <code>flow</code>.</li></ul>
+<p class="ex">Exemple : <code>Context.user</code> vers <code>Ping.user</code> pour prevenir l'artiste qui a lance le flow.</p></div>
+</section>
+
+<section class="chap" id="f-logic">
+<h1>Logique</h1>
+<p>Tester et choisir. If et Switch choisissent la branche exec ; les autres calculent un booleen ou une valeur.</p>
+<div class="node" id="n-logic.if" data-find="logic.if if" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>If</b><code>logic.if</code></div>
+<p>Une seule branche s'execute : <code>then</code> si la condition est vraie, <code>else</code> sinon. Les deux branches peuvent se rejoindre plus loin sur la meme entree exec.</p>
+<ul><li>Entrees : <code>exec</code>, <code>condition</code> (bool). Sorties : <code>then</code>, <code>else</code>, <code>on_error</code>.</li></ul>
+<p class="ex">Exemple : <code>Exists (dossier de sortie)</code> &gt; <code>If</code> : <code>else</code> &gt; <code>MakeDir</code>, puis les deux branches vers <code>Copy</code>.</p></div>
+<div class="node" id="n-logic.switch" data-find="logic.switch switch" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>Switch</b><code>logic.switch</code></div>
+<p>Prend la sortie du cas egal a la valeur (egalite exacte, pas de motif), sinon <code>default</code>. Jusqu'a 8 cas, une sortie <code>case_N</code> par valeur de la liste <code>cases</code>.</p>
+<ul><li>Entrees : <code>exec</code>, <code>value</code>. Sorties : <code>case_0</code> a <code>case_7</code>, <code>default</code>, <code>on_error</code>.</li><li>Reglages : <code>cases</code> (liste), <code>type</code> (str, int, float).</li></ul>
+<p class="ex">Exemple : <code>Switch (cases: [mod, rig, surf])</code> sur le departement : chaque branche publie a sa facon.</p></div>
+<div class="node" id="n-logic.compare" data-find="logic.compare compare" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>Compare</b><code>logic.compare</code></div>
+<p>Compare <code>a</code> et <code>b</code> : egal, different, plus petit, plus grand, contient, commence par, finit par, ou <code>matches</code> (a contre le motif b, par exemple <code>*.abc ^*_tmp*</code>).</p>
+<ul><li>Entrees : <code>a</code>, <code>b</code>. Sortie : <code>result</code> (bool).</li><li>Reglage : <code>op</code> (eq, ne, lt, le, gt, ge, contains, startswith, endswith, matches).</li></ul>
+<p class="ex">Exemple : <code>Compare (op: gt)</code> entre <code>ListLength</code> et <code>Value 0</code> &gt; <code>If</code> : ne notifier que s'il y a des fichiers.</p></div>
+<div class="node" id="n-logic.and" data-find="logic.and and" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>And</b><code>logic.and</code></div>
+<p>Vrai si toutes les entrees reliees sont vraies (2 a 4 entrees).</p>
+<ul><li>Entrees : <code>a</code>, <code>b</code>, <code>c</code>, <code>d</code> (c et d optionnelles). Sortie : <code>result</code>.</li></ul>
+<p class="ex">Exemple : <code>And (Exists source, Not Exists dest)</code> &gt; <code>If</code> pour copier seulement ce qui manque.</p></div>
+<div class="node" id="n-logic.or" data-find="logic.or or" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>Or</b><code>logic.or</code></div>
+<p>Vrai si au moins une entree reliee est vraie (2 a 4 entrees).</p>
+<ul><li>Entrees : <code>a</code>, <code>b</code>, <code>c</code>, <code>d</code>. Sortie : <code>result</code>.</li></ul>
+<p class="ex">Exemple : <code>Or (Compare ext == .ma, Compare ext == .mb)</code> pour reconnaitre une scene Maya.</p></div>
+<div class="node" id="n-logic.not" data-find="logic.not not" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>Not</b><code>logic.not</code></div>
+<p>Le contraire du booleen.</p>
+<ul><li>Entree : <code>value</code>. Sortie : <code>result</code>.</li></ul>
+<p class="ex">Exemple : <code>Exists</code> &gt; <code>Not</code> &gt; <code>If</code> pour creer un dossier seulement s'il manque.</p></div>
+<div class="node" id="n-logic.is_empty" data-find="logic.is_empty isempty" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>IsEmpty</b><code>logic.is_empty</code></div>
+<p>Vrai si la valeur est vide : texte vide, liste ou dict vide, rien.</p>
+<ul><li>Entree : <code>value</code>. Sortie : <code>result</code>.</li></ul>
+<p class="ex">Exemple : <code>FindPublishes.items</code> &gt; <code>IsEmpty</code> &gt; <code>If</code> : <code>then</code> &gt; <code>Notify (&quot;Rien publie aujourd&#x27;hui&quot;)</code>.</p></div>
+<div class="node" id="n-logic.exists" data-find="logic.exists exists" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>Exists</b><code>logic.exists</code></div>
+<p>Le fichier ou le dossier existe-t-il ? <code>is_dir</code> dit si c'est un dossier.</p>
+<ul><li>Entree : <code>path</code>. Sorties : <code>result</code>, <code>is_dir</code>.</li></ul>
+<p class="ex">Exemple : verifier qu'un <code>.tx</code> existe deja avant de lancer ConformTexture.</p></div>
+<div class="node" id="n-logic.select" data-find="logic.select select" style="--fam:oklch(66% 0.085 315)"><div class="node-h"><b>Select</b><code>logic.select</code></div>
+<p>Choisit une valeur, pas une branche : <code>a</code> si la condition est vraie, sinon <code>b</code>. Equivalent de <code>a if condition else b</code>.</p>
+<ul><li>Entrees : <code>condition</code>, <code>a</code>, <code>b</code>. Sortie : <code>value</code>.</li></ul>
+<p class="ex">Exemple : dossier de sortie = <code>Select (case &quot;en local&quot;, dossier perso, dossier du projet)</code>.</p></div>
+</section>
+
+<section class="chap" id="f-operator">
+<h1>Operateurs</h1>
+<p>Boucles, ordre, calculs sur nombres, textes, listes, chemins et dates.</p>
+<div class="node" id="n-operator.foreach_begin" data-find="operator.foreach_begin foreachbegin" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ForEachBegin</b><code>operator.foreach_begin</code></div>
+<p>Ouvre une boucle : le corps (les nodes relies entre Begin et End) tourne une fois par element de la liste. <code>item</code> est l'element du tour, <code>index</code> son rang. Liste vide : le corps est saute, la suite part du <code>done</code> de ForEachEnd.</p>
+<ul><li>Entrees : <code>exec</code>, <code>list</code>. Sorties : <code>loop</code> (vers le corps), <code>item</code>, <code>index</code>, <code>count</code>, <code>on_error</code>.</li><li>Reglages : <code>max_items</code> (plafond, 10000), <code>mode</code> (reserve).</li></ul>
+<p class="ex">Exemple : <code>FindPublishes.items</code> &gt; <code>ForEachBegin</code> &gt; <code>PublishFields</code> + <code>Copy</code> &gt; <code>ForEachEnd</code>.</p></div>
+<div class="node" id="n-operator.foreach_end" data-find="operator.foreach_end foreachend" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ForEachEnd</b><code>operator.foreach_end</code></div>
+<p>Ferme la boucle de son ForEachBegin (apparie par l'editeur). A chaque tour, garde la valeur reliee a <code>collect</code> ; a la fin, <code>results</code> est la liste de ces valeurs et le flux repart de <code>done</code>.</p>
+<ul><li>Entrees : <code>exec</code>, <code>collect</code>. Sorties : <code>done</code>, <code>results</code>, <code>on_error</code>.</li><li>Reglage : <code>begin</code> (pose par l'editeur).</li></ul>
+<p class="ex">Exemple : <code>collect</code> &lt;- <code>Copy.path</code> : <code>results</code> = liste des fichiers copies, envoyee a <code>StrJoin</code> puis <code>Notify</code>.</p></div>
+<div class="node" id="n-operator.sequence" data-find="operator.sequence sequence" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>Sequence</b><code>operator.sequence</code></div>
+<p>Execute ses sorties dans l'ordre, l'une apres l'autre. Une sortie exec n'acceptant qu'un lien, c'est le node pour enchainer plusieurs suites independantes depuis un meme point.</p>
+<ul><li>Entree : <code>exec</code>. Sorties : <code>then_0</code> a <code>then_7</code>, <code>on_error</code>.</li><li>Reglage : <code>count</code> (1 a 8).</li></ul>
+<p class="ex">Exemple : apres un publish, <code>Sequence</code> : <code>then_0</code> &gt; <code>GenerateProxy</code>, <code>then_1</code> &gt; <code>UsdCheck</code>, <code>then_2</code> &gt; <code>Notify</code>.</p></div>
+<div class="node" id="n-operator.for_begin" data-find="operator.for_begin forbegin" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ForBegin</b><code>operator.for_begin</code></div>
+<p>Boucle sur des nombres : le corps tourne pour chaque index de <code>start</code> a <code>end</code> inclus, avec un pas (negatif pour descendre). Plafonnee par <code>max_iterations</code>.</p>
+<ul><li>Entrees : <code>exec</code>, <code>start</code>, <code>end</code>, <code>step</code>. Sorties : <code>loop</code>, <code>index</code>, <code>on_error</code>.</li><li>Reglages : <code>max_iterations</code> (1000), <code>mode</code> (reserve).</li></ul>
+<p class="ex">Exemple : <code>ForBegin (1 a 10)</code> &gt; <code>StrFormat 03d</code> &gt; <code>Template &quot;SH{index}&quot;</code> pour preparer 10 noms de plans.</p></div>
+<div class="node" id="n-operator.for_end" data-find="operator.for_end forend" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ForEnd</b><code>operator.for_end</code></div>
+<p>Ferme la boucle de son ForBegin ; la suite part de <code>done</code> apres le dernier tour.</p>
+<ul><li>Entree : <code>exec</code>. Sorties : <code>done</code>, <code>on_error</code>.</li><li>Reglage : <code>begin</code> (pose par l'editeur).</li></ul>
+<p class="ex">Exemple : fin du corps d'une boucle de 1 a 10, puis <code>done</code> &gt; <code>Notify (&quot;10 dossiers crees&quot;)</code>.</p></div>
+<div class="node" id="n-operator.while_begin" data-find="operator.while_begin whilebegin" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>WhileBegin</b><code>operator.while_begin</code></div>
+<p>Le corps tourne tant que la condition est vraie ; elle est relue apres chaque tour. Atteindre <code>max_iterations</code> est une erreur : jamais de boucle infinie.</p>
+<ul><li>Entrees : <code>exec</code>, <code>condition</code>. Sorties : <code>loop</code>, <code>index</code>, <code>on_error</code>.</li><li>Reglage : <code>max_iterations</code> (1000).</li></ul>
+<p class="ex">Exemple : attendre qu'un rendu ecrive son fichier : <code>WhileBegin (Not Exists)</code> &gt; <code>Wait 10 s</code> &gt; <code>WhileEnd</code>.</p></div>
+<div class="node" id="n-operator.while_end" data-find="operator.while_end whileend" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>WhileEnd</b><code>operator.while_end</code></div>
+<p>Ferme la boucle de son WhileBegin ; la suite part de <code>done</code> quand la condition devient fausse.</p>
+<ul><li>Entree : <code>exec</code>. Sorties : <code>done</code>, <code>on_error</code>.</li><li>Reglage : <code>begin</code> (pose par l'editeur).</li></ul>
+<p class="ex">Exemple : <code>done</code> &gt; <code>Notify (&quot;Le rendu est arrive&quot;)</code>.</p></div>
+<div class="node" id="n-operator.break_loop" data-find="operator.break_loop breakloop" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>BreakLoop</b><code>operator.break_loop</code></div>
+<p>Sort tout de suite de la boucle qui l'entoure : la suite part du <code>done</code> du End de cette boucle.</p>
+<ul><li>Entree : <code>exec</code>.</li></ul>
+<p class="ex">Exemple : dans un ForEach, <code>If (fichier trouve)</code> &gt; <code>BreakLoop</code> pour s'arreter au premier resultat.</p></div>
+<div class="node" id="n-operator.math" data-find="operator.math math" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>Math</b><code>operator.math</code></div>
+<p>Calcule <code>a op b</code> (add, sub, mul, div, mod, min, max) ou <code>op a</code> (round, floor, ceil, abs). <code>as_int</code> donne le resultat en entier.</p>
+<ul><li>Entrees : <code>a</code>, <code>b</code>. Sorties : <code>result</code> (float), <code>as_int</code>.</li><li>Reglage : <code>op</code>.</li></ul>
+<p class="ex">Exemple : <code>Math (sub)</code> entre deux <code>index</code> pour un nombre d'images, ou <code>Math add 1</code> pour un compteur.</p></div>
+<div class="node" id="n-operator.null" data-find="operator.null null" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>Null</b><code>operator.null</code></div>
+<p>Laisse passer la valeur telle quelle. Sert a ranger le graph : un point de rassemblement d'ou partent plusieurs liens.</p>
+<ul><li>Entree : <code>value</code>. Sortie : <code>value</code>.</li></ul>
+<p class="ex">Exemple : <code>Null</code> nomme <code>OUT_FOLDER</code> relie a tous les nodes qui ecrivent dans le meme dossier.</p></div>
+<div class="node" id="n-operator.str_join" data-find="operator.str_join strjoin" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>StrJoin</b><code>operator.str_join</code></div>
+<p>Joint une liste de textes avec un separateur.</p>
+<ul><li>Entree : <code>items</code>. Sortie : <code>text</code>.</li><li>Reglage : <code>sep</code>.</li></ul>
+<p class="ex">Exemple : <code>ForEachEnd.results</code> &gt; <code>StrJoin (sep: &quot;, &quot;)</code> &gt; <code>Notify</code> : "chair, table, lamp copies".</p></div>
+<div class="node" id="n-operator.str_split" data-find="operator.str_split strsplit" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>StrSplit</b><code>operator.str_split</code></div>
+<p>Coupe un texte a chaque separateur (vide = aux espaces).</p>
+<ul><li>Entree : <code>text</code>. Sortie : <code>items</code>.</li><li>Reglage : <code>sep</code>.</li></ul>
+<p class="ex">Exemple : <code>StrSplit (sep: _)</code> sur <code>chair_mod_v003</code> puis <code>ListGet 0</code> pour retrouver le nom de l'asset.</p></div>
+<div class="node" id="n-operator.str_replace" data-find="operator.str_replace strreplace" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>StrReplace</b><code>operator.str_replace</code></div>
+<p>Remplace <code>find</code> par <code>with</code> dans le texte ; <code>regex</code> pour une expression reguliere.</p>
+<ul><li>Entree : <code>text</code>. Sortie : <code>text</code>.</li><li>Reglages : <code>find</code>, <code>with</code>, <code>regex</code>.</li></ul>
+<p class="ex">Exemple : <code>StrReplace (find: _WIP, with: &quot;&quot;)</code> pour nettoyer un nom avant de publier.</p></div>
+<div class="node" id="n-operator.str_case" data-find="operator.str_case strcase" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>StrCase</b><code>operator.str_case</code></div>
+<p>Majuscules, minuscules, Titre, ou espaces retires au debut et a la fin.</p>
+<ul><li>Entree : <code>text</code>. Sortie : <code>text</code>.</li><li>Reglage : <code>op</code> (upper, lower, title, strip).</li></ul>
+<p class="ex">Exemple : <code>StrCase (upper)</code> sur le nom d'artiste pour le dossier <code>ARCHIVE/&lt;date&gt;_&lt;ARTISTE&gt;</code>.</p></div>
+<div class="node" id="n-operator.str_format" data-find="operator.str_format strformat" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>StrFormat</b><code>operator.str_format</code></div>
+<p>Met une valeur en forme avec un format Python : <code>03d</code> donne <code>007</code>, <code>.2f</code> donne <code>3.14</code>.</p>
+<ul><li>Entree : <code>value</code>. Sortie : <code>text</code>.</li><li>Reglage : <code>spec</code>.</li></ul>
+<p class="ex">Exemple : <code>index</code> d'un ForBegin &gt; <code>StrFormat 03d</code> &gt; <code>Template &quot;v{version}&quot;</code> pour <code>v001</code>, <code>v002</code>...</p></div>
+<div class="node" id="n-operator.list_length" data-find="operator.list_length listlength" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ListLength</b><code>operator.list_length</code></div>
+<p>Nombre d'elements d'une liste.</p>
+<ul><li>Entree : <code>list</code>. Sortie : <code>length</code>.</li></ul>
+<p class="ex">Exemple : <code>ListFiles.files</code> &gt; <code>ListLength</code> &gt; <code>Template &quot;{n} fichiers a traiter&quot;</code>.</p></div>
+<div class="node" id="n-operator.list_get" data-find="operator.list_get listget" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ListGet</b><code>operator.list_get</code></div>
+<p>L'element a un rang donne (0 = premier, -1 = dernier). Si le rang n'existe pas : <code>found</code> faux et <code>default</code>.</p>
+<ul><li>Entrees : <code>list</code>, <code>index</code>. Sorties : <code>item</code>, <code>found</code>.</li><li>Reglage : <code>default</code>.</li></ul>
+<p class="ex">Exemple : <code>ListSort (date)</code> &gt; <code>ListGet -1</code> pour le fichier le plus recent.</p></div>
+<div class="node" id="n-operator.list_filter" data-find="operator.list_filter listfilter" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ListFilter</b><code>operator.list_filter</code></div>
+<p>Garde les elements qui passent un motif facon Houdini, sur le nom ou sur le chemin entier ; les autres sortent par <code>rejected</code>.</p>
+<ul><li>Entree : <code>list</code>. Sorties : <code>items</code>, <code>rejected</code>.</li><li>Reglages : <code>pattern</code>, <code>match_on</code> (name ou path).</li></ul>
+<p class="ex">Exemple : <code>ListFilter (*.exr ^*_denoise*)</code> pour garder les images de rendu sans les passes debruitees.</p></div>
+<div class="node" id="n-operator.list_sort" data-find="operator.list_sort listsort" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ListSort</b><code>operator.list_sort</code></div>
+<p>Trie une liste : par nom, par date ou taille (fichiers), ou en ordre naturel (<code>v2</code> avant <code>v10</code>).</p>
+<ul><li>Entree : <code>list</code>. Sortie : <code>items</code>.</li><li>Reglages : <code>key</code> (name, date, size, natural), <code>reverse</code>.</li></ul>
+<p class="ex">Exemple : <code>ListSort (natural, reverse)</code> &gt; <code>ListGet 0</code> pour la version la plus haute.</p></div>
+<div class="node" id="n-operator.list_unique" data-find="operator.list_unique listunique" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ListUnique</b><code>operator.list_unique</code></div>
+<p>Retire les doublons en gardant l'ordre de premiere apparition.</p>
+<ul><li>Entree : <code>list</code>. Sortie : <code>items</code>.</li></ul>
+<p class="ex">Exemple : liste des artistes ayant publie aujourd'hui, sans repetition, avant de les pinguer.</p></div>
+<div class="node" id="n-operator.list_append" data-find="operator.list_append listappend" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>ListAppend</b><code>operator.list_append</code></div>
+<p>Renvoie une nouvelle liste avec l'element ajoute a la fin (la liste d'origine ne change pas).</p>
+<ul><li>Entrees : <code>list</code>, <code>item</code>. Sortie : <code>items</code>.</li></ul>
+<p class="ex">Exemple : ajouter le dossier <code>LAST</code> a la liste des dossiers a zipper.</p></div>
+<div class="node" id="n-operator.path_join" data-find="operator.path_join pathjoin" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>PathJoin</b><code>operator.path_join</code></div>
+<p>Joint un dossier de depart et jusqu'a 3 morceaux relatifs.</p>
+<ul><li>Entrees : <code>base</code>, <code>a</code>, <code>b</code>, <code>c</code>. Sortie : <code>path</code>.</li></ul>
+<p class="ex">Exemple : <code>PathJoin (FlowInput dest_folder, DateNow.date)</code> &gt; <code>MakeDir</code> : un dossier par jour.</p></div>
+<div class="node" id="n-operator.path_split" data-find="operator.path_split pathsplit" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>PathSplit</b><code>operator.path_split</code></div>
+<p>Decoupe un chemin : dossier parent, nom complet, nom sans extension, extension.</p>
+<ul><li>Entree : <code>path</code>. Sorties : <code>parent</code>, <code>name</code>, <code>stem</code>, <code>ext</code>.</li></ul>
+<p class="ex">Exemple : <code>PathSplit.stem</code> &gt; <code>Template &quot;{stem}_proxy.usd&quot;</code> pour nommer un fichier a cote de sa source.</p></div>
+<div class="node" id="n-operator.path_relative" data-find="operator.path_relative pathrelative" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>PathRelative</b><code>operator.path_relative</code></div>
+<p>Chemin relatif a un dossier de reference.</p>
+<ul><li>Entrees : <code>path</code>, <code>base</code>. Sortie : <code>relative</code>.</li></ul>
+<p class="ex">Exemple : ecrire dans un rapport les chemins relatifs au projet plutot que des chemins absolus de poste.</p></div>
+<div class="node" id="n-operator.path_flux_token" data-find="operator.path_flux_token pathfluxtoken" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>PathFluxToken</b><code>operator.path_flux_token</code></div>
+<p>Passe d'un chemin absolu a la forme portable <code>$FLUX/...</code>, et inversement. La forme <code>$FLUX</code> marche sur tous les postes.</p>
+<ul><li>Entree : <code>value</code>. Sorties : <code>token</code> (forme <code>$FLUX/...</code>), <code>path</code> (chemin absolu).</li></ul>
+<p class="ex">Exemple : <code>PathFluxToken.token</code> &gt; <code>WriteJson</code> pour stocker un chemin lisible depuis n'importe quel poste.</p></div>
+<div class="node" id="n-operator.date_now" data-find="operator.date_now datenow" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>DateNow</b><code>operator.date_now</code></div>
+<p>Date et heure au moment ou le node est lu : en ISO, en date <code>AAAA-MM-JJ</code> et en secondes.</p>
+<ul><li>Sorties : <code>iso</code>, <code>date</code>, <code>epoch</code>.</li></ul>
+<p class="ex">Exemple : <code>DateNow.date</code> &gt; <code>PathJoin</code> pour un dossier de dailies date du jour.</p></div>
+<div class="node" id="n-operator.date_format" data-find="operator.date_format dateformat" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>DateFormat</b><code>operator.date_format</code></div>
+<p>Met une date ISO en forme avec un format strftime (<code>%Y%m%d</code>, <code>%d/%m %H:%M</code>...).</p>
+<ul><li>Entree : <code>iso</code>. Sortie : <code>text</code>.</li><li>Reglage : <code>fmt</code>.</li></ul>
+<p class="ex">Exemple : <code>DateNow.iso</code> &gt; <code>DateFormat (%Y%m%d)</code> &gt; nom de zip <code>livraison_20261023.zip</code>.</p></div>
+<div class="node" id="n-operator.date_add" data-find="operator.date_add dateadd" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>DateAdd</b><code>operator.date_add</code></div>
+<p>Ajoute (ou retire, en negatif) des jours et des heures a une date.</p>
+<ul><li>Entree : <code>iso</code>. Sortie : <code>iso</code>.</li><li>Reglages : <code>days</code>, <code>hours</code>.</li></ul>
+<p class="ex">Exemple : <code>DateAdd (days: -7)</code> &gt; <code>FindPublishes date</code> pour lister les publishs de la semaine passee.</p></div>
+</section>
+
+<section class="chap" id="f-action">
+<h1>Actions</h1>
+<p>Agir sur les fichiers et le poste. Nodes a effet : simules pendant un essai a blanc.</p>
+<div class="node" id="n-action.run" data-find="action.run run" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>Run</b><code>action.run</code></div>
+<p>Ouvre un fichier dans son logiciel (Maya, Houdini, Nuke...), detache de FLUX : le flow continue sans attendre. <code>soft: auto</code> choisit le logiciel d'apres l'extension.</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>launched</code>.</li><li>Reglage : <code>soft</code> (auto, maya, houdini, nuke, painter...).</li></ul>
+<p class="ex">Exemple : <code>ResolvePath (LAST de la scene de layout)</code> &gt; <code>Run</code> : bouton "ouvrir le layout du plan".</p></div>
+<div class="node" id="n-action.rename" data-find="action.rename rename" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>Rename</b><code>action.rename</code></div>
+<p>Renomme un fichier ou un dossier sans le deplacer. N'ecrase jamais : erreur si le nouveau nom existe deja.</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code>, <code>new_name</code> (nom seul, sans dossier). Sorties : <code>then</code>, <code>on_error</code>, <code>path</code> (nouveau chemin).</li></ul>
+<p class="ex">Exemple : dans un ForEach, <code>StrReplace (_WIP -&gt; &quot;&quot;)</code> &gt; <code>Rename</code> pour nettoyer les noms d'un dossier.</p></div>
+<div class="node" id="n-action.move" data-find="action.move move" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>Move</b><code>action.move</code></div>
+<p>Deplace un fichier ou un dossier ; une destination qui est un dossier existant recoit l'element dedans. N'ecrase jamais.</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>, <code>dest</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>path</code>.</li></ul>
+<p class="ex">Exemple : ranger les captures d'ecran posees sur le bureau dans <code>{project_path}/REF/</code> avec <code>ListFiles</code> + ForEach.</p></div>
+<div class="node" id="n-action.copy" data-find="action.copy copy" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>Copy</b><code>action.copy</code></div>
+<p>Copie un fichier ou un dossier ; une destination qui est un dossier existant recoit la copie dedans. N'ecrase rien, sauf avec <code>overwrite</code> (alors destructif <code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>, <code>dest</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>path</code> (la copie).</li><li>Reglage : <code>overwrite</code>.</li></ul>
+<p class="ex">Exemple : <code>PublishFields.path</code> &gt; <code>Copy (dest: dossier des dailies)</code> dans un ForEach sur les publishs du jour.</p></div>
+<div class="node" id="n-action.make_dir" data-find="action.make_dir makedir" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>MakeDir</b><code>action.make_dir</code></div>
+<p>Cree un dossier et ses parents. S'il existe deja, rien ne change et le node reussit quand meme.</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>dir</code>.</li></ul>
+<p class="ex">Exemple : <code>PathJoin (DAILY, date du jour)</code> &gt; <code>MakeDir</code> &gt; <code>dir</code> vers <code>Copy.dest</code>.</p></div>
+<div class="node" id="n-action.delete" data-find="action.delete delete" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>Delete</b><code>action.delete</code></div>
+<p>Supprime un fichier ou un dossier du projet. Par defaut il <b>archive</b> : l'element part dans <code>ARCHIVE/&lt;date&gt;_&lt;ARTISTE&gt;/</code> du projet et reste recuperable. En mode <code>erase</code> il efface definitivement (<code>!</code>, seulement sous FLUX_ROOT, jamais une racine ni un dossier projet).</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>archived_to</code>.</li><li>Reglage : <code>mode</code> (archive, erase).</li></ul>
+<p class="ex">Exemple : <code>ListFiles (*_v0*)</code> &gt; <code>ListSort</code> &gt; garder les 3 dernieres &gt; ForEach &gt; <code>Delete (archive)</code>.</p></div>
+<div class="node" id="n-action.write_json" data-find="action.write_json writejson" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>WriteJson</b><code>action.write_json</code></div>
+<p>Ecrit des donnees dans un fichier JSON, de facon sure (ecrit a cote puis remplace). En mode <code>create</code> il refuse un fichier existant ; <code>overwrite</code> le remplace (<code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code>, <code>data</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>path</code>.</li><li>Reglage : <code>mode</code> (create, overwrite).</li></ul>
+<p class="ex">Exemple : ecrire un rapport <code>{date}_check.json</code> avec la liste des problemes trouves par UsdCheck.</p></div>
+<div class="node" id="n-action.write_text" data-find="action.write_text writetext" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>WriteText</b><code>action.write_text</code></div>
+<p>Ecrit un fichier texte (note, rapport, liste). <code>create</code> refuse un fichier existant, <code>overwrite</code> le remplace (<code>!</code>), <code>append</code> ajoute a la fin.</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code>, <code>text</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>path</code>.</li><li>Reglage : <code>mode</code> (create, overwrite, append).</li></ul>
+<p class="ex">Exemple : <code>WriteText (append)</code> dans un journal <code>livraisons.txt</code>, une ligne par livraison.</p></div>
+<div class="node" id="n-action.list_files" data-find="action.list_files listfiles" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>ListFiles</b><code>action.list_files</code></div>
+<p>Liste les fichiers (ou dossiers) d'un dossier dont le nom passe un motif (<code>^</code> exclut), avec ou sans sous-dossiers. Simple lecture : tourne aussi pendant un essai a blanc.</p>
+<ul><li>Entrees : <code>exec</code>, <code>folder</code>. Sorties : <code>then</code>, <code>files</code>, <code>count</code>, <code>first</code>.</li><li>Reglages : <code>pattern</code>, <code>recursive</code>, <code>kind</code> (file, dir, both).</li></ul>
+<p class="ex">Exemple : <code>ListFiles (*.exr, recursive)</code> sur un dossier de rendu &gt; ForEach &gt; <code>ConvertImage</code> en png.</p></div>
+<div class="node" id="n-action.wait" data-find="action.wait wait" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>Wait</b><code>action.wait</code></div>
+<p>Attend un certain temps avant la suite. S'arrete tout de suite si le run est annule.</p>
+<ul><li>Entrees : <code>exec</code>, <code>seconds</code>. Sorties : <code>then</code>, <code>on_error</code>.</li></ul>
+<p class="ex">Exemple : dans un While qui surveille un fichier, <code>Wait 10</code> entre deux verifications.</p></div>
+<div class="node" id="n-action.zip_folder" data-find="action.zip_folder zipfolder" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>ZipFolder</b><code>action.zip_folder</code></div>
+<p>Zippe un dossier (livraison, sauvegarde avant une modification risquee). <code>.zip</code> est ajoute au nom si absent ; un dossier comme destination recoit le zip dedans. N'ecrase qu'avec <code>overwrite</code> (<code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>folder</code>, <code>dest</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>zip</code>.</li><li>Reglage : <code>overwrite</code>.</li></ul>
+<p class="ex">Exemple : <code>ZipFolder (dossier du plan, dest: LIVRAISON/{shot}_{date:%Y%m%d})</code> avant l'envoi au monteur.</p></div>
+<div class="node" id="n-action.convert_image" data-find="action.convert_image convertimage" style="--fam:oklch(66% 0.085 100)"><div class="node-h"><b>ConvertImage</b><code>action.convert_image</code></div>
+<p>Convertit une image dans un autre format (exr, png, tif, jpg) avec OpenImageIO ; l'extension de <code>dest</code> choisit le format. N'ecrase qu'avec <code>overwrite</code> (<code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>, <code>dest</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>path</code>.</li><li>Reglage : <code>overwrite</code>.</li></ul>
+<p class="ex">Exemple : rendus <code>.exr</code> &gt; <code>ConvertImage</code> en <code>.jpg</code> pour une planche de review.</p></div>
+</section>
+
+<section class="chap" id="f-flux">
+<h1>FLUX</h1>
+<p>Le pipeline : Production, publishs, activite, USD, textures.</p>
+<div class="node" id="n-flux.notify" data-find="flux.notify notify" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>Notify</b><code>flux.notify</code></div>
+<p>Affiche un message dans FLUX (toast) et / ou le poste dans le fil Activite du projet, avec un niveau info, avertissement ou erreur. <code>path</code> lie un fichier ou dossier au message.</p>
+<ul><li>Entrees : <code>exec</code>, <code>text</code> (obligatoire), <code>path</code>. Sorties : <code>then</code>, <code>on_error</code>.</li><li>Reglages : <code>level</code> (info, warn, error), <code>where</code> (toast, activity, both).</li></ul>
+<p class="ex">Exemple : fin d'un flow de daily : <code>Notify (&quot;Daily copie&quot;, where: both, path: dossier du jour)</code>.</p></div>
+<div class="node" id="n-flux.legacy_command" data-find="flux.legacy_command legacycommand" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>LegacyCommand</b><code>flux.legacy_command</code></div>
+<p>Execute une commande d'action v1 telle quelle. On le trouve dans les flows migres depuis les actions YAML v1 ; ses ports reprennent les parametres et sorties de la commande. Son effet n'est pas connu du moteur : il est traite comme destructif et jamais lance en essai a blanc.</p>
+<ul><li>Entrees : <code>exec</code>, <code>inputs</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>outputs</code>.</li><li>Reglages : <code>command</code> (cle v1), <code>params</code>.</li></ul>
+<p class="ex">Exemple : <code>legacy_publish</code> : <code>select_publish</code> puis <code>copy_publish</code>, chacun dans un LegacyCommand.</p></div>
+<div class="node" id="n-flux.find_publishes" data-find="flux.find_publishes findpublishes" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>FindPublishes</b><code>flux.find_publishes</code></div>
+<p>Liste les publishs du projet sur un jour ou une plage, filtres par logiciel, type, nom ou artiste (motifs). Logiciel, type et version sont deduits du nom et de l'extension ; une image ou une video passe toujours le filtre logiciel. Simple lecture.</p>
+<ul><li>Entrees : <code>exec</code>, <code>project</code> (vide = projet du flow). Sorties : <code>then</code>, <code>items</code> (liste de publishs), <code>count</code>, <code>first</code>.</li><li>Reglages : <code>date</code> (today, yesterday, AAAA-MM-JJ), <code>date_to</code>, <code>soft</code>, <code>type</code> (scene, usd, cache, texture, image, video, capture), <code>name</code>, <code>user</code>.</li></ul>
+<p class="ex">Exemple : <code>FindPublishes (date: today, soft: &quot;maya houdini&quot;, type: capture)</code> &gt; ForEach &gt; Copy vers les dailies.</p></div>
+<div class="node" id="n-flux.publish_fields" data-find="flux.publish_fields publishfields" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>PublishFields</b><code>flux.publish_fields</code></div>
+<p>Lit les champs d'un publish : chemin, dossier, nom, version, artiste, date, logiciel, type. C'est la seule facon de passer d'un <code>publish</code> a un chemin.</p>
+<ul><li>Entree : <code>publish</code>. Sorties : <code>path</code>, <code>dir</code>, <code>name</code>, <code>version</code>, <code>user</code>, <code>date</code>, <code>soft</code>, <code>type</code>.</li></ul>
+<p class="ex">Exemple : dans un ForEach sur <code>FindPublishes.items</code> : <code>item</code> &gt; <code>PublishFields.path</code> &gt; <code>Copy.source</code>.</p></div>
+<div class="node" id="n-flux.resolve_path" data-find="flux.resolve_path resolvepath" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>ResolvePath</b><code>flux.resolve_path</code></div>
+<p>Donne le chemin publie d'un asset d'apres ses tokens (classe, type / departement, nom, instance, variante) : le dossier du publish et le fichier <code>LAST</code> ou d'une version <code>vNNN</code>. <code>exists</code> dit si le fichier est la. Simple lecture.</p>
+<ul><li>Entree : <code>exec</code>. Sorties : <code>then</code>, <code>path</code>, <code>dir</code>, <code>exists</code>.</li><li>Reglages : <code>project</code>, <code>class</code>, <code>type</code>, <code>name</code>, <code>instance</code>, <code>variant</code>, <code>iter</code> (LAST ou vNNN).</li></ul>
+<p class="ex">Exemple : <code>ResolvePath (class: PROPS, type: mod, name: chair)</code> &gt; <code>GenerateProxy.source</code>.</p></div>
+<div class="node" id="n-flux.project_info" data-find="flux.project_info projectinfo" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>ProjectInfo</b><code>flux.project_info</code></div>
+<p>Le nom, le dossier et les tokens d'un projet (ceux de Folder Manager).</p>
+<ul><li>Entree : <code>project</code> (vide = projet du flow). Sorties : <code>name</code>, <code>path</code>, <code>tokens</code>.</li></ul>
+<p class="ex">Exemple : <code>ProjectInfo.path</code> &gt; <code>PathJoin &quot;LIVRAISON&quot;</code> pour un dossier de sortie qui suit le projet.</p></div>
+<div class="node" id="n-flux.asset_info" data-find="flux.asset_info assetinfo" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>AssetInfo</b><code>flux.asset_info</code></div>
+<p>Lit la fiche Production d'un asset (par <code>NOM</code> ou <code>CLASSE/NOM</code>) et son dossier. <code>found</code> faux si l'asset n'existe pas.</p>
+<ul><li>Entrees : <code>project</code>, <code>asset</code> (obligatoire). Sorties : <code>found</code>, <code>class</code>, <code>folder</code>, <code>record</code>.</li></ul>
+<p class="ex">Exemple : <code>AssetInfo (chair)</code> &gt; <code>JsonValue (json: record, key: status)</code> &gt; <code>If</code> pour ne traiter que les assets valides.</p></div>
+<div class="node" id="n-flux.shot_info" data-find="flux.shot_info shotinfo" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>ShotInfo</b><code>flux.shot_info</code></div>
+<p>Lit la fiche Production d'un plan (sequence + plan) et son dossier.</p>
+<ul><li>Entrees : <code>project</code>, <code>seq</code>, <code>shot</code> (obligatoires). Sorties : <code>found</code>, <code>folder</code>, <code>record</code>.</li></ul>
+<p class="ex">Exemple : <code>ShotInfo (SEQ010, SH020).folder</code> &gt; <code>ListFiles (*.mov)</code> pour trouver les previews du plan.</p></div>
+<div class="node" id="n-flux.list_assets" data-find="flux.list_assets listassets" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>ListAssets</b><code>flux.list_assets</code></div>
+<p>Liste les assets de la Production, filtres par classe (motif, vide = toutes).</p>
+<ul><li>Entree : <code>project</code>. Sorties : <code>names</code>, <code>records</code>, <code>count</code>.</li><li>Reglage : <code>class</code>.</li></ul>
+<p class="ex">Exemple : <code>ListAssets (class: CHARS)</code> &gt; ForEach &gt; <code>ResolvePath</code> &gt; <code>UsdCheck</code> : controle de tous les personnages.</p></div>
+<div class="node" id="n-flux.list_shots" data-find="flux.list_shots listshots" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>ListShots</b><code>flux.list_shots</code></div>
+<p>Liste les plans de la Production sous la forme <code>SEQ/SHOT</code>, filtres par sequence (motif).</p>
+<ul><li>Entree : <code>project</code>. Sorties : <code>names</code>, <code>records</code>, <code>count</code>.</li><li>Reglage : <code>seq</code>.</li></ul>
+<p class="ex">Exemple : <code>ListShots (seq: SEQ010)</code> &gt; ForEach &gt; <code>RefreshShotStage</code> pour regenerer tous les stages d'une sequence.</p></div>
+<div class="node" id="n-flux.ping" data-find="flux.ping ping" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>Ping</b><code>flux.ping</code></div>
+<p>Ecrit un message dans le chat du projet en mentionnant <code>@artiste</code> : il recoit une mention non lue.</p>
+<ul><li>Entrees : <code>exec</code>, <code>user</code>, <code>text</code> (obligatoires). Sorties : <code>then</code>, <code>on_error</code>.</li></ul>
+<p class="ex">Exemple : <code>UsdCheck.ok</code> faux &gt; <code>Ping (user: PublishFields.user, text: &quot;Ton USD a des erreurs&quot;)</code>.</p></div>
+<div class="node" id="n-flux.log_activity" data-find="flux.log_activity logactivity" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>LogActivity</b><code>flux.log_activity</code></div>
+<p>Poste un evenement dans le fil Activite du projet, vu par toute l'equipe (action update, import ou error ; <code>publish</code> est reserve au Publisher).</p>
+<ul><li>Entrees : <code>exec</code>, <code>text</code> (obligatoire), <code>folder</code>. Sorties : <code>then</code>, <code>on_error</code>.</li><li>Reglage : <code>action</code> (update, import, error).</li></ul>
+<p class="ex">Exemple : apres une conversion de textures : <code>LogActivity (&quot;Textures chair converties en .tx&quot;, action: update)</code>.</p></div>
+<div class="node" id="n-flux.archive" data-find="flux.archive archive" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>Archive</b><code>flux.archive</code></div>
+<p>Deplace un fichier ou un dossier du projet dans <code>ARCHIVE/&lt;date&gt;_&lt;ARTISTE&gt;/</code>. N'efface jamais : c'est la version sure de Delete, jamais marquee <code>!</code>.</p>
+<ul><li>Entrees : <code>exec</code>, <code>path</code> (obligatoire). Sorties : <code>then</code>, <code>on_error</code>, <code>archived_to</code>.</li></ul>
+<p class="ex">Exemple : archiver les anciennes versions <code>v0*</code> d'un dossier de publish en gardant les 3 dernieres.</p></div>
+<div class="node" id="n-flux.publish_file" data-find="flux.publish_file publishfile" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>PublishFile</b><code>flux.publish_file</code></div>
+<p>Publie un fichier dans le layout FLUX comme le Publisher : nouvelle version <code>vNNN</code>, mise a jour de <code>LAST</code>, logs. Une version publiee ne s'ecrase jamais.</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code> (obligatoire). Sorties : <code>then</code>, <code>on_error</code>, <code>publish</code>, <code>path</code>.</li><li>Reglages : <code>target_name</code> (vide = nom du fichier), <code>description</code>.</li></ul>
+<p class="ex">Exemple : <code>ConvertImage</code> (planche en jpg) &gt; <code>PublishFile (target_name: chair_turntable)</code>.</p></div>
+<div class="node" id="n-flux.call_function" data-find="flux.call_function callfunction" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>CallFunction</b><code>flux.call_function</code></div>
+<p>Appelle une fonction du code de FLUX (<code>package.module:fonction</code>, limite aux packages <code>features</code>, <code>core</code>, <code>dcc</code>). Un argument absent prend la valeur du contexte du meme nom. Code libre : traite comme destructif, jamais lance en essai a blanc. A reserver aux cas qu'aucun node ne couvre.</p>
+<ul><li>Entrees : <code>exec</code>, <code>args</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>result</code>.</li><li>Reglage : <code>function</code>.</li></ul>
+<p class="ex">Exemple : <code>CallFunction (features.usd_assembler...:fonction)</code> le temps qu'un node dedie existe.</p></div>
+<div class="node" id="n-flux.conform_texture" data-find="flux.conform_texture conformtexture" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>ConformTexture</b><code>flux.conform_texture</code></div>
+<p>Convertit une texture, un dossier ou un set UDIM (<code>&lt;UDIM&gt;</code>) en <code>.tx</code> mipmappes et tiles pour Karma, avec OpenImageIO : aucun logiciel ouvert, aucune licence. Saute les <code>.tx</code> deja a jour, sauf avec <code>force</code> (<code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>tx_paths</code>, <code>converted</code>, <code>skipped</code>.</li><li>Reglages : <code>out_dir</code> (vide = a cote), <code>colorconvert</code>, <code>color_in</code>, <code>color_out</code>, <code>force</code>.</li></ul>
+<p class="ex">Exemple : apres un publish de surfacing : <code>ResolvePath (surf, LAST)</code> &gt; <code>ConformTexture</code> &gt; <code>Notify (&quot;{converted} .tx&quot;)</code>.</p></div>
+<div class="node" id="n-flux.generate_proxy" data-find="flux.generate_proxy generateproxy" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>GenerateProxy</b><code>flux.generate_proxy</code></div>
+<p>Cree un proxy decime (<code>purpose=proxy</code>) pour chaque mesh de rendu d'un USD, en Python : pas de Houdini, aucune licence. Saute un proxy deja a jour, sauf avec <code>force</code> (<code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>proxy_path</code>, <code>mesh_count</code>, <code>tri_count</code>.</li><li>Reglages : <code>out</code> (vide = <code>&lt;source&gt;.proxy.usda</code>), <code>target_reduction</code>, <code>min_tris</code>, <code>force</code>.</li></ul>
+<p class="ex">Exemple : <code>ListAssets (PROPS)</code> &gt; ForEach &gt; <code>ResolvePath (mod)</code> &gt; <code>GenerateProxy</code> : proxys de tous les props.</p></div>
+<div class="node" id="n-flux.usd_check" data-find="flux.usd_check usdcheck" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>UsdCheck</b><code>flux.usd_check</code></div>
+<p>Lance le controle USD de FLUX sur un USD publie et liste ce qui ne va pas. Simple lecture ; <code>ok</code> vrai si rien a signaler.</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>issues</code>, <code>count</code>, <code>ok</code>.</li></ul>
+<p class="ex">Exemple : <code>UsdCheck</code> &gt; <code>If (ok)</code> : <code>else</code> &gt; <code>StrJoin issues</code> &gt; <code>Ping</code> l'artiste du publish.</p></div>
+<div class="node" id="n-flux.usd_flatten" data-find="flux.usd_flatten usdflatten" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>UsdFlatten</b><code>flux.usd_flatten</code></div>
+<p>Aplatit un stage USD (couches, references, variantes) en un seul fichier <code>.usda</code> ou <code>.usdc</code>, pour une livraison ou un outil qui ne suit pas les references. N'ecrase qu'avec <code>overwrite</code> (<code>!</code>).</p>
+<ul><li>Entrees : <code>exec</code>, <code>source</code>, <code>dest</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>path</code>.</li><li>Reglage : <code>overwrite</code>.</li></ul>
+<p class="ex">Exemple : stage du plan &gt; <code>UsdFlatten (dest: LIVRAISON/{shot}.usdc)</code> &gt; <code>ZipFolder</code>.</p></div>
+<div class="node" id="n-flux.refresh_component" data-find="flux.refresh_component refreshcomponent" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>RefreshComponent</b><code>flux.refresh_component</code></div>
+<p>Met a jour le component USD de l'asset depuis un dossier de publish, comme le fait un publish. Utile apres une correction manuelle dans un dossier publie.</p>
+<ul><li>Entrees : <code>exec</code>, <code>folder</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>updated</code>.</li><li>Reglages : <code>base</code> (nom de base du publish, obligatoire), <code>ext</code> (<code>.usd</code>).</li></ul>
+<p class="ex">Exemple : <code>ResolvePath (mod, chair).dir</code> &gt; <code>RefreshComponent (base: chair_mod)</code>.</p></div>
+<div class="node" id="n-flux.refresh_shot_stage" data-find="flux.refresh_shot_stage refreshshotstage" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>RefreshShotStage</b><code>flux.refresh_shot_stage</code></div>
+<p>Regenere le stage USD du plan depuis un dossier de publish d'un departement de plan (layout, anim, lighting...).</p>
+<ul><li>Entrees : <code>exec</code>, <code>folder</code>. Sorties : <code>then</code>, <code>on_error</code>, <code>updated</code>.</li><li>Reglages : <code>base</code> (obligatoire), <code>ext</code> (<code>.usd</code>).</li></ul>
+<p class="ex">Exemple : <code>ListShots</code> &gt; ForEach &gt; <code>ShotInfo.folder</code> &gt; <code>PathJoin anim</code> &gt; <code>RefreshShotStage</code>.</p></div>
+</section>
+
+<section class="chap" id="f-subflow">
+<h1>Sous-flow</h1>
+<p>Reutiliser un flow dans un autre.</p>
+<div class="node" id="n-subflow.flow_call" data-find="subflow.flow_call flowcall" style="--fam:#a3a09c"><div class="node-h"><b>FlowCall</b><code>subflow.flow_call</code></div>
+<p>Appelle un autre flow et attend sa fin. Les parametres exposes du flow appele deviennent des entrees du node, ses <code>FlowOutput</code> des sorties. Le flow appele demarre a son <code>Manual</code>. Profondeur maximale 8 ; un flow qui s'appelle lui-meme est refuse.</p>
+<ul><li>Entree : <code>exec</code> + une entree par parametre de l'interface appelee. Sorties : <code>then</code>, <code>on_error</code>, <code>run_id</code> + les sorties declarees.</li><li>Reglages : <code>flow</code> (nom, cherche en perso, projet, equipe puis livre), <code>version</code> (current ou un numero).</li></ul>
+<p class="ex">Exemple : un flow <code>make_daily</code> appele par <code>daily_maya</code> et <code>daily_houdini</code> avec un <code>soft</code> different.</p></div>
+<div class="node" id="n-subflow.flow_output" data-find="subflow.flow_output flowoutput" style="--fam:#a3a09c"><div class="node-h"><b>FlowOutput</b><code>subflow.flow_output</code></div>
+<p>Rend une valeur au <code>FlowCall</code> qui a appele ce flow. La sortie doit etre declaree dans Params du flow &gt; Sorties (sous-flow).</p>
+<ul><li>Entrees : <code>exec</code>, <code>value</code>. Sortie : <code>then</code>.</li><li>Reglage : <code>id</code>, la sortie declaree.</li></ul>
+<p class="ex">Exemple : sous-flow <code>find_last_render</code> : <code>ListSort</code> &gt; <code>ListGet -1</code> &gt; <code>FlowOutput (id: path)</code>.</p></div>
+</section>
+
+</main>
+</div>
+<a class="top" href="#top">Haut</a>
+<script>
+(function () {
+  var links = {};
+  document.querySelectorAll(".side a[data-id]").forEach(function (a) { links[a.dataset.id] = a; });
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting || !links[e.target.id]) return;
+      Object.keys(links).forEach(function (k) { links[k].classList.remove("on"); });
+      links[e.target.id].classList.add("on");
+    });
+  }, { rootMargin: "-10% 0px -80% 0px" });
+  document.querySelectorAll("section[id]").forEach(function (sec) { obs.observe(sec); });
+  var find = document.getElementById("find");
+  if (find) find.addEventListener("input", function () {
+    var q = find.value.trim().toLowerCase();
+    document.querySelectorAll("[data-find]").forEach(function (el) {
+      el.classList.toggle("hide", !!q && el.dataset.find.indexOf(q) < 0);
+    });
+  });
+})();
+</script>
+</body>
+</html>

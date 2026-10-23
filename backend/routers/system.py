@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
@@ -37,12 +38,12 @@ async def flux_root() -> dict:
 
 
 @router.get("/manual")
-async def manual() -> HTMLResponse:
-    """The FLUX manual as HTML, for the Settings > Doc tab (iframe). Serves the
-    FLUX_DOC copy when present, else the bundled one (ADR 0049)."""
+async def manual(doc: Literal["flux", "flows"] = "flux") -> HTMLResponse:
+    """A manual as HTML, for the Settings > Doc tabs (iframe): ``doc=flux`` the FLUX
+    manual, ``doc=flows`` the Flows manual. Bundled copy first, else FLUX_DOC (ADR 0049)."""
     from features.system.manual import manual_path
     loop = asyncio.get_running_loop()
-    path = await loop.run_in_executor(None, manual_path)
+    path = await loop.run_in_executor(None, manual_path, doc)
     if path is None:
         raise HTTPException(status_code=404, detail="Manuel introuvable")
     text = await loop.run_in_executor(None, lambda: path.read_text(encoding="utf-8"))
@@ -55,9 +56,11 @@ async def manual_info() -> dict:
     from features.system.manual import manual_path
     loop = asyncio.get_running_loop()
     path = await loop.run_in_executor(None, manual_path)
+    flows = await loop.run_in_executor(None, manual_path, "flows")
     root = get_flux_root()
     return {
         "path":    str(path) if path else "",
+        "flows_path": str(flows) if flows else "",
         "doc_dir": str(root / "FLUX_DOC") if root else "",
     }
 
