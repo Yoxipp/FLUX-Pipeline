@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import shutil
 import tempfile
@@ -43,6 +44,55 @@ PUBLISHES = [
     {"id": "4", "date": "2026-10-23", "time": "12-00-00", "user": "ADAM", "file": "CHAR_MOD_HERO_null_v002.usd",
      "dest_folder": ""},
 ]
+
+class DailyRenderExample(unittest.TestCase):
+    """shipped/example_daily_render (02 §12 example 3, button only): real run and dry run."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="flux_daily_"))
+        self.pub = self.root / "DOSSIER_PROJETS" / "DEMO" / "shots" / "publish"
+        self.pub.mkdir(parents=True)
+        (self.pub / "SEQ010_SHOT010_ANIM_null_v003.mov").write_bytes(b"mov")
+        self.events = [{"id": "1", "date": "2026-10-23", "time": "10-00-00", "user": "ADAM",
+                        "file": "SEQ010_SHOT010_ANIM_null_v003.mov", "dest_folder": str(self.pub)},
+                       {"id": "2", "date": "2026-10-23", "time": "10-00-00", "user": "ADAM",
+                        "file": "CHAR_MOD_HERO_null_v002.usd", "dest_folder": str(self.pub)}]
+        self.patches = [mock.patch("core.paths.get_flux_root", return_value=self.root),
+                        mock.patch("features.calendar.publishes.publishes_between", return_value=self.events),
+                        mock.patch("features.activity.activity_writer.log_event", return_value=True)]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _run(self, mode):
+        from flux_flows import engine, locations
+        from flux_flows.model import load_flow_text
+
+        flow = load_flow_text((locations.shipped_dir() / "example_daily_render.flow.yml").read_text(encoding="utf-8"))
+
+        async def scenario():
+            mgr = engine.manager()
+            rec = await mgr.submit(engine.Run(flow, scope="team", project="DEMO", user="ADAM", mode=mode,
+                                              folder=self.root / "runs"))
+            return await mgr.wait(rec["run_id"])
+
+        return asyncio.run(scenario())
+
+    def test_dry_run_writes_nothing(self):
+        rec = self._run("dry")
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        self.assertFalse((self.root / "DAILY").exists())
+
+    def test_real_run_copies_the_capture_only(self):
+        rec = self._run("real")
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        copied = [p.name for p in (self.root / "DAILY").rglob("*") if p.is_file()]
+        self.assertEqual(copied, ["SEQ010_SHOT010_ANIM_null_v003.mov"])
+
 
 PRODUCTION = {
     "sequences": [{"id": "s1", "name": "SEQ010"}, {"id": "s2", "name": "SEQ020"}],
