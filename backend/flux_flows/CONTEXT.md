@@ -5,7 +5,8 @@ ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Et
 (prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). P2 fait (prompt `P2_moteur_runs.md`) :
 moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).
 P5 (2026-10-23) : scheduler, verrou entre postes, evenements actifs, activation (voir "Evenements et flows actifs").
-P6a (2026-10-23) : socle DCC, Houdini et Maya (voir "DCC (P6a)").
+P6a (2026-10-23) : socle DCC, Houdini et Maya (voir "DCC (P6a)"). P6b (2026-10-23) : Nuke, Painter, Designer, Marvelous,
+ZBrush, Mari (voir "Autres logiciels").
 
 ## Fichiers
 
@@ -217,8 +218,29 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   `dcc_node`, `publish` (entrees reliees seulement, jamais dans un formulaire de page). Un `FlowOutput` relie rend une
   valeur vide sans erreur.
 
+## Autres logiciels (P6b, 02 §8.3 a §8.8)
+
+| Logiciel | Transport (session) | Nodes (P6b) | Publish boite noire | Reportes ("bridge+", accord du mainteneur + live) | Live |
+|---|---|---|---|---|---|
+| Nuke (`nk`) | TCP JSON `{"cmd"}`, `run(code)` | Instance, OpenScene, SaveScene, SaveAs, RunScript, Export (Write temporaire), Import (Read), Render (Write existant), FindNodes ; SceneOpened | `publish_from_nuke` | aucun (headless `nuke -t` non offert) | a verifier par le mainteneur |
+| Substance Painter (`sp`) | TCP JSON `{"action"}`, pas de code | Instance, Export, Info | `publish_painter` | open, save, save_as, run_script, import | a verifier par le mainteneur |
+| Substance Designer (`sd`) | TCP JSON `{"action"}`, pas de code | Instance, Export, Info, Cook (`sbscooker` cote hub, sans session) | `publish_designer` | open, save, save_as, run_script, import | a verifier par le mainteneur |
+| Marvelous (`mvd`) | boite a fichiers (une instance) | Instance, Export, Import, Info | `publish_marvelous` | open, save, save_as, run_script | a verifier par le mainteneur |
+| ZBrush (`zb`) | TCP `{"action"}`, pas de code | Instance, Export (ztl, obj, fbx), MeshInfo ; ZBrush toujours relache | `publish_zbrush` | open, save, save_as, run_script, import | a verifier par le mainteneur |
+| Mari (`mari`) | TCP JSON `{"action"}`, pas de code | Instance, Export (un a la fois), Info | `publish_mari` | open, save, save_as, run_script, import | a verifier par le mainteneur |
+
+* `nodes/dcc_softs.py` : Instances (`dc.instance_node(..., headless=False)`), nodes ci-dessus, `client_for(session, soft)`
+  (client existant sur le port de la session, refactor `port=` de Nuke, Painter, Designer, Mari ; ZBrush prenait deja `port`).
+  `session.ClientSession` = bridge sans execution de code (`run` refuse, jamais simule). Nuke execute le code avec
+  `exec(code, {"nuke"}, locals)` : pas de comprehension sur un nom local dans le code envoye.
+* Publish (`nodes/dcc_publish.py`, coeurs `dcc.<p>_publish_core`) : la fonction de publish du Publisher dans un thread ;
+  elles parlent au client singleton sur le port de BASE : une session sur un autre port est refusee. Flows livres
+  `shipped/dcc/<dossier>/{<p>_instance,<p>_publish}.flow.yml` (generes depuis les specs des coeurs : entrees reliees par
+  `data.flow_input` ; `dict` hors interface) et `shipped/publish_<soft>.flow.yml`.
+* ZBrush : `release` apres chaque export (finally) ET en fin de run (`ctx.add_cleanup`), meme en erreur ou annulation.
+
 ## Tests
 
 `backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
-flows_ws, legacy_command ; P6a : bridge_primitives, dcc_session, nodes_houdini, nodes_maya, headless, publish_black_box, dcc_subflows (faux bridges `_fake_bridges.py`, faux `hou` / `maya.cmds` `_fake_dcc.py` : prouvent les appels, jamais le logiciel) ; P5 : host_lock, scheduler, event_schedule, event_new_file, event_when, activation (`_sched_helpers.py`), `tests/publisher/test_publish_hooks.py` ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+flows_ws, legacy_command ; P6b : nodes_softs (faux bridges TCP, boite a fichiers temporaire, faux `sbscooker`) ; P6a : bridge_primitives, dcc_session, nodes_houdini, nodes_maya, headless, publish_black_box, dcc_subflows (faux bridges `_fake_bridges.py`, faux `hou` / `maya.cmds` `_fake_dcc.py` : prouvent les appels, jamais le logiciel) ; P5 : host_lock, scheduler, event_schedule, event_new_file, event_when, activation (`_sched_helpers.py`), `tests/publisher/test_publish_hooks.py` ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.
