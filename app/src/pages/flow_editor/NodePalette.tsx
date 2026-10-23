@@ -1,10 +1,11 @@
 // NodePalette.tsx — Catalogue drawer (03_EDITEUR §9, the old editor's Palette): every node
 // of GET /flows/catalog by family, a search (label, type, aliases, doc), the team nodes
 // tagged. Drag = created at the drop point, click = centre of the view (03 §4).
-// Team node files that failed to load are listed at the bottom.
+// Team node files that failed to load are listed at the bottom. Team TD: "Nouveau node
+// Python" opens NodeWriterDialog.
 
 import { useMemo, useState } from 'react'
-import { X } from 'lucide-react'
+import { FilePlus, X } from 'lucide-react'
 import { FAMILIES, FAMILY_INFO } from './families'
 import { iconFor } from './icons'
 import { DRAG_MIME } from './NetworkPane'
@@ -13,8 +14,10 @@ import { useTr } from './useTr'
 
 export const PALETTE_W = 240
 
-export function NodePalette({ catalog, errors, onPick, onClose }: {
+export function NodePalette({ catalog, errors, canWriteNode, onNewNode, onPick, onClose }: {
   catalog: CatalogEntry[] | null
+  canWriteNode: boolean
+  onNewNode: () => void
   errors: { file: string; error: string }[]
   onPick: (e: CatalogEntry) => void
   onClose: () => void
@@ -70,6 +73,12 @@ export function NodePalette({ catalog, errors, onPick, onClose }: {
             {errors.map(x => <div key={x.file} title={x.error}>{x.file} : {x.error}</div>)}
           </div>
         )}
+      </div>
+      <div style={{ padding: 8, borderTop: '1px solid var(--rule)' }}>
+        <button type="button" className="flow-tool" disabled={!canWriteNode} onClick={onNewNode} style={{ width: '100%', justifyContent: 'center' }}
+                title={canWriteNode ? tr('Ecrire un node Python partage avec l\'equipe', 'Write a Python node shared with the team') : tr('Case Team TD requise', 'Team TD box required')}>
+          <FilePlus size={12} /> {tr('Nouveau node Python', 'New Python node')}
+        </button>
       </div>
     </aside>
   )

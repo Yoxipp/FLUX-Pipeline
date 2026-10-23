@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 from pathlib import Path
 from typing import Any, Optional
@@ -29,6 +30,7 @@ from flux_flows.nodes import registry
 from flux_flows.nodes.contract import NodeError
 
 router = APIRouter()
+TEAM_NODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 
 
 def _http(exc: FlowStoreError) -> HTTPException:
@@ -60,6 +62,34 @@ async def get_node_template() -> dict[str, Any]:
     folder = locations.team_nodes_dir()
     return {"filename": path.name, "text": await asyncio.to_thread(path.read_text, encoding="utf-8"),
             "folder": str(folder) if folder else None}
+
+
+class TeamNodeBody(BaseModel):
+    name: str        # file name without .py
+    code: str
+
+
+@router.post("/nodes")
+async def post_team_node(body: TeamNodeBody) -> dict[str, Any]:
+    """Write a team Python node (NodeWriterDialog, P4): CONFIG/extensions/nodes/<name>.py,
+    Team TD. The file is written even when it fails to load (the next save fixes it);
+    ``error`` = the load error of this file, None when its nodes are in the catalogue."""
+    await _require(rights.ADMIN, "team")
+    if not TEAM_NODE_RE.match(body.name):
+        raise HTTPException(status_code=400, detail={"message": "nom invalide : minuscules, chiffres, _ (2 a 41)"})
+    if registry.MARKER not in body.code:
+        raise HTTPException(status_code=400, detail={"message": f"le fichier doit contenir {registry.MARKER}"})
+    folder = locations.team_nodes_dir()
+    if folder is None:
+        raise HTTPException(status_code=409, detail={"message": "FLUX_ROOT inconnu : pas de dossier des nodes d'equipe"})
+    path = folder / f"{body.name}.py"
+
+    def work() -> Optional[str]:
+        store._write_text(path, body.code)
+        errors = registry.catalog(folder)["node_errors"]
+        return next((e["error"] for e in errors if e.get("file") == path.name), None)
+
+    return {"file": str(path), "error": await asyncio.to_thread(work)}
 
 
 @router.get("/rights")

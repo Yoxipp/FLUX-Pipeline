@@ -34,6 +34,10 @@ export const flowsApi = {
   getV1Catalog:  (): Promise<ActionCatalog> => api.getActionCatalog(),
   getRights:     (): Promise<FlowRights> => apiCall<FlowRights>('GET', '/flows/rights'),
   getCatalog:    (): Promise<FlowCatalog> => apiCall<FlowCatalog>('GET', '/flows/catalog'),
+  nodeTemplate:  (): Promise<{ filename: string; text: string; folder: string | null }> => apiCall('GET', '/flows/nodes/template'),
+  // Team Python node (Team TD): error = load error of this file (the file is kept).
+  saveTeamNode:  (name: string, code: string): Promise<{ file: string; error: string | null }> =>
+    apiCall('POST', '/flows/nodes', { name, code }),
   // P4: issues of the open document (the backend is the reference, 01 §8). Never writes.
   validate: (flow: FlowDoc, scope: FlowScope, project?: string): Promise<{ issues: Issue[]; valid: boolean }> =>
     apiCall('POST', '/flows/validate', { flow, scope, project }),

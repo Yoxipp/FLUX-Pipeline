@@ -32,6 +32,7 @@ import { useProject } from '../../ProjectContext'
 import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
 import { NetworkPane, type EditActions } from './NetworkPane'
 import { NodePalette } from './NodePalette'
+import { NodeWriterDialog } from './NodeWriterDialog'
 import { ParamsPane, type NodeEdits } from './ParamsPane'
 import { FlowParams } from './FlowParams'
 import { RunsPanel } from './RunsPanel'
@@ -80,6 +81,7 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null)
   const [nodeErrors, setNodeErrors] = useState<{ file: string; error: string }[]>([])
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [writing, setWriting] = useState(false)
   // P4: the document being edited lives in the store (undo / redo); `loaded` keeps what the
   // backend answered (scope, version, state).
   const store = useMemo(() => createDocStore<FlowDoc>(), [])
@@ -109,11 +111,12 @@ function Editor({ rights }: { rights: FlowRights }) {
   }, [project])
 
   useEffect(() => { refreshList() }, [refreshList])
-  useEffect(() => {
+  const loadCatalog = useCallback(() => {
     flowsApi.getCatalog()
       .then(c => { setCatalog(adaptCatalog(c)); setNodeErrors(c.node_errors ?? []) })
       .catch(() => setCatalog([]))
   }, [])
+  useEffect(() => { loadCatalog() }, [loadCatalog])
 
   // No deep link: reopen the last flow of this user.
   useEffect(() => {
@@ -437,7 +440,8 @@ function Editor({ rights }: { rights: FlowRights }) {
       )}
       <ShelfBar catalog={catalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {paletteOpen && <NodePalette catalog={catalog} errors={nodeErrors} onPick={onPick} onClose={() => setPaletteOpen(false)} />}
+        {paletteOpen && <NodePalette catalog={catalog} errors={nodeErrors} canWriteNode={rights.team_td} onNewNode={() => setWriting(true)}
+                                     onPick={onPick} onClose={() => setPaletteOpen(false)} />}
         {error
           ? <div style={{ flex: 1, padding: 20, fontSize: 12, color: 'var(--ink-3)' }}>
               {tr(`Impossible de lire "${current}" : ${error}`, `Cannot read "${current}": ${error}`)}
@@ -469,6 +473,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         onClose={() => setDialog(null)}
         onConfirm={create}
       />
+      <NodeWriterDialog open={writing} onClose={() => setWriting(false)} onSaved={loadCatalog} />
       <MigrateDialog report={migration} busy={busy} onClose={() => setMigration(null)} onConfirm={() => migrate(false)} />
     </div>
   )

@@ -91,6 +91,13 @@ export interface FlowGroup { id: string; label?: string; nodes: string[]; color?
 export interface FlowNote  { id: string; pos: [number, number]; text: string }
 export interface FlowVariable { name: string; type: string; default?: unknown }
 
+// interface of a flow (01 §2): the values asked at run time (form, event payload) and the
+// outputs a sub-flow returns. Input types: INTERFACE_TYPES of model.py.
+export const INTERFACE_TYPES = ['bool', 'int', 'float', 'str', 'path', 'dir', 'pattern', 'list[str]', 'select'] as const
+export interface InterfaceInput  { id: string; type: string; label?: string; default?: unknown; options?: unknown[] }
+export interface InterfaceOutput { id: string; type: string; label?: string }
+export interface FlowInterface   { inputs: InterfaceInput[]; outputs: InterfaceOutput[] }
+
 export interface FlowOrigin {
   kind: 'v1'
   name: string
@@ -108,7 +115,7 @@ export interface FlowDoc {
   run_policy?: 'skip_if_running' | 'queue'
   origin?:     FlowOrigin
   node_type?:  string
-  interface?:  unknown
+  interface?:  FlowInterface
   variables?:  FlowVariable[]
   nodes:       Record<string, FlowDocNode>
   links:       FlowDocLink[]
