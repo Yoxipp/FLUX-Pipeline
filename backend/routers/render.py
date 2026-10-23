@@ -577,21 +577,31 @@ async def tractor_projects(project: str):
     return await asyncio.to_thread(_tractor_projects, project, _user())
 
 
-_ACTIONS = {"kill": tractor_bridge.kill, "retry": tractor_bridge.retry,
-            "pause": tractor_bridge.pause, "resume": tractor_bridge.resume}
-
-
 def _action(project: str, jid: int, action: str, user: str) -> dict:
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
     try:
-        return _ACTIONS[action](settings, user, jid)
+        return tractor_bridge.job_action(action, settings, user, jid)
     except tractor_bridge.BridgeError as exc:
         raise _bridge_error(exc)
 
 
 @router.post("/jobs/{jid}/{action}")
 async def job_action(jid: int, action: str, project: str):
-    if action not in _ACTIONS:
+    if action not in tractor_bridge.JOB_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Action inconnue : {action}")
     return await asyncio.to_thread(_action, project, jid, action, _user())
+
+
+def _trace(project: str, jid: int, user: str) -> dict:
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    try:
+        return tractor_bridge.trace(settings, user, jid)
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+
+
+@router.get("/jobs/{jid}/trace")
+async def job_trace(jid: int, project: str):
+    return await asyncio.to_thread(_trace, project, jid, _user())

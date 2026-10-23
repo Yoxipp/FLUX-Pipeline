@@ -206,7 +206,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   }
 
   return (
-    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720 }}>
+    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Toggle value={source} onChange={id => pickSource(id as Source)}
         options={[{ id: 'shot', label: 'Shot' }, { id: 'usd', label: tr('USD publie', 'Published USD') }]} />
 

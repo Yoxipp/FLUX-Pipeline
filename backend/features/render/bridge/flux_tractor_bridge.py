@@ -212,11 +212,11 @@ def _blades(req):
     return {"blades": blades, "active_by_project": active}
 
 
-def _one_job(tq, jid):
+def _one_job(tq, jid, archive=False):
     """[{"jid": jid}] after checking the job exists. Every write passes this exact list, never a
     search clause: a Tractor operation applies to everything its search matches."""
     jid = int(jid)
-    found = [r for r in tq.jobs("jid=%d" % jid, columns=["jid"], limit=2) if r.get("jid") == jid]
+    found = [r for r in tq.jobs("jid=%d" % jid, columns=["jid"], limit=2, archive=archive) if r.get("jid") == jid]
     if len(found) != 1:
         raise ValueError("job %d introuvable" % jid)
     return [{"jid": jid}]
@@ -232,25 +232,53 @@ def _maxactive(req):
     return {"jid": int(req["jid"]), "maxactive": value}
 
 
+def _engine_client():
+    import tractor.api.query.base as qbase  # noqa: Tractor's Python only
+    return qbase.ModuleEngineClient
+
+
 def _job_op(name):
+    # Same calls as the Dashboard job menu (Tractor 2.4 EngineClient / Dashboard ALL.js, read 2026-10-23).
     def run(req):
         jid = int(req["jid"])
         tq = _tq(req)
-        job = _one_job(tq, jid)
+        job = _one_job(tq, jid, archive=(name == "restore"))
         if name == "kill":
             tq.interrupt(job)  # stop running tasks
             tq.pause(job)      # and keep the job from restarting
         elif name == "retry":
-            failed = [{"jid": jid, "tid": t["tid"]} for t in tq.tasks("jid=%d and error" % jid, columns=["jid", "tid"])
-                      if t.get("jid") == jid]
-            if failed:
-                tq.retry(failed)
+            tq.retryerrors(job)        # "Retry All Error Tasks"
+        elif name == "skip_errors":
+            tq.skiperrors(job)         # "Skip All Error Tasks"
+        elif name == "restart":
+            tq.restart(job)            # "Restart Job": every task again
+        elif name == "archive":
+            tq.delete(job)             # "Archive Job" (jretire), undone by restore
+        elif name == "restore":
+            tq.undelete(job)           # "Restore Job" (jrestore)
+        elif name == "lock":
+            tq.lock(job, note="FLUX %s" % (req.get("user") or ""))
+        elif name == "unlock":
+            tq.unlock(job)
+        elif name == "shuffle_top":
+            # "Shuffle Job To Top": Dashboard queue request jshuffle, not exposed by the query API.
+            client = _engine_client()
+            client._transaction(client.QUEUE, {"q": "jshuffle", "jid": str(jid)})
         elif name == "pause":
             tq.pause(job)
         elif name == "resume":
             tq.unpause(job)
         return {"jid": int(req["jid"])}
     return run
+
+
+def _trace(req):
+    """Read only: why the engine does or does not dispatch this job ("Trace Job" of the Dashboard)."""
+    jid = int(req["jid"])
+    _one_job(_tq(req), jid)
+    client = _engine_client()
+    text = client._transaction(client.CONTROL, {"q": "tracer", "t": "J%d" % jid, "fmt": "plain"}, translation=None)
+    return {"trace": _str(text)[-LOG_TAIL:]}
 
 
 def _exit_codes(req):
@@ -283,7 +311,10 @@ VERBS = {
     "spool": _spool, "jobs": _jobs, "tasks": _tasks, "log": _log, "blades": _blades, "ping": _ping,
     "kill": _job_op("kill"), "retry": _job_op("retry"),
     "pause": _job_op("pause"), "resume": _job_op("resume"), "maxactive": _maxactive,
-    "exit_codes": _exit_codes,
+    "exit_codes": _exit_codes, "trace": _trace,
+    "skip_errors": _job_op("skip_errors"), "restart": _job_op("restart"), "archive": _job_op("archive"),
+    "restore": _job_op("restore"), "lock": _job_op("lock"), "unlock": _job_op("unlock"),
+    "shuffle_top": _job_op("shuffle_top"),
 }
 
 

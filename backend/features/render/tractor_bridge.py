@@ -17,9 +17,11 @@ from typing import Dict, Optional
 
 from features.render import job_builder
 
-VERBS = ("spool", "jobs", "tasks", "log", "blades", "kill", "retry", "pause", "resume", "maxactive", "ping",
-         "exit_codes")
-_JID_VERBS = ("tasks", "log", "kill", "retry", "pause", "resume", "maxactive")
+# Job menu of the Dashboard (2026-10-23): retry / skip errors, restart, archive / restore, lock, shuffle, trace.
+JOB_ACTIONS = ("kill", "retry", "pause", "resume", "skip_errors", "restart", "archive", "restore",
+               "lock", "unlock", "shuffle_top")
+VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace") + JOB_ACTIONS
+_JID_VERBS = ("tasks", "log", "maxactive", "trace") + JOB_ACTIONS
 DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
@@ -233,11 +235,20 @@ def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
     if user in ANONYMOUS_USERS:
         raise BridgeError("Action refusee : connecte-toi a FLUX (utilisateur)")
     # FLUX logs in as an engine admin: only act on jobs this FLUX user spooled (2026-10-22).
-    found = [j for j in call("jobs", settings, user, jid=jid).get("jobs") or []
+    # A restore looks in the archive (an archived job is not in the live list).
+    archived = verb == "restore"
+    found = [j for j in call("jobs", settings, user, jid=jid, archive=archived).get("jobs") or []
              if isinstance(j, dict) and j.get("jid") == jid]
     if not found or not user or _normalize(found[0])["flux_user"] != user:
         raise BridgeError("Action refusee : ce job n'a pas ete lance par vous depuis FLUX")
     return call(verb, settings, user, jid=jid)
+
+
+def job_action(verb: str, settings: dict, user: str, jid: int) -> dict:
+    """One of JOB_ACTIONS on a FLUX job of this user (dry run and anonymous refused)."""
+    if verb not in JOB_ACTIONS:
+        raise BridgeError(f"Action inconnue : {verb}")
+    return _action(verb, settings, user, jid)
 
 
 def kill(settings: dict, user: str, jid: int) -> dict:
@@ -254,6 +265,13 @@ def pause(settings: dict, user: str, jid: int) -> dict:
 
 def resume(settings: dict, user: str, jid: int) -> dict:
     return _action("resume", settings, user, jid)
+
+
+def trace(settings: dict, user: str, jid: int) -> dict:
+    """Read only, any job: the engine's dispatch trace for it."""
+    if _reads_off(settings):
+        return {"trace": "", "dry_run": True}
+    return call("trace", settings, user, jid=jid)
 
 
 def set_maxactive(settings: dict, user: str, jid: int, value: int) -> dict:

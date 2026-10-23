@@ -187,6 +187,9 @@ export interface RenderJob {
 }
 export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string; progress?: number | null }
 export type RenderJobScope = 'all' | 'team' | 'mine'
+// Job menu of the Tractor Dashboard (backend tractor_bridge.JOB_ACTIONS); only on the user's FLUX jobs.
+export type RenderJobAction = 'kill' | 'retry' | 'pause' | 'resume' | 'skip_errors' | 'restart' | 'archive'
+  | 'restore' | 'lock' | 'unlock' | 'shuffle_top'
 export interface RenderExitCode {
   code: number; count: number; last_seen: string; last_title: string; label: string; active: boolean; proposed: boolean
 }
@@ -1141,8 +1144,11 @@ export const api = {
       `/render/tractor_projects?project=${encodeURIComponent(project)}`),
   renderFarm: (project: string) =>
     apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
-  renderJobAction: (project: string, jid: number, action: 'kill' | 'retry' | 'pause' | 'resume') =>
+  renderJobAction: (project: string, jid: number, action: RenderJobAction) =>
     apiCall<unknown>('POST', `/render/jobs/${jid}/${action}?project=${encodeURIComponent(project)}`),
+  // Engine dispatch trace of a job ("Trace Job"), read only, any job.
+  renderJobTrace: (project: string, jid: number) =>
+    apiCall<{ trace: string }>('GET', `/render/jobs/${jid}/trace?project=${encodeURIComponent(project)}`, undefined, 60000),
 
   getCalendarPublishes: (project: string, start: string, end: string) =>
     apiCall<{ publishes: CalendarPublish[] }>('GET', `/calendar/${encodeURIComponent(project)}/publishes?start=${start}&end=${end}`),

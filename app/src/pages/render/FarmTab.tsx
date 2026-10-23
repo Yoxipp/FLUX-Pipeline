@@ -33,7 +33,7 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
   const cap = farm.team_cap
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
         {[{ k: 'alive', label: tr('Allumes', 'Alive'), color: 'var(--ink)' },
           ...STATES.map(s => ({ k: s, label: bladeStateLabel(s, tr), color: BLADE_COLOR[s] }))].map(t => (

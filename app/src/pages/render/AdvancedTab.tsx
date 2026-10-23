@@ -111,7 +111,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Banner color="var(--warn)">
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <Users size={12} />{tr("Reglages de toute l'equipe", 'Whole team settings')}
