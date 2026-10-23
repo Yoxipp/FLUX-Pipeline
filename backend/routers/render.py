@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from core import config
 from core.logger import get_logger
-from features.render import farm_paths, farm_targets, freeze, job_builder, team_settings, tractor_bridge
+from features.render import exit_codes, farm_paths, farm_targets, freeze, job_builder, team_settings, tractor_bridge
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -413,7 +413,44 @@ def _jobs(project: str, scope: str, days: int, user: str) -> dict:
     full = scope != "team" and tractor_bridge.is_configured(settings)
     out["finished"] = _notify_finished(out.get("jobs", []), user) if full else []
     out["tractor_project"] = settings["tractor_project"]
+    _record_exit_codes(project, settings, user, out.get("jobs", []))
     return out
+
+
+_CODES_EVERY_S = 60.0
+_codes_at: dict[str, float] = {}
+
+
+def _record_exit_codes(project: str, settings: dict, user: str, jobs: list[dict], force: bool = False) -> None:
+    """Keep the exit codes of the team's failed FLUX renders (one engine read per minute at most, never fails)."""
+    if not force and time.time() - _codes_at.get(project, 0.0) < _CODES_EVERY_S:
+        return
+    try:
+        todo = exit_codes.jobs_to_check(project, jobs, settings["tractor_project"])
+        if not todo:
+            return
+        _codes_at[project] = time.time()
+        found = tractor_bridge.exit_codes(settings, user, [j["jid"] for j in todo])
+        exit_codes.record(project, todo, found)
+    except Exception as exc:  # noqa: BLE001 - a side record never fails the poll
+        log.warning("Render exit codes not recorded: %s", exc)
+
+
+def _exit_codes(project: str, user: str) -> dict:
+    _ensure_project(project)
+    settings = team_settings.effective_settings(project)
+    warning = None
+    try:
+        listing = tractor_bridge.jobs(settings, user, days=90, project=settings["tractor_project"])
+        _record_exit_codes(project, settings, user, listing.get("jobs", []), force=True)
+    except tractor_bridge.BridgeError as exc:
+        warning = f"Farm indisponible ({exc}) : codes deja enregistres seulement"
+    return {"codes": exit_codes.suggestions(project, settings["retry_exit_codes"]), "warning": warning}
+
+
+@router.get("/exit_codes")
+async def get_exit_codes(project: str):
+    return await asyncio.to_thread(_exit_codes, project, _user())
 
 
 @router.get("/jobs")

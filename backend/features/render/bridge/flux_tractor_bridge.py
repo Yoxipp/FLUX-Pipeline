@@ -14,6 +14,7 @@ output). Nothing here was run against a real engine yet.
 from __future__ import print_function
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -252,6 +253,26 @@ def _job_op(name):
     return run
 
 
+def _exit_codes(req):
+    """Read only: non-zero exit codes of these jobs' executions (retries included), with the program run."""
+    jids = sorted(set(int(j) for j in (req.get("jids") or [])))[:50]
+    if not jids:
+        return {"invocations": []}
+    tq = _tq(req)
+    clause = "jid in [%s]" % ",".join(str(j) for j in jids)
+    program = {}
+    for c in tq.commands(clause, columns=["jid", "cid", "argv"]):
+        argv = c.get("argv") or []
+        program[(c.get("jid"), c.get("cid"))] = os.path.basename(_str(argv[0]).replace("\\", "/")) if argv else ""
+    out = []
+    for r in tq.invocations(clause + " and rcode != 0", columns=["jid", "tid", "cid", "rcode", "stoptime"]):
+        if r.get("rcode") is None:
+            continue
+        out.append({"jid": r.get("jid"), "tid": r.get("tid"), "cid": r.get("cid"), "rcode": int(r.get("rcode")),
+                    "stoptime": _str(r.get("stoptime")), "program": program.get((r.get("jid"), r.get("cid")), "")})
+    return {"invocations": out}
+
+
 def _ping(req):
     return {"version": sys.version.split()[0]}
 
@@ -262,6 +283,7 @@ VERBS = {
     "spool": _spool, "jobs": _jobs, "tasks": _tasks, "log": _log, "blades": _blades, "ping": _ping,
     "kill": _job_op("kill"), "retry": _job_op("retry"),
     "pause": _job_op("pause"), "resume": _job_op("resume"), "maxactive": _maxactive,
+    "exit_codes": _exit_codes,
 }
 
 

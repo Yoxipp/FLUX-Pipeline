@@ -4,9 +4,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Layers, Trash2, Users } from 'lucide-react'
+import { ChevronDown, ChevronRight, Layers, Plus, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
-import type { RenderFarm, RenderFreezeWhen, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
+import type { RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
 import { MachinePicker } from './MachinePicker'
 import {
   Banner, Check, Row, Section, ShareBaseInfo, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
@@ -30,6 +30,13 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
   const [techOpen, setTechOpen] = useState(false)
   const [codesDraft, setCodesDraft] = useState((settings.retry_exit_codes ?? []).join(', '))
   useEffect(() => { setDraft(settings); setCodesDraft((settings.retry_exit_codes ?? []).join(', ')) }, [settings])
+  // Codes recorded from the team's failed renders (read when the tab opens, the backend refreshes them).
+  const [seenCodes, setSeenCodes] = useState<RenderExitCode[]>([])
+  useEffect(() => {
+    let live = true
+    api.renderExitCodes(project).then(r => { if (live) setSeenCodes(r.codes) }).catch(() => { if (live) setSeenCodes([]) })
+    return () => { live = false }
+  }, [project])
   const [knownProjects, setKnownProjects] = useState<{ name: string; jobs: number }[]>([])
   useEffect(() => {
     let live = true
@@ -60,7 +67,12 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
     </Row>
   )
   // Exit codes typed freely, parsed on blur: integers only, 0 dropped (success).
-  const parseCodes = (s: string) => [...new Set(s.split(/[,\s]+/).map(x => Number(x)).filter(n => Number.isInteger(n) && n !== 0))]
+  const parseCodes = (s: string) => [...new Set(s.split(/[,\s]+/).filter(Boolean).map(x => Number(x)).filter(n => Number.isInteger(n) && n !== 0))]
+  const addCode = (code: number) => {
+    const next = [...new Set([...parseCodes(codesDraft), code])]
+    setCodesDraft(next.join(', '))
+    set('retry_exit_codes', next)
+  }
   const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
     label: string, placeholder?: string) => (
     <Row label={label}>
@@ -201,6 +213,24 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
                 <input style={input} value={codesDraft} placeholder="3, 4"
                   onChange={e => setCodesDraft(e.target.value)}
                   onBlur={() => set('retry_exit_codes', parseCodes(codesDraft))} />
+                {seenCodes.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }}>
+                    <span style={hint}>{tr('Vus sur vos rendus :', 'Seen on your renders:')}</span>
+                    {seenCodes.map(c => {
+                      const inDraft = draft.retry_exit_codes.includes(c.code)
+                      const canAdd = c.proposed && !inDraft
+                      const tip = [c.label, `${c.count} ${tr('fois', 'times')}`, c.last_title && `${tr('dernier', 'last')} : ${c.last_title}`, c.last_seen.slice(0, 16)]
+                        .filter(Boolean).join(' · ')
+                      return (
+                        <button key={c.code} type="button" title={tip} disabled={!canAdd}
+                          onClick={() => addCode(c.code)}
+                          style={{ ...btn(), ...disabledIf(!canAdd), background: inDraft ? 'var(--accent-soft)' : 'var(--paper-2)' }}>
+                          {canAdd && <Plus size={10} />}{c.code} <span style={{ color: 'var(--ink-3)' }}>x{c.count}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </Row>
               {txt('husk_path', 'Husk')}
               {txt('engine', 'Engine (host:port)', 'TRACTOR_ENGINE')}

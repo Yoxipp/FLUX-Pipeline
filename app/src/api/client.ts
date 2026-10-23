@@ -187,6 +187,9 @@ export interface RenderJob {
 }
 export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string; progress?: number | null }
 export type RenderJobScope = 'all' | 'team' | 'mine'
+export interface RenderExitCode {
+  code: number; count: number; last_seen: string; last_title: string; label: string; active: boolean; proposed: boolean
+}
 export type RenderBladeState = 'free' | 'busy' | 'nimby' | 'offline'
 export interface RenderBlade {
   name: string; state: RenderBladeState; room: string; slots: number; nimby: string
@@ -1129,6 +1132,10 @@ export const api = {
     apiCall<{ last: Partial<RenderLastForm> }>('GET', `/render/last?project=${encodeURIComponent(project)}`),
   renderSaveLast: (project: string, last: RenderLastForm) =>
     apiCall<{ ok: boolean }>('PUT', `/render/last?project=${encodeURIComponent(project)}`, last),
+  // Exit codes seen on the team's failed FLUX renders (husk), most frequent first; proposed = can be added.
+  renderExitCodes: (project: string) =>
+    apiCall<{ codes: RenderExitCode[]; warning: string | null }>('GET',
+      `/render/exit_codes?project=${encodeURIComponent(project)}`),
   renderTractorProjects: (project: string) =>
     apiCall<{ projects: { name: string; jobs: number }[]; current: string }>('GET',
       `/render/tractor_projects?project=${encodeURIComponent(project)}`),

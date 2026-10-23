@@ -17,7 +17,8 @@ from typing import Dict, Optional
 
 from features.render import job_builder
 
-VERBS = ("spool", "jobs", "tasks", "log", "blades", "kill", "retry", "pause", "resume", "maxactive", "ping")
+VERBS = ("spool", "jobs", "tasks", "log", "blades", "kill", "retry", "pause", "resume", "maxactive", "ping",
+         "exit_codes")
 _JID_VERBS = ("tasks", "log", "kill", "retry", "pause", "resume", "maxactive")
 DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
@@ -209,6 +210,15 @@ def task_log(settings: dict, user: str, jid: int, tid: int) -> dict:
     if _reads_off(settings):
         return {"log": "", "dry_run": True}
     return call("log", settings, user, jid=jid, tid=tid)
+
+
+def exit_codes(settings: dict, user: str, jids: list) -> list:
+    """Non-zero exit codes of these jobs' executions (read only): [{jid, tid, cid, rcode, stoptime, program}]."""
+    jids = [j for j in jids if _is_int(j)][:50]
+    if not jids or _reads_off(settings):
+        return []
+    found = call("exit_codes", settings, user, jids=jids).get("invocations", [])
+    return [i for i in found if isinstance(i, dict) and _is_int(i.get("rcode"))]
 
 
 def blades(settings: dict, user: str) -> dict:
