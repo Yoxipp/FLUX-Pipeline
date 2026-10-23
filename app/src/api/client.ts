@@ -164,6 +164,10 @@ export interface RenderSettings {
   job_share: RenderShare; team_cap: RenderShare
   host_groups: Record<string, string[]>; exclude_hosts: string[]
 }
+// farm_teams / team_warning: Shares of the engine limits.config (read only, Tractor balances the teams itself)
+export interface RenderSettingsResponse {
+  settings: RenderSettings; warning: string | null; farm_teams?: string[]; team_warning?: string | null
+}
 // Last launch form of the artist (backend <project>/_flux_setup/render_last/<user>.json).
 export interface RenderLastForm {
   source: 'shot' | 'usd'; seq: string; shot: string; usd_path: string; renderer: 'karma' | 'renderman'
@@ -1124,9 +1128,9 @@ export const api = {
     apiCall<{ items: CalendarItem[]; me: string }>('GET', `/calendar/${encodeURIComponent(project)}`),
   // Tractor farm render (ADR 0015, backend routers/render.py)
   renderSettings: (project: string) =>
-    apiCall<{ settings: RenderSettings; warning: string | null }>('GET', `/render/settings?project=${encodeURIComponent(project)}`),
+    apiCall<RenderSettingsResponse>('GET', `/render/settings?project=${encodeURIComponent(project)}`),
   renderSaveSettings: (project: string, patch: Partial<RenderSettings>) =>
-    apiCall<{ settings: RenderSettings; warning: string | null }>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
+    apiCall<RenderSettingsResponse>('PUT', `/render/settings?project=${encodeURIComponent(project)}`, patch),
   renderShots: (project: string) =>
     apiCall<{ shots: RenderShot[] }>('GET', `/render/shots?project=${encodeURIComponent(project)}`),
   renderUsdRange: (project: string, path: string) =>

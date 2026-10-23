@@ -17,7 +17,8 @@ from pydantic import BaseModel
 
 from core import config
 from core.logger import get_logger
-from features.render import exit_codes, farm_paths, farm_targets, freeze, job_builder, team_settings, tractor_bridge
+from features.render import (exit_codes, farm_limits, farm_paths, farm_targets, freeze, job_builder, team_settings,
+                             tractor_bridge)
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -47,7 +48,11 @@ def _bridge_error(exc: Exception) -> HTTPException:
 def get_settings(project: str):
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
-    return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user()}
+    shares = farm_limits.fetch_shares(settings["engine"])
+    # Teams of the farm (engine limits.config, read only): Tractor shares the farm between them.
+    return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user(),
+            "farm_teams": farm_limits.teams(shares),
+            "team_warning": farm_limits.team_warning(settings["tractor_project"], shares)}
 
 
 # ── last launch form of each artist (follows the artist from desk to desk: stored in the project) ──
@@ -226,6 +231,11 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
     return service, _min_cap(own, team_total), own, notes
 
 
+def _team_note(settings: dict) -> list[str]:
+    note = farm_limits.team_warning(settings["tractor_project"], farm_limits.fetch_shares(settings["engine"]))
+    return [note] if note else []
+
+
 def _farm(path: Path | str, what: str, simulate: bool) -> str:
     unc = farm_paths.to_farm_path(path)
     if unc is None:
@@ -341,7 +351,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
     return {**result, "title": spec.title, "output": str(out_dir), "usd": spec.usd_path if at_start else frozen["usd"],
             "frozen": frozen["frozen"] or at_start, "freeze_when": "start" if at_start else "submit",
             "frames": [start, end], "start_at": spec.start_after,
-            "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes,
+            "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes + _team_note(settings),
             "priority_warning": team_settings.priority_warning(settings)}
 
 

@@ -6,7 +6,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronRight, Layers, Plus, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
-import type { RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
+import type {
+  RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderSettingsResponse, RenderShare, RenderShareBase,
+} from '../../api/client'
 import { MachinePicker } from './MachinePicker'
 import {
   Banner, Check, Row, Section, ShareBaseInfo, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
@@ -18,9 +20,10 @@ function changedKeys(a: RenderSettings, b: RenderSettings): Key[] {
   return (Object.keys(b) as Key[]).filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
 }
 
-export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
+export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSaved }: {
   project: string; settings: RenderSettings; warning: string | null; farm: RenderFarm | null
-  onSaved: (r: { settings: RenderSettings; warning: string | null }) => void
+  farmTeams: string[]   // Shares of the engine limits.config: the only team names the farm knows
+  onSaved: (r: RenderSettingsResponse) => void
 }) {
   const { tr } = useTr()
   const [draft, setDraft] = useState<RenderSettings>(settings)
@@ -121,7 +124,19 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
       <Section title={tr('Equipe et part de la farm', 'Team and farm share')}>
         <Row label={tr('Equipe sur la farm', 'Team on the farm')}>
           <input style={input} value={draft.tractor_project} onChange={e => set('tractor_project', e.target.value)} />
-          {knownProjects.length > 0 && (
+          {farmTeams.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }}>
+              <span style={hint}>{tr('Equipes de la farm :', 'Farm teams:')}</span>
+              {farmTeams.map(name => (
+                <button key={name} type="button" title={tr('Part de la farm reglee par l\'ecole (limits.config)', 'Farm share set by the school (limits.config)')}
+                  style={{ ...btn(), background: draft.tractor_project === name ? 'var(--accent-soft)' : 'var(--paper-2)' }}
+                  onClick={() => set('tractor_project', name)}>{name}</button>
+              ))}
+              {draft.tractor_project && !farmTeams.includes(draft.tractor_project) && (
+                <span style={warnText}>{tr('Inconnue de la farm : part "default" (limitee)', 'Unknown to the farm: "default" share (limited)')}</span>
+              )}
+            </div>
+          ) : knownProjects.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
               {knownProjects.map(p => (
                 <button key={p.name} type="button" title={tr(`${p.jobs} job(s) en 90 jours`, `${p.jobs} job(s) in 90 days`)}
@@ -136,8 +151,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
           {num('chunk_size', tr('Images par tache', 'Frames per task'))}
         </div>
         {warning && <div style={warnText}>{warning}</div>}
-        {shareField('team_cap', tr("Plafond de l'equipe", 'Team cap'), tr('Tous les jobs FLUX de l\'equipe. 0 = aucun.', "All the team's FLUX jobs. 0 = none."))}
-      </Section>
+        {shareField('team_cap', tr("Plafond de l'equipe", 'Team cap'), tr('Tous les jobs FLUX de l\'equipe. 0 = aucun.', "All the team's FLUX jobs. 0 = none."))}      </Section>
 
       <Section title={tr('Groupes de PC', 'PC groups')}>
         {Object.entries(groups).map(([name, members]) => (

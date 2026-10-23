@@ -63,8 +63,7 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
             </div>
             {Object.keys(cap.targets).length > 0 && (
               <div style={hint}>{Object.entries(cap.targets).map(([j, n]) => `#${j} : ${n}`).join('   ')}</div>
-            )}
-            {cap.errors.map((e, i) => <div key={i} style={warnText}>{e}</div>)}
+            )}            {cap.errors.map((e, i) => <div key={i} style={warnText}>{e}</div>)}
           </>
         ) : (
           <div style={hint}>{tr('Pas de plafond', 'No cap')}</div>

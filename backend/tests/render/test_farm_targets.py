@@ -215,6 +215,26 @@ class TractorProjects(RouterTargeting):
         self.assertEqual(r.json(), {"projects": [{"name": "FIE", "jobs": 2}, {"name": "CEB", "jobs": 1}], "current": "P"})
 
 
+class FarmTeams(RouterTargeting):
+    """Teams of the farm from the engine limits.config (read only): FLUX warns, Tractor balances."""
+
+    def test_settings_and_submit_warn_outside_the_shares(self):
+        from features.render import farm_limits
+        from tests.render.test_farm_limits import SAMPLE
+
+        with mock.patch.object(farm_limits, "fetch_shares", return_value=farm_limits.parse_shares(SAMPLE)):
+            body = self.client.get("/render/settings", params={"project": "P"}).json()
+            self.assertEqual(body["farm_teams"], ["Andhakara", "Hold", "Lum", "MortalKoil"])
+            self.assertIn("'default'", body["team_warning"])  # tractor_project defaults to the FLUX name "P"
+            self.assertTrue(any("'default'" in w for w in self._submit().json()["warnings"]))
+            self.client.put("/render/settings", params={"project": "P"}, json={"tractor_project": "Lum"})
+            self.assertIsNone(self.client.get("/render/settings", params={"project": "P"}).json()["team_warning"])
+
+    def test_no_engine_no_warning(self):
+        body = self.client.get("/render/settings", params={"project": "P"}).json()
+        self.assertEqual((body["farm_teams"], body["team_warning"]), ([], None))
+
+
 class LastForm(RouterTargeting):
     def test_last_form_per_artist(self):
         self.assertEqual(self.client.get("/render/last", params={"project": "P"}).json(), {"last": {}})
