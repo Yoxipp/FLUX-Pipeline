@@ -451,9 +451,12 @@ class Run:
     async def _inputs(self, nid: str, node, spec, got: Dict[str, Any],
                       params: Dict[str, Any]) -> Dict[str, Any]:
         declared = {p.name: p for p in spec.inputs if p.type != "exec"}
+        params_of = {p.name for p in spec.params}
         for name in list(declared) + [p for p in self._data_ports.get(nid, []) if p not in declared]:
             if (nid, name) in self._data_in:
                 got[name] = await self._pull(nid, name)
+                if name not in declared and name in params_of:
+                    params[name] = got[name]          # promoted param: the body reads params
             elif name in params:
                 got[name] = params[name]
             else:
