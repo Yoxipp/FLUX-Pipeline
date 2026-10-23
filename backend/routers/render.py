@@ -233,6 +233,8 @@ class SubmitBody(BaseModel):
     share_percent: Optional[int] = None  # % of the farm for this job, None = team default
     share_of: Optional[str] = None       # "alive" | "free"
     priority: Optional[int] = None       # this job only, None = team default (higher = dispatched first)
+    denoise: bool = False                # RenderMan denoise_batch after the render, same job
+    denoise_crossframe: Optional[bool] = None  # None = team default
 
 
 # ── farm snapshot (shared by /farm, /submit and the team balancer) ──────────
@@ -371,7 +373,13 @@ def _submit(body: SubmitBody, user: str) -> dict:
     priority = settings["priority"] if body.priority is None else body.priority
     if not isinstance(priority, int) or not 1 <= priority <= 10000:
         raise HTTPException(status_code=400, detail="Priorite entre 1 et 10000")
+    if body.denoise and renderer != "renderman":
+        raise HTTPException(status_code=400, detail="Denoise apres rendu : RenderMan seulement (Karma : denoiser dans ses reglages)")
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
+    if body.denoise and render_settings:
+        # ADR 0060: the generated render layer has the beauty only, not RenderMan's denoise AOVs.
+        notes.append("Denoise : le stage publie n'a que la beaute (pas les AOV de denoise RenderMan), "
+                     "le denoise risque d'echouer. Lancer depuis Houdini (Entree LOP) avec les AOV de denoise.")
     out_dir = freeze.reserve_render_dir(folder)
     render_usd = _farm(frozen["usd"], "Le USD", simulate)
     freeze_at_start = {}
@@ -392,6 +400,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
         usd_path=render_usd,
         render_settings=render_settings,
         **freeze_at_start,
+        denoise=body.denoise,
+        denoise_exe=settings["denoise_path"],
+        denoise_crossframe=settings["denoise_crossframe"] if body.denoise_crossframe is None else body.denoise_crossframe,
         output_pattern=_farm(out_dir / f"{name}.$F4.exr", "Le dossier de rendu", simulate),
         frame_start=start,
         frame_end=end,
@@ -422,6 +433,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
     return {**result, "title": spec.title, "output": str(out_dir), "usd": spec.usd_path if at_start else frozen["usd"],
             "frozen": frozen["frozen"] or at_start, "freeze_when": "start" if at_start else "submit",
             "frames": [start, end], "start_at": spec.start_after,
+            "denoise": str(out_dir / job_builder.DENOISE_DIR) if spec.denoise else None,
             "service": service, "maxactive": maxactive, "warnings": frozen["warnings"] + notes + _team_note(settings),
             "priority": priority, "priority_warning": team_settings.priority_warning({**settings, "priority": priority})}
 
@@ -432,8 +444,9 @@ _SUBMIT_MAX = 10  # per backend and per 10 minutes: never flood the engine (2026
 _submits: list[float] = []
 
 
-def _guarded_submit(body: SubmitBody, user: str) -> dict:
-    """One submit at a time per backend, and a rate cap (a double click or a loop never floods the farm)."""
+def _guarded_submit(body, user: str, run=None) -> dict:
+    """One submit at a time per backend, and a rate cap (a double click or a loop never floods the farm).
+    run: the submit to guard (render by default, or the denoise of a rendered sequence)."""
     if not _SUBMIT_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="Un lancement est deja en cours, attendre la fin")
     try:
@@ -442,7 +455,7 @@ def _guarded_submit(body: SubmitBody, user: str) -> dict:
         if len(_submits) >= _SUBMIT_MAX:
             raise HTTPException(status_code=429, detail=(
                 f"Trop de lancements ({_SUBMIT_MAX} en {_SUBMIT_WINDOW_S // 60} min) : attendre un peu"))
-        result = _submit(body, user)
+        result = (run or _submit)(body, user)
         if not result.get("dry_run"):
             _submits.append(now)
         return result
@@ -454,6 +467,87 @@ def _guarded_submit(body: SubmitBody, user: str) -> dict:
 async def submit(body: SubmitBody):
     # Freezing writes a stage version and audits USD dependencies: off the event loop.
     return await asyncio.to_thread(_guarded_submit, body, _user())
+
+
+# ── denoise of an already rendered sequence (2026-10-23) ─────────────────
+
+class DenoiseBody(BaseModel):
+    project: str
+    path: str                            # one frame, a pattern (####, $F4) or the folder of the sequence
+    frame_start: Optional[int] = None    # None = first frame found
+    frame_end: Optional[int] = None
+    crossframe: Optional[bool] = None    # None = team default
+    priority: Optional[int] = None
+    chunk_size: Optional[int] = None
+
+
+def _denoise_sequence(body: DenoiseBody, user: str) -> dict:
+    from features.render import image_sequence
+
+    _ensure_project(body.project)
+    settings = team_settings.effective_settings(body.project)
+    simulate = settings["dry_run"] is True
+    if not simulate and user in tractor_bridge.ANONYMOUS_USERS:
+        raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un denoise sur la farm")
+    try:
+        seq = image_sequence.find(body.path)
+    except image_sequence.SequenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    start = seq["first"] if body.frame_start is None else body.frame_start
+    end = seq["last"] if body.frame_end is None else body.frame_end
+    if start > end or start < seq["first"] or end > seq["last"]:
+        raise HTTPException(status_code=400, detail=f"Plage {start}-{end} hors de la sequence ({seq['first']}-{seq['last']})")
+    holes = [f for f in seq["missing"] if start <= f <= end]
+    if holes:
+        shown = ", ".join(str(f) for f in holes[:10]) + (" ..." if len(holes) > 10 else "")
+        raise HTTPException(status_code=400, detail=f"Images manquantes dans la sequence : {shown}")
+    priority = settings["priority"] if body.priority is None else body.priority
+    if not isinstance(priority, int) or not 1 <= priority <= 10000:
+        raise HTTPException(status_code=400, detail="Priorite entre 1 et 10000")
+    folder = seq["folder"]
+    try:
+        service = farm_targets.service_expression(settings["service_renderman"], [], settings["exclude_hosts"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    out = folder / job_builder.DENOISE_DIR
+    stem = seq["pattern"].split("$F")[0].rstrip("._") or folder.name
+    spec = job_builder.RenderJobSpec(
+        title=f"{body.project} denoise {stem} {folder.name}",
+        project=settings["tractor_project"],
+        user=user,
+        usd_path="",
+        output_pattern=_farm(folder, "La sequence", simulate) + "/" + seq["pattern"],
+        frame_start=start,
+        frame_end=end,
+        renderer="renderman",
+        chunk_size=body.chunk_size or settings["chunk_size"],
+        priority=priority,
+        service=service,
+        envkeys=settings["envkeys"],
+        denoise_only=True,
+        denoise_exe=settings["denoise_path"],
+        denoise_crossframe=settings["denoise_crossframe"] if body.crossframe is None else body.crossframe,
+        metadata={"flux_project": body.project, "entity": stem, "user": user, "kind": "denoise",
+                  "output": _farm(out, "Le dossier denoised", simulate)},
+    )
+    try:
+        result = tractor_bridge.spool(spec, settings, user, out / "_job")
+    except job_builder.JobValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except tractor_bridge.BridgeError as exc:
+        raise _bridge_error(exc)
+    if result.get("jid") is not None:
+        _running[int(result["jid"])] = {"project": body.project, "title": spec.title,
+                                        "output": str(out), "user": user, "seen": time.time()}
+    log.info("Denoise %s %s -> %s", "simulated" if result["dry_run"] else "spooled", spec.title, result.get("jid"))
+    return {**result, "title": spec.title, "output": str(out), "frames": [start, end], "count": end - start + 1,
+            "pattern": seq["pattern"], "warnings": _team_note(settings),
+            "priority_warning": team_settings.priority_warning({**settings, "priority": priority})}
+
+
+@router.post("/denoise")
+async def denoise(body: DenoiseBody):
+    return await asyncio.to_thread(_guarded_submit, body, _user(), _denoise_sequence)
 
 
 # ── follow-up ───────────────────────────────────────────────────────────────

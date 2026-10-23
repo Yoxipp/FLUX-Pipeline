@@ -242,6 +242,30 @@ class FarmTeams(RouterTargeting):
         self.assertEqual(r.status_code, 200, r.text)  # not swallowed by /jobs/{jid}/{action}
         setter.assert_called_once_with(mock.ANY, "adam", 5, 3)
 
+    def test_denoise_after_render(self):
+        self.assertEqual(self._submit(renderer="karma", denoise=True).status_code, 400)
+        body = self._submit(renderer="renderman", denoise=True).json()
+        self.assertTrue(body["denoise"].endswith("denoised"))
+        alf = next((self.usd.parent / "render" / "v001" / "_job").glob("*.alf")).read_text(encoding="utf-8")
+        self.assertIn("Task -title {denoise} -subtasks {", alf)
+        self.assertIn("-cf --frame-include", alf)  # crossframe by default
+
+    def test_denoise_rendered_sequence(self):
+        frames = self.tmp / "v003"
+        frames.mkdir()
+        for f in (1, 2, 3, 5):
+            (frames / f"SH010.{f:04d}.exr").write_bytes(b"")
+        r = self.client.post("/render/denoise", json={"project": "P", "path": str(frames / "SH010.0002.exr"), "frame_end": 3})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["frames"], body["count"], body["pattern"]), ([1, 3], 3, "SH010.$F4.exr"))
+        alf = next((frames / "denoised" / "_job").glob("*.alf")).read_text(encoding="utf-8")
+        self.assertIn("SH010.####.exr 1-3", alf)
+        self.assertNotIn("husk", alf)
+        r = self.client.post("/render/denoise", json={"project": "P", "path": str(frames)})
+        self.assertEqual(r.status_code, 400)  # frame 4 missing
+        self.assertIn("4", r.json()["detail"])
+
     def test_env_locked_and_never_in_simulation(self):
         for path in ("/render/env/state", "/render/env/reload"):
             self.assertEqual(self.client.post(path, params={"project": "P"}, json={"phrase": "Understand", "password": "x"}).status_code, 403)

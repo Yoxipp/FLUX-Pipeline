@@ -139,7 +139,8 @@ function AppShell({ settings }: { settings: Settings }) {
     <HashRouter>
       <WorkProfileProvider>
       {!DETACHED && <StartPageRedirect />}
-      <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)' }}>
+      {/* Detached windows are frameless: a dark edge sets them apart from the main window under them. */}
+      <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg)', ...(DETACHED ? { border: '2px solid #000', borderTop: 'none' } : {}) }}>
         {showLogin && <Login onDone={() => setShowLogin(false)} />}
 
         <TitleBar

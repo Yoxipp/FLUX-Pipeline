@@ -34,6 +34,10 @@ DEFAULTS: dict = {
     # Houdini on the blades (20.5 to 22): its embedded python + pxr freeze at start (no Houdini
     # license, probe job 34027). A blade without it uses its newest Houdini.
     "houdini_path": "C:/Program Files/Side Effects Software/Houdini 20.5.445",
+    # RenderMan denoise after the render (2026-10-23): denoise_batch of RenderMan 26.3 on the blades,
+    # crossframe by default. The launch form ticks it per job.
+    "denoise_path": "C:/Program Files/Pixar/RenderManProServer-26.3/bin/denoise_batch.exe",
+    "denoise_crossframe": True,
     # Night window off by default (2026-10-22): opt-in in the advanced settings.
     "schedule": {"enabled": False, "start": "18:00", "end": "08:00", "kill_at_end": False},
     "service_karma": "",
@@ -70,7 +74,7 @@ _STR_KEYS = (
 TRACTOR_PYTHON_CANDIDATES = (Path(r"C:\Program Files\Pixar\Tractor-2.4\bin\rmanpy.exe"),)
 # Same install on every blade (blade service, probe job 34027): starts the freeze-at-start script.
 BLADE_TRACTOR_PYTHON = "C:/Program Files/Pixar/Tractor-2.4/bin/rmanpy.exe"
-_BOOL_KEYS = ("freeze_by_default", "dry_run")
+_BOOL_KEYS = ("freeze_by_default", "dry_run", "denoise_crossframe")
 
 
 def _is_int(value) -> bool:
@@ -157,6 +161,10 @@ def _check_value(key: str, value):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("houdini_path must be the Houdini install folder of the blades")
         return value.strip().replace("\\", "/").rstrip("/")
+    if key == "denoise_path":
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("denoise_path must be denoise_batch.exe on the blades")
+        return value.strip().replace("\\", "/")
     if key in _BOOL_KEYS:
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be true or false")

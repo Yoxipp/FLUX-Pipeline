@@ -61,6 +61,13 @@ class RenderJobSpec:
     freeze_houdini: str = ""  # Houdini folder on the blades: the script runs again with its python
     # RenderSettings prim of the shot stage render layer (ADR 0060), "" = husk's default.
     render_settings: str = ""
+    # RenderMan denoise after the render (2026-10-23): denoise_batch per chunk, once every chunk is rendered,
+    # into <output dir>/denoised. The frames need RenderMan's denoise AOVs (set in Houdini).
+    denoise: bool = False
+    denoise_exe: str = ""            # denoise_batch on the blades (local path, drive letter allowed)
+    denoise_crossframe: bool = True  # -cf: reads the neighbour frames, better in animation
+    # Denoise an already rendered sequence (output_pattern = that sequence, $F<n> = frame padding): no husk task.
+    denoise_only: bool = False
 
 
 def after_clause(start_after: str) -> str:
@@ -120,6 +127,21 @@ def husk_command(spec: RenderJobSpec, first: int, last: int) -> List[str]:
     ]
 
 
+# Tractor limit tag of the school for denoise commands (limits.config "Denoise" Shares).
+DENOISE_TAG = "Denoise"
+DENOISE_DIR = "denoised"
+_FRAME_TOKEN = re.compile(r"\$F(\d)")  # husk frame token, $F4 = 4 digits
+
+
+def denoise_command(spec: RenderJobSpec, first: int, last: int) -> List[str]:
+    """denoise_batch on frames first..last of the render. Crossframe reads the whole range, denoises the chunk."""
+    folder, _, name = spec.output_pattern.rpartition("/")
+    frames = _FRAME_TOKEN.sub(lambda m: "#" * int(m.group(1)), name)
+    cross = ["-cf", "--frame-include", f"{first}-{last}"] if spec.denoise_crossframe else []
+    span = f"{spec.frame_start}-{spec.frame_end}" if spec.denoise_crossframe else f"{first}-{last}"
+    return [spec.denoise_exe, "-p", "-t", *cross, "-o", f"{folder}/{DENOISE_DIR}", f"{folder}/{frames}", span]
+
+
 def freeze_command(spec: RenderJobSpec) -> List[str]:
     return [spec.freeze_python, spec.freeze_script, "--houdini", spec.freeze_houdini, spec.freeze_source, spec.usd_path]
 
@@ -127,7 +149,10 @@ def freeze_command(spec: RenderJobSpec) -> List[str]:
 def validate_spec(spec: RenderJobSpec, strict: bool = True) -> RenderJobSpec:
     if spec.renderer not in RENDERER_DELEGATES:
         raise JobValidationError(f"unknown renderer '{spec.renderer}' (expected: {', '.join(RENDERER_DELEGATES)})")
-    spec.usd_path = validate_farm_path(spec.usd_path, "USD", strict)
+    if spec.denoise_only:
+        spec.denoise = True  # the sequence is already rendered: only the denoise tasks
+    else:
+        spec.usd_path = validate_farm_path(spec.usd_path, "USD", strict)
     spec.output_pattern = validate_farm_path(spec.output_pattern, "output", strict)
     if not spec.project:
         raise JobValidationError("missing Tractor project (team)")
@@ -140,6 +165,15 @@ def validate_spec(spec: RenderJobSpec, strict: bool = True) -> RenderJobSpec:
         spec.freeze_python = spec.freeze_python.replace("\\", "/")
         spec.freeze_houdini = spec.freeze_houdini.replace("\\", "/")
         texts += [spec.freeze_source, spec.freeze_script, spec.freeze_python, spec.freeze_houdini]
+    if spec.denoise:
+        if spec.renderer != "renderman":
+            raise JobValidationError("denoise apres rendu : RenderMan seulement (Karma : denoiser dans ses reglages Houdini)")
+        if not spec.denoise_exe:
+            raise JobValidationError("denoise apres rendu : chemin de denoise_batch sur les blades manquant")
+        if len(_FRAME_TOKEN.findall(spec.output_pattern.rpartition("/")[2])) != 1 or spec.frame_step != 1:
+            raise JobValidationError("denoise : sequence <nom>.$F4.exr (un numero d'image) et pas de frame 1 attendus")
+        spec.denoise_exe = spec.denoise_exe.replace("\\", "/")
+        texts.append(spec.denoise_exe)
     texts += spec.envkeys + list(spec.metadata.keys()) + list(spec.metadata.values())
     for text in texts:
         # $F4 is the only '$' allowed (husk frame token), it is protected by braces in Tcl.
@@ -184,15 +218,21 @@ def to_alf(spec: RenderJobSpec, strict: bool = True) -> str:
         job_attrs.append(f"-metadata {_tcl(json.dumps(spec.metadata, sort_keys=True))}")
 
     service = f" -service {_tcl(spec.service)}" if spec.service else ""
+    if spec.denoise_only:
+        lines = ["##AlfredToDo 3.0", "Job " + " ".join(job_attrs) + " -subtasks {"]
+        lines += _denoise_tasks(spec, service, "    ")
+        return "\n".join(lines + ["}"]) + "\n"
     pad = "    "
-    if spec.freeze_source:
-        # Freeze task first, then the chunks (in parallel) once it has succeeded.
+    staged = bool(spec.freeze_source or spec.denoise)
+    if staged:
+        # Steps in order: freeze, then the chunks (in parallel), then the denoise chunks (in parallel).
         job_attrs.append("-serialsubtasks 1")
     lines = ["##AlfredToDo 3.0", "Job " + " ".join(job_attrs) + " -subtasks {"]
     if spec.freeze_source:
         lines.append(f"    Task -title {{gel au demarrage}} -cmds {{")
         lines.append(f"        RemoteCmd {_tcl_cmd(freeze_command(spec))}{service}")
         lines.append("    }")
+    if staged:
         lines.append("    Task -title {rendu} -subtasks {")
         pad = "        "
     # Render commands only: the freeze task is short and must never be retried blindly.
@@ -206,10 +246,24 @@ def to_alf(spec: RenderJobSpec, strict: bool = True) -> str:
         lines.append(f"{pad}Task -title {_tcl(f'frames {first}-{last}')} -cmds {{")
         lines.append(f"{pad}    RemoteCmd {cmd}{render_opts}")
         lines.append(f"{pad}}}")
-    if spec.freeze_source:
+    if staged:
+        lines.append("    }")
+    if spec.denoise:
+        lines.append("    Task -title {denoise} -subtasks {")
+        lines += _denoise_tasks(spec, service, "        ")
         lines.append("    }")
     lines.append("}")
     return "\n".join(lines) + "\n"
+
+
+def _denoise_tasks(spec: RenderJobSpec, service: str, pad: str) -> List[str]:
+    """One denoise_batch task per chunk, tagged with the school's Denoise limit."""
+    lines = []
+    for first, last in chunk_frames(spec.frame_start, spec.frame_end, spec.chunk_size, spec.frame_step):
+        lines.append(f"{pad}Task -title {_tcl(f'denoise {first}-{last}')} -cmds {{")
+        lines.append(f"{pad}    RemoteCmd {_tcl_cmd(denoise_command(spec, first, last))}{service} -tags {_tcl(DENOISE_TAG)}")
+        lines.append(f"{pad}}}")
+    return lines
 
 
 def to_submission(spec: RenderJobSpec, strict: bool = True) -> Dict:

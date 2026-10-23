@@ -199,13 +199,21 @@ function createDetachedWindow(route: string): void {
   }
   const large = LARGE_ROUTES.has(routePath)
   const cursor = screen.getCursorScreenPoint()
+  const area = screen.getDisplayNearestPoint(cursor).workArea
+  const width = Math.min(large ? 1440 : 1100, area.width)
+  const height = Math.min(large ? 900 : 760, area.height)
+  // Windows opened from a launcher (Tractor) are centered on the screen; a page
+  // dragged out opens under the cursor. Both stay inside the work area.
+  const centered = routePath === '/render'
+  const wantX = centered ? area.x + (area.width - width) / 2 : cursor.x - 120
+  const wantY = centered ? area.y + (area.height - height) / 2 : cursor.y - 16
   const child = new BrowserWindow({
-    width:           large ? 1440 : 1100,
-    height:          large ? 900 : 760,
+    width,
+    height,
     minWidth:        large ? 960 : 640,
     minHeight:       large ? 600 : 480,
-    x:               Math.max(0, cursor.x - 120),
-    y:               Math.max(0, cursor.y - 16),
+    x:               Math.round(Math.min(Math.max(area.x, wantX), area.x + area.width - width)),
+    y:               Math.round(Math.min(Math.max(area.y, wantY), area.y + area.height - height)),
     backgroundColor: '#0f0f0f',
     icon:            ICON,
     frame:           false,

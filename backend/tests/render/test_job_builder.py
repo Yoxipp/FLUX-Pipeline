@@ -96,6 +96,49 @@ class AlfTests(unittest.TestCase):
             jb.to_alf(_spec(title="x} ; exec rm {"))
 
 
+DENOISE = "C:/Program Files/Pixar/RenderManProServer-26.3/bin/denoise_batch.exe"
+
+
+class DenoiseTests(unittest.TestCase):
+    """RenderMan denoise_batch after the render, same job (2026-10-23)."""
+
+    def test_render_then_denoise_in_order(self):
+        alf = jb.to_alf(_spec(renderer="renderman", denoise=True, denoise_exe=DENOISE))
+        self.assertIn("-serialsubtasks 1", alf.splitlines()[1])
+        self.assertLess(alf.index("Task -title {rendu} -subtasks {"), alf.index("Task -title {denoise} -subtasks {"))
+        self.assertEqual(alf.count("Task -title {denoise "), 3)  # one per render chunk
+        self.assertEqual(alf.count("-tags {Denoise}"), 3)        # the school's Denoise Share
+        out = "//srv/flux/PROJ/shot/SQ01/SH010/render/v003"
+        self.assertIn(f"-cf --frame-include 1006-1010 -o {out}/denoised {out}/SQ01_SH010.####.exr 1001-1012", alf)
+        self.assertIn("{C:/Program Files/Pixar/RenderManProServer-26.3/bin/denoise_batch.exe} -p -t", alf)
+
+    def test_without_crossframe_only_the_chunk(self):
+        cmd = jb.denoise_command(_spec(renderer="renderman", denoise=True, denoise_exe=DENOISE, denoise_crossframe=False),
+                                 1006, 1010)
+        self.assertNotIn("-cf", cmd)
+        self.assertEqual(cmd[-1], "1006-1010")
+
+    def test_no_denoise_no_change(self):
+        alf = jb.to_alf(_spec(renderer="renderman"))
+        self.assertNotIn("serialsubtasks", alf)
+        self.assertNotIn("denoise", alf)
+
+    def test_denoise_only_job(self):
+        alf = jb.to_alf(_spec(renderer="renderman", usd_path="", denoise_only=True, denoise_exe=DENOISE,
+                              output_pattern="//srv/out/v003/SH010.$F3.exr", frame_start=1, frame_end=12))
+        self.assertNotIn("husk", alf)
+        self.assertNotIn("serialsubtasks", alf)
+        self.assertEqual(alf.count("Task -title {denoise "), 3)
+        self.assertIn("-o //srv/out/v003/denoised //srv/out/v003/SH010.###.exr 1-12", alf)
+
+    def test_refused(self):
+        for over in ({"renderer": "karma"}, {"renderer": "renderman", "denoise_exe": ""},
+                     {"renderer": "renderman", "output_pattern": "//srv/out/a.exr"},
+                     {"renderer": "renderman", "frame_step": 2}):
+            with self.assertRaises(jb.JobValidationError):
+                jb.to_alf(_spec(**{"denoise": True, "denoise_exe": DENOISE, **over}))
+
+
 class DryRunTests(unittest.TestCase):
     def test_writes_alf_and_json(self):
         with tempfile.TemporaryDirectory() as tmp:

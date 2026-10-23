@@ -161,6 +161,7 @@ export interface RenderSettings {
   service_karma: string; service_renderman: string; envkeys: string[]
   husk_path: string; bridge_python: string; bridge_script: string; engine: string; engine_user: string; dry_run: boolean
   engine_config_dir: string   // network folder of the engine limits.config (environment screen only)
+  denoise_path: string; denoise_crossframe: boolean   // RenderMan denoise_batch on the blades
   // percent 0 = off; of = alive blades or blades free right now
   job_share: RenderShare; team_cap: RenderShare
   host_groups: Record<string, string[]>; exclude_hosts: string[]
@@ -180,6 +181,7 @@ export interface RenderLastForm {
   source: 'shot' | 'usd'; seq: string; shot: string; usd_path: string; renderer: 'karma' | 'renderman'
   freeze: boolean; limit_job: boolean; share_percent: number; share_of: RenderShareBase
   target: 'any' | 'pick'; hosts: string[]; groups: string[]; freeze_when?: RenderFreezeWhen
+  denoise?: boolean; denoise_crossframe?: boolean
 }
 export type RenderShareBase = 'alive' | 'free'
 export type RenderFreezeWhen = 'start' | 'submit'
@@ -189,6 +191,7 @@ export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
   start_at: string; service: string; maxactive: number; freeze_when?: RenderFreezeWhen
+  denoise?: string | null   // folder of the denoised frames, when asked
 }
 export interface RenderJob {
   jid: number; title: string; user: string; projects?: string[] | string; priority?: number; maxactive?: number
@@ -1151,7 +1154,15 @@ export const api = {
     hosts?: string[]; groups?: string[]   // only these machines / groups (team groups or rooms)
     share_percent?: number; share_of?: RenderShareBase   // omitted = team default (job_share)
     priority?: number   // this job only, omitted = team default
+    denoise?: boolean; denoise_crossframe?: boolean   // RenderMan denoise_batch after the render (same job)
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
+  // Denoise of an already rendered sequence (RenderMan denoise_batch on the farm, into <folder>/denoised).
+  renderDenoise: (body: {
+    project: string; path: string; frame_start?: number; frame_end?: number; crossframe?: boolean; priority?: number
+  }) => apiCall<{
+    dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string; output: string
+    frames: [number, number]; count: number; pattern: string; warnings: string[]; priority_warning?: string | null
+  }>('POST', '/render/denoise', body, 60000),
   renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
     apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
       'GET', `/render/jobs?project=${encodeURIComponent(project)}&scope=${scope}&days=${days}`),

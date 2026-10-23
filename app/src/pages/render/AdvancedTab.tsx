@@ -77,7 +77,7 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
     setCodesDraft(next.join(', '))
     set('retry_exit_codes', next)
   }
-  const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
+  const txt = (k: 'tractor_project' | 'service_karma' | 'service_renderman' | 'husk_path' | 'houdini_path' | 'denoise_path' | 'bridge_python' | 'bridge_script' | 'engine' | 'engine_user',
     label: string, placeholder?: string) => (
     <Row label={label}>
       <input style={input} value={draft[k]} placeholder={placeholder} onChange={e => set(k, e.target.value)} />
@@ -214,6 +214,10 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
                   options={[{ id: 'start', label: tr('Au demarrage', 'At start') }, { id: 'submit', label: tr('Au lancement', 'At submit') }]} />
               </Row>
               {txt('houdini_path', tr('Houdini des blades', 'Blades Houdini'), 'C:/Program Files/Side Effects Software/Houdini 20.5.445')}
+              {txt('denoise_path', tr('denoise_batch des blades (RenderMan)', 'Blades denoise_batch (RenderMan)'), 'C:/Program Files/Pixar/RenderManProServer-26.3/bin/denoise_batch.exe')}
+              <Row label={tr('Denoise par defaut', 'Default denoise')}>
+                <Check label={tr('Entre images (crossframe)', 'Crossframe')} checked={draft.denoise_crossframe} onChange={v => set('denoise_crossframe', v)} />
+              </Row>
               {txt('service_karma', 'Service Karma', 'PixarRender')}
               {txt('service_renderman', 'Service RenderMan', 'PixarRender')}
               <Row label={tr('Envkeys (separes par des virgules)', 'Envkeys (comma separated)')}>
