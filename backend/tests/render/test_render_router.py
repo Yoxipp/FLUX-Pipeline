@@ -22,6 +22,8 @@ class RenderRouter(unittest.TestCase):
         self.project_dir = self.tmp / "proj"
         self.project_dir.mkdir()
         self.render_json = self.tmp / "render.json"
+        # Simulation is opt-in since 2026-10-23: these tests run in it unless they say otherwise.
+        self.render_json.write_text('{"dry_run": true}', encoding="utf-8")
         render._running.clear()
         self.addCleanup(render._running.clear)
         app = FastAPI()

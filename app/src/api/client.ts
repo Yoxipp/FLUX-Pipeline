@@ -149,30 +149,60 @@ export const MANUAL_URL = `${BASE_URL}/system/manual`
 // Tractor farm render (backend features/render/team_settings.py, routers/render.py).
 export interface RenderSettings {
   tractor_project: string; priority: number; maxactive: number; chunk_size: number
+  max_task_minutes: number; retry_exit_codes: number[]   // per render chunk: kill past N min (0 = none), retry on codes
   renderer: 'karma' | 'renderman'; freeze_by_default: boolean
+  // scheduled job: freeze on the blade when it starts, or at submit
+  freeze_when: RenderFreezeWhen; houdini_path: string
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   service_karma: string; service_renderman: string; envkeys: string[]
-  husk_path: string; bridge_python: string; bridge_script: string; engine: string; dry_run: boolean
+  husk_path: string; bridge_python: string; bridge_script: string; engine: string; engine_user: string; dry_run: boolean
+  // percent 0 = off; of = alive blades or blades free right now
+  job_share: RenderShare; team_cap: RenderShare
+  host_groups: Record<string, string[]>; exclude_hosts: string[]
 }
+// Last launch form of the artist (backend <project>/_flux_setup/render_last/<user>.json).
+export interface RenderLastForm {
+  source: 'shot' | 'usd'; seq: string; shot: string; usd_path: string; renderer: 'karma' | 'renderman'
+  freeze: boolean; limit_job: boolean; share_percent: number; share_of: RenderShareBase
+  target: 'any' | 'pick'; hosts: string[]; groups: string[]; freeze_when?: RenderFreezeWhen
+}
+export type RenderShareBase = 'alive' | 'free'
+export type RenderFreezeWhen = 'start' | 'submit'
+export interface RenderShare { percent: number; of: RenderShareBase }
 export interface RenderShot { seq: string; shot: string; frame_start: number | null; frame_end: number | null; has_stage: boolean }
 export interface RenderSubmitResult {
   dry_run: boolean; jid?: number | null; files: { alf: string; json: string }; title: string
   output: string; usd: string; frozen: boolean; frames: string; warnings: string[]; priority_warning?: string | null
-  start_at: string
+  start_at: string; service: string; maxactive: number; freeze_when?: RenderFreezeWhen
 }
 export interface RenderJob {
-  jid: number; title: string; user: string; projects?: string[] | string; priority?: number
+  jid: number; title: string; user: string; projects?: string[] | string; priority?: number; maxactive?: number
   numTasks: number; numDone: number; numError: number; numActive: number
   numBlocked?: number; numReady?: number
   spooltime?: string | number; stoptime?: string; pausetime?: string; comment?: string; metadata?: unknown
   // user = Tractor owner (the shared school login); flux_user = who spooled it from FLUX ('' otherwise)
   flux_user?: string
   state?: 'active' | 'error' | 'done' | 'paused' | 'waiting' | 'deleted'
+  percent?: number   // done tasks + progress of the running ones (husk ALF_PROGRESS), 0-100
 }
-export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string }
+export interface RenderTask { jid: number; tid: number; title: string; state: string; service?: string; progress?: number | null }
 export type RenderJobScope = 'all' | 'team' | 'mine'
+// Job menu of the Tractor Dashboard (backend tractor_bridge.JOB_ACTIONS); only on the user's FLUX jobs.
+export type RenderJobAction = 'kill' | 'retry' | 'pause' | 'resume' | 'skip_errors' | 'restart' | 'archive'
+  | 'restore' | 'lock' | 'unlock' | 'shuffle_top'
+export interface RenderExitCode {
+  code: number; count: number; last_seen: string; last_title: string; label: string; active: boolean; proposed: boolean
+}
+export type RenderBladeState = 'free' | 'busy' | 'nimby' | 'offline'
+export interface RenderBlade {
+  name: string; state: RenderBladeState; room: string; slots: number; nimby: string
+  job: number | null; project: string | null; heartbeat: string
+}
 export interface RenderFarm {
-  blades: unknown[]; active_by_project: Record<string, number>
+  blades: RenderBlade[]; active_by_project: Record<string, number>
+  counts: Record<RenderBladeState | 'alive', number>; rooms: Record<string, string[]>
+  team_cap: { enabled: boolean; slots: number; used: number; targets: Record<string, number>; changed: number; errors: string[] }
+  host_groups: Record<string, string[]>; exclude_hosts: string[]; host_targeting_verified: boolean
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   tractor_project: string; dry_run?: boolean
 }
@@ -1094,6 +1124,9 @@ export const api = {
     project: string; seq?: string; shot?: string; usd_path?: string
     frame_start?: number; frame_end?: number; renderer?: string; freeze?: boolean; chunk_size?: number
     start_at?: string   // "YYYY-MM-DDTHH:MM" local; omitted = now
+    freeze_when?: RenderFreezeWhen   // with start_at: freeze when the job starts or now; omitted = team default
+    hosts?: string[]; groups?: string[]   // only these machines / groups (team groups or rooms)
+    share_percent?: number; share_of?: RenderShareBase   // omitted = team default (job_share)
   }) => apiCall<RenderSubmitResult>('POST', '/render/submit', body, 120000),   // freezing can be slow
   renderJobs: (project: string, scope: RenderJobScope, days = 30) =>
     apiCall<{ jobs: RenderJob[]; dry_run?: boolean; tractor_project?: string; finished?: { jid: number; title: string; output?: string }[] }>(
@@ -1102,10 +1135,24 @@ export const api = {
     apiCall<{ tasks: RenderTask[] }>('GET', `/render/jobs/${jid}/tasks?project=${encodeURIComponent(project)}`),
   renderTaskLog: (project: string, jid: number, tid: number) =>
     apiCall<{ log: string }>('GET', `/render/jobs/${jid}/tasks/${tid}/log?project=${encodeURIComponent(project)}`, undefined, 60000),
+  renderLast: (project: string) =>
+    apiCall<{ last: Partial<RenderLastForm> }>('GET', `/render/last?project=${encodeURIComponent(project)}`),
+  renderSaveLast: (project: string, last: RenderLastForm) =>
+    apiCall<{ ok: boolean }>('PUT', `/render/last?project=${encodeURIComponent(project)}`, last),
+  // Exit codes seen on the team's failed FLUX renders (husk), most frequent first; proposed = can be added.
+  renderExitCodes: (project: string) =>
+    apiCall<{ codes: RenderExitCode[]; warning: string | null }>('GET',
+      `/render/exit_codes?project=${encodeURIComponent(project)}`),
+  renderTractorProjects: (project: string) =>
+    apiCall<{ projects: { name: string; jobs: number }[]; current: string }>('GET',
+      `/render/tractor_projects?project=${encodeURIComponent(project)}`),
   renderFarm: (project: string) =>
     apiCall<RenderFarm>('GET', `/render/farm?project=${encodeURIComponent(project)}`),
-  renderJobAction: (project: string, jid: number, action: 'kill' | 'retry' | 'pause' | 'resume') =>
+  renderJobAction: (project: string, jid: number, action: RenderJobAction) =>
     apiCall<unknown>('POST', `/render/jobs/${jid}/${action}?project=${encodeURIComponent(project)}`),
+  // Engine dispatch trace of a job ("Trace Job"), read only, any job.
+  renderJobTrace: (project: string, jid: number) =>
+    apiCall<{ trace: string }>('GET', `/render/jobs/${jid}/trace?project=${encodeURIComponent(project)}`, undefined, 60000),
 
   getCalendarPublishes: (project: string, start: string, end: string) =>
     apiCall<{ publishes: CalendarPublish[] }>('GET', `/calendar/${encodeURIComponent(project)}/publishes?start=${start}&end=${end}`),

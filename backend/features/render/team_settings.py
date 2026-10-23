@@ -9,9 +9,13 @@ from pathlib import Path
 
 from core import paths
 from core.json_manager import read_json, write_json
+from features.render import farm_targets
 
-SCHEMA_VERSION = 1
-DEFAULT_PRIORITY = 100
+# 2 (2026-10-23): default priority 100 -> 1. A v1 file holding 100 had the old default, not a choice.
+SCHEMA_VERSION = 2
+_OLD_DEFAULT_PRIORITY = 100
+# Tractor: a higher number goes first (tq chpri help). Every school job is at 1 (2026-10-23): same as everyone.
+DEFAULT_PRIORITY = 1
 
 DEFAULTS: dict = {
     "schema_version": SCHEMA_VERSION,
@@ -19,8 +23,17 @@ DEFAULTS: dict = {
     "priority": DEFAULT_PRIORITY,  # 1..10000
     "maxactive": 0,                # 0 = no cap
     "chunk_size": 5,
-    "renderer": "karma",
+    # Per render chunk (2026-10-23): killed past this many minutes (Tractor -maxrunsecs), 0 = no bound;
+    # ready again when husk exits with one of these codes (-retryrc), [] = never.
+    "max_task_minutes": 0,
+    "retry_exit_codes": [],
+    "renderer": "renderman",       # 2026-10-23
     "freeze_by_default": True,
+    # Scheduled job ("Lancer a"): freeze when the render starts (on the blade) or at submit (2026-10-23).
+    "freeze_when": "start",
+    # Houdini on the blades (20.5 to 22): its embedded python + pxr freeze at start (no Houdini
+    # license, probe job 34027). A blade without it uses its newest Houdini.
+    "houdini_path": "C:/Program Files/Side Effects Software/Houdini 20.5.445",
     # Night window off by default (2026-10-22): opt-in in the advanced settings.
     "schedule": {"enabled": False, "start": "18:00", "end": "08:00", "kill_at_end": False},
     "service_karma": "",
@@ -31,10 +44,19 @@ DEFAULTS: dict = {
     "bridge_script": "",
     "engine": "",                  # host:port, empty => TRACTOR_ENGINE of the machine
     "engine_user": "",             # engine login, empty => "root" (read only for FLUX)
-    "dry_run": True,               # stays True until school phase 0 is done
+    # Real farm by default since the school echo test (job 34026, 2026-10-23, the maintainer); simulation stays opt-in.
+    "dry_run": False,
+    # Farm throttling (2026-10-23). percent 0 = off; "of" = alive blades or blades free right now.
+    "job_share": {"percent": 0, "of": "alive"},   # default per-job share, overridable at submit
+    "team_cap": {"percent": 0, "of": "alive"},    # budget shared by every FLUX job of the team
+    "host_groups": {},             # team machine groups {"name": ["ROOM1701", ...]}
+    "exclude_hosts": [],           # never render on these machines
 }
+_SHARE_KEYS = ("job_share", "team_cap")
+_OBJECT_KEYS = ("schedule",) + _SHARE_KEYS
 
 RENDERERS = ("karma", "renderman")
+FREEZE_WHEN = ("start", "submit")
 # Shipped beside this module (scripts/backend.spec copies it in frozen mode).
 BUNDLED_BRIDGE = Path(__file__).resolve().parent / "bridge" / "flux_tractor_bridge.py"
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -44,6 +66,8 @@ _STR_KEYS = (
 )
 # Tractor client install on school machines (phase 0, 2026-10-22): its rmanpy.exe is Python 2.7.
 TRACTOR_PYTHON_CANDIDATES = (Path(r"C:\Program Files\Pixar\Tractor-2.4\bin\rmanpy.exe"),)
+# Same install on every blade (blade service, probe job 34027): starts the freeze-at-start script.
+BLADE_TRACTOR_PYTHON = "C:/Program Files/Pixar/Tractor-2.4/bin/rmanpy.exe"
 _BOOL_KEYS = ("freeze_by_default", "dry_run")
 
 
@@ -69,6 +93,30 @@ def _check_schedule(value) -> dict:
     return out
 
 
+def _check_share(key: str, value) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be an object")
+    unknown = sorted(set(value) - set(DEFAULTS[key]))
+    if unknown:
+        raise ValueError(f"unknown {key} key: {', '.join(unknown)}")
+    out = {**DEFAULTS[key], **value}
+    if not _is_int(out["percent"]) or not 0 <= out["percent"] <= 100:
+        raise ValueError(f"{key}.percent must be an integer between 0 and 100")
+    if out["of"] not in farm_targets.SHARE_BASES:
+        raise ValueError(f"{key}.of must be one of: {', '.join(farm_targets.SHARE_BASES)}")
+    return out
+
+
+def _check_hosts(key: str, value) -> list:
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a list of machine names")
+    return sorted({farm_targets.check_host(str(h).strip()) for h in value if str(h).strip()})
+
+
+def _check_object(key: str, value) -> dict:
+    return _check_schedule(value) if key == "schedule" else _check_share(key, value)
+
+
 def _check_value(key: str, value):
     """Return the normalized value or raise ValueError with a readable message."""
     if key == "schema_version":
@@ -83,6 +131,14 @@ def _check_value(key: str, value):
         if not _is_int(value) or value < 0:
             raise ValueError("maxactive must be an integer >= 0 (0 = no cap)")
         return value
+    if key == "max_task_minutes":
+        if not _is_int(value) or value < 0:
+            raise ValueError("max_task_minutes must be an integer >= 0 (0 = no bound)")
+        return value
+    if key == "retry_exit_codes":
+        if not isinstance(value, list) or not all(_is_int(v) and v != 0 for v in value):
+            raise ValueError("retry_exit_codes must be a list of non-zero integers (0 = success)")
+        return sorted(set(value))
     if key == "chunk_size":
         if not _is_int(value) or value < 1:
             raise ValueError("chunk_size must be an integer >= 1")
@@ -91,12 +147,35 @@ def _check_value(key: str, value):
         if value not in RENDERERS:
             raise ValueError(f"renderer must be one of: {', '.join(RENDERERS)}")
         return value
+    if key == "freeze_when":
+        if value not in FREEZE_WHEN:
+            raise ValueError(f"freeze_when must be one of: {', '.join(FREEZE_WHEN)}")
+        return value
+    if key == "houdini_path":
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("houdini_path must be the Houdini install folder of the blades")
+        return value.strip().replace("\\", "/").rstrip("/")
     if key in _BOOL_KEYS:
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be true or false")
         return value
-    if key == "schedule":
-        return _check_schedule(value)
+    if key in _OBJECT_KEYS:
+        return _check_object(key, value)
+    if key == "exclude_hosts":
+        try:
+            return _check_hosts(key, value)
+        except ValueError as exc:
+            raise ValueError(f"exclude_hosts: {exc}") from None
+    if key == "host_groups":
+        if not isinstance(value, dict):
+            raise ValueError("host_groups must be an object {name: [machines]}")
+        groups = {}
+        for name, hosts in value.items():
+            name = str(name).strip()
+            if not name or not farm_targets.check_host(name):
+                raise ValueError(f"host_groups: invalid group name '{name}'")
+            groups[name] = _check_hosts(f"host_groups.{name}", hosts)
+        return dict(sorted(groups.items()))
     if key == "envkeys":
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise ValueError("envkeys must be a list of strings")
@@ -117,20 +196,22 @@ def read_settings(project_name: str, path=None) -> dict:
     raw = read_json(_resolve(project_name, path))
     if not isinstance(raw, dict):
         raw = {}
+    if raw.get("schema_version", 1) < 2 and raw.get("priority") == _OLD_DEFAULT_PRIORITY:
+        raw = {**raw, "priority": DEFAULT_PRIORITY}
     out = copy.deepcopy(DEFAULTS)
     for key in DEFAULTS:
         if key not in raw:
             continue
-        if key == "schedule" and isinstance(raw[key], dict):
+        if key in _OBJECT_KEYS and isinstance(raw[key], dict):
             # per sub-key fallback so one bad field keeps the others
-            sched = dict(DEFAULTS["schedule"])
-            for sub, default in DEFAULTS["schedule"].items():
+            obj = dict(DEFAULTS[key])
+            for sub, default in DEFAULTS[key].items():
                 if sub in raw[key]:
                     try:
-                        sched[sub] = _check_schedule({**DEFAULTS["schedule"], sub: raw[key][sub]})[sub]
+                        obj[sub] = _check_object(key, {**DEFAULTS[key], sub: raw[key][sub]})[sub]
                     except ValueError:
-                        sched[sub] = default
-            out[key] = sched
+                        obj[sub] = default
+            out[key] = obj
             continue
         try:
             out[key] = _check_value(key, raw[key])
@@ -149,9 +230,9 @@ def write_settings(project_name: str, patch: dict, path=None) -> dict:
     for key, value in patch.items():
         if key not in DEFAULTS:
             raise ValueError(f"unknown setting: {key}")
-        if key == "schedule" and isinstance(value, dict):
+        if key in _OBJECT_KEYS and isinstance(value, dict):
             # partial patch: keep the stored sub-keys it does not name
-            value = {**merged["schedule"], **value}
+            value = {**merged[key], **value}
         clean[key] = _check_value(key, value)
     merged.update(clean)
     merged["schema_version"] = SCHEMA_VERSION
@@ -180,6 +261,6 @@ def priority_warning(settings: dict) -> str | None:
     """Short warning when priority is above the default (it impacts other teams)."""
     priority = settings.get("priority", DEFAULT_PRIORITY)
     if _is_int(priority) and priority > DEFAULT_PRIORITY:
-        return (f"Priorite {priority} au-dessus du defaut ({DEFAULT_PRIORITY}) : "
+        return (f"Priorite {priority} au-dessus des autres jobs de l'ecole ({DEFAULT_PRIORITY}) : "
                 "vos jobs passent avant ceux des autres equipes.")
     return None

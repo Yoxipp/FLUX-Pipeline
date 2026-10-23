@@ -31,7 +31,16 @@ class TeamSettingsTests(unittest.TestCase):
         self.assertEqual(again, out)
         self.assertEqual(again["chunk_size"], 10)
         self.assertEqual(again["maxactive"], 0)
-        self.assertEqual(json.loads(self.file.read_text("utf-8"))["schema_version"], 1)
+        self.assertEqual(json.loads(self.file.read_text("utf-8"))["schema_version"], 2)
+
+    def test_v1_old_default_priority_migrates_to_1(self):
+        # Tractor: higher goes first; school jobs are at 1. A v1 file's 100 was the old default, not a choice.
+        self.file.write_text(json.dumps({"schema_version": 1, "priority": 100}), encoding="utf-8")
+        self.assertEqual(ts.read_settings("proj")["priority"], 1)
+        self.file.write_text(json.dumps({"schema_version": 1, "priority": 300}), encoding="utf-8")
+        self.assertEqual(ts.read_settings("proj")["priority"], 300)
+        self.file.write_text(json.dumps({"schema_version": 2, "priority": 100}), encoding="utf-8")
+        self.assertEqual(ts.read_settings("proj")["priority"], 100)
 
     def test_unknown_key_rejected(self):
         with self.assertRaises(ValueError) as cm:
@@ -52,9 +61,9 @@ class TeamSettingsTests(unittest.TestCase):
             "schedule": {"start": "25:00", "end": "07:30"},
         }), encoding="utf-8")
         got = ts.read_settings("proj")
-        self.assertEqual(got["priority"], 100)
+        self.assertEqual(got["priority"], 1)
         self.assertEqual(got["chunk_size"], 8)
-        self.assertEqual(got["renderer"], "karma")
+        self.assertEqual(got["renderer"], "renderman")  # default since 2026-10-23
         self.assertNotIn("extra", got)
         self.assertEqual(got["schedule"]["start"], "18:00")
         self.assertEqual(got["schedule"]["end"], "07:30")
@@ -83,8 +92,8 @@ class TeamSettingsTests(unittest.TestCase):
         self.assertEqual(ts.read_settings("MyProj")["tractor_project"], "team_a")
 
     def test_priority_warning(self):
-        self.assertIsNone(ts.priority_warning({"priority": 100}))
-        self.assertIsNone(ts.priority_warning({"priority": 50, "maxactive": 0}))
+        self.assertIsNone(ts.priority_warning({"priority": 1}))
+        self.assertTrue(ts.priority_warning({"priority": 50, "maxactive": 0}))
         msg = ts.priority_warning({"priority": 500})
         self.assertTrue(msg)
         self.assertNotIn("—", msg)

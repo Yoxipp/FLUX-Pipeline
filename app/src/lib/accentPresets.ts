@@ -35,4 +35,17 @@ export function applyAccentPreset(key: string): void {
   root.style.setProperty('--accent-hi',   hi)
   root.style.setProperty('--accent-soft', `color-mix(in oklch, ${accent} 13%, transparent)`)
   root.style.setProperty('--hl',          `color-mix(in oklch, ${accent} 22%, transparent)`)
+  // Tell the other FLUX windows (Tractor window...): they get a 'storage' event, this one does not.
+  try { localStorage.setItem(ACCENT_STORAGE_KEY, key) } catch { /* private storage off */ }
+}
+
+const ACCENT_STORAGE_KEY = 'flux.accent'
+
+/** Follow an accent change made in another FLUX window. Returns the cleanup. */
+export function followAccentFromOtherWindows(): () => void {
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === ACCENT_STORAGE_KEY && e.newValue) applyAccentPreset(e.newValue)
+  }
+  window.addEventListener('storage', onStorage)
+  return () => window.removeEventListener('storage', onStorage)
 }

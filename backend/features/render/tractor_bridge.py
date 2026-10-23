@@ -17,12 +17,17 @@ from typing import Dict, Optional
 
 from features.render import job_builder
 
-VERBS = ("spool", "jobs", "tasks", "log", "blades", "kill", "retry", "pause", "resume", "ping")
-_JID_VERBS = ("tasks", "log", "kill", "retry", "pause", "resume")
+# Job menu of the Dashboard (2026-10-23): retry / skip errors, restart, archive / restore, lock, shuffle, trace.
+JOB_ACTIONS = ("kill", "retry", "pause", "resume", "skip_errors", "restart", "archive", "restore",
+               "lock", "unlock", "shuffle_top")
+VERBS = ("spool", "jobs", "tasks", "log", "blades", "maxactive", "ping", "exit_codes", "trace") + JOB_ACTIONS
+_JID_VERBS = ("tasks", "log", "maxactive", "trace") + JOB_ACTIONS
 DEFAULT_LOGIN = "root"  # school engine 2026-10-22: only "root" logs in (as tq does), read only for FLUX
 _DROPPED_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE")
 _STDERR_TAIL = 300
 _SIMULATION_MSG = "Mode simulation : aucune action sur la farm"
+ANONYMOUS_USERS = ("", "unknown")  # routers/render._user() when nobody is logged in to FLUX
+_SPOOL_TIMEOUT_S = 60
 
 
 class BridgeError(RuntimeError):
@@ -103,7 +108,13 @@ def spool(spec: job_builder.RenderJobSpec, settings: dict, user: str, out_dir: P
     files = job_builder.dry_run(spec, out_dir, strict=not simulate)
     if simulate:
         return {"dry_run": True, "jid": None, "files": files}
-    result = call("spool", settings, user, alf_path=files["alf"])
+    try:
+        result = call("spool", settings, user, timeout=_SPOOL_TIMEOUT_S, alf_path=files["alf"])
+    except BridgeError as exc:
+        if "delai depasse" in str(exc):
+            # The engine may have accepted it anyway: a blind retry would spool the job twice.
+            raise BridgeError(f"{exc}. Le job est peut-etre parti : verifier l'onglet Jobs avant de relancer") from None
+        raise
     return {"dry_run": False, "jid": result.get("jid"), "files": files, "output": result.get("output", "")}
 
 
@@ -154,6 +165,18 @@ def job_state(job: dict) -> str:
     return "waiting"
 
 
+def job_percent(job: dict) -> int:
+    """Done tasks plus the progress of the running ones (husk -Va1 -> ALF_PROGRESS), 0-100."""
+    total = _int(job.get("numTasks"))
+    if total <= 0:
+        return 0
+    try:
+        active = float(job.get("activeProgress") or 0)
+    except (TypeError, ValueError):
+        active = 0.0
+    return max(0, min(100, int((_int(job.get("numDone")) * 100 + active) / total)))
+
+
 def _normalize(job: dict) -> dict:
     meta = _metadata(job.get("metadata"))
     out = dict(job)
@@ -161,6 +184,7 @@ def _normalize(job: dict) -> dict:
     # Every school job is owned by the shared Windows login: the FLUX user lives in the metadata.
     out["flux_user"] = str(meta.get("user") or "")
     out["state"] = job_state(job)
+    out["percent"] = job_percent(job)
     return out
 
 
@@ -190,6 +214,15 @@ def task_log(settings: dict, user: str, jid: int, tid: int) -> dict:
     return call("log", settings, user, jid=jid, tid=tid)
 
 
+def exit_codes(settings: dict, user: str, jids: list) -> list:
+    """Non-zero exit codes of these jobs' executions (read only): [{jid, tid, cid, rcode, stoptime, program}]."""
+    jids = [j for j in jids if _is_int(j)][:50]
+    if not jids or _reads_off(settings):
+        return []
+    found = call("exit_codes", settings, user, jids=jids).get("invocations", [])
+    return [i for i in found if isinstance(i, dict) and _is_int(i.get("rcode"))]
+
+
 def blades(settings: dict, user: str) -> dict:
     if _reads_off(settings):
         return {"blades": [], "active_by_project": {}, "dry_run": True}
@@ -199,12 +232,23 @@ def blades(settings: dict, user: str) -> dict:
 def _action(verb: str, settings: dict, user: str, jid: int) -> dict:
     if settings.get("dry_run") is True:
         raise BridgeError(_SIMULATION_MSG)
+    if user in ANONYMOUS_USERS:
+        raise BridgeError("Action refusee : connecte-toi a FLUX (utilisateur)")
     # FLUX logs in as an engine admin: only act on jobs this FLUX user spooled (2026-10-22).
-    found = [j for j in call("jobs", settings, user, jid=jid).get("jobs") or []
+    # A restore looks in the archive (an archived job is not in the live list).
+    archived = verb == "restore"
+    found = [j for j in call("jobs", settings, user, jid=jid, archive=archived).get("jobs") or []
              if isinstance(j, dict) and j.get("jid") == jid]
     if not found or not user or _normalize(found[0])["flux_user"] != user:
         raise BridgeError("Action refusee : ce job n'a pas ete lance par vous depuis FLUX")
     return call(verb, settings, user, jid=jid)
+
+
+def job_action(verb: str, settings: dict, user: str, jid: int) -> dict:
+    """One of JOB_ACTIONS on a FLUX job of this user (dry run and anonymous refused)."""
+    if verb not in JOB_ACTIONS:
+        raise BridgeError(f"Action inconnue : {verb}")
+    return _action(verb, settings, user, jid)
 
 
 def kill(settings: dict, user: str, jid: int) -> dict:
@@ -221,4 +265,20 @@ def pause(settings: dict, user: str, jid: int) -> dict:
 
 def resume(settings: dict, user: str, jid: int) -> dict:
     return _action("resume", settings, user, jid)
+
+
+def trace(settings: dict, user: str, jid: int) -> dict:
+    """Read only, any job: the engine's dispatch trace for it."""
+    if _reads_off(settings):
+        return {"trace": "", "dry_run": True}
+    return call("trace", settings, user, jid=jid)
+
+
+def set_maxactive(settings: dict, user: str, jid: int, value: int) -> dict:
+    """Team cap balancing. The caller only passes FLUX jobs of its own team (router)."""
+    if settings.get("dry_run") is True:
+        raise BridgeError(_SIMULATION_MSG)
+    if not _is_int(value) or value < 0:
+        raise BridgeError("Tractor : maxactive demande un entier >= 0")
+    return call("maxactive", settings, user, jid=jid, value=value)
 
