@@ -20,6 +20,22 @@ def _doc(name: str = "daily", label: str = "Daily") -> dict:
             "nodes": {"ev": {"type": "event.manual"}, "n1": {"type": "data.value", "params": {"value": 1}}}}
 
 
+def dry_run_and_gate(client, name: str, scope: str, version: int) -> dict:
+    """Dry run of a frozen version, then the activation gate once dry_run_ok is written."""
+    import time
+
+    run_id = client.post(f"/flows/{name}/run", json={"scope": scope, "dry_run": True,
+                                                    "version": version}).json()["run_id"]
+    gate: dict = {}
+    for _ in range(100):
+        status = client.get(f"/flows/runs/{run_id}").json()["status"]
+        gate = client.get(f"/flows/{name}/activation", params={"scope": scope}).json()
+        if status not in ("queued", "running") and gate["dry_run"]["ok"]:
+            break
+        time.sleep(0.02)
+    return gate
+
+
 class Router(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="flux_flows_router_"))
@@ -59,6 +75,8 @@ class Router(unittest.TestCase):
 
     def test_crud_cycle(self) -> None:
         self.boxes = {"flows_team_td": True}
+        self.client.__enter__()   # one event loop: the dry run below runs to its end
+        self.addCleanup(self.client.__exit__, None, None, None)
         self.assertEqual(self.client.put("/flows/daily", json={"flow": _doc(), "scope": "team"}).status_code, 200)
         # Same name again without base_revision = 409.
         r = self.client.put("/flows/daily", json={"flow": _doc(), "scope": "team"})
@@ -69,7 +87,12 @@ class Router(unittest.TestCase):
         got = self.client.get("/flows/daily").json()
         self.assertEqual((got["scope"], got["category"], got["flow"]["label"]), ("team", "pipe", "B"))
         self.assertEqual(self.client.get("/flows/daily/versions", params={"scope": "team"}).json()["versions"][0]["version"], 1)
-        self.assertTrue(self.client.post("/flows/daily/activate", json={"scope": "team"}).json()["active"])
+        # P5: activation needs a dry run passed on v1 and the warnings read.
+        self.assertEqual(self.client.post("/flows/daily/activate", json={"scope": "team"}).status_code, 409)
+        gate = dry_run_and_gate(self.client, "daily", "team", 1)
+        acked = [{k: w[k] for k in ("code", "node", "port")} for w in gate["warnings"]]
+        r = self.client.post("/flows/daily/activate", json={"scope": "team", "acked": acked})
+        self.assertTrue(r.json()["active"], r.json())
         self.assertFalse(self.client.post("/flows/daily/deactivate", json={"scope": "team"}).json()["active"])
         self.assertEqual(self.client.post("/flows/daily/revert", json={"scope": "team", "to_version": 1}).status_code, 200)
         self.assertEqual(self.client.delete("/flows/daily", params={"scope": "team"}).status_code, 200)

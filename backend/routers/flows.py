@@ -11,6 +11,11 @@
 # destructive node added without being in ``confirmed_destructive`` (409,
 # E_DESTRUCTIVE_UNCONFIRMED); activation refuses a frozen version with errors; the
 # engine refuses a run with errors (a type mismatch only blocks real runs, ADR 0058).
+# P5: GET /flows/host (who runs the shared active flows), POST /flows/events/{kind}
+# (scene_opened sent by a script in the DCC), activation gate (0 error, warnings
+# acknowledged, dry run passed on the frozen version: GET /{name}/activation), WS
+# ``host``, ``activation`` and ``flow_changed``; a dry run of version `current` that ends
+# ``ok`` writes state.json ``dry_run_ok``.
 
 from __future__ import annotations
 
@@ -23,7 +28,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import engine, events, locations, migrate_v1, patterns, resolver, rights, runs, store, validate
+from flux_flows import (engine, events, locations, migrate_v1, patterns, resolver, rights, runs, scheduler, store,
+                        validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
@@ -142,6 +148,45 @@ async def post_preview(body: PreviewBody) -> dict[str, Any]:
     except NodeError as exc:
         return {"result": None, "error": exc.message, "code": exc.code, **exc.details}
     return {"result": result, "error": None}
+
+
+# -- host and events (static, before /{name}) ------------------------------------------
+
+@router.get("/host")
+async def get_host() -> dict[str, Any]:
+    """Who runs the shared active flows (host lock, 01 §9) and what this backend watches."""
+    sched = scheduler.get()
+    if sched is None:
+        return {"enabled": scheduler.enabled(), "running": False, "holder": None, "me": socket.gethostname(),
+                "is_holder": False, "since": None, "idle_reason": "planificateur arrete", "active_flows": [],
+                "watchers": [], "over_cap": [], "max_watchers": scheduler.MAX_WATCHERS}
+    return sched.info()
+
+
+class EventBody(BaseModel):
+    soft: str = "maya"
+    scene: str = ""
+    port: Optional[int] = None
+    pid: Optional[int] = None
+
+
+@router.post("/events/{kind}")
+async def post_event(kind: str, body: EventBody) -> dict[str, Any]:
+    """A local event sent by a script in the DCC (proposition of 01 §9): only scene_opened.
+    Starts the active flows of this backend whose SceneOpened node matches the soft."""
+    if kind != "scene_opened":
+        raise HTTPException(status_code=400, detail={"message": f"evenement `{kind}` inconnu (scene_opened)"})
+    if body.soft not in scheduler.SCENE_SOFTS:
+        raise HTTPException(status_code=400, detail={"message": "soft : maya ou houdini"})
+    sched = scheduler.get()
+    if sched is None:
+        raise HTTPException(status_code=409, detail={"message": "planificateur des flows arrete sur ce poste"})
+    session = {"soft": body.soft, "port": body.port, "pid": body.pid}
+    started = []
+    for w in sched.scene_watchers(body.soft):
+        rec = await sched.fire(w.af, w.node, {"scene": body.scene, "soft": body.soft, "session": session})
+        started.append({"flow": w.af.name, "run_id": rec["run_id"], "status": rec["status"]})
+    return {"started": started}
 
 
 # -- validation (static, before /{name}) ------------------------------------------
@@ -271,8 +316,10 @@ async def flows_websocket(websocket: WebSocket) -> None:
 
     read_task = asyncio.create_task(reader())
     try:
-        await websocket.send_json({"type": "hello", "holder": None, "me": socket.gethostname(),
-                                   "running": engine.manager().running()})
+        sched = scheduler.get()
+        host = sched.info() if sched is not None else {"holder": None, "since": None}
+        await websocket.send_json({"type": "hello", "holder": host.get("holder"), "me": socket.gethostname(),
+                                   "since": host.get("since"), "running": engine.manager().running()})
         while True:
             get_task = asyncio.create_task(sub.get())
             done, _ = await asyncio.wait({get_task, read_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -407,6 +454,12 @@ async def _gate_save(roots: dict, scope: str, flow: Flow, confirmed: list[str],
     return await asyncio.to_thread(_issues, roots, scope, flow, project)
 
 
+def _changed(name: str, scope: str, project: Optional[str], state: dict[str, Any], user: Optional[str]) -> None:
+    """WS flow_changed: an early conflict warning for the other editors (01 §10)."""
+    events.emit({"type": "flow_changed", "flow": name, "scope": scope, "project": project,
+                 "version": state.get("current"), "revision": state.get("revision"), "by": user})
+
+
 @router.put("/{name}")
 async def save(name: str, body: SaveBody) -> dict[str, Any]:
     """Enregistrer: overwrite the working file (409 on a revision conflict or an unconfirmed `!`).
@@ -418,6 +471,7 @@ async def save(name: str, body: SaveBody) -> dict[str, Any]:
     valid = not validate.errors(issues)
     state = await _call(store.save_flow, roots, body.scope, flow, user=current["user"] or "",
                         base_revision=body.base_revision, force=body.force, note=body.note, valid=valid)
+    _changed(name, body.scope, body.project, state, current["user"])
     return {"state": state, "issues": _dicts(issues), "valid": valid}
 
 
@@ -433,6 +487,7 @@ async def increment(name: str, body: IncrementBody) -> dict[str, Any]:
         valid = not validate.errors(issues)
     got = await _call(store.increment_flow, roots, body.scope, name, user=current["user"] or "", flow=flow,
                       base_revision=body.base_revision, force=body.force, note=body.note, valid=valid)
+    _changed(name, body.scope, body.project, got["state"], current["user"])
     return {**got, "issues": _dicts(issues), "valid": got["state"].get("valid")}
 
 
@@ -444,32 +499,112 @@ async def revert(name: str, body: RevertBody) -> dict[str, Any]:
     def is_valid(flow: Flow) -> bool:
         return not validate.errors(_issues(roots, body.scope, flow, body.project))
 
-    return await _call(store.revert_flow, roots, body.scope, name, body.to_version,
-                       user=current["user"] or "", validator=is_valid)
+    got = await _call(store.revert_flow, roots, body.scope, name, body.to_version,
+                      user=current["user"] or "", validator=is_valid)
+    _changed(name, body.scope, body.project, got["state"], current["user"])
+    return got
+
+
+def _issue_key(issue: dict[str, Any]) -> tuple:
+    return (issue.get("code"), issue.get("node"), issue.get("port"))
+
+
+def _gate(roots: dict, scope: str, name: str, project: Optional[str]) -> dict[str, Any]:
+    """Activation gate of 01 §8 on the frozen version ``current``: errors, warnings (with
+    ``acked``), dry run. ``ready`` = what the Activer button needs (the acks it sends aside)."""
+    got = store.read_flow(roots, scope, name)
+    state, current = got["state"], got["state"].get("current") or 0
+    out: dict[str, Any] = {"version": current, "active": bool(state.get("active")),
+                           "active_version": state.get("active_version"), "legacy": name.startswith(store.LEGACY_PREFIX),
+                           "errors": [], "warnings": [], "dry_run": {"ok": False, "run_id": None, "version": None},
+                           "destructive": [], "ready": False}
+    if not current:
+        out["reason"] = "aucune version figee : Enregistrer et incrementer d'abord"
+        return out
+    frozen = store.read_flow(roots, scope, name, current)["flow"]
+    issues = _dicts(_issues(roots, scope, frozen, project))
+    ack = state.get("acked") if isinstance(state.get("acked"), dict) else {}
+    acked = {_issue_key(a) for a in ack.get("items") or []} if ack.get("version") == current else set()
+    out["errors"] = [i for i in issues if i["level"] == "error"]
+    out["warnings"] = [{**i, "acked": _issue_key(i) in acked} for i in issues if i["level"] == "warning"]
+    done = state.get("dry_run_ok") or {}
+    out["dry_run"] = {"ok": done.get("version") == current, "run_id": done.get("run_id"),
+                      "version": done.get("version")}
+    out["destructive"] = sorted(nid for nid, node in frozen.nodes.items() if not node.bypass and
+                                (spec := registry.get_node(node.type)) is not None and
+                                registry.flag_on(spec.destructive, spec, node.params))
+    out["ready"] = (not out["legacy"] and not out["errors"] and out["dry_run"]["ok"]
+                    and all(w["acked"] for w in out["warnings"]))
+    return out
+
+
+@router.get("/{name}/activation")
+async def get_activation(name: str, scope: str, project: Optional[str] = None) -> dict[str, Any]:
+    """The three lines of the activation dialog (03 §5) for the frozen version ``current``."""
+    current = await asyncio.to_thread(rights.current_rights)
+    return await _call(_gate, _roots(current["user"], project), scope, name, project)
+
+
+class ActivateBody(ScopeBody):
+    acked: list[dict[str, Any]] = []   # warnings read: {code, node, port}, for the version ``current``
 
 
 @router.post("/{name}/activate")
-async def activate(name: str, body: ScopeBody) -> dict[str, Any]:
-    """Refused for legacy_* flows (the publish runs on v1 until P8), without a frozen version
-    and when the frozen version has errors (409 ``gate``). Warnings and dry run: P5."""
+async def activate(name: str, body: ActivateBody) -> dict[str, Any]:
+    """Activate the frozen version ``current`` (01 §8): refused for legacy_* flows (v1
+    publish until P8), without a frozen version, with errors, with unacknowledged
+    warnings or without a dry run passed on that version (409 ``gate``). The acks sent
+    are kept in state.json for this version. The last elapsed Schedule slot is noted."""
     current = await _require(rights.WRITE, body.scope)
     roots = _roots(current["user"], body.project)
-    state = (await _call(store.read_flow, roots, body.scope, name))["state"]
-    if state.get("current") and not name.startswith(store.LEGACY_PREFIX):
-        frozen = (await _call(store.read_flow, roots, body.scope, name, state["current"]))["flow"]
-        gate = validate.errors(await asyncio.to_thread(_issues, roots, body.scope, frozen, body.project))
-        if gate:
-            raise HTTPException(status_code=409, detail={
-                "message": f"v{state['current']} a {len(gate)} erreur(s) : corrige puis incremente",
-                "gate": _dicts(gate)})
-    return await _call(store.set_active, roots, body.scope, name, True, user=current["user"] or "")
+    if name.startswith(store.LEGACY_PREFIX):
+        raise HTTPException(status_code=409, detail={
+            "message": "un flow legacy_* ne s'active pas : le publish tourne encore sur les actions v1"})
+    gate = await _call(_gate, roots, body.scope, name, body.project)
+    version = gate["version"]
+    if not version:
+        raise HTTPException(status_code=409, detail={"message": gate.get("reason"), "gate": gate})
+    sent = {_issue_key(a) for a in body.acked}
+    missing = [w for w in gate["warnings"] if not w["acked"] and _issue_key(w) not in sent]
+    problems = []
+    if gate["errors"]:
+        problems.append(f"{len(gate['errors'])} erreur(s) : corrige puis incremente")
+    if missing:
+        problems.append(f"{len(missing)} avertissement(s) a lire")
+    if not gate["dry_run"]["ok"]:
+        problems.append(f"essai a blanc a reussir sur v{version}")
+    if problems:
+        raise HTTPException(status_code=409, detail={"message": f"v{version} : " + ", ".join(problems), "gate": gate})
+    root = Path(roots[body.scope])
+    items = [{"code": w["code"], "node": w.get("node"), "port": w.get("port")} for w in gate["warnings"]]
+
+    def finish() -> dict[str, Any]:
+        def ack(state: dict[str, Any]) -> bool:
+            state["acked"] = {"version": version, "items": items}
+            return True
+
+        store.update_state(root, name, ack)
+        state = store.set_active(roots, body.scope, name, True, user=current["user"] or "")
+        frozen = store.read_flow(roots, body.scope, name, state["active_version"])["flow"]
+        scheduler.note_activation(root, name, frozen)
+        return state
+
+    state = await _call(finish)
+    scheduler.request_refresh()
+    events.emit({"type": "activation", "flow": name, "scope": body.scope, "project": body.project,
+                 "active": True, "version": state["active_version"], "by": current["user"]})
+    return state
 
 
 @router.post("/{name}/deactivate")
 async def deactivate(name: str, body: ScopeBody) -> dict[str, Any]:
     current = await _require(rights.WRITE, body.scope)
-    return await _call(store.set_active, _roots(current["user"], body.project), body.scope, name, False,
-                       user=current["user"] or "")
+    state = await _call(store.set_active, _roots(current["user"], body.project), body.scope, name, False,
+                        user=current["user"] or "")
+    scheduler.request_refresh()
+    events.emit({"type": "activation", "flow": name, "scope": body.scope, "project": body.project,
+                 "active": False, "version": state.get("active_version"), "by": current["user"]})
+    return state
 
 
 @router.post("/{name}/copy")
@@ -489,6 +624,29 @@ async def delete(name: str, scope: str, project: Optional[str] = None) -> dict[s
                        user=current["user"] or "")
 
 
+def _note_dry_run(run: engine.Run, root: Path, name: str, version: int) -> None:
+    """When the dry run of *version* ends ``ok``: state.json dry_run_ok (activation, 01 §8)."""
+    def done(_task: asyncio.Task) -> None:
+        if run.record.get("status") != "ok":
+            return
+        note = {"version": version, "run_id": run.run_id, "nodes_simulated": list(run.record["nodes_simulated"]),
+                "at": run.record.get("ended")}
+
+        def change(state: dict[str, Any]) -> bool:
+            state["dry_run_ok"] = note
+            return True
+
+        async def write() -> None:
+            try:
+                await asyncio.to_thread(store.update_state, root, name, change)
+            except OSError:
+                pass
+
+        asyncio.get_running_loop().create_task(write())
+
+    run.task.add_done_callback(done)
+
+
 class RunBody(BaseModel):
     scope: Optional[str] = None
     project: Optional[str] = None
@@ -497,6 +655,7 @@ class RunBody(BaseModel):
     dry_run: bool = False                     # on the saved file, never on a draft (01 §5)
     draft: Optional[dict[str, Any]] = None    # editor document: runs without creating a version (A7)
     base_revision: Optional[int] = None       # revision the draft was loaded from (kept in the record)
+    version: Optional[int] = None             # dry run of a frozen version (activation dialog)
 
 
 @router.post("/{name}/run")
@@ -517,8 +676,16 @@ async def run(name: str, body: RunBody) -> dict[str, Any]:
         flow, draft = _parse(body.draft, name), True
     elif body.dry_run:
         await _require(rights.DRAFT, scope)
-        got = await _call(store.read_flow, roots, scope, name)
+        got = await _call(store.read_flow, roots, scope, name, body.version)
         flow, mode, base_revision = got["flow"], "dry", got["state"].get("revision")
+        current_version = got["state"].get("current") or 0
+        if body.version is not None:
+            version = body.version
+        elif current_version and scope != "shipped":
+            # The saved working file equal to the frozen `current` counts for the activation.
+            frozen = await _call(store.read_flow, roots, scope, name, current_version)
+            if store.dump_flow(frozen["flow"]) == store.dump_flow(flow):
+                version = current_version
     else:
         state = (await _call(store.read_flow, roots, scope, name))["state"]
         if not state.get("active") or not state.get("active_version"):
@@ -530,6 +697,8 @@ async def run(name: str, body: RunBody) -> dict[str, Any]:
                          draft=draft, version=version, base_revision=base_revision, event=body.event,
                          values=body.values, folder=folder)
     record = await engine.manager().submit(new_run)
+    if mode == "dry" and version and scope != "shipped" and new_run.task is not None:
+        _note_dry_run(new_run, Path(roots[scope]), name, version)
     if record["status"] in ("refused", "skipped"):
         raise HTTPException(status_code=409, detail={
             "message": record["error"], "run_id": record["run_id"], "status": record["status"],

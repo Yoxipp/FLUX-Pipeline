@@ -69,6 +69,11 @@ class NodeContext:
         return self._run.interface
 
     @property
+    def payload(self) -> Dict[str, Any]:
+        """Payload of the event that started the run (empty for a manual run)."""
+        return getattr(self._run, "payload", None) or {}
+
+    @property
     def interface_types(self) -> Dict[str, str]:
         """Type of each interface input (str, path, dir...)."""
         return {i.id: i.type for i in self._run.flow.interface.inputs}

@@ -139,7 +139,8 @@ class Run:
                  base_revision: Optional[int] = None, event: Optional[str] = None,
                  values: Optional[Dict[str, Any]] = None, folder=None,
                  context: Optional[Dict[str, Any]] = None, depth: int = 0,
-                 call_stack: Tuple[str, ...] = (), flow_loader=None) -> None:
+                 call_stack: Tuple[str, ...] = (), flow_loader=None,
+                 payload: Optional[Dict[str, Any]] = None, checked: bool = True) -> None:
         if mode not in ("real", "dry"):
             raise ValueError(f"mode inconnu '{mode}'")
         self.flow = flow
@@ -149,12 +150,18 @@ class Run:
         self.run_id = runs.make_run_id(user)
         self.cancelled = threading.Event()
         self.task: Optional[asyncio.Task] = None
-        self.event_id, self.issues = precheck(flow, event, mode, project)
+        # checked=False: a probe of the scheduler (event inputs), never a real run.
+        self.event_id, self.issues = precheck(flow, event, mode, project) if checked else (event, [])
         self.values = dict(values or {})
+        # Payload of the event that started the run (scheduler, hooks: 01 §9), read by event nodes.
+        self.payload = dict(payload or {})
+        self.interrupted: Optional[str] = None   # reason when the scheduler stops the run (lock lost, stop)
         self.record = runs.new_record(run_id=self.run_id, flow=flow.name, scope=scope, project=project,
                                       version=version, draft=draft, mode=mode, user=user,
                                       base_revision=base_revision,
-                                      trigger={"event": self.event_id, "values": self.values})
+                                      trigger={"event": self.event_id, "values": self.values,
+                                               **({"payload": {k: runs.preview(v) for k, v in self.payload.items()}}
+                                                  if self.payload else {})})
         self.context = base_context(user, project, flow.name, self.run_id)
         if context:
             self.context.update(context)
@@ -328,6 +335,15 @@ class Run:
             else:
                 out[key] = val
         return out
+
+    async def evaluate_inputs(self, nid: str) -> Dict[str, Any]:
+        """Inputs of node *nid* pulled from their pure sources (event.when condition,
+        event.new_file folder): the scheduler probes an event without running the flow."""
+        node, spec = self._spec(nid)
+        got: Dict[str, Any] = {}
+        params = self._params(node, spec)
+        await self._inputs(nid, node, spec, got, params)
+        return {**params, **got}
 
     # -- subflows (02 §10) ---------------------------------------------------------
     def set_output(self, ident: str, value: Any) -> None:
@@ -722,7 +738,7 @@ class Run:
         except _StopRun as stop:
             status, error = stop.status, stop.error
         except asyncio.CancelledError:
-            status, error = "cancelled", "annule"
+            status, error = ("interrupted", self.interrupted) if self.interrupted else ("cancelled", "annule")
             task = asyncio.current_task()
             if task is not None:
                 task.uncancel()
@@ -739,6 +755,15 @@ class Run:
             self._flush_pushes()
             await self._write()
             events.emit(self._finished_msg())
+
+    def stop_reason(self) -> Tuple[str, str]:
+        """(status, error) of a run stopped before its start."""
+        return ("interrupted", self.interrupted) if self.interrupted else ("cancelled", "annule avant le depart")
+
+    def interrupt(self, reason: str) -> None:
+        """Stop the run as ``interrupted`` (host lock lost, backend stop: 01 §9)."""
+        self.interrupted = reason
+        self.cancel()
 
     def cancel(self) -> None:
         self.cancelled.set()
@@ -786,11 +811,11 @@ class RunManager:
             async with lock:
                 async with self._slots:
                     if run.cancelled.is_set():
-                        await run.refuse("cancelled", "annule avant le depart")
+                        await run.refuse(*run.stop_reason())
                     else:
                         await run.execute()
         except asyncio.CancelledError:    # cancelled while queued
-            await run.refuse("cancelled", "annule avant le depart")
+            await run.refuse(*run.stop_reason())
         finally:
             if run in self._by_flow[key]:
                 self._by_flow[key].remove(run)

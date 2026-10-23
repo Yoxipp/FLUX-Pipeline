@@ -9,10 +9,17 @@
 # to the subscriber's event loop with call_soon_threadsafe. No subscriber = no-op.
 # A subscription keeps at most MAX_QUEUE messages: link_value and log are dropped
 # first, then the oldest message, never run_finished.
+#
+# P5: local listeners (``listen`` / ``signal``) carry the events born in a backend
+# (publish_done for event.on_publish) to the scheduler, never to the WS. publish_done
+# is the only entry point features/ uses: it is cut by FLUX_FLOWS_HOOKS=0 (read at each
+# call, like flux_actions/switch.py), a no-op without listener, and never raises.
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import threading
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
@@ -120,3 +127,60 @@ def emit(message: Dict[str, Any]) -> None:
                 sub.loop.call_soon_threadsafe(sub.push, message)
         except RuntimeError:  # loop closed between the check and the call
             continue
+
+
+# -- local listeners (P5) ---------------------------------------------------------------
+
+HOOKS_ENV = "FLUX_FLOWS_HOOKS"
+_FALSE = {"0", "false", "no", "off"}
+_LISTENERS: Dict[str, List[tuple]] = {}
+_log = logging.getLogger("flux.flows.events")
+
+
+def hooks_enabled() -> bool:
+    """False when FLUX_FLOWS_HOOKS is falsey (rollback switch, read at each call)."""
+    return os.environ.get(HOOKS_ENV, "1").strip().lower() not in _FALSE
+
+
+def listen(kind: str, callback, loop: Optional[asyncio.AbstractEventLoop] = None) -> tuple:
+    """Call ``callback(payload)`` on *loop* for each ``signal(kind, ...)``. Returns a handle."""
+    handle = (loop or asyncio.get_running_loop(), callback)
+    with _LOCK:
+        _LISTENERS.setdefault(kind, []).append(handle)
+    return handle
+
+
+def unlisten(kind: str, handle: tuple) -> None:
+    with _LOCK:
+        if handle in _LISTENERS.get(kind, []):
+            _LISTENERS[kind].remove(handle)
+
+
+def has_listeners(kind: str) -> bool:
+    with _LOCK:
+        return bool(_LISTENERS.get(kind))
+
+
+def signal(kind: str, payload: Dict[str, Any]) -> None:
+    """Hand *payload* to the listeners of *kind*, from any thread. Never raises."""
+    with _LOCK:
+        handles = list(_LISTENERS.get(kind, []))
+    for loop, callback in handles:
+        try:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(callback, payload)
+        except RuntimeError:
+            continue
+
+
+def publish_done(user: Any, filename: Any, project: Any, dest_folder: Any = None) -> None:
+    """A publish succeeded (features.activity.activity_writer.log_publish). Non blocking:
+    switch off or no listener = nothing at all; any problem is logged, never raised."""
+    try:
+        if not hooks_enabled() or not has_listeners("publish_done"):
+            return
+        signal("publish_done", {"user": str(user or ""), "filename": str(filename or ""),
+                                "project": str(project or ""),
+                                "dest_folder": str(dest_folder) if dest_folder else ""})
+    except Exception:  # noqa: BLE001 - a publish never fails because of a flow hook
+        _log.warning("publish_done hook skipped", exc_info=True)

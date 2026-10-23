@@ -33,6 +33,10 @@ SWITCHES: dict[str, tuple[str, str]] = {
     # Publish copy caps of this machine (features/publisher/copy_limits.py).
     "publish_max_parallel":    ("FLUX_PUBLISH_MAX_PARALLEL", "count"),
     "publish_max_mbps":        ("FLUX_PUBLISH_MAX_MBPS", "mbps"),
+    # Flows (P5): event.on_publish emission in log_publish (read at each publish) and the
+    # background scheduler of the active flows (read at backend start).
+    "flows_hooks":             ("FLUX_FLOWS_HOOKS", "bool"),
+    "flows_scheduler":         ("FLUX_FLOWS_SCHEDULER", "bool"),
 }
 
 # Env vars present when the backend started (dev .bat, CI): restored when a saved value is cleared.
@@ -43,6 +47,8 @@ def _current(name: str) -> Any:
     """Effective value, as the publish code sees it right now."""
     from features.publisher import copy_limits
     from flux_actions import switch
+    from flux_flows import events as flows_events
+    from flux_flows import scheduler as flows_scheduler
 
     return {
         "conform_tx": switch.conform_tx_enabled,
@@ -52,6 +58,8 @@ def _current(name: str) -> Any:
         "portable_paths": switch.portable_paths_enabled,
         "publish_max_parallel": copy_limits.max_parallel,
         "publish_max_mbps": copy_limits.max_mbps,
+        "flows_hooks": flows_events.hooks_enabled,
+        "flows_scheduler": flows_scheduler.enabled,
     }[name]()
 
 

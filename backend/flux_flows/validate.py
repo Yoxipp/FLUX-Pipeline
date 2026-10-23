@@ -34,6 +34,8 @@ from flux_flows.types import can_connect
 ERROR, WARNING = "error", "warning"
 MIN_EVERY_S = 5          # hard minimum of a scan (01 §8, E_PARAM_INVALID below)
 FAST_EVERY_S = 10        # W_SCAN_TOO_FAST below
+MIN_SCENE_EVERY_S = 2    # event.scene_opened polls a local DCC
+SCHEDULE, SCENE_OPENED = "event.schedule", "event.scene_opened"
 MAX_SUBFLOW_DEPTH = 8
 
 FOREACH_BEGIN, FOREACH_END = "operator.foreach_begin", "operator.foreach_end"
@@ -424,15 +426,28 @@ def _check_nodes(net: _Net, issues: List[Issue], env: Env) -> None:
 def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> None:
     params = node.params
     every = params.get("every_s")
+    # scene_opened polls a local DCC, not the share: 2 s minimum, no network warning (01 §9).
+    local_poll = node.type == SCENE_OPENED
+    minimum = MIN_SCENE_EVERY_S if local_poll else MIN_EVERY_S
     if isinstance(every, (int, float)) and not isinstance(every, bool):
-        if every < MIN_EVERY_S:
-            issues.append(_issue("E_PARAM_INVALID", nid, f"Frequence minimale : {MIN_EVERY_S} secondes",
-                                 f"Minimum frequency: {MIN_EVERY_S} seconds", port="every_s"))
-        elif every < FAST_EVERY_S:
+        if every < minimum:
+            issues.append(_issue("E_PARAM_INVALID", nid, f"Frequence minimale : {minimum} secondes",
+                                 f"Minimum frequency: {minimum} seconds", port="every_s"))
+        elif every < FAST_EVERY_S and not local_poll:
             issues.append(_issue("W_SCAN_TOO_FAST", nid, f"Scan toutes les {every:g} s : charge reseau",
                                  f"Scan every {every:g} s: network load", port="every_s",
                                  fix=_fix("set_param", node=nid, param="every_s", value=30)))
     # data.value ``type`` is checked by its choices (VALUE_TYPES), in _check_nodes.
+    if node.type == SCHEDULE:
+        from flux_flows import scheduler
+
+        for pname in ("days", "time", "missed"):
+            problem = scheduler.schedule_param_error(pname, params.get(pname))
+            if problem:
+                issues.append(_issue("E_PARAM_INVALID", nid, problem[0], problem[1], port=pname))
+    if node.type == SCENE_OPENED and str(params.get("soft") or "maya") not in ("maya", "houdini"):
+        issues.append(_issue("E_PARAM_INVALID", nid, "SceneOpened : maya ou houdini (autres logiciels en P6b)",
+                             "SceneOpened: maya or houdini (other softs in P6b)", port="soft"))
     if node.type == FOR_BEGIN and (nid, "step") not in net.data_in and params.get("step") in (0, 0.0, "0"):
         issues.append(_issue("E_PARAM_INVALID", nid, "step ne peut pas valoir 0", "step cannot be 0", port="step"))
     if node.type == "data.flow_input":

@@ -26,7 +26,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from flux_flows.model import NAME_RE, Flow, FlowSchemaError, dump_flow, load_flow_text
 
@@ -438,3 +438,33 @@ def set_active(roots: Mapping[str, Optional[Path]], scope: str, name: str, activ
     _history(roots, scope, {"kind": "activate" if active else "deactivate", "user": user, "flow": name,
                             "version": state["active_version"], "note": ""})
     return state
+
+
+# -- P5: scheduler side (01 §9) ----------------------------------------------------
+
+def update_state(root: Path, name: str, change) -> Optional[Dict[str, Any]]:
+    """Apply ``change(state) -> bool`` to state.json under the flow lock; written only
+    when it returns True. Returns the new state, or None when nothing was written."""
+    with _flow_lock(root, name):
+        state = read_state(root, name)
+        if not change(state):
+            return None
+        _write_state(root, name, state)
+    return state
+
+
+def active_names(root: Path) -> List[Tuple[str, int]]:
+    """(name, active_version) of the active flows kept in *root* (a scope folder)."""
+    out: List[Tuple[str, int]] = []
+    try:
+        entries = sorted(root.glob(f"*{SUFFIX}"))
+    except OSError:
+        return out
+    for path in entries:
+        name = path.name[: -len(SUFFIX)]
+        if not NAME_RE.match(name):
+            continue
+        state = read_state(root, name)
+        if state.get("active") and state.get("active_version"):
+            out.append((name, int(state["active_version"])))
+    return out
