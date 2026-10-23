@@ -77,8 +77,10 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
             const running = `${j.numActive}${j.maxactive ? `/${j.maxactive}` : ''}`
             return (
               <div key={j.jid} style={{ borderBottom: '1px solid var(--rule-2)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px,2fr) 80px 60px 70px minmax(90px,1.2fr) 50px 50px 80px auto', gap: 10, alignItems: 'center', padding: '8px 12px', fontSize: 11.5, color: 'var(--ink)' }}>
-                  <button type="button" onClick={() => void toggleJob(j.jid)} title={`${j.jid} ${j.title}`}
+                {/* The whole row folds / unfolds the tasks; the action buttons stop the click. */}
+                <div onClick={() => void toggleJob(j.jid)}
+                  style={{ display: 'grid', gridTemplateColumns: 'minmax(120px,2fr) 80px 60px 70px minmax(90px,1.2fr) 50px 50px 80px auto', gap: 10, alignItems: 'center', padding: '8px 12px', fontSize: 11.5, color: 'var(--ink)', cursor: 'pointer' }}>
+                  <button type="button" title={`${j.jid} ${j.title}`}
                     style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink)', fontSize: 11.5, fontFamily: 'var(--sans)', textAlign: 'left' }}>
                     {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.title}</span>
@@ -95,7 +97,7 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
                   <div style={{ color: 'var(--ink-3)' }} title={tr('Blades en cours / maximum', 'Running blades / maximum')}>{running}</div>
                   <div style={{ color: j.numError > 0 ? 'var(--err)' : 'var(--ink-3)' }} title={tr('Erreurs', 'Errors')}>{j.numError} {tr('err.', 'err.')}</div>
                   <div style={{ color: 'var(--ink-3)' }} title={String(j.spooltime ?? '')}>{shortDate(j.spooltime)}</div>
-                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
                     {/* Actions only on FLUX jobs that can still change (never on a finished or deleted job). */}
                     {j.flux_user && state !== 'done' && state !== 'deleted' && <>
                       {state === 'paused'
@@ -113,10 +115,10 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
                     {tasks.length === 0 && <div style={hint}>{tr('Chargement des taches...', 'Loading tasks...')}</div>}
                     {tasks.map(t => (
                       <div key={t.tid}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 0' }}>
+                        <div onClick={() => void showLog(j.jid, t.tid)} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 0', cursor: 'pointer' }}>
                           <span style={{ width: 60, color: t.state === TASK_ERROR ? 'var(--err)' : 'var(--ink-3)' }}>{t.state}</span>
                           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.title}>{t.title}</span>
-                          <button type="button" style={btn()} onClick={() => void showLog(j.jid, t.tid)}>Log</button>
+                          <button type="button" style={btn()}>Log</button>
                         </div>
                         {logOf?.tid === t.tid && (
                           <pre style={{ margin: '4px 0 8px', padding: 8, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 10.5, background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 6, color: 'var(--ink)' }}>{logOf.text}</pre>

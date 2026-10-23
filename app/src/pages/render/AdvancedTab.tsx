@@ -131,10 +131,10 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
         {Object.entries(groups).map(([name, members]) => (
           <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5 }}>
             <button type="button" onClick={() => setEditGroup(editGroup === name ? null : name)}
-              style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink)', fontSize: 11.5 }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, textAlign: 'left', background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer', color: 'var(--ink)', fontSize: 11.5 }}>
               {editGroup === name ? <ChevronDown size={12} /> : <ChevronRight size={12} />}<b>{name}</b>
+              <span style={hint}>{members.length} {tr('machine(s)', 'machine(s)')}</span>
             </button>
-            <span style={hint}>{members.length} {tr('machine(s)', 'machine(s)')}</span>
             <button type="button" style={btn(false, true)} title={tr('Supprimer le groupe', 'Delete group')} onClick={() => removeGroup(name)}><Trash2 size={11} /></button>
           </div>
         ))}
@@ -170,7 +170,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
 
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: 12 }}>
         <button type="button" onClick={() => setTechOpen(o => !o)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', ...lbl, marginBottom: 0 }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', ...lbl, marginBottom: 0 }}>
           {techOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{tr('Technique', 'Technical')}
         </button>
         {techOpen && (

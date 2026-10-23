@@ -103,7 +103,7 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
           )
         })}
         <button type="button" onClick={() => setShowList(s => !s)}
-          style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--accent-hi)', fontSize: 11.5 }}>
+          style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer', color: 'var(--accent-hi)', fontSize: 11.5 }}>
           {showList ? tr('Masquer les machines', 'Hide machines') : tr('Voir les machines', 'Show machines')}
         </button>
         {showList && <MachinePicker blades={farm.blades} selected={[]} onChange={() => undefined} hideOffline={false} readOnly />}
