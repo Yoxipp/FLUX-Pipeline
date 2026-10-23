@@ -28,6 +28,11 @@ P4 : `POST /validate {flow, scope, project?}` -> `{issues, valid}` (statique, n'
 (`valid` dans `state.json`, enregistrer avec erreurs reste permis) et refusent en 409 `{code: E_DESTRUCTIVE_UNCONFIRMED, issues}`
 un node `!` ajoute sans figurer dans `confirmed_destructive` ; `revert` revalide ; `activate` refuse une version figee en
 erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouve une erreur.
+P5 : `GET /host` (detenteur du verrou, surveillants de ce poste), `POST /events/scene_opened {soft, scene, port?, pid?}`
+(script cote logiciel), `GET /{name}/activation` (3 voyants : erreurs, avertissements `acked`, `dry_run`) ; `activate
+{scope, acked}` exige 0 erreur, avertissements lus et essai a blanc reussi sur `current` (409 `{gate}` sinon), note le dernier
+creneau `Schedule` ; `run {dry_run, version?}` ecrit `dry_run_ok` dans `state.json` a la fin d'un essai `ok` de `current` ;
+WS `host`, `activation`, `flow_changed` (save, increment, revert). `dcc.py` : `instance_context` vit dans `core/dcc_context.py`.
 P4 (editeur) : `POST /nodes {name, code}` (Team TD) ecrit `CONFIG/extensions/nodes/<name>.py` (marqueur `@flow_node` requis,
 fichier garde meme s'il ne charge pas, `error` = erreur de chargement de ce fichier) ; `GET /{name}/versions` rend aussi
 `user` par version et `history` (lignes `history.jsonl` du flow, recentes d'abord).

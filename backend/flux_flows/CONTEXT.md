@@ -4,7 +4,7 @@ Chantier Flows (ADR 0057, 0058 ; specs `docs/yaml_update_refonte/`). Package neu
 ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Etat au 2026-10-22 : P1 fait
 (prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). P2 fait (prompt `P2_moteur_runs.md`) :
 moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).
-Pas encore d'evenement automatique (P5).
+P5 (2026-10-23) : scheduler, verrou entre postes, evenements actifs, activation (voir "Evenements et flows actifs").
 
 ## Fichiers
 
@@ -21,7 +21,10 @@ Pas encore d'evenement automatique (P5).
 | `validate.py` | P4 : validation (01 §8), fait foi a l'enregistrement, au lancement, a l'activation et pour `POST /flows/validate`. `validate(flow, Env)` -> `Issue {level, code, node, port, message_fr/en, why_fr/en, fix {kind, args}, link}` ; tous les codes de 01 §8 ; `unconfirmed_destructive` (E_DESTRUCTIVE_UNCONFIRMED, compare au fichier de travail) ; `errors(issues, dry_run)` (un E_TYPE_MISMATCH ne bloque pas l'essai a blanc, ADR 0058). Voir "Validation" ci-dessous. |
 | `engine.py` | Moteur exec + data (01 §4), `Run` (un run) et `RunManager` (admission, un par boucle asyncio : `engine.manager()`). |
 | `runs.py` | Enregistrements de run (01 §6) : id, ecriture atomique, liste, retention, `interrupted`. |
-| `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. |
+| `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. P5 : ecouteurs locaux `listen` / `signal` (jamais vers le WS) et `publish_done` (appele par `log_publish`, switch `FLUX_FLOWS_HOOKS`, ne leve jamais). |
+| `scheduler.py` | P5 : tache de fond (lifespan), election, relecture des flows actifs, surveillants `schedule` / `new_file` / `when` / `scene_opened`, ecoute de `publish_done`. Voir plus bas. |
+| `hosts.py` | P5 : verrou `CONFIG/extensions/runs/host.lock` entre postes (`HostLock.tick` toutes les 20 s). |
+| `hooks.py` | P5 : `event.on_publish` : publish -> enregistrement `publish` (soft / type deduits), filtres, flows qui le veulent. |
 | `locations.py` | Dossier de chaque portee ; `roots_for(user, project)` construit le dict `{portee: dossier ou None}` du store (nom de projet = un nom de dossier, jamais un chemin). |
 | `store.py` | Portees, fichier de travail, versions figees, `state.json`, `history.jsonl`, `_trash/`, verrou, ecriture atomique, conflit 409. P4 : `read_history` (lignes du flow, recentes d'abord) et `list_versions` rend `user` par version + `history` (dialogue Versions). |
 | `rights.py` | Cases TD / Team TD, table de 01 §7, 403. |
@@ -146,8 +149,39 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   (`action._values`). `data.token_path` reproduit la resolution de dossier de `resolve_publish_path` sans toucher
   publish_core (layout plat : `level: last` = fichier `<base>_LAST.<ext>`, pas de dossier LAST).
 
+## Evenements et flows actifs (P5, 01 §9)
+
+* **Scheduler** (`scheduler.start()` dans le `lifespan`, `stop()` apres le `yield`, `FLUX_FLOWS_SCHEDULER=0` = rien) : un
+  battement toutes les 20 s ; inactif sans utilisateur ou sans FLUX_ROOT (reteste a chaque battement). Flows actifs relus
+  toutes les 60 s et a chaque (de)activation (`request_refresh`) : team, chaque `DOSSIER_PROJETS/*/_flux_setup/flows`,
+  perso de l'utilisateur local ; chacun tourne sa `active_version`. Un run d'evenement est un `engine.Run` normal
+  (`payload` lu par le node evenement via `ctx.payload`, garde en apercu dans `trigger.payload` du record).
+* **Verrou** (`hosts.py`) : `{host, user, pid, nonce, expires, beat}`. Mon nonce : renouveler + relire. Libre (absent, vide,
+  illisible, `expires: 0` apres un arret propre) ou perime (`expires < now` ET `beat` inchange depuis 60 s de MON horloge
+  monotone) : ecrire, attendre 1 a 3 s, relire, confirmer 2 s plus tard. 2 lectures ratees de suite = perdu. Perte :
+  surveillants globaux desarmes, leurs runs `interrupted` (`Run.interrupt`). `GET /flows/host`, WS `host`.
+* **Classes** : globaux (schedule, new_file, when) armes chez le detenteur pour team / project, toujours pour perso ;
+  locaux (on_publish, scene_opened) sur chaque poste. Plafond 50 surveillants (`over_cap` dans `/flows/host`).
+* **schedule** : toutes les 15 s, dernier creneau echu ; note dans `state.json.last_schedule[<node>] {slot, ran_at}` sous le
+  verrou du flow AVANT le run (deja note = pas de tir, deux postes = un tir). Creneau en retard de plus de 2 min = rattrapage
+  (`missed: true`, une fois) ou `skip` (note sans tirer). L'activation note le dernier creneau echu.
+* **new_file** : dossier et reglages evalues comme des entrees pures (`Run.evaluate_inputs`, Run sonde `checked=False`),
+  scan `os.scandir` dans `HEAVY`, 1er scan = base (`runs/<flow>/seen_<node>.json`, cle dossier + motif + recursif) ;
+  fichier nouveau tire quand sa taille est stable sur 2 scans (`wait_stable`) ; un run par fichier.
+* **when** : `condition` evaluee toutes les `every_s` ; tir sur faux -> vrai ; 1re valeur = base ; erreur = notee, pas de tir.
+* **scene_opened** : un scruteur par logiciel (`scan_instances` + `core/dcc_context.instance_context`), periode = le plus
+  petit `every_s` (min 2 s) ; 1re scrutation = base ; scene changee ou nouvelle instance avec scene = tir. `session` =
+  `{soft, port, pid}` jusqu'a P6. `POST /flows/events/scene_opened` pour un script du logiciel.
+* **on_publish** : `log_publish` -> `events.publish_done` -> `Scheduler._on_publish` -> `hooks.matching` (filtres soft, type,
+  name ; un flow projet n'entend que son projet).
+* **Activation** (`routers/flows.py`, `_gate`) : version `current` sans erreur, avertissements acquittes (`state.json.acked
+  {version, items}`), essai a blanc reussi sur `current` (`dry_run_ok {version, run_id, nodes_simulated}`, ecrit a la fin d'un
+  `POST /run {dry_run, version}` `ok`, ou d'un essai du fichier de travail identique a `current`). W_DESTRUCTIVE_UNTESTED lit
+  `nodes_simulated`. Validation : `every_s` min 2 s pour `scene_opened` (pas d'avertissement reseau), `days` / `time` /
+  `missed` de Schedule (E_PARAM_INVALID).
+
 ## Tests
 
 `backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
-flows_ws, legacy_command ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+flows_ws, legacy_command ; P5 : host_lock, scheduler, event_schedule, event_new_file, event_when, activation (`_sched_helpers.py`), `tests/publisher/test_publish_hooks.py` ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.
