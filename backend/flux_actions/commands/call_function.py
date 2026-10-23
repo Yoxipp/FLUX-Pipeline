@@ -19,11 +19,27 @@ from typing import Any, Dict
 from flux_core import CommandBase, register
 
 
-def resolve_function(ref: str):
-    """"package.module:name" -> the function object (ValueError when not found)."""
+# Only FLUX's own packages (01 §16; v1 guard decided by 2026-10-23): a team copy
+# of an action YAML cannot import os, subprocess or any other module.
+ALLOWED_PACKAGES = ("features", "core", "dcc")
+
+
+def check_function_ref(ref: str) -> tuple:
+    """(module, name) of a "package.module:name" inside ALLOWED_PACKAGES, else ValueError."""
     module_name, _, func_name = (ref or "").partition(":")
     if not module_name or not func_name or func_name.startswith("_"):
         raise ValueError(f"fonction invalide: {ref!r} (attendu package.module:nom)")
+    parts = module_name.split(".")
+    if parts[0] not in ALLOWED_PACKAGES or any(not p or p.startswith("_") for p in parts):
+        raise ValueError(f"fonction refusee: {ref!r} (seuls les packages FLUX "
+                         f"{', '.join(ALLOWED_PACKAGES)} sont permis)")
+    return module_name, func_name
+
+
+def resolve_function(ref: str):
+    """"package.module:name" -> the function object (ValueError when not found or
+    outside ALLOWED_PACKAGES)."""
+    module_name, func_name = check_function_ref(ref)
     func = getattr(importlib.import_module(module_name), func_name, None)
     if not callable(func):
         raise ValueError(f"fonction introuvable: {ref!r}")

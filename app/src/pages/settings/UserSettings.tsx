@@ -16,6 +16,7 @@ import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { useWorkProfile } from '../../WorkProfileContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
 import { BridgesInstall } from './BridgesInstall'
+import { FLOW_RIGHTS_EVENT } from '../../api/flows'
 
 // Console log levels the user can recolor + a theme-neutral swatch default shown
 // when there is no override yet (picking one writes the override).
@@ -97,6 +98,9 @@ export function UserSettings({ username }: { username: string }) {
         <ChevronRight size={12} strokeWidth={1.75} color="var(--ink-4)" />
       </div>
 
+      <SecTitle>Flows</SecTitle>
+      <FlowBoxes />
+
       <SecTitle>{t('settings.workspace')}</SecTitle>
       <Workspaces />
 
@@ -170,6 +174,45 @@ export function UserSettings({ username }: { username: string }) {
       <div><Btn sm ghost onClick={handleResetUi}><RotateCcw size={11} /> {t('settings.resetUi')}</Btn></div>
 
       {version && <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--mono)' }}>{t('settings.version')} {version}</div>}
+    </div>
+  )
+}
+
+// TD / Team TD boxes of the Flows (01 §7): root keys of User.json, NOT the "TD / Avance"
+// interface profile. Team TD implies TD. A guard against mistakes, not security.
+function FlowBoxes() {
+  const [boxes, setBoxes] = useState<{ td: boolean; team_td: boolean } | null>(null)
+  useEffect(() => {
+    api.getUserData()
+      .then(d => setBoxes({ td: d.flows_td === true || d.flows_team_td === true, team_td: d.flows_team_td === true }))
+      .catch(() => setBoxes({ td: false, team_td: false }))
+  }, [])
+  const set = (next: { td: boolean; team_td: boolean }) => {
+    const prev = boxes
+    setBoxes(next)
+    api.setUserData({ flows_td: next.td, flows_team_td: next.team_td })
+      .then(() => window.dispatchEvent(new Event(FLOW_RIGHTS_EVENT)))
+      .catch(() => { setBoxes(prev); toast.error("Cases Flows non enregistrees") })
+  }
+  const box = { ...row, fontSize: 11, color: 'var(--ink-2)', cursor: 'pointer' }
+  return (
+    <div className="card" style={card}>
+      <label style={box}>
+        <input type="checkbox" disabled={!boxes} checked={!!boxes?.td}
+          onChange={e => set({ td: e.target.checked, team_td: e.target.checked && !!boxes?.team_td })}
+          style={{ accentColor: 'var(--accent)', margin: 0 }} />
+        TD : ouvrir l'editeur de flows, modifier mes flows perso, essais a blanc
+      </label>
+      <label style={box}>
+        <input type="checkbox" disabled={!boxes} checked={!!boxes?.team_td}
+          onChange={e => set({ td: e.target.checked || !!boxes?.td, team_td: e.target.checked })}
+          style={{ accentColor: 'var(--accent)', margin: 0 }} />
+        Team TD : modifier les flows de l'equipe et des projets, migrer les actions v1
+      </label>
+      <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+        Garde-fou contre l'erreur, pas une securite : n'importe qui peut cocher ces cases.
+        Distinct du profil de travail "TD / Avance".
+      </div>
     </div>
   )
 }

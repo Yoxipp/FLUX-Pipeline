@@ -42,7 +42,7 @@ export interface LogRecord {
   msg:     string
 }
 
-async function apiCall<T>(
+export async function apiCall<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
   endpoint: string,
   body?: unknown,
@@ -74,12 +74,15 @@ async function apiCall<T>(
   }
 
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`
+    let detail: unknown = `HTTP ${response.status}`
     try {
       const err = await response.json()
       detail = err.detail ?? detail
     } catch {}
-    throw new Error(detail)
+    // Object details ({message, ...} of the /flows routes) keep their fields on the error.
+    const message = typeof detail === 'string' ? detail
+      : (detail as { message?: string } | null)?.message ?? JSON.stringify(detail)
+    throw Object.assign(new Error(message), { status: response.status, detail })
   }
 
   return response.json() as Promise<T>
@@ -145,6 +148,7 @@ export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'err
 // The manual as HTML, for the Settings > Doc iframe (the Electron main process adds
 // the X-Flux-Token header to every request to the backend, frames included).
 export const MANUAL_URL = `${BASE_URL}/system/manual`
+export const FLOWS_MANUAL_URL = `${BASE_URL}/system/manual?doc=flows`
 
 // Tractor farm render (backend features/render/team_settings.py, routers/render.py).
 export interface RenderSettings {
@@ -281,7 +285,7 @@ export const api = {
 
   // Settings > Doc: where the manual lives (FLUX_DOC copy, else the bundled one).
   getManualInfo: () =>
-    apiCall<{ path: string; doc_dir: string }>('GET', '/system/manual-info'),
+    apiCall<{ path: string; flows_path: string; doc_dir: string }>('GET', '/system/manual-info'),
 
   photoshopOpen: (project_name: string, rel_path: string) =>
     apiCall<{ ok: boolean; error: string | null }>('POST', '/dcc/photoshop/open', { project_name, rel_path }),

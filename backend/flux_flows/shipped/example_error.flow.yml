@@ -1,0 +1,18 @@
+flux_flow: 2
+name: example_error
+label: "Exemple : run en erreur"
+description: "Exemple P2 qui echoue : SetVariable recoit un texte pour une variable entiere. Le node passe en rouge avec le message et les valeurs recues ; la notification n'est jamais atteinte."
+run_policy: skip_if_running
+interface:
+  - {id: count, type: str, label: "Nombre (texte)", default: douze}
+variables:
+  - {name: "n", type: int, default: 0}
+nodes:
+  n1: {type: event.manual, pos: [0, 0], params: {}}
+  n2: {type: data.flow_input, pos: [320, 160], params: {id: count}}
+  n3: {type: data.set_variable, pos: [640, 0], params: {name: "n"}}
+  n4: {type: flux.notify, pos: [960, 0], params: {text: "jamais affiche", where: toast}}
+links:
+  - {from: n1.then, to: n3.exec}
+  - {from: n2.value, to: n3.value}
+  - {from: n3.then, to: n4.exec}

@@ -18,6 +18,7 @@ root_packages =
     routers
     flux_core
     flux_actions
+    flux_flows
 
 [importlinter:contract:no-json-manager-in-stores]
 name = Stores go through MetadataRepository, not core.json_manager directly

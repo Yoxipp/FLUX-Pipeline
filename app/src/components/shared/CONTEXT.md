@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__components__shared.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC connectes), `Console` (logs `/logs`), `BackendBanner` (reconnexion), `ExportOptions` + `SoftwareSelector` (Publisher), `ActionForm`, `ui.tsx`, `Logo`.
+Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC connectes), `Console` (logs `/logs`), `BackendBanner` (reconnexion), `ExportOptions` + `SoftwareSelector` (Publisher), `ActionForm` + `ParamWidget`, `closeGuard`, `ui.tsx`, `Logo`.
 
 ## Profils de travail et interface allegee (2026-10-07, ADR 0042 + 0043)
 
@@ -25,5 +25,10 @@ Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC co
 * `SoftwareSelector` : `isVisible` replie derriere `+N` les logiciels non actives par l'utilisateur
   (le logiciel actif reste affiche). Utilise par Publisher et Shelf Manager.
 * `TitleBar` / Parametres : resume du profil actif (et "modifie"), couleurs de console repliees.
+* `ParamWidget.tsx` (Flows P4, 2026-10-23) : un widget par sorte de parametre (bool, int, float, text, path, dir, list,
+  select, str), extrait de `ActionForm` (comportement identique pour ActionForm : seules bool / int / float / text / path
+  y sont mappees, le reste = texte). Utilise par le Params de l'editeur de flows, demain par le PageRenderer (P7).
+* `closeGuard.ts` (Flows P4) : registre de gardes async consultees par `TitleBar` avant `windowClose()` (fenetre detachee,
+  et fenetre principale apres le curseur). L'editeur de flows y branche quitter = Ctrl+S (garde `!` au curseur).
 * `tooltipPosition.viewportRect` : Electron 31 (Chromium 126) renvoie des rects non zoomes sous un
   ancetre `zoom` CSS ; toute ancre `position: fixed` portee dans body doit passer par cette fonction.

@@ -14,6 +14,7 @@ import { api } from '../api/client'
 import type { AdvancedProject, AdvancedSwitch } from '../api/client'
 import { Btn, SecTitle } from '../components/shared/ui'
 import { useProject } from '../ProjectContext'
+import { useFlowRights } from './flow_editor/useFlowRights'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 const mono = { fontFamily: 'var(--mono)', fontSize: 11 } as const
@@ -53,6 +54,7 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
   const adv = part === 'advanced'
   const { project: activeProject } = useProject()
   const navigate = useNavigate()
+  const flowRights = useFlowRights()
   const [proj, setProj] = useState<AdvancedProject | null>(null)
   const [switches, setSwitches] = useState<Record<string, AdvancedSwitch>>({})
   const [error, setError] = useState('')
@@ -182,18 +184,27 @@ export function AdvancedSettings({ part = 'advanced' }: { part?: 'project' | 'ad
       <div className="card" style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
         <Workflow size={14} strokeWidth={1.75} color="var(--ink-3)" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: 'var(--ink)' }}>Graph YAML</div>
+          <div style={{ fontSize: 11, color: 'var(--ink)' }}>Flows (graph YAML)</div>
           <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
-            Node flow des actions (publish...), en lecture seule : le YAML reste la source.
+            Editeur de flows. Le publish tourne encore sur les actions v1 jusqu'a P8 : seul l'ancien editeur les modifie.
           </div>
         </div>
-        <Btn sm ghost onClick={() => {
+        <Btn sm ghost disabled={!flowRights?.td} title={flowRights?.td ? undefined : 'Coche TD dans ton profil'} onClick={() => {
           // Own window when Electron can open one, else the page in this window.
           if (window.electronAPI?.detachPage) window.electronAPI.detachPage('/action-graph')
           else navigate('/action-graph')
         }}>
           <ExternalLink size={11} strokeWidth={2} /> Ouvrir le graph
         </Btn>
+        {/* P4: the old v1 action editor, the only UI that edits the real publish until P8
+            (which removes it). Kept out of the new editor's bar on purpose. */}
+        <span
+          onClick={() => navigate('/action-graph-legacy')}
+          title="Ancien editeur des actions v1 (publish reel), retire en P8"
+          style={{ fontSize: 10.5, color: 'var(--ink-4)', cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap' }}
+        >
+          Ancien editeur
+        </span>
       </div>
 
       <SecTitle>Publish (ce poste)</SecTitle>

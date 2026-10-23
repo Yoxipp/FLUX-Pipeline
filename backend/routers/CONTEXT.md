@@ -15,3 +15,19 @@ Ajouts : `review` (ADR 0047, `features/review/keyframe.py`) : `GET /review/keyfr
 (single-flight), resultat garde 1 s, ETag + 304 ; `main.py` vide ce cache apres toute requete non-GET hors
 `/activity`, `/logs`, `/calendar`. Le calcul tourne dans `core/executors.HEAVY` (pool borne, separe des feeds).
 `GET /publish/queue` : copies de publish actives / en attente (`features/publisher/copy_limits.py`).
+
+## flows.py (2026-10-22, Flows P1)
+
+Prefixe `/flows` : routes statiques (`catalog`, `rights`, `migrate`) avant `/{name}` ; lecture pour tous, chaque mutation
+verifie d'abord les cases TD / Team TD (`flux_flows.rights`, garde-fou, pas une securite). Detail : `backend/flux_flows/CONTEXT.md`.
+P2 : `POST /{name}/run` (brouillon de l'editeur, essai a blanc du fichier enregistre, version active), `GET /runs`,
+`GET /runs/{run_id}`, `POST /runs/{run_id}/cancel` (TD ou lanceur), `WS /ws` (messages de run, file de 500 par client ;
+`ApiAuthMiddleware` le couvre comme `/dcc/ws/status`). Les runs sont des taches asyncio du backend (`flux_flows.engine`).
+P3 : `POST /preview` (apercu resolve | pattern, aucun node lance), `GET /nodes/template` (modele de node d'equipe), statiques.
+P4 : `POST /validate {flow, scope, project?}` -> `{issues, valid}` (statique, n'ecrit rien). PUT et `increment` revalident
+(`valid` dans `state.json`, enregistrer avec erreurs reste permis) et refusent en 409 `{code: E_DESTRUCTIVE_UNCONFIRMED, issues}`
+un node `!` ajoute sans figurer dans `confirmed_destructive` ; `revert` revalide ; `activate` refuse une version figee en
+erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouve une erreur.
+P4 (editeur) : `POST /nodes {name, code}` (Team TD) ecrit `CONFIG/extensions/nodes/<name>.py` (marqueur `@flow_node` requis,
+fichier garde meme s'il ne charge pas, `error` = erreur de chargement de ce fichier) ; `GET /{name}/versions` rend aussi
+`user` par version et `history` (lignes `history.jsonl` du flow, recentes d'abord).
