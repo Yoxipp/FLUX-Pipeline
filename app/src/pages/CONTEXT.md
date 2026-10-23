@@ -197,3 +197,9 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
     de version) : diff par version, Voir (lecture seule, bandeau "Lecture vNNN"), Revenir (cree v(max+1)), historique.
   * L'ancien editeur (`/action-graph-legacy`, `ActionGraph.tsx`) n'est plus dans la TopBar : lien "Ancien editeur" dans
     Parametres avances, carte Actions (YAML), jusqu'a P8.
+  * P5 : `ActivationDialog.tsx` (bouton Activer de la TopBar : 0 erreur, avertissements coches, essai a blanc de `current`
+    lance depuis le dialogue ; `SlideToConfirm` si un node `!`), tags "actif vN" / "vM non activee".
+  * P6a : nodes DCC livres en sous-flows verrouilles (`spec.subflow`) : cadenas (livre) ou icone equipe (copie), double clic
+    ou Entree = entrer, fil d'Ariane dans la TopBar, U = remonter ; `DccBanner.tsx` (Deverrouiller = copie d'equipe,
+    Revenir au defaut apres `SlideToConfirm`). Les coeurs `spec.internal` ne sont ni dans Tab ni dans le Shelf.
+    `icons.ts` liste toutes les icones du registre.

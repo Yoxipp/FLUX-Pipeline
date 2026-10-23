@@ -5,6 +5,7 @@ ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Et
 (prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). P2 fait (prompt `P2_moteur_runs.md`) :
 moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).
 P5 (2026-10-23) : scheduler, verrou entre postes, evenements actifs, activation (voir "Evenements et flows actifs").
+P6a (2026-10-23) : socle DCC, Houdini et Maya (voir "DCC (P6a)").
 
 ## Fichiers
 
@@ -25,6 +26,8 @@ P5 (2026-10-23) : scheduler, verrou entre postes, evenements actifs, activation 
 | `scheduler.py` | P5 : tache de fond (lifespan), election, relecture des flows actifs, surveillants `schedule` / `new_file` / `when` / `scene_opened`, ecoute de `publish_done`. Voir plus bas. |
 | `hosts.py` | P5 : verrou `CONFIG/extensions/runs/host.lock` entre postes (`HostLock.tick` toutes les 20 s). |
 | `hooks.py` | P5 : `event.on_publish` : publish -> enregistrement `publish` (soft / type deduits), filtres, flows qui le veulent. |
+| `bridges/` | P6a : `softs.py` (registre des logiciels), `primitives.py` (transports qui enveloppent les clients `dcc/`), `session.py` (valeur `session[<soft>]`, `connect_live`), `headless.py` (worker `hython` / `mayapy`). |
+| `dcc_nodes.py` | P6a : nodes DCC livres en sous-flows verrouilles (`shipped/dcc/<soft>/*.flow.yml`, `node_type`) et leurs copies d'equipe. |
 | `locations.py` | Dossier de chaque portee ; `roots_for(user, project)` construit le dict `{portee: dossier ou None}` du store (nom de projet = un nom de dossier, jamais un chemin). |
 | `store.py` | Portees, fichier de travail, versions figees, `state.json`, `history.jsonl`, `_trash/`, verrou, ecriture atomique, conflit 409. P4 : `read_history` (lignes du flow, recentes d'abord) et `list_versions` rend `user` par version + `history` (dialogue Versions). |
 | `rights.py` | Cases TD / Team TD, table de 01 §7, 403. |
@@ -180,8 +183,42 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   `nodes_simulated`. Validation : `every_s` min 2 s pour `scene_opened` (pas d'avertissement reseau), `days` / `time` /
   `missed` de Schedule (E_PARAM_INVALID).
 
+## DCC (P6a, 01 §12, 02 §8 / §9, 03 §8)
+
+* **Session** (`bridges/session.py`) : contrat `run(code, timeout) -> {ok, result | error}` + `close()` (seul un worker est
+  ferme ; FLUX ne ferme jamais un logiciel Live). `HoudiniLiveSession` (HoudiniClient du port), `MayaLiveSession` (commandPort :
+  le code tourne dans un espace avec `cmds`, aller en base64 sur une ligne, retour par un fichier JSON), `TcpJsonSession`
+  (`{"cmd": "run"}`, P6b), `headless.WorkerSession`. `find_instance` (pick `active` = `resolve_port`, `scene` par
+  `core/dcc_context.instance_context`, `pid`), `connect_live` (sans instance : `live_connect_only` echoue,
+  `live_connect_or_open` lance puis `wait_ready` sur toute la plage).
+* **Worker headless** (`bridges/headless.py`) : script stdlib `WORKER_SOURCE` ecrit dans le temp (rien a ajouter au bundle),
+  lance par `hython` (`_find_hython`) ou `mayapy` (a cote de `maya.exe`), env nettoye (`launcher_core._child_env` : pas de
+  `PYTHONPATH`, le `usd-core` de FLUX n'atteint pas Houdini). Une ligne JSON par requete, prints vers un journal, timeout =
+  worker tue (session morte). Ferme par `Run.add_cleanup` a la fin du run (partage avec les sous-flows).
+* **Nodes** : `bridge.*` (9, `nodes/bridge.py`), `dcc_common.py` (Instance, helpers : `need_session`, `skip_read`, `sim`),
+  `dcc_houdini.py` (13 + coeur Instance), `dcc_maya.py` (11 + coeur), `dcc_publish.py` (coeurs des publishs),
+  `headless.py` (`action.run_headless`, `action.batch`), `event.publish_request`. Les nodes reutilisent `houdini_export` /
+  `houdini_import` (`client=session`), `maya_export_client._build_command` + enveloppe, `dcc/maya/maya_hub.py`,
+  `dcc/maya/maya_playblast.py` (nouveau, Live). Les noms de nodes Houdini / Maya sont compares sensibles a la casse.
+* **Essai a blanc** : aucun logiciel ni worker lance. Une Instance sans instance ouverte rend une session nulle (le moteur
+  laisse passer une entree `session[...]` vide en essai) ; les nodes a effet ecrivent "saute", les lecteurs rendent du vide.
+  Une instance deja ouverte sert aux lectures (`se connecterait a ...`), jamais aux effets.
+* **Publish boite noire** : `dcc.may_publish_core` / `dcc.hou_publish_core` appellent `run_maya_publish_action` /
+  `run_houdini_publish_action` dans le pool (asyncio.run dedans), Live seulement ; Houdini refuse une session sur une autre
+  instance que celle choisie dans FLUX (le runner cuit dans le singleton). Essai : destination (`resolve_publish_path`,
+  lecture) + version suivante. Flows livres `publish_maya` / `publish_houdini` (`event.publish_request` -> Instance
+  `live_connect_only` -> publish -> `FlowOutput`), Publisher non bascule (P8).
+* **Nodes livres verrouilles** (`dcc_nodes.py`, decisions 18 / 19) : `HoudiniInstance`, `MayaInstance`, `houPublish`,
+  `mayPublish` = flows `shipped/dcc/<soft>/*.flow.yml` avec `node_type` ; spec du catalogue tiree de l'interface (entrees
+  `select` = reglages a choix, constantes), drapeaux du coeur Python `<type>_core` (`internal`, hors Tab / Shelf). Le moteur
+  les execute en ligne comme un FlowCall (fichier de travail, essai a blanc compris, timeout des nodes internes). Une copie
+  d'equipe du meme nom (`POST /flows/{name}/unlock`, Team TD) les remplace pour tous ; la supprimer = Revenir au defaut.
+  Index relu au plus toutes les 2 s (le dossier d'equipe est sur le partage). L'interface d'un flow accepte `session[<soft>]`,
+  `dcc_node`, `publish` (entrees reliees seulement, jamais dans un formulaire de page). Un `FlowOutput` relie rend une
+  valeur vide sans erreur.
+
 ## Tests
 
 `backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
-flows_ws, legacy_command ; P5 : host_lock, scheduler, event_schedule, event_new_file, event_when, activation (`_sched_helpers.py`), `tests/publisher/test_publish_hooks.py` ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+flows_ws, legacy_command ; P6a : bridge_primitives, dcc_session, nodes_houdini, nodes_maya, headless, publish_black_box, dcc_subflows (faux bridges `_fake_bridges.py`, faux `hou` / `maya.cmds` `_fake_dcc.py` : prouvent les appels, jamais le logiciel) ; P5 : host_lock, scheduler, event_schedule, event_new_file, event_when, activation (`_sched_helpers.py`), `tests/publisher/test_publish_hooks.py` ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.
