@@ -441,13 +441,10 @@ def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> N
     if node.type == SCHEDULE:
         from flux_flows import scheduler
 
-        for pname in ("days", "time", "missed"):
+        for pname in ("days", "time"):   # missed: checked by its choices
             problem = scheduler.schedule_param_error(pname, params.get(pname))
             if problem:
                 issues.append(_issue("E_PARAM_INVALID", nid, problem[0], problem[1], port=pname))
-    if node.type == SCENE_OPENED and str(params.get("soft") or "maya") not in ("maya", "houdini"):
-        issues.append(_issue("E_PARAM_INVALID", nid, "SceneOpened : maya ou houdini (autres logiciels en P6b)",
-                             "SceneOpened: maya or houdini (other softs in P6b)", port="soft"))
     if node.type == FOR_BEGIN and (nid, "step") not in net.data_in and params.get("step") in (0, 0.0, "0"):
         issues.append(_issue("E_PARAM_INVALID", nid, "step ne peut pas valoir 0", "step cannot be 0", port="step"))
     if node.type == "data.flow_input":

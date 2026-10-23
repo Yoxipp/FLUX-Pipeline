@@ -38,6 +38,7 @@ async def manual(ctx, inputs, params):
 # -- P5: events armed by the scheduler (01 §9) ---------------------------------------
 # Global (schedule, new_file, when): run by the host lock holder (perso flows: locally).
 # Local (on_publish, scene_opened): run on the backend where they happen.
+# Their settings are constants (wirable=False): the flow has no run while it waits (02 §2).
 # The body hands the payload of the trigger on; a run started by hand (editor Run, dry
 # run) gets example values so the rest of the flow can be tried.
 
@@ -52,11 +53,13 @@ SCENE_SOFTS = ("maya", "houdini")
                     port("missed", "bool", "Vrai pour un rattrapage (FLUX etait ferme a l'heure)",
                          "True for a catch up (FLUX was closed at the time)", False)],
            params=[port("days", "str", "daily, ou jours separes par des virgules (mon,tue,...)",
-                        "daily, or days separated by commas (mon,tue,...)", "mon,tue,wed,thu,fri", default="daily"),
+                        "daily, or days separated by commas (mon,tue,...)", "mon,tue,wed,thu,fri", default="daily",
+                        wirable=False),
                    port("time", "str", "Heure HH:MM (heure du poste qui execute)", "Time HH:MM (executing host)",
-                        "08:00", default="08:00"),
+                        "08:00", default="08:00", wirable=False),
                    port("missed", "str", "Creneau manque : catch_up_once (rattrape une fois) ou skip",
-                        "Missed slot: catch_up_once or skip", "catch_up_once", default="catch_up_once")],
+                        "Missed slot: catch_up_once or skip", "catch_up_once", default="catch_up_once",
+                        choices=MISSED, wirable=False)],
            shelf=2, aliases=["horaire", "cron", "planifier", "heure"],
            doc_fr="Part a heure fixe, tous les jours ou certains jours. Un creneau manque (FLUX ferme) est "
                   "rattrape une fois au prochain lancement par defaut. Le run prend les defauts de l'interface.",
@@ -75,12 +78,14 @@ async def schedule(ctx, inputs, params):
            outputs=[_THEN, port("path", "path", "Fichier arrive", "New file", "$FLUX/DROP/ref.jpg"),
                     port("name", "str", "Nom du fichier", "File name", "ref.jpg"),
                     port("dir", "dir", "Dossier du fichier", "Folder of the file", "$FLUX/DROP")],
-           params=[port("pattern", "pattern", "Motif sur le nom", "Pattern on the name", "*.jpg *.png", default="*"),
-                   port("recursive", "bool", "Sous-dossiers compris", "Subfolders included", False, default=False),
+           params=[port("pattern", "pattern", "Motif sur le nom", "Pattern on the name", "*.jpg *.png", default="*",
+                        wirable=False),
+                   port("recursive", "bool", "Sous-dossiers compris", "Subfolders included", False, default=False,
+                        wirable=False),
                    port("every_s", "int", "Frequence du scan en secondes (min 5)", "Scan frequency in seconds (min 5)",
-                        30, default=30),
+                        30, default=30, wirable=False),
                    port("wait_stable", "bool", "Attendre une taille stable sur 2 scans", "Wait for a stable size on 2 scans",
-                        True, default=True)],
+                        True, default=True, wirable=False)],
            shelf=3, aliases=["fichier", "dossier", "surveiller", "watch", "drop"],
            doc_fr="Part pour chaque nouveau fichier qui arrive dans un dossier. Le premier scan sert de base : les "
                   "fichiers deja la ne declenchent rien.",
@@ -102,7 +107,7 @@ async def new_file(ctx, inputs, params):
                         "Condition (pure nodes: Exists, Compare...)", True, required=True)],
            outputs=[_THEN],
            params=[port("every_s", "int", "Frequence de l'evaluation en secondes (min 5)",
-                        "Evaluation frequency in seconds (min 5)", 30, default=30)],
+                        "Evaluation frequency in seconds (min 5)", 30, default=30, wirable=False)],
            shelf=4, aliases=["quand", "condition", "si", "trigger"],
            doc_fr="Part quand la condition passe de faux a vrai. La premiere evaluation sert de base ; une erreur "
                   "est notee dans le journal sans declencher.",
@@ -115,11 +120,12 @@ async def when(ctx, inputs, params):
 @flow_node("event.on_publish", "OnPublish", icon="PackageCheck",
            outputs=[_THEN, port("publish", "publish", "Le publish qui vient de reussir", "The publish that just succeeded"),
                     port("project", "str", "Projet du publish", "Project of the publish", "MYPROJ")],
-           params=[port("soft", "pattern", "Logiciels (maya, houdini...), vide = tous", "Softs, empty = all", "maya"),
+           params=[port("soft", "pattern", "Logiciels (maya, houdini...), vide = tous", "Softs, empty = all", "maya",
+                        wirable=False),
                    port("type", "pattern", "Types (scene, usd, cache, texture, image...), vide = tous",
-                        "Types, empty = all", "usd"),
+                        "Types, empty = all", "usd", wirable=False),
                    port("name", "pattern", "Motif sur le nom du fichier, vide = tous", "Pattern on the file name",
-                        "*_model_*")],
+                        "*_model_*", wirable=False)],
            shelf=5, aliases=["publish", "apres publish", "after publish", "publie"],
            doc_fr="Part apres chaque publish reussi sur ce poste (tous les logiciels), filtre par logiciel, type ou "
                   "nom. Soft et type sont deduits du nom et de l'extension.",
@@ -138,9 +144,10 @@ async def on_publish(ctx, inputs, params):
                     port("soft", "str", "Logiciel", "Software", "maya"),
                     port("session", "session[*]", "Session de l'instance (nodes DCC, P6)",
                          "Session of the instance (DCC nodes, P6)")],
-           params=[port("soft", "str", "maya ou houdini", "maya or houdini", "maya", default="maya"),
+           params=[port("soft", "str", "maya ou houdini (autres logiciels en P6b)", "maya or houdini (other softs in P6b)",
+                        "maya", default="maya", choices=SCENE_SOFTS, wirable=False),
                    port("every_s", "int", "Frequence de scrutation en secondes (min 2)",
-                        "Polling frequency in seconds (min 2)", 5, default=5)],
+                        "Polling frequency in seconds (min 2)", 5, default=5, wirable=False)],
            shelf=6, aliases=["scene", "ouverture", "open", "maya", "houdini"],
            doc_fr="Part quand une autre scene est ouverte dans Maya ou Houdini sur ce poste (scrutation de "
                   "l'instance, toutes les 5 s par defaut).",
