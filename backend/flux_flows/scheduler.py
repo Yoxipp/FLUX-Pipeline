@@ -48,7 +48,7 @@ MIN_EVERY_S = 5.0
 MIN_SCENE_EVERY_S = 2.0
 GLOBAL_EVENTS = ("event.schedule", "event.new_file", "event.when")
 SCENE_OPENED = "event.scene_opened"
-SCENE_SOFTS = {"maya": "Maya", "houdini": "Houdini"}
+SCENE_SOFTS = {"maya": "Maya", "houdini": "Houdini", "nuke": "Nuke"}
 _FALSE = {"0", "false", "no", "off"}
 DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 

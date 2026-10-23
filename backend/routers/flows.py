@@ -177,7 +177,7 @@ async def post_event(kind: str, body: EventBody) -> dict[str, Any]:
     if kind != "scene_opened":
         raise HTTPException(status_code=400, detail={"message": f"evenement `{kind}` inconnu (scene_opened)"})
     if body.soft not in scheduler.SCENE_SOFTS:
-        raise HTTPException(status_code=400, detail={"message": "soft : maya ou houdini"})
+        raise HTTPException(status_code=400, detail={"message": "soft : maya, houdini ou nuke"})
     sched = scheduler.get()
     if sched is None:
         raise HTTPException(status_code=409, detail={"message": "planificateur des flows arrete sur ce poste"})

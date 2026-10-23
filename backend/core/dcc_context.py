@@ -1,7 +1,8 @@
 # dcc_context.py — what a running Maya / Houdini instance has open (best effort).
 #
 # Extracted from routers/dcc.py (P5): the Publisher instance picker (/dcc/instances)
-# and the Flows scheduler (event.scene_opened, by polling) both read it. Never raises:
+# and the Flows scheduler (event.scene_opened, by polling) both read it. P6b: Nuke too
+# (its bridge runs code: the open script and the selected nodes). Never raises:
 # an instance that does not answer reads as an empty scene.
 
 from __future__ import annotations
@@ -28,6 +29,15 @@ def instance_context(dcc: str, port: int) -> dict:
             state = HoudiniClient(port=port)._get("/state")
             return {"scene": str(state.get("hip_file") or ""),
                     "selection": [str(n) for n in (state.get("selected_nodes") or [])][:50]}
+        if dcc == "Nuke":
+            from dcc.nuke.client import NukeClient
+
+            res = NukeClient(port=port).run("result = [nuke.root().name()] + [n.fullName() for n in nuke.selectedNodes()]",
+                                            timeout=2.0)
+            names = res.get("result") if res.get("ok") else None
+            if isinstance(names, list) and names:
+                scene = str(names[0] or "")
+                return {"scene": "" if scene == "Root" else scene, "selection": [str(n) for n in names[1:]][:50]}
     except Exception:                       # noqa: BLE001 - a label is best effort
         pass
     return {"scene": "", "selection": []}

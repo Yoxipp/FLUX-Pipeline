@@ -30,6 +30,16 @@ class InstanceContext(unittest.TestCase):
         with mock.patch("dcc.houdini.client.HoudiniClient._get", side_effect=OSError("refused")):
             self.assertEqual(dcc_router.instance_context("Houdini", 48886), {"scene": "", "selection": []})
 
+    def test_nuke_script_and_selection(self):
+        # P6b: Nuke's bridge runs code; an unsaved script is named "Root".
+        with mock.patch("dcc.nuke.client.send_json_line",
+                        return_value={"ok": True, "result": ["D:/comp/sh010_v004.nk", "Write1"]}) as send:
+            self.assertEqual(dcc_router.instance_context("Nuke", 7021),
+                             {"scene": "D:/comp/sh010_v004.nk", "selection": ["Write1"]})
+        self.assertEqual(send.call_args.args[1], 7021)
+        with mock.patch("dcc.nuke.client.send_json_line", return_value={"ok": True, "result": ["Root"]}):
+            self.assertEqual(dcc_router.instance_context("Nuke", 7020), {"scene": "", "selection": []})
+
 
 if __name__ == "__main__":
     unittest.main()

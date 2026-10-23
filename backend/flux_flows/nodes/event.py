@@ -44,7 +44,7 @@ async def manual(ctx, inputs, params):
 
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MISSED = ("catch_up_once", "skip")
-SCENE_SOFTS = ("maya", "houdini")
+SCENE_SOFTS = ("maya", "houdini", "nuke")   # nuke: P6b (its bridge gives the open script)
 
 
 @flow_node("event.schedule", "Schedule", icon="CalendarClock",
@@ -144,14 +144,14 @@ async def on_publish(ctx, inputs, params):
                     port("soft", "str", "Logiciel", "Software", "maya"),
                     port("session", "session[*]", "Session de l'instance (nodes DCC, P6)",
                          "Session of the instance (DCC nodes, P6)")],
-           params=[port("soft", "str", "maya ou houdini (autres logiciels en P6b)", "maya or houdini (other softs in P6b)",
+           params=[port("soft", "str", "maya, houdini ou nuke", "maya, houdini or nuke",
                         "maya", default="maya", choices=SCENE_SOFTS, wirable=False),
                    port("every_s", "int", "Frequence de scrutation en secondes (min 2)",
                         "Polling frequency in seconds (min 2)", 5, default=5, wirable=False)],
            shelf=6, aliases=["scene", "ouverture", "open", "maya", "houdini"],
-           doc_fr="Part quand une autre scene est ouverte dans Maya ou Houdini sur ce poste (scrutation de "
+           doc_fr="Part quand une autre scene est ouverte dans Maya, Houdini ou Nuke sur ce poste (scrutation de "
                   "l'instance, toutes les 5 s par defaut).",
-           doc_en="Starts when another scene is opened in Maya or Houdini on this workstation (instance polling, "
+           doc_en="Starts when another scene is opened in Maya, Houdini or Nuke on this workstation (instance polling, "
                   "every 5 s by default).")
 async def scene_opened(ctx, inputs, params):
     p = ctx.payload
