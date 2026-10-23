@@ -116,7 +116,9 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
           {dryRun && jobs.length === 0 ? tr('Mode simulation : pont Tractor non configure', 'Simulation mode: Tractor bridge not configured') : tr('Aucun job.', 'No jobs.')}
         </div>
       ) : (
-        <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+        // flexShrink 0: with overflow hidden a flex item shrinks to the window and clips the list, so the page
+        // never scrolls (2026-10-23, "faut pouvoir scroll dans jobs").
+        <div style={{ ...card, padding: 0, overflow: 'hidden', flexShrink: 0 }}>
           {shownJobs.map(j => {
             const pct = j.percent ?? (j.numTasks > 0 ? Math.round((j.numDone / j.numTasks) * 100) : 0)
             const out = jobOutput(j)
