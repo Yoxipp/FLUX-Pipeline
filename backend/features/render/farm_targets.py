@@ -5,8 +5,7 @@
   service key expression. A blade name is a valid service key: validated at school on
   2026-10-23 (echo job 34026, -service {ROOM0321}, ran on ROOM0321).
 * "X % of the farm" -> a job maxactive (max chunks running at once, 1 slot per blade at school).
-* Team cap: one budget shared by every FLUX job of the team, split into per-job maxactive.
-  Deterministic, so every FLUX window of the team computes the same split.
+* No team cap: the school's Shares (engine limits.config) share the farm between teams (2026-10-23).
 """
 from __future__ import annotations
 
@@ -127,36 +126,3 @@ def cap_from_percent(percent: int, base: str, farm_counts: Dict[str, int]) -> in
     return max(1, math.floor(pool * percent / 100))
 
 
-def split_team_cap(cap: int, jobs: List[dict]) -> Dict[int, int]:
-    """Share a team budget between its unfinished FLUX jobs: {jid: maxactive}.
-
-    jobs: {"jid", "remaining" (tasks not done), "cap" (own job cap, 0 = none)}.
-    Oldest jid first gets the remainder; every job keeps at least 1 so none starves.
-    """
-    live = sorted((j for j in jobs if j.get("remaining", 0) > 0), key=lambda j: j["jid"])
-    if cap <= 0 or not live:
-        return {}
-    out: Dict[int, int] = {}
-    budget = max(cap, len(live))
-    pending = list(live)
-    # Water filling: jobs that need less than an even share (remaining or own cap) release the rest.
-    while pending:
-        even = budget // len(pending)
-        small = [j for j in pending if _need(j) <= even]
-        if not small:
-            extra = budget - even * len(pending)
-            for i, j in enumerate(pending):
-                out[j["jid"]] = max(1, even + (1 if i < extra else 0))
-            break
-        for j in small:
-            out[j["jid"]] = max(1, _need(j))
-            budget -= out[j["jid"]]
-            pending.remove(j)
-        budget = max(budget, len(pending))
-    return out
-
-
-def _need(job: dict) -> int:
-    remaining = int(job.get("remaining") or 0)
-    own = int(job.get("cap") or 0)
-    return min(remaining, own) if own > 0 else remaining

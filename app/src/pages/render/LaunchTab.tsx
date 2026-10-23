@@ -57,6 +57,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   // where and how much
   const [whereOpen, setWhereOpen] = useState(false)
   const [whenOpen, setWhenOpen] = useState(false)
+  const [denoiseOpen, setDenoiseOpen] = useState(false)
   const [limitJob, setLimitJob] = useState(false)   // off = the team cap manages it (2026-10-23)
   const [sharePct, setSharePct] = useState(25)
   const [shareOf, setShareOf] = useState<RenderShareBase>('free')
@@ -92,6 +93,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
       if (r.frame_start == null) toast.message(tr('Pas de plage dans ce USD : la saisir', 'No frame range in this USD: type it'))
     } catch (e) { toast.error(errMsg(e)) }
   }
+  // USD library of the project (assemblies and components with a LAST), proposed before browsing.
+  const [libItems, setLibItems] = useState<{ label: string; path: string }[]>([])
+  useEffect(() => {
+    if (source !== 'usd' || libItems.length) return
+    let live = true
+    api.getUsdLibrary(project).then(lib => {
+      if (!live) return
+      const sets = lib.assemblies.map(a => ({ label: `${tr('Set', 'Set')} · ${a.name}`, path: a.file }))
+      const comps = lib.components.filter(c => c.last).map(c => ({ label: `${tr('Asset', 'Asset')} · ${c.name}`, path: c.last! }))
+      setLibItems([...sets, ...comps].sort((a, b) => a.label.localeCompare(b.label)))
+    }).catch(() => { /* no library: browse only */ })
+    return () => { live = false }
+  }, [project, source]) // eslint-disable-line react-hooks/exhaustive-deps
   const browseUsd = async () => {
     const p = await window.electronAPI?.openFile?.([{ name: 'USD', extensions: ['usd', 'usda', 'usdc'] }])
     if (p) { setUsdPath(p); void detectUsdRange(p) }
@@ -230,6 +244,18 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         </div>
       ) : (
         <Row label={tr('Fichier USD', 'USD file')}>
+          {libItems.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ ...hint, marginBottom: 3 }}>{tr('Bibliotheque USD du projet, ou parcourir plus bas', 'Project USD library, or browse below')}</div>
+              <Select value={libItems.some(i => i.path === usdPath) ? usdPath : undefined}
+                onValueChange={p => { setUsdPath(p); void detectUsdRange(p) }}>
+                <SelectTrigger style={sel} title={tr('Bibliotheque USD du projet', 'Project USD library')} />
+                <SelectContent>
+                  {libItems.map(i => <SelectItem key={i.path} value={i.path}>{i.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6 }}>
             <input style={input} value={usdPath} placeholder="\\serveur\...\shot.usd" onChange={e => setUsdPath(e.target.value)}
               onBlur={() => void detectUsdRange(usdPath)} />
@@ -255,21 +281,10 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
           </Select>
         </Row>
         <Row label={tr('Priorite', 'Priority')}
-          help={tr("Plus haut = passe avant. 1 = comme tout le monde. Au-dessus, passe aussi avant les autres equipes (dans leur part de la farm).",
-            'Higher = goes first. 1 = like everyone. Above, also goes before other teams (within their farm share).')}>
+          help={tr('Defaut 1, >1 = prend une part de la farm aux autres groupes', 'Default 1, >1 = takes farm share from other groups')}>
           <input type="number" min={1} max={10000} style={input} value={priority}
             onChange={e => setPriority(Math.max(1, Math.min(10000, Math.round(Number(e.target.value) || 1))))} />
         </Row>
-        {renderer === 'renderman' && (
-          <Row label="Denoise"
-            help={tr('denoise_batch RenderMan apres le rendu, dans le meme job, vers vNNN/denoised. Le rendu doit avoir les AOV de denoise (reglees dans Houdini).',
-              'RenderMan denoise_batch after the render, same job, into vNNN/denoised. The render needs the denoise AOVs (set in Houdini).')}>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <Check label={tr('Denoiser apres', 'Denoise after')} checked={denoise} onChange={setDenoise} />
-              {denoise && <Check label={tr('Entre images (crossframe)', 'Crossframe')} checked={denoiseCross} onChange={setDenoiseCross} />}
-            </div>
-          </Row>
-        )}
       </div>
 
       {/* How much of the farm: the school's Shares (limits.config) decide, not FLUX (2026-10-23). */}
@@ -340,6 +355,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
           )}
         </div>
       </Fold>
+
+      {renderer === 'renderman' && (
+        <Fold title="Denoise" summary={denoise ? tr(`Apres le rendu${denoiseCross ? ' · crossframe' : ''}`, `After the render${denoiseCross ? ' · crossframe' : ''}`) : tr('Non', 'No')}
+          open={denoiseOpen} onToggle={() => setDenoiseOpen(o => !o)}>
+          <Row label={tr('Apres ce rendu', 'After this render')}
+            help={tr('Vers vNNN/denoised, AOV de denoise requis', 'Into vNNN/denoised, denoise AOVs required')}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <Check label={tr('Denoiser apres', 'Denoise after')} checked={denoise} onChange={setDenoise} />
+              {denoise && <Check label={tr('Entre images (crossframe)', 'Crossframe')} checked={denoiseCross} onChange={setDenoiseCross} />}
+            </div>
+          </Row>
+        </Fold>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button type="button" style={{ ...btn(true), ...disabledIf(!canSubmit) }} onClick={() => void submit()}>

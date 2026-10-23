@@ -54,7 +54,8 @@ DEFAULTS: dict = {
     "dry_run": False,
     # Farm throttling (2026-10-23). percent 0 = off; "of" = alive blades or blades free right now.
     "job_share": {"percent": 0, "of": "alive"},   # default per-job share, overridable at submit
-    "team_cap": {"percent": 0, "of": "alive"},    # budget shared by every FLUX job of the team
+    # Kept for old render.json files, never applied since 2026-10-23 (the school's Shares decide).
+    "team_cap": {"percent": 0, "of": "alive"},
     "host_groups": {},             # team machine groups {"name": ["ROOM1701", ...]}
     "exclude_hosts": [],           # never render on these machines
 }

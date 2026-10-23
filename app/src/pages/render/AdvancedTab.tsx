@@ -4,16 +4,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Layers, Plus, Trash2, Users } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
-import type {
-  RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderSettingsResponse, RenderShare, RenderShareBase,
-} from '../../api/client'
+import type { RenderExitCode, RenderFarm, RenderFreezeWhen, RenderSettings, RenderSettingsResponse } from '../../api/client'
 import { EnvPanel } from './EnvPanel'
 import { MachinePicker } from './MachinePicker'
-import {
-  Banner, Check, Row, Section, ShareBaseInfo, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
-} from './renderUi'
+import { Banner, Check, Row, Section, Toggle, btn, disabledIf, errMsg, hint, input, lbl, useTr, warnText } from './renderUi'
 
 type Key = keyof RenderSettings
 
@@ -50,7 +46,6 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
 
   const changed = useMemo(() => changedKeys(settings, draft), [settings, draft])
   const set = <K extends Key>(k: K, v: RenderSettings[K]) => setDraft(d => ({ ...d, [k]: v }))
-  const counts = farm?.counts
   const blades = farm?.blades ?? []
 
   const save = async () => {
@@ -83,24 +78,6 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
       <input style={input} value={draft[k]} placeholder={placeholder} onChange={e => set(k, e.target.value)} />
     </Row>
   )
-  const shareField = (k: 'team_cap', label: string, help: string) => {
-    const s: RenderShare = draft[k]
-    const n = capFromPercent(s.percent, counts ? counts[s.of] : 0)
-    return (
-      <Row label={label} help={help}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="number" min={0} max={100} style={{ ...input, width: 70 }} value={s.percent}
-            onChange={e => set(k, { ...s, percent: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} />
-          <span style={hint}>%</span>
-          <Toggle value={s.of} onChange={id => set(k, { ...s, of: id as RenderShareBase })}
-            options={[{ id: 'alive', label: tr('Machines allumees', 'Machines on') }, { id: 'free', label: tr('Machines libres', 'Free machines') }]} />
-          <ShareBaseInfo />
-          <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{s.percent ? <><Layers size={11} />{n}</> : tr('off', 'off')}</span>
-        </div>
-      </Row>
-    )
-  }
-
   const groups = draft.host_groups
   const addGroup = () => {
     const name = newGroup.trim()
@@ -152,7 +129,9 @@ export function AdvancedTab({ project, settings, warning, farm, farmTeams, onSav
           {num('chunk_size', tr('Images par tache', 'Frames per task'))}
         </div>
         {warning && <div style={warnText}>{warning}</div>}
-        {shareField('team_cap', tr("Plafond de l'equipe", 'Team cap'), tr('Tous les jobs FLUX de l\'equipe. 0 = aucun.', "All the team's FLUX jobs. 0 = none."))}      </Section>
+        <div style={hint}>{tr("Part de la farm : reglee par l'ecole pour chaque equipe (limits.config), Tractor equilibre lui-meme.",
+          "Farm share: set by the school per team (limits.config), Tractor balances by itself.")}</div>
+      </Section>
 
       <Section title={tr('Groupes de PC', 'PC groups')}>
         {Object.entries(groups).map(([name, members]) => (

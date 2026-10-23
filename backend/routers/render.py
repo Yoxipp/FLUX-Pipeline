@@ -52,6 +52,8 @@ def get_settings(project: str):
     # Teams of the farm (engine limits.config, read only): Tractor shares the farm between them.
     return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user(),
             "farm_teams": farm_limits.teams(shares),
+            # {team: {nominal, cap}} of FLUX's commands (husk), "default" = every other project. None = unknown.
+            "farm_shares": (shares or {}).get(farm_limits.RENDER_TAG),
             "team_warning": farm_limits.team_warning(settings["tractor_project"], shares)}
 
 
@@ -271,9 +273,8 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
         share["percent"] = body.share_percent
     if body.share_of:
         share["of"] = body.share_of
-    team = settings["team_cap"]
     snap = None
-    if body.groups or share["percent"] or team["percent"]:
+    if body.groups or share["percent"]:
         try:
             snap = _farm_snapshot(settings, user)
         except tractor_bridge.BridgeError as exc:
@@ -284,12 +285,10 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
         include = farm_targets.resolve_hosts(body.hosts, body.groups, settings["host_groups"], rooms)
         service = farm_targets.service_expression(base, include, settings["exclude_hosts"])
         own = 0
-        team_total = 0
         if snap:
             if not 0 <= int(share["percent"]) <= 100:
                 raise ValueError("pourcentage entre 0 et 100")
             own = farm_targets.cap_from_percent(int(share["percent"]), share["of"], counts)
-            team_total = farm_targets.cap_from_percent(team["percent"], team["of"], counts)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if (body.hosts or body.groups) and not include:
@@ -297,8 +296,7 @@ def _targeting(body: SubmitBody, settings: dict, renderer: str, user: str) -> tu
     if include and not farm_targets.FLUX_HOST_TARGETING_VERIFIED:
         notes.append("Ciblage par nom de machine pas encore valide sur la farm (job test a faire)")
     own = _min_cap(settings["maxactive"], own)
-    # The team balancer refines this on the next farm poll; start under the team budget.
-    return service, _min_cap(own, team_total), own, notes
+    return service, own, own, notes
 
 
 def _team_note(settings: dict) -> list[str]:
@@ -668,60 +666,14 @@ async def job_task_log(jid: int, tid: int, project: str):
     return await asyncio.to_thread(_task_log, project, jid, tid, _user())
 
 
-_BALANCE_MAX_CHANGES = 20  # engine writes per poll, at most (never flood the engine)
-_DONE_STATES = ("done", "deleted")
-
-
-def _as_int(value) -> int:
-    try:
-        return max(0, int(str(value or "0")))
-    except ValueError:
-        return 0
-
-
-def _balance_team(project: str, settings: dict, user: str, counts: dict) -> dict:
-    """Split the team cap between the team's unfinished FLUX jobs (jattr maxactive).
-
-    Every FLUX window of the team runs the same deterministic split, so they agree.
-    Only jobs with metadata.flux_project == project and the team's Tractor project are touched.
-    """
-    team = settings["team_cap"]
-    total = farm_targets.cap_from_percent(team["percent"], team["of"], counts) if team["percent"] else 0
-    out = {"enabled": bool(total), "slots": total, "used": 0, "targets": {}, "changed": 0, "errors": []}
-    if not total:
-        return out
-    listing = tractor_bridge.jobs(settings, user, project=settings["tractor_project"], days=30)
-    team_jobs = [j for j in listing.get("jobs", [])
-                 if j.get("metadata", {}).get("flux_project") == project and j.get("state") not in _DONE_STATES
-                 and settings["tractor_project"] in (j.get("projects") or [])]
-    out["used"] = sum(int(j.get("numActive") or 0) for j in team_jobs)
-    live = [j for j in team_jobs if j.get("state") != "paused"]
-    targets = farm_targets.split_team_cap(total, [
-        {"jid": j["jid"], "remaining": int(j.get("numTasks") or 0) - int(j.get("numDone") or 0),
-         "cap": _as_int(j.get("metadata", {}).get("cap"))} for j in live])
-    out["targets"] = targets
-    if settings.get("dry_run") is True:
-        return out  # computed and shown, never applied in simulation
-    current = {j["jid"]: int(j.get("maxactive") or 0) for j in live}
-    for jid, value in sorted(targets.items()):
-        if current.get(jid) == value:
-            continue
-        if out["changed"] >= _BALANCE_MAX_CHANGES:
-            break
-        try:
-            tractor_bridge.set_maxactive(settings, user, jid, value)
-            out["changed"] += 1
-        except tractor_bridge.BridgeError as exc:
-            out["errors"].append(f"{jid}: {exc}")
-    return out
-
+# No FLUX team cap any more (2026-10-23): the school's Shares (engine limits.config) share the farm,
+# FLUX never rewrites a job's maxactive. render.json may still hold "team_cap": read, never applied.
 
 def _farm_state(project: str, user: str) -> dict:
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
     try:
         out = dict(_farm_snapshot(settings, user))
-        out["team_cap"] = _balance_team(project, settings, user, out["counts"])
     except tractor_bridge.BridgeError as exc:
         raise _bridge_error(exc)
     out["schedule"] = settings["schedule"]

@@ -169,6 +169,7 @@ export interface RenderSettings {
 // farm_teams / team_warning: Shares of the engine limits.config (read only, Tractor balances the teams itself)
 export interface RenderSettingsResponse {
   settings: RenderSettings; warning: string | null; farm_teams?: string[]; team_warning?: string | null
+  farm_shares?: Record<string, RenderShareRule> | null   // husk Shares, "default" = every other project
 }
 export interface RenderEnvUnlock { phrase: string; password: string }
 export interface RenderShareRule { nominal: number | null; cap: number | null }   // 0..1 (school limits.config)
@@ -219,7 +220,6 @@ export interface RenderBlade {
 export interface RenderFarm {
   blades: RenderBlade[]; active_by_project: Record<string, number>
   counts: Record<RenderBladeState | 'alive', number>; rooms: Record<string, string[]>
-  team_cap: { enabled: boolean; slots: number; used: number; targets: Record<string, number>; changed: number; errors: string[] }
   host_groups: Record<string, string[]>; exclude_hosts: string[]; host_targeting_verified: boolean
   schedule: { enabled: boolean; start: string; end: string; kill_at_end: boolean }
   tractor_project: string; dry_run?: boolean

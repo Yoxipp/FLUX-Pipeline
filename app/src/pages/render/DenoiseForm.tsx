@@ -4,15 +4,16 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { FolderOpen, Play } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderOpen, Play } from 'lucide-react'
 import { api } from '../../api/client'
 import type { RenderSettings } from '../../api/client'
-import { Check, Row, Section, btn, disabledIf, errMsg, hint, input, openFolder, useTr, warnText } from './renderUi'
+import { Check, Row, btn, card, disabledIf, errMsg, hint, input, lbl, openFolder, useTr, warnText } from './renderUi'
 
 export function DenoiseForm({ project, settings, onSubmitted }: {
   project: string; settings: RenderSettings | null; onSubmitted: () => void
 }) {
   const { tr } = useTr()
+  const [open, setOpen] = useState(false)   // its own folded box, apart from the render form
   const [path, setPath] = useState('')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
@@ -42,8 +43,18 @@ export function DenoiseForm({ project, settings, onSubmitted }: {
     finally { setBusy(false) }
   }
 
+  const head = (
+    <button type="button" onClick={() => setOpen(o => !o)}
+      style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+      {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+      <span style={{ ...lbl, marginBottom: 0 }}>{tr('Denoiser une sequence deja rendue', 'Denoise an already rendered sequence')}</span>
+    </button>
+  )
+  if (!open) return <div style={card}>{head}</div>
+
   return (
-    <Section title={tr('Denoiser une sequence deja rendue', 'Denoise an already rendered sequence')}>
+    <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {head}
       <Row label={tr('Sequence (une image, un motif #### ou le dossier)', 'Sequence (one frame, a #### pattern or the folder)')}
         help={tr('RenderMan denoise_batch sur la farm, vers <dossier>/denoised. Les images doivent avoir les AOV de denoise RenderMan.',
           'RenderMan denoise_batch on the farm, into <folder>/denoised. The frames need the RenderMan denoise AOVs.')}>
@@ -72,6 +83,6 @@ export function DenoiseForm({ project, settings, onSubmitted }: {
           {done.warnings.map((w, i) => <div key={i} style={warnText}>{w}</div>)}
         </div>
       )}
-    </Section>
+    </div>
   )
 }
