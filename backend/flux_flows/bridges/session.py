@@ -162,6 +162,29 @@ class ClientSession(Session):
                                       "au bridge, a etudier)"}
 
 
+class MailboxSession(Session):
+    """An extension bridge on a file mailbox (P6c template file_mailbox_server.py)."""
+
+    def __init__(self, soft: str, mailbox: str, *, pid: Optional[int] = None) -> None:
+        self.soft, self.mailbox, self.port, self.pid = soft, mailbox, None, pid
+
+    def run(self, code: str, timeout: float = 600.0) -> Dict[str, Any]:
+        from dcc.marvelous.client import mailbox_dir
+
+        return primitives.file_mailbox_call({"cmd": "run", "code": code}, mailbox_dir=str(mailbox_dir(self.mailbox)),
+                                            timeout=timeout, raise_on_error=False)
+
+
+class HttpRunSession(Session):
+    """An extension bridge on HTTP (POST /run {"code"}, the Houdini server's protocol)."""
+
+    def __init__(self, soft: str, port: int, *, pid: Optional[int] = None) -> None:
+        self.soft, self.port, self.pid = soft, int(port), pid
+
+    def run(self, code: str, timeout: float = 600.0) -> Dict[str, Any]:
+        return primitives.http_call(self.port, "/run", {"code": code}, timeout=timeout, raise_on_error=False)
+
+
 _LIVE = {"houdini": HoudiniLiveSession, "maya": MayaLiveSession}
 
 
@@ -170,8 +193,12 @@ def live_session(soft: str, port: Optional[int], pid: Optional[int] = None) -> S
     cls = _LIVE.get(spec.soft)
     if cls is not None:
         return cls(port, pid=pid)
-    if spec.soft == "nuke":
+    if spec.soft == "nuke" or (spec.extension and spec.transport == "tcp_json"):
         return TcpJsonSession(spec.soft, port, pid=pid)
+    if spec.extension and spec.transport == "file_mailbox":
+        return MailboxSession(spec.soft, spec.mailbox or f"flux_{spec.soft}_bridge", pid=pid)
+    if spec.extension and spec.transport == "http":
+        return HttpRunSession(spec.soft, port, pid=pid)
     return ClientSession(spec.soft, port, pid=pid)
 
 
@@ -197,7 +224,7 @@ def find_instance(soft: str, *, pick: str = "active", scene: str = "", pid: Any 
     """The running instance a flow targets, or None. ``active`` = the one chosen in FLUX
     (resolve_port), ``scene`` = the one whose open scene is *scene*, ``pid``."""
     spec = softs.get(soft)
-    if spec.transport == "file_mailbox" and instances is None:
+    if spec.transport == "file_mailbox" and instances is None and not spec.extension:
         # One mailbox, one instance: alive when the bridge beats (Marvelous).
         got = primitives.ping(spec.soft)
         return {"port": None, "pid": got.get("pid")} if got.get("ok") else None
@@ -214,6 +241,8 @@ def find_instance(soft: str, *, pick: str = "active", scene: str = "", pid: Any 
         if not scene:
             raise BridgeError("pick scene : relie ou saisis `scene`")
         return next((i for i in found if _same_path(scene_fn(spec.soft, int(i["port"])), scene)), None)
+    if spec.extension:          # no instance chosen in FLUX for an extension: the first one
+        return found[0]
     from core.dcc_instances import InstanceLostError, resolve_port
 
     try:

@@ -102,17 +102,36 @@ def com_call(prog_id: str, method: str, args: Optional[Dict[str, Any]] = None) -
 
 
 def scan_ports(soft: str) -> List[Dict[str, Any]]:
-    """Running instances of *soft*: {id, dcc, port, connected, pid, ...}."""
+    """Running instances of *soft*: {id, dcc, port, connected, pid, ...}. An extension bridge
+    (P6c) is not in DCC_PORT_RANGES: each port of its range is pinged."""
+    spec = softs.get(soft)
+    if spec.extension:
+        if spec.transport == "file_mailbox":
+            got = ping(spec.soft)
+            return [{"id": f"{spec.soft}:mailbox", "dcc": spec.soft, "port": None, "pid": got.get("pid")}] \
+                if got.get("ok") else []
+        found = []
+        for p in softs.port_range(spec.soft):
+            if ping(spec.soft, p).get("ok"):
+                found.append({"id": f"{spec.soft}:{p}", "dcc": spec.soft, "port": p, "pid": None})
+        return found
     from core.dcc_instances import scan_instances
 
-    return list(scan_instances(softs.get(soft).dcc_key))
+    return list(scan_instances(spec.dcc_key))
 
 
 def launch(soft: str, scene: Optional[str] = None) -> bool:
     """Start *soft* detached from FLUX (optionally on *scene*). False when no exe is found."""
+    spec = softs.get(soft)
+    if spec.extension:
+        from features.launcher.launcher_core import launch_exe
+        from flux_flows.bridges import extension
+
+        exe = extension.find_exe(extension.get(spec.soft))
+        return bool(exe) and bool(launch_exe(exe, scene or None, label=spec.label))
     from features.launcher.launcher_core import launch_dcc
 
-    return bool(launch_dcc(softs.get(soft).launcher_key, scene or None))
+    return bool(launch_dcc(spec.launcher_key, scene or None))
 
 
 def ping(soft: str, port: Optional[int] = None) -> Dict[str, Any]:
@@ -128,13 +147,13 @@ def ping(soft: str, port: Optional[int] = None) -> Dict[str, Any]:
                                     timeout=3.0)
             return {"ok": True, "version": out, "port": port}
         if spec.transport == "tcp_json":
-            resp = tcp_json_call(port, spec.ping, timeout=2.0, raise_on_error=False)
+            resp = tcp_json_call(port, spec.ping, timeout=0.5 if spec.extension else 2.0, raise_on_error=False)
             ok = resp.get("ok") is True or resp.get("status") == "ok" or resp.get("pong") is True
             return {"ok": bool(ok), "version": str(resp.get("version") or ""), "port": port}
         if spec.transport == "file_mailbox":
-            from dcc.marvelous.client import heartbeat
+            from dcc.marvelous.client import heartbeat, mailbox_dir
 
-            beat = heartbeat()
+            beat = heartbeat(mailbox_dir(spec.mailbox) if spec.mailbox else None)
             return {"ok": beat is not None, "version": str((beat or {}).get("version") or ""), "port": port,
                     "pid": (beat or {}).get("pid")}
     except BridgeError as exc:
