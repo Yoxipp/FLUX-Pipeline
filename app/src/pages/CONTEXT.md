@@ -203,3 +203,5 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
     ou Entree = entrer, fil d'Ariane dans la TopBar, U = remonter ; `DccBanner.tsx` (Deverrouiller = copie d'equipe,
     Revenir au defaut apres `SlideToConfirm`). Les coeurs `spec.internal` ne sont ni dans Tab ni dans le Shelf.
     `icons.ts` liste toutes les icones du registre.
+  * P6c : bouton Bridges de la TopBar -> `BridgesDialog.tsx` (bridges d'extension : erreurs, exe, etat d'installation,
+    Installer / Mettre a jour / Desinstaller sur ce poste, conflit -> "Remplacer (sauvegarde)", Creer les nodes = Team TD).

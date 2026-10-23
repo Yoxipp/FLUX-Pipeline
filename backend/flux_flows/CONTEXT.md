@@ -6,7 +6,8 @@ ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Et
 moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).
 P5 (2026-10-23) : scheduler, verrou entre postes, evenements actifs, activation (voir "Evenements et flows actifs").
 P6a (2026-10-23) : socle DCC, Houdini et Maya (voir "DCC (P6a)"). P6b (2026-10-23) : Nuke, Painter, Designer, Marvelous,
-ZBrush, Mari (voir "Autres logiciels").
+ZBrush, Mari (voir "Autres logiciels"). P6c (2026-10-23) : bridges d'extension, un logiciel ajoute sans recompiler (voir
+"Bridges d'extension").
 
 ## Fichiers
 
@@ -238,6 +239,36 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   `shipped/dcc/<dossier>/{<p>_instance,<p>_publish}.flow.yml` (generes depuis les specs des coeurs : entrees reliees par
   `data.flow_input` ; `dict` hors interface) et `shipped/publish_<soft>.flow.yml`.
 * ZBrush : `release` apres chaque export (finally) ET en fin de run (`ctx.add_cleanup`), meme en erreur ou annulation.
+
+## Bridges d'extension (P6c, 01 §12, 00_LOGIQUE n°18)
+
+Un logiciel que FLUX ne livre pas : `CONFIG/extensions/bridges/<soft>/` = `bridge.yml` + `dcc_side/` (+ `flows/` optionnel).
+Exemple documente, NON TESTE : `docs/development/FLOWS_BRIDGE_3DSMAX.md`.
+
+* `bridges/extension.py` : manifeste strict (pydantic `extra=forbid` : soft, label, icon, prefix `^[a-z]{2,4}$`, exe_hints,
+  port_range [base, nombre <= 16], transport `tcp_json` | `file_mailbox` | `http`, mailbox, install {target, files relatifs}),
+  `load_all()` (cache 2 s, erreurs isolees par bridge), refus avec la raison : soft livre, nom de dossier different, prefixe
+  livre / reserve (ps, ue) / double, ports qui chevauchent `DCC_PORT_RANGES` ou une autre extension. `get(soft)` = valide seulement.
+* `softs.get` retombe sur les extensions valides (`Soft.extension`, `dcc_key` `ext:<soft>`) : `scan_ports` pingue chaque port
+  de la plage, `launch` passe par `launch_exe` + `exe_hints`, sessions `TcpJsonSession` / `MailboxSession` / `HttpRunSession`,
+  `find_instance` prend la premiere instance (pas d'instance "active" choisie dans FLUX).
+* `bridges/templates/` : `tcp_json_server.py` et `file_mailbox_server.py` (stdlib, Python 3.7+, 127.0.0.1, `ping` / `run`),
+  lus a cote d'eux `<nom du script>.json` (ecrit a l'installation). Embarques par `backend.spec` (`*_server.py`). Le script
+  execute le code recu : meme confiance que les nodes Python d'equipe.
+* `bridges/installer.py` : copie `install.files` + `<script>.json` dans `install.target` (`~`, `%VAR%`, `$VAR`, `{exe_dir}`),
+  recu `.flux_bridge_<soft>.install.json` (sha256). Jamais d'ecrasement silencieux (conflit ; `overwrite` = sauvegarde
+  `.flux_backup_<date>` d'abord) ; desinstallation = fichiers de FLUX seulement + restauration des sauvegardes, un fichier
+  modifie depuis est garde ; chemins confines. `install_all_entries()` branche les extensions dans "Installer tous les bridges".
+* Nodes (`nodes/dcc_extension.py`) : `session.ext_instance_core` (interne, reglage `soft`, Live seulement) et
+  `dcc.ext_run_script` (`session[*]`, `args["path"]` = `path` ou fichier temporaire `temp_ext` supprime en fin de run).
+  `bridges/flow_templates.py` ecrit `<prefix>_instance` (`session.<prefix>_instance`) et `<prefix>_publish`
+  (`dcc.<prefix>_publish` : ExtRunScript enregistre, puis `flux.publish_file`) dans le scope equipe (ou les
+  `flows/session.flow.yml` / `publish.flow.yml` du bridge). Noeuds d'equipe sans coeur propre : icone / rang Shelf du coeur
+  interne, sinon du dernier node a effet (`dcc_nodes._inner_look`).
+* Routes : `GET /flows/bridges`, `POST /flows/bridges/{soft}/install | uninstall` (ce poste, sans droit),
+  `POST /flows/bridges/{soft}/flows` (Team TD). Nom de flow `bridges` reserve.
+* Tests : bridge_manifest, bridge_templates (modeles sur port libre / boite temporaire), bridge_installer, extension_session
+  (faux logiciel = modele TCP dans un thread). Prouvent le protocole et le cote FLUX, pas un vrai logiciel.
 
 ## Tests
 
