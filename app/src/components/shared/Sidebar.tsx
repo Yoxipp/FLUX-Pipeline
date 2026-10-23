@@ -11,7 +11,7 @@ import {
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
 import { useActiveInstances } from '../../hooks/useActiveInstances'
-import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { useVisibleDccs } from '../../hooks/useVisibleDccs'
 import { DCC_STATUS_KEYS, SOFTWARE } from '../../lib/dccs'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
@@ -142,7 +142,7 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
   const productionMode = new URLSearchParams(search).get('mode') ?? localStorage.getItem('flux.production.mode') ?? 'shot'
   const { unreadMentions } = useMentions()
   const { t } = useI18n()
-  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const { isVisible: isDccEnabled } = useVisibleDccs()
   const [launcherMenu, setLauncherMenu] = useState<{ soft: string; x: number; y: number } | null>(null)
   const [launching, setLaunching]             = useState<Set<string>>(new Set())
   const [dccPaths, setDccPaths]               = useState<Record<string, string>>({})

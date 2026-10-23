@@ -22,7 +22,7 @@ import { api } from '../api/client'
 import type { DesignerPackage, MayaUsdPreview, MayaUsdTreeNode, PainterChannel, PainterPreset, UsdTaskContribution } from '../api/client'
 import { useProject } from '../ProjectContext'
 import { useWorkProfile } from '../WorkProfileContext'
-import { useEnabledDccs } from '../hooks/useEnabledDccs'
+import { useVisibleDccs } from '../hooks/useVisibleDccs'
 import { SOFTWARE } from '../lib/dccs'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
 import { PublishDestination } from './publisher/PublishDestination'
@@ -690,7 +690,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   // Work profile (ADR 0042): first software shown, unless the user or a navigation
   // (Production prefill, ZBrush freeze) already picked one.
   const { ready: prefsReady, prefs: workPrefs } = useWorkProfile()
-  const { isEnabled: isDccEnabled } = useEnabledDccs()
+  const { isVisible: isDccEnabled } = useVisibleDccs()
   const dccPicked = useRef(readSession(PUB + 'dcc') !== undefined)
   const changeDcc = useCallback((name: string) => { dccPicked.current = true; setDcc(name) }, [])
   const dccEnabled = useCallback((name: string) => {

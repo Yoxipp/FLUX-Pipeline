@@ -11,6 +11,7 @@
 // working prefs; later tweaks in the pages change the working prefs and show "modified".
 // ADR 0043: a profile presets the Production "Show" departments and the activity
 // notifications; both stay editable by hand (Show menu, Activity > Notifications).
+// A profile also narrows the software shown, inside what Settings > Logiciels enables.
 // Folder Manager layout is NOT part of a profile (page preference, per browser).
 // Values stay scalar (project.json only keeps str/bool/number): department lists are
 // comma separated upper-case names, '' = every department.
@@ -25,6 +26,9 @@ export interface WorkPrefs {
   publisherSoft: string
   /** Production columns shown, upper-case department names, comma separated ('' = all). */
   productionDepartments: string
+  /** Software shown (launcher, status bar, Publisher, Shelf), DCC keys comma separated ('' = all).
+   *  Always narrowed by Settings > Logiciels, never widened. */
+  softwares: string
   /** Activity notifications (toast + system notification). */
   notifyMention: boolean
   /** Events on followed (favorite) tasks. */
@@ -78,6 +82,7 @@ export const DEFAULT_PREFS: WorkPrefs = {
   launcher: 'compact',
   publisherSoft: '',
   productionDepartments: '',
+  softwares: '',
   notifyMention: true,
   notifyFollowed: true,
   notifyPublish: false,
@@ -112,6 +117,7 @@ export function sanitizePrefs(raw: unknown): Partial<WorkPrefs> {
   if (r.launcher === 'compact' || r.launcher === 'full') out.launcher = r.launcher
   if (typeof r.publisherSoft === 'string' && (r.publisherSoft === '' || PUBLISHER_SOFTS.includes(r.publisherSoft))) out.publisherSoft = r.publisherSoft
   if (typeof r.productionDepartments === 'string') out.productionDepartments = joinDepartments(splitDepartments(r.productionDepartments))
+  if (typeof r.softwares === 'string') out.softwares = joinSoftwares(splitSoftwares(r.softwares))
   for (const { key } of NOTIFY_OPTIONS) if (typeof r[key] === 'boolean') out[key] = r[key] as boolean
   return out
 }
@@ -222,4 +228,25 @@ export function toggleDepartment(departments: { name: string }[], pref: string, 
 export function showAllDepartments(departments: { name: string }[], pref: string): string {
   const modeNames = departments.map(d => d.name.toUpperCase())
   return joinDepartments(splitDepartments(pref).filter(x => !modeNames.includes(x)))
+}
+
+// ── Software shown ─────────────────────────────────────────────────────────────
+
+export function splitSoftwares(value: string): string[] {
+  return Array.from(new Set(value.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)))
+}
+
+export function joinSoftwares(keys: string[]): string {
+  return Array.from(new Set(keys.map(x => x.trim().toLowerCase()).filter(Boolean))).join(',')
+}
+
+/**
+ * Is `key` shown? Settings > Logiciels (`isEnabled`) always wins. When the profile picks
+ * nothing, or only software disabled in Settings, every enabled software stays visible so
+ * the launcher is never empty because of a profile.
+ */
+export function isSoftwareVisible(key: string, pref: string, allKeys: string[], isEnabled: (key: string) => boolean): boolean {
+  if (!isEnabled(key)) return false
+  const picked = splitSoftwares(pref).filter(k => allKeys.includes(k) && isEnabled(k))
+  return !picked.length || picked.includes(key.toLowerCase())
 }

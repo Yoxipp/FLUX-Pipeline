@@ -6,6 +6,7 @@
 Hooks de donnees : `useFlowsWs` (WS `/flows/ws` des Flows, modele `useDccStatus` : reconnexion 3 s, `onReconnect` pour relire le run), `useDccStatus`, `useActiveInstances`, `useBackendStatus`, `useActivity`, `useMentions`, `useFeeds`, `useCommentReadState`, `useProduction`, `useSettings`, `useFavorites`, `useEnabledDccs`.
 
 `useEnabledDccs` (V8 U10) : DCC actives par utilisateur (`/settings/enabled-dccs`, `USER/<user>/UserSettings/User.json` cle `enabled_dccs`). `null` = toutes. Evenement `flux:enabled-dccs`. Liste DCC partagee : `lib/dccs.ts`.
+`useVisibleDccs` : DCC affichees = `useEnabledDccs` restreint par la pref de profil `softwares` (ADR 0042, vide = toutes ; si le profil ne garde aucune DCC active, toutes les actives restent visibles). Utilise par Sidebar, StatusBar, Publisher, ShelfManager ; Settings > Logiciels reste sur `useEnabledDccs`.
 
 Les intervalles viennent de `lib/pollIntervals.ts`.
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DccStatusMap } from '../../types'
-import { useEnabledDccs } from '../../hooks/useEnabledDccs'
+import { useVisibleDccs } from '../../hooks/useVisibleDccs'
 import { DCC_FRONTEND_KEYS, SOFTWARE } from '../../lib/dccs'
 import { DccLogo } from './DccLogo'
 
@@ -11,7 +11,7 @@ interface Props {
 // Connected software, their mark only (ADR 0044): the name is the tooltip. The FLUX
 // version (x.x.xxx, package.json fluxVersion via electron main) sits bottom-right.
 export function StatusBar({ dccStatus }: Props) {
-  const { isEnabled } = useEnabledDccs()
+  const { isVisible: isEnabled } = useVisibleDccs()
   const [version, setVersion] = useState('')
   useEffect(() => {
     window.electronAPI?.getAppVersion().then(setVersion).catch(() => {})
