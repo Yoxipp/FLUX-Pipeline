@@ -148,6 +148,7 @@ export interface BridgeInstallResult { dcc: string; status: 'ok' | 'skip' | 'err
 // The manual as HTML, for the Settings > Doc iframe (the Electron main process adds
 // the X-Flux-Token header to every request to the backend, frames included).
 export const MANUAL_URL = `${BASE_URL}/system/manual`
+export const FLOWS_MANUAL_URL = `${BASE_URL}/system/manual?doc=flows`
 
 // Tractor farm render (backend features/render/team_settings.py, routers/render.py).
 export interface RenderSettings {
@@ -254,7 +255,7 @@ export const api = {
 
   // Settings > Doc: where the manual lives (FLUX_DOC copy, else the bundled one).
   getManualInfo: () =>
-    apiCall<{ path: string; doc_dir: string }>('GET', '/system/manual-info'),
+    apiCall<{ path: string; flows_path: string; doc_dir: string }>('GET', '/system/manual-info'),
 
   photoshopOpen: (project_name: string, rel_path: string) =>
     apiCall<{ ok: boolean; error: string | null }>('POST', '/dcc/photoshop/open', { project_name, rel_path }),
