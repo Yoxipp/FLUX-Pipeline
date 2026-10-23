@@ -1,4 +1,4 @@
-/* flow_editor.css — menus of the Flows editor (File menu, node hover toolbar). Flat, no glow. */
+/* flow_editor.css — menus of the Flows editor (File menu, node hover toolbar), port hit zones, loop frames, knife. Flat, no glow. */
 
 .flow-menu {
   min-width: 220px;
@@ -120,3 +120,17 @@
   min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 16px;
   text-align: center; color: var(--on-accent); flex-shrink: 0;
 }
+
+/* Ports (PortHandle.tsx): wider invisible grab zone around the 10 px dot, more on outputs,
+   mostly outwards (inputs left, outputs right) so the row label stays clickable. */
+.react-flow__handle.flow-port-in::before,
+.react-flow__handle.flow-port-out::before { content: ''; position: absolute; top: -5px; bottom: -5px; }
+.react-flow__handle.flow-port-in::before  { left: -7px; right: -4px; }
+.react-flow__handle.flow-port-out::before { left: -5px; right: -10px; }
+
+/* Loop frames (LoopFrame.tsx): never catch the mouse, the pane below selects / pans. */
+.react-flow__node.react-flow__node-loop { pointer-events: none !important; }
+
+/* Knife (Y, NetworkPane): screen space overlay over the graph. */
+.flow-knife { position: absolute; inset: 0; z-index: 6; cursor: crosshair; }
+.flow-knife svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

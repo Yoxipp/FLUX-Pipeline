@@ -65,6 +65,7 @@ const DRAFT_PREFIX = 'flux.flow_draft.'
 type ViewPrefs = { dots: boolean; straight: boolean }
 type HttpError = Error & { status?: number; detail?: { by?: string; at?: string; status?: string; code?: string; issues?: RunIssue[] } }
 type RunStates = Record<string, NodeRunInfo>
+type RunLinks = RunRecord['links']   // value per link "a.port->b.port"
 
 function readPrefs(): ViewPrefs {
   try {
@@ -117,10 +118,12 @@ function Editor({ rights }: { rights: FlowRights }) {
   // Runs: the run launched from this window (live), the node states shown, the Runs dock.
   const [liveRun, setLiveRun] = useState<{ id: string; running: boolean } | null>(null)
   const [runStates, setRunStates] = useState<RunStates>({})
+  const [runLinks, setRunLinks] = useState<RunLinks>({})
   const [runsOpen, setRunsOpen] = useState(false)
   const [openRunId, setOpenRunId] = useState<string | null>(null)
   const [runsKey, setRunsKey] = useState(0)
   const runBuf = useRef<Record<string, RunStates>>({})   // states per run_id, also before POST answers
+  const linkBuf = useRef<Record<string, RunLinks>>({})   // link values per run_id (link_value)
   const liveRef = useRef<string | null>(null)
 
   const refreshList = useCallback(() => {
@@ -343,6 +346,7 @@ function Editor({ rights }: { rights: FlowRights }) {
     liveRef.current = id
     setOpenRunId(null)
     setRunStates({ ...(runBuf.current[id] ?? {}) })
+    setRunLinks({ ...(linkBuf.current[id] ?? {}) })
   }, [])
 
   const onWs = useCallback((msg: FlowsWsMessage) => {
@@ -361,11 +365,17 @@ function Editor({ rights }: { rights: FlowRights }) {
       if (msg.run_id === liveRef.current) setRunStates({ ...buf })
       return
     }
+    if (msg.type === 'link_value') {
+      const buf = (linkBuf.current[msg.run_id] ??= {})
+      buf[msg.link] = { value: msg.preview, count: msg.count }
+      if (msg.run_id === liveRef.current) setRunLinks({ ...buf })
+      return
+    }
     if (msg.type === 'run_finished' && msg.run_id === liveRef.current) {
       setLiveRun(r => r && r.id === msg.run_id ? { ...r, running: false } : r)
       setRunsKey(k => k + 1)
       // The record has the values received of a failed node: reread it once.
-      flowsApi.getRun(msg.run_id, project || undefined).then(r => setRunStates(r.nodes)).catch(() => { /* WS states stay */ })
+      flowsApi.getRun(msg.run_id, project || undefined).then(r => { setRunStates(r.nodes); setRunLinks(r.links ?? {}) }).catch(() => { /* WS states stay */ })
       const secs = msg.duration_ms !== null ? ` (${(msg.duration_ms / 1000).toFixed(1)} s)` : ''
       const what = msg.mode === 'dry' ? tr('Essai a blanc', 'Dry run') : 'Run'
       if (msg.status === 'ok') toast.success(tr(`${what} fini${secs}`, `${what} done${secs}`))
@@ -379,6 +389,7 @@ function Editor({ rights }: { rights: FlowRights }) {
     if (!id) return
     flowsApi.getRun(id, project || undefined).then(r => {
       setRunStates(r.nodes)
+      setRunLinks(r.links ?? {})
       setLiveRun(cur => cur && cur.id === id ? { ...cur, running: r.status === 'queued' || r.status === 'running' } : cur)
     }).catch(() => { /* run of a restarted backend: interrupted */ })
   }, [project])
@@ -405,13 +416,13 @@ function Editor({ rights }: { rights: FlowRights }) {
   }, [liveRun, project])
 
   const openRecord = useCallback((r: RunRecord | null) => {
-    if (r) setRunStates(r.nodes)
-    else if (liveRef.current) setRunStates({ ...(runBuf.current[liveRef.current] ?? {}) })
-    else setRunStates({})
+    if (r) { setRunStates(r.nodes); setRunLinks(r.links ?? {}) }
+    else if (liveRef.current) { setRunStates({ ...(runBuf.current[liveRef.current] ?? {}) }); setRunLinks({ ...(linkBuf.current[liveRef.current] ?? {}) }) }
+    else { setRunStates({}); setRunLinks({}) }
   }, [])
 
   // A new flow opened: no run states from the previous one.
-  useEffect(() => { liveRef.current = null; setLiveRun(null); setRunStates({}); setOpenRunId(null) }, [loaded?.name, loaded?.scope])
+  useEffect(() => { liveRef.current = null; setLiveRun(null); setRunStates({}); setRunLinks({}); setOpenRunId(null) }, [loaded?.name, loaded?.scope])
 
   const running = !!liveRun?.running
   const runBlocked = !loaded ? tr('Aucun flow ouvert', 'No open flow')
@@ -484,8 +495,19 @@ function Editor({ rights }: { rights: FlowRights }) {
         setSelection(new Set([...Object.keys(block.nodes), ...block.notes.map(n => NOTE_PREFIX + n.id)]))
       }).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
     },
+    // Alt + drag: a copy of the nodes (and the links between them) with its top-left at `at`.
+    onDuplicate: (ids, at) => {
+      const d = docOf(store.get())
+      const clip = d && copySelection(d, ids)
+      if (!d || !clip) return
+      const block = pasteBlock(d, clip, at)
+      store.apply(cur => insertBlock(cur, block))
+      setSelection(new Set(Object.keys(block.nodes)))
+    },
     onConnect: (from, to) => store.apply(d => connect(d, from, to)),
     onDisconnect: links => store.apply(d => disconnect(d, links)),
+    // A link picked up from its input: moved to `to`, or removed (null). One undo entry.
+    onRelink: (old, to) => store.apply(d => to ? connect(disconnect(d, [old]), old.from, to) : disconnect(d, [old])),
     // One undo entry: the node and, from a link dropped in the void, its link.
     onGroup: () => {
       if (!picked.nodes.length) return
@@ -639,7 +661,7 @@ function Editor({ rights }: { rights: FlowRights }) {
           : <NetworkPane
               view={view} flowKey={loaded ? `${loaded.scope}:${loaded.name}:${loaded.version ?? ''}` : ''}
               selection={selection} edit={edit}
-              search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
+              search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates} runLinks={runLinks}
               issues={issues} flash={flash}
               onSelect={onSelect} onToggleWires={toggleWires}
             />}

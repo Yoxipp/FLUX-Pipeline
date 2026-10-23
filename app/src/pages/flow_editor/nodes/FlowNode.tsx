@@ -1,12 +1,14 @@
 // FlowNode.tsx — a node of the Flows editor (03_EDITEUR §3): name band in the family colour
 // (2026-10-22), icon, DCC prefix badge, exec row on top, one 20 px row per data port
-// (value greyed or "<- n.port"). Hover shows a small toolbar like Houdini: bypass, info (doc).
+// (port names only, 2026-10-23). Hover shows a small toolbar like Houdini: bypass, info.
 // P2: run state of the node (03_EDITEUR §7): running = accent border + spinning loader, ok =
 // check + count, error = --err border + message (values received in the tooltip),
 // error_handled = --warn border, skipped / cancelled = dashed border.
 // P4: issue badge (count, --err or --warn) in the header, red ring on the faulty ports,
 // one blink when zoomed from the Problems panel.
-// (i) shows the node's section of docs/flows/03_INDEX_NODES.md (nodeDoc.tsx), else the registry doc.
+// (i) shows the node's section of docs/flows/03_INDEX_NODES.md (nodeDoc.tsx), else the registry doc,
+// then every current value (2026-10-23): Inputs (literal value or "<- node.port", plus the
+// value received in the run when known) and Outputs (last value of the run when known).
 
 import { memo, useRef, useState } from 'react'
 import { NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react'
@@ -22,29 +24,23 @@ import '../flow_editor.css'
 export const NODE_W = 240
 const HEADER_H = 28
 const ROW_H = 20
-const VALUE_MAX = 24
+const VALUE_MAX = 80
 const HIDE_MS = 250   // time to reach the toolbar before it hides
 
 export interface NodeIssues { errors: number; warnings: number; ports: string[] }
-export type FlowNodeData = { node: FlowViewNode; linked: string[]; dim: boolean; run?: NodeRunInfo; issues?: NodeIssues; flash?: number }
+// Run values per port (RunRecord.links / link_value, else NodeRunInfo.values), for the info card.
+export interface PortRunValues { in: Record<string, string>; out: Record<string, string> }
+export type FlowNodeData = { node: FlowViewNode; linked: string[]; dim: boolean; run?: NodeRunInfo; issues?: NodeIssues; flash?: number; io?: PortRunValues }
 export type FlowRfNode = Node<FlowNodeData, 'flow'>
 
 const EXEC_IN: PortSpec = { name: 'exec', type: 'exec' }
 const EXEC_OUT: PortSpec = { name: 'then', type: 'exec' }
 
 function Row({ left, right, linked, faulty }: { left?: PortSpec; right?: PortSpec; linked: Set<string>; faulty: Set<string> }) {
-  const value = left && left.type !== 'exec'
-    ? left.wiredFrom ? `<- ${left.wiredFrom}` : formatValue(left.value, VALUE_MAX)
-    : ''
   return (
     <div style={{ position: 'relative', height: ROW_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', fontSize: 11 }}>
       {left && <PortHandle port={left} side="in" linked={linked.has(handleId('in', left.name))} faulty={faulty.has(left.name)} />}
-      {left && (
-        <span style={{ display: 'flex', gap: 5, minWidth: 0, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-          <span style={{ color: 'var(--ink-2)' }}>{left.name}</span>
-          {value && <span style={{ color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>}
-        </span>
-      )}
+      {left && <span style={{ color: 'var(--ink-2)', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left.name}</span>}
       {!left && <span style={{ flex: 1 }} />}
       {right && <span style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{right.name}</span>}
       {right && <PortHandle port={right} side="out" linked={linked.has(handleId('out', right.name))} faulty={faulty.has(right.name)} />}
@@ -52,14 +48,32 @@ function Row({ left, right, linked, faulty }: { left?: PortSpec; right?: PortSpe
   )
 }
 
-function InfoCard({ node }: { node: FlowViewNode }) {
+function ValueLine({ port, value, run }: { port: PortSpec; value?: string; run?: string }) {
+  const { tr } = useTr()
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr', columnGap: 6, fontSize: 11, marginTop: 3 }}>
+      <span style={{ color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={port.name}>{port.name}</span>
+      <span style={{ minWidth: 0, wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>
+        <span style={{ color: 'var(--ink-4)' }}>{port.type}</span>
+        {value !== undefined && <span style={{ color: value ? 'var(--ink)' : 'var(--ink-4)' }}>{'  '}{value || tr('(vide)', '(empty)')}</span>}
+        {run !== undefined && <span style={{ display: 'block', color: 'var(--ink-3)' }}>run : {run}</span>}
+      </span>
+    </div>
+  )
+}
+
+function InfoCard({ node, io, run }: { node: FlowViewNode; io?: PortRunValues; run?: NodeRunInfo }) {
   const { tr, lang } = useTr()
   const fam = FAMILY_INFO[node.family]
   const section = nodeDocSection(node.type)
   const doc = lang === 'en' ? node.doc_en || node.doc_fr : node.doc_fr || node.doc_en
+  const ins = [...node.inputs, ...(node.constants ?? [])].filter(p => p.type !== 'exec')
+  const outs = node.outputs.filter(p => p.type !== 'exec')
+  const head: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: 0.4,
+                                      marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--rule)' }
   return (
-    <div style={{
-      width: 340, marginTop: 4, padding: '8px 10px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
+    <div className="nowheel" style={{
+      width: 340, maxHeight: 560, overflowY: 'auto', marginTop: 4, padding: '8px 10px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
       borderRadius: 6, boxShadow: 'var(--shadow)', fontSize: 11.5, color: 'var(--ink-2)',
     }}>
       <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{node.label}</div>
@@ -73,6 +87,14 @@ function InfoCard({ node }: { node: FlowViewNode }) {
           <span style={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>{v}</span>
         </div>
       ))}
+      {ins.length > 0 && <div style={head}>{tr('Entrees', 'Inputs')}</div>}
+      {ins.map(p => (
+        <ValueLine key={p.name} port={p}
+                   value={p.wiredFrom ? `<- ${p.wiredFrom}` : formatValue(p.value, VALUE_MAX)}
+                   run={io?.in[p.name] ?? run?.values?.[p.name]} />
+      ))}
+      {outs.length > 0 && <div style={head}>{tr('Sorties', 'Outputs')}</div>}
+      {outs.map(p => <ValueLine key={p.name} port={p} run={io?.out[p.name]} />)}
     </div>
   )
 }
@@ -134,7 +156,7 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
         </div>
       </NodeToolbar>
       <NodeToolbar isVisible={info} position={Position.Bottom} align="start" offset={4}>
-        <div onMouseEnter={enter} onMouseLeave={leave}><InfoCard node={node} /></div>
+        <div onMouseEnter={enter} onMouseLeave={leave}><InfoCard node={node} io={data.io} run={run} /></div>
       </NodeToolbar>
       <div style={{
         width: NODE_W, background: 'var(--paper-2)',
