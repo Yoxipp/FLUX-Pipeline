@@ -1,7 +1,9 @@
 // renderUi.tsx: shared look and helpers of the Tractor window (pages/Render.tsx and its tabs).
 // Flat tokens, light elevation, no glow (FLUX UI rules).
 
+import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { Info } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import type { RenderBladeState, RenderJob } from '../../api/client'
 
@@ -86,6 +88,28 @@ export function jobOutput(j: RenderJob): string {
 
 export function Row({ label, children, help }: { label: string; children: ReactNode; help?: string }) {
   return <div><div style={lbl}>{label}</div>{children}{help && <div style={{ ...hint, marginTop: 3 }}>{help}</div>}</div>
+}
+
+// "i" button: what "machines on" / "free machines" mean (2026-10-23). Click to show, click again to hide.
+export function ShareBaseInfo() {
+  const { tr } = useTr()
+  const [open, setOpen] = useState(false)
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button type="button" onClick={() => setOpen(o => !o)} title={tr('Explication', 'Explanation')}
+        style={{ display: 'inline-flex', background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: open ? 'var(--accent)' : 'var(--ink-3)' }}>
+        <Info size={12} />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 20, width: 280, marginTop: 4, padding: '8px 10px',
+          background: 'var(--paper)', border: '1px solid var(--rule-2)', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,.12)',
+          fontSize: 11, color: 'var(--ink-2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div><b>{tr('Machines allumees', 'Machines on')}</b> : {tr('vues par Tractor dans les 15 dernieres minutes, occupees ou non.', 'seen by Tractor in the last 15 minutes, busy or not.')}</div>
+          <div><b>{tr('Machines libres', 'Free machines')}</b> : {tr("aucun rendu Tractor en cours, mais pas forcement sans personne dessus.", 'no Tractor render running, but not necessarily nobody at the desk.')}</div>
+        </div>
+      )}
+    </span>
+  )
 }
 
 export function Toggle({ value, options, onChange }: {

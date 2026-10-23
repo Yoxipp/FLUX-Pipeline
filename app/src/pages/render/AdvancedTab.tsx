@@ -9,7 +9,7 @@ import { api } from '../../api/client'
 import type { RenderFarm, RenderFreezeWhen, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
 import { MachinePicker } from './MachinePicker'
 import {
-  Banner, Check, Row, Section, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
+  Banner, Check, Row, Section, ShareBaseInfo, Toggle, btn, capFromPercent, disabledIf, errMsg, hint, input, lbl, useTr, warnText,
 } from './renderUi'
 
 type Key = keyof RenderSettings
@@ -74,7 +74,8 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
             onChange={e => set(k, { ...s, percent: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} />
           <span style={hint}>%</span>
           <Toggle value={s.of} onChange={id => set(k, { ...s, of: id as RenderShareBase })}
-            options={[{ id: 'alive', label: tr('des machines allumees', 'of machines on') }, { id: 'free', label: tr('des machines libres', 'of free machines') }]} />
+            options={[{ id: 'alive', label: tr('Machines allumees', 'Machines on') }, { id: 'free', label: tr('Machines libres', 'Free machines') }]} />
+          <ShareBaseInfo />
           <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{s.percent ? <><Layers size={11} />{n}</> : tr('off', 'off')}</span>
         </div>
       </Row>

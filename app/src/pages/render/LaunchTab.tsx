@@ -12,7 +12,7 @@ import type {
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../../components/shared/ui'
 import { MachinePicker } from './MachinePicker'
 import {
-  Check, Row, Toggle, btn, capFromPercent, card, disabledIf, errMsg, hint, input, lbl, openFolder, sel, useTr, warnText,
+  Check, Row, ShareBaseInfo, Toggle, btn, capFromPercent, card, disabledIf, errMsg, hint, input, lbl, openFolder, sel, useTr, warnText,
 } from './renderUi'
 
 type Source = 'shot' | 'usd'
@@ -108,7 +108,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   function teamCapSummary() {
     return teamCap ? `${tr('equipe', 'team')} · ${teamCap}` : tr('sans limite', 'no limit')
   }
-  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('des machines libres', 'of free machines') : tr('des machines allumees', 'of machines on'))
+  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('machines libres', 'free machines') : tr('machines allumees', 'machines on'))
   const shareSummary = share.percent
     ? `${share.percent} % ${ofLabel(share.of)} · ${jobCap}`
     : teamCapSummary()
@@ -288,7 +288,8 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
                   onChange={e => setSharePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
               )}
               <Toggle value={shareOf} onChange={id => setShareOf(id as RenderShareBase)}
-                options={[{ id: 'free', label: tr('des machines libres', 'of free machines') }, { id: 'alive', label: tr('des machines allumees', 'of machines on') }]} />
+                options={[{ id: 'free', label: tr('Machines libres', 'Free machines') }, { id: 'alive', label: tr('Machines allumees', 'Machines on') }]} />
+              <ShareBaseInfo />
             </div>
           )}
         </Row>
