@@ -171,7 +171,18 @@ def launch_dcc(dcc_name: str, scene: str | None = None) -> bool:
     if extra:
         env["FLUX_FRAME_START"] = str(DEFAULT_FRAME_START)
         env["FLUX_FRAME_END"] = str(DEFAULT_FRAME_END)
+    return launch_exe(exe, scene, extra=extra, env=env, label=dcc_name)
+
+
+def launch_exe(exe: str, scene: str | None = None, *, extra: tuple = (), env: dict | None = None,
+               label: str | None = None) -> bool:
+    """Start *exe* (optionally on *scene*) detached from the hub, environment cleaned.
+
+    Extracted from launch_dcc (Flows P6c): an extension bridge (3ds Max...) is not in the
+    launcher constants but starts the same way. See launch_dcc for why detaching matters."""
+    env = env if env is not None else _child_env()
     args = [exe, *extra, scene] if scene else [exe, *extra]
+    dcc_name = label or os.path.basename(exe)
     try:
         if os.name == "nt":
             # `start "" "<exe>" [args]` — the empty "" is start's window-title arg.
