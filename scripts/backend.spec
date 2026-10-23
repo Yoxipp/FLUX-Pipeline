@@ -39,6 +39,8 @@ hidden = (
 # validates USD recipes, and the DCC plugin sources are copied into the softwares.
 app_datas = [
     (str(ROOT / "backend/flux_actions/config/*.yml"), "flux_actions/config"),
+    # Shipped v2 flows (legacy_* today, publish_<soft> from P8): a folder = copied recursively.
+    (str(ROOT / "backend/flux_flows/shipped"), "flux_flows/shipped"),
     (str(ROOT / "backend/features/usd_assembler/recipe/schema.json"),
      "features/usd_assembler/recipe"),
     (str(ROOT / "backend/dcc/houdini/flux_houdini_server.py"), "dcc/houdini"),

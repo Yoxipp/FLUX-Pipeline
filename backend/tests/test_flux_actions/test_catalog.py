@@ -28,10 +28,11 @@ class Catalog(unittest.TestCase):
         return {"name": "demo", "description": "demo action", "steps": [
             {"name": "a", "index": 10, "note": "first", "commands": [
                 {"name": "join", "command": "call_function", "note": "a code function",
-                 "parameters": {"function": "core.paths:is_subpath", "child": "C:/x/y", "parent": "C:/x"}}]},
+                 "parameters": {"function": "core.paths:to_flux_token", "path": "C:/x/y", "root": "C:/x"}}]},
             {"name": "b", "index": index_b, "commands": [
                 {"name": "echo", "command": "call_function",
-                 "parameters": {"function": "json:dumps", "obj": {"from": "a.join.result"}}}]},
+                 "parameters": {"function": "core.paths:is_subpath", "child": {"from": "a.join.result"},
+                                "parent": "$FLUX"}}]},
         ]}
 
     def test_commands_and_functions_listed(self) -> None:
@@ -49,7 +50,7 @@ class Catalog(unittest.TestCase):
         self.assertEqual(catalog.resolve_action_file(Path("x/demo.yml")), path)
         query = ActionQuery.from_file(path)
         self.assertIs(asyncio.run(query.execute()), Status.COMPLETED)
-        self.assertEqual(query.buffer.steps["b"].commands["echo"].outputs["result"], "true")
+        self.assertEqual(query.buffer.steps["b"].commands["echo"].outputs["result"], True)
 
     def test_link_to_a_later_step_is_refused(self) -> None:
         with self.assertRaises(ValueError):

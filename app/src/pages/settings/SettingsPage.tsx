@@ -35,7 +35,7 @@ const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'user',     label: 'User',   hint: 'Toi et ce poste' },
   { key: 'project',  label: 'Projet', hint: 'Le projet actif, pour tous ses artistes' },
   { key: 'advanced', label: 'Avancé', hint: 'Réglages à risque (confirmation)' },
-  { key: 'doc',      label: 'Doc',    hint: 'Manuel de FLUX' },
+  { key: 'doc',      label: 'Doc',    hint: 'Manuels de FLUX et des Flows' },
 ]
 const SUBS: { key: Sub; label: string }[] = [
   { key: 'settings', label: 'Réglages' }, { key: 'disk', label: 'Disque' }, { key: 'templates', label: 'Editeur de Template' },

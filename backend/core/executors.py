@@ -12,3 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 HEAVY_WORKERS = 16
 
 HEAVY = ThreadPoolExecutor(max_workers=HEAVY_WORKERS, thread_name_prefix="flux-heavy")
+
+# Flows v2 node bodies (01_ARCHITECTURE §4): a node may block up to 600 s on a DCC,
+# so the Flows get their own pool instead of starving the publishes of HEAVY.
+FLOWS_WORKERS = 8
+
+FLOWS = ThreadPoolExecutor(max_workers=FLOWS_WORKERS, thread_name_prefix="flux-flows")

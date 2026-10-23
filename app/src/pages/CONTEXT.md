@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__pages.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `ActionGraph` (node flow lecture seule, route cachee `/action-graph`), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
+Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `ActionGraph` (ancien editeur des actions YAML, route `/action-graph-legacy` via `flow_editor/LegacyEditor.tsx`, retire en P8), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
@@ -151,3 +151,49 @@ Pages geantes = dette connue, ne pas les decouper sans demande.
 * Table Production (2026-10-08) : layout fixe (`colgroup`), Shot / Timing / Casting gardent leur largeur
   et les departements masques elargissent les colonnes de departement. Plus de resume
   "X taches selectionnees" : Ctrl / Shift + clic sur le badge selectionne, clic simple ouvre les retakes.
+
+## Editeur de Flows (`flow_editor/`, chantier Flows P0 2026-10-22)
+
+Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, fichiers), ADR 0057. P0 = lecture seule.
+* `FlowEditor.tsx` : coque (route `/action-graph`, lien profond `?flow=<nom>`) : `TopBar` (choix du flow, badges, recherche,
+  Cadrer, "Ancien editeur"), `ShelfBar` (onglet par famille), `NetworkPane` (@xyflow/react, Tab, F, Echap, MiniMap par famille),
+  `ParamsPane` (node selectionne ou flow).
+* `nodes/FlowNode.tsx` (barre de famille, icone, ligne exec, une ligne par port), `PortHandle.tsx` (forme et couleur par type,
+  plein = relie), `PortTooltip.tsx` (une seule info-bulle en portail, 300 ms), `edges/FlowEdge.tsx` (exec blanc, data couleur du type).
+* `families.ts` / `icons.ts` / `portTypes.ts` : variables `--fam-*` et `--port-*` de `globals.css`, table statique lucide.
+* `v1_adapter.ts` : `ActionGraph` v1 -> `FlowView` (fonctions pures : commande -> famille, params -> ports, une chaine exec
+  dans l'ordre des etapes, node Start en tete, liens data des parametres cables). Appels API dans `api/flows.ts` (routes v1).
+* `TabMenu.tsx` : menu d'ajout a la souris (P4, filtre possible). `useTr.ts` copie de l'ancien editeur.
+* P2 (runs, 03 §7) : `TopBar` Run (le document ouvert, `draft`, TD, aucune version), Essai (fichier enregistre, grise sur
+  une version figee), Stop, Runs. `FlowEditor` ecoute `useFlowsWs` : etats par `run_id` (gardes meme avant la reponse du POST),
+  toast des nodes Notify et de fin de run, relecture de `GET /flows/runs/{id}` a la fin et apres reconnexion.
+  `FlowNode` : bordure et pastille par etat (`running` accent + LoaderCircle, `ok` coche + `xN`, `error` `--err` + message,
+  valeurs recues en info-bulle, `error_handled` `--warn`, `skipped` / `cancelled` tirets). `RunsPanel.tsx` : dock Runs
+  (historique du flow, clic = graph colore par ce run, rapport d'essai et logs, clic sur une ligne = selection du node).
+* P4 (edition, 2026-10-23, 03 §4 a §6) :
+  * Etat : `store.ts` (`createDocStore`, `useSyncExternalStore`, aucune dependance) tient le `FlowDoc` ; `history.ts` (pile
+    immuable, 200, `coalesceKey` < 800 ms) ; `reducers.ts` (actions pures, partage structurel, aucun relayout) ;
+    `clipboard.ts` (`flux_flow_clip: 1`, ids regeneres, colle a la souris) ; `layout.ts` (bouton Layout seul, une entree undo).
+    La vue (`v2_adapter.adaptV2Flow`) est derivee du document ; un enregistrement garde la pile. Lecture seule la ou
+    Enregistrer est bloque (livre, version figee, case absente).
+  * Catalogue v2 (`GET /flows/catalog`, `adaptCatalog`) : ports par spec (exec, entrees, params promouvables, sorties),
+    Tab / Shelf / `NodePalette.tsx` (tiroir Catalogue, glisser `application/x-flux-node` ou clic = centre).
+    `portTypes.ts` = miroir de `types.py` (`canConnect`, `editorConnect` : une sortie `any` passe), `checkLink` pendant le
+    glisser (ports compatibles entoures, autres a 35 %, raison en rouge dans `PortTooltip`, 2e lien sur une sortie exec refuse,
+    entree data deja reliee = remplacee). Lien lache dans le vide = Tab des nodes compatibles, node cree relie.
+    `test_catalog_types.py` (backend) garde le miroir. Conversion implicite marquee `~` sur le lien (`FlowEdge`).
+  * `ParamsPane.tsx` (libelle, bypass, un `ParamWidget` par port), `FlowParams.tsx` (libelle, description, `run_policy`,
+    interface entrees / sorties, variables), `NodeWriterDialog.tsx` (node Python d'equipe, `POST /flows/nodes`).
+  * `IssuesPanel.tsx` : `POST /flows/validate` 300 ms apres la derniere edition, erreurs puis avertissements, clic = zoom +
+    clignotement, "Corriger" = `fixes.ts` (un reducer par `fix.kind`, une entree undo). Pastille par node, anneau rouge sur
+    le port fautif, lien fautif en `--err`, badge "invalide" et compteur dans la TopBar ; backend injoignable = Run bloque.
+  * `GroupBox.tsx` (Ctrl+G, boite derriere ses nodes, la glisser deplace les nodes, double clic = renommer) et `NoteNode.tsx`
+    (N a la souris). Ids xyflow prefixes `group:` / `note:` (`NetworkPane`).
+  * Enregistrer (`FlowEditor.saveDoc`) : Ctrl+S, Enregistrer et incrementer, quitter (changer de flow, fermer la fenetre :
+    `components/shared/closeGuard.ts` lu par `TitleBar`). Nodes `!` ajoutes depuis le dernier enregistrement (`destructive.ts`,
+    miroir de `flag_on`) = `DestructiveDialog.tsx` + `SlideToConfirm`, ids envoyes en `confirmed_destructive`. 409 de revision
+    = `ConflictDialog.tsx` (voir sa version : le document reste en brouillon local ; enregistrer par-dessus). Brouillon
+    `localStorage` `flux.flow_draft.<portee>.<nom>`, propose a la reouverture. `VersionsDialog.tsx` (Fichier > Versions, tag
+    de version) : diff par version, Voir (lecture seule, bandeau "Lecture vNNN"), Revenir (cree v(max+1)), historique.
+  * L'ancien editeur (`/action-graph-legacy`, `ActionGraph.tsx`) n'est plus dans la TopBar : lien "Ancien editeur" dans
+    Parametres avances, carte Actions (YAML), jusqu'a P8.

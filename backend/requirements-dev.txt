@@ -1,3 +1,5 @@
 -r requirements.txt
 # Test-only: Starlette >= 1.x TestClient imports httpx2 (BSD-3-Clause; deps httpcore2 BSD-3, truststore MIT).
 httpx2>=2.16
+# Build-only: python -m PyInstaller scripts/backend.spec (BUILD_INSTALLER.bat). GPL with bootloader exception, not bundled as a library.
+pyinstaller>=6.0

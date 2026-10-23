@@ -43,6 +43,33 @@
   --prod-seq:   oklch(66% 0.08  85);
   --prod-shot:  oklch(66% 0.08 260);
 
+  /* ── flows : une couleur par famille de nodes (aplats, 03_EDITEUR §2) ── */
+  --fam-event:    oklch(66% 0.085 345);
+  --fam-logic:    oklch(66% 0.085 315);
+  --fam-session:  oklch(66% 0.085 285);
+  --fam-dcc:      oklch(66% 0.085 255);
+  --fam-operator: oklch(66% 0.085 225);
+  --fam-flux:     oklch(66% 0.085 195);
+  --fam-data:     oklch(66% 0.085 165);
+  --fam-action:   oklch(66% 0.085 100);
+  --fam-subflow:  var(--ink-2);
+  --fam-bridge:   var(--ink-3);
+
+  /* ── flows : une couleur par type de port (01_ARCHITECTURE §3) ── */
+  --port-exec:     #e9e6e2;   /* main flow: near white, stands out over data links */
+  --port-any:      var(--ink-3);
+  --port-bool:     oklch(66% 0.085 345);
+  --port-int:      oklch(66% 0.085 175);
+  --port-float:    oklch(66% 0.085 200);
+  --port-str:      oklch(66% 0.085 315);
+  --port-pattern:  oklch(66% 0.085 315);
+  --port-path:     oklch(66% 0.085 100);
+  --port-dir:      oklch(66% 0.085 120);
+  --port-dict:     oklch(66% 0.085 255);
+  --port-session:  oklch(66% 0.085 285);
+  --port-publish:  oklch(66% 0.085 230);
+  --port-dcc_node: oklch(66% 0.085 210);
+
   /* ── typographie ── */
   /* ADR 0050: one font everywhere, Inter embedded (@fontsource-variable/inter, imported in
      main.tsx). --mono is kept as a name for labels / tokens / versions but resolves to Inter;
@@ -57,6 +84,8 @@
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
   --shadow-inset: inset 0 1px 4px rgba(0,0,0,0.35);
+  /* Popovers and dialogs used var(--shadow) without any definition (19 uses): same as --shadow-md. */
+  --shadow: var(--shadow-md);
 
   /* ── compat App.tsx ── */
   --color-bg:      var(--paper);

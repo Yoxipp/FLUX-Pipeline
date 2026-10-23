@@ -1,0 +1,17 @@
+flux_flow: 2
+name: legacy_generate_proxy
+label: "generate_proxy (v1)"
+description: "Proxy USD au publish : un mesh decime (purpose=proxy) par mesh de rendu, calcule par FLUX sans Houdini."
+run_policy: skip_if_running
+origin: {kind: v1, name: generate_proxy, shelf: publish}
+interface:
+  - {id: proxy_source, type: path, label: "Asset USD source", default: null}
+nodes:
+  n1: {type: event.manual, pos: [0, 0], params: {}}
+  n2: {type: flux.legacy_command, pos: [320, 0], params: {command: generate_proxy, ports: {inputs: {source: path}, outputs: {}}}, label: proxy.proxy}
+  in1: {type: data.flow_input, pos: [320, 104], params: {id: proxy_source}}
+links:
+  - {from: in1.value, to: n2.source}
+  - {from: n1.then, to: n2.exec}
+notes:
+  - {id: k1, pos: [0, 84], text: "generate_proxy.yml - author lightweight USD proxy geometry (purpose=proxy).\n\nOne step, one command. The command reads the render meshes of a published USD\nasset, decimates each with fast-simplification, and writes a proxy layer that\nsublayers the source and adds a \"<name>_proxy\" Mesh (purpose=proxy) per mesh.\nNo Houdini, no license token.\n\nsource / out are set at run time (UI or runner); reduction keeps its default.\n\nsource is set at run time; target_reduction/min_tris keep defaults."}

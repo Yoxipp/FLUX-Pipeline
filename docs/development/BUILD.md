@@ -3,6 +3,14 @@
 > Deplace depuis `docs/archive/legacy/docs/Build_Pipeline.md` et corrige le 2026-09-16 (cible NSIS, sortie `INSTALLEURS/`,
 > jeton API S1, installeur Python supprime). Les chemins sensibles au build sont listes dans `STRUCTURE.md`.
 
+## Installer un poste de dev
+
+* Double-clic `INSTALL_DEV.bat` : `pip install -r backend/requirements-dev.txt` (backend + `httpx2` des tests +
+  PyInstaller) puis `npm ci`, puis verifie les imports et `tsc`. Il installe dans le `python` du PATH (celui que lance
+  `FLUX_DEV.bat`) mais **ignore le Python d'un logiciel** (Nuke, Houdini, Maya...) et les raccourcis du Store : il
+  prend alors le Python suivant (`py -3.13`, `py -3`) et previent qu'il faut le mettre en premier dans le PATH.
+  Il n'installe ni Python ni Node : il donne la commande `winget` s'ils manquent.
+
 ## Lancer en dev
 
 * Double-clic `FLUX_DEV.bat` (fait `npm install` la premiere fois, puis `npm run dev`).
