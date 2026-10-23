@@ -522,7 +522,12 @@ async def install_all_bridges_endpoint() -> dict:
     from features.launcher.bridges import install_all_bridges
 
     def _do() -> list[dict]:
-        return install_all_bridges(get_installed_dccs(), _AUTOSTART_MODULES, ensure_library)
+        # Flows P6c: the extension bridges (CONFIG/extensions/bridges/) install with the others.
+        from flux_flows.bridges.installer import install_all_entries
+
+        ext_installed, ext_modules = install_all_entries()
+        return install_all_bridges({**get_installed_dccs(), **ext_installed},
+                                   {**_AUTOSTART_MODULES, **ext_modules}, ensure_library)
 
     loop = asyncio.get_running_loop()
     results = await loop.run_in_executor(None, _do)

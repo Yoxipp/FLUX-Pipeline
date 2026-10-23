@@ -31,7 +31,7 @@ PORT_REF_RE = re.compile(r"^([a-z][a-z0-9_]{0,30})\.([a-z][a-z0-9_]*)$")
 
 # Static routes of /flows: a flow cannot take one of these names.
 RESERVED_NAMES = frozenset(
-    "catalog runs host nodes pages validate migrate preview events ws rights".split()
+    "catalog runs host nodes pages validate migrate preview events ws rights bridges".split()
 )
 # Flow variable / interface ids that would shadow $FLUX or a context key.
 RESERVED_VARS = frozenset("flux project asset shot seq user date time".split())

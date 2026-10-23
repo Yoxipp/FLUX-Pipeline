@@ -16,6 +16,8 @@
 # acknowledged, dry run passed on the frozen version: GET /{name}/activation), WS
 # ``host``, ``activation`` and ``flow_changed``; a dry run of version `current` that ends
 # ``ok`` writes state.json ``dry_run_ok``.
+# P6c: GET /flows/bridges (extension bridges + install state), POST
+# /flows/bridges/{soft}/install | uninstall (this machine, never a silent overwrite).
 
 from __future__ import annotations
 
@@ -401,6 +403,60 @@ class CopyBody(BaseModel):
     to_scope: str
     project: Optional[str] = None
     new_name: Optional[str] = None
+
+
+class BridgeInstallBody(BaseModel):
+    exe: Optional[str] = None       # default: found by exe_hints
+    overwrite: bool = False         # replace files FLUX did not write (after a backup)
+
+
+def _bridge(soft: str):
+    from flux_flows.bridges import extension
+
+    ext = next((e for e in extension.load_all() if e.soft == soft), None)
+    if ext is None:
+        raise HTTPException(status_code=404, detail={"message": f"bridge d'extension `{soft}` introuvable"})
+    return ext
+
+
+@router.get("/bridges")
+async def list_bridges() -> dict[str, Any]:
+    """Extension bridges (P6c, CONFIG/extensions/bridges/): manifest, errors, exe found,
+    install state on this machine."""
+    from flux_flows.bridges import extension, installer
+
+    def _do() -> dict[str, Any]:
+        out = []
+        for ext in extension.load_all():
+            row = ext.to_dict()
+            exe = extension.find_exe(ext) if ext.manifest else None
+            row["exe"] = exe
+            row["install"] = installer.status(ext, exe) if ext.ok else None
+            out.append(row)
+        folder = extension.bridges_dir()
+        return {"dir": str(folder) if folder else None, "bridges": out}
+
+    return await asyncio.to_thread(_do)
+
+
+@router.post("/bridges/{soft}/install")
+async def install_bridge(soft: str, body: BridgeInstallBody) -> dict[str, Any]:
+    """Copy the dcc_side script into the soft's folder (this machine). A conflict without
+    ``overwrite`` changes nothing: {success: false, conflicts}."""
+    from flux_flows.bridges import extension, installer
+
+    ext = _bridge(soft)
+    got = await asyncio.to_thread(installer.install, ext, body.exe or extension.find_exe(ext),
+                                  overwrite=body.overwrite)
+    return got
+
+
+@router.post("/bridges/{soft}/uninstall")
+async def uninstall_bridge(soft: str, body: BridgeInstallBody) -> dict[str, Any]:
+    from flux_flows.bridges import extension, installer
+
+    ext = _bridge(soft)
+    return await asyncio.to_thread(installer.uninstall, ext, body.exe or extension.find_exe(ext))
 
 
 @router.get("")

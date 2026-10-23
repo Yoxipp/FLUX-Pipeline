@@ -6,7 +6,7 @@
 #   <id>.req     a request written by FLUX, claimed here (renamed <id>.work)
 #   <id>.resp    the answer, written atomically
 # Requests: {"cmd": "run", "code": "..."} -> {"ok": true, "result": ...} | {"ok": false, "error"}
-# FLUX writes flux_bridge.json next to this file: {"soft", "label", "mailbox"}.
+# FLUX writes <script name>.json next to this file: {"soft", "label", "mailbox"}.
 # Call poll() from the soft's own timer / idle callback (its main thread), or run
 # serve_forever() in a thread when the soft allows it.
 # SECURITY: runs the Python code FLUX sends: same trust as the team's Python nodes.
@@ -24,11 +24,16 @@ VERSION = "flux-extension-mailbox 1"
 
 def load_config():
     cfg = {"soft": "extension", "label": "Extension", "mailbox": "flux_extension_bridge"}
-    try:
-        with open(os.path.join(HERE, "flux_bridge.json"), encoding="utf-8") as fh:
-            cfg.update(json.load(fh))
-    except (OSError, ValueError):
-        pass
+    # <this script's name>.json (written by FLUX at install, several bridges can share a
+    # folder), else flux_bridge.json.
+    stem = os.path.splitext(os.path.basename(os.path.abspath(__file__)))[0]
+    for name in (stem + ".json", "flux_bridge.json"):
+        try:
+            with open(os.path.join(HERE, name), encoding="utf-8") as fh:
+                cfg.update(json.load(fh))
+            break
+        except (OSError, ValueError):
+            continue
     return cfg
 
 

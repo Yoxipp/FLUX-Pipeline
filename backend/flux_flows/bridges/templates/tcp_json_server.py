@@ -2,7 +2,7 @@
 #
 # Copy into CONFIG/extensions/bridges/<soft>/dcc_side/, adapt the bottom of the file to
 # the soft (how it starts the script, which thread runs the code), list it in bridge.yml
-# (install.files). FLUX writes flux_bridge.json next to it at install time:
+# (install.files). FLUX writes <script name>.json next to it at install time:
 #   {"soft": "max", "label": "3ds Max", "port_base": 7100, "port_count": 8}
 #
 # Protocol (one JSON object per line, one request per connection, 127.0.0.1 only):
@@ -25,11 +25,16 @@ VERSION = "flux-extension-bridge 1"
 
 def load_config():
     cfg = {"soft": "extension", "label": "Extension", "port_base": 7100, "port_count": 8}
-    try:
-        with open(os.path.join(HERE, "flux_bridge.json"), encoding="utf-8") as fh:
-            cfg.update(json.load(fh))
-    except (OSError, ValueError):
-        pass
+    # <this script's name>.json (written by FLUX at install, several bridges can share a
+    # folder), else flux_bridge.json.
+    stem = os.path.splitext(os.path.basename(os.path.abspath(__file__)))[0]
+    for name in (stem + ".json", "flux_bridge.json"):
+        try:
+            with open(os.path.join(HERE, name), encoding="utf-8") as fh:
+                cfg.update(json.load(fh))
+            break
+        except (OSError, ValueError):
+            continue
     return cfg
 
 
