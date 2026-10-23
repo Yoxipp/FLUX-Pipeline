@@ -16,14 +16,20 @@ from unittest import mock
 from dcc.marvelous import client
 
 
+def _beat(box: Path) -> None:
+    tmp = box / "alive.json.tmp"
+    tmp.write_text(json.dumps({"time": time.time(), "pid": os.getpid()}), encoding="utf-8")
+    os.replace(tmp, box / "alive.json")      # atomic, like the real bridge must be
+
+
 def _serve_once(box: Path, answer: dict) -> threading.Thread:
     """A fake bridge: beats, answers the first request of *box*."""
-    (box / "alive.json").write_text(json.dumps({"time": time.time(), "pid": os.getpid()}), encoding="utf-8")
+    _beat(box)
 
     def run():
         end = time.monotonic() + 5
         while time.monotonic() < end:
-            (box / "alive.json").write_text(json.dumps({"time": time.time(), "pid": os.getpid()}), encoding="utf-8")
+            _beat(box)
             reqs = list(box.glob("*.req"))
             if reqs:
                 rid = reqs[0].name[:-4]
