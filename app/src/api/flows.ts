@@ -4,7 +4,7 @@
 
 import { api, apiCall } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, MigrateReport, RunRecord, RunStatus, RunSummary } from '../pages/flow_editor/types'
+import type { FlowCatalog, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -19,7 +19,8 @@ export interface RunOpts {
   base_revision?: number
 }
 
-export interface SaveOpts { project?: string; base_revision?: number; force?: boolean; note?: string }
+// confirmed_destructive: ids of the `!` nodes validated with the slider (409 E_DESTRUCTIVE_UNCONFIRMED otherwise).
+export interface SaveOpts { project?: string; base_revision?: number; force?: boolean; note?: string; confirmed_destructive?: string[] }
 
 function qs(params: Record<string, string | number | undefined>): string {
   const q = Object.entries(params).filter(([, v]) => v !== undefined && v !== '')
@@ -32,6 +33,10 @@ export const flowsApi = {
   getV1Action:   (name: string): Promise<ActionGraph> => api.getActionGraph(name),
   getV1Catalog:  (): Promise<ActionCatalog> => api.getActionCatalog(),
   getRights:     (): Promise<FlowRights> => apiCall<FlowRights>('GET', '/flows/rights'),
+  getCatalog:    (): Promise<FlowCatalog> => apiCall<FlowCatalog>('GET', '/flows/catalog'),
+  // P4: issues of the open document (the backend is the reference, 01 §8). Never writes.
+  validate: (flow: FlowDoc, scope: FlowScope, project?: string): Promise<{ issues: Issue[]; valid: boolean }> =>
+    apiCall('POST', '/flows/validate', { flow, scope, project }),
 
   // v2 store (01 §14). project = active project name, needed for the project scope.
   list: (project?: string): Promise<FlowListItem[]> =>
@@ -39,10 +44,15 @@ export const flowsApi = {
   get: (name: string, opts: { scope?: FlowScope; project?: string; version?: number } = {}): Promise<FlowRead> =>
     apiCall<FlowRead>('GET', `/flows/${encodeURIComponent(name)}${qs(opts)}`),
   // base_revision undefined = new flow (Nouveau, Enregistrer sous): 409 if the name exists.
-  save: (flow: FlowDoc, scope: FlowScope, opts: SaveOpts = {}): Promise<{ state: FlowState }> =>
+  save: (flow: FlowDoc, scope: FlowScope, opts: SaveOpts = {}): Promise<SaveResult> =>
     apiCall('PUT', `/flows/${encodeURIComponent(flow.name)}`, { flow, scope, ...opts }),
-  increment: (name: string, scope: FlowScope, flow: FlowDoc | null, opts: SaveOpts = {}): Promise<{ state: FlowState; created: number | null }> =>
+  increment: (name: string, scope: FlowScope, flow: FlowDoc | null, opts: SaveOpts = {}): Promise<SaveResult & { created: number | null }> =>
     apiCall('POST', `/flows/${encodeURIComponent(name)}/increment`, { flow, scope, ...opts }),
+  versions: (name: string, scope: FlowScope, project?: string): Promise<VersionList> =>
+    apiCall<VersionList>('GET', `/flows/${encodeURIComponent(name)}/versions${qs({ scope, project })}`),
+  // Revenir a vN: the working file becomes vN, frozen as v(max+1) (nothing is lost).
+  revert: (name: string, scope: FlowScope, to_version: number, project?: string): Promise<{ state: FlowState; created: number | null }> =>
+    apiCall('POST', `/flows/${encodeURIComponent(name)}/revert`, { scope, project, to_version }),
   copy: (name: string, from_scope: FlowScope, to_scope: FlowScope, opts: { project?: string; new_name?: string } = {}): Promise<{ state: FlowState; scope: FlowScope; name: string }> =>
     apiCall('POST', `/flows/${encodeURIComponent(name)}/copy`, { from_scope, to_scope, ...opts }),
   migrate: (dry_run: boolean): Promise<MigrateReport> =>

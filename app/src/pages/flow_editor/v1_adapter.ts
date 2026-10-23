@@ -8,7 +8,7 @@
 
 import type { ActionCatalog, ActionGraph, ActionGraphNode, CatalogCommand } from '../../types'
 import { toPortType } from './portTypes'
-import type { Family, FlowView, FlowViewEdge, FlowViewNode, PortSpec } from './types'
+import type { Family, FlowView, FlowViewEdge, FlowViewNode, NodeSpec, PortSpec } from './types'
 
 const COL_W = 320          // node width 240 + room for the links
 const ROW_GAP = 28
@@ -182,16 +182,20 @@ export function adaptV1Action(graph: ActionGraph): FlowView {
   }
 }
 
-// Catalogue entry as the Shelf and Tab menu show it (P0: v1 commands only).
+// Catalogue entry as the Shelf and Tab menu show it (P0: v1 commands; P4: v2 nodes, see
+// adaptCatalog in v2_adapter.ts).
 export interface CatalogEntry {
   type:   string
   label:  string
   family: Family
+  icon?:  string
   prefix?: string
   doc_fr?: string
   doc_en?: string
   origin?: string
   aliases: string[]
+  shelf?: number | null   // order on the Shelf; null = not on the Shelf
+  spec?:  NodeSpec
 }
 
 export function adaptV1Catalog(catalog: ActionCatalog | null): CatalogEntry[] {

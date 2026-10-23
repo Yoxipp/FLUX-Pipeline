@@ -1,7 +1,8 @@
 // TabMenu.tsx — Tab menu at the mouse, like Houdini (2026-10-22): one sub-menu per node
 // family, its nodes inside; typing searches every node (names starting with the search first).
 // Keys: arrows, Right / Enter opens a family, Left goes back, Enter picks, Escape closes.
-// P0: nothing is added (editing comes in P4).
+// P4: picking adds the node (at the mouse). ilter limits the menu (a link dropped in the
+// void: the compatible nodes only, 03 §4), 	itle replaces the footer.
 
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
@@ -14,8 +15,10 @@ import { useTr } from './useTr'
 const SEARCH_MAX = 14
 const COL_W = 210
 
-export function TabMenu({ entries, x, y, onPick, onClose }: {
+export function TabMenu({ entries: all, x, y, filter, title, onPick, onClose }: {
   entries: CatalogEntry[] | null
+  filter?: (e: CatalogEntry) => boolean
+  title?: string
   x: number
   y: number
   onPick: (e: CatalogEntry) => void
@@ -26,6 +29,7 @@ export function TabMenu({ entries, x, y, onPick, onClose }: {
   const [famIdx, setFamIdx] = useState(0)
   const [nodeIdx, setNodeIdx] = useState(-1)   // -1 = focus on the family column
   const ql = q.trim().toLowerCase()
+  const entries = useMemo(() => all && filter ? all.filter(filter) : all, [all, filter])
 
   const byFamily = useMemo(() => {
     const m = {} as Record<Family, CatalogEntry[]>
@@ -80,7 +84,7 @@ export function TabMenu({ entries, x, y, onPick, onClose }: {
   })
   const NodeRow = ({ e, on, onHover }: { e: CatalogEntry; on: boolean; onHover: () => void }) => {
     const info = FAMILY_INFO[e.family]
-    const Icon = iconFor(undefined, e.family)
+    const Icon = iconFor(e.icon, e.family)
     const doc = lang === 'en' ? e.doc_en || e.doc_fr : e.doc_fr || e.doc_en
     return (
       <div onMouseDown={ev => { ev.preventDefault(); pick(e) }} onMouseEnter={onHover} style={rowStyle(on)} title={doc}>
@@ -120,7 +124,7 @@ export function TabMenu({ entries, x, y, onPick, onClose }: {
               )
             })}
         <div style={{ fontSize: 10.5, color: 'var(--ink-4)', padding: '3px 4px 1px', borderTop: '1px solid var(--rule)' }}>
-          {tr('Ajout de node : edition en P4', 'Adding a node: editing in P4')}
+          {title ?? tr('Entree ajoute le node a la souris', 'Enter adds the node at the mouse')}
         </div>
       </div>
       {!ql && (

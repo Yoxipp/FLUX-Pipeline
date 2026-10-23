@@ -115,7 +115,7 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
       <NodeToolbar isVisible={hover || info} position={Position.Top} align="start" offset={6}>
         <div onMouseEnter={enter} onMouseLeave={leave}>
           <div className="flow-node-toolbar">
-            <button type="button" disabled title={tr('Bypass : arrive avec l\'edition (P4)', 'Bypass: comes with editing (P4)')}>
+            <button type="button" disabled title={tr('Bypass : case dans Params', 'Bypass: box in Params')}>
               <Ban size={13} strokeWidth={1.75} />
             </button>
             <button type="button" className={info ? 'on' : ''} title={tr('Infos du node', 'Node info')} onClick={() => setInfo(v => !v)}>
@@ -134,7 +134,7 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
         boxShadow: selected
           ? '0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent), var(--shadow-sm)'
           : 'var(--shadow-sm)',
-        opacity: dim ? 0.35 : 1,
+        opacity: dim ? 0.35 : node.meta?.bypass === 'true' ? 0.55 : 1,
         paddingBottom: 4,
       }}>
         <div style={{

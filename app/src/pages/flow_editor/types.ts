@@ -46,6 +46,7 @@ export interface FlowViewNode {
   outputs:  PortSpec[]
   position: { x: number; y: number }
   meta?:    Record<string, string>   // shown in Params (step, module...)
+  spec?:    NodeSpec                 // catalogue entry (P4), absent for unknown / legacy types
 }
 
 export interface FlowViewEdge {
@@ -56,6 +57,8 @@ export interface FlowViewEdge {
   target: string
   targetPort: string
   type:   PortType
+  conversion?: boolean    // implicit conversion (int -> float...), marked on the link
+  bad?:   boolean         // incompatible types (kept, reported by the validation)
 }
 
 export interface FlowView {
@@ -157,6 +160,75 @@ export interface MigrateReport {
              unknown_commands?: string[]; unresolved_links?: string[] }[]
   nodes:   { file: string; status: string }[]
 }
+
+// -- catalogue (GET /flows/catalog, 02 §1) ---------------------------------------
+
+export interface CatalogPort {
+  name:     string
+  type:     PortType
+  doc_fr:   string
+  doc_en:   string
+  example:  unknown
+  required: boolean
+  default:  unknown
+}
+
+// True, or {param, equals}: compares the param (or its default).
+export type CondFlag = boolean | { param: string; equals: unknown } | null
+
+export interface NodeSpec {
+  type:        string
+  label:       string
+  family:      Family
+  icon:        string
+  inputs:      CatalogPort[]
+  outputs:     CatalogPort[]
+  params:      CatalogPort[]
+  shelf:       number | null
+  aliases:     string[]
+  doc_fr:      string
+  doc_en:      string
+  destructive: CondFlag
+  effect:      boolean
+  raw:         string[]
+  source:      'flux' | 'team'
+  file:        string
+  session:     string | null
+  live_only:   boolean
+  licence:     CondFlag
+}
+
+export interface FlowCatalog {
+  nodes:      NodeSpec[]
+  families:   string[]
+  types:      { id: string; implicit: string[] }[]
+  node_errors: { file: string; error: string }[]
+}
+
+// -- validation (01 §8, POST /flows/validate) -------------------------------------
+
+export type IssueFixKind =
+  | 'remove_link' | 'insert_foreach' | 'add_node' | 'add_block_end' | 'add_instance'
+  | 'set_instance_mode' | 'add_set_variable' | 'replace_token' | 'set_param' | 'remove_node'
+
+export interface Issue {
+  level:      'error' | 'warning'
+  code:       string
+  node:       string | null
+  port:       string | null
+  message_fr: string
+  message_en: string
+  why_fr:     string
+  why_en:     string
+  fix:        { kind: IssueFixKind; args: Record<string, unknown> } | null
+  link:       FlowDocLink | null
+}
+
+export interface SaveResult { state: FlowState; issues: Issue[]; valid: boolean }
+
+// GET /flows/{name}/versions.
+export interface VersionInfo { version: number; at: string; size: number }
+export interface VersionList { scope: FlowScope; name: string; state: FlowState; versions: VersionInfo[] }
 
 // -- runs (01 §4, §6, §10) ------------------------------------------------------
 

@@ -1,19 +1,34 @@
 // ShelfBar.tsx — Shelf (03_EDITEUR §1): one tab per family (its colour), the common nodes
-// of the active family below. P0: display only (adding a node comes in P4).
+// of the active family below (spec `shelf` order, else the first ones). P4 (03 §4): drag =
+// created at the drop point (dataTransfer application/x-flux-node = type id), click = centre
+// of the view. "Catalogue" opens the drawer of every node (NodePalette).
 
 import { useState } from 'react'
+import { Library } from 'lucide-react'
 import { FAMILIES, FAMILY_INFO } from './families'
 import { iconFor } from './icons'
+import { DRAG_MIME } from './NetworkPane'
 import type { Family } from './types'
 import type { CatalogEntry } from './v1_adapter'
 import { useTr } from './useTr'
 
 const SHELF_MAX = 12
 
-export function ShelfBar({ catalog, onPick }: { catalog: CatalogEntry[] | null; onPick: (e: CatalogEntry) => void }) {
+export function shelfItems(catalog: CatalogEntry[] | null, fam: Family): CatalogEntry[] {
+  const list = (catalog ?? []).filter(e => e.family === fam)
+  const ranked = list.filter(e => e.shelf !== null && e.shelf !== undefined).sort((a, b) => (a.shelf ?? 0) - (b.shelf ?? 0))
+  return (ranked.length ? ranked : list).slice(0, SHELF_MAX)
+}
+
+export function ShelfBar({ catalog, paletteOpen, onPick, onTogglePalette }: {
+  catalog: CatalogEntry[] | null
+  paletteOpen: boolean
+  onPick: (e: CatalogEntry) => void
+  onTogglePalette: () => void
+}) {
   const { tr, lang } = useTr()
   const [fam, setFam] = useState<Family>('flux')
-  const items = (catalog ?? []).filter(e => e.family === fam).slice(0, SHELF_MAX)
+  const items = shelfItems(catalog, fam)
   return (
     <div style={{ flexShrink: 0, borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>
       <div style={{ height: 24, display: 'flex', alignItems: 'stretch', gap: 2, padding: '0 8px' }}>
@@ -35,23 +50,30 @@ export function ShelfBar({ catalog, onPick }: { catalog: CatalogEntry[] | null; 
             </div>
           )
         })}
+        <div style={{ flex: 1 }} />
+        <button type="button" className={`flow-tool${paletteOpen ? ' on' : ''}`} onClick={onTogglePalette} style={{ height: 22, alignSelf: 'center' }}
+                title={tr('Tous les nodes, par famille', 'Every node, by family')}>
+          <Library size={12} /> {tr('Catalogue', 'Catalogue')}
+        </button>
       </div>
       <div style={{ height: 40, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', overflowX: 'auto' }}>
         {items.length === 0 && (
           <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
-            {catalog ? tr('Aucun node de cette famille pour l\'instant (nodes v2 en phase P2)', 'No node of this family yet (v2 nodes in phase P2)') : tr('Chargement…', 'Loading…')}
+            {catalog ? tr('Aucun node de cette famille pour l\'instant', 'No node of this family yet') : tr('Chargement…', 'Loading…')}
           </span>
         )}
         {items.map(e => {
           const info = FAMILY_INFO[e.family]
-          const Icon = iconFor(undefined, e.family)
+          const Icon = iconFor(e.icon, e.family)
           return (
             <div
               key={e.type}
+              draggable
+              onDragStart={ev => { ev.dataTransfer.setData(DRAG_MIME, e.type); ev.dataTransfer.effectAllowed = 'copy' }}
               onClick={() => onPick(e)}
               title={(lang === 'en' ? e.doc_en : e.doc_fr) || e.label}
               style={{
-                display: 'flex', alignItems: 'center', gap: 5, height: 26, padding: '0 9px', borderRadius: 5, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 5, height: 26, padding: '0 9px', borderRadius: 5, cursor: 'grab',
                 fontSize: 11, color: 'var(--ink-2)', background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
                 borderLeft: `3px solid ${info.color}`, whiteSpace: 'nowrap',
               }}

@@ -1,14 +1,15 @@
 // PortTooltip.tsx — one shared tooltip for every port (03_EDITEUR §3): a single portal
 // instead of a Radix Tooltip per port (hundreds of ports). 300 ms delay like ui.tsx.
 // Content: name + type, expected type, description, example, current value (inputs only).
+// P4: while a link is dragged over an incompatible port, the reason in red, shown at once.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { portColor } from '../portTypes'
+import { portColor, type Connection } from '../portTypes'
 import type { PortSpec } from '../types'
 import { formatValue, useTr } from '../useTr'
 
-export interface PortHover { port: PortSpec; side: 'in' | 'out'; rect: DOMRect }
+export interface PortHover { port: PortSpec; side: 'in' | 'out'; rect: DOMRect; refusal?: Connection | null }
 
 interface Ctx { show: (h: PortHover) => void; hide: () => void }
 const PortTooltipCtx = createContext<Ctx>({ show: () => {}, hide: () => {} })
@@ -21,7 +22,7 @@ export function PortTooltipProvider({ children }: { children: React.ReactNode })
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const show = useCallback((h: PortHover) => {
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => setHover(h), DELAY_MS)
+    timer.current = setTimeout(() => setHover(h), h.refusal ? 0 : DELAY_MS)
   }, [])
   const hide = useCallback(() => { clearTimeout(timer.current); setHover(null) }, [])
   useEffect(() => () => clearTimeout(timer.current), [])
@@ -44,6 +45,13 @@ function TooltipBox({ hover }: { hover: PortHover }) {
   const left = side === 'out' ? rect.right + 8 : Math.max(8, rect.left - W - 8)
   const top = Math.min(rect.top - 6, window.innerHeight - 160)
   const label: React.CSSProperties = { color: 'var(--ink-4)', fontSize: 10.5, marginTop: 6 }
+  if (hover.refusal) {
+    return (
+      <div className="tooltip-content" style={{ position: 'fixed', left, top, maxWidth: W, width: 'max-content', pointerEvents: 'none', color: 'var(--err)' }}>
+        {lang === 'en' ? hover.refusal.reason_en : hover.refusal.reason_fr}
+      </div>
+    )
+  }
   return (
     <div className="tooltip-content" style={{ position: 'fixed', left, top, maxWidth: W, width: 'max-content', pointerEvents: 'none' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

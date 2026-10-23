@@ -7,6 +7,9 @@
 // reducers (reducers.ts); the view is derived from it. Move, delete, copy / paste
 // (clipboard.ts), Layout (layout.ts). Read-only where Save is blocked (shipped, frozen
 // version, no box). A save keeps the document and its undo pile.
+// P4 step 4: the catalogue is GET /flows/catalog (v2 nodes); nodes are added from the Tab menu,
+// the Shelf, the Catalogue drawer (NodePalette) or a link dropped in the void, linked by
+// dragging (portTypes.checkLink), edited in Params.
 // Open flow: deep link /action-graph?flow=<name>, else the last flow this user opened
 // (user data `flows_last_open`, USER/<user>/UserSettings), else "legacy_publish".
 // A v1 name kept from P0 ("publish") opens its legacy_ flow.
@@ -28,15 +31,18 @@ import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
 import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
 import { NetworkPane, type EditActions } from './NetworkPane'
-import { ParamsPane } from './ParamsPane'
+import { NodePalette } from './NodePalette'
+import { ParamsPane, type NodeEdits } from './ParamsPane'
+import { FlowParams } from './FlowParams'
 import { RunsPanel } from './RunsPanel'
 import { ShelfBar } from './ShelfBar'
 import { TopBar, type FlowListEntry } from './TopBar'
 import type { FlowDoc, FlowRead, FlowRights, FlowScope, FlowsWsMessage, MigrateReport, NodeRunInfo, RunIssue, RunRecord } from './types'
-import { adaptV1Catalog, type CatalogEntry } from './v1_adapter'
-import { adaptV2Flow } from './v2_adapter'
+import type { CatalogEntry } from './v1_adapter'
+import { adaptCatalog, adaptV2Flow, type SpecIndex } from './v2_adapter'
 import { createDocStore, docOf, isDirty, useStore } from './store'
-import { insertBlock, moveNodes, removeItems } from './reducers'
+import { addNode, connect, disconnect, insertBlock, moveNodes, nextNodeId, removeItems, setFlowFields, setNodeFields, setParam } from './reducers'
+import { checkLink } from './portTypes'
 import { clipToText, copySelection, parseClip, pasteBlock } from './clipboard'
 import { layoutFlow } from './layout'
 import { useTr } from './useTr'
@@ -63,7 +69,7 @@ function writePrefs(p: ViewPrefs): void {
 }
 
 function Editor({ rights }: { rights: FlowRights }) {
-  const { tr } = useTr()
+  const { tr, lang } = useTr()
   const navigate = useNavigate()
   const { project } = useProject()
   const [params, setParams] = useSearchParams()
@@ -72,6 +78,8 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [wantedScope, setWantedScope] = useState<FlowScope | undefined>((params.get('scope') as FlowScope) || undefined)
   const [loaded, setLoaded] = useState<FlowRead | null>(null)
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null)
+  const [nodeErrors, setNodeErrors] = useState<{ file: string; error: string }[]>([])
+  const [paletteOpen, setPaletteOpen] = useState(false)
   // P4: the document being edited lives in the store (undo / redo); `loaded` keeps what the
   // backend answered (scope, version, state).
   const store = useMemo(() => createDocStore<FlowDoc>(), [])
@@ -102,7 +110,9 @@ function Editor({ rights }: { rights: FlowRights }) {
 
   useEffect(() => { refreshList() }, [refreshList])
   useEffect(() => {
-    flowsApi.getV1Catalog().then(c => setCatalog(adaptV1Catalog(c))).catch(() => setCatalog([]))
+    flowsApi.getCatalog()
+      .then(c => { setCatalog(adaptCatalog(c)); setNodeErrors(c.node_errors ?? []) })
+      .catch(() => setCatalog([]))
   }, [])
 
   // No deep link: reopen the last flow of this user.
@@ -163,7 +173,8 @@ function Editor({ rights }: { rights: FlowRights }) {
     : !rights.can[loaded.scope]?.write ? (loaded.scope === 'perso' ? tr('Case TD requise', 'TD box required') : tr('Case Team TD requise', 'Team TD box required'))
     : undefined
   // The graph is editable where it can be saved (a shipped flow: Save as first).
-  const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope }) : null, [doc, loaded, saveBlocked])
+  const specs = useMemo<SpecIndex>(() => Object.fromEntries((catalog ?? []).filter(e => e.spec).map(e => [e.type, e.spec!])), [catalog])
+  const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope, specs }) : null, [doc, loaded, saveBlocked, specs])
 
   const conflict = (e: HttpError, retry: () => void) => {
     // Destructive nodes added without confirmation (the guard dialog comes with step 9).
@@ -343,16 +354,44 @@ function Editor({ rights }: { rights: FlowRights }) {
         setSelection(new Set(block.ids))
       }).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
     },
-  }), [store, selection, tr])
+    onConnect: (from, to) => store.apply(d => connect(d, from, to)),
+    onDisconnect: links => store.apply(d => disconnect(d, links)),
+    // One undo entry: the node and, from a link dropped in the void, its link.
+    onAdd: (entry, at, link) => {
+      const d = docOf(store.get())
+      if (!d) return
+      const id = nextNodeId(d)
+      let next = addNode(d, id, { type: entry.type, pos: at, params: {} })
+      if (link) {
+        const nodes = Object.fromEntries(adaptV2Flow(next, { readOnly: false, specs }).nodes.map(n => [n.id, n]))
+        const r = checkLink(nodes, next.links, link.end, { node: id, port: link.port, side: link.end.side === 'out' ? 'in' : 'out' })
+        if (r.status === 'incompatible' || !r.from || !r.to) toast.warning(lang === 'en' ? r.reason_en : r.reason_fr)
+        else next = connect(next, r.from, r.to)
+      }
+      store.apply(() => next)
+      setSelection(new Set([id]))
+    },
+  }), [store, selection, specs, tr, lang])
 
   // Layout (03 §4): the only thing that arranges the graph; one undo entry, then frames.
   const arrange = useCallback(() => {
     store.apply(d => moveNodes(d, layoutFlow(d, id => rf.getNode(id)?.measured?.height ?? 110)))
     requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 250 }))
   }, [store, rf])
+
+  // Shelf / Catalogue click: the node at the centre of the view.
   const onPick = useCallback((e: CatalogEntry) => {
-    toast.info(tr(`${e.label} : l'ajout de nodes arrive avec l'edition (P4)`, `${e.label}: adding nodes comes with editing (P4)`))
-  }, [tr])
+    if (saveBlocked) { toast.info(saveBlocked); return }
+    const r = document.querySelector('.react-flow')?.getBoundingClientRect()
+    const p = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 }
+    edit.onAdd(e, [p.x - 120, p.y - 30])
+  }, [saveBlocked, rf, edit])
+
+  const nodeEdits = useMemo<NodeEdits>(() => ({
+    onParam: (id, name, value) => store.apply(d => setParam(d, id, name, value), `param:${id}:${name}`),
+    onFields: (id, patch) => store.apply(d => setNodeFields(d, id, patch), `node:${id}:${Object.keys(patch).join(',')}`),
+  }), [store])
+  const onFlowFields = useCallback((patch: Partial<FlowDoc>, key: string) => store.apply(d => setFlowFields(d, patch), key), [store])
 
   const choices = scopeChoices(rights, project, tr)
 
@@ -396,8 +435,9 @@ function Editor({ rights }: { rights: FlowRights }) {
               'Flow migrated from the v1 actions. Publishing still runs on the v1 actions (until P8): this flow does not activate.')}
         </div>
       )}
-      <ShelfBar catalog={catalog} onPick={onPick} />
+      <ShelfBar catalog={catalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        {paletteOpen && <NodePalette catalog={catalog} errors={nodeErrors} onPick={onPick} onClose={() => setPaletteOpen(false)} />}
         {error
           ? <div style={{ flex: 1, padding: 20, fontSize: 12, color: 'var(--ink-3)' }}>
               {tr(`Impossible de lire "${current}" : ${error}`, `Cannot read "${current}": ${error}`)}
@@ -406,9 +446,13 @@ function Editor({ rights }: { rights: FlowRights }) {
               view={view} flowKey={loaded ? `${loaded.scope}:${loaded.name}:${loaded.version ?? ''}` : ''}
               selection={selection} edit={edit}
               search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
-              onSelect={onSelect} onPick={onPick} onToggleWires={toggleWires}
+              onSelect={onSelect} onToggleWires={toggleWires}
             />}
-        <ParamsPane view={view} selected={selected} />
+        <ParamsPane
+          selected={selected} params={(selected && doc?.nodes[selected.id]?.params) || {}}
+          editable={!saveBlocked} edits={nodeEdits}
+          flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} />}
+        />
       </div>
       {runsOpen && loaded && (
         <RunsPanel
