@@ -21,12 +21,13 @@ class NukeClient:
 
     def __init__(self, port: int | None = None) -> None:
         self.port = port
+        self._at = {"port": port} if port else {}   # without a port: the exact calls of before
 
     def ping(self) -> dict:
-        return _send({"cmd": "ping"}, port=self.port)
+        return _send({"cmd": "ping"}, **self._at)
 
     def run(self, code: str, timeout: float = SOCKET_TIMEOUT_S) -> dict:
-        return _send({"cmd": "run", "code": code}, timeout, port=self.port)
+        return _send({"cmd": "run", "code": code}, timeout, **self._at)
 
 
 nuke_client = NukeClient()

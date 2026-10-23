@@ -99,6 +99,7 @@ class MariClient:
 
     def __init__(self, port: int | None = None) -> None:
         self.port = port
+        self._at = {"port": port} if port else {}   # without a port: the exact calls of before
 
     def ping(self) -> dict:
         if _busy_since is not None:
@@ -106,13 +107,13 @@ class MariClient:
             prog = _progress()
             return {"ok": True, "busy": True,
                     "version": f"export en cours ({mins} min)" + (f", {prog}" if prog else "")}
-        return _send({"action": "ping"}, timeout=2.0, port=self.port)
+        return _send({"action": "ping"}, timeout=2.0, **self._at)
 
     def info(self) -> dict:
         """Channels of Mari's current geo: {ok, geo, channels}."""
         if _busy_since is not None:
             return {"ok": False, "error": "Mari exporte en ce moment : attends la fin de l'export"}
-        return _send({"action": "info"}, timeout=20.0, port=self.port)
+        return _send({"action": "info"}, timeout=20.0, **self._at)
 
     def export(self, export_path: str, file_format: str = "tif",
                channels: list[str] | None = None, formats: dict[str, str] | None = None,
@@ -130,7 +131,7 @@ class MariClient:
             box["result"] = _send({"action": "export", "export_path": export_path, "file_format": file_format,
                                    "channels": channels or [], "formats": formats or {},
                                    "sizes": sizes or {}},
-                                  timeout=EXPORT_TIMEOUT_S, port=self.port)
+                                  timeout=EXPORT_TIMEOUT_S, **self._at)
 
         worker = threading.Thread(target=run, daemon=True)
         try:

@@ -24,17 +24,18 @@ class SubstanceDesignerClient:
 
     def __init__(self, port: int | None = None) -> None:
         self.port = port
+        self._at = {"port": port} if port else {}   # without a port: the exact calls of before
 
     def ping(self) -> dict:
-        return _send({"action": "ping"}, timeout=2.0, port=self.port)
+        return _send({"action": "ping"}, timeout=2.0, **self._at)
 
     def info(self) -> dict:
         """Open packages / graphs / outputs: {ok, packages, current}."""
-        return _send({"action": "info"}, timeout=20.0, port=self.port)
+        return _send({"action": "info"}, timeout=20.0, **self._at)
 
     def export(self, config: dict[str, Any]) -> dict:
         """Ask Designer to export maps / .sbsar / .sbs with *config*; returns {ok, files}."""
-        return _send({"action": "export", "config": config}, port=self.port)
+        return _send({"action": "export", "config": config}, **self._at)
 
 
 designer_client = SubstanceDesignerClient()
