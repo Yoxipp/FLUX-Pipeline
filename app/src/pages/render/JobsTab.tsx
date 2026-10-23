@@ -60,7 +60,7 @@ export function JobsTab({ project, jobs, dryRun, scope, setScope, days, setDays,
           options={[{ id: '7', label: tr('7 j', '7 d') }, { id: '30', label: tr('30 j', '30 d') }, { id: '90', label: tr('90 j', '90 d') }]} />
       </div>
       {dryRun && jobs.length > 0 && (
-        <Banner>{tr('Mode simulation : la liste est reelle, les actions sont bloquees.', 'Simulation mode: the list is real, actions are blocked.')}</Banner>
+        <Banner>{tr('Simulation : actions bloquees', 'Simulation: actions blocked')}</Banner>
       )}
       {shownJobs.length === 0 ? (
         <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>

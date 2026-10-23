@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Layers, Trash2, Users } from 'lucide-react'
 import { api } from '../../api/client'
 import type { RenderFarm, RenderSettings, RenderShare, RenderShareBase } from '../../api/client'
 import { MachinePicker } from './MachinePicker'
@@ -74,8 +74,8 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
             onChange={e => set(k, { ...s, percent: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })} />
           <span style={hint}>%</span>
           <Toggle value={s.of} onChange={id => set(k, { ...s, of: id as RenderShareBase })}
-            options={[{ id: 'alive', label: tr('des blades allumes', 'of alive blades') }, { id: 'free', label: tr('des blades libres', 'of free blades') }]} />
-          <span style={hint}>{s.percent ? tr(`= ${n} maintenant`, `= ${n} right now`) : tr('desactive', 'off')}</span>
+            options={[{ id: 'alive', label: tr('des allumees', 'of alive') }, { id: 'free', label: tr('des libres', 'of free') }]} />
+          <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{s.percent ? <><Layers size={11} />{n}</> : tr('off', 'off')}</span>
         </div>
       </Row>
     )
@@ -96,13 +96,14 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720 }}>
-      <Banner color="var(--warn)">{tr(
-        'Ces reglages valent pour toute ton equipe (fichier render.json du projet). Priorite et part de farm touchent aussi les autres equipes.',
-        'These settings apply to your whole team (render.json of the project). Priority and farm share also affect other teams.')}</Banner>
+      <Banner color="var(--warn)">
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Users size={12} />{tr("Reglages de toute l'equipe", 'Whole team settings')}
+        </span>
+      </Banner>
 
       <Section title={tr('Equipe et part de la farm', 'Team and farm share')}>
-        <Row label={tr('Projet Tractor (equipe)', 'Tractor project (team)')}
-          help={tr("Nom de l'equipe sur la farm. Reprendre celui de l'equipe s'il existe deja.", "Team name on the farm. Reuse the team's one if it already exists.")}>
+        <Row label={tr('Equipe sur la farm', 'Team on the farm')}>
           <input style={input} value={draft.tractor_project} onChange={e => set('tractor_project', e.target.value)} />
           {knownProjects.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
@@ -115,19 +116,14 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
           )}
         </Row>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {num('priority', tr('Priorite (defaut 1)', 'Priority (default 1)'),
-            tr("Plus grand = passe avant. Tous les jobs de l'ecole sont a 1 : rester a 1 pour etre a egalite.",
-              'Higher goes first. Every school job is at 1: stay at 1 to be even.'))}
-          {num('chunk_size', tr('Images par morceau (chunk)', 'Frames per chunk'))}
+          {num('priority', tr('Priorite', 'Priority'), tr('1 = comme tout le monde. Plus haut = passe avant.', '1 = like everyone. Higher = goes first.'))}
+          {num('chunk_size', tr('Images par tache', 'Frames per task'))}
         </div>
         {warning && <div style={warnText}>{warning}</div>}
-        {shareField('team_cap', tr("Plafond de toute l'equipe", 'Whole team cap'),
-          tr("Budget partage par tous les jobs FLUX de l'equipe. Tant qu'un FLUX de l'equipe est ouvert, il repartit ce budget entre les jobs. 0 = pas de plafond. Un job peut en plus etre limite au lancement.",
-            'Budget shared by every FLUX job of the team. While a FLUX of the team is open, it splits this budget between the jobs. 0 = no cap. A job can also be limited at launch.'))}
+        {shareField('team_cap', tr("Plafond de l'equipe", 'Team cap'), tr('Tous les jobs FLUX de l\'equipe. 0 = aucun.', "All the team's FLUX jobs. 0 = none."))}
       </Section>
 
-      <Section title={tr('Groupes de machines', 'Machine groups')}
-        note={<div style={hint}>{tr("Groupes de l'equipe, proposes au lancement (ex. nos postes, salle 17 du soir).", 'Team groups, offered at launch (e.g. our desks, room 17 at night).')}</div>}>
+      <Section title={tr('Groupes de PC', 'PC groups')}>
         {Object.entries(groups).map(([name, members]) => (
           <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5 }}>
             <button type="button" onClick={() => setEditGroup(editGroup === name ? null : name)}
@@ -149,13 +145,12 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
         </div>
       </Section>
 
-      <Section title={tr('Machines exclues', 'Excluded machines')}
-        note={<div style={hint}>{tr("L'equipe ne rend jamais sur ces machines (sauf si on les choisit a la main au lancement).", 'The team never renders on these machines (unless picked by hand at launch).')}</div>}>
+      <Section title={tr('PC exclus', 'Excluded PCs')}>
         <MachinePicker blades={blades} selected={draft.exclude_hosts} hideOffline={false} onChange={names => set('exclude_hosts', names)} />
       </Section>
 
       <Section title={tr('Horaires', 'Hours')}>
-        <Check label={tr('Activer une plage de rendu (sinon rendu a toute heure)', 'Enable a render window (otherwise render at any hour)')}
+        <Check label={tr('Plage de rendu', 'Render window')}
           checked={draft.schedule.enabled} onChange={v => set('schedule', { ...draft.schedule, enabled: v })} />
         {draft.schedule.enabled && (
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -165,7 +160,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
               checked={draft.schedule.kill_at_end} onChange={v => set('schedule', { ...draft.schedule, kill_at_end: v })} />
           </div>
         )}
-        <div style={hint}>{tr('Pas encore applique sur la farm (stocke seulement).', 'Not applied on the farm yet (stored only).')}</div>
+        <div style={hint}>{tr('Pas encore actif', 'Not active yet')}</div>
       </Section>
 
       <div style={{ border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper-2)', padding: 12 }}>
@@ -196,7 +191,7 @@ export function AdvancedTab({ project, settings, warning, farm, onSaved }: {
               {txt('bridge_python', 'Bridge Python')}
               {txt('bridge_script', 'Bridge script')}
             </div>
-            <Check label={tr('Mode simulation (rien envoye a la farm)', 'Simulation mode (nothing sent to the farm)')}
+            <Check label={tr('Simulation (rien envoye)', 'Simulation (nothing sent)')}
               checked={draft.dry_run} onChange={v => set('dry_run', v)} />
           </div>
         )}

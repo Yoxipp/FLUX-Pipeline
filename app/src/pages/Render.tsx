@@ -109,9 +109,7 @@ export function Render() {
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {settings?.dry_run && (
-          <Banner>{tr(
-            "Mode simulation : les jobs sont ecrits sur disque, rien n'est envoye a la farm. Les lectures (jobs, farm) sont reelles.",
-            'Simulation mode: jobs are written to disk, nothing is sent to the farm. Reads (jobs, farm) are real.')}</Banner>
+          <Banner color="var(--warn)">{tr('Simulation : rien n\'est envoye a la farm', 'Simulation: nothing is sent to the farm')}</Banner>
         )}
         {!settings ? <div style={hint}>{tr('Chargement...', 'Loading...')}</div> : (
           <>

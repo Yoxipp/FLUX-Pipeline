@@ -31,7 +31,7 @@ import { SettingsPage } from './pages/settings/SettingsPage'
 import { FirstLaunch }   from './pages/FirstLaunch'
 import { Login }         from './pages/Login'
 import type { Settings } from './types'
-import { applyAccentPreset } from './lib/accentPresets'
+import { applyAccentPreset, followAccentFromOtherWindows } from './lib/accentPresets'
 import { useI18n } from './i18n'
 import { Toaster, toast } from 'sonner'
 
@@ -256,6 +256,8 @@ export function App() {
     // Restore accent preset (stored as preset key, e.g. "blue")
     applyAccentPreset(settings.theme.accent)
   }, [settings])
+  // Accent changed in another window (e.g. main window while the Tractor window is open).
+  useEffect(() => followAccentFromOtherWindows(), [])
 
   if (loading) {
     return (

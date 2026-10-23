@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import type { RenderBladeState, RenderFarm } from '../../api/client'
+import { Activity, Clock, Layers, Users } from 'lucide-react'
 import { MachinePicker } from './MachinePicker'
 import { BLADE_COLOR, Bar, Section, bladeStateLabel, card, hint, roomLabel, useTr, warnText } from './renderUi'
 
@@ -44,33 +45,30 @@ export function FarmTab({ farm }: { farm: RenderFarm | null }) {
       </div>
 
       <Section title={tr('Mon equipe', 'My team')}>
-        <div style={{ fontSize: 11.5, color: 'var(--ink-2)' }}>
-          {tr('Projet Tractor', 'Tractor project')} : <b>{farm.tractor_project}</b>, {farm.active_by_project[farm.tractor_project] ?? 0} {tr('blades en cours', 'blades running')}.
+        <div style={{ fontSize: 11.5, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Users size={12} /><b>{farm.tractor_project}</b></span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} title={tr('Blades en cours', 'Blades running')}>
+            <Activity size={12} />{farm.active_by_project[farm.tractor_project] ?? 0}
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--ink-3)' }} title={tr('Horaires', 'Hours')}>
+            <Clock size={12} />{farm.schedule.enabled ? `${farm.schedule.start}-${farm.schedule.end}` : '24/24'}
+          </span>
         </div>
         {cap.enabled ? (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11.5 }}>
-              <span style={{ width: 140, color: 'var(--ink-2)' }}>{tr('Plafond equipe', 'Team cap')}</span>
+              <span style={{ width: 140, color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Layers size={12} />{tr('Plafond', 'Cap')}</span>
               <Bar value={cap.used} max={cap.slots} color={cap.used > cap.slots ? 'var(--warn)' : 'var(--accent)'} />
               <span style={{ color: 'var(--ink-3)', minWidth: 50, textAlign: 'right' }}>{cap.used} / {cap.slots}</span>
             </div>
-            <div style={hint}>
-              {Object.keys(cap.targets).length
-                ? tr(`Reparti entre ${Object.keys(cap.targets).length} job(s) : ${Object.entries(cap.targets).map(([j, n]) => `${j}=${n}`).join(', ')}`,
-                  `Split between ${Object.keys(cap.targets).length} job(s): ${Object.entries(cap.targets).map(([j, n]) => `${j}=${n}`).join(', ')}`)
-                : tr('Aucun job FLUX de l\'equipe en cours.', 'No FLUX job of the team running.')}
-              {farm.dry_run ? tr(' (simulation : calcule, pas applique)', ' (simulation: computed, not applied)') : ''}
-            </div>
+            {Object.keys(cap.targets).length > 0 && (
+              <div style={hint}>{Object.entries(cap.targets).map(([j, n]) => `#${j} : ${n}`).join('   ')}</div>
+            )}
             {cap.errors.map((e, i) => <div key={i} style={warnText}>{e}</div>)}
           </>
         ) : (
-          <div style={hint}>{tr("Pas de plafond d'equipe (onglet Avance).", 'No team cap (Advanced tab).')}</div>
+          <div style={hint}>{tr('Pas de plafond', 'No cap')}</div>
         )}
-        <div style={hint}>
-          {farm.schedule.enabled
-            ? tr(`Plage de rendu ${farm.schedule.start} a ${farm.schedule.end} (pas encore appliquee)`, `Render window ${farm.schedule.start} to ${farm.schedule.end} (not applied yet)`)
-            : tr('Rendu a toute heure.', 'Rendering at any hour.')}
-        </div>
       </Section>
 
       <Section title={tr('Par equipe (projet Tractor)', 'Per team (Tractor project)')}>

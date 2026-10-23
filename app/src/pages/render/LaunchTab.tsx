@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Play } from 'lucide-react'
+import { Ban, ChevronDown, ChevronRight, Circle, Layers, Monitor, Play } from 'lucide-react'
 import { api } from '../../api/client'
 import type { RenderFarm, RenderLastForm, RenderSettings, RenderShareBase, RenderShot, RenderSubmitResult } from '../../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '../../components/shared/ui'
@@ -103,15 +103,15 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const jobCap = capFromPercent(share.percent, pool(share.of))
   const teamCap = settings ? capFromPercent(settings.team_cap.percent, pool(settings.team_cap.of)) : 0
   function teamCapSummary() {
-    return teamCap ? tr(`gere par l'equipe (plafond ${teamCap})`, `managed by the team (cap ${teamCap})`) : tr('sans limite', 'no limit')
+    return teamCap ? `${tr('equipe', 'team')} · ${teamCap}` : tr('sans limite', 'no limit')
   }
-  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('libres maintenant', 'free right now') : tr('allumes', 'alive'))
+  const ofLabel = (of: RenderShareBase) => (of === 'free' ? tr('libres', 'free') : tr('allumees', 'alive'))
   const shareSummary = share.percent
-    ? tr(`${share.percent} % des blades ${ofLabel(share.of)} (${jobCap} en parallele)`, `${share.percent} % of ${ofLabel(share.of)} blades (${jobCap} at once)`)
+    ? `${share.percent} % ${ofLabel(share.of)} · ${jobCap}`
     : teamCapSummary()
   const teamGroups = settings?.host_groups ?? {}
   const pickedCount = new Set([...hosts, ...groups.flatMap(g => teamGroups[g] ?? [])]).size
-  const whereSummary = `${targetMode === 'any' ? tr('Toute la farm', 'Whole farm') : tr(`${pickedCount} machine(s)`, `${pickedCount} machine(s)`)}, ${shareSummary}`
+  const whereSummary = `${targetMode === 'any' ? tr('Toute la farm', 'Whole farm') : `${pickedCount} PC`}  ·  ${shareSummary}`
 
   // ── when ──
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -125,7 +125,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const [atDay, atTime] = startAt ? startAt.split('T') : ['', '']
   const [atHour, atMin] = atTime ? atTime.split(':') : ['', '']
   const setWhen = (day: string, hour: string, min: string) => setStartAt(day ? `${day}T${hour || '20'}:${min || '00'}` : '')
-  const whenSummary = `${startAt ? startAt.replace('T', ' ') : tr('Maintenant', 'Now')}, ${freeze ? tr('version gelee', 'version frozen') : tr('version LAST', 'LAST version')}`
+  const whenSummary = `${startAt ? startAt.replace('T', ' ') : tr('Maintenant', 'Now')}  ·  ${freeze ? tr('gele', 'frozen') : 'LAST'}`
 
   // ── last form of this artist: restored once shots are known, saved (debounced) on change ──
   const restored = useRef(false)
@@ -256,11 +256,19 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
       </div>
 
       <Fold title={tr('Ou et combien', 'Where and how much')} summary={whereSummary} open={whereOpen} onToggle={() => setWhereOpen(o => !o)}>
-        <Row label={tr('Part de la farm pour ce job', 'Farm share for this job')}
-          help={tr('Nombre maximum de morceaux (chunks) rendus en meme temps. 1 blade = 1 morceau.',
-            'Max chunks rendered at once. 1 blade = 1 chunk.')}>
-          <Check label={tr('Limiter ce job (sinon gere par le plafond de l\'equipe)', 'Limit this job (otherwise managed by the team cap)')}
-            checked={limitJob} onChange={setLimitJob} />
+        <Row label={tr('Part de la farm', 'Farm share')}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Check label={tr('Limiter ce job', 'Limit this job')} checked={limitJob} onChange={setLimitJob} />
+            {counts && (
+              <span style={{ ...hint, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                <span title={tr('Blades allumees', 'Alive blades')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Monitor size={11} />{counts.alive}</span>
+                <span title={tr('Blades libres', 'Free blades')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ok)' }}><Circle size={8} fill="currentColor" />{counts.free}</span>
+                <span title={tr('Maximum en parallele pour ce job', 'Max at once for this job')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ink-2)' }}>
+                  <Layers size={11} />{limitJob ? jobCap : teamCap ? `${teamCap} (${tr('equipe', 'team')})` : '∞'}
+                </span>
+              </span>
+            )}
+          </div>
           {limitJob && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 6 }}>
               <Toggle value={SHARE_PRESETS.includes(sharePct) ? String(sharePct) : 'other'}
@@ -274,19 +282,14 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
                   onChange={e => setSharePct(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
               )}
               <Toggle value={shareOf} onChange={id => setShareOf(id as RenderShareBase)}
-                options={[{ id: 'free', label: tr('des blades libres', 'of free blades') }, { id: 'alive', label: tr('des blades allumes', 'of alive blades') }]} />
+                options={[{ id: 'free', label: tr('des libres', 'of free') }, { id: 'alive', label: tr('des allumees', 'of alive') }]} />
             </div>
           )}
-          <div style={{ ...hint, marginTop: 4 }}>
-            {counts ? tr(`Farm : ${counts.alive} allumes, ${counts.free} libres. Ce job : ${shareSummary}.`,
-              `Farm: ${counts.alive} alive, ${counts.free} free. This job: ${shareSummary}.`) : tr('Etat de la farm inconnu', 'Farm state unknown')}
-            {teamCap ? tr(` Plafond de l'equipe (tous ses jobs) : ${teamCap}.`, ` Team cap (all its jobs): ${teamCap}.`) : ''}
-          </div>
         </Row>
 
         <Row label={tr('Machines', 'Machines')}>
           <Toggle value={targetMode} onChange={id => setTargetMode(id as 'any' | 'pick')}
-            options={[{ id: 'any', label: tr('Toute la farm', 'Whole farm') }, { id: 'pick', label: tr('Choisir', 'Pick') }]} />
+            options={[{ id: 'any', label: tr('Toute la farm', 'Whole farm') }, { id: 'pick', label: tr('Choisir les PC', 'Pick PCs') }]} />
           {targetMode === 'pick' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
               {Object.keys(teamGroups).length > 0 && (
@@ -298,14 +301,12 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
                 </div>
               )}
               <MachinePicker blades={farm?.blades ?? []} selected={hosts} onChange={setHosts} />
-              {farm && !farm.host_targeting_verified && (
-                <div style={warnText}>{tr("Ciblage par nom de PC pas encore valide sur le moteur de l'ecole (job test a faire).",
-                  'Targeting by PC name not validated on the school engine yet (test job pending).')}</div>
-              )}
             </div>
           )}
           {(settings?.exclude_hosts.length ?? 0) > 0 && (
-            <div style={{ ...hint, marginTop: 4 }}>{tr('Jamais sur', 'Never on')} : {settings!.exclude_hosts.join(', ')}</div>
+            <div style={{ ...hint, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Ban size={11} />{settings!.exclude_hosts.join(', ')}
+            </div>
           )}
         </Row>
       </Fold>
@@ -338,7 +339,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
             )}
           </div>
         </Row>
-        <Check label={tr('Geler la version (conseille)', 'Freeze the version (recommended)')} checked={freeze} onChange={setFreeze} />
+        <Check label={tr('Geler la version', 'Freeze the version')} checked={freeze} onChange={setFreeze} />
       </Fold>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
