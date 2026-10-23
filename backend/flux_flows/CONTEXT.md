@@ -3,7 +3,8 @@
 Chantier Flows (ADR 0057, 0058 ; specs `docs/yaml_update_refonte/`). Package neuf : `flux_core` et `flux_actions`
 ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Etat au 2026-10-22 : P1 fait
 (prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). P2 fait (prompt `P2_moteur_runs.md`) :
-moteur, runs, essai a blanc, WS, 11 types de node. Pas encore de validation complete (P4) ni d'evenement automatique (P5).
+moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).
+Pas encore d'evenement automatique (P5).
 
 ## Fichiers
 
@@ -17,6 +18,7 @@ moteur, runs, essai a blanc, WS, 11 types de node. Pas encore de validation comp
 | `nodes/common.py` | `as_path`, `in_project`, `check_destructive_target` (erase / overwrite seulement sous FLUX_ROOT, jamais une racine ni un dossier projet), archive projet partagee (`archive_preview`, `archive_into_project`, via `archive_folder`). |
 | `nodes/contract.py` | Contrat d'un corps de node : `body(ctx, inputs, params) -> {port: valeur}`, `simulate(...) -> {lines, outputs}`, `NodeError` (message affiche sur le node), `NodeContext` (`context`, `interface`, `cancelled`, `log`, `notify`, variables), `EXEC_KEY` (`_exec`) pour choisir la sortie exec. |
 | `nodes/event.py`, `data.py`, `logic.py`, `operator.py`, `action.py`, `flux.py`, `subflow.py` | Nodes P2 + P3 (02 §11, liste exacte). P3 : data (path, python_value lu par AST sans executer, json_value, template, context), logic (8), operator (26, dont sequence, for, while au plafond 1000, break_loop), action (12, logique partagee avec les commandes v1 de `flux_actions/commands/utility.py` ; `delete` archive par defaut, `erase` destructif), flux (19 : `find_publishes` deduit soft / type / version du nom et de l'extension, une capture sans soft connu passe le filtre soft ; `publish_file` appelle `run_publish_action`, `publish_core` non modifie ; `call_function` v2 reutilise la garde v1 `features`, `core`, `dcc` ; `ping` = message de chat), subflow (`flow_call` profondeur 8 + cycle, `flow_output`). Chaque node a effet a un `simulate` qui n'ecrit rien. |
+| `validate.py` | P4 : validation (01 §8), fait foi a l'enregistrement, au lancement, a l'activation et pour `POST /flows/validate`. `validate(flow, Env)` -> `Issue {level, code, node, port, message_fr/en, why_fr/en, fix {kind, args}, link}` ; tous les codes de 01 §8 ; `unconfirmed_destructive` (E_DESTRUCTIVE_UNCONFIRMED, compare au fichier de travail) ; `errors(issues, dry_run)` (un E_TYPE_MISMATCH ne bloque pas l'essai a blanc, ADR 0058). Voir "Validation" ci-dessous. |
 | `engine.py` | Moteur exec + data (01 §4), `Run` (un run) et `RunManager` (admission, un par boucle asyncio : `engine.manager()`). |
 | `runs.py` | Enregistrements de run (01 §6) : id, ecriture atomique, liste, retention, `interrupted`. |
 | `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. |
@@ -120,8 +122,25 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
 * **Push** (`events.py` -> WS `/flows/ws`) : `run_started`, `node_state` et `link_value` regroupes (dernier etat par node /
   lien toutes les 100 ms), `log`, `notify` (toast de `flux.notify`, proposition : absent de la table 01 §10), `run_finished`.
 
+## Validation (P4, 01 §8)
+
+* **Types** : la sortie `any` est propagee quand c'est possible (GetVariable / SetVariable = type de la variable, FlowInput =
+  type de l'interface, Value = param `type`, ForEach `item` = element de la liste, End `results`, Null, Select, List*).
+  Une sortie encore `any` n'est pas controlee (proposition : pas de faux positif ; 01 §3 refusait `any -> T`).
+* **Exec** (reseau du haut seulement, le subnet n'est pas execute) : dominance sur le graph exec + arete implicite Begin -> End
+  (liste vide = corps saute) pour E_DATA_BEFORE_PRODUCED ; End.collect et la condition du While lisent leur corps ; corps de bloc
+  = ce que `loop` atteint avant le End (blocs imbriques compris), chaine qui rejoint l'apres-End = E_BLOCK_UNBALANCED ;
+  un cul-de-sac dans le corps est permis.
+* **Variables** : E_VAR_NEVER_SET si la variable n'a pas de defaut et qu'aucun SetVariable ne l'ecrit dans le flow (proposition).
+* **DCC** (nodes en P6) : `@flow_node(session="houdini", live_only=True, licence=...)` ; E_NO_SESSION = entree `session`
+  non reliee ; E_LIVE_ONLY = session venant d'un `session.*_instance` en `mode: headless` ; W_LICENCE = drapeau `licence` vrai.
+* **Destructif** : `!` = drapeau `destructive` vrai pour les params (`registry.flag_on`), bypass exclu. W_DESTRUCTIVE_UNTESTED
+  lit `state.json.dry_run_ok {version, nodes_simulated}` (ecrit en P5) : d'ici la, chaque `!` l'affiche. Enregistrer sous / nouveau
+  fichier : tous les `!` sont "ajoutes".
+* W_SHIPPED_CHANGED : l'unlock garde `shipped_hash` dans `state.json`, compare au flow livre courant.
+
 ## Tests
 
 `backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
-flows_ws, legacy_command ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+flows_ws, legacy_command ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.

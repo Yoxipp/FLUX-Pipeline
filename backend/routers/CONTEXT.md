@@ -24,3 +24,7 @@ P2 : `POST /{name}/run` (brouillon de l'editeur, essai a blanc du fichier enregi
 `GET /runs/{run_id}`, `POST /runs/{run_id}/cancel` (TD ou lanceur), `WS /ws` (messages de run, file de 500 par client ;
 `ApiAuthMiddleware` le couvre comme `/dcc/ws/status`). Les runs sont des taches asyncio du backend (`flux_flows.engine`).
 P3 : `POST /preview` (apercu resolve | pattern, aucun node lance), `GET /nodes/template` (modele de node d'equipe), statiques.
+P4 : `POST /validate {flow, scope, project?}` -> `{issues, valid}` (statique, n'ecrit rien). PUT et `increment` revalident
+(`valid` dans `state.json`, enregistrer avec erreurs reste permis) et refusent en 409 `{code: E_DESTRUCTIVE_UNCONFIRMED, issues}`
+un node `!` ajoute sans figurer dans `confirmed_destructive` ; `revert` revalide ; `activate` refuse une version figee en
+erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouve une erreur.
