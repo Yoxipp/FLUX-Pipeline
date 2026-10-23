@@ -48,6 +48,15 @@ async def get_catalog() -> dict[str, Any]:
     return await asyncio.to_thread(registry.catalog, locations.team_nodes_dir())
 
 
+@router.get("/nodes/template")
+async def get_node_template() -> dict[str, Any]:
+    """The team node template to copy into CONFIG/extensions/nodes/ (reloaded per file, no restart)."""
+    path = locations.shipped_dir() / "team_node_template.py"
+    folder = locations.team_nodes_dir()
+    return {"filename": path.name, "text": await asyncio.to_thread(path.read_text, encoding="utf-8"),
+            "folder": str(folder) if folder else None}
+
+
 @router.get("/rights")
 async def get_rights() -> dict[str, Any]:
     """TD / Team TD boxes of the current user and what they allow (01 §7). A guard, not security."""

@@ -60,7 +60,6 @@ class Registry(unittest.TestCase):
         registry.load_team_nodes(None)
         registry._REGISTRY.clear()
         registry._REGISTRY.update(self._saved)
-        registry._TEAM_SIG = None
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_declaration_checks(self) -> None:

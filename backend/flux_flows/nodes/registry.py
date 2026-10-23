@@ -181,66 +181,80 @@ def all_nodes() -> List[NodeSpec]:
         return sorted(_REGISTRY.values(), key=lambda s: (FAMILIES.index(s.family), s.type))
 
 
-def _drop_team_nodes() -> None:
-    for node_type in [t for t, s in _REGISTRY.items() if s.source == "team"]:
-        del _REGISTRY[node_type]
-    for mod in [m for m in sys.modules if m.startswith(_TEAM_MODULE_PREFIX)]:
-        del sys.modules[mod]
+@dataclass
+class _TeamFile:
+    sig: Tuple[float, int]
+    types: List[str]
+    error: Optional[str] = None
 
 
-_TEAM_SIG: Optional[Tuple[Tuple[str, float, int], ...]] = None
-_TEAM_ERRORS: List[Dict[str, str]] = []
+# Loaded team files by name: a file is re-imported only when it changed (hot reload per file).
+_TEAM_FILES: Dict[str, _TeamFile] = {}
 
 
-def _signature(files: List[Path]) -> Tuple[Tuple[str, float, int], ...]:
-    out = []
-    for f in files:
-        try:
-            st = f.stat()
-            out.append((f.name, st.st_mtime, st.st_size))
-        except OSError:
-            continue
-    return tuple(out)
+def _file_sig(path: Path) -> Optional[Tuple[float, int]]:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return st.st_mtime, st.st_size
+
+
+def _unload_team_file(name: str) -> None:
+    entry = _TEAM_FILES.pop(name, None)
+    for node_type in entry.types if entry else ():
+        spec = _REGISTRY.get(node_type)
+        if spec is not None and spec.source == "team" and spec.file == name:
+            del _REGISTRY[node_type]
+    sys.modules.pop(_TEAM_MODULE_PREFIX + Path(name).stem, None)
+
+
+def _import_team_file(path: Path, sig: Tuple[float, int]) -> _TeamFile:
+    try:
+        if MARKER not in path.read_text(encoding="utf-8", errors="replace"):
+            return _TeamFile(sig, [])
+    except OSError as exc:
+        return _TeamFile(sig, [], str(exc))
+    before = set(_REGISTRY)
+    mod_name = _TEAM_MODULE_PREFIX + path.stem
+    _LOADING["file"] = path.name
+    try:
+        spec = importlib.util.spec_from_file_location(mod_name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = module
+        spec.loader.exec_module(module)
+    except Exception as exc:  # a broken team file must not break the catalog
+        for node_type in set(_REGISTRY) - before:
+            del _REGISTRY[node_type]
+        sys.modules.pop(mod_name, None)
+        return _TeamFile(sig, [], f"{type(exc).__name__}: {exc}")
+    finally:
+        _LOADING.pop("file", None)
+    return _TeamFile(sig, sorted(set(_REGISTRY) - before))
 
 
 def load_team_nodes(folder: Optional[Path]) -> List[Dict[str, str]]:
-    """(Re)import the team node files of *folder* when they changed.
+    """(Re)import the team node files of *folder* that changed, one file at a time.
 
     Returns ``node_errors``: one ``{file, error}`` per file that failed; the other
     files still load. A file without the "@flow_node" marker is never imported.
     """
-    global _TEAM_SIG, _TEAM_ERRORS
-    files = sorted(folder.glob("*.py")) if folder and folder.is_dir() else []
-    sig = _signature(files)
+    ensure_builtin()   # a team file can never take a FLUX node type
+    files = {p.name: p for p in sorted(folder.glob("*.py"))} if folder and folder.is_dir() else {}
     with _LOCK:
-        if sig == _TEAM_SIG:
-            return list(_TEAM_ERRORS)
-        _drop_team_nodes()
-        errors: List[Dict[str, str]] = []
-        for path in files:
-            try:
-                if MARKER not in path.read_text(encoding="utf-8", errors="replace"):
-                    continue
-            except OSError as exc:
-                errors.append({"file": path.name, "error": str(exc)})
+        for name in [n for n in _TEAM_FILES if n not in files]:
+            _unload_team_file(name)
+        for name, path in files.items():
+            sig = _file_sig(path)
+            entry = _TEAM_FILES.get(name)
+            if sig is None:
+                _unload_team_file(name)
                 continue
-            before = set(_REGISTRY)
-            mod_name = _TEAM_MODULE_PREFIX + path.stem
-            _LOADING["file"] = path.name
-            try:
-                spec = importlib.util.spec_from_file_location(mod_name, path)
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = module
-                spec.loader.exec_module(module)
-            except Exception as exc:  # a broken team file must not break the catalog
-                for node_type in set(_REGISTRY) - before:
-                    del _REGISTRY[node_type]
-                sys.modules.pop(mod_name, None)
-                errors.append({"file": path.name, "error": f"{type(exc).__name__}: {exc}"})
-            finally:
-                _LOADING.pop("file", None)
-        _TEAM_SIG, _TEAM_ERRORS = sig, errors
-        return list(errors)
+            if entry and entry.sig == sig and all(t in _REGISTRY for t in entry.types):
+                continue
+            _unload_team_file(name)
+            _TEAM_FILES[name] = _import_team_file(path, sig)
+        return [{"file": n, "error": e.error} for n, e in sorted(_TEAM_FILES.items()) if e.error]
 
 
 def catalog(team_folder: Optional[Path]) -> Dict[str, Any]:

@@ -110,6 +110,10 @@ def base_context(user: Optional[str], project: Optional[str], flow: str, run_id:
 def precheck(flow: Flow, event: Optional[str]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """(start event id, issues). Minimal until validate.py (P4)."""
     issues: List[Dict[str, Any]] = []
+    if any(n.type != SUBNET_TYPE and registry.get_node(n.type) is None for n in flow.nodes.values()):
+        from flux_flows.locations import team_nodes_dir
+
+        registry.load_team_nodes(team_nodes_dir())   # a team node the catalog has not loaded yet
     for node_id, node in flow.nodes.items():
         if node.type != SUBNET_TYPE and registry.get_node(node.type) is None:
             issues.append({"level": "error", "code": "E_UNKNOWN_NODE", "node": node_id, "port": None,
