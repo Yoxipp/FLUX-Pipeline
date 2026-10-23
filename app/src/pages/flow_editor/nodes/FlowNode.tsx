@@ -6,11 +6,13 @@
 // error_handled = --warn border, skipped / cancelled = dashed border.
 // P4: issue badge (count, --err or --warn) in the header, red ring on the faulty ports,
 // one blink when zoomed from the Problems panel.
+// (i) shows the node's section of docs/flows/03_INDEX_NODES.md (nodeDoc.tsx), else the registry doc.
 
 import { memo, useRef, useState } from 'react'
 import { NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react'
 import { Ban, CircleCheck, CircleX, Info, LoaderCircle } from 'lucide-react'
 import { FAMILY_INFO } from '../families'
+import { NodeDocText, nodeDocSection } from '../nodeDoc'
 import { iconFor } from '../icons'
 import type { FlowViewNode, NodeRunInfo, PortSpec } from '../types'
 import { formatValue, useTr } from '../useTr'
@@ -53,15 +55,18 @@ function Row({ left, right, linked, faulty }: { left?: PortSpec; right?: PortSpe
 function InfoCard({ node }: { node: FlowViewNode }) {
   const { tr, lang } = useTr()
   const fam = FAMILY_INFO[node.family]
+  const section = nodeDocSection(node.type)
   const doc = lang === 'en' ? node.doc_en || node.doc_fr : node.doc_fr || node.doc_en
   return (
     <div style={{
-      width: 300, marginTop: 4, padding: '8px 10px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
+      width: 340, marginTop: 4, padding: '8px 10px', background: 'var(--paper)', border: '1px solid var(--rule-2)',
       borderRadius: 6, boxShadow: 'var(--shadow)', fontSize: 11.5, color: 'var(--ink-2)',
     }}>
       <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{node.label}</div>
       <div style={{ fontSize: 11, color: 'var(--ink-4)', marginBottom: 6 }}>{node.type} · {lang === 'en' ? fam.en : fam.fr}</div>
-      <div style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflowY: 'auto' }}>{doc || tr('Pas de documentation.', 'No documentation.')}</div>
+      {section
+        ? <div style={{ maxHeight: 320, overflowY: 'auto' }}><NodeDocText text={section} /></div>
+        : <div style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflowY: 'auto' }}>{doc || tr('Pas de documentation.', 'No documentation.')}</div>}
       {Object.entries(node.meta ?? {}).map(([k, v]) => (
         <div key={k} style={{ display: 'flex', gap: 6, fontSize: 11, marginTop: 3 }}>
           <span style={{ color: 'var(--ink-4)', width: 56, flexShrink: 0 }}>{k}</span>
