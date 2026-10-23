@@ -28,3 +28,6 @@ P4 : `POST /validate {flow, scope, project?}` -> `{issues, valid}` (statique, n'
 (`valid` dans `state.json`, enregistrer avec erreurs reste permis) et refusent en 409 `{code: E_DESTRUCTIVE_UNCONFIRMED, issues}`
 un node `!` ajoute sans figurer dans `confirmed_destructive` ; `revert` revalide ; `activate` refuse une version figee en
 erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouve une erreur.
+P4 (editeur) : `POST /nodes {name, code}` (Team TD) ecrit `CONFIG/extensions/nodes/<name>.py` (marqueur `@flow_node` requis,
+fichier garde meme s'il ne charge pas, `error` = erreur de chargement de ce fichier) ; `GET /{name}/versions` rend aussi
+`user` par version et `history` (lignes `history.jsonl` du flow, recentes d'abord).

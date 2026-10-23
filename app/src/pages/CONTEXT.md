@@ -163,10 +163,37 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
 * `families.ts` / `icons.ts` / `portTypes.ts` : variables `--fam-*` et `--port-*` de `globals.css`, table statique lucide.
 * `v1_adapter.ts` : `ActionGraph` v1 -> `FlowView` (fonctions pures : commande -> famille, params -> ports, une chaine exec
   dans l'ordre des etapes, node Start en tete, liens data des parametres cables). Appels API dans `api/flows.ts` (routes v1).
-* `TabMenu.tsx` : recherche seule en P0 (rien ne s'ajoute, edition en P4). `useTr.ts` copie de l'ancien editeur.
+* `TabMenu.tsx` : menu d'ajout a la souris (P4, filtre possible). `useTr.ts` copie de l'ancien editeur.
 * P2 (runs, 03 §7) : `TopBar` Run (le document ouvert, `draft`, TD, aucune version), Essai (fichier enregistre, grise sur
   une version figee), Stop, Runs. `FlowEditor` ecoute `useFlowsWs` : etats par `run_id` (gardes meme avant la reponse du POST),
   toast des nodes Notify et de fin de run, relecture de `GET /flows/runs/{id}` a la fin et apres reconnexion.
   `FlowNode` : bordure et pastille par etat (`running` accent + LoaderCircle, `ok` coche + `xN`, `error` `--err` + message,
   valeurs recues en info-bulle, `error_handled` `--warn`, `skipped` / `cancelled` tirets). `RunsPanel.tsx` : dock Runs
   (historique du flow, clic = graph colore par ce run, rapport d'essai et logs, clic sur une ligne = selection du node).
+* P4 (edition, 2026-10-23, 03 §4 a §6) :
+  * Etat : `store.ts` (`createDocStore`, `useSyncExternalStore`, aucune dependance) tient le `FlowDoc` ; `history.ts` (pile
+    immuable, 200, `coalesceKey` < 800 ms) ; `reducers.ts` (actions pures, partage structurel, aucun relayout) ;
+    `clipboard.ts` (`flux_flow_clip: 1`, ids regeneres, colle a la souris) ; `layout.ts` (bouton Layout seul, une entree undo).
+    La vue (`v2_adapter.adaptV2Flow`) est derivee du document ; un enregistrement garde la pile. Lecture seule la ou
+    Enregistrer est bloque (livre, version figee, case absente).
+  * Catalogue v2 (`GET /flows/catalog`, `adaptCatalog`) : ports par spec (exec, entrees, params promouvables, sorties),
+    Tab / Shelf / `NodePalette.tsx` (tiroir Catalogue, glisser `application/x-flux-node` ou clic = centre).
+    `portTypes.ts` = miroir de `types.py` (`canConnect`, `editorConnect` : une sortie `any` passe), `checkLink` pendant le
+    glisser (ports compatibles entoures, autres a 35 %, raison en rouge dans `PortTooltip`, 2e lien sur une sortie exec refuse,
+    entree data deja reliee = remplacee). Lien lache dans le vide = Tab des nodes compatibles, node cree relie.
+    `test_catalog_types.py` (backend) garde le miroir. Conversion implicite marquee `~` sur le lien (`FlowEdge`).
+  * `ParamsPane.tsx` (libelle, bypass, un `ParamWidget` par port), `FlowParams.tsx` (libelle, description, `run_policy`,
+    interface entrees / sorties, variables), `NodeWriterDialog.tsx` (node Python d'equipe, `POST /flows/nodes`).
+  * `IssuesPanel.tsx` : `POST /flows/validate` 300 ms apres la derniere edition, erreurs puis avertissements, clic = zoom +
+    clignotement, "Corriger" = `fixes.ts` (un reducer par `fix.kind`, une entree undo). Pastille par node, anneau rouge sur
+    le port fautif, lien fautif en `--err`, badge "invalide" et compteur dans la TopBar ; backend injoignable = Run bloque.
+  * `GroupBox.tsx` (Ctrl+G, boite derriere ses nodes, la glisser deplace les nodes, double clic = renommer) et `NoteNode.tsx`
+    (N a la souris). Ids xyflow prefixes `group:` / `note:` (`NetworkPane`).
+  * Enregistrer (`FlowEditor.saveDoc`) : Ctrl+S, Enregistrer et incrementer, quitter (changer de flow, fermer la fenetre :
+    `components/shared/closeGuard.ts` lu par `TitleBar`). Nodes `!` ajoutes depuis le dernier enregistrement (`destructive.ts`,
+    miroir de `flag_on`) = `DestructiveDialog.tsx` + `SlideToConfirm`, ids envoyes en `confirmed_destructive`. 409 de revision
+    = `ConflictDialog.tsx` (voir sa version : le document reste en brouillon local ; enregistrer par-dessus). Brouillon
+    `localStorage` `flux.flow_draft.<portee>.<nom>`, propose a la reouverture. `VersionsDialog.tsx` (Fichier > Versions, tag
+    de version) : diff par version, Voir (lecture seule, bandeau "Lecture vNNN"), Revenir (cree v(max+1)), historique.
+  * L'ancien editeur (`/action-graph-legacy`, `ActionGraph.tsx`) n'est plus dans la TopBar : lien "Ancien editeur" dans
+    Parametres avances, carte Actions (YAML), jusqu'a P8.

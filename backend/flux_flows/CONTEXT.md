@@ -23,7 +23,7 @@ Pas encore d'evenement automatique (P5).
 | `runs.py` | Enregistrements de run (01 §6) : id, ecriture atomique, liste, retention, `interrupted`. |
 | `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. |
 | `locations.py` | Dossier de chaque portee ; `roots_for(user, project)` construit le dict `{portee: dossier ou None}` du store (nom de projet = un nom de dossier, jamais un chemin). |
-| `store.py` | Portees, fichier de travail, versions figees, `state.json`, `history.jsonl`, `_trash/`, verrou, ecriture atomique, conflit 409. |
+| `store.py` | Portees, fichier de travail, versions figees, `state.json`, `history.jsonl`, `_trash/`, verrou, ecriture atomique, conflit 409. P4 : `read_history` (lignes du flow, recentes d'abord) et `list_versions` rend `user` par version + `history` (dialogue Versions). |
 | `rights.py` | Cases TD / Team TD, table de 01 §7, 403. |
 | `migrate_v1.py` | Actions v1 -> flows (script de dev pour `shipped/`, `POST /flows/migrate` pour l'equipe). |
 | `shipped/` | Flows livres, lecture seule, dans l'exe (`scripts/backend.spec`, dossier copie recursivement). Les 5 `legacy_*`, 2 exemples P2 (`example_foreach`, `example_error`) et l'exemple P3 `example_daily_render` (bouton `daily_render` ; le Schedule viendra en P5), a la racine pour etre ouvrables : le store ne liste que ce niveau. `team_node_template.py` : modele de node d'equipe (ignore par le store). |
@@ -142,5 +142,5 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
 ## Tests
 
 `backend/tests/test_flux_flows/` (model, types, store, rights, migrate_v1, flows_router ; P2 : engine, dry_run, runs, events_bus,
-flows_ws, legacy_command ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
+flows_ws, legacy_command ; P3 : patterns, resolver, nodes_data / logic / operator / action / flux, engine_control, team_nodes ; P4 : validate (un test par code), validate_router, catalog_types (miroir `portTypes.ts`), team_node_router ; nodes de test dans `_flow_helpers.py`, registre restaure apres chaque module ; `run_flow(checked=False)` contourne la validation pour tester les gardes du moteur), dossiers temporaires, jamais le vrai FLUX_ROOT ;
 `tests/system/test_frozen_bundle.py` verifie que chaque `shipped/*.flow.yml` est embarque.
