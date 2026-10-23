@@ -1,0 +1,44 @@
+flux_flow: 2
+name: publish_nuke
+label: "Publish Nuke"
+description: "Flow de publish Nuke (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish) -> nkPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher n'est pas encore bascule dessus (P8) : on le lance a la main avec Run."
+run_policy: queue
+interface:
+  inputs:
+    - {id: "name", type: "str", label: "Nom FLUX du publish", default: ""}
+    - {id: "format", type: "str", label: "Extension (.exr, .png, .mov...)", default: ".exr"}
+    - {id: "frame_range", type: "str", label: "Plage (caches, anim) : 1001-1050", default: ""}
+    - {id: "sequence", type: "bool", label: "Une image par frame", default: false}
+    - {id: "description", type: "str", label: "Description du publish (journal)", default: ""}
+    - {id: "colorspace", type: "str", label: "Espace couleur du Write (vide = defaut FLUX)", default: ""}
+  outputs:
+    - {id: path, type: path, label: "Fichier publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+nodes:
+  ev: {type: event.publish_request, pos: [0, 160], params: {soft: nuke}}
+  inst: {type: session.nk_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
+  in_name: {type: data.flow_input, pos: [320, 400], params: {id: name}}
+  in_format: {type: data.flow_input, pos: [320, 520], params: {id: format}}
+  in_frame_range: {type: data.flow_input, pos: [320, 640], params: {id: frame_range}}
+  in_sequence: {type: data.flow_input, pos: [320, 760], params: {id: sequence}}
+  in_description: {type: data.flow_input, pos: [320, 880], params: {id: description}}
+  in_colorspace: {type: data.flow_input, pos: [320, 1000], params: {id: colorspace}}
+  pub: {type: dcc.nk_publish, pos: [640, 160]}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+links:
+  - {from: ev.then, to: inst.exec}
+  - {from: inst.then, to: pub.exec}
+  - {from: inst.session, to: pub.session}
+  - {from: in_name.value, to: pub.name}
+  - {from: in_format.value, to: pub.format}
+  - {from: in_frame_range.value, to: pub.frame_range}
+  - {from: in_sequence.value, to: pub.sequence}
+  - {from: in_description.value, to: pub.description}
+  - {from: in_colorspace.value, to: pub.colorspace}
+  - {from: pub.then, to: out_path.exec}
+  - {from: pub.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: pub.version, to: out_version.value}
+notes:
+  - {id: k1, pos: [0, 1160], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et nkPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

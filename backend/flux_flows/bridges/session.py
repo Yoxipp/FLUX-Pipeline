@@ -150,17 +150,29 @@ class TcpJsonSession(Session):
                                         raise_on_error=False)
 
 
+class ClientSession(Session):
+    """Bridges without code execution (Painter, Designer, Mari, ZBrush, Marvelous): the nodes
+    call their client on this port; run() is refused (a "bridge+" verb, not invented, A17)."""
+
+    def __init__(self, soft: str, port: Optional[int], *, pid: Optional[int] = None) -> None:
+        self.soft, self.port, self.pid = soft, int(port) if port else None, pid
+
+    def run(self, code: str, timeout: float = 600.0) -> Dict[str, Any]:
+        return {"ok": False, "error": f"{softs.get(self.soft).label} n'execute pas de code (commande a ajouter "
+                                      "au bridge, a etudier)"}
+
+
 _LIVE = {"houdini": HoudiniLiveSession, "maya": MayaLiveSession}
 
 
-def live_session(soft: str, port: int, pid: Optional[int] = None) -> Session:
+def live_session(soft: str, port: Optional[int], pid: Optional[int] = None) -> Session:
     spec = softs.get(soft)
     cls = _LIVE.get(spec.soft)
     if cls is not None:
         return cls(port, pid=pid)
-    if spec.transport == "tcp_json":
+    if spec.soft == "nuke":
         return TcpJsonSession(spec.soft, port, pid=pid)
-    raise BridgeError(f"{spec.label} : pas de session live (P6b)")
+    return ClientSession(spec.soft, port, pid=pid)
 
 
 def _same_path(a: str, b: str) -> bool:
@@ -185,6 +197,10 @@ def find_instance(soft: str, *, pick: str = "active", scene: str = "", pid: Any 
     """The running instance a flow targets, or None. ``active`` = the one chosen in FLUX
     (resolve_port), ``scene`` = the one whose open scene is *scene*, ``pid``."""
     spec = softs.get(soft)
+    if spec.transport == "file_mailbox" and instances is None:
+        # One mailbox, one instance: alive when the bridge beats (Marvelous).
+        got = primitives.ping(spec.soft)
+        return {"port": None, "pid": got.get("pid")} if got.get("ok") else None
     found = instances if instances is not None else primitives.scan_ports(spec.soft)
     if not found:
         return None
@@ -223,12 +239,12 @@ def connect_live(soft: str, *, mode: str = "live_connect_or_open", pick: str = "
         if not primitives.launch(spec.soft, scene or None):
             raise BridgeError(f"{spec.label} : executable introuvable (Parametres > Logiciels)")
         ready = primitives.wait_ready(spec.soft, None, timeout=wait_s, cancelled=cancelled, any_port=True)
-        inst = {"port": ready["port"], "pid": None}
-    session = live_session(spec.soft, int(inst["port"]), inst.get("pid"))
+        inst = {"port": ready["port"] if spec.transport != "file_mailbox" else None, "pid": None}
+    session = live_session(spec.soft, inst.get("port"), inst.get("pid"))
     got = primitives.ping(spec.soft, session.port)
     if not got.get("ok"):
         raise BridgeError(f"{spec.label} :{session.port} ne repond pas ({got.get('error') or 'bridge absent'})")
     session.version = got.get("version") or ""
-    session.scene = scene_of(spec.soft, session.port)
+    session.scene = scene_of(spec.soft, session.port) if session.port else ""
     log(f"connecte a {session.label}")
     return session

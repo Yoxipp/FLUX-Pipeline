@@ -29,8 +29,9 @@ class Specs(unittest.TestCase):
     def test_shipped_dcc_nodes_and_their_ports(self) -> None:
         with mock.patch.object(dcc_nodes, "_team_dir", return_value=None):
             idx = dcc_nodes.index()
-            self.assertEqual(sorted(idx), ["dcc.hou_publish", "dcc.may_publish", "session.hou_instance",
-                                           "session.may_instance"])
+            prefixes = ("hou", "may", "nk", "sp", "sd", "mvd", "zb", "mari")
+            self.assertEqual(sorted(idx), sorted([f"dcc.{p}_publish" for p in prefixes]
+                                                 + [f"session.{p}_instance" for p in prefixes]))
             spec = registry.get_node("session.hou_instance")
         self.assertEqual(spec.label, "HoudiniInstance")
         self.assertEqual([p.name for p in spec.params], ["mode", "pick"])

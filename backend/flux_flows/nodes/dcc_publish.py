@@ -192,3 +192,224 @@ def hou_publish(ctx, inputs, params):
     record = publish_record(got["path"], user=user)
     record["version"] = got.get("version")
     return {"publish": record, "path": str(got["path"]), "version": got.get("version") or 0}
+
+
+# -- P6b: Nuke, Painter, Designer, Marvelous, ZBrush, Mari (01 §13 table) --------------------
+# Each calls the soft's publish function of the Publisher in a worker thread. Those functions
+# talk to the singleton client on the BASE port of the soft: a session on another instance
+# is refused (same rule as houPublish) instead of publishing from the wrong one.
+
+def _base_port_only(session, soft: str, label: str) -> None:
+    from flux_flows.bridges import softs
+
+    if not session.live:
+        raise NodeError(f"{label}Publish demande une session Live")
+    if soft in ("marvelous",):
+        return
+    base = softs.port_range(soft).start
+    if session.port and int(session.port) != base:
+        raise NodeError(f"{label}Publish publie dans l'instance du port {base} (celle du Publisher), pas :{session.port}")
+
+
+def _from_result(res: Any, user: str) -> Dict[str, Any]:
+    from flux_flows.nodes.flux import publish_record
+
+    if not isinstance(res, dict) or not res.get("ok"):
+        raise NodeError(f"publish echoue : {(res or {}).get('error') or 'voir le journal FLUX'}")
+    paths = [str(p) for p in (res.get("published") or [])]
+    path = str(res.get("path") or (paths[0] if paths else ""))
+    record = publish_record(path, user=user) if path else None
+    version = res.get("version")
+    if record is not None:
+        record["version"] = version if version is not None else record.get("version")
+    return {"publish": record, "path": path, "version": int(version or (record or {}).get("version") or 0),
+            "files": paths or ([path] if path else [])}
+
+
+def _texture_tokens(inputs, params) -> Dict[str, Any]:
+    out = {"class_tok": str(inputs.get("class") or "").strip(), "task_tok": str(inputs.get("task") or "").strip(),
+           "name_tok": str(inputs.get("name") or "").strip(), "instance": str(params.get("instance") or "null")}
+    if not (out["class_tok"] and out["task_tok"] and out["name_tok"]):
+        raise NodeError("class, task et name sont obligatoires (tokens FLUX)")
+    return out
+
+
+_TEX_IN = [port("class", "str", "Token CLASS", "CLASS token", "PROP", required=True),
+           port("task", "str", "Token TYPE (tache)", "TYPE token (task)", "TEXTURE", required=True),
+           port("name", "str", "Token NAME", "NAME token", "chair", required=True)]
+_TEX_OUTS = _OUTS + [port("files", "list[path]", "Tous les fichiers publies", "Every published file")]
+
+
+def _sim_soft(label: str):
+    def simulate(ctx, inputs, params):
+        if inputs.get("session") is None:
+            return {"lines": [{"kind": "skip", "text_fr": dc.SKIPPED_FR}],
+                    "outputs": {"publish": None, "path": "", "version": 0, "files": []}}
+        name = inputs.get("name") or ""
+        return {"lines": [{"kind": "publish", "text_fr": f"publierait {name} depuis {label} (vNNN + LAST)"}],
+                "outputs": {"publish": None, "path": "", "version": 0, "files": []}}
+    return simulate
+
+
+def _user(ctx) -> str:
+    return str((ctx.context or {}).get("user") or "unknown")
+
+
+@flow_node("dcc.nk_publish_core", "nkPublishCore", icon="PackagePlus", internal=True,
+           inputs=[dc.EXEC, dc.session_port("nuke", "Nuke"),
+                   port("name", "str", "Nom FLUX du publish", "FLUX publish name", "SEQ010_SH010_COMP_main", required=True),
+                   port("node", "dcc_node", "Node a ecrire (vide = selection)", "Node to write (empty = selection)", "Merge1")],
+           outputs=_TEX_OUTS,
+           params=[port("format", "str", "Extension (.exr, .png, .mov...)", "Extension", ".exr", default=".exr"),
+                   _FRAMES, port("sequence", "bool", "Une image par frame", "One file per frame", True, default=False),
+                   _DESCRIPTION, port("options", "dict", "Knobs du Write", "Write knobs", {}),
+                   port("colorspace", "str", "Espace couleur du Write (vide = defaut FLUX)", "Write colorspace", "")],
+           session="nuke", live_only=True, effect=True, simulate=_sim_soft("Nuke"), shelf=219,
+           doc_fr="Coeur de nkPublish : publish_from_nuke (Publisher Nuke).", doc_en="Core of nkPublish.")
+def nk_publish(ctx, inputs, params):
+    from dcc.nuke.nuke_publish import publish_from_nuke
+
+    s = dc.need_session(ctx, inputs)
+    _base_port_only(s, "nuke", "nk")
+    project, _path = _project(ctx, params)
+    fr = dc.frame_range(params.get("frame_range"))
+    res = publish_from_nuke(project, dc.text_param(ctx, inputs.get("name"), "name"), _ext(params.get("format")),
+                            options=params.get("options") or None, is_sequence=bool(params.get("sequence")),
+                            frame_range=(fr[0], fr[1]) if fr else None, node_name=str(inputs.get("node") or "") or None,
+                            description=str(params.get("description") or ""), user=_user(ctx),
+                            colorspace=str(params.get("colorspace") or "") or None)
+    return _from_result(res, _user(ctx))
+
+
+@flow_node("dcc.sp_publish_core", "spPublishCore", icon="PackagePlus", internal=True,
+           inputs=[dc.EXEC, dc.session_port("painter", "Painter"), *_TEX_IN],
+           outputs=_TEX_OUTS,
+           params=[port("instance", "str", "Token INSTANCE", "INSTANCE token", "null", default="null"),
+                   port("preset", "str", "Preset d'export", "Export preset", "PBR Metallic Roughness",
+                        default="PBR Metallic Roughness"),
+                   port("format", "str", "Format", "Format", "png", default="png"),
+                   port("bit_depth", "str", "Profondeur", "Bit depth", "8", default="8"),
+                   port("size", "int", "Largeur (vide = celle du texture set)", "Width", 2048),
+                   port("maps", "list[str]", "Maps (vide = toutes)", "Maps (empty = all)", []),
+                   port("conform_tx", "bool", "Ecrire aussi les .tx", "Also write the .tx", False, default=False),
+                   _DESCRIPTION, port("extra", "dict", "Autres arguments de publish_painter", "Other publish_painter "
+                                      "arguments", {})],
+           session="painter", live_only=True, effect=True, simulate=_sim_soft("Painter"), shelf=233,
+           doc_fr="Coeur de spPublish : publish_painter (Publisher Painter).", doc_en="Core of spPublish.")
+def sp_publish(ctx, inputs, params):
+    from dcc.substance_painter.substance_export import publish_painter
+
+    s = dc.need_session(ctx, inputs)
+    _base_port_only(s, "painter", "sp")
+    project, _path = _project(ctx, params)
+    res = publish_painter(project, **_texture_tokens(inputs, params),
+                          preset=str(params.get("preset") or "PBR Metallic Roughness"),
+                          file_format=str(params.get("format") or "png"), bit_depth=str(params.get("bit_depth") or "8"),
+                          conform_tx=bool(params.get("conform_tx")), description=str(params.get("description") or ""),
+                          user=_user(ctx), size=params.get("size") or None, maps=params.get("maps") or None,
+                          **(params.get("extra") or {}))
+    return _from_result(res, _user(ctx))
+
+
+@flow_node("dcc.sd_publish_core", "sdPublishCore", icon="PackagePlus", internal=True,
+           inputs=[dc.EXEC, dc.session_port("designer", "Designer"), *_TEX_IN],
+           outputs=_TEX_OUTS,
+           params=[port("instance", "str", "Token INSTANCE", "INSTANCE token", "null", default="null"),
+                   port("format", "str", "Format des maps", "Map format", "png", default="png"),
+                   port("size", "int", "Largeur", "Width", 2048), port("bit_depth", "str", "Profondeur", "Bit depth", "16"),
+                   port("maps", "bool", "Publier les maps", "Publish the maps", True, default=True),
+                   port("sbsar", "bool", "Publier le .sbsar", "Publish the .sbsar", False, default=False),
+                   port("sbs", "bool", "Publier le .sbs", "Publish the .sbs", False, default=False),
+                   port("conform_tx", "bool", "Ecrire aussi les .tx", "Also write the .tx", False, default=False),
+                   _DESCRIPTION, port("extra", "dict", "Autres arguments de publish_designer", "Other publish_designer "
+                                      "arguments", {})],
+           session="designer", live_only=True, effect=True, simulate=_sim_soft("Designer"), shelf=244,
+           doc_fr="Coeur de sdPublish : publish_designer (Publisher Designer).", doc_en="Core of sdPublish.")
+def sd_publish(ctx, inputs, params):
+    from dcc.substance_designer.designer_export import publish_designer
+
+    s = dc.need_session(ctx, inputs)
+    _base_port_only(s, "designer", "sd")
+    project, _path = _project(ctx, params)
+    res = publish_designer(project, **_texture_tokens(inputs, params), file_format=str(params.get("format") or "png"),
+                           size=params.get("size") or None, bit_depth=str(params.get("bit_depth") or "") or None,
+                           maps=params.get("maps", True) is not False, sbsar=bool(params.get("sbsar")),
+                           sbs=bool(params.get("sbs")), conform_tx=bool(params.get("conform_tx")),
+                           description=str(params.get("description") or ""), user=_user(ctx),
+                           **(params.get("extra") or {}))
+    return _from_result(res, _user(ctx))
+
+
+@flow_node("dcc.mvd_publish_core", "mvdPublishCore", icon="PackagePlus", internal=True,
+           inputs=[dc.EXEC, dc.session_port("marvelous", "Marvelous"),
+                   port("name", "str", "Nom FLUX du publish", "FLUX publish name", "CHAR_CLOTH_dress_null", required=True)],
+           outputs=_TEX_OUTS,
+           params=[port("format", "str", "abc, obj, fbx, usd, zprj", "Format", "abc", default="abc"),
+                   port("options", "dict", "Options d'export", "Export options", {}),
+                   port("with_zprj", "bool", "Publier aussi le .zprj", "Also publish the .zprj", False, default=False),
+                   _DESCRIPTION],
+           session="marvelous", live_only=True, effect=True, simulate=_sim_soft("Marvelous"), shelf=254,
+           doc_fr="Coeur de mvdPublish : publish_marvelous (Publisher Marvelous).", doc_en="Core of mvdPublish.")
+def mvd_publish(ctx, inputs, params):
+    from dcc.marvelous.marvelous_export import publish_marvelous
+
+    s = dc.need_session(ctx, inputs)
+    _base_port_only(s, "marvelous", "mvd")
+    project, _path = _project(ctx, params)
+    res = publish_marvelous(project, dc.text_param(ctx, inputs.get("name"), "name"),
+                            file_format=str(params.get("format") or "abc"), options=params.get("options") or None,
+                            with_zprj=bool(params.get("with_zprj")), description=str(params.get("description") or ""),
+                            user=_user(ctx))
+    return _from_result(res, _user(ctx))
+
+
+@flow_node("dcc.zb_publish_core", "zbPublishCore", icon="PackagePlus", internal=True,
+           inputs=[dc.EXEC, dc.session_port("zbrush", "ZBrush"),
+                   port("name", "str", "Nom FLUX du publish", "FLUX publish name", "CHAR_SCULPT_head_null", required=True)],
+           outputs=_TEX_OUTS,
+           params=[port("format", "str", ".ztl, .obj ou .fbx", ".ztl, .obj or .fbx", ".ztl", default=".ztl"),
+                   port("options", "dict", "Options d'export", "Export options", {}), _DESCRIPTION],
+           session="zbrush", live_only=True, effect=True, simulate=_sim_soft("ZBrush"), shelf=263,
+           doc_fr="Coeur de zbPublish : publish_zbrush (Publisher ZBrush) ; ZBrush toujours relache.",
+           doc_en="Core of zbPublish; ZBrush always released.")
+def zb_publish(ctx, inputs, params):
+    from dcc.zbrush.client import zbrush_client
+    from dcc.zbrush.zbrush_export import publish_zbrush
+
+    s = dc.need_session(ctx, inputs)
+    _base_port_only(s, "zbrush", "zb")
+    project, project_path = _project(ctx, params)
+    ctx.add_cleanup(lambda: zbrush_client.release(timeout=2.0))
+    try:
+        res = publish_zbrush(project_path, dc.text_param(ctx, inputs.get("name"), "name"), _ext(params.get("format")),
+                             params.get("options") or {}, str(params.get("description") or ""), _user(ctx),
+                             project_name=project)
+    finally:
+        try:
+            zbrush_client.release(timeout=2.0)
+        except Exception:  # noqa: BLE001 - the run's cleanup tries again
+            pass
+    return _from_result(res, _user(ctx))
+
+
+@flow_node("dcc.mari_publish_core", "mariPublishCore", icon="PackagePlus", internal=True,
+           inputs=[dc.EXEC, dc.session_port("mari", "Mari"), *_TEX_IN],
+           outputs=_TEX_OUTS,
+           params=[port("instance", "str", "Token INSTANCE", "INSTANCE token", "null", default="null"),
+                   port("format", "str", "Format (tif, exr, png)", "Format", "tif", default="tif"),
+                   port("channels", "list[str]", "Channels (vide = tous)", "Channels (empty = all)", []),
+                   port("conform_tx", "bool", "Ecrire aussi les .tx", "Also write the .tx", False, default=False),
+                   _DESCRIPTION, port("extra", "dict", "Autres arguments de publish_mari", "Other publish_mari arguments",
+                                      {})],
+           session="mari", live_only=True, effect=True, simulate=_sim_soft("Mari"), shelf=273,
+           doc_fr="Coeur de mariPublish : publish_mari (Publisher Mari).", doc_en="Core of mariPublish.")
+def mari_publish(ctx, inputs, params):
+    from dcc.mari.mari_export import publish_mari
+
+    s = dc.need_session(ctx, inputs)
+    _base_port_only(s, "mari", "mari")
+    project, _path = _project(ctx, params)
+    res = publish_mari(project, **_texture_tokens(inputs, params), file_format=str(params.get("format") or "tif"),
+                       conform_tx=bool(params.get("conform_tx")), description=str(params.get("description") or ""),
+                       user=_user(ctx), channels=params.get("channels") or None, **(params.get("extra") or {}))
+    return _from_result(res, _user(ctx))

@@ -181,8 +181,8 @@ def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) ->
             why = ""
         if inst is not None:
             try:
-                s = sess.live_session(spec.soft, int(inst["port"]), inst.get("pid"))
-                s.scene = sess.scene_of(spec.soft, s.port)
+                s = sess.live_session(spec.soft, inst.get("port"), inst.get("pid"))
+                s.scene = sess.scene_of(spec.soft, s.port) if s.port else ""
                 return {"lines": [{"kind": "dcc", "text_fr": f"se connecterait a {s.label} (lectures seulement "
                                    "en essai a blanc)"}],
                         "outputs": {"session": s, "scene": s.scene, "version": "", "state": "live"}}

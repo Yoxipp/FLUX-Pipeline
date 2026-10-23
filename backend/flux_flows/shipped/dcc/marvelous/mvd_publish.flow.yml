@@ -1,0 +1,46 @@
+flux_flow: 2
+name: mvd_publish
+label: mvdPublish
+description: "Publish Marvelous Designer (node livre, verrouille ; boite noire, decision 9) : meme code que le Publisher Marvelous Designer, vNNN immuable + LAST, activite, flows OnPublish. Live, instance du Publisher. Double clic pour voir dedans ; Deverrouiller = copie d'equipe (verifications avant publish)."
+node_type: dcc.mvd_publish
+interface:
+  inputs:
+    - {id: session, type: "session[marvelous]", label: "Session Marvelous Designer (Live)"}
+    - {id: "name", type: "str", label: "Nom FLUX du publish", default: ""}
+    - {id: "format", type: "str", label: "abc, obj, fbx, usd, zprj", default: "abc"}
+    - {id: "with_zprj", type: "bool", label: "Publier aussi le .zprj", default: false}
+    - {id: "description", type: "str", label: "Description du publish (journal)", default: ""}
+  outputs:
+    - {id: publish, type: publish, label: "Le publish"}
+    - {id: path, type: path, label: "Fichier publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+    - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+nodes:
+  ev: {type: event.manual, pos: [0, 160]}
+  in_session: {type: data.flow_input, pos: [0, 320], params: {id: session}}
+  in_name: {type: data.flow_input, pos: [0, 440], params: {id: name}}
+  in_format: {type: data.flow_input, pos: [0, 560], params: {id: format}}
+  in_with_zprj: {type: data.flow_input, pos: [0, 680], params: {id: with_zprj}}
+  in_description: {type: data.flow_input, pos: [0, 800], params: {id: description}}
+  core: {type: dcc.mvd_publish_core, pos: [320, 160]}
+  out_publish: {type: subflow.flow_output, pos: [640, 160], params: {id: publish}}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+links:
+  - {from: ev.then, to: core.exec}
+  - {from: in_session.value, to: core.session}
+  - {from: in_name.value, to: core.name}
+  - {from: in_format.value, to: core.format}
+  - {from: in_with_zprj.value, to: core.with_zprj}
+  - {from: in_description.value, to: core.description}
+  - {from: core.then, to: out_publish.exec}
+  - {from: core.publish, to: out_publish.value}
+  - {from: out_publish.then, to: out_path.exec}
+  - {from: core.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: core.version, to: out_version.value}
+  - {from: out_version.then, to: out_files.exec}
+  - {from: core.files, to: out_files.value}
+notes:
+  - {id: k1, pos: [0, 960], text: "Node livre avec FLUX : lecture seule. Deverrouiller (Team TD) pour ajouter des verifications avant le publish ; Revenir au defaut supprime la copie."}

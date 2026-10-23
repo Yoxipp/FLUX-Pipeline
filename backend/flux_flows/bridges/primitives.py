@@ -135,7 +135,8 @@ def ping(soft: str, port: Optional[int] = None) -> Dict[str, Any]:
             from dcc.marvelous.client import heartbeat
 
             beat = heartbeat()
-            return {"ok": beat is not None, "version": str((beat or {}).get("version") or ""), "port": port}
+            return {"ok": beat is not None, "version": str((beat or {}).get("version") or ""), "port": port,
+                    "pid": (beat or {}).get("pid")}
     except BridgeError as exc:
         return {"ok": False, "version": "", "port": port, "error": str(exc)}
     return {"ok": False, "version": "", "port": port, "error": f"transport {spec.transport} sans ping"}
