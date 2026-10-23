@@ -10,6 +10,8 @@
 // tooltip, the drop creates nothing when refused); a link dropped in the void opens the Tab
 // menu limited to the compatible nodes, the node created is linked. Shelf / Catalogue items
 // dropped here are created at the drop point (dataTransfer application/x-flux-node).
+// P4 issues: badge per node, red ring on the faulty port, the link named by an issue in --err;
+// lash makes a node blink once (zoom from the Problems panel).
 // Pan: middle button, select: drag on the background. No +/- / frame buttons (2026-10-22).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -21,13 +23,13 @@ import '@xyflow/react/dist/style.css'
 import { toast } from 'sonner'
 import { FAMILY_INFO } from './families'
 import { FlowEdge, type FlowRfEdge } from './edges/FlowEdge'
-import { FlowNode, type FlowRfNode } from './nodes/FlowNode'
+import { FlowNode, type FlowRfNode, type NodeIssues } from './nodes/FlowNode'
 import { handleId, portOfHandle } from './nodes/PortHandle'
 import { PortTooltipProvider } from './nodes/PortTooltip'
 import { ConnectCtx, type ConnectState } from './nodes/connectState'
 import { checkLink, firstCompatible, type PortEnd } from './portTypes'
 import { TabMenu } from './TabMenu'
-import type { FlowDocLink, FlowView, FlowViewNode, NodeRunInfo } from './types'
+import type { FlowDocLink, FlowView, FlowViewNode, Issue, NodeRunInfo } from './types'
 import type { CatalogEntry } from './v1_adapter'
 import { useTr } from './useTr'
 
@@ -55,8 +57,10 @@ export interface EditActions {
 
 type TabAt = { x: number; y: number; fx: number; fy: number; from?: { end: PortEnd; type: string } }
 
-export function NetworkPane({ view, flowKey, selection, search, dots, straight, catalog, runStates, edit, onSelect, onToggleWires }: {
+export function NetworkPane({ view, flowKey, selection, search, dots, straight, catalog, runStates, issues, flash, edit, onSelect, onToggleWires }: {
   view: FlowView | null
+  issues: Issue[]
+  flash: { id: string; n: number } | null
   flowKey: string              // changes when another flow is loaded: frames it once
   selection: ReadonlySet<string>
   runStates?: Record<string, NodeRunInfo>
@@ -80,6 +84,18 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
   const byId = useMemo(() => Object.fromEntries((view?.nodes ?? []).map(n => [n.id, n])) as Record<string, FlowViewNode>, [view])
   const links = useMemo<FlowDocLink[]>(() => (view?.edges ?? []).map(e => ({ from: `${e.source}.${e.sourcePort}`, to: `${e.target}.${e.targetPort}` })), [view])
 
+  const perNode = useMemo(() => {
+    const m: Record<string, NodeIssues> = {}
+    for (const i of issues) {
+      if (!i.node) continue
+      const x = (m[i.node] ??= { errors: 0, warnings: 0, ports: [] })
+      if (i.level === 'error') x.errors++; else x.warnings++
+      if (i.port) x.ports.push(i.port)
+    }
+    return m
+  }, [issues])
+  const badLinks = useMemo(() => new Set(issues.filter(i => i.link).map(i => `${i.link!.from}->${i.link!.to}`)), [issues])
+
   const q = search.trim().toLowerCase()
   const derived = useMemo<FlowRfNode[]>(() => {
     if (!view) return []
@@ -91,11 +107,12 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
     return view.nodes.map(n => ({
       id: n.id, type: 'flow', position: n.position, selected: selection.has(n.id),
       data: {
-        node: n, linked: linked[n.id] ?? [], run: runStates?.[n.id],
+        node: n, linked: linked[n.id] ?? [], run: runStates?.[n.id], issues: perNode[n.id],
+        flash: flash?.id === n.id ? flash.n : undefined,
         dim: !!q && ![n.label, n.type, ...n.inputs.map(p => p.name)].some(t => t.toLowerCase().includes(q)),
       },
     }))
-  }, [view, q, runStates, selection])
+  }, [view, q, runStates, selection, perNode, flash])
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowRfNode>(derived)
   useEffect(() => { setNodes(derived) }, [derived, setNodes])
   // Frame the whole flow once per flow loaded (not on each edit).
@@ -107,8 +124,9 @@ export function NetworkPane({ view, flowKey, selection, search, dots, straight, 
     .map(e => ({
       id: e.id, type: 'flow', source: e.source, target: e.target, selected: edgeSel.includes(e.id),
       sourceHandle: handleId('out', e.sourcePort), targetHandle: handleId('in', e.targetPort),
-      data: { kind: e.kind, type: e.type, dim: !!q, straight, conversion: e.conversion, bad: e.bad },
-    })), [view, q, straight, edgeSel])
+      data: { kind: e.kind, type: e.type, dim: !!q, straight, conversion: e.conversion,
+              bad: e.bad || badLinks.has(`${e.source}.${e.sourcePort}->${e.target}.${e.targetPort}`) },
+    })), [view, q, straight, edgeSel, badLinks])
 
   const connectState = useMemo<ConnectState>(() => ({
     editable: !readOnly,

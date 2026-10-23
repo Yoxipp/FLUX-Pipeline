@@ -38,7 +38,9 @@ import { FlowParams } from './FlowParams'
 import { RunsPanel } from './RunsPanel'
 import { ShelfBar } from './ShelfBar'
 import { TopBar, type FlowListEntry } from './TopBar'
-import type { FlowDoc, FlowRead, FlowRights, FlowScope, FlowsWsMessage, MigrateReport, NodeRunInfo, RunIssue, RunRecord } from './types'
+import type { FlowDoc, FlowRead, FlowRights, FlowScope, FlowsWsMessage, Issue, MigrateReport, NodeRunInfo, RunIssue, RunRecord } from './types'
+import { IssuesPanel, type CheckState } from './IssuesPanel'
+import { applyFix, autoBegin } from './fixes'
 import type { CatalogEntry } from './v1_adapter'
 import { adaptCatalog, adaptV2Flow, type SpecIndex } from './v2_adapter'
 import { createDocStore, docOf, isDirty, useStore } from './store'
@@ -82,6 +84,11 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [nodeErrors, setNodeErrors] = useState<{ file: string; error: string }[]>([])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [writing, setWriting] = useState(false)
+  // P4 validation (03 §5): POST /flows/validate 300 ms after the last edit; the backend is the reference.
+  const [issues, setIssues] = useState<Issue[]>([])
+  const [check, setCheck] = useState<CheckState>('idle')
+  const [issuesOpen, setIssuesOpen] = useState(true)
+  const [flash, setFlash] = useState<{ id: string; n: number } | null>(null)
   // P4: the document being edited lives in the store (undo / redo); `loaded` keeps what the
   // backend answered (scope, version, state).
   const store = useMemo(() => createDocStore<FlowDoc>(), [])
@@ -176,6 +183,18 @@ function Editor({ rights }: { rights: FlowRights }) {
     : !rights.can[loaded.scope]?.write ? (loaded.scope === 'perso' ? tr('Case TD requise', 'TD box required') : tr('Case Team TD requise', 'Team TD box required'))
     : undefined
   // The graph is editable where it can be saved (a shipped flow: Save as first).
+  useEffect(() => {
+    if (!doc || !loaded) { setIssues([]); setCheck('idle'); return }
+    let alive = true
+    setCheck('checking')
+    const t = setTimeout(() => {
+      flowsApi.validate(doc, loaded.scope, project || undefined)
+        .then(r => { if (alive) { setIssues(r.issues); setCheck('ok') } })
+        .catch(() => { if (alive) setCheck('down') })
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [doc, loaded?.scope, loaded?.name, project])  // eslint-disable-line react-hooks/exhaustive-deps
+
   const specs = useMemo<SpecIndex>(() => Object.fromEntries((catalog ?? []).filter(e => e.spec).map(e => [e.type, e.spec!])), [catalog])
   const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope, specs }) : null, [doc, loaded, saveBlocked, specs])
 
@@ -305,6 +324,7 @@ function Editor({ rights }: { rights: FlowRights }) {
   const runBlocked = !loaded ? tr('Aucun flow ouvert', 'No open flow')
     : !rights.can[loaded.scope]?.draft ? tr('Case TD requise', 'TD box required')
     : !wsUp ? tr('Backend injoignable', 'Backend unreachable')
+    : check === 'down' ? tr('Verification indisponible', 'Check unavailable')
     : undefined
   const dryBlocked = runBlocked
     ?? (loaded?.version !== null ? tr('Version figee ouverte : ouvre le fichier de travail', 'Frozen version open: open the working file')
@@ -364,7 +384,8 @@ function Editor({ rights }: { rights: FlowRights }) {
       const d = docOf(store.get())
       if (!d) return
       const id = nextNodeId(d)
-      let next = addNode(d, id, { type: entry.type, pos: at, params: {} })
+      const begin = autoBegin(d, entry.type)
+      let next = addNode(d, id, { type: entry.type, pos: at, params: begin ? { begin } : {} })
       if (link) {
         const nodes = Object.fromEntries(adaptV2Flow(next, { readOnly: false, specs }).nodes.map(n => [n.id, n]))
         const r = checkLink(nodes, next.links, link.end, { node: id, port: link.port, side: link.end.side === 'out' ? 'in' : 'out' })
@@ -389,6 +410,25 @@ function Editor({ rights }: { rights: FlowRights }) {
     const p = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 }
     edit.onAdd(e, [p.x - 120, p.y - 30])
   }, [saveBlocked, rf, edit])
+
+  // Problems panel: a click frames the node (250 ms), selects it, it blinks once.
+  const zoomTo = useCallback((i: Issue) => {
+    if (!i.node || !docOf(store.get())?.nodes[i.node]) return
+    const id = i.node
+    rf.fitView({ nodes: [{ id }], duration: 250, padding: 0.6, maxZoom: 1.4 })
+    setSelection(new Set([id]))
+    setFlash(f => ({ id, n: (f?.n ?? 0) + 1 }))
+  }, [rf, store])
+  const canFix = useCallback((i: Issue) => !!i.fix && !saveBlocked, [saveBlocked])
+  const fixIssue = useCallback((i: Issue) => {
+    const d = docOf(store.get())
+    const r = d && applyFix(d, i, specs)
+    if (!r) { toast.info(tr('Correction impossible ici (node pas encore disponible ?)', 'Cannot fix here (node not available yet?)')); return }
+    store.apply(() => r.doc)
+    if (r.select) setSelection(new Set([r.select]))
+  }, [store, specs, tr])
+  const labels = useMemo(() => Object.fromEntries((view?.nodes ?? []).map(n => [n.id, n.label])), [view])
+  const errorCount = issues.filter(i => i.level === 'error').length
 
   const nodeEdits = useMemo<NodeEdits>(() => ({
     onParam: (id, name, value) => store.apply(d => setParam(d, id, name, value), `param:${id}:${name}`),
@@ -426,6 +466,10 @@ function Editor({ rights }: { rights: FlowRights }) {
           onRun: () => launch(false), onDry: () => launch(true), onStop: stop,
           onToggleRuns: () => setRunsOpen(v => !v),
         }}
+        problems={{
+          errors: errorCount, warnings: issues.length - errorCount, state: check, open: issuesOpen,
+          onToggle: () => setIssuesOpen(v => !v),
+        }}
         onSearch={setSearch}
         onToggleDots={() => updatePrefs({ dots: !prefs.dots })}
         onToggleWires={toggleWires}
@@ -450,6 +494,7 @@ function Editor({ rights }: { rights: FlowRights }) {
               view={view} flowKey={loaded ? `${loaded.scope}:${loaded.name}:${loaded.version ?? ''}` : ''}
               selection={selection} edit={edit}
               search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
+              issues={issues} flash={flash}
               onSelect={onSelect} onToggleWires={toggleWires}
             />}
         <ParamsPane
@@ -458,6 +503,9 @@ function Editor({ rights }: { rights: FlowRights }) {
           flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} />}
         />
       </div>
+      {issuesOpen && loaded && (
+        <IssuesPanel issues={issues} state={check} labels={labels} canFix={canFix} onZoom={zoomTo} onFix={fixIssue} onClose={() => setIssuesOpen(false)} />
+      )}
       {runsOpen && loaded && (
         <RunsPanel
           flow={loaded.name} project={project || undefined} refreshKey={runsKey} openRunId={openRunId}

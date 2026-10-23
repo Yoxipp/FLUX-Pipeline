@@ -4,6 +4,8 @@
 // P2: run state of the node (03_EDITEUR §7): running = accent border + spinning loader, ok =
 // check + count, error = --err border + message (values received in the tooltip),
 // error_handled = --warn border, skipped / cancelled = dashed border.
+// P4: issue badge (count, --err or --warn) in the header, red ring on the faulty ports,
+// one blink when zoomed from the Problems panel.
 
 import { memo, useRef, useState } from 'react'
 import { NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react'
@@ -21,19 +23,20 @@ const ROW_H = 20
 const VALUE_MAX = 24
 const HIDE_MS = 250   // time to reach the toolbar before it hides
 
-export type FlowNodeData = { node: FlowViewNode; linked: string[]; dim: boolean; run?: NodeRunInfo }
+export interface NodeIssues { errors: number; warnings: number; ports: string[] }
+export type FlowNodeData = { node: FlowViewNode; linked: string[]; dim: boolean; run?: NodeRunInfo; issues?: NodeIssues; flash?: number }
 export type FlowRfNode = Node<FlowNodeData, 'flow'>
 
 const EXEC_IN: PortSpec = { name: 'exec', type: 'exec' }
 const EXEC_OUT: PortSpec = { name: 'then', type: 'exec' }
 
-function Row({ left, right, linked }: { left?: PortSpec; right?: PortSpec; linked: Set<string> }) {
+function Row({ left, right, linked, faulty }: { left?: PortSpec; right?: PortSpec; linked: Set<string>; faulty: Set<string> }) {
   const value = left && left.type !== 'exec'
     ? left.wiredFrom ? `<- ${left.wiredFrom}` : formatValue(left.value, VALUE_MAX)
     : ''
   return (
     <div style={{ position: 'relative', height: ROW_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', fontSize: 11 }}>
-      {left && <PortHandle port={left} side="in" linked={linked.has(handleId('in', left.name))} />}
+      {left && <PortHandle port={left} side="in" linked={linked.has(handleId('in', left.name))} faulty={faulty.has(left.name)} />}
       {left && (
         <span style={{ display: 'flex', gap: 5, minWidth: 0, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
           <span style={{ color: 'var(--ink-2)' }}>{left.name}</span>
@@ -42,7 +45,7 @@ function Row({ left, right, linked }: { left?: PortSpec; right?: PortSpec; linke
       )}
       {!left && <span style={{ flex: 1 }} />}
       {right && <span style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{right.name}</span>}
-      {right && <PortHandle port={right} side="out" linked={linked.has(handleId('out', right.name))} />}
+      {right && <PortHandle port={right} side="out" linked={linked.has(handleId('out', right.name))} faulty={faulty.has(right.name)} />}
     </div>
   )
 }
@@ -91,7 +94,8 @@ function RunBadge({ run }: { run?: NodeRunInfo }) {
 
 function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
   const { tr } = useTr()
-  const { node, dim, run } = data
+  const { node, dim, run, issues } = data
+  const faulty = new Set(issues?.ports ?? [])
   const border = runBorder(run, !!selected)
   const failed = run && (run.state === 'error' || run.state === 'error_handled') && run.error
   const received = run?.values && Object.keys(run.values).length
@@ -111,7 +115,7 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
   const isEvent = node.family === 'event'
   const radius = isEvent ? '12px 6px 6px 12px' : '6px'
   return (
-    <div onMouseEnter={enter} onMouseLeave={leave}>
+    <div onMouseEnter={enter} onMouseLeave={leave} key={data.flash} className={data.flash ? 'flow-flash' : undefined}>
       <NodeToolbar isVisible={hover || info} position={Position.Top} align="start" offset={6}>
         <div onMouseEnter={enter} onMouseLeave={leave}>
           <div className="flow-node-toolbar">
@@ -152,6 +156,12 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
             </span>
           )}
           <RunBadge run={run} />
+          {issues && issues.errors + issues.warnings > 0 && (
+            <span className="flow-issue-badge" style={{ background: issues.errors ? 'var(--err)' : 'var(--warn)' }}
+                  title={tr(`${issues.errors} erreur(s), ${issues.warnings} avertissement(s)`, `${issues.errors} error(s), ${issues.warnings} warning(s)`)}>
+              {issues.errors + issues.warnings}
+            </span>
+          )}
         </div>
         {failed && (
           <div
@@ -162,7 +172,7 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
           </div>
         )}
         {Array.from({ length: rows }, (_, i) => (
-          <Row key={i} left={left[i]} right={right[i]} linked={linked} />
+          <Row key={i} left={left[i]} right={right[i]} linked={linked} faulty={faulty} />
         ))}
       </div>
     </div>

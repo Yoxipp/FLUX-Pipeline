@@ -110,3 +110,13 @@
   font-size: 11.5px; color: var(--ink); cursor: grab;
 }
 .flow-palette-item:hover { background: var(--paper-2); }
+
+/* P4: Problems dock line (IssuesPanel.tsx) and the blink of a node zoomed from it. */
+.flow-issue { display: flex; align-items: flex-start; gap: 8px; padding: 4px 10px; cursor: pointer; border-bottom: 1px solid var(--rule); }
+.flow-issue:hover { background: var(--paper-2); }
+@keyframes flow-flash { 0%, 100% { outline-color: transparent; } 40% { outline-color: var(--accent); } }
+.flow-flash { outline: 2px solid transparent; outline-offset: 3px; border-radius: 7px; animation: flow-flash 0.7s ease-in-out 1; }
+.flow-issue-badge {
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 16px;
+  text-align: center; color: var(--on-accent); flex-shrink: 0;
+}

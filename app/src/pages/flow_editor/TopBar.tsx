@@ -7,9 +7,11 @@
 // blanc (the saved file), Stop, and the Runs dock toggle (03_EDITEUR §7).
 // P4: tag "modifie" while the document differs from the saved one, "lecture seule" where it
 // cannot be saved (reason in the tooltip), Layout arranges the graph (one undo entry).
+// Problems button (errors / warnings of the validation, toggles the dock) and the
+// "invalide" badge (.tag.err) while the document has errors (03 §5).
 
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid } from 'lucide-react'
+import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -36,7 +38,9 @@ export interface RunActions {
   onToggleRuns: () => void
 }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, onSearch, onToggleDots, onToggleWires, onLayout, onLegacy }: {
+export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
+
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onLegacy }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -51,6 +55,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   straight: boolean
   actions: FileActions
   run: RunActions
+  problems: ProblemsInfo
   onSearch: (s: string) => void
   onToggleDots: () => void
   onToggleWires: () => void
@@ -118,6 +123,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       {!!version && <span className="tag">v{String(version).padStart(3, '0')}</span>}
       {legacy && <span className="tag">v1</span>}
       {saveBlocked && current && <span className="tag" title={saveBlocked}>{tr('lecture seule', 'read-only')}</span>}
+      {problems.errors > 0 && <span className="tag err" title={tr('Enregistrable, mais non activable tant qu\'il reste des erreurs', 'Can be saved, but not activated while errors remain')}>{tr('invalide', 'invalid')}</span>}
       {dirty && !saveBlocked && <span className="tag" title={tr('Ctrl+S pour enregistrer', 'Ctrl+S to save')}>{tr('modifie', 'modified')}</span>}
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
@@ -130,6 +136,11 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       <button type="button" className="flow-tool" disabled={run.running || !!run.dryBlocked} onClick={run.onDry}
               title={run.dryBlocked ?? tr('Essai a blanc du fichier enregistre : rien n\'est ecrit, aucun logiciel lance', 'Dry run of the saved file: nothing written, no software started')}>
         <FlaskConical size={13} /> {tr('Essai', 'Dry run')}
+      </button>
+      <button type="button" className={`flow-tool${problems.open ? ' on' : ''}`} onClick={problems.onToggle}
+              title={problems.state === 'down' ? tr('Verification indisponible', 'Check unavailable') : tr('Problemes du flow', 'Flow problems')}>
+        {problems.errors > 0 ? <CircleX size={13} color="var(--err)" /> : <TriangleAlert size={13} color={problems.warnings ? 'var(--warn)' : undefined} />}
+        {problems.state === 'down' ? '?' : `${problems.errors} / ${problems.warnings}`}
       </button>
       <button type="button" className={`flow-tool${run.runsOpen ? ' on' : ''}`} onClick={run.onToggleRuns} title={tr('Historique des runs', 'Run history')}>
         <ListChecks size={13} /> Runs

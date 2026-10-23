@@ -14,7 +14,7 @@ const SIZE = 10
 export const handleId = (side: 'in' | 'out', name: string) => `${side}:${name}`
 export const portOfHandle = (id: string | null | undefined) => (id ?? '').replace(/^(in|out):/, '')
 
-export function PortHandle({ port, side, linked }: { port: PortSpec; side: 'in' | 'out'; linked: boolean }) {
+export function PortHandle({ port, side, linked, faulty }: { port: PortSpec; side: 'in' | 'out'; linked: boolean; faulty?: boolean }) {
   const { show, hide } = usePortTooltip()
   const nodeId = useNodeId() ?? ''
   const { editable, verdict } = useConnectState()
@@ -33,7 +33,7 @@ export function PortHandle({ port, side, linked }: { port: PortSpec; side: 'in' 
     background: shape === 'hollow' ? 'var(--paper-2)' : linked || clipped ? color : 'var(--paper-2)',
     border: clipped ? 'none' : `${shape === 'ring' && linked ? 3 : 2}px solid ${color}`,
     opacity: refused ? 0.35 : clipped && !linked ? 0.55 : 1,
-    outline: v && !refused ? '2px solid var(--accent)' : undefined,
+    outline: v && !refused ? '2px solid var(--accent)' : faulty ? '2px solid var(--err)' : undefined,
     outlineOffset: 2,
     cursor: editable ? 'crosshair' : 'default',
   }
