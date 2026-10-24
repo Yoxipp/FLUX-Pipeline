@@ -461,7 +461,7 @@ def _verb(ctx, inputs, soft: str, payload: Dict[str, Any], what: str, timeout: f
 
 def bridge_verb_nodes(soft: str, prefix: str, label: str, session_port: Any, shelf: int, *,
                       open_doc: tuple, open_example: str, mesh_new: bool, save_as_ext: tuple,
-                      save_as_doc: tuple, save_as_example: str, save_as_copy_only: bool = False,
+                      save_as_doc: tuple, save_as_example: str, copy_param: bool = True, discard_param: bool = True,
                       import_kinds: Optional[List[str]] = None, import_doc: tuple = ("", ""),
                       import_example: str = "") -> None:
     """dcc.<prefix>_{open_scene, save_scene, save_as, import, run_script} for one soft."""
@@ -475,15 +475,18 @@ def bridge_verb_nodes(soft: str, prefix: str, label: str, session_port: Any, she
     @flow_node(f"dcc.{prefix}_open_scene", f"{prefix}OpenScene", icon="FolderOpen", inputs=open_inputs,
                outputs=[dc.THEN, dc.ERR, port("scene", "path", "Projet ouvert", "Opened project")],
                params=[port("discard_changes", "bool", "Perdre les modifications non enregistrees",
-                            "Drop unsaved changes", False, default=False, wirable=False)],
-               session=soft, live_only=True, effect=True, destructive={"param": "discard_changes", "equals": True},
+                            "Drop unsaved changes", False, default=False, wirable=False)] if discard_param else [],
+               session=soft, live_only=True, effect=True,
+               destructive={"param": "discard_changes", "equals": True} if discard_param else None,
                simulate=dc.sim(lambda i, p: f"creerait un projet depuis {i.get('mesh')}" if i.get("mesh")
                                else f"ouvrirait {i.get('path')}", lambda i, p: {"scene": str(i.get("path") or "")}),
                shelf=shelf, aliases=["ouvrir", "open", "projet", "scene"] + (["nouveau", "mesh"] if mesh_new else []),
                doc_fr=f"Ouvre un projet {label}" + (", ou en cree un depuis un mesh" if mesh_new else "")
-                      + ". Refuse si le projet courant a des modifications non enregistrees, sauf discard_changes.",
+                      + (". Refuse si le projet courant a des modifications non enregistrees, sauf discard_changes."
+                         if discard_param else " (s'ajoute aux projets ouverts, rien n'est remplace)."),
                doc_en=f"Opens a {label} project" + (", or creates one from a mesh" if mesh_new else "")
-                      + ". Refused when the current project has unsaved changes, unless discard_changes.")
+                      + (". Refused when the current project has unsaved changes, unless discard_changes."
+                         if discard_param else " (added to the open projects, nothing is replaced)."))
     def _open(ctx, inputs, params):
         mesh = ""
         if mesh_new and inputs.get("mesh") not in (None, ""):
@@ -512,7 +515,7 @@ def bridge_verb_nodes(soft: str, prefix: str, label: str, session_port: Any, she
 
     as_params = [port("increment", "bool", "Ajoute _vNNN (version suivante libre)", "Adds _vNNN (next free version)",
                       False, default=False, wirable=False), _OVERWRITE]
-    if not save_as_copy_only:
+    if copy_param:
         as_params.insert(0, port("copy", "bool", "Copie : le projet ouvert garde son nom",
                                  "Copy: the open project keeps its name", False, default=False, wirable=False))
 
@@ -846,7 +849,7 @@ def mari_info(ctx, inputs, params):
 bridge_verb_nodes("mari", "mari", "Mari", _MARI, 274,
                   open_doc=("Projet Mari : son nom dans le cache Mari, ou une archive .mra",
                             "Mari project: its name in the Mari cache, or a .mra archive"),
-                  open_example="chair_tex", mesh_new=True, save_as_ext=(".mra",), save_as_copy_only=True,
+                  open_example="chair_tex", mesh_new=True, save_as_ext=(".mra",), copy_param=False,
                   save_as_doc=("Archive le projet Mari en .mra (le projet reste dans le cache, toujours une copie)",
                                "Archives the Mari project as .mra (the project stays in the cache, always a copy)"),
                   save_as_example="$FLUX/PROJ/chair_tex.mra", import_kinds=["image", "object", "version"],
@@ -871,3 +874,16 @@ bridge_verb_nodes("zbrush", "zb", "ZBrush", _ZB, 264,
                               "mesh = into the active tool (Tool:Import, obj / fbx); tool = a .ztl loaded as a new "
                               "tool"),
                   import_example="$FLUX/PROJ/head_retopo.obj")
+
+
+bridge_verb_nodes("designer", "sd", "Substance Designer", _SD, 245,
+                  open_doc=("Package .sbs a charger (s'ajoute aux packages ouverts)",
+                            "Package .sbs to load (added to the open packages)"),
+                  open_example="$FLUX/PROJ/wood_planks_v002.sbs", mesh_new=False, discard_param=False,
+                  save_as_ext=(".sbs",), copy_param=False,
+                  save_as_doc=("Enregistre le package du graphe courant sous un nouveau .sbs (il devient son fichier)",
+                               "Saves the current graph's package as a new .sbs (it becomes its file)"),
+                  save_as_example="$FLUX/PROJ/wood_planks.sbs", import_kinds=["bitmap", "mesh"],
+                  import_doc=("bitmap ou mesh lie dans les ressources du package du graphe courant",
+                              "bitmap or mesh linked into the resources of the current graph's package"),
+                  import_example="$FLUX/PROJ/wood_scan.png")

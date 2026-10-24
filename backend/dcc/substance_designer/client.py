@@ -26,6 +26,11 @@ class SubstanceDesignerClient:
         self.port = port
         self._at = {"port": port} if port else {}   # without a port: the exact calls of before
 
+    def verb(self, payload: dict, timeout: float = 600.0) -> dict:
+        """Flows "bridge+" verbs (open, save, save_as, import, run; P6b step 9). The bridge
+        answers "unknown action" until it is reinstalled."""
+        return _send(dict(payload), timeout=timeout, **self._at)
+
     def ping(self) -> dict:
         return _send({"action": "ping"}, timeout=2.0, **self._at)
 

@@ -24,7 +24,9 @@ tearDownModule = h.tearDownModule  # noqa: N816
 
 # soft -> (prefix, open extension (None = new project from a mesh), save_as extension, import kind or None)
 TCP_SOFTS = {"mari": ("mari", None, ".mra", "version"),
-             "zbrush": ("zb", ".zpr", ".zpr", "mesh")}
+             "zbrush": ("zb", ".zpr", ".zpr", "mesh"),
+             "designer": ("sd", ".sbs", ".sbs", "bitmap")}
+NO_DISCARD = {"designer"}   # open adds a package, nothing is replaced
 
 
 def _handler(requests):
@@ -70,11 +72,13 @@ class Nodes(unittest.TestCase):
                 mesh = self.tmp / "chair.obj"
                 mesh.write_text("x", encoding="utf-8")
                 source = {"mesh": str(mesh)} if open_ext is None else {"path": str(self.tmp / f"chair{open_ext}")}
-                rec, _ = run_node(soft, f"dcc.{prefix}_open_scene", self.srv.port, {"discard_changes": True}, source)
+                discard = soft not in NO_DISCARD
+                rec, _ = run_node(soft, f"dcc.{prefix}_open_scene", self.srv.port,
+                                  {"discard_changes": True} if discard else {}, source)
                 self.assertEqual(rec["status"], "ok", rec.get("error"))
                 req = self._last("open")
                 self.assertEqual((Path(req["mesh"] or req["path"]), req["discard"]),
-                                 (Path(list(source.values())[0]), True))
+                                 (Path(list(source.values())[0]), discard))
                 rec, _ = run_node(soft, f"dcc.{prefix}_save_scene", self.srv.port)
                 self.assertEqual(rec["status"], "ok", rec.get("error"))
                 target = self.tmp / f"chair{ext}"
@@ -288,6 +292,65 @@ class ZBrushScript(unittest.TestCase):
         self.assertFalse(d({"action": "run", "code": "result = 1", "secret": "bad"})["ok"])
         resp = d({"action": "run", "code": "result = zbc.get_active_tool_index()", "secret": "s3cret"})
         self.assertEqual((resp["ok"], resp["result"]), (True, 0))
+
+
+class DesignerScript(_FakeModules):
+    MODULE = "dcc.substance_designer.substance_designer_bridge"
+
+    def setUp(self) -> None:
+        calls = self.calls = []
+        tmp = Path(tempfile.mkdtemp(prefix="flux_sd_files_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.sbs = tmp / "wood.sbs"
+        self.sbs.write_text("x", encoding="utf-8")
+
+        class Pkg:
+            def __init__(self, path):
+                self.path = path
+
+            def getFilePath(self):  # noqa: N802 - sd API
+                return self.path
+
+        pkg = Pkg("C:/p/current.sbs")
+        graph = types.SimpleNamespace(getPackage=lambda: pkg)
+        mgr = types.SimpleNamespace(
+            getUserPackageFromFilePath=lambda p: None,
+            loadUserPackage=lambda p: (calls.append(("load", p)), Pkg(p))[1],
+            savePackage=lambda k: calls.append(("save", k.path)),
+            savePackageAs=lambda k, p: calls.append(("save_as", k.path, p)),
+            getUserPackages=lambda: [pkg])
+        app = types.SimpleNamespace(getPackageMgr=lambda: mgr,
+                                    getQtForPythonUIMgr=lambda: types.SimpleNamespace(getCurrentGraph=lambda: graph))
+        sd = types.ModuleType("sd")
+        sd.getContext = lambda: types.SimpleNamespace(getSDApplication=lambda: app)
+        api = types.ModuleType("sd.api")
+        res = types.ModuleType("sd.api.sdresource")
+        res.EmbedMethod = types.SimpleNamespace(Linked="linked")
+        bitmap = types.ModuleType("sd.api.sdresourcebitmap")
+        bitmap.SDResourceBitmap = types.SimpleNamespace(
+            sNewFromFile=lambda k, p, m: calls.append(("bitmap", k.path, p, m)))
+        scene = types.ModuleType("sd.api.sdresourcescene")
+        scene.SDResourceScene = types.SimpleNamespace(
+            sNewFromFile=lambda k, p, m: calls.append(("scene", k.path, p, m)))
+        self.load({"sd": sd, "sd.api": api, "sd.api.sdresource": res, "sd.api.sdresourcebitmap": bitmap,
+                   "sd.api.sdresourcescene": scene})
+
+    def test_open_save_save_as_import(self) -> None:
+        d = self.bridge._dispatch
+        self.assertEqual(d({"action": "open", "path": "C:/p/x.spp"})["status"], "error")
+        self.assertEqual(d({"action": "open", "path": str(self.sbs)})["project"], str(self.sbs))
+        self.assertEqual(d({"action": "save"})["project"], "C:/p/current.sbs")
+        target = str(self.tmp / "out" / "wood_v2.sbs")
+        self.assertEqual(d({"action": "save_as", "path": target})["status"], "ok")
+        self.assertEqual(self.calls[:3], [("load", str(self.sbs)), ("save", "C:/p/current.sbs"),
+                                          ("save_as", "C:/p/current.sbs", target)])
+        self.assertEqual(d({"action": "import", "kind": "bitmap", "path": str(self.sbs)})["status"], "ok")
+        self.assertEqual(self.calls[-1], ("bitmap", "C:/p/current.sbs", str(self.sbs), "linked"))
+        self.assertEqual(d({"action": "import", "kind": "mesh", "path": str(self.sbs)})["status"], "ok")
+        self.assertEqual(self.calls[-1][0], "scene")
+
+    def test_run_needs_the_secret(self) -> None:
+        self.check_run("app.getPackageMgr().getUserPackages()[0].getFilePath()", "C:/p/current.sbs")
 
 
 if __name__ == "__main__":
