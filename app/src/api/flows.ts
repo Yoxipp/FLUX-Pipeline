@@ -89,7 +89,7 @@ export const flowsApi = {
   // runs (01 §4, §6). 409 = refused (detail.issues), skipped (run_policy) or not active.
   run: (name: string, opts: RunOpts): Promise<{ run_id: string; status: RunStatus; mode: 'real' | 'dry' }> =>
     apiCall('POST', `/flows/${encodeURIComponent(name)}/run`, opts),
-  listRuns: (opts: { flow?: string; scope?: FlowScope; project?: string; status?: RunStatus; limit?: number } = {}): Promise<RunSummary[]> =>
+  listRuns: (opts: { flow?: string; scope?: FlowScope; project?: string; status?: RunStatus; event?: string; limit?: number } = {}): Promise<RunSummary[]> =>
     apiCall<RunSummary[]>('GET', `/flows/runs${qs(opts)}`),
   getRun: (runId: string, project?: string): Promise<RunRecord> =>
     apiCall<RunRecord>('GET', `/flows/runs/${encodeURIComponent(runId)}${qs({ project })}`),

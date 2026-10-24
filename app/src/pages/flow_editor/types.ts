@@ -336,7 +336,7 @@ export interface RunSummary {
   draft:       boolean
   mode:        'real' | 'dry'
   status:      RunStatus
-  trigger:     { event: string | null; values?: Record<string, unknown> }
+  trigger:     { event: string | null; button?: string; values?: Record<string, unknown> }
   user:        string | null
   host:        string
   started:     string | null
@@ -367,6 +367,8 @@ export type FlowsWsMessage =
   | { type: 'log'; run_id: string; flow: string; node: string; level: string; text: string }
   | { type: 'notify'; run_id: string; flow: string; node: string; level: 'info' | 'warn' | 'error'; text: string; path: string | null }
   | { type: 'run_finished'; run_id: string; flow: string; status: RunStatus; duration_ms: number | null; error: string | null; mode: 'real' | 'dry' }
+  | { type: 'page_changed'; page: string; scope: 'team' | 'project'; project: string | null; rev: string | null; by: string | null }
+  | { type: 'page_data'; page: string; collection: string; project: string | null; etag: string; by: string | null }
 
 // -- TOOL pages (P7, 04_PAGES_TOOL, ADR 0066) ---------------------------------------
 // Same keys as the page YAML (backend flux_flows/pages.py is the truth).

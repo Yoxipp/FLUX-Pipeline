@@ -168,9 +168,15 @@ def purge(folder: Optional[Path], flow: str, *, keep_real: int = KEEP_REAL, keep
     return removed
 
 
+def trigger_matches(record: Dict[str, Any], event: str) -> bool:
+    trigger = record.get("trigger") or {}
+    return event in (trigger.get("event"), trigger.get("button"))
+
+
 def list_runs(folders: Iterable[Optional[Path]], *, flow: Optional[str] = None, status: Optional[str] = None,
-              mode: Optional[str] = None, scope: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    """Run summaries, newest first."""
+              mode: Optional[str] = None, scope: Optional[str] = None, event: Optional[str] = None,
+              limit: int = 50) -> List[Dict[str, Any]]:
+    """Run summaries, newest first. *event*: the start node id or the page button_id (P7)."""
     paths: List[Path] = []
     for folder in folders:
         if folder is None or not Path(folder).is_dir():
@@ -185,7 +191,7 @@ def list_runs(folders: Iterable[Optional[Path]], *, flow: Optional[str] = None, 
         if data is None:
             continue
         if (status and data.get("status") != status) or (mode and data.get("mode") != mode) \
-                or (scope and data.get("scope") != scope):
+                or (scope and data.get("scope") != scope) or (event and not trigger_matches(data, event)):
             continue
         out.append(summary(data))
         if len(out) >= limit:

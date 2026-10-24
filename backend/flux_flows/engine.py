@@ -173,6 +173,8 @@ class Run:
                                       version=version, draft=draft, mode=mode, user=user,
                                       base_revision=base_revision,
                                       trigger={"event": self.event_id, "values": self.values,
+                                               # P7: the page button_id (or event type) the run was asked with
+                                               **({"button": event} if event and event != self.event_id else {}),
                                                **({"payload": {k: runs.preview(v) for k, v in self.payload.items()}}
                                                   if self.payload else {})})
         self.context = base_context(user, project, flow.name, self.run_id)

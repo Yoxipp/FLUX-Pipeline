@@ -205,3 +205,15 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
     `icons.ts` liste toutes les icones du registre.
   * P6c : bouton Bridges de la TopBar -> `BridgesDialog.tsx` (bridges d'extension : erreurs, exe, etat d'installation,
     Installer / Mettre a jour / Desinstaller sur ce poste, conflit -> "Remplacer (sauvegarde)", Creer les nodes = Team TD).
+
+## Pages TOOL (`tool_pages/`, chantier Flows P7, ADR 0066)
+
+* `links.ts` : fonctions pures (pas de runner front : verifiees a la lecture et en live) : `renamedInputs` (parametres
+  d'interface renommes entre l'enregistre et l'envoye, l'editeur de flows propose ensuite de suivre dans les pages),
+  `widgetsOf`, `initialValue`, `coerce`, `runValues` (champs lies au flow du bouton), `blockedWidgets` (raison de grisage
+  depuis les `P_*`, `P_FLOW_INACTIVE` grise aussi), `ago`, `seconds`.
+* `PageRenderer.tsx` : rendu d'une page (dossiers `plain | tabs | collapsible`, lignes en grille a poids `w`, champs via
+  `ParamWidget`, vrais `<button>`). Clic = `POST /flows/{flow}/run {event: button_id, values}` (version active) ; etat du
+  dernier run par bouton (`GET /flows/runs?flow&event&limit=1`, rafraichi sur `run_finished` du WS) ; en cours = "Stop"
+  (annule le run) ; `remember: user` dans les donnees utilisateur (`flux.pages.remember`) ; `preview` (editeur) : boutons
+  inertes ("lancerait ..."), clic = selection. Widgets de donnees via `renderData`.

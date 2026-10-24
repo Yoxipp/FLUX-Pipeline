@@ -66,6 +66,10 @@ class PageRun(unittest.TestCase):
         self.assertEqual(rec["status"], "ok", rec)
         self.assertEqual(rec["trigger"]["event"], "b")
         self.assertEqual(rec["trigger"]["values"], {"dest_folder": "D:/x"})
+        self.assertEqual(rec["trigger"]["button"], "render")
+        last = self.client.get("/flows/runs", params={"flow": "daily_render", "event": "render", "limit": 1}).json()
+        self.assertEqual([r["run_id"] for r in last], [rec["run_id"]])
+        self.assertEqual(self.client.get("/flows/runs", params={"flow": "daily_render", "event": "other"}).json(), [])
 
     def test_unknown_button_is_refused(self) -> None:
         store.increment_flow(self.roots, "team", "daily_render", user="ADAM", flow=_flow())

@@ -265,21 +265,22 @@ def _matches(rec: dict[str, Any], **wanted: Optional[str]) -> bool:
 
 @router.get("/runs")
 async def list_runs(flow: Optional[str] = None, scope: Optional[str] = None, project: Optional[str] = None,
-                    status: Optional[str] = None, mode: Optional[str] = None,
+                    status: Optional[str] = None, mode: Optional[str] = None, event: Optional[str] = None,
                     limit: int = 50) -> list[dict[str, Any]]:
     """Run summaries, newest first: records on disk plus this backend's live and recent runs."""
     current = await asyncio.to_thread(rights.current_rights)
     limit = max(1, min(limit, 500))
     try:
         listed = await asyncio.to_thread(runs.list_runs, _run_folders(current["user"], project), flow=flow,
-                                         status=status, mode=mode, scope=scope, limit=limit)
+                                         status=status, mode=mode, scope=scope, event=event, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
     mgr = engine.manager()
     by_id = {r["run_id"]: r for r in listed}
     # Memory wins: a live run is fresher than its last write; a run without folder is only here.
     for rec in [mgr.get(i) for i in list(mgr.live)] + list(mgr.finished.values()):
-        if rec and _matches(rec, flow=flow, status=status, mode=mode, scope=scope):
+        if rec and _matches(rec, flow=flow, status=status, mode=mode, scope=scope) \
+                and (event is None or runs.trigger_matches(rec, event)):
             by_id[rec["run_id"]] = runs.summary(rec)
     return sorted(by_id.values(), key=lambda r: r["run_id"], reverse=True)[:limit]
 
