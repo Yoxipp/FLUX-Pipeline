@@ -309,8 +309,18 @@ class UsdCheck(CommandBase):
         src = _path(parameters["source"], action_query)
         root = _ctx(action_query).get("project_path")
         issues = check_published_usd(src, src.stem, Path(root) if root else None)
-        found = [str(getattr(i, "message", i)) for i in issues]
+        found = [_issue_text(i) for i in issues]
         return {"issues": found, "count": len(found), "ok": not found}
+
+
+def _issue_text(issue) -> str:
+    """'warn: pas de defaultPrim (/HERO)' for a validator Issue (level, msg, prim); a
+    plain value as is. The field is ``msg``: reading ``message`` printed the dataclass repr (T1)."""
+    msg = getattr(issue, "msg", None)
+    if msg is None:
+        return str(issue)
+    prim = getattr(issue, "prim", None)
+    return f"{getattr(issue, 'level', 'warn')}: {msg}" + (f" ({prim})" if prim else "")
 
 
 @register("convert_image")
