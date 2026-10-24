@@ -593,9 +593,11 @@ def _simulate_write_text(ctx, inputs, params):
                   "mode; append adds at the end.")
 def write_text(ctx, inputs, params):
     path, mode, _missing = _write_target(ctx, inputs, params, WRITE_MODES_TEXT)
-    text = inputs.get("text")
+    text = "" if inputs.get("text") is None else str(inputs.get("text"))
+    if mode == "append" and not text.endswith("\n"):
+        text += "\n"     # T1: append = one line per write (a journal), never two writes glued together
     with _fs_errors("Ecriture"):
-        write_text_file(path, "" if text is None else text, append=(mode == "append"))
+        write_text_file(path, text, append=(mode == "append"))
     return {"path": str(path)}
 
 

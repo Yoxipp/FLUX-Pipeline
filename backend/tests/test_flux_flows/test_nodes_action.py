@@ -244,7 +244,9 @@ class ActionNodesTest(unittest.TestCase):
         sim = self.sim("action.write_text", {"path": "n.txt", "text": "b"}, {"mode": "append"})
         self.assertIn("ajouterait", sim["lines"][0]["text_fr"])
         self.call("action.write_text", {"path": "n.txt", "text": "b"}, {"mode": "append"})
-        self.assertEqual(p.read_text(encoding="utf-8"), "ab")
+        self.assertEqual(p.read_text(encoding="utf-8"), "ab\n")      # T1: append = one line per write
+        self.call("action.write_text", {"path": "n.txt", "text": "d\n"}, {"mode": "append"})
+        self.assertEqual(p.read_text(encoding="utf-8"), "ab\nd\n")
         self.sim("action.write_text", {"path": "n.txt", "text": "c"}, {"mode": "overwrite"})
         self.call("action.write_text", {"path": "n.txt", "text": "c"}, {"mode": "overwrite"})
         self.assertEqual(p.read_text(encoding="utf-8"), "c")
