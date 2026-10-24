@@ -28,6 +28,10 @@ import type {
 
 const BASE_URL = 'http://127.0.0.1:8765'
 
+export interface UserProfile {
+  id: string; first_name: string; last_name: string; has_password: boolean
+}
+
 export interface WorkspacesInfo {
   active: string | null
   workspaces: { path: string; exists: boolean; active: boolean }[]
@@ -230,14 +234,19 @@ export const api = {
   getSettings: () =>
     apiCall<Settings>('GET', '/settings', undefined, 10000),   // fail fast on a wedged backend
 
-  initFirstLaunch: (workspace: string, username: string) =>
-    apiCall<{ success: boolean }>('POST', '/settings/init', { workspace, username }),
+  // Existing artist: username (+ password if it has one). New artist: first_name + last_name
+  // (the identifier is computed server side).
+  initFirstLaunch: (workspace: string, username: string, extra?: {
+    first_name?: string; last_name?: string; password?: string; remember?: boolean
+  }) =>
+    apiCall<{ success: boolean; username?: string }>('POST', '/settings/init', { workspace, username, ...extra }),
 
   updateSettings: (patch: Partial<{
     theme_bg: string; theme_surface: string; theme_fg: string; theme_accent: string
     last_project: string; dcc_path: Record<string, string>
     username: string; workspace: string; language: 'fr' | 'en'
     log_colors: Record<string, string>
+    password: string; remember: boolean   // with username: switching to a protected artist
   }>) => apiCall<{ success: boolean }>('PUT', '/settings', patch),
 
   // Known FLUX directories on this machine; exactly one is active (activate it with
@@ -254,11 +263,36 @@ export const api = {
   listUsers: () =>
     apiCall<{ users: string[] }>('GET', '/settings/users'),
 
-  renameUser: (old: string, next: string) =>
-    apiCall<{ success: boolean; message: string }>('PUT', '/settings/users/rename', { old, new: next }),
+  // `project` is required to rename ANOTHER artist (supervisor) and to delete one.
+  renameUser: (old: string, next: string, project?: string) =>
+    apiCall<{ success: boolean; message: string }>('PUT', '/settings/users/rename', { old, new: next, project }),
 
-  deleteUser: (name: string) =>
-    apiCall<{ success: boolean; message: string }>('DELETE', `/settings/users/${encodeURIComponent(name)}`),
+  deleteUser: (name: string, project?: string) =>
+    apiCall<{ success: boolean; message: string }>(
+      'DELETE', `/settings/users/${encodeURIComponent(name)}` + (project ? `?project=${encodeURIComponent(project)}` : '')),
+
+  // Artist accounts: names + optional password
+  listUserProfiles: () =>
+    apiCall<{ profiles: UserProfile[] }>('GET', '/settings/users/profiles'),
+
+  previewUserId: (first_name: string, last_name: string) =>
+    apiCall<{ id: string }>('POST', '/settings/users/id-preview', { first_name, last_name }),
+
+  createUser: (body: { first_name: string; last_name: string; password?: string; remember?: boolean; switch?: boolean }) =>
+    apiCall<{ id: string }>('POST', '/settings/users', body),
+
+  getOwnProfile: () =>
+    apiCall<UserProfile>('GET', '/settings/user/profile'),
+
+  setOwnProfile: (first_name: string, last_name: string) =>
+    apiCall<UserProfile>('PUT', '/settings/user/profile', { first_name, last_name }),
+
+  // current required when a password is set; empty / missing `next` removes the password
+  setOwnPassword: (current: string | undefined, next: string | undefined) =>
+    apiCall<{ has_password: boolean }>('PUT', '/settings/user/password', { current, new: next }),
+
+  resetUserPassword: (name: string, project: string) =>
+    apiCall<{ success: boolean }>('POST', `/settings/users/${encodeURIComponent(name)}/reset-password`, { project }),
 
   // Per-user data blob (favorites / recents / archived …) — stored on the Flux drive
   getUserData: () =>

@@ -1,16 +1,98 @@
 // FirstLaunch.tsx — wizard de premier lancement (workspace + username).
 
-import { useState } from 'react'
-import { FolderOpen } from 'lucide-react'
-import { api } from '../api/client'
+import { useEffect, useState } from 'react'
+import { FolderOpen, Lock } from 'lucide-react'
+import { api, type UserProfile } from '../api/client'
 import { Avatar } from '../components/shared/ui'
 import { FluxLogo } from '../components/shared/Logo'
+
+// ── Shared "new artist" fields (first + last name, identifier preview, optional password) ──
+// Also used by Login.tsx and Settings > Projet > Artistes.
+export interface NewArtistValue {
+  first: string; last: string; password: string; confirm: string; remember: boolean
+}
+export const EMPTY_NEW_ARTIST: NewArtistValue = { first: '', last: '', password: '', confirm: '', remember: false }
+
+// Client-side check, null when the form can be submitted.
+export function newArtistError(v: NewArtistValue): string | null {
+  if (!v.first.trim() || !v.last.trim()) return 'Prénom et nom requis'
+  if (v.password && v.password.length < 4) return 'Mot de passe trop court (4 caractères minimum)'
+  if (v.password !== v.confirm) return 'Les mots de passe ne correspondent pas'
+  return null
+}
+
+export function newArtistPayload(v: NewArtistValue) {
+  return {
+    first_name: v.first.trim(), last_name: v.last.trim(),
+    ...(v.password ? { password: v.password, remember: v.remember } : {}),
+  }
+}
+
+export function NewArtistFields({ value, onChange, onSubmit, compact }: {
+  value: NewArtistValue; onChange: (v: NewArtistValue) => void; onSubmit?: () => void; compact?: boolean
+}) {
+  const [preview, setPreview] = useState<string | null>(null)
+  const set = (patch: Partial<NewArtistValue>) => onChange({ ...value, ...patch })
+  const fs = compact ? 11 : 12
+
+  // Debounced identifier preview: the server computes it (accents, collisions).
+  useEffect(() => {
+    if (!value.first.trim() || !value.last.trim()) { setPreview(null); return }
+    let alive = true
+    const t = setTimeout(() => {
+      api.previewUserId(value.first.trim(), value.last.trim())
+        .then(r => { if (alive) setPreview(r.id) })
+        .catch(() => { if (alive) setPreview(null) })
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [value.first, value.last])
+
+  const input: React.CSSProperties = {
+    padding: compact ? '6px 8px' : '8px 10px', background: 'var(--paper-2)',
+    border: '1px solid var(--rule-2)', borderRadius: 7, outline: 'none',
+    fontFamily: 'inherit', fontSize: fs, color: 'var(--ink)', boxSizing: 'border-box', minWidth: 0,
+  }
+  const key = (e: React.KeyboardEvent) => { if (e.key === 'Enter') onSubmit?.() }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input value={value.first} onChange={e => set({ first: e.target.value })} onKeyDown={key}
+          placeholder="Prénom" style={{ ...input, flex: 1, width: '50%' }} />
+        <input value={value.last} onChange={e => set({ last: e.target.value })} onKeyDown={key}
+          placeholder="Nom" style={{ ...input, flex: 1, width: '50%' }} />
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--mono)', minHeight: 14 }}>
+        {preview ? `Identifiant : ${preview}` : 'Identifiant : (prénom et nom requis)'}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input type="password" value={value.password} onChange={e => set({ password: e.target.value })} onKeyDown={key}
+          placeholder="Mot de passe (facultatif)" autoComplete="new-password" style={{ ...input, flex: 1, width: '50%' }} />
+        <input type="password" value={value.confirm} onChange={e => set({ confirm: e.target.value })} onKeyDown={key}
+          placeholder="Confirmation" autoComplete="new-password" disabled={!value.password}
+          style={{ ...input, flex: 1, width: '50%', opacity: value.password ? 1 : 0.5 }} />
+      </div>
+      {value.password && <RememberCheckbox checked={value.remember} onChange={remember => set({ remember })} />}
+    </div>
+  )
+}
+
+export function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink-3)', cursor: 'pointer' }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
+      Se souvenir sur ce PC
+    </label>
+  )
+}
 
 export function FirstLaunch() {
   const [step, setStep]           = useState<1 | 2>(1)
   const [workspace, setWorkspace] = useState('')
-  const [username, setUsername]   = useState('')
-  const [users, setUsers]         = useState<string[]>([])
+  const [username, setUsername]   = useState('')          // selected existing artist ('' = new artist)
+  const [users, setUsers]         = useState<UserProfile[]>([])
+  const [newArtist, setNewArtist] = useState<NewArtistValue>(EMPTY_NEW_ARTIST)
+  const [password, setPassword]   = useState('')          // existing artist's password
+  const [remember, setRemember]   = useState(false)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
@@ -19,9 +101,15 @@ export function FirstLaunch() {
     setLoading(true)
     setError(null)
     try {
-      const { users: existing } = await api.listUsers()
-      setUsers(existing)
-    } catch {}
+      // Profiles need the chosen root; the workspace is only set by init, so fall back to plain ids.
+      const { profiles } = await api.listUserProfiles()
+      setUsers(profiles)
+    } catch {
+      try {
+        const { users: existing } = await api.listUsers()
+        setUsers(existing.map(id => ({ id, first_name: '', last_name: '', has_password: false })))
+      } catch {}
+    }
     setLoading(false)
     setStep(2)
   }
@@ -31,12 +119,22 @@ export function FirstLaunch() {
     if (path) setWorkspace(path)
   }
 
+  const selected = users.find(u => u.id === username) ?? null
+
   const handleFinish = async () => {
-    if (!username.trim()) { setError('Nom requis'); return }
-    setLoading(true)
     setError(null)
+    if (!selected) {
+      const err = newArtistError(newArtist)
+      if (err) { setError(err); return }
+    } else if (selected.has_password && !password) { setError('Mot de passe requis'); return }
+    setLoading(true)
     try {
-      await api.initFirstLaunch(workspace.trim(), username.trim())
+      if (selected) {
+        await api.initFirstLaunch(workspace.trim(), selected.id,
+          selected.has_password ? { password, remember } : undefined)
+      } else {
+        await api.initFirstLaunch(workspace.trim(), '', newArtistPayload(newArtist))
+      }
       window.location.reload()
     } catch (e) {
       setError((e as Error).message)
@@ -132,12 +230,14 @@ export function FirstLaunch() {
                   Artistes existants
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
-                  {users.map(u => {
+                  {users.map(p => {
+                    const u = p.id
                     const isActive = u === username
+                    const full = `${p.first_name} ${p.last_name}`.trim()
                     return (
                       <div
                         key={u}
-                        onClick={() => setUsername(u)}
+                        onClick={() => { setUsername(isActive ? '' : u); setPassword(''); setError(null) }}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '7px 10px', borderRadius: 7,
@@ -148,7 +248,8 @@ export function FirstLaunch() {
                         }}
                       >
                         <Avatar ch={u[0].toUpperCase()} size={22} />
-                        <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{u}</span>
+                        <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ink)' : 'var(--ink-2)' }}>{full ? `${full} (${u})` : u}</span>
+                        {p.has_password && <Lock size={11} strokeWidth={1.75} color="var(--ink-4)" />}
                         {isActive && (
                           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', color: 'var(--accent-hi)', textTransform: 'uppercase' }}>
                             Sélectionné
@@ -161,28 +262,35 @@ export function FirstLaunch() {
               </div>
             )}
 
-            {/* nouveau nom */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-                {users.length > 0 ? 'Ou entrer un nouveau nom' : 'Votre prénom'}
+            {selected ? (
+              selected.has_password && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                    Mot de passe de {selected.id}
+                  </div>
+                  <input
+                    type="password" value={password} autoFocus autoComplete="current-password"
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && void handleFinish()}
+                    placeholder="Mot de passe"
+                    style={{
+                      padding: '8px 10px', background: 'var(--paper-2)', border: '1px solid var(--rule-2)',
+                      borderRadius: 7, outline: 'none', fontFamily: 'inherit', fontSize: 12, color: 'var(--ink)',
+                      boxSizing: 'border-box', width: '100%',
+                    }}
+                  />
+                  <RememberCheckbox checked={remember} onChange={setRemember} />
+                </div>
+              )
+            ) : (
+              /* nouvel artiste */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                  {users.length > 0 ? 'Ou créer un nouvel artiste' : 'Votre prénom et votre nom'}
+                </div>
+                <NewArtistFields value={newArtist} onChange={setNewArtist} onSubmit={() => void handleFinish()} />
               </div>
-              <input
-                value={username}
-                onChange={e => setUsername(e.target.value.toUpperCase())}
-                onKeyDown={e => e.key === 'Enter' && void handleFinish()}
-                placeholder="NOM DE L'ARTISTE"
-                autoFocus={users.length === 0}
-                style={{
-                  padding: '8px 10px',
-                  background: 'var(--paper-2)',
-                  border: '1px solid var(--rule-2)',
-                  borderRadius: 7, outline: 'none',
-                  fontFamily: 'inherit', fontSize: 12, color: 'var(--ink)',
-                  textTransform: 'uppercase',
-                  boxSizing: 'border-box', width: '100%',
-                }}
-              />
-            </div>
+            )}
           </div>
         )}
 

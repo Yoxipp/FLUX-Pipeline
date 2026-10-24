@@ -14,6 +14,7 @@ import { ACCENT_PRESETS, applyAccentPreset, isCustomAccent } from '../../lib/acc
 import { SOFTWARE } from '../../lib/dccs'
 import { useEnabledDccs } from '../../hooks/useEnabledDccs'
 import { useWorkProfile } from '../../WorkProfileContext'
+import { useProject } from '../../ProjectContext'
 import { openWorkProfile } from '../../components/shared/WorkProfileDialog'
 import { BridgesInstall } from './BridgesInstall'
 import { FLOW_RIGHTS_EVENT } from '../../api/flows'
@@ -220,6 +221,7 @@ function FlowBoxes() {
 // Rename or delete one's own user. The backend refuses to delete the active user, so
 // deleting first switches to another (existing or new) user, then removes the old one.
 function OwnAccount({ username }: { username: string }) {
+  const { project } = useProject()
   const [mode, setMode] = useState<'idle' | 'rename' | 'delete'>('idle')
   const [value, setValue] = useState('')
   const [others, setOthers] = useState<string[]>([])
@@ -251,7 +253,7 @@ function OwnAccount({ username }: { username: string }) {
     setBusy(true)
     try {
       await api.updateSettings({ username: target })
-      const res = await api.deleteUser(username)
+      const res = await api.deleteUser(username, project || undefined)
       toast.success(res.message)
       window.location.reload()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Échec de la suppression'); setBusy(false) }
@@ -293,6 +295,94 @@ function OwnAccount({ username }: { username: string }) {
           </div>
         </div>
       )}
+      <OwnProfile />
+      <OwnPassword />
+    </div>
+  )
+}
+
+// First / last name of the active artist (display only, the identifier does not change).
+function OwnProfile() {
+  const [first, setFirst] = useState('')
+  const [last, setLast] = useState('')
+  const [saved, setSaved] = useState({ first: '', last: '' })
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    api.getOwnProfile().then(p => {
+      setFirst(p.first_name); setLast(p.last_name); setSaved({ first: p.first_name, last: p.last_name })
+    }).catch(() => {})
+  }, [])
+  const dirty = first.trim() !== saved.first || last.trim() !== saved.last
+  const save = async () => {
+    setBusy(true)
+    try {
+      const p = await api.setOwnProfile(first.trim(), last.trim())
+      setFirst(p.first_name); setLast(p.last_name); setSaved({ first: p.first_name, last: p.last_name })
+      toast.success('Nom enregistré')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Échec de l\'enregistrement') }
+    setBusy(false)
+  }
+  return (
+    <div style={{ ...row, borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+      <input value={first} onChange={e => setFirst(e.target.value)} placeholder="Prénom"
+        onKeyDown={e => { if (e.key === 'Enter' && dirty) void save() }} style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+      <input value={last} onChange={e => setLast(e.target.value)} placeholder="Nom"
+        onKeyDown={e => { if (e.key === 'Enter' && dirty) void save() }} style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+      <Btn sm disabled={busy || !dirty} onClick={() => void save()}>Enregistrer</Btn>
+    </div>
+  )
+}
+
+// Set / change / remove the active artist's password. Not a security boundary.
+function OwnPassword() {
+  const [hasPassword, setHasPassword] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.getOwnProfile().then(p => setHasPassword(p.has_password)).catch(() => {}) }, [])
+  const close = () => { setOpen(false); setCurrent(''); setNext(''); setConfirm('') }
+  const apply = async (newPassword: string | undefined) => {
+    if (newPassword !== undefined && newPassword.length < 4) { toast.error('Mot de passe trop court (4 caractères minimum)'); return }
+    if (newPassword !== undefined && newPassword !== confirm) { toast.error('Les mots de passe ne correspondent pas'); return }
+    setBusy(true)
+    try {
+      const r = await api.setOwnPassword(hasPassword ? current : undefined, newPassword)
+      setHasPassword(r.has_password)
+      toast.success(r.has_password ? 'Mot de passe enregistré' : 'Mot de passe supprimé')
+      close()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Échec du changement de mot de passe') }
+    setBusy(false)
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--rule)', paddingTop: 8 }}>
+      <div style={row}>
+        <span style={{ flex: 1, fontSize: 11, color: 'var(--ink-2)' }}>
+          Mot de passe : {hasPassword ? 'défini' : 'aucun'}
+        </span>
+        {!open && <Btn sm ghost onClick={() => setOpen(true)}>{hasPassword ? 'Changer' : 'Définir'}</Btn>}
+        {!open && hasPassword && <Btn sm ghost style={{ color: 'var(--err)' }} onClick={() => { setOpen(true); setNext('') }}>Supprimer</Btn>}
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {hasPassword && <input type="password" value={current} onChange={e => setCurrent(e.target.value)}
+            placeholder="Mot de passe actuel" autoComplete="current-password" style={{ ...inputStyle, width: 240 }} />}
+          <input type="password" value={next} onChange={e => setNext(e.target.value)}
+            placeholder="Nouveau mot de passe" autoComplete="new-password" style={{ ...inputStyle, width: 240 }} />
+          <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+            placeholder="Confirmation" autoComplete="new-password" style={{ ...inputStyle, width: 240 }} />
+          <div style={row}>
+            <Btn sm primary disabled={busy || !next || (hasPassword && !current)} onClick={() => void apply(next)}>Enregistrer</Btn>
+            {hasPassword && <Btn sm ghost disabled={busy || !current} style={{ color: 'var(--err)' }}
+              title="Retire le mot de passe (le mot de passe actuel est requis)" onClick={() => void apply(undefined)}>Supprimer le mot de passe</Btn>}
+            <Btn sm ghost onClick={close}>Annuler</Btn>
+          </div>
+        </div>
+      )}
+      <span style={{ fontSize: 11, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+        Le mot de passe est un garde-fou entre artistes : quiconque a accès au dossier partagé peut le contourner.
+      </span>
     </div>
   )
 }
