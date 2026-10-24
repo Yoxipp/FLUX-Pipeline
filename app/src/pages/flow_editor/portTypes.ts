@@ -30,7 +30,7 @@ const ADVICE: Record<string, Advice> = {
   'str>dir': ['un texte n\'est pas un chemin : passe par un node Path', 'a text is not a path: go through a Path node'],
   'int>str': ['utilise Template ou StrFormat', 'use Template or StrFormat'],
   'float>str': ['utilise Template ou StrFormat', 'use Template or StrFormat'],
-  'path>dir': ['un chemin peut etre un fichier : prends la sortie dir de PathJoin ou de Path, ou parent de PathSplit pour le dossier d'un fichier', 'a path can be a file: take the dir output of PathJoin or Path, or parent of PathSplit for the folder of a file'],
+  'path>dir': ['un chemin peut etre un fichier : prends la sortie dir de PathJoin ou de Path, ou parent de PathSplit pour le dossier d\'un fichier', 'a path can be a file: take the dir output of PathJoin or Path, or parent of PathSplit for the folder of a file'],
   'dict>*': ['utilise JsonValue pour lire une cle', 'use JsonValue to read a key'],
   'publish>path': ['un publish est un enregistrement : lis son chemin avec PublishFields', 'a publish is a record: read its path with PublishFields'],
   'publish>*': ['un publish est un enregistrement : lis ses champs avec PublishFields ou PublishInfos', 'a publish is a record: read its fields with PublishFields or PublishInfos'],
