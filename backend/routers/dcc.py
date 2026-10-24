@@ -1741,7 +1741,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         from pathlib import Path as _Path
         pub_result = await loop.run_in_executor(
             None,
-            lambda: publish_file(_Path(tmp_path), project_path, req.description, user, req.project_name),
+            lambda: publish_file(_Path(tmp_path), project_path, req.description, user, req.project_name, soft="maya"),
         )
         if pub_result is None:
             raise HTTPException(status_code=500, detail="publish_core a échoué")
@@ -2171,7 +2171,7 @@ def _ingest_file(req: "FilePublishRequest", soft: str) -> dict:
     if not project_path.exists():
         return {"ok": False, "error": f"Projet introuvable : {req.project_name}"}
     dest = publish_file(source, project_path, req.description or "", user,
-                        req.project_name, req.target_name)
+                        req.project_name, req.target_name, soft=soft.lower())
     if dest is None:
         return {"ok": False, "error": f"Publish {soft} échoué (nom FLUX invalide ?)"}
     return {"ok": True, "path": str(dest)}

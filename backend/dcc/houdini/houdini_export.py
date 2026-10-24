@@ -521,7 +521,8 @@ def publish_houdini_rop(
         ver_str = format_version(effective_ver, DEFAULT_PADDING)
         try:
             # Log the versioned name (not the _LAST alias) so history shows each version.
-            log_publish(user or "unknown", f"{base_name}_{ver_str}{ext}", project_path.name, dest_folder=output_path.parent)
+            log_publish(user or "unknown", f"{base_name}_{ver_str}{ext}", project_path.name, dest_folder=output_path.parent,
+                        soft="houdini")
             from features.publisher.modif_log import append_log
             append_log(dest_folder, base_name, ver_str, description, user)
         except Exception as exc:
@@ -590,7 +591,7 @@ def publish_houdini_rop(
     _log_base = get_base_name(f"{filename}{ext}")
     _log_name = f"{_log_base}_{ver_str}{ext}"
     try:
-        log_publish(user or "unknown", _log_name, project_path.name, dest_folder=output_path.parent)
+        log_publish(user or "unknown", _log_name, project_path.name, dest_folder=output_path.parent, soft="houdini")
         from features.publisher.modif_log import append_log
         # modif log stays in the shared publish folder (spans all versions/formats)
         append_log(dest_folder, base_name, ver_str, description, user)

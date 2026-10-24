@@ -5,7 +5,8 @@
 # (the only flux_flows import of features/). The scheduler listens to it and asks
 # this module which active flows want that publish. A local event: the flows run on
 # the backend of the artist who publishes, without the host lock.
-# soft, type and version come from the name and the extension (publish_record);
+# type and version come from the name and the extension (publish_record); soft is sent
+# by the Publisher (log_publish soft=...), else deduced from the extension;
 # the filters soft / type / name are Houdini style patterns, empty = everything.
 # R1 retake 10: also mode / task / class / asset / seq / shot / project, read from the FLUX
 # name (flux.publish_infos); log_publish itself is unchanged.
@@ -27,9 +28,11 @@ def publish_payload(signal: Dict[str, Any]) -> Dict[str, Any]:
     from flux_flows.nodes.flux import publish_infos
 
     record = publish_record(path, user=signal.get("user") or "")
+    if signal.get("soft"):
+        record["soft"] = signal["soft"]      # sent by the Publisher; else deduced from the extension
     project = signal.get("project") or ""
-    infos = publish_infos(name, project=project, user=record["user"], path=str(path) if folder else "",
-                          version=record.get("version"))
+    infos = publish_infos(name, soft=record["soft"], project=project, user=record["user"],
+                          path=str(path) if folder else "", version=record.get("version"))
     return {"publish": record, "project": project, "infos": infos}
 
 

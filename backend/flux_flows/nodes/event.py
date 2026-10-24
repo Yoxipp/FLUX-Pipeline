@@ -142,8 +142,9 @@ def _filter(name, fr, en, example):
                    _filter("seq", "Sequence (SEQ010...)", "Sequence (SEQ010...)", "SEQ010"),
                    _filter("shot", "Plan (SHOT010...)", "Shot (SHOT010...)", "SHOT0*"),
                    _filter("project", "Projet", "Project", "DEMO"),
-                   _filter("soft", "Logiciels (maya, houdini...), deduit de l'extension : un .abc ou .usd n'a pas de "
-                           "logiciel", "Softs (maya, houdini...), from the extension: an .abc or .usd has no soft",
+                   _filter("soft", "Logiciels (maya, houdini...) qui ont publie, envoye par le Publisher (un .abc "
+                           "publie depuis Maya compte pour maya)", "Softs (maya, houdini...) that published, sent by "
+                           "the Publisher (an .abc published from Maya counts as maya)",
                            "maya"),
                    _filter("type", "Types de fichier (scene, usd, cache, texture, image, video, capture...)",
                            "File types (scene, usd, cache, texture, image, video, capture...)", "usd"),
@@ -151,10 +152,10 @@ def _filter(name, fr, en, example):
            shelf=5, aliases=["publish", "apres publish", "after publish", "publie"],
            doc_fr="Part apres chaque publish reussi sur ce poste, si FLUX y est ouvert (tous les logiciels). Les filtres (mode, task, "
                   "asset, plan, projet, logiciel, type, nom) choisissent les publishs qui le declenchent ; vide = tout. "
-                  "Un publish filtre ne cree aucun run. Le logiciel est deduit de l'extension.",
+                  "Un publish filtre ne cree aucun run. Le logiciel est celui qui publie (envoye par le Publisher).",
            doc_en="Starts after each successful publish on this workstation, if FLUX is open there (every soft). The filters (mode, task, "
                   "asset, shot, project, soft, type, name) pick the publishes that fire it; empty = all. A filtered "
-                  "publish creates no run. The soft comes from the extension.")
+                  "publish creates no run. The soft is the one that publishes (sent by the Publisher).")
 async def on_publish(ctx, inputs, params):
     from flux_flows.nodes.flux import publish_infos, publish_record
 

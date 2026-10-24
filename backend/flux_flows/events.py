@@ -173,7 +173,7 @@ def signal(kind: str, payload: Dict[str, Any]) -> None:
             continue
 
 
-def publish_done(user: Any, filename: Any, project: Any, dest_folder: Any = None) -> None:
+def publish_done(user: Any, filename: Any, project: Any, dest_folder: Any = None, soft: Any = "") -> None:
     """A publish succeeded (features.activity.activity_writer.log_publish). Non blocking:
     switch off or no listener = nothing at all; any problem is logged, never raised."""
     try:
@@ -181,6 +181,7 @@ def publish_done(user: Any, filename: Any, project: Any, dest_folder: Any = None
             return
         signal("publish_done", {"user": str(user or ""), "filename": str(filename or ""),
                                 "project": str(project or ""),
-                                "dest_folder": str(dest_folder) if dest_folder else ""})
+                                "dest_folder": str(dest_folder) if dest_folder else "",
+                                "soft": str(soft or "").strip().lower()})
     except Exception:  # noqa: BLE001 - a publish never fails because of a flow hook
         _log.warning("publish_done hook skipped", exc_info=True)

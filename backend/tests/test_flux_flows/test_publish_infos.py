@@ -61,6 +61,15 @@ class PublishInfosTest(unittest.TestCase):
         _call("event.on_publish", ctx, params={"task": "RIG"})
         self.assertEqual(logs, [])
 
+    def test_soft_sent_by_the_publisher_wins_over_the_extension(self):
+        from flux_flows import hooks
+
+        signal = {"user": "ADAM", "filename": "CHAR_GEO_HERO_null_v002.abc", "project": "DEMO", "dest_folder": ""}
+        self.assertEqual(hooks.publish_payload(signal)["publish"]["soft"], "")       # .abc: no soft from the extension
+        sent = hooks.publish_payload({**signal, "soft": "maya"})
+        self.assertEqual((sent["publish"]["soft"], sent["infos"]["soft"]), ("maya", "maya"))
+        self.assertTrue(hooks.wants({"soft": "maya"}, sent["publish"], sent["infos"]))
+
     def test_node_splits_infos_record_and_path(self):
         infos = publish_infos("CHAR_RIG_HERO_null_v003.ma", project="DEMO")
         out = _call("data.publish_infos", _ctx(), {"infos": infos})

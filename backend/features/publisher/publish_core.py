@@ -114,6 +114,7 @@ def copy_publish(
     description: str,
     user: str,
     project_name: str,
+    soft: str = "",
 ) -> Path | None:
     """Archive the previous version and copy *source_path* into *dest_folder*.
 
@@ -147,7 +148,7 @@ def copy_publish(
     # Log the VERSIONED name (not the _LAST alias) so the publish history shows each
     # distinct version; dest_path.parent is the publish folder for the "open folder" UX.
     versioned_name = f"{base_name}_{format_version(new_ver)}{full_ext(source_path.name)}"
-    log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent)
+    log_publish(user, versioned_name, project_name, dest_folder=dest_path.parent, soft=soft)
 
     log.info("Published %s → %s (v%03d)", filename, dest_path, new_ver)
     # ADR 0019: proxy layer + asset (component) refresh, both on the immutable version.
@@ -169,8 +170,11 @@ def publish_file(
     user: str,
     project_name: str = "",
     target_name: str | None = None,
+    soft: str = "",
 ) -> Path | None:
     """Publish *source_path* into the correct folder inside *project_path*.
+
+    *soft* : the software that publishes (Flows OnPublish filter), empty = from the extension.
 
     Thin wrapper over the two halves of a publish:
       1. resolve  -> logical name + destination folder (no side effect)
@@ -197,5 +201,6 @@ def publish_file(
         description,
         user,
         project_name or project_path.name,
+        soft=soft,
     )
 
