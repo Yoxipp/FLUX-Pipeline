@@ -102,16 +102,16 @@ export function ToolPage() {
     <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       {visible.length > 1 && <Rail pages={pages} current={wanted} onPick={pick} />}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '16px 22px' }}>
-        {listError && <div className="cap" style={{ color: 'var(--err)' }}>{listError}</div>}
+        {listError && <div className="tp-note" style={{ color: 'var(--err)' }}>{listError}</div>}
         {list && !visible.length && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
             <div style={{ fontSize: 14, color: 'var(--ink-2)' }}>{tr('Aucune page TOOL pour le moment.', 'No TOOL page yet.')}</div>
             {canCreate
               ? <button type="button" className="btn primary" onClick={() => navigate('/tool/new/edit')}><Plus size={13} /> {tr('Nouvelle page', 'New page')}</button>
-              : <div className="cap">{tr('Un Team TD cree les pages de l\'equipe.', 'A Team TD creates the team pages.')}</div>}
+              : <div className="tp-note">{tr('Un Team TD cree les pages de l\'equipe.', 'A Team TD creates the team pages.')}</div>}
           </div>
         )}
-        {error && <div className="cap" style={{ color: 'var(--err)' }}>{error}</div>}
+        {error && <div className="tp-note" style={{ color: 'var(--err)' }}>{error}</div>}
         {read && (
           <>
             <header style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -122,9 +122,9 @@ export function ToolPage() {
               {canCreate && <button type="button" className="btn ghost sm" onClick={() => navigate('/tool/new/edit')}><Plus size={12} /> {tr('Nouvelle', 'New')}</button>}
               {read.can_edit && <button type="button" className="btn sm" onClick={() => navigate(`/tool/${read.id}/edit?scope=${read.scope}`)}><Pencil size={12} /> {tr('Editer', 'Edit')}</button>}
             </header>
-            {read.page.description && <div className="cap" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>{read.page.description}</div>}
+            {read.page.description && <div className="tp-note" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>{read.page.description}</div>}
             {read.issues.some(i => i.level === 'error') && !read.can_edit && (
-              <div className="cap" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>{tr('Previens un TD pour corriger cette page.', 'Tell a TD to fix this page.')}</div>
+              <div className="tp-note" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>{tr('Previens un TD pour corriger cette page.', 'Tell a TD to fix this page.')}</div>
             )}
             <PageRenderer key={`${read.scope}/${read.id}`} page={read.page} issues={read.issues} project={project || undefined}
                           renderData={w => <DataWidget page={read.page} widget={w} project={project || undefined} />} />

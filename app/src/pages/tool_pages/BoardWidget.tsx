@@ -39,7 +39,7 @@ const dims = (it: Item) => {
 export function BoardWidget({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr } = useTr()
   const collection = w.source?.data ?? ''
-  const data = usePageData(page.id, collection, project, !!collection && !preview)
+  const data = usePageData(page.id, collection, project, !!collection)
   const canEdit = data.canWrite && !preview
   const [view, setView] = useState({ x: 40, y: 40, z: 1 })
   const [selected, setSelected] = useState<string | null>(null)
@@ -223,9 +223,10 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
             )
           })}
         </div>
-        {data.error && <div className="cap" style={{ position: 'absolute', left: 10, bottom: 8, color: 'var(--err)' }}>{data.error}</div>}
+        {data.error && <div className="tp-note" style={{ position: 'absolute', left: 10, bottom: 8, color: preview ? undefined : 'var(--err)' }}>
+          {preview ? tr('Apercu : enregistre la page pour lire ses donnees.', 'Preview: save the page to read its data.') : data.error}</div>}
         {data.loaded && !cards.length && !data.error && (
-          <div className="cap" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', pointerEvents: 'none' }}>
+          <div className="tp-note" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', pointerEvents: 'none' }}>
             {canEdit ? tr('Board vide : double clic pour poser une note', 'Empty board: double click to drop a note') : tr('Board vide', 'Empty board')}
           </div>
         )}

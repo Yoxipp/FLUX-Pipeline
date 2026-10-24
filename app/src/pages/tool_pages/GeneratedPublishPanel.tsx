@@ -44,11 +44,11 @@ export function GeneratedPublishPanel({ soft, label, project }: { soft: string; 
         <span style={{ flex: 1 }} />
         <button type="button" className="btn ghost sm" onClick={openFlow}><ExternalLink size={11} /> {tr('Flow publish', 'Publish flow')}</button>
       </div>
-      <div className="cap" style={{ color: 'var(--ink-3)' }}>
+      <div className="tp-note" style={{ color: 'var(--ink-3)' }}>
         {tr(`Panneau genere depuis l'interface du flow publish_${soft} : un TD l'edite dans l'editeur de flows.`,
             `Panel generated from the interface of the flow publish_${soft}: a TD edits it in the flow editor.`)}
       </div>
-      {error && <div className="cap" style={{ color: 'var(--err)' }}>{error}</div>}
+      {error && <div className="tp-note" style={{ color: 'var(--err)' }}>{error}</div>}
       {panel && <PageRenderer page={panel.page} issues={panel.issues} project={project} />}
     </div>
   )

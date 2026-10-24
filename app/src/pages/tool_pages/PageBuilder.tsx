@@ -23,7 +23,7 @@ import {
 import { DataWidget } from './DataWidgets'
 import { pageIcon, PAGE_ICONS } from './icons'
 import { PageRenderer } from './PageRenderer'
-import { DataProps, FolderProps, PropRow, WidgetProps } from './PageProps'
+import { DataProps, FolderProps, PropRow, WidgetProps, propInput } from './PageProps'
 
 type HttpError = Error & { status?: number; detail?: { by?: string; rev?: string } }
 
@@ -74,16 +74,16 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
   return (
     <div style={{ padding: 24, maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 4 }}>
       <h1 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 12px' }}>{tr('Nouvelle page TOOL', 'New TOOL page')}</h1>
-      <PropRow label={tr('Libelle', 'Label')}><input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="Daily render" style={{ flex: 1, height: 26, padding: '0 8px', border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', borderRadius: 5, color: 'var(--ink)' }} /></PropRow>
-      <PropRow label="id"><input value={shownId} onChange={e => { setIdEdited(true); setId(e.target.value) }} style={{ flex: 1, height: 26, padding: '0 8px', border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', borderRadius: 5, color: 'var(--ink)', fontFamily: 'var(--mono)' }} /></PropRow>
+      <PropRow label={tr('Libelle', 'Label')}><input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="Daily render" style={{ ...propInput, height: 26 }} /></PropRow>
+      <PropRow label="id"><input value={shownId} onChange={e => { setIdEdited(true); setId(e.target.value) }} style={{ ...propInput, height: 26, fontFamily: 'var(--mono)' }} /></PropRow>
       <PropRow label={tr('Portee', 'Scope')}>
-        <select value={scope} onChange={e => setScope(e.target.value as PageScope)} style={{ flex: 1, height: 26 }}>
+        <select value={scope} onChange={e => setScope(e.target.value as PageScope)} style={{ ...propInput, height: 26 }}>
           {canTeam && <option value="team">{tr('Equipe (tous les projets)', 'Team (every project)')}</option>}
           {canProject && project && <option value="project">{tr(`Projet ${project}`, `Project ${project}`)}</option>}
         </select>
       </PropRow>
       <PropRow label={tr('Depart', 'Start from')}>
-        <select value={from} onChange={e => setFrom(e.target.value)} style={{ flex: 1, height: 26 }}>
+        <select value={from} onChange={e => setFrom(e.target.value)} style={{ ...propInput, height: 26 }}>
           <option value="">{tr('Page vide', 'Empty page')}</option>
           {templates.map(t => <option key={t.id} value={`tpl:${t.id}`}>{tr('Modele : ', 'Template: ')}{t.label}</option>)}
           {pages.filter(p => !p.error).map(p => <option key={`${p.scope}/${p.id}`} value={`copy:${p.scope}/${p.id}`}>{tr('Copie de ', 'Copy of ')}{p.label}</option>)}
@@ -270,8 +270,8 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
     try { await flowsApi.deletePage(pageId, scope, proj); store.load(null); navigate('/tool') } catch (err) { toast.error((err as Error).message) }
   }
 
-  if (loadError) return <div style={{ padding: 20 }} className="cap">{loadError}</div>
-  if (!doc) return <div style={{ padding: 20 }} className="cap">{tr('Chargement...', 'Loading...')}</div>
+  if (loadError) return <div style={{ padding: 20 }} className="tp-note">{loadError}</div>
+  if (!doc) return <div style={{ padding: 20 }} className="tp-note">{tr('Chargement...', 'Loading...')}</div>
 
   const bad: Record<string, 'error' | 'warning'> = {}
   for (const i of issues) if (i.widget && bad[i.widget] !== 'error') bad[i.widget] = i.level
@@ -283,7 +283,7 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
         <Icon size={16} />
         <span style={{ fontWeight: 600 }}>{doc.label || doc.id}</span>
         <span className="tag">{scope === 'team' ? tr('equipe', 'team') : tr('projet', 'project')}</span>
-        {dirty && <span className="cap" style={{ color: 'var(--ink-3)' }}>{tr('modifie', 'modified')}</span>}
+        {dirty && <span className="tp-note" style={{ color: 'var(--ink-3)' }}>{tr('modifie', 'modified')}</span>}
         <span style={{ flex: 1 }} />
         <button type="button" className="btn ghost sm" title="Ctrl+Z" onClick={() => store.undo()}><Undo2 size={12} /></button>
         <button type="button" className="btn ghost sm" title="Ctrl+Y" onClick={() => store.redo()}><Redo2 size={12} /></button>
@@ -308,8 +308,8 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
             </div>
           )) : (
             <div>
-              <div className="cap" style={{ marginBottom: 6, color: 'var(--ink-4)' }}>{tr('Un modele cree une nouvelle page (Nouvelle page > Depart).', 'A template creates a new page (New page > Start from).')}</div>
-              {templates.map(t => <div key={t.id} className="cap" style={{ padding: '3px 0', color: 'var(--ink-2)' }}>{t.label}</div>)}
+              <div className="tp-note" style={{ marginBottom: 6, color: 'var(--ink-4)' }}>{tr('Un modele cree une nouvelle page (Nouvelle page > Depart).', 'A template creates a new page (New page > Start from).')}</div>
+              {templates.map(t => <div key={t.id} className="tp-note" style={{ padding: '3px 0', color: 'var(--ink-2)' }}>{t.label}</div>)}
               <button type="button" className="btn sm" style={{ marginTop: 8 }} onClick={() => { void close().then(() => navigate('/tool/new/edit')) }}>{tr('Nouvelle page', 'New page')}</button>
             </div>
           )}
@@ -333,7 +333,7 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
           <div className="cap" style={{ margin: '12px 0 4px' }}>{tr('Donnees', 'Data')}</div>
           {doc.data.map(d => (
             <div key={d.id} onClick={() => setSel({ kind: 'data', id: d.id })} className={`nav${sel?.kind === 'data' && sel.id === d.id ? ' active' : ''}`} style={{ fontSize: 12, gap: 6 }}>
-              <Database size={12} /> <span style={{ fontFamily: 'var(--mono)' }}>{d.id}</span> <span className="cap">{d.kind === 'board' ? 'board' : `${d.fields?.length ?? 0} ${tr('champs', 'fields')}`}</span>
+              <Database size={12} /> <span style={{ fontFamily: 'var(--mono)' }}>{d.id}</span> <span className="tp-note">{d.kind === 'board' ? 'board' : `${d.fields?.length ?? 0} ${tr('champs', 'fields')}`}</span>
             </div>
           ))}
           <div className="cap" style={{ margin: '12px 0 4px' }}>{tr('Problemes', 'Problems')} ({issues.length})</div>
@@ -351,13 +351,13 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
         <div style={col(300)}>
           {sel?.kind === 'page' && <>
             <PropRow label="id"><span className="tag" style={{ fontFamily: 'var(--mono)' }}>{doc.id}</span></PropRow>
-            <PropRow label={tr('Libelle', 'Label')}><input value={doc.label ?? ''} onChange={e => { const v = e.target.value; apply(d => ({ ...d, label: v }), 'page:label') }} style={{ flex: 1, height: 24 }} /></PropRow>
+            <PropRow label={tr('Libelle', 'Label')}><input value={doc.label ?? ''} onChange={e => { const v = e.target.value; apply(d => ({ ...d, label: v }), 'page:label') }} style={propInput} /></PropRow>
             <PropRow label={tr('Icone', 'Icon')}>
-              <select value={doc.icon ?? 'wrench'} onChange={e => { const v = e.target.value; apply(d => ({ ...d, icon: v })) }} style={{ flex: 1, height: 24 }}>
+              <select value={doc.icon ?? 'wrench'} onChange={e => { const v = e.target.value; apply(d => ({ ...d, icon: v })) }} style={propInput}>
                 {Object.keys(PAGE_ICONS).map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </PropRow>
-            <PropRow label={tr('Description', 'Description')}><input value={doc.description ?? ''} onChange={e => { const v = e.target.value; apply(d => ({ ...d, description: v || undefined }), 'page:desc') }} style={{ flex: 1, height: 24 }} /></PropRow>
+            <PropRow label={tr('Description', 'Description')}><input value={doc.description ?? ''} onChange={e => { const v = e.target.value; apply(d => ({ ...d, description: v || undefined }), 'page:desc') }} style={propInput} /></PropRow>
           </>}
           {widget && <WidgetProps key={widget.id} doc={doc} w={widget} scope={scope} project={proj} flows={flows}
                                   onPatch={(p, key) => apply(d => updateWidget(d, widget.id, p), key)}
@@ -371,7 +371,7 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
 
         {/* Preview */}
         <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '14px 18px', background: 'var(--paper)' }}>
-          <div className="cap" style={{ marginBottom: 10, color: 'var(--ink-4)' }}>{tr('Apercu : les boutons ne lancent rien', 'Preview: buttons run nothing')}</div>
+          <div className="tp-note" style={{ marginBottom: 10, color: 'var(--ink-4)' }}>{tr('Apercu : les boutons ne lancent rien', 'Preview: buttons run nothing')}</div>
           <PageRenderer page={doc} issues={issues} project={proj} preview selected={sel?.kind === 'widget' ? sel.id : null}
                         onSelect={id => setSel({ kind: 'widget', id })}
                         renderData={w => <DataWidget page={doc} widget={w} project={proj} preview />} />

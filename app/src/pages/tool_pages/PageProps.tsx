@@ -14,7 +14,7 @@ import { ID_RE } from './builder'
 import { PAGE_ICONS } from './icons'
 import { isDataKind, isValueKind } from './links'
 
-const input: CSSProperties = { flex: 1, minWidth: 0, height: 24, padding: '0 6px', border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', borderRadius: 5, fontSize: 12, color: 'var(--ink)' }
+export const propInput: CSSProperties = { flex: 1, minWidth: 0, height: 24, padding: '0 6px', border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', borderRadius: 5, fontSize: 12, color: 'var(--ink)' }
 const FEEDS: Record<string, string[]> = {
   float: ['float'], int: ['int', 'float'], text: ['str', 'pattern'], path: ['path', 'str'], dir: ['dir', 'path', 'str'],
   toggle: ['bool'], select: ['select', 'str'], list: ['list[str]'],
@@ -31,16 +31,16 @@ export function PropRow({ label, children, tip }: { label: string; children: Rea
 }
 
 function Text({ value, onChange, placeholder, mono }: { value: string | undefined; onChange: (v: string) => void; placeholder?: string; mono?: boolean }) {
-  return <input value={value ?? ''} placeholder={placeholder} onChange={e => onChange(e.target.value)} style={{ ...input, fontFamily: mono ? 'var(--mono)' : undefined }} />
+  return <input value={value ?? ''} placeholder={placeholder} onChange={e => onChange(e.target.value)} style={{ ...propInput, fontFamily: mono ? 'var(--mono)' : undefined }} />
 }
 
 function Num({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
-  return <input type="number" value={value ?? ''} onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))} style={input} />
+  return <input type="number" value={value ?? ''} onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))} style={propInput} />
 }
 
 function Pick<T extends string>({ value, options, onChange, empty }: { value: T | undefined; options: { value: T; label: string }[]; onChange: (v: T | undefined) => void; empty?: string }) {
   return (
-    <select value={value ?? ''} onChange={e => onChange((e.target.value || undefined) as T | undefined)} style={input}>
+    <select value={value ?? ''} onChange={e => onChange((e.target.value || undefined) as T | undefined)} style={propInput}>
       {empty !== undefined && <option value="">{empty}</option>}
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
@@ -78,8 +78,8 @@ function OptionsEditor({ options, onChange }: { options: { value: string; label?
       <div className="cap" style={{ marginBottom: 4 }}>{tr('Options', 'Options')}</div>
       {options.map((o, k) => (
         <div key={k} style={{ display: 'flex', gap: 4, marginBottom: 3 }}>
-          <input value={o.value} placeholder={tr('valeur', 'value')} onChange={e => onChange(options.map((x, j) => j === k ? { ...x, value: e.target.value } : x))} style={{ ...input, fontFamily: 'var(--mono)' }} />
-          <input value={o.label ?? ''} placeholder={tr('libelle', 'label')} onChange={e => onChange(options.map((x, j) => j === k ? { ...x, label: e.target.value } : x))} style={input} />
+          <input value={o.value} placeholder={tr('valeur', 'value')} onChange={e => onChange(options.map((x, j) => j === k ? { ...x, value: e.target.value } : x))} style={{ ...propInput, fontFamily: 'var(--mono)' }} />
+          <input value={o.label ?? ''} placeholder={tr('libelle', 'label')} onChange={e => onChange(options.map((x, j) => j === k ? { ...x, label: e.target.value } : x))} style={propInput} />
           <button type="button" className="btn ghost sm" onClick={() => onChange(options.filter((_, j) => j !== k))}><Trash2 size={11} /></button>
         </div>
       ))}
@@ -112,7 +112,7 @@ export function WidgetProps({ doc, w, scope, project, flows, onPatch, onRename, 
       <PropRow label="id" tip={tr('Les liens passent par cet id', 'Links go through this id')}>
         <input value={idDraft} onChange={e => setIdDraft(e.target.value)} onBlur={() => { if (!idBad && idDraft !== w.id) onRename(idDraft); else setIdDraft(w.id) }}
                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-               style={{ ...input, fontFamily: 'var(--mono)', borderColor: idBad ? 'var(--err)' : undefined }} />
+               style={{ ...propInput, fontFamily: 'var(--mono)', borderColor: idBad ? 'var(--err)' : undefined }} />
       </PropRow>
       {w.kind !== 'label' && <PropRow label={tr('Libelle', 'Label')}><Text value={w.label} onChange={v => onPatch({ label: v }, `w:${w.id}:label`)} /></PropRow>}
       <PropRow label={tr('Info-bulle', 'Tooltip')}><Text value={w.tooltip} onChange={v => onPatch({ tooltip: v }, `w:${w.id}:tooltip`)} /></PropRow>
@@ -217,14 +217,14 @@ export function FolderProps({ f, onPatch, onRename }: { f: PageFolder; onPatch: 
     <div>
       <PropRow label="id">
         <input value={idDraft} onChange={e => setIdDraft(e.target.value)} onBlur={() => { if (ID_RE.test(idDraft) && idDraft !== f.id) onRename(idDraft); else setIdDraft(f.id) }}
-               style={{ ...input, fontFamily: 'var(--mono)' }} />
+               style={{ ...propInput, fontFamily: 'var(--mono)' }} />
       </PropRow>
       <PropRow label={tr('Libelle', 'Label')}><Text value={f.label} onChange={v => onPatch({ label: v }, `f:${f.id}:label`)} /></PropRow>
       <PropRow label={tr('Mode', 'Mode')}>
         <Pick value={f.mode ?? 'plain'} onChange={v => onPatch({ mode: v ?? 'plain' }, `f:${f.id}:mode`)}
               options={[{ value: 'plain', label: tr('bloc', 'block') }, { value: 'tabs', label: tr('onglet', 'tab') }, { value: 'collapsible', label: tr('repliable', 'collapsible') }]} />
       </PropRow>
-      <div className="cap" style={{ color: 'var(--ink-4)' }}>{tr('Des dossiers "onglet" qui se suivent forment une barre d\'onglets.', 'Consecutive "tab" folders form one tab bar.')}</div>
+      <div className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('Des dossiers "onglet" qui se suivent forment une barre d\'onglets.', 'Consecutive "tab" folders form one tab bar.')}</div>
     </div>
   )
 }
@@ -250,14 +250,14 @@ export function DataProps({ spec, scope, onPatch, onRemove }: { spec: PageDataSp
               options={[{ value: 'all', label: tr('tous les artistes', 'every artist') }, { value: 'team_td', label: 'Team TD' }]} />
       </PropRow>
       {spec.kind === 'board'
-        ? <div className="cap" style={{ color: 'var(--ink-4)', margin: '6px 0' }}>{tr('Board : champs fixes (cartes, liens, images).', 'Board: fixed fields (cards, links, images).')}</div>
+        ? <div className="tp-note" style={{ color: 'var(--ink-4)', margin: '6px 0' }}>{tr('Board : champs fixes (cartes, liens, images).', 'Board: fixed fields (cards, links, images).')}</div>
         : <>
           <div className="cap" style={{ margin: '10px 0 4px' }}>{tr('Champs', 'Fields')}</div>
           {fields.map((f, k) => (
             <div key={k} style={{ display: 'flex', gap: 4, marginBottom: 3, alignItems: 'center' }}>
               <input value={f.id} onChange={e => setFields(fields.map((x, j) => j === k ? { ...x, id: e.target.value } : x), `d:${spec.id}:f${k}:id`)}
-                     style={{ ...input, fontFamily: 'var(--mono)', borderColor: ID_RE.test(f.id) ? undefined : 'var(--err)' }} />
-              <select value={f.type} style={{ ...input, flex: '0 0 82px' }}
+                     style={{ ...propInput, fontFamily: 'var(--mono)', borderColor: ID_RE.test(f.id) ? undefined : 'var(--err)' }} />
+              <select value={f.type} style={{ ...propInput, flex: '0 0 82px' }}
                       onChange={e => { const type = e.target.value as PageFieldType; setFields(fields.map((x, j) => j === k ? { ...x, type, options: type === 'select' ? (x.options ?? [{ value: 'a' }]) : undefined } : x), `d:${spec.id}:f${k}:type`) }}>
                 {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
@@ -275,7 +275,7 @@ export function DataProps({ spec, scope, onPatch, onRemove }: { spec: PageDataSp
         </>}
       <div style={{ marginTop: 14 }}>
         <button type="button" className="btn ghost sm" onClick={onRemove} style={{ color: 'var(--err)' }}><Trash2 size={11} /> {tr('Retirer la collection', 'Remove the collection')}</button>
-        <div className="cap" style={{ color: 'var(--ink-4)', marginTop: 4 }}>{tr('Les donnees deja ecrites restent sur le disque.', 'Data already written stays on disk.')}</div>
+        <div className="tp-note" style={{ color: 'var(--ink-4)', marginTop: 4 }}>{tr('Les donnees deja ecrites restent sur le disque.', 'Data already written stays on disk.')}</div>
       </div>
     </div>
   )

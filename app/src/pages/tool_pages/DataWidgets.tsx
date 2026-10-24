@@ -16,6 +16,7 @@ import type { PageDataField, PageDataSpec, PageDoc, PageRecord, PageWidget, RunS
 import { useTr } from '../flow_editor/useTr'
 import { ago } from './links'
 import { BoardWidget } from './BoardWidget'
+import './tool_pages.css'
 
 export interface DataWidgetProps { page: PageDoc; widget: PageWidget; project?: string; preview?: boolean }
 
@@ -65,11 +66,13 @@ export function FieldInput({ field, value, onChange, autoFocus }: { field: PageD
   }
 }
 
-function State({ data, empty }: { data: PageData; empty: string }) {
+function State({ data, empty, preview }: { data: PageData; empty: string; preview?: boolean }) {
   const { tr } = useTr()
-  if (data.error) return <div className="cap" style={{ color: 'var(--err)', padding: 10 }}>{data.error}</div>
-  if (!data.loaded) return <div className="cap" style={{ color: 'var(--ink-4)', padding: 10 }}>{tr('Chargement...', 'Loading...')}</div>
-  if (!data.records.length) return <div className="cap" style={{ color: 'var(--ink-4)', padding: 10 }}>{empty}</div>
+  // Editor preview of a collection not saved yet: the backend does not know it.
+  if (data.error && preview) return <div className="tp-note" style={{ padding: 10 }}>{tr('Apercu : enregistre la page pour lire ses donnees.', 'Preview: save the page to read its data.')}</div>
+  if (data.error) return <div className="tp-note" style={{ color: 'var(--err)', padding: 10 }}>{data.error}</div>
+  if (!data.loaded) return <div className="tp-note" style={{ color: 'var(--ink-4)', padding: 10 }}>{tr('Chargement...', 'Loading...')}</div>
+  if (!data.records.length) return <div className="tp-note" style={{ color: 'var(--ink-4)', padding: 10 }}>{empty}</div>
   return null
 }
 
@@ -88,7 +91,7 @@ function Title({ w, right }: { w: PageWidget; right?: ReactNode }) {
 function Feed({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr, lang } = useTr()
   const spec = specOf(page, w)
-  const data = usePageData(page.id, spec?.id ?? '', project, !!spec && !preview)
+  const data = usePageData(page.id, spec?.id ?? '', project, !!spec)
   const textField = w.field ?? 'text'
   const group = w.group_by ? spec?.fields?.find(f => f.id === w.group_by) : undefined
   const groups = useMemo(() => {
@@ -126,14 +129,14 @@ function Feed({ page, widget: w, project, preview }: DataWidgetProps) {
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <State data={data} empty={tr('Aucun message pour le moment.', 'No message yet.')} />
+        <State data={data} preview={preview} empty={tr('Aucun message pour le moment.', 'No message yet.')} />
         {shown.map(r => (
           <div key={r.rid} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <Avatar ch={(r._created_by || '?').slice(0, 1)} size={22} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{r._created_by}</span>
-                <span className="cap" style={{ color: 'var(--ink-4)' }}>{ago(r._created_at, lang)}</span>
+                <span className="tp-note" style={{ color: 'var(--ink-4)' }}>{ago(r._created_at, lang)}</span>
                 {data.canWrite && r._created_by === data.me && (
                   <button type="button" className="btn ghost sm" title={tr('Supprimer', 'Delete')} style={{ marginLeft: 'auto', padding: '0 4px' }}
                           onClick={() => { data.del(r.rid).catch(fail) }}><Trash2 size={11} /></button>
@@ -189,7 +192,7 @@ function writable(fields: PageDataField[]): PageDataField[] {
 function Table({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr } = useTr()
   const spec = specOf(page, w)
-  const data = usePageData(page.id, spec?.id ?? '', project, !!spec && !preview)
+  const data = usePageData(page.id, spec?.id ?? '', project, !!spec)
   const fields = spec?.fields ?? []
   const cols = w.columns?.length ? fields.filter(f => w.columns!.includes(f.id)) : fields
   const [editing, setEditing] = useState<string | 'new' | null>(null)
@@ -215,14 +218,14 @@ function Table({ page, widget: w, project, preview }: DataWidgetProps) {
                   <RecordForm fields={writable(fields)} initial={r} onSave={save(r.rid)} onCancel={() => setEditing(null)} /></td></tr>
               : <tr key={r.rid} onDoubleClick={() => canEdit && setEditing(r.rid)} style={{ cursor: canEdit ? 'pointer' : 'default' }}>
                   {cols.map(c => <td key={c.id} style={{ padding: '5px 10px', borderBottom: '1px solid var(--rule)', color: 'var(--ink-2)' }}>{fieldText(r, c)}</td>)}
-                  <td className="cap" style={{ padding: '5px 10px', borderBottom: '1px solid var(--rule)', color: 'var(--ink-4)' }}>{r._by}</td>
+                  <td className="tp-note" style={{ padding: '5px 10px', borderBottom: '1px solid var(--rule)', color: 'var(--ink-4)' }}>{r._by}</td>
                   {canEdit && <td style={{ borderBottom: '1px solid var(--rule)', width: 28 }}>
                     <button type="button" className="btn ghost sm" title={tr('Supprimer', 'Delete')} onClick={() => { data.del(r.rid).catch(fail) }}><Trash2 size={11} /></button></td>}
                 </tr>)}
           </tbody>
         </table>
       </div>
-      <State data={data} empty={tr('Aucune ligne.', 'No row.')} />
+      <State data={data} preview={preview} empty={tr('Aucune ligne.', 'No row.')} />
     </div>
   )
 }
@@ -232,7 +235,7 @@ function Table({ page, widget: w, project, preview }: DataWidgetProps) {
 function Cards({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr } = useTr()
   const spec = specOf(page, w)
-  const data = usePageData(page.id, spec?.id ?? '', project, !!spec && !preview)
+  const data = usePageData(page.id, spec?.id ?? '', project, !!spec)
   const fields = spec?.fields ?? []
   const title = fields.find(f => f.id === w.title) ?? fields.find(f => f.type === 'str' || f.type === 'text')
   const group = w.group_by ? fields.find(f => f.id === w.group_by) : undefined
@@ -269,8 +272,8 @@ function Cards({ page, widget: w, project, preview }: DataWidgetProps) {
                      onDoubleClick={() => canEdit && setEditing(r.rid)}
                      style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule)', cursor: canEdit ? 'grab' : 'default' }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', wordBreak: 'break-word' }}>{fieldText(r, title) || r.rid}</div>
-                  {others.map(f => fieldText(r, f) && <div key={f.id} className="cap" style={{ color: 'var(--ink-3)' }}>{f.label || f.id} : {fieldText(r, f)}</div>)}
-                  <div className="cap" style={{ color: 'var(--ink-4)', display: 'flex' }}>
+                  {others.map(f => fieldText(r, f) && <div key={f.id} className="tp-note" style={{ color: 'var(--ink-3)' }}>{f.label || f.id} : {fieldText(r, f)}</div>)}
+                  <div className="tp-note" style={{ color: 'var(--ink-4)', display: 'flex' }}>
                     <span style={{ flex: 1 }}>{r._by}</span>
                     {canEdit && <button type="button" className="btn ghost sm" style={{ padding: '0 4px' }} onClick={() => { data.del(r.rid).catch(fail) }}><Trash2 size={11} /></button>}
                   </div>
@@ -278,7 +281,7 @@ function Cards({ page, widget: w, project, preview }: DataWidgetProps) {
           </div>
         ))}
       </div>
-      <State data={data} empty={tr('Aucune carte.', 'No card.')} />
+      <State data={data} preview={preview} empty={tr('Aucune carte.', 'No card.')} />
     </div>
   )
 }
@@ -295,7 +298,7 @@ function ymd(d: Date): string {
 function Calendar({ page, widget: w, project, preview }: DataWidgetProps) {
   const { tr, lang } = useTr()
   const spec = specOf(page, w)
-  const data = usePageData(page.id, spec?.id ?? '', project, !!spec && !preview)
+  const data = usePageData(page.id, spec?.id ?? '', project, !!spec)
   const fields = spec?.fields ?? []
   const dateField = fields.find(f => f.id === w.date) ?? fields.find(f => f.type === 'date' || f.type === 'datetime')
   const endField = w.end ? fields.find(f => f.id === w.end) : undefined
@@ -356,8 +359,8 @@ function Calendar({ page, widget: w, project, preview }: DataWidgetProps) {
           )
         })}
       </div>
-      {canEdit && <div className="cap" style={{ padding: '4px 8px', color: 'var(--ink-4)' }}>{tr('Double clic sur un jour : ajouter', 'Double click a day: add')}</div>}
-      {data.error && <State data={data} empty="" />}
+      {canEdit && <div className="tp-note" style={{ padding: '4px 8px', color: 'var(--ink-4)' }}>{tr('Double clic sur un jour : ajouter', 'Double click a day: add')}</div>}
+      {data.error && <State data={data} preview={preview} empty="" />}
     </div>
   )
 }
@@ -376,7 +379,7 @@ function Members({ widget: w }: DataWidgetProps) {
     <div style={box}>
       <Title w={w} right={users && <span className="cap">{users.length}</span>} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 8 }}>
-        {users === null && <span className="cap" style={{ color: 'var(--ink-4)' }}>{tr('Chargement...', 'Loading...')}</span>}
+        {users === null && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('Chargement...', 'Loading...')}</span>}
         {users?.map(u => (
           <div key={u} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Avatar ch={u.slice(0, 1)} size={20} />
@@ -409,10 +412,10 @@ function FlowOutput({ widget: w, project }: DataWidgetProps) {
   const rows = run?.value === undefined || run?.value === null ? [] : Array.isArray(run.value) ? run.value : [run.value]
   return (
     <div style={box}>
-      <Title w={w} right={run && <span className="cap">{w.source?.flow} {ago(run.summary.ended, lang)}</span>} />
+      <Title w={w} right={run && <span className="tp-note">{w.source?.flow} {ago(run.summary.ended, lang)}</span>} />
       <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {run === undefined && <span className="cap" style={{ color: 'var(--ink-4)' }}>{tr('Chargement...', 'Loading...')}</span>}
-        {run === null && <span className="cap" style={{ color: 'var(--ink-4)' }}>{tr('Le flow n\'a pas encore tourne.', 'The flow has not run yet.')}</span>}
+        {run === undefined && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('Chargement...', 'Loading...')}</span>}
+        {run === null && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('Le flow n\'a pas encore tourne.', 'The flow has not run yet.')}</span>}
         {rows.map((v, k) => <div key={k} style={{ fontSize: 12, color: 'var(--ink-2)', wordBreak: 'break-all' }}>{typeof v === 'string' ? v : JSON.stringify(v)}</div>)}
       </div>
     </div>

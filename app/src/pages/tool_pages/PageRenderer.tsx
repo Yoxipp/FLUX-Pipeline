@@ -21,6 +21,7 @@ import { useFlowsWs } from '../../hooks/useFlowsWs'
 import type { FlowsWsMessage, PageDoc, PageFolder, PageIssue, PageLayoutItem, PageWidget, RunSummary } from '../flow_editor/types'
 import { useTr } from '../flow_editor/useTr'
 import { ago, blockedWidgets, initialValue, isDataKind, runValues, seconds, widgetsOf } from './links'
+import './tool_pages.css'
 
 const REMEMBER_KEY = 'flux.pages.remember'
 const EMPTY_RUN: ButtonRun = { last: null, pending: null, error: null, preview: null }
@@ -88,25 +89,25 @@ function useButtonRuns(page: PageDoc, project: string | undefined, enabled: bool
 
 function RunState({ state }: { state: ButtonRun | undefined }) {
   const { tr, lang } = useTr()
-  if (state?.preview) return <div className="cap" style={{ color: 'var(--ink-3)' }}>{state.preview}</div>
-  if (state?.error) return <div className="cap" style={{ color: 'var(--err)' }}>{state.error}</div>
+  if (state?.preview) return <div className="tp-note" style={{ color: 'var(--ink-3)' }}>{state.preview}</div>
+  if (state?.error) return <div className="tp-note" style={{ color: 'var(--err)' }}>{state.error}</div>
   if (state?.pending) {
-    return <div className="cap" style={{ color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+    return <div className="tp-note" style={{ color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
       <LoaderCircle size={12} style={{ animation: 'spin 1s linear infinite' }} /> {tr('en cours', 'running')}
     </div>
   }
   const last = state?.last
-  if (!last) return <div className="cap" style={{ color: 'var(--ink-4)' }}>{tr('jamais lance', 'never run')}</div>
+  if (!last) return <div className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('jamais lance', 'never run')}</div>
   if (last.status === 'running' || last.status === 'queued') {
-    return <div className="cap" style={{ color: 'var(--ink-3)' }}>{tr(`en cours, par ${last.user ?? '?'}`, `running, by ${last.user ?? '?'}`)}</div>
+    return <div className="tp-note" style={{ color: 'var(--ink-3)' }}>{tr(`en cours, par ${last.user ?? '?'}`, `running, by ${last.user ?? '?'}`)}</div>
   }
   if (last.status === 'ok') {
     const when = ago(last.ended ?? last.started, lang)
-    return <div className="cap" style={{ color: 'var(--ok)' }}>
+    return <div className="tp-note" style={{ color: 'var(--ok)' }}>
       {tr(`fini ${when} (${seconds(last.duration_ms, lang)}) par ${last.user ?? '?'}`, `done ${when} (${seconds(last.duration_ms, lang)}) by ${last.user ?? '?'}`)}
     </div>
   }
-  return <div className="cap" style={{ color: 'var(--err)' }} title={last.error ?? ''}>
+  return <div className="tp-note" style={{ color: 'var(--err)' }} title={last.error ?? ''}>
     {tr('erreur', 'error')}{last.error ? ` : ${last.error}` : ''} ({ago(last.ended ?? last.started, lang)})
   </div>
 }
@@ -162,17 +163,17 @@ function WidgetCell({ w, ctx }: { w: PageWidget; ctx: Ctx }) {
                 style={{ opacity: blocked ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {running ? <><Square size={12} />{tr('Stop', 'Stop')}</> : <><Play size={12} />{w.label || w.id}</>}
         </button>
-        {blocked ? <div className="cap" style={{ color: 'var(--ink-4)' }}>{blocked}</div> : <RunState state={state} />}
+        {blocked ? <div className="tp-note" style={{ color: 'var(--ink-4)' }}>{blocked}</div> : <RunState state={state} />}
       </div>
     )
   } else if (w.kind === 'separator') {
     body = <div style={{ borderTop: '1px solid var(--rule)', paddingTop: 6 }}>{w.label && <span className="cap">{w.label}</span>}</div>
   } else if (w.kind === 'label') {
-    body = <div className="cap" style={{ color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}>{w.text ?? w.label}</div>
+    body = <div className="tp-note" style={{ color: 'var(--ink-2)', whiteSpace: 'pre-wrap' }}>{w.text ?? w.label}</div>
   } else if (isDataKind(w.kind)) {
     body = ctx.renderData ? ctx.renderData(w)
-      : <div className="cap" style={{ color: 'var(--ink-4)' }}>{tr(`${w.kind} : ${w.label || w.id}`, `${w.kind}: ${w.label || w.id}`)}</div>
-    if (ctx.blocked[w.id]) body = <div className="cap" style={{ color: 'var(--ink-4)' }} title={ctx.blocked[w.id]}>{ctx.blocked[w.id]}</div>
+      : <div className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr(`${w.kind} : ${w.label || w.id}`, `${w.kind}: ${w.label || w.id}`)}</div>
+    if (ctx.blocked[w.id]) body = <div className="tp-note" style={{ color: 'var(--ink-4)' }} title={ctx.blocked[w.id]}>{ctx.blocked[w.id]}</div>
   } else {
     body = <FieldWidget w={w} value={ctx.values[w.id]} blocked={ctx.blocked[w.id]} onChange={v => ctx.setValue(w.id, v)} />
   }
@@ -318,7 +319,7 @@ export function PageRenderer({ page, issues = [], project, preview = false, sele
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {errorCount > 0 && !preview && (
-        <div className="cap" style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)', color: 'var(--ink-2)' }}>
+        <div className="tp-note" style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--paper-2)', border: '1px solid var(--rule-2)', color: 'var(--ink-2)' }}>
           {tr(`Cette page a ${errorCount} probleme(s) : les widgets concernes sont grises.`, `This page has ${errorCount} problem(s): the widgets concerned are greyed out.`)}
         </div>
       )}

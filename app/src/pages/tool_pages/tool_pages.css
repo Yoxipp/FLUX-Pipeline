@@ -1,0 +1,7 @@
+/* tool_pages.css — TOOL pages (P7). .cap stays for labels (mono, capitals); sentences
+   (states, reasons, descriptions, hints) use .tp-note: small, sentence case, flat. */
+.tp-note {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
