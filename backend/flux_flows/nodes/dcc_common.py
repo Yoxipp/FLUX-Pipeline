@@ -188,6 +188,25 @@ def instance_simulate(ctx, inputs, params, spec):
             "outputs": empty}
 
 
+def mode_labels(spec, modes) -> dict:
+    """Readable menu entries of the Instance modes (R1 retake 4), in MODES order."""
+    worker = spec.headless or "worker"
+    labels = {
+        "live_connect_or_open": ("Se connecter ou ouvrir (defaut)", "Connect or open (default)"),
+        "live_connect_only": ("Se connecter seulement", "Connect only"),
+        "headless": (f"Sans interface ({worker}, 1 licence)", f"No UI ({worker}, 1 licence)"),
+        "farm": ("Farm (V2, indisponible)", "Farm (V2, unavailable)"),
+    }
+    return {m: labels[m] for m in modes if m in labels}
+
+
+PICK_LABELS = {
+    "active": ("Instance active (choisie dans FLUX)", "Active instance (chosen in FLUX)"),
+    "scene": ("Celle qui a la scene ouverte", "The one with the scene open"),
+    "pid": ("Par process (pid)", "By process (pid)"),
+}
+
+
 def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) -> None:
     """Register session.<prefix>_instance_core for *soft* (decision 24, 02 §8): the Python core of
     the <Soft>Instance node, which is the locked subflow around it."""
@@ -222,10 +241,11 @@ def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) ->
                                           "headless : sans interface (licence) ; farm : V2",
                            "live_connect_or_open: connect, else open; live_connect_only; headless: no UI "
                            "(licence); farm: V2", "live_connect_or_open", default="live_connect_or_open",
-                           choices=modes, wirable=False),
+                           choices=modes, wirable=False, labels=mode_labels(spec, modes),
+                           reserved=[m for m in modes if m == "farm"]),
                       port("pick", "str", "Quelle instance : active (choisie dans FLUX), scene, pid",
                            "Which instance: active (chosen in FLUX), scene, pid", "active", default="active",
-                           choices=PICKS, wirable=False),
+                           choices=PICKS, wirable=False, labels=PICK_LABELS),
                       port("pid", "int", "Process vise (pick pid)", "Target process (pick pid)", 12345),
                       port("wait_s", "float", "Attente du bridge apres ouverture (s)", "Wait for the bridge after "
                            "opening (s)", 60, default=60)],

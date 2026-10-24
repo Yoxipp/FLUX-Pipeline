@@ -56,22 +56,32 @@ class Port:
     # Editor hints (params): the allowed values of a choice param, in menu order;
     # wirable=False = a constant (never promoted to an input, no link into it);
     # tokens = a project token section (CLASS, NAME, TYPE, SEQ...) offered in a menu.
+    # R1: choice_labels = ((value, label_fr, label_en), ...) readable menu entries;
+    # reserved = choices shown in the menu but disabled (e.g. instance mode farm, V2).
     choices: Optional[Tuple[Any, ...]] = None
     wirable: bool = True
     tokens: Optional[str] = None
+    choice_labels: Tuple[Tuple[Any, str, str], ...] = ()
+    reserved: Tuple[Any, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "type": self.type, "doc_fr": self.doc_fr, "doc_en": self.doc_en,
                 "example": self.example, "required": self.required, "default": self.default,
                 "choices": list(self.choices) if self.choices is not None else None,
-                "wirable": self.wirable, "tokens": self.tokens}
+                "wirable": self.wirable, "tokens": self.tokens,
+                "choice_labels": {str(v): {"fr": fr, "en": en} for v, fr, en in self.choice_labels} or None,
+                "reserved": [str(v) for v in self.reserved] or None}
 
 
 def port(name: str, type: str, doc_fr: str = "", doc_en: str = "", example: Any = None,
          required: bool = False, default: Any = None, *, choices: Optional[Iterable[Any]] = None,
-         wirable: bool = True, tokens: Optional[str] = None) -> Port:
+         wirable: bool = True, tokens: Optional[str] = None,
+         labels: Optional[Dict[Any, Tuple[str, str]]] = None, reserved: Iterable[Any] = ()) -> Port:
+    """A port or param. *choices* keep their declaration order in the menu; *labels* maps a
+    choice to (label_fr, label_en); *reserved* choices are listed but cannot be picked."""
     return Port(name, type, doc_fr, doc_en, example, required, default,
-                tuple(choices) if choices is not None else None, bool(wirable), tokens or None)
+                tuple(choices) if choices is not None else None, bool(wirable), tokens or None,
+                tuple((v, fr, en) for v, (fr, en) in (labels or {}).items()), tuple(reserved))
 
 
 @dataclass
@@ -145,6 +155,9 @@ def _check_ports(node_type: str, kind: str, ports: Iterable[Port]) -> List[Port]
             raise NodeDefinitionError(f"{node_type} : {kind} '{p.name}' en double")
         if not is_valid_type(p.type):
             raise NodeDefinitionError(f"{node_type} : {kind} '{p.name}' a un type inconnu '{p.type}'")
+        extra = [v for v, _fr, _en in p.choice_labels] + list(p.reserved)
+        if extra and (p.choices is None or any(v not in p.choices for v in extra)):
+            raise NodeDefinitionError(f"{node_type} : {kind} '{p.name}' : libelle ou option reservee hors choices")
         names.add(p.name)
         out.append(p)
     return out

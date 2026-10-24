@@ -386,6 +386,13 @@ def _check_nodes(net: _Net, issues: List[Issue], env: Env) -> None:
                                      f"{net.name(nid)} : `{pname}` vaut {value!r}, attendu : {shown}",
                                      f"{net.name(nid)}: `{pname}` is {value!r}, expected: {shown}", port=pname))
                 continue
+            if port.reserved and not _templated(value) and _in_choices(value, port.reserved):
+                issues.append(_issue("E_PARAM_INVALID", nid,
+                                     f"{net.name(nid)} : `{pname}` = {value!r} n'est pas encore disponible, choisis "
+                                     f"une autre option du menu",
+                                     f"{net.name(nid)}: `{pname}` = {value!r} is not available yet, pick another "
+                                     f"option of the menu", port=pname))
+                continue
             if port.type == "pattern" and isinstance(value, str) and not _templated(value):
                 bad = patterns.check_pattern(value)
                 if bad:

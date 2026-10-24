@@ -91,6 +91,43 @@ class CatalogTest(unittest.TestCase):
         self.assertIn(("v", "type"), [(i.node, i.port) for i in validate(f) if i.code == "E_PARAM_INVALID"])
 
 
+class ChoiceLabelsTest(unittest.TestCase):
+    """R1 retake 4: menus keep the declaration order, with readable labels and reserved options."""
+
+    def test_instance_modes_ordered_labelled_farm_reserved(self):
+        for node_type in ("session.may_instance", "session.may_instance_core"):
+            mode = {p["name"]: p for p in _spec(node_type).to_dict()["params"]}["mode"]
+            self.assertEqual(mode["choices"], ["live_connect_or_open", "live_connect_only", "headless", "farm"])
+            self.assertEqual(mode["reserved"], ["farm"], node_type)
+            self.assertIn("defaut", mode["choice_labels"]["live_connect_or_open"]["fr"])
+            self.assertIn("mayapy", mode["choice_labels"]["headless"]["fr"])
+            self.assertNotEqual(mode["doc_fr"], "Mode", node_type)   # the subflow node takes the core doc
+
+    def test_label_outside_choices_is_refused(self):
+        with self.assertRaises(registry.NodeDefinitionError):
+            registry.flow_node("data.tst_bad_label", "TstBadLabel",
+                               params=[registry.port("m", "str", choices=("a",), labels={"b": ("B", "B")})])(lambda *a: {})
+
+    def test_plain_port_has_no_labels(self):
+        params = {p["name"]: p for p in _spec("action.delete").to_dict()["params"]}
+        self.assertIsNone(params["mode"]["choice_labels"])
+        self.assertIsNone(params["mode"]["reserved"])
+
+    def test_reserved_choice_is_a_validation_error(self):
+        f = flow({"ev": ("event.manual", {}), "n1": ("session.may_instance", {"mode": "farm"})},
+                 ["ev.then->n1.exec"])
+        self.assertTrue([i for i in validate(f) if i.code == "E_PARAM_INVALID" and i.node == "n1"])
+
+    def test_reserved_choice_generic_message(self):
+        registry.flow_node("data.tst_reserved", "TstReserved", outputs=[registry.port("v", "str")],
+                           params=[registry.port("m", "str", choices=("a", "b"), reserved=("b",), wirable=False)],
+                           )(lambda ctx, inputs, params: {"v": params.get("m")})
+        self.addCleanup(registry._REGISTRY.pop, "data.tst_reserved", None)
+        f = flow({"ev": ("event.manual", {}), "n1": ("data.tst_reserved", {"m": "b"})}, [])
+        issues = [i for i in validate(f) if i.code == "E_PARAM_INVALID" and i.node == "n1"]
+        self.assertIn("pas encore disponible", issues[0].message_fr)
+
+
 class _FsCase(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="flux_opts_"))

@@ -112,7 +112,8 @@ function ParamRow({ p, editable, raw, onChange, choices, tokens, tokenOptions, m
     const cur = raw !== undefined ? raw : p.value
     return row(
       <ParamWidget kind="select" value={cur === undefined || cur === null ? '' : String(cur)} tip={tip}
-                   options={choices.map(String)}
+                   options={choices.map(String)} disabledOptions={p.reserved}
+                   optionLabels={p.choiceLabels && Object.fromEntries(Object.entries(p.choiceLabels).map(([k, l]) => [k, lang === 'en' ? l.en : l.fr]))}
                    onChange={v => onChange(v === '' ? undefined : choices.find(c => String(c) === v) ?? v)} />,
     )
   }

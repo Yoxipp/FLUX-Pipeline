@@ -31,11 +31,13 @@ export interface ParamWidgetProps {
   tip?: string
   placeholder?: string
   options?: string[]          // select
+  optionLabels?: Record<string, string>   // select: shown text per option (value kept)
+  disabledOptions?: string[]  // select: listed but not pickable
   disabled?: boolean
   onPickPath?: () => void     // native file / folder picker, when the host provides one
 }
 
-export function ParamWidget({ kind, value, onChange, tip, placeholder, options, disabled, onPickPath }: ParamWidgetProps) {
+export function ParamWidget({ kind, value, onChange, tip, placeholder, options, optionLabels, disabledOptions, disabled, onPickPath }: ParamWidgetProps) {
   switch (kind) {
     case 'bool':
       return (
@@ -71,7 +73,7 @@ export function ParamWidget({ kind, value, onChange, tip, placeholder, options, 
       return (
         <select value={text(value)} title={tip} disabled={disabled} onChange={e => onChange(e.target.value)} style={paramInputStyle}>
           {!(options ?? []).includes(text(value)) && <option value={text(value)}>{text(value)}</option>}
-          {(options ?? []).map(o => <option key={o} value={o}>{o}</option>)}
+          {(options ?? []).map(o => <option key={o} value={o} disabled={disabledOptions?.includes(o)}>{optionLabels?.[o] ?? o}</option>)}
         </select>
       )
 

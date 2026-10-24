@@ -129,14 +129,23 @@ def reset_cache() -> None:
         _CACHE["sig"], _CACHE["index"], _CACHE["at"] = None, {}, 0.0
 
 
-def _interface_port(item: Any, required: bool = False):
+def _interface_port(item: Any, required: bool = False, core_port: Any = None):
+    """A node port from an interface item. *core_port* (same name on the core leaf, R1) gives
+    its doc, menu labels and reserved options; the YAML item keeps its order and default."""
     from flux_flows.nodes.registry import port
 
-    doc = item.label or item.id
+    doc_fr = doc_en = item.label or item.id
+    if core_port is not None and core_port.doc_fr:
+        doc_fr, doc_en = core_port.doc_fr, core_port.doc_en or core_port.doc_fr
     if item.type == "select":
         options = list(item.options or [])
-        return port(item.id, "str", doc, doc, item.default, default=item.default, choices=options, wirable=False)
-    return port(item.id, item.type, doc, doc, item.default, default=item.default, required=required)
+        labels, reserved = {}, []
+        if core_port is not None:
+            labels = {v: (fr, en) for v, fr, en in core_port.choice_labels if v in options}
+            reserved = [v for v in core_port.reserved if v in options]
+        return port(item.id, "str", doc_fr, doc_en, item.default, default=item.default, choices=options,
+                    wirable=False, labels=labels, reserved=reserved)
+    return port(item.id, item.type, doc_fr, doc_en, item.default, default=item.default, required=required)
 
 
 def _inner_look(flow):
@@ -160,8 +169,9 @@ def spec_for(entry: DccFlow):
     look = core or _inner_look(flow)        # icon, Shelf rank, aliases of a team node (P6c)
     inputs = [port("exec", "exec", required=True)]
     params = []
+    core_ports = {p.name: p for p in (*core.inputs, *core.params)} if core else {}
     for item in flow.interface.inputs:
-        p = _interface_port(item, required=item.type.startswith("session["))
+        p = _interface_port(item, required=item.type.startswith("session["), core_port=core_ports.get(item.id))
         (params if item.type == "select" else inputs).append(p)
     outputs = [port("then", "exec"), port("on_error", "exec")]
     outputs += [port(o.id, o.type, o.label or o.id, o.label or o.id) for o in flow.interface.outputs]

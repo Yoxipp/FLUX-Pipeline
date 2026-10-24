@@ -34,6 +34,8 @@ export interface PortSpec {
   choices?: unknown[]     // allowed values (menu, catalogue order)
   wirable?: boolean       // false = constant param: never a port, edited in Params only
   tokens?:  string        // project token section offered in a menu (CLASS, NAME, SEQ...)
+  choiceLabels?: Record<string, { fr: string; en: string }>   // readable menu entries (R1)
+  reserved?: string[]     // choices listed but disabled (instance mode farm, V2)
 }
 
 // One node as the editor draws it.
@@ -246,6 +248,8 @@ export interface CatalogPort {
   choices?: unknown[] | null   // allowed values of a choice param, in menu order
   wirable?: boolean            // absent (old catalogue) = true; false = constant, no link
   tokens?:  string | null      // project token section ("CLASS", "NAME", "SEQ"...) offered in a menu
+  choice_labels?: Record<string, { fr: string; en: string }> | null   // R1: readable menu entries
+  reserved?: string[] | null   // R1: choices shown disabled
 }
 
 // True, or {param, equals}: compares the param (or its default).
