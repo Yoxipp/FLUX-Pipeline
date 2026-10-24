@@ -213,7 +213,10 @@ class Marvelous(unittest.TestCase):
     def _beat(self) -> None:
         tmp = self.box / "alive.json.tmp"
         tmp.write_text(json.dumps({"time": time.time(), "pid": os.getpid(), "version": "MD 2024"}), encoding="utf-8")
-        os.replace(tmp, self.box / "alive.json")
+        try:
+            os.replace(tmp, self.box / "alive.json")
+        except PermissionError:         # Windows: the client is reading it, skip a beat like the real bridge
+            pass
 
     def _serve(self) -> None:
         while not self.stop.is_set():

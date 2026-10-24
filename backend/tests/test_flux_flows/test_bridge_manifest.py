@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from flux_flows.bridges import extension, primitives, softs
 from tests.test_flux_flows._ext_helpers import MAX_YML, ExtFolder
@@ -113,8 +114,7 @@ class Registry(unittest.TestCase):
             exe.parent.mkdir(parents=True)
             exe.write_text("", encoding="utf-8")
             ext.add("max", _yml(exe_hints=f"['{ext.tmp.as_posix()}/Autodesk/3ds Max */3dsmax.exe']"))
-            self.assertEqual(extension.find_exe(extension.get("max")), str(exe).replace("\\", "/")
-                             if "/" in str(exe) else str(exe))
+            self.assertEqual(Path(extension.find_exe(extension.get("max"))), exe)
 
 
 if __name__ == "__main__":

@@ -51,10 +51,11 @@ class HoudiniNodes(unittest.TestCase):
 
     def test_open_scene_refuses_unsaved_changes(self) -> None:
         self.hou.unsaved = True
-        rec, _ = self.run_node("dcc.hou_open_scene", inputs={"path": "/p/b.hip"})
+        scene = (self.tmp / "b.hip").as_posix()                 # drive-absolute on Windows
+        rec, _ = self.run_node("dcc.hou_open_scene", inputs={"path": scene})
         self.assertIn("non enregistree", rec["nodes"]["n"]["error"])
-        rec, value = self.run_node("dcc.hou_open_scene", {"discard_changes": True}, {"path": "/p/b.hip"}, "scene")
-        self.assertEqual((rec["status"], value, self.hou.file), ("ok", "/p/b.hip", "/p/b.hip"))
+        rec, value = self.run_node("dcc.hou_open_scene", {"discard_changes": True}, {"path": scene}, "scene")
+        self.assertEqual((rec["status"], value, self.hou.file), ("ok", scene, scene))
         rec, value = self.run_node("dcc.hou_open_scene", {"new": True}, out="scene")
         self.assertEqual(value, "untitled.hip")
 
@@ -124,7 +125,7 @@ class HoudiniNodes(unittest.TestCase):
         self.assertEqual(kwargs["client"].port, self.srv.port)
         with mock.patch("dcc.houdini.houdini_import.import_into_lop",
                         return_value={"ok": True, "result": {"node_path": "/stage/ref1"}}) as imp:
-            rec, value = self.run_node("dcc.hou_import", {"mode": "reference"}, {"path": "/p/a.usd"}, "nodes")
+            rec, value = self.run_node("dcc.hou_import", {"mode": "reference"}, {"path": (self.tmp / "a.usd").as_posix()}, "nodes")
         self.assertEqual(value, ["/stage/ref1"])
         self.assertEqual(imp.call_args.args[1], "reference")
 
