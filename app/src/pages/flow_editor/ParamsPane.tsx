@@ -14,6 +14,7 @@
 // buttons and fields of the chosen page into its ports.
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
 import { ParamWidget, type ParamKind } from '../../components/shared/ParamWidget'
 import { useProject } from '../../ProjectContext'
@@ -23,7 +24,7 @@ import { PortHelp } from './nodes/PortTooltip'
 import { portColor } from './portTypes'
 import { TokenField, tokenKeys, useProjectTokens, type ProjectTokens } from './TokenField'
 import { portVisible } from './visibility'
-import type { FlowViewNode, PortSpec } from './types'
+import type { FlowViewNode, InterfaceInput, PageDoc, PageWidget, PageWidgetKind, PortSpec } from './types'
 import { formatValue, useTr } from './useTr'
 
 export const PARAMS_W = 320          // default width; the viewer can drag it
@@ -173,8 +174,33 @@ function usePageIds(active: boolean, project: string | null | undefined): string
   return ids
 }
 
-function PageInputsPorts({ params, editable, onPorts }: {
-  params: Record<string, unknown>; editable: boolean; onPorts: (p: PagePortsParam) => void
+// Interface type -> page widget kind (same table as the generated Publisher panel, 04 §7).
+const KIND_FOR_TYPE: Record<string, PageWidgetKind> = {
+  float: 'float', int: 'int', bool: 'toggle', str: 'text', pattern: 'text', path: 'path', dir: 'dir', select: 'select', 'list[str]': 'list',
+}
+
+// "Creer une page pour ce flow": a page named like the flow, one field per interface input
+// (its values also fill those inputs on a click, ADR 0068 n°4) and a Lancer button. Team TD.
+async function createFlowPage(flowName: string, project: string | null | undefined): Promise<string> {
+  const read = await flowsApi.get(flowName, { project: project || undefined })
+  const raw = read.flow.interface as unknown
+  const inputs = (Array.isArray(raw) ? raw : (read.flow.interface?.inputs ?? [])) as InterfaceInput[]
+  const fields: PageWidget[] = inputs.filter(i => KIND_FOR_TYPE[i.type] && i.id !== 'lancer').map(i => ({
+    id: i.id, kind: KIND_FOR_TYPE[i.type], label: i.label || i.id,
+    ...(i.default !== undefined && i.default !== null ? { default: i.default } : {}),
+    ...(i.type === 'select' ? { options: (i.options ?? []).map(o => ({ value: String(o), label: String(o) })) } : {}),
+  }))
+  const page: PageDoc = {
+    page: 1, id: flowName, label: read.flow.label || flowName, icon: 'wrench', data: [],
+    layout: [...fields.map(w => ({ row: [w] })), { row: [{ id: 'lancer', kind: 'button', label: 'Lancer' }] }],
+  }
+  await flowsApi.savePage(page, read.scope === 'project' ? 'project' : 'team', { project: project || undefined, base_rev: null })
+  return flowName
+}
+
+function PageInputsPorts({ params, editable, flowName, onPage, onPorts }: {
+  params: Record<string, unknown>; editable: boolean; flowName?: string
+  onPage: (page: string) => void; onPorts: (p: PagePortsParam) => void
 }) {
   const { tr } = useTr()
   const { project } = useProject()
@@ -192,7 +218,24 @@ function PageInputsPorts({ params, editable, onPorts }: {
   const stored = (params.ports ?? { outputs: {}, labels: {} }) as PagePortsParam
   const same = !!found && JSON.stringify(found) === JSON.stringify({ outputs: stored.outputs ?? {}, labels: stored.labels ?? {} })
   useEffect(() => { if (found && !same && editable) onPorts(found) }, [found, same, editable, onPorts])
-  if (!page) return <div style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0' }}>{tr('Choisis la page : ses boutons et ses champs deviendront les sorties du node.', 'Pick the page: its buttons and fields become the outputs of the node.')}</div>
+  const make = () => {
+    if (!flowName) return
+    createFlowPage(flowName, project)
+      .then(id => { onPage(id); toast.success(tr(`Page ${id} creee : relie son bouton Lancer`, `Page ${id} created: link its Lancer button`)) })
+      .catch(e => toast.error(String((e as Error)?.message ?? e)))
+  }
+  if (!page) return (
+    <div style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0' }}>
+      {tr('Choisis la page : ses boutons et ses champs deviendront les sorties du node.', 'Pick the page: its buttons and fields become the outputs of the node.')}
+      {editable && flowName && (
+        <button type="button" className="flow-tool" onClick={make} style={{ width: 'auto', padding: '0 6px', marginTop: 6, fontSize: 11, display: 'block' }}
+                title={tr('Une page du nom du flow : un champ par entree du flow enregistre, un bouton Lancer (case Team TD)',
+                          'A page named like the flow: one field per input of the saved flow, a Lancer button (Team TD box)')}>
+          {tr('Creer une page pour ce flow', 'Create a page for this flow')}
+        </button>
+      )}
+    </div>
+  )
   const shown = found ?? stored
   const names = (exec: boolean) => Object.entries(shown.outputs ?? {}).filter(([, ty]) => (ty === 'exec') === exec)
     .map(([id]) => shown.labels?.[id] ?? id).join(', ') || tr('aucun', 'none')
@@ -271,7 +314,7 @@ function InterfaceNote({ node }: { node: FlowViewNode }) {
   return <div style={{ fontSize: 11, margin: '6px 0 8px', color: 'var(--ink-3)', lineHeight: 1.45 }}>{text}</div>
 }
 
-function NodeParams({ node, params, editable, edits, iface }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; iface?: { inputs: string[]; outputs: string[] } }) {
+function NodeParams({ node, params, editable, edits, flowName, iface }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; flowName?: string; iface?: { inputs: string[]; outputs: string[] } }) {
   const { tr } = useTr()
   const fam = FAMILY_INFO[node.family]
   const canEdit = editable && !!node.spec
@@ -330,7 +373,8 @@ function NodeParams({ node, params, editable, edits, iface }: { node: FlowViewNo
                       muted={!portVisible(node, p)}
                       onChange={v => edits.onParam(node.id, p.name, v)} />
           ))}
-      {isPageReader && <PageInputsPorts params={params} editable={canEdit} onPorts={onPorts} />}
+      {isPageReader && <PageInputsPorts params={params} editable={canEdit} flowName={flowName} onPorts={onPorts}
+                                        onPage={id => onParam(node.id, 'page', id)} />}
       {isInterface && <InterfaceNote node={node} />}
       {node.type === 'subflow.flow_call' && (
         <FlowCallPorts params={params} editable={canEdit} onPorts={onPorts} />
@@ -339,7 +383,8 @@ function NodeParams({ node, params, editable, edits, iface }: { node: FlowViewNo
   )
 }
 
-export function ParamsPane({ selected, params, editable, edits, flowPart, iface }: {
+export function ParamsPane({ selected, params, editable, edits, flowPart, flowName, iface }: {
+  flowName?: string                        // name of the open flow (InputsPageReader: create its page)
   selected: FlowViewNode | null
   iface?: { inputs: string[]; outputs: string[] }   // interface ids (FlowInput / FlowOutput id menus)
   params: Record<string, unknown>          // params of the selected node in the document
@@ -392,7 +437,7 @@ export function ParamsPane({ selected, params, editable, edits, flowPart, iface 
            style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5,
                     background: dragging ? 'var(--accent)' : 'transparent', opacity: dragging ? 0.5 : 1, touchAction: 'none' }} />
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '10px 12px' }}>
-        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} iface={iface} /> : flowPart}
+        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} flowName={flowName} iface={iface} /> : flowPart}
       </div>
     </aside>
   )

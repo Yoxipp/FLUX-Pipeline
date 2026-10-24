@@ -34,7 +34,7 @@ import { api } from '../../api/client'
 import { flowsApi } from '../../api/flows'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
-import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
+import { MigrateDialog, NameDialog, START_NODE, scopeChoices, type StartKind } from './FileDialogs'
 import { GROUP_PREFIX, NetworkPane, NOTE_PREFIX, type EditActions } from './NetworkPane'
 import { NodePalette } from './NodePalette'
 import { NodeWriterDialog } from './NodeWriterDialog'
@@ -346,12 +346,12 @@ function Editor({ rights }: { rights: FlowRights }) {
       .catch((e: Error) => toast.error(e.message))
   }, [loaded, project, switchTo, tr])
 
-  const create = useCallback(async (name: string, scope: FlowScope) => {
-    // Nouveau: an empty flow headed by event.manual. Enregistrer sous: the open document renamed
-    // (a new file: every `!` node is confirmed with the slider, 01 §8).
+  const create = useCallback(async (name: string, scope: FlowScope, start: StartKind = 'manual') => {
+    // Nouveau: an empty flow headed by the start picked in the dialog (ADR 0068 n°5). Enregistrer
+    // sous: the open document renamed (a new file: every `!` node is confirmed with the slider, 01 §8).
     const next: FlowDoc = dialog === 'saveas' && doc
       ? { ...doc, name }
-      : { flux_flow: 2, name, label: name, nodes: { n1: { type: 'event.manual', pos: [0, 0], params: {} } }, links: [] }
+      : { flux_flow: 2, name, label: name, nodes: { n1: { type: START_NODE[start], pos: [0, 0], params: {} } }, links: [] }
     const bang = destructiveAdded(next, null, specs)
     if (bang.length && !(await askDestructive(bang))) return
     flowsApi.save(next, scope, { project: project || undefined, confirmed_destructive: bang })
@@ -733,7 +733,7 @@ function Editor({ rights }: { rights: FlowRights }) {
             />}
         <ParamsPane
           selected={selected} params={(selected && doc?.nodes[selected.id]?.params) || {}}
-          editable={!saveBlocked} edits={nodeEdits}
+          editable={!saveBlocked} edits={nodeEdits} flowName={doc?.name}
           iface={{ inputs: (doc?.interface?.inputs ?? []).map(x => x.id), outputs: (doc?.interface?.outputs ?? []).map(x => x.id) }}
           flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} onPlaceNode={placeNode} onSelectNode={selectNode} />}
         />
@@ -753,6 +753,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         initialName={dialog === 'saveas' && loaded ? `${loaded.name.replace(LEGACY_PREFIX, '')}_copy`.slice(0, 41) : ''}
         initialScope={loaded?.scope === 'shipped' ? 'team' : loaded?.scope}
         choices={choices}
+        askStart={dialog === 'new'}
         onClose={() => setDialog(null)}
         onConfirm={create}
       />
