@@ -10,6 +10,12 @@ from flux_flows.nodes.registry import flow_node, port
 _THEN = port("then", "exec", "Suite du flow", "Next step")
 _VALUES = port("values", "dict", "Valeurs de l'interface du flow", "Values of the flow interface",
                {"dest_folder": "$FLUX/DAILY"})
+# R1 retakes 3 and 10: the infos of the publish, split by data.publish_infos (PublishInfos).
+_INFOS = port("infos", "dict", "Infos du publish (mode, task, asset ou seq / shot, instance, soft...) : relie "
+              "PublishInfos pour les lire une par une", "Publish infos (mode, task, asset or seq / shot, instance, "
+              "soft...): link PublishInfos to read them one by one",
+              {"mode": "asset", "task": "RIG", "class": "CHAR", "asset": "HERO", "soft": "maya"})
+MODE_FILTER = ("any", "asset", "shot")
 
 
 def _payload(ctx, inputs, params):
@@ -117,26 +123,46 @@ async def when(ctx, inputs, params):
     return {}
 
 
+def _filter(name, fr, en, example):
+    return port(name, "pattern", f"{fr}, vide = tous", f"{en}, empty = all", example, wirable=False)
+
+
 @flow_node("event.on_publish", "OnPublish", icon="PackageCheck",
            outputs=[_THEN, port("publish", "publish", "Le publish qui vient de reussir", "The publish that just succeeded"),
-                    port("project", "str", "Projet du publish", "Project of the publish", "MYPROJ")],
-           params=[port("soft", "pattern", "Logiciels (maya, houdini...), vide = tous", "Softs, empty = all", "maya",
-                        wirable=False),
-                   port("type", "pattern", "Types (scene, usd, cache, texture, image...), vide = tous",
-                        "Types, empty = all", "usd", wirable=False),
-                   port("name", "pattern", "Motif sur le nom du fichier, vide = tous", "Pattern on the file name",
-                        "*_model_*", wirable=False)],
+                    port("project", "str", "Projet du publish", "Project of the publish", "MYPROJ"), _INFOS],
+           params=[port("mode", "str", "Asset, shot ou les deux (any)", "Asset, shot or both (any)", "asset",
+                        default="any", choices=MODE_FILTER, wirable=False,
+                        labels={"any": ("Asset et shot", "Asset and shot"), "asset": ("Asset seulement", "Asset only"),
+                                "shot": ("Shot seulement", "Shot only")}),
+                   _filter("task", "Task / departement (token TYPE : RIG, MOD, ANIM...)",
+                           "Task / department (TYPE token: RIG, MOD, ANIM...)", "RIG MOD"),
+                   _filter("class", "Classe de l'asset (CHAR, PROPS...)", "Asset class (CHAR, PROPS...)", "CHAR"),
+                   _filter("asset", "Nom de l'asset (HERO...)", "Asset name (HERO...)", "HERO"),
+                   _filter("seq", "Sequence (SEQ010...)", "Sequence (SEQ010...)", "SEQ010"),
+                   _filter("shot", "Plan (SHOT010...)", "Shot (SHOT010...)", "SHOT0*"),
+                   _filter("project", "Projet", "Project", "DEMO"),
+                   _filter("soft", "Logiciels (maya, houdini...), deduit de l'extension : un .abc ou .usd n'a pas de "
+                           "logiciel", "Softs (maya, houdini...), from the extension: an .abc or .usd has no soft",
+                           "maya"),
+                   _filter("type", "Types de fichier (scene, usd, cache, texture, image, video, capture...)",
+                           "File types (scene, usd, cache, texture, image, video, capture...)", "usd"),
+                   _filter("name", "Motif sur le nom du fichier", "Pattern on the file name", "*_model_*")],
            shelf=5, aliases=["publish", "apres publish", "after publish", "publie"],
-           doc_fr="Part apres chaque publish reussi sur ce poste (tous les logiciels), filtre par logiciel, type ou "
-                  "nom. Soft et type sont deduits du nom et de l'extension.",
-           doc_en="Starts after each successful publish on this workstation (every soft), filtered by soft, type "
-                  "or name. Soft and type come from the name and the extension.")
+           doc_fr="Part apres chaque publish reussi sur ce poste (tous les logiciels). Les filtres (mode, task, "
+                  "asset, plan, projet, logiciel, type, nom) choisissent les publishs qui le declenchent ; vide = tout. "
+                  "Un publish filtre ne cree aucun run. Le logiciel est deduit de l'extension.",
+           doc_en="Starts after each successful publish on this workstation (every soft). The filters (mode, task, "
+                  "asset, shot, project, soft, type, name) pick the publishes that fire it; empty = all. A filtered "
+                  "publish creates no run. The soft comes from the extension.")
 async def on_publish(ctx, inputs, params):
-    from flux_flows.nodes.flux import publish_record
+    from flux_flows.nodes.flux import publish_infos, publish_record
 
     p = ctx.payload
-    record = p.get("publish") or publish_record("exemple_v001.usd")
-    return {"publish": record, "project": p.get("project") or (ctx.context or {}).get("project") or ""}
+    record = p.get("publish") or publish_record("CHAR_RIG_HERO_null_v001.ma")
+    project = p.get("project") or (ctx.context or {}).get("project") or ""
+    infos = p.get("infos") or publish_infos(record.get("file"), project=project, user=record.get("user") or "",
+                                            path=record.get("path") or "", version=record.get("version"))
+    return {"publish": record, "project": project, "infos": infos}
 
 
 @flow_node("event.scene_opened", "SceneOpened", icon="FolderOpen",
@@ -163,7 +189,7 @@ async def scene_opened(ctx, inputs, params):
 
 @flow_node("event.publish_request", "PublishRequest", icon="Upload",
            outputs=[_THEN, _VALUES, port("soft", "str", "Logiciel qui demande le publish", "Software asking for the "
-                                         "publish", "maya")],
+                                         "publish", "maya"), _INFOS],
            params=[port("soft", "str", "Logiciel du formulaire de publish", "Software of the publish form", "maya",
                         default="maya", wirable=False)],
            shelf=7, aliases=["publish", "publier", "formulaire", "publisher"],
@@ -172,5 +198,12 @@ async def scene_opened(ctx, inputs, params):
            doc_en="Starts when the Publisher of a software sends its form (values of the flow interface). Start of "
                   "the publish_<soft> flows; until P8 they are started with Run.")
 async def publish_request(ctx, inputs, params):
+    from flux_flows.nodes.flux import publish_infos
+
     values = dict(ctx.interface)
-    return {**values, "values": values, "soft": ctx.payload.get("soft") or params.get("soft") or ""}
+    soft = ctx.payload.get("soft") or params.get("soft") or ""
+    name, ext = str(values.get("name") or ""), str(values.get("format") or "")
+    c = ctx.context or {}
+    infos = publish_infos(name + ext if name and ext.startswith(".") else name, soft=soft,
+                          project=c.get("project") or "", user=c.get("user") or "")
+    return {**values, "values": values, "soft": soft, "infos": infos}

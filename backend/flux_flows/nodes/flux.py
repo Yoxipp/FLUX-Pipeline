@@ -320,6 +320,40 @@ def publish_record(path: Any, **meta: Any) -> Dict[str, Any]:
             "ext": ext}
 
 
+# R1 retakes 3 and 10: one "infos" dict for PublishRequest and OnPublish, read by the
+# data.publish_infos node and by the OnPublish filters. Tokens come from the FLUX name
+# (features/folder_manager/naming_validator.parse_filename, read only): asset
+# CLASS_TYPE_NAME_INSTANCE, shot SEQ_SHOT_TYPE_VARIANTE. task = the TYPE token (department
+# of the asset, task of the shot). soft: given by the caller, else from the extension.
+PUBLISH_INFO_KEYS = ("mode", "project", "soft", "user", "task", "class", "asset", "seq", "shot", "instance",
+                     "variant", "version", "file_type", "ext", "file", "path")
+
+
+def publish_infos(file_name: Any, *, soft: str = "", project: str = "", user: str = "", path: Any = "",
+                  version: Any = None) -> Dict[str, Any]:
+    """The infos of a publish (asked or done). Unknown fields are "" (version None)."""
+    from features.folder_manager.naming_validator import parse_filename
+
+    name = Path(str(file_name or path or "")).name
+    record = publish_record(path or name) if (path or name) else {}
+    parsed = parse_filename(name) if name else None
+    shot = bool(parsed and parsed.get("is_shot"))
+    out: Dict[str, Any] = {k: "" for k in PUBLISH_INFO_KEYS}
+    out.update({"mode": ("shot" if shot else "asset") if parsed else "", "project": project or "",
+                "soft": soft or record.get("soft") or "", "user": user or "",
+                "file_type": record.get("type") or "", "ext": record.get("ext") or "",
+                "file": record.get("file") or "", "path": str(path) if path else "",
+                "version": version if version is not None else record.get("version")})
+    if parsed:
+        out.update({"task": parsed.get("TYPE") or "", "instance": parsed.get("INSTANCE") or "",
+                    "variant": parsed.get("VARIANTE") or ""})
+        if shot:
+            out.update({"seq": parsed.get("SEQ") or "", "shot": parsed.get("SHOT") or ""})
+        else:
+            out.update({"class": parsed.get("CLASS") or "", "asset": parsed.get("NAME") or ""})
+    return out
+
+
 def _type_tags(record: Dict[str, Any]) -> List[str]:
     kind = record.get("type") or "other"
     return [kind, "capture"] if kind in ("image", "video") else [kind]

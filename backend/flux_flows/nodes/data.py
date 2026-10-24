@@ -439,3 +439,51 @@ _CONTEXT_OUTPUTS = ("project", "project_path", "asset", "seq", "shot", "user", "
 async def context(ctx, inputs, params):
     c = ctx.context or {}
     return {k: ("" if c.get(k) is None else c.get(k)) for k in _CONTEXT_OUTPUTS}
+
+
+# -- data.publish_infos (R1 retakes 3 and 10) ----------------------------------------------
+
+_INFO_OUTS = (
+    ("mode", "str", "asset ou shot (vide si le nom n'est pas un nom FLUX)", "asset or shot (empty when the name is "
+     "not a FLUX name)", "asset"),
+    ("task", "str", "Task / departement (token TYPE : RIG, MOD, ANIM...)", "Task / department (TYPE token)", "RIG"),
+    ("class", "str", "Classe de l'asset (CHAR...), vide en shot", "Asset class (CHAR...), empty for a shot", "CHAR"),
+    ("asset", "str", "Nom de l'asset (HERO...), vide en shot", "Asset name (HERO...), empty for a shot", "HERO"),
+    ("seq", "str", "Sequence, vide en asset", "Sequence, empty for an asset", "SEQ010"),
+    ("shot", "str", "Plan, vide en asset", "Shot, empty for an asset", "SHOT010"),
+    ("instance", "str", "Instance (asset) ou variante (shot)", "Instance (asset) or variant (shot)", "null"),
+    ("soft", "str", "Logiciel du publish", "Software of the publish", "maya"),
+    ("project", "str", "Projet", "Project", "DEMO"),
+    ("user", "str", "Artiste", "Artist", "ADAM"),
+    ("version", "int", "Version ecrite (vide avant le publish)", "Version written (empty before the publish)", 3),
+    ("file_type", "str", "Type de fichier (scene, usd, cache, image...)", "File type (scene, usd, cache, image...)",
+     "scene"),
+    ("path", "path", "Fichier publie (vide avant le publish)", "Published file (empty before the publish)", ""),
+)
+
+
+@flow_node("data.publish_infos", "PublishInfos", icon="Tags",
+           inputs=[port("infos", "any", "La sortie infos de PublishRequest ou OnPublish (ou un publish)",
+                        "The infos output of PublishRequest or OnPublish (or a publish)", required=True)],
+           outputs=[port(n, t, fr, en, ex) for n, t, fr, en, ex in _INFO_OUTS],
+           shelf=8, aliases=["infos publish", "publish infos", "task", "shot", "asset", "champs"],
+           doc_fr="Eclate les infos d'un publish (PublishRequest, OnPublish) en champs : mode, task, asset ou "
+                  "sequence et plan, instance, logiciel, projet, artiste, version. Lecture.",
+           doc_en="Splits the infos of a publish (PublishRequest, OnPublish) into fields: mode, task, asset or "
+                  "sequence and shot, instance, soft, project, artist, version. Read only.")
+def publish_infos(ctx, inputs, params):
+    from flux_flows.nodes.flux import PUBLISH_INFO_KEYS, publish_infos as build
+
+    value = inputs.get("infos")
+    if isinstance(value, dict) and "mode" in value and "task" in value:
+        infos = value
+    elif isinstance(value, dict) and value.get("path"):          # a publish record
+        infos = build(value.get("file") or value["path"], path=value["path"], user=value.get("user") or "",
+                      version=value.get("version"))
+    elif isinstance(value, str) and value.strip():               # a published file name or path
+        infos = build(value, path=value)
+    else:
+        raise NodeError("PublishInfos attend les infos d'un publish : relie la sortie `infos` de PublishRequest ou "
+                        "OnPublish", code="E_PARAM_INVALID")
+    out = {k: infos.get(k, "") for k in PUBLISH_INFO_KEYS}
+    return {name: out.get(name) for name, *_ in _INFO_OUTS}

@@ -209,6 +209,65 @@ class OnPublish(unittest.TestCase):
         self.assertEqual([v for _n, v in h.CALLS], ["PROJ"])
 
 
+class OnPublishFilters(unittest.TestCase):
+    """R1 retake 10: filters on mode, task, asset, shot, project; evaluated before any run."""
+
+    def setUp(self) -> None:
+        h.reset()
+        self.env = s.Env()
+
+    def tearDown(self) -> None:
+        self.env.close()
+
+    def _sig(self, filename, project="P"):
+        return {"user": "ADAM", "filename": filename, "project": project, "dest_folder": "/p/pub"}
+
+    def test_mode_task_asset_shot_project(self) -> None:
+        rig = self.env.active(_flow("rig_asset", "event.on_publish", {"mode": "asset", "task": "RIG"}))
+        self.assertEqual(len(hooks.matching([rig], self._sig("CHAR_RIG_HERO_null_v003.ma"))), 1)
+        self.assertEqual(hooks.matching([rig], self._sig("CHAR_MOD_HERO_null_v003.ma")), [])
+        self.assertEqual(hooks.matching([rig], self._sig("SEQ010_SHOT020_RIG_main_v001.abc")), [])
+        shot = self.env.active(_flow("anim_shot", "event.on_publish", {"mode": "shot", "seq": "SEQ010", "shot": "SHOT0*"}))
+        self.assertEqual(len(hooks.matching([shot], self._sig("SEQ010_SHOT020_ANIM_main_v001.abc"))), 1)
+        self.assertEqual(hooks.matching([shot], self._sig("SEQ020_SHOT020_ANIM_main_v001.abc")), [])
+        hero = self.env.active(_flow("hero", "event.on_publish", {"class": "CHAR", "asset": "HERO TREE", "project": "DEMO"}))
+        self.assertEqual(len(hooks.matching([hero], self._sig("CHAR_RIG_HERO_null_v003.ma", "DEMO"))), 1)
+        self.assertEqual(hooks.matching([hero], self._sig("CHAR_RIG_HERO_null_v003.ma", "OTHER")), [])
+        any_mode = self.env.active(_flow("any", "event.on_publish", {"mode": "any"}))
+        self.assertEqual(len(hooks.matching([any_mode], self._sig("not_a_flux_name.png"))), 1)
+        payload = hooks.matching([rig], self._sig("CHAR_RIG_HERO_null_v003.ma"))[0][2]
+        self.assertEqual((payload["infos"]["task"], payload["infos"]["asset"], payload["infos"]["version"]),
+                         ("RIG", "HERO", 3))
+
+    def test_capture_type_matches(self) -> None:
+        cap = self.env.active(_flow("cap", "event.on_publish", {"type": "capture"}))
+        self.assertEqual(len(hooks.matching([cap], self._sig("SEQ010_SHOT020_ANIM_main_v001.mov"))), 1)
+        self.assertEqual(hooks.matching([cap], self._sig("CHAR_RIG_HERO_null_v003.ma")), [])
+
+    def test_filtered_publish_creates_no_run(self) -> None:
+        flow = h.flow({"ev": ("event.on_publish", {"mode": "asset", "task": "RIG"}), "rec": "action.t_record"},
+                      ["ev.then->rec.exec", "ev.infos->rec.value"], name="pub_rig")
+        af = self.env.active(flow)
+        sched = s.make(self.env, [af])
+
+        async def scenario():
+            sched._listener = events.listen("publish_done", sched._on_publish)
+            try:
+                events.publish_done("ADAM", "CHAR_MOD_HERO_null_v001.ma", "PROJ", "/x")
+                events.publish_done("ADAM", "CHAR_RIG_HERO_null_v002.ma", "PROJ", "/x")
+                for _ in range(50):
+                    await asyncio.sleep(0.01)
+                    if h.CALLS and not engine.manager().live:
+                        break
+            finally:
+                events.unlisten("publish_done", sched._listener)
+
+        s.run(scenario())
+        self.assertEqual(len(h.CALLS), 1)
+        infos = h.CALLS[0][1]
+        self.assertEqual((infos["task"], infos["version"], infos["project"]), ("RIG", 2, "PROJ"))
+
+
 class Routes(unittest.TestCase):
     def setUp(self) -> None:
         app = FastAPI()

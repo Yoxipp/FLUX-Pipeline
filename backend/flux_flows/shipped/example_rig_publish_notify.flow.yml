@@ -1,0 +1,18 @@
+flux_flow: 2
+name: example_rig_publish_notify
+label: "Exemple : prevenir quand un rig est publie"
+description: "Exemple R1 : OnPublish filtre (mode asset, task RIG) puis un toast avec le nom de l'asset. Les autres publishs ne creent aucun run. A activer pour l'essayer."
+run_policy: queue
+interface: []
+nodes:
+  ev: {type: event.on_publish, pos: [0, 0], params: {mode: asset, task: RIG}}
+  msg: {type: data.template, pos: [320, 200], params: {text: "Rig publie : {asset} ({class}) par {user}, v{version}"}}
+  info: {type: data.publish_infos, pos: [320, 400], params: {}}
+  say: {type: flux.notify, pos: [640, 0], params: {where: toast}}
+links:
+  - {from: ev.then, to: say.exec}
+  - {from: ev.infos, to: msg.values}
+  - {from: msg.text, to: say.text}
+  - {from: ev.infos, to: info.infos}
+notes:
+  - {id: k1, pos: [0, 560], text: "Depart : OnPublish ne part que pour les publishs d'asset de task RIG (filtres dans Params, vide = tout).\nValeurs : infos donne mode, task, asset, seq / shot, version... Template les met dans le texte ({asset}, {user}).\nPublishInfos les donne une par une, pour un If ou un Compare (filtre plus complexe)."}
