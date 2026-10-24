@@ -51,6 +51,16 @@ class PublishInfosTest(unittest.TestCase):
         dry = _call("event.on_publish", _ctx())                     # editor Run: an example publish
         self.assertEqual(dry["infos"]["mode"], "asset")
 
+    def test_run_by_hand_says_when_the_filters_refuse_the_example(self):
+        logs = []
+        ctx = _ctx()
+        ctx.log = lambda text, level="info": logs.append((level, text))
+        _call("event.on_publish", ctx, params={"task": "ANIM"})     # the example is a RIG publish
+        self.assertEqual([lv for lv, _ in logs], ["warn"])
+        logs.clear()
+        _call("event.on_publish", ctx, params={"task": "RIG"})
+        self.assertEqual(logs, [])
+
     def test_node_splits_infos_record_and_path(self):
         infos = publish_infos("CHAR_RIG_HERO_null_v003.ma", project="DEMO")
         out = _call("data.publish_infos", _ctx(), {"infos": infos})

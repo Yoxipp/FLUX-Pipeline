@@ -163,6 +163,13 @@ async def on_publish(ctx, inputs, params):
     project = p.get("project") or (ctx.context or {}).get("project") or ""
     infos = p.get("infos") or publish_infos(record.get("file"), project=project, user=record.get("user") or "",
                                             path=record.get("path") or "", version=record.get("version"))
+    if not p.get("publish"):
+        # R1 audit F14: a run by hand uses an example publish; say when the filters would refuse it.
+        from flux_flows.hooks import wants
+
+        if not wants(params, record, infos):
+            ctx.log(f"Publish d'exemple {record.get('file')} : tes filtres le refuseraient, un vrai publish de ce "
+                    "type ne lancerait pas ce flow (le run continue pour essayer la suite)", "warn")
     return {"publish": record, "project": project, "infos": infos}
 
 
