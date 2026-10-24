@@ -40,8 +40,10 @@ _ADVICE: Dict[Tuple[str, str], Tuple[str, str, Optional[str]]] = {
     ("str", "dir"): ("un texte n'est pas un chemin : passe par un node Path", "a text is not a path: go through a Path node", None),
     ("int", "str"): ("utilise Template ou StrFormat", "use Template or StrFormat", None),
     ("float", "str"): ("utilise Template ou StrFormat", "use Template or StrFormat", None),
-    ("path", "dir"): ("un chemin peut etre un fichier : prends la sortie parent de PathSplit",
-                      "a path can be a file: take the parent output of PathSplit", None),
+    ("path", "dir"): ("un chemin peut etre un fichier : prends la sortie dir de PathJoin ou de Path, ou parent de "
+                      "PathSplit pour le dossier d'un fichier",
+                      "a path can be a file: take the dir output of PathJoin or Path, or parent of PathSplit for the "
+                      "folder of a file", None),
     ("dict", "*"): ("utilise JsonValue pour lire une cle", "use JsonValue to read a key", None),
     ("publish", "path"): ("un publish est un enregistrement : lis son chemin avec PublishFields",
                           "a publish is a record: read its path with PublishFields", None),

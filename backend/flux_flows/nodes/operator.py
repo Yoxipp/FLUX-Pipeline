@@ -457,7 +457,9 @@ async def list_append(ctx, inputs, params):
            inputs=[port("base", "path", "Dossier de depart", "Base folder", "$FLUX/DAILY", required=True),
                    port("a", "str", "Morceau 1", "Part 1", "2026-10-23", required=True),
                    port("b", "str", "Morceau 2", "Part 2"), port("c", "str", "Morceau 3", "Part 3")],
-           outputs=[port("path", "path", "Chemin joint", "Joined path", "D:/FLUX/DAILY/2026-10-23")],
+           outputs=[port("path", "path", "Chemin joint", "Joined path", "D:/FLUX/DAILY/2026-10-23"),
+                    port("dir", "dir", "Le meme chemin, comme dossier (ZipFolder, ListFiles, NewFile...)",
+                         "The same path, as a folder (ZipFolder, ListFiles, NewFile...)", "D:/FLUX/DAILY/2026-10-23")],
            shelf=73, aliases=["joindre", "chemin", "join"],
            doc_fr="Joint un dossier et des morceaux de chemin relatifs.", doc_en="Joins a folder and relative parts.")
 async def path_join(ctx, inputs, params):
@@ -470,7 +472,7 @@ async def path_join(ctx, inputs, params):
         if pure.is_absolute() or pure.drive or ".." in pure.parts:
             raise NodeError(f"`{name}` doit etre un morceau relatif, sans `..` : {part!r}")
         path = path / str(part)
-    return {"path": _posix(path)}
+    return {"path": _posix(path), "dir": _posix(path)}
 
 
 @flow_node("operator.path_split", "PathSplit", icon="FolderTree",

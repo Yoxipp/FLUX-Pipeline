@@ -146,6 +146,7 @@ class Paths(unittest.TestCase):
     def test_join(self):
         out = call("operator.path_join", {"base": "$FLUX/DAILY", "a": "2026-10-23", "b": "", "c": "maya"})
         self.assertEqual(out["path"], f"{self.root.as_posix()}/DAILY/2026-10-23/maya")
+        self.assertEqual(out["dir"], out["path"])     # T1: a joined folder goes into ZipFolder / ListFiles
         for bad in ("../x", "a/../../b", str(self.root)):
             with self.assertRaisesRegex(NodeError, "relatif"):
                 call("operator.path_join", {"base": "$FLUX", "a": bad})
