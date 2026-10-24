@@ -16,12 +16,14 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from flux_flows import page_store, store
 from flux_flows.model import Flow, Node
+from flux_flows.nodes.contract import EXEC_KEY
 from flux_flows.pages import VALUE_KINDS, Page, iter_widgets
 from flux_flows.store import FlowStoreError
 
 PAGE_NODE = "event.page_inputs"
-# Own outputs of the node, whatever the page.
-OWN_OUTPUTS = ("button", "values")
+# Own output of the node, whatever the page (a widget with this id is left out). The
+# clicked button is not a data output: it is the exec output that fires (2026-10-25).
+OWN_OUTPUTS = ("values",)
 # Field kind -> type of its output on the node (04 §3).
 TYPE_FOR_KIND = {"float": "float", "int": "int", "text": "str", "path": "path", "dir": "dir", "toggle": "bool",
                  "select": "str", "list": "list[str]"}
@@ -84,20 +86,20 @@ def linked_buttons(flow: Flow, nid: str) -> List[str]:
 
 
 def node_outputs(node: Node, page: Optional[Page], payload: Mapping[str, Any]) -> Dict[str, Any]:
-    """Outputs of a Page node: the clicked button and the values of the click when the run
-    was started by a click on its page, else the page defaults (no button)."""
+    """Outputs of a Page node: the values of the click and the exec output of the clicked
+    button (EXEC_KEY) when the run was started by a click on its page, else the page defaults."""
     page_id = str(node.params.get("page") or "")
     if payload.get("page") == page_id and payload.get("button"):
         values = dict(payload.get("values") or {})
         base = defaults_of(page) if page is not None else {}
         values = {**base, **values}
-        return {**values, "values": values, "button": str(payload["button"])}
+        return {**values, "values": values, EXEC_KEY: str(payload["button"])}
     if page is not None:
         values = defaults_of(page)
     else:
         snap = (node.params.get("ports") or {}).get("defaults") or {}
         values = dict(snap)
-    return {**values, "values": values, "button": ""}
+    return {**values, "values": values}
 
 
 def broken_links(flow: Flow, nid: str, page: Optional[Page]) -> List[Tuple[str, str]]:

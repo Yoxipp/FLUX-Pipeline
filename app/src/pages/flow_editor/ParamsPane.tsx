@@ -245,8 +245,8 @@ function PageInputsPorts({ params, editable, flowName, onPage, onPorts }: {
       <div>{tr('Boutons', 'Buttons')} : {names(true)}</div>
       <div>{tr('Champs', 'Fields')} : {names(false)}</div>
       <div style={{ color: 'var(--ink-4)', marginTop: 4 }}>
-        {tr('Relie chaque bouton a ce qu\'il lance. Le flow doit etre actif pour qu\'un clic le lance ; lance autrement, les champs donnent les valeurs par defaut de la page.',
-            'Link each button to what it starts. The flow must be active for a click to start it; started another way, the fields give the page defaults.')}
+        {tr('Chaque bouton est une sortie exec (triangle) : relie-la a l\'exec du node a lancer. Les champs sont des valeurs a brancher seulement si un node en a besoin. Le flow doit etre actif pour qu\'un clic le lance ; lance autrement, les champs donnent les valeurs par defaut de la page.',
+            'Each button is an exec output (triangle): link it to the exec of the node to start. Fields are values, to link only when a node needs them. The flow must be active for a click to start it; started another way, the fields give the page defaults.')}
       </div>
     </div>
   )

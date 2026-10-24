@@ -294,6 +294,14 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
             </span>
           )}
         </div>
+        {node.type === 'event.page_inputs' && (
+          <div title={tr('Page TOOL lue : chaque bouton est une sortie exec (triangle) a relier a l\'exec du node a lancer',
+                         'TOOL page read: each button is an exec output (triangle) to link to the exec of the node to start')}
+               style={{ padding: '4px 10px', fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: 'var(--ink)',
+                        borderBottom: '1px solid var(--rule)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {String((node.constants ?? []).find(p => p.name === 'page')?.value ?? '') || tr('(choisis une page)', '(pick a page)')}
+          </div>
+        )}
         {(node.type === 'data.flow_input' || node.type === 'subflow.flow_output') && (
           <div title={node.type === 'data.flow_input'
                  ? tr('Entree du flow lue ici (interface du flow)', 'Flow input read here (flow interface)')

@@ -32,16 +32,16 @@ def _locate(ctx, inputs):
 # ADR 0068: the flow picks its page. One exec output per button, one data output per field,
 # copied into params.ports by the editor (same mechanism as FlowCall).
 @flow_node("event.page_inputs", "InputsPageReader", icon="LayoutPanelTop",
-           outputs=[port("button", "str", "Id du bouton clique (vide pour un autre depart)",
-                         "Id of the clicked button (empty for another start)", "render"),
-                    port("values", "dict", "Tous les champs de la page", "Every field of the page",
+           outputs=[port("values", "dict", "Tous les champs de la page", "Every field of the page",
                          {"dest_folder": "$FLUX/DAILY"})],
            params=[port("page", "str", "Page TOOL dont les boutons lancent ce flow", "TOOL page whose buttons start this flow",
                         "daily_render", required=True, wirable=False)],
            shelf=1, aliases=["inputs page reader", "page reader", "bouton", "button", "page", "tool", "start", "depart", "formulaire"],
-           doc_fr="Part quand on clique un bouton d'une page TOOL : une sortie par bouton, une sortie par champ. "
+           doc_fr="Part quand on clique un bouton d'une page TOOL : chaque bouton est une sortie d'execution a relier a "
+                  "l'exec du node suivant ; chaque champ est une sortie de valeur. "
                   "Lance par un autre depart (Horaire, Run), les champs donnent les valeurs par defaut de la page.",
-           doc_en="Starts when a TOOL page button is clicked: one output per button, one output per field. "
+           doc_en="Starts when a TOOL page button is clicked: each button is an exec output to link to the exec of "
+                  "the next node; each field is a value output. "
                   "Started another way (Schedule, Run), the fields give the page defaults.")
 async def page_event(ctx, inputs, params):
     from flux_flows import page_inputs
@@ -54,9 +54,10 @@ async def page_event(ctx, inputs, params):
         raise NodeError(f"page {page_id or '(vide)'} introuvable")
     node = Node(type=page_inputs.PAGE_NODE, params=dict(params))
     outs = page_inputs.node_outputs(node, page, ctx.payload)
-    button = outs.get("button") or page_inputs.first_button(node)
-    if button:
-        outs[EXEC_KEY] = button
+    if not outs.get(EXEC_KEY):
+        button = page_inputs.first_button(node)     # editor Run without a click
+        if button:
+            outs[EXEC_KEY] = button
     return outs
 
 
