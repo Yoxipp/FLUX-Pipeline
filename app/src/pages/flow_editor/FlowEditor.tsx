@@ -598,13 +598,26 @@ function Editor({ rights }: { rights: FlowRights }) {
     requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 250 }))
   }, [store, rf])
 
-  // Shelf / Catalogue click: the node at the centre of the view.
+  // Shelf / Catalogue click: after the selected node (R1 audit P3.3, 2026-10-25: placed on
+  // its right, its first free exec output linked to the new exec, like stacking Scratch blocks),
+  // else at the centre of the view. Ctrl+Z undoes both.
   const onPick = useCallback((e: CatalogEntry) => {
     if (saveBlocked) { toast.info(saveBlocked); return }
+    const d = docOf(store.get())
+    const sel = selected && d?.nodes[selected.id] ? selected : null
+    if (sel && d && e.spec?.inputs.some(p => p.type === 'exec')) {
+      const taken = new Set(d.links.map(l => l.from))
+      const out = sel.outputs.find(o => o.type === 'exec' && o.name !== 'on_error' && !taken.has(`${sel.id}.${o.name}`))
+      if (out) {
+        const pos = d.nodes[sel.id].pos ?? [0, 0]
+        edit.onAdd(e, [pos[0] + 320, pos[1]], { end: { node: sel.id, port: out.name, side: 'out' }, port: 'exec' })
+        return
+      }
+    }
     const r = document.querySelector('.react-flow')?.getBoundingClientRect()
     const p = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 }
     edit.onAdd(e, [p.x - 120, p.y - 30])
-  }, [saveBlocked, rf, edit])
+  }, [saveBlocked, rf, edit, store, selected])
 
   // Problems panel: a click frames the node (250 ms), selects it, it blinks once.
   const goToNode = useCallback((id: string) => {
