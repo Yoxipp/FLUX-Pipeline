@@ -502,6 +502,9 @@ def _write_file(ctx, inputs, values) -> Path:
                             code="E_PARAM_INVALID")
         return as_path(ctx, inputs.get("dir"), "dossier") / _file_name(name)
     if inputs.get("path") is None or _text(inputs.get("path")) == "":
+        if inputs.get("dir") == "":   # linked to an empty value: Path.dir of a folder not created yet (T1)
+            raise NodeError("`dir` est relie mais vide : le dossier n'existe pas encore ? Path.dir est vide tant "
+                            "que le dossier n'existe pas : prends PathJoin.dir, ou relie `path`")
         raise NodeError("Donne `path` (le fichier) ou `dir` et `name` (un dossier et un nom de fichier)")
     path = as_path(ctx, inputs.get("path"), "fichier")
     if path.is_dir():

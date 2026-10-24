@@ -234,6 +234,9 @@ class ActionNodesTest(unittest.TestCase):
         self.assertFalse(p.with_suffix(".json.tmp").exists())
         with self.assertRaises(NodeError):
             self.call("action.write_json", {"path": "r/x.json", "data": {"a": object()}})
+        # T1: dir linked to Path.dir of a folder not created yet arrives empty: say why
+        with self.assertRaisesRegex(NodeError, "relie mais vide"):
+            self.call("action.write_json", {"dir": "", "data": {"a": 1}}, {"name": "x.json"})
 
     def test_write_text_modes(self):
         sim = self.sim("action.write_text", {"path": "n.txt", "text": "a"})
