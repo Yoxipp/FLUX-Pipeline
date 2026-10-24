@@ -555,7 +555,7 @@ def _simulate_write_json(ctx, inputs, params):
            outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file")],
            params=_write_params(WRITE_MODES_JSON, "create (erreur si existe) ou overwrite",
                                 "create (error when it exists) or overwrite", "notes.json"),
-           destructive={"param": "mode", "equals": "overwrite"}, simulate=_simulate_write_json, shelf=56,
+           destructive={"param": "mode", "equals": "overwrite"}, simulate=_simulate_write_json, shelf=62,
            aliases=["json", "ecrire json", "save json"],
            doc_fr="Ecrit des donnees dans un fichier JSON (ecrit a cote puis remplace). N'ecrase qu'en mode overwrite.",
            doc_en="Writes data to a JSON file (written next to it, then swapped in). Overwrites only in overwrite mode.")

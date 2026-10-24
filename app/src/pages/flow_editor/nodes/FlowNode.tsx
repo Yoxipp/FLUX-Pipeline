@@ -50,7 +50,7 @@ function Row({ left, right, linked, faulty }: { left?: PortSpec; right?: PortSpe
   return (
     <div style={{ position: 'relative', height: ROW_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', fontSize: 11 }}>
       {left && <PortHandle port={left} side="in" linked={linked.has(handleId('in', left.name))} faulty={faulty.has(left.name)} />}
-      {left && <span onMouseEnter={hover(left, 'in')} onMouseLeave={hide} style={{ color: 'var(--ink-2)', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left.label ?? left.name}</span>}
+      {left && <span onMouseEnter={hover(left, 'in')} onMouseLeave={hide} style={{ color: 'var(--ink-2)', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left.label ?? left.name}{left.required && left.type !== 'exec' && <span style={{ color: 'var(--warn)' }}> *</span>}</span>}
       {!left && <span style={{ flex: 1 }} />}
       {right && <span onMouseEnter={hover(right, 'out')} onMouseLeave={hide} style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{right.label ?? right.name}</span>}
       {right && <PortHandle port={right} side="out" linked={linked.has(handleId('out', right.name))} faulty={faulty.has(right.name)} />}

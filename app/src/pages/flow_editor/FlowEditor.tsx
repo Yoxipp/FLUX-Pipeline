@@ -715,7 +715,9 @@ function Editor({ rights }: { rights: FlowRights }) {
               'Flow migrated from the v1 actions. Publishing still runs on the v1 actions (until P8): this flow does not activate.')}
         </div>
       )}
-      <ShelfBar catalog={menuCatalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)} />
+      <ShelfBar catalog={menuCatalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)}
+                flowKey={loaded ? `${loaded.scope}/${loaded.name}` : undefined}
+                startFamily={doc && Object.values(doc.nodes ?? {}).every(n => n.type.startsWith('event.')) ? 'event' : 'flux'} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         {paletteOpen && <NodePalette catalog={menuCatalog} errors={nodeErrors} canWriteNode={rights.team_td} onNewNode={() => setWriting(true)}
                                      onPick={onPick} onClose={() => setPaletteOpen(false)} />}

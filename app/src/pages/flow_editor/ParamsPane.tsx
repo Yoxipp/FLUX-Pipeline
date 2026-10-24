@@ -117,7 +117,10 @@ function ParamRow({ p, editable, raw, onChange, choices, tokens, tokenOptions, m
       </span>,
     )
   }
-  const placeholder = p.example ?? (raw === undefined && p.value !== undefined ? formatValue(p.value, 60) : undefined)
+  // R1 audit F10: an example must not look like a value already typed.
+  const placeholder = p.example !== undefined && p.example !== null && p.example !== ''
+    ? tr(`ex : ${formatValue(p.example, 60)}`, `e.g. ${formatValue(p.example, 60)}`)
+    : (raw === undefined && p.value !== undefined ? formatValue(p.value, 60) : undefined)
   if (choices && choices.length) {
     // Menu in the given order; a value outside the list stays shown as an extra option.
     const cur = raw !== undefined ? raw : p.value

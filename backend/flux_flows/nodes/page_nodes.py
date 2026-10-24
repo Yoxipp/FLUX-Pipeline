@@ -74,7 +74,7 @@ async def page_event(ctx, inputs, params):
                         default="added", choices=("added", "changed", "any"), wirable=False),
                    port("every_s", "int", "Frequence de lecture en secondes (min 5)", "Read frequency in seconds (min 5)",
                         10, default=10, wirable=False)],
-           shelf=6, aliases=["donnees", "message", "page", "data", "nouveau"],
+           shelf=8, aliases=["donnees", "message", "page", "data", "nouveau"],
            doc_fr="Part pour chaque enregistrement ajoute (ou modifie) dans une collection d'une page TOOL, quel que "
                   "soit le poste qui l'a ecrit. La premiere lecture sert de base.",
            doc_en="Starts for each record added (or changed) in a collection of a TOOL page, whatever the computer "
