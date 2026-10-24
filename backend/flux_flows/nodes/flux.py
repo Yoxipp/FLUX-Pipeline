@@ -1039,7 +1039,15 @@ def _unresolved(source: Path) -> List[str]:
         _layers, _assets, missing = UsdUtils.ComputeAllDependencies(str(source))
     except Exception:  # noqa: BLE001 - an unreadable stage is reported by the flatten itself
         return []
-    return sorted({str(m).replace("\\", "/") for m in missing})
+    from core.paths import to_flux_token
+
+    def portable(m: str) -> str:
+        try:
+            return to_flux_token(m)
+        except Exception:  # noqa: BLE001 - no FLUX_ROOT: keep the path
+            return m
+
+    return sorted({portable(str(m)).replace("\\", "/") for m in missing})
 
 
 def _simulate_flatten(ctx, inputs, params):
