@@ -229,3 +229,12 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
   ASSETS (`Sidebar.tsx`) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
   Dette : chaque `useFlowsWs` ouvre sa propre socket (sidebar, page, widgets) ; un hub partage viendra si ca pese.
+* `PageBuilder.tsx` (route `/tool/:id/edit?scope=`, `new` = dialogue de creation : libelle, id propose, portee, depart
+  vide / modele `shipped/pages/` / copie d'une page) : 4 colonnes Palette (Formulaire, Decor, Donnees ; un widget de
+  donnees cree sa collection par defaut s'il n'y en a pas : un Fil marche du premier coup) | Arbre (dossiers > lignes >
+  widgets, pastille ok / erreur, monter / descendre / gauche / droite / sortir de la ligne, collections, Problemes) |
+  Proprietes (`PageProps.tsx` : id avec renommage propage pour un bouton lie, "Au clic" = `POST /flows/pages/link_button`
+  apres confirmation de la nouvelle version, "Lie a" filtre par type, props par kind, champs des collections) | Apercu
+  (`PageRenderer preview`). Store generique de l'editeur de flows (undo / redo), validation en direct 300 ms, Ctrl+S,
+  Fermer = enregistrer puis quitter. Reducers purs dans `builder.ts`. Pas de glisser-deposer dans l'arbre (fleches) :
+  a ajouter si the maintainer le demande.
