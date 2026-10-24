@@ -224,3 +224,8 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   (`usePageData` : etag toutes les 5 s tant que monte + WS `page_data` ; `usePageList`).
 * `BoardWidget.tsx` (ADR 0066 n°1) : board facon Miro dans sa ligne : notes, cartes, images (copiees par le backend),
   liens, couleurs a plat, pan (glisser le fond), zoom a la molette, "Tout voir", Suppr. Vue par spectateur, jamais ecrite.
+* `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
+  au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
+  "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
+  ASSETS (`Sidebar.tsx`) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
+  Dette : chaque `useFlowsWs` ouvre sa propre socket (sidebar, page, widgets) ; un hub partage viendra si ca pese.

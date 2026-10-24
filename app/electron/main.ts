@@ -169,6 +169,8 @@ const DETACHABLE_ROUTES = new Set([
   '/action-graph', '/action-graph-legacy',
   // Tractor farm page, opened from the launcher like a software (single window).
   '/render',
+  // TOOL pages (Flows P7): the tab, with ?page=<id> as a deep link.
+  '/tool',
 ])
 
 // Routes that only ever get one window: a second request focuses the existing one.
