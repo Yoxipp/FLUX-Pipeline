@@ -26,7 +26,11 @@ router = APIRouter()
 
 class InitRequest(BaseModel):
     workspace: str
-    username: str
+    username: str = ""             # existing artist picked in the wizard
+    first_name: str | None = None  # new artist: identifier built from first + last name
+    last_name: str | None = None
+    password: str | None = None    # new artist: optional; existing artist: its password
+    remember: bool = False         # "Se souvenir sur ce PC"
 
 
 class SettingsUpdate(BaseModel):
@@ -40,6 +44,38 @@ class SettingsUpdate(BaseModel):
     workspace: str | None = None   # change le répertoire du pipe
     language: str | None = None    # UI language: "fr" | "en"
     log_colors: dict | None = None  # console log-color overrides {level: color}
+    password: str | None = None     # password of the artist switched to, if it has one
+    remember: bool = False          # remember that artist on this PC
+
+
+def _taken_names() -> set[str]:
+    """Current artists and retired names: never given to a new artist."""
+    from features.accounts import aliases
+    return set(user_utils.list_users()) | set(aliases.load_aliases())
+
+
+def _check_can_enter(name: str, password: str | None, remember: bool) -> None:
+    """403 when *name* has a password that was not given (and is not remembered here)."""
+    from features.accounts import passwords
+    if not user_utils.user_exists(name):
+        return
+    if not passwords.can_enter(name, password):
+        raise HTTPException(status_code=403, detail="Mot de passe incorrect.")
+    if remember and password:
+        passwords.remember_on_this_pc(name)
+
+
+def _require_role(project: str | None, action: str) -> None:
+    """403 unless the active user holds the role *action* needs on *project*."""
+    if not project:
+        raise HTTPException(status_code=403, detail="Ouvre un projet : cette action dépend de ton rôle.")
+    try:
+        from features.roles import project_roles
+        project_roles.require(project, action)
+    except ImportError:
+        raise HTTPException(status_code=403, detail="Rôles indisponibles.")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
 
 @router.get("")
@@ -72,12 +108,21 @@ async def get_settings() -> dict:
 async def init_first_launch(req: InitRequest) -> dict:
     """First-launch setup: scaffold FLUX root structure, persist workspace + username."""
     # Artist names are always stored/displayed in FULL UPPERCASE (frontend + backend).
-    username = req.username.strip().upper()
-    if not user_utils.is_valid_user_name(username):
-        raise HTTPException(status_code=400, detail=f"Nom d'artiste invalide : {username}")
+    from features.accounts import identity, passwords
 
     def _scaffold():
         root = Path(req.workspace)
+        set_flux_root(root)   # users and aliases live under the chosen root
+        new_artist = bool(req.first_name or req.last_name)
+        if new_artist:
+            username = identity.make_user_id(req.first_name or "", req.last_name or "", _taken_names())
+            if req.password:
+                passwords.validate_new_password(req.password)
+        else:
+            username = req.username.strip().upper()
+            if not user_utils.is_valid_user_name(username):
+                raise ValueError(f"Nom d'artiste invalide : {username}")
+            _check_can_enter(username, req.password, req.remember)
         for d in FLUX_ROOT_DIRS:
             ensure_dir(root / d)
         (root / FLUX_MARKER_FILENAME).touch()
@@ -87,13 +132,23 @@ async def init_first_launch(req: InitRequest) -> dict:
         # depend on the metadata repository, whose location depends on the workspace.
         # When frozen, config.json and prefs.json are two different files, so writing
         # only to prefs.json (via create_user) would leave the wizard looping forever.
-        set_flux_root(root)
         set_config_username(username)
         config.create_user(username, req.workspace)
+        if new_artist:
+            identity.write_profile(username, req.first_name, req.last_name)
+            if req.password:
+                passwords.set_password(username, req.password)
+                if req.remember:
+                    passwords.remember_on_this_pc(username)
+        return username
 
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, _scaffold)
+        username = await loop.run_in_executor(None, _scaffold)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         log.error("init_first_launch failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -136,6 +191,13 @@ async def update_settings(req: SettingsUpdate) -> dict:
         new_user = req.username.strip().upper()
         if not user_utils.is_valid_user_name(new_user):
             raise HTTPException(status_code=400, detail=f"Nom d'artiste invalide : {new_user}")
+        if new_user != config.get_current_user():
+            from features.accounts import aliases
+            if not user_utils.user_exists(new_user) and aliases.is_retired_name(new_user):
+                raise HTTPException(status_code=400,
+                                    detail=f"{new_user} a appartenu à un autre artiste, choisis un autre nom.")
+            await loop.run_in_executor(
+                None, lambda: _check_can_enter(new_user, req.password, req.remember))
         # set_current_user crée le dossier FLUX_ROOT/USER/<name>/ en plus de persister
         await loop.run_in_executor(None, lambda: user_utils.set_current_user(new_user))
         await loop.run_in_executor(None, lambda: set_config_username(new_user))
@@ -216,15 +278,170 @@ async def list_users() -> dict:
     return {"users": users}
 
 
+@router.get("/users/profiles")
+async def list_user_profiles() -> dict:
+    """Every artist with first / last name and whether a password is set (Login, Settings)."""
+    from features.accounts import identity
+
+    def _profiles() -> list[dict]:
+        return [identity.read_profile(u) for u in user_utils.list_users()]
+
+    loop = asyncio.get_running_loop()
+    return {"profiles": await loop.run_in_executor(None, _profiles)}
+
+
+class NewArtistRequest(BaseModel):
+    first_name: str
+    last_name: str
+    password: str | None = None
+    remember: bool = False
+    switch: bool = True        # become the active artist right away
+
+
+@router.post("/users/id-preview")
+async def preview_user_id(req: NewArtistRequest) -> dict:
+    """Identifier a new artist would get (shown before validation)."""
+    from features.accounts import identity
+    loop = asyncio.get_running_loop()
+    try:
+        user_id = await loop.run_in_executor(
+            None, lambda: identity.make_user_id(req.first_name, req.last_name, _taken_names()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"id": user_id}
+
+
+@router.post("/users")
+async def create_artist(req: NewArtistRequest) -> dict:
+    """Create an artist from first + last name (optional password), switch to it if asked."""
+    from features.accounts import identity, passwords
+
+    def _create() -> str:
+        user_id = identity.make_user_id(req.first_name, req.last_name, _taken_names())
+        if req.password:
+            passwords.validate_new_password(req.password)
+        user_utils.create_user_dir(user_id)
+        identity.write_profile(user_id, req.first_name, req.last_name)
+        if req.password:
+            passwords.set_password(user_id, req.password)
+            if req.remember:
+                passwords.remember_on_this_pc(user_id)
+        if req.switch:
+            user_utils.set_current_user(user_id)
+            set_config_username(user_id)
+        return user_id
+
+    loop = asyncio.get_running_loop()
+    try:
+        user_id = await loop.run_in_executor(None, _create)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    log.info("Artist created '%s'", user_id)
+    return {"id": user_id}
+
+
+@router.get("/user/profile")
+async def get_own_profile() -> dict:
+    """Active artist's profile (identifier, first / last name, password set)."""
+    from features.accounts import identity
+    user = config.get_current_user()
+    if not user:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: identity.read_profile(user))
+
+
+class ProfileUpdate(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+
+
+@router.put("/user/profile")
+async def put_own_profile(req: ProfileUpdate) -> dict:
+    """Fill or change the active artist's first / last name (identifier unchanged)."""
+    from features.accounts import identity
+    user = config.get_current_user()
+    if not user:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, lambda: identity.write_profile(user, req.first_name, req.last_name))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class PasswordChange(BaseModel):
+    current: str | None = None   # required when a password is already set
+    new: str | None = None       # empty / None removes the password
+
+
+@router.put("/user/password")
+async def put_own_password(req: PasswordChange) -> dict:
+    """Set, change or remove the active artist's password."""
+    from features.accounts import passwords
+    user = config.get_current_user()
+    if not user:
+        raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
+
+    def _change() -> bool:
+        if not passwords.check_password(user, req.current):
+            raise PermissionError("Mot de passe actuel incorrect.")
+        has = passwords.set_password(user, req.new)
+        passwords.forget_on_this_pc(user)
+        return has
+
+    loop = asyncio.get_running_loop()
+    try:
+        has = await loop.run_in_executor(None, _change)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    log.info("Password %s for '%s'", "set" if has else "removed", user)
+    return {"has_password": has}
+
+
+class ProjectScoped(BaseModel):
+    project: str | None = None
+
+
+@router.post("/users/{name}/reset-password")
+async def reset_password(name: str, req: ProjectScoped) -> dict:
+    """Remove an artist's password: lead or supervisor of the active project only."""
+    from features.accounts import passwords
+    name = name.strip().upper()
+    if not user_utils.user_exists(name):
+        raise HTTPException(status_code=404, detail=f"Artiste introuvable : {name}")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: _require_role(req.project, "reset_password"))
+    try:
+        await loop.run_in_executor(None, lambda: passwords.set_password(name, None))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    log.info("Password reset for '%s' by '%s' (project %s)", name, config.get_current_user(), req.project)
+    return {"success": True}
+
+
 class UserRenameRequest(BaseModel):
     old: str
     new: str
+    project: str | None = None   # needed to rename ANOTHER artist (supervisor)
 
 
 @router.put("/users/rename")
 async def rename_user_endpoint(req: UserRenameRequest) -> dict:
-    """Rename an artist (renames their USER folder; active user follows)."""
+    """Rename an artist (folder + alias so the history follows; active user follows).
+
+    Your own account is always yours; another artist's needs a supervisor of the project.
+    """
     loop = asyncio.get_running_loop()
+    if req.old.strip().upper() != (config.get_current_user() or ""):
+        await loop.run_in_executor(None, lambda: _require_role(req.project, "manage_accounts"))
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.rename_user(req.old, req.new))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -232,9 +449,10 @@ async def rename_user_endpoint(req: UserRenameRequest) -> dict:
 
 
 @router.delete("/users/{name}")
-async def delete_user_endpoint(name: str) -> dict:
-    """Delete an artist and their data (refuses the active user)."""
+async def delete_user_endpoint(name: str, project: str | None = None) -> dict:
+    """Delete an artist and their data (refuses the active user; supervisor only)."""
     loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: _require_role(project, "manage_accounts"))
     ok, msg = await loop.run_in_executor(None, lambda: user_utils.delete_user(name))
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -249,8 +467,11 @@ async def get_user_data() -> dict:
     user = config.get_current_user()
     if not user:
         return {}
+    from features.accounts.passwords import PASSWORD_KEY
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: user_utils.read_user_data(user))
+    data = await loop.run_in_executor(None, lambda: user_utils.read_user_data(user))
+    data.pop(PASSWORD_KEY, None)   # the hash never leaves the backend
+    return data
 
 
 @router.put("/user-data")
@@ -260,11 +481,14 @@ async def put_user_data(patch: dict) -> dict:
     if not user:
         raise HTTPException(status_code=400, detail="Aucun utilisateur actif")
 
+    from features.accounts.passwords import PASSWORD_KEY
+
     def _merge() -> dict:
         data = user_utils.read_user_data(user)
-        data.update(patch)
+        # The password only changes through PUT /settings/user/password.
+        data.update({k: v for k, v in patch.items() if k != PASSWORD_KEY})
         user_utils.write_user_data(user, data)
-        return data
+        return {k: v for k, v in data.items() if k != PASSWORD_KEY}
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _merge)

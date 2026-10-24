@@ -102,14 +102,24 @@ def rename_user(old: str, new: str) -> tuple[bool, str]:
         return False, f"Artiste introuvable : {old}"
     if user_exists(new):
         return False, f"Un artiste nommé {new} existe déjà."
+    from features.accounts import aliases
+    if not aliases.can_take_name(old, new):
+        return False, f"{new} a appartenu à un autre artiste, son historique le suit."
     try:
         paths.get_user_dir(old).rename(paths.get_user_dir(new))
     except OSError as exc:
         log.error("rename_user %s -> %s failed: %s", old, new, exc)
         return False, f"Échec du renommage : {exc}"
+    try:
+        # Chat, mentions, activity, calendar keep the old name: readers resolve it.
+        aliases.record_rename(old, new)
+    except (OSError, RuntimeError) as exc:
+        log.error("rename_user %s -> %s: alias not recorded: %s", old, new, exc)
     if get_current_user() == old:
         config.set_current_user(new)
         config.set("username", new)
+        # Frozen: config.json (bootstrap) is a separate file from the prefs.
+        paths.set_config_username(new)
     log.info("Renamed artist '%s' -> '%s'", old, new)
     return True, f"{old} renommé en {new}"
 
