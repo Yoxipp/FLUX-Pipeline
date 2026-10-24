@@ -160,7 +160,8 @@ async def on_publish(ctx, inputs, params):
     from flux_flows.nodes.flux import publish_infos, publish_record
 
     p = ctx.payload
-    record = p.get("publish") or publish_record("CHAR_RIG_HERO_null_v001.ma")
+    # A run by hand: an example publish by the artist of the run (T1: an empty user broke {user}).
+    record = p.get("publish") or publish_record("CHAR_RIG_HERO_null_v001.ma", user=(ctx.context or {}).get("user") or "")
     project = p.get("project") or (ctx.context or {}).get("project") or ""
     infos = p.get("infos") or publish_infos(record.get("file"), project=project, user=record.get("user") or "",
                                             path=record.get("path") or "", version=record.get("version"))

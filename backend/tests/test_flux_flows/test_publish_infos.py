@@ -50,6 +50,7 @@ class PublishInfosTest(unittest.TestCase):
         self.assertEqual((out["infos"]["mode"], out["infos"]["shot"], out["infos"]["version"]), ("shot", "SHOT020", 4))
         dry = _call("event.on_publish", _ctx())                     # editor Run: an example publish
         self.assertEqual(dry["infos"]["mode"], "asset")
+        self.assertEqual((dry["publish"]["user"], dry["infos"]["user"]), ("ADAM", "ADAM"))   # T1: {user} resolves
 
     def test_run_by_hand_says_when_the_filters_refuse_the_example(self):
         logs = []
