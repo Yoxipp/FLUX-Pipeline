@@ -468,6 +468,22 @@ class FluxNodesTest(unittest.TestCase):
             self.call("flux.usd_flatten", {"source": str(src), "dest": str(dest)}, {"overwrite": True})
         v1.assert_called_once_with(self.ctx, "usd_flatten", {"source": str(src), "destination": str(dest)})
 
+    def test_usd_flatten_reports_missing_references(self):
+        # T1: a shot stage whose character LAST was archived flattens without it: say so.
+        src = self.write("shot/stage.usda", '#usda 1.0\n\ndef "hero" (\n    references = @../assets/HERO_LAST.usda@\n)\n{\n}\n')
+        dest = self.project / "deliver" / "flat.usdc"
+        res = self.sim("flux.usd_flatten", {"source": str(src), "dest": str(dest)})
+        self.assertFalse(res["outputs"]["complete"])
+        self.assertTrue(res["outputs"]["missing"][0].endswith("assets/HERO_LAST.usda"), res["outputs"])
+        self.assertIn("introuvable", res["lines"][-1]["text_fr"])
+        with mock.patch("flux_flows.nodes.flux._run_v1", return_value={"path": str(dest)}):
+            out = self.call("flux.usd_flatten", {"source": str(src), "dest": str(dest)})
+        self.assertEqual((len(out["missing"]), out["complete"]), (1, False))
+        self.write("assets/HERO_LAST.usda", "#usda 1.0\n")
+        with mock.patch("flux_flows.nodes.flux._run_v1", return_value={"path": str(dest)}):
+            out = self.call("flux.usd_flatten", {"source": str(src), "dest": str(dest)})
+        self.assertEqual((out["missing"], out["complete"]), ([], True))
+
     def test_usd_flatten_refuses_overwrite_outside_pipe(self):
         outside = Path(tempfile.mkdtemp(prefix="flux_out_"))
         try:

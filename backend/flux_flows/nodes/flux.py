@@ -1030,13 +1030,29 @@ def _flatten_args(ctx, inputs, params) -> Tuple[Path, Path, bool]:
     return source, dest, overwrite
 
 
+def _unresolved(source: Path) -> List[str]:
+    """Asset paths the stage of *source* points to but that do not resolve (T1: a shot stage
+    whose character LAST was archived flattens without it, silently). Read only."""
+    from pxr import UsdUtils
+
+    try:
+        _layers, _assets, missing = UsdUtils.ComputeAllDependencies(str(source))
+    except Exception:  # noqa: BLE001 - an unreadable stage is reported by the flatten itself
+        return []
+    return sorted({str(m).replace("\\", "/") for m in missing})
+
+
 def _simulate_flatten(ctx, inputs, params):
     source, dest, _overwrite = _flatten_args(ctx, inputs, params)
     text = f"aplatirait {source} vers {dest}" + (" (ecrase l'existant)" if dest.exists() else "")
     lines = [_line("flatten", text, dest)]
+    missing: List[str] = []
     if not source.is_file():
         lines.append(_line("warn", f"{source} n'existe pas encore", source))
-    return {"lines": lines, "outputs": {"path": str(dest)}}
+    else:
+        missing = _unresolved(source)
+        lines += [_line("warn", f"reference introuvable, absente du fichier aplati : {m}", m) for m in missing]
+    return {"lines": lines, "outputs": {"path": str(dest), "missing": missing, "complete": not missing}}
 
 
 @flow_node("flux.usd_flatten", "UsdFlatten", icon="Layers",
@@ -1044,7 +1060,12 @@ def _simulate_flatten(ctx, inputs, params):
                    port("source", "path", "USD source", "Source USD", "shot/SEQ010/SH010/stage.usda", required=True),
                    port("dest", "path", "USD aplati (.usda / .usdc)", "Flattened USD (.usda / .usdc)",
                         "deliver/SH010_flat.usdc", required=True)],
-           outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file")],
+           outputs=[*_EXITS, port("path", "path", "Fichier ecrit", "Written file"),
+                    port("missing", "list[str]", "References introuvables, absentes du fichier aplati",
+                         "References that do not resolve, missing from the flattened file",
+                         ["assets/chara/HERO/usd/HERO_LAST.usda"]),
+                    port("complete", "bool", "Toutes les references ont ete trouvees", "Every reference was found",
+                         True)],
            params=[port("overwrite", "bool", "Ecraser dest s'il existe", "Overwrite dest when it exists", False,
                         default=False)],
            destructive={"param": "overwrite", "equals": True}, simulate=_simulate_flatten, shelf=87,
@@ -1056,7 +1077,10 @@ def usd_flatten(ctx, inputs, params):
     if not source.is_file():
         raise NodeError(f"USD source introuvable : {source}")
     out = _run_v1(ctx, "usd_flatten", {"source": str(source), "destination": str(dest)})
-    return {"path": out.get("path") or str(dest)}
+    missing = _unresolved(source)
+    for m in missing:
+        ctx.log(f"reference introuvable, absente du fichier aplati : {m}", "warn")
+    return {"path": out.get("path") or str(dest), "missing": missing, "complete": not missing}
 
 
 # -- flux.refresh_component / refresh_shot_stage ------------------------------------
