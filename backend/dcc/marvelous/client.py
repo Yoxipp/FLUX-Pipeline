@@ -162,6 +162,11 @@ class MarvelousClient:
             return {"ok": False, "error": NOT_RUNNING}
         return {"ok": True, "version": beat.get("version"), "mode": beat.get("mode"), "pid": beat.get("pid")}
 
+    def verb(self, payload: dict, timeout: float = 600.0) -> dict:
+        """Flows "bridge+" verbs (open, save, save_as, run; P6b step 9). The script answers
+        "unknown action" until it is reinstalled and restarted in Marvelous."""
+        return call(dict(payload), timeout=timeout)
+
     def info(self) -> dict:
         """Open project + formats this Marvelous can export: {ok, project, formats}."""
         return call({"action": "info"}, timeout=20.0)

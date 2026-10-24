@@ -353,5 +353,109 @@ class DesignerScript(_FakeModules):
         self.check_run("app.getPackageMgr().getUserPackages()[0].getFilePath()", "C:/p/current.sbs")
 
 
+class MarvelousNodes(unittest.TestCase):
+    """The file mailbox (no TCP in Marvelous' Python)."""
+
+    def setUp(self) -> None:
+        import json
+        import threading
+        import time
+
+        h.reset()
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_mvd_plus_"))
+        box = self.tmp / "flux_marvelous_bridge"
+        box.mkdir()
+        self._env = mock.patch.dict(os.environ, {"FLUX_MD_MAILBOX_ROOT": str(self.tmp),
+                                                 "FLUX_BRIDGE_SECRET_FILE": str(self.tmp / "secret.txt")})
+        self._env.start()
+        self.requests, self.stop = [], threading.Event()
+
+        def beat():
+            tmp = box / "alive.json.tmp"
+            tmp.write_text(json.dumps({"time": time.time(), "pid": os.getpid(), "version": "MD"}), encoding="utf-8")
+            os.replace(tmp, box / "alive.json")
+
+        def serve():
+            while not self.stop.is_set():
+                beat()
+                for req in list(box.glob("*.req")):
+                    payload = json.loads(req.read_text(encoding="utf-8"))
+                    req.unlink()
+                    self.requests.append(payload)
+                    answer = _handler([])(payload)
+                    (box / (req.name[:-4] + ".resp")).write_text(json.dumps(answer), encoding="utf-8")
+                time.sleep(0.02)
+
+        beat()
+        self.thread = threading.Thread(target=serve, daemon=True)
+        self.thread.start()
+
+    def tearDown(self) -> None:
+        self.stop.set()
+        self.thread.join(2)
+        self._env.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_open_save_save_as_run(self) -> None:
+        zprj = str(self.tmp / "dress.zprj")
+        rec, _ = run_node("marvelous", "dcc.mvd_open_scene", None, {"discard_changes": True}, {"path": zprj})
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        self.assertEqual((self.requests[-1]["action"], self.requests[-1]["discard"]), ("open", True))
+        rec, _ = run_node("marvelous", "dcc.mvd_save_scene", None)
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        rec, value = run_node("marvelous", "dcc.mvd_save_as", None, inputs={"path": zprj}, out="path")
+        self.assertEqual((rec["status"], Path(value)), ("ok", Path(zprj)), rec.get("error"))
+        rec, _ = run_node("marvelous", "dcc.mvd_save_as", None, inputs={"path": str(self.tmp / "d.obj")})
+        self.assertEqual(rec["status"], "error")
+        rec, value = run_node("marvelous", "dcc.mvd_run_script", None, inputs={"code": "result = 7"}, out="result")
+        self.assertEqual((rec["status"], value), ("ok", 7), rec.get("error"))
+
+
+class MarvelousScript(unittest.TestCase):
+    """The script serves at import inside Marvelous: run without its final `serve()`."""
+
+    def setUp(self) -> None:
+        import ast
+
+        src = Path(__file__).resolve().parents[2] / "dcc" / "marvelous" / "marvelous_bridge.py"
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        body = [n for n in tree.body if not (isinstance(n, ast.If) and "serve" in ast.dump(n))]
+        self.ns = {"__name__": "mvd_bridge_test"}
+        exec(compile(ast.Module(body=body, type_ignores=[]), str(src), "exec"), self.ns)
+        self.ns["_MD_AVAILABLE"] = True
+        self.ns["_diag"] = lambda msg: None
+        self.calls = []
+        self.ns["_do_import"] = lambda cfg: (self.calls.append(("import", cfg["path"])), {"status": "ok"})[1]
+        self.ns["_call_export"] = lambda fmt, path, opts: (self.calls.append(("export", fmt, path)), [path])[1]
+        self.ns["_project"] = lambda: ("dress", "C:/p/dress_v003.zprj")
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_mvd_script_"))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_open_needs_discard_save_and_save_as_export_a_zprj(self) -> None:
+        d = self.ns["_dispatch"]
+        self.assertEqual(d({"action": "open", "path": "C:/p/a.zprj"})["status"], "error")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(d({"action": "open", "config": {"path": "C:/p/a.zprj"}, "discard": True})["project"],
+                         "C:/p/a.zprj")
+        self.assertEqual(d({"action": "save"})["project"], "C:/p/dress_v003.zprj")
+        target = str(self.tmp / "out" / "dress.zprj").replace(chr(92), "/")
+        self.assertEqual(d({"action": "save_as", "path": target})["status"], "ok")
+        self.assertEqual(self.calls, [("import", "C:/p/a.zprj"), ("export", "zprj", "C:/p/dress_v003.zprj"),
+                                      ("export", "zprj", target)])
+        self.ns["_project"] = lambda: ("", "")
+        self.assertIn("mvdSaveAs", d({"action": "save"})["msg"])
+
+    def test_run_needs_the_secret(self) -> None:
+        d = self.ns["_dispatch"]
+        self.ns["_secret"] = lambda: ""
+        self.assertFalse(d({"action": "run", "code": "result = 1", "secret": ""})["ok"])
+        self.ns["_secret"] = lambda: "s3cret"
+        self.assertFalse(d({"action": "run", "code": "result = 1", "secret": "bad"})["ok"])
+        resp = d({"action": "run", "code": "result = 40 + 2", "secret": "s3cret"})
+        self.assertEqual((resp["ok"], resp["result"]), (True, 42))
+
+
 if __name__ == "__main__":
     unittest.main()

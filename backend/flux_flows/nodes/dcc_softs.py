@@ -887,3 +887,12 @@ bridge_verb_nodes("designer", "sd", "Substance Designer", _SD, 245,
                   import_doc=("bitmap ou mesh lie dans les ressources du package du graphe courant",
                               "bitmap or mesh linked into the resources of the current graph's package"),
                   import_example="$FLUX/PROJ/wood_scan.png")
+
+
+bridge_verb_nodes("marvelous", "mvd", "Marvelous Designer", _MVD, 255,
+                  open_doc=("Projet .zprj (remplace la scene, demande discard_changes)",
+                            "Project .zprj (replaces the scene, needs discard_changes)"),
+                  open_example="$FLUX/PROJ/dress_cloth_v003.zprj", mesh_new=False, save_as_ext=(".zprj",),
+                  copy_param=False,
+                  save_as_doc=("Enregistre le projet Marvelous en .zprj", "Saves the Marvelous project as .zprj"),
+                  save_as_example="$FLUX/PROJ/dress_cloth.zprj")

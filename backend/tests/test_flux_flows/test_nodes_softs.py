@@ -59,12 +59,14 @@ class Registry(unittest.TestCase):
         for s in softs.SOFTS.values():
             self.assertIn(s.dcc_key, DCC_PORT_RANGES)
 
-    def test_bridge_plus_verbs_are_not_nodes(self) -> None:
+    def test_bridge_plus_verbs_are_nodes(self) -> None:
+        # P6b step 9 (2026-10-24): the 24 "bridge+" verbs got their bridge command.
         from flux_flows.nodes import registry
 
-        for prefix in ("mvd",):   # sp, mari, zb, sd: done in P6b step 9
-            for verb in ("open_scene", "save_scene", "save_as", "run_script"):
-                self.assertIsNone(registry.get_node(f"dcc.{prefix}_{verb}"), f"{prefix}_{verb}")
+        for prefix in ("sp", "sd", "zb", "mari", "mvd"):
+            verbs = ("open_scene", "save_scene", "save_as", "run_script") + (("import",) if prefix != "mvd" else ())
+            for verb in verbs:
+                self.assertIsNotNone(registry.get_node(f"dcc.{prefix}_{verb}"), f"{prefix}_{verb}")
         self.assertIsNotNone(registry.get_node("dcc.nk_run_script"))
 
 
