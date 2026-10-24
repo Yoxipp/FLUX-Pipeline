@@ -438,6 +438,117 @@ def sp_import(ctx, inputs, params):
 run_script_node("painter", "sp", "Substance Painter", _SP, 238)
 
 
+# == "bridge+" verbs shared by Mari, ZBrush, Designer and Marvelous (P6b step 9) ===============
+# Same bridge protocol for all: {"action": open | save | save_as | import | run}. Painter has
+# its own nodes above (first one done, validated live 2026-10-24).
+
+def _verb(ctx, inputs, soft: str, payload: Dict[str, Any], what: str, timeout: float = 1800.0) -> Dict[str, Any]:
+    return _ok(client_for(dc.need_session(ctx, inputs), soft).verb(payload, timeout), what)
+
+
+def bridge_verb_nodes(soft: str, prefix: str, label: str, session_port: Any, shelf: int, *,
+                      open_doc: tuple, open_example: str, mesh_new: bool, save_as_ext: tuple,
+                      save_as_doc: tuple, save_as_example: str, save_as_copy_only: bool = False,
+                      import_kinds: Optional[List[str]] = None, import_doc: tuple = ("", ""),
+                      import_example: str = "") -> None:
+    """dcc.<prefix>_{open_scene, save_scene, save_as, import, run_script} for one soft."""
+    from flux_flows.bridges.session import RUN_SOFTS
+
+    open_inputs = [dc.EXEC, session_port, port("path", "path", open_doc[0], open_doc[1], open_example)]
+    if mesh_new:
+        open_inputs.append(port("mesh", "path", "Mesh d'un nouveau projet (ignore path)",
+                                "Mesh of a new project (path ignored)", "$FLUX/PROJ/chair_mod.obj"))
+
+    @flow_node(f"dcc.{prefix}_open_scene", f"{prefix}OpenScene", icon="FolderOpen", inputs=open_inputs,
+               outputs=[dc.THEN, dc.ERR, port("scene", "path", "Projet ouvert", "Opened project")],
+               params=[port("discard_changes", "bool", "Perdre les modifications non enregistrees",
+                            "Drop unsaved changes", False, default=False, wirable=False)],
+               session=soft, live_only=True, effect=True, destructive={"param": "discard_changes", "equals": True},
+               simulate=dc.sim(lambda i, p: f"creerait un projet depuis {i.get('mesh')}" if i.get("mesh")
+                               else f"ouvrirait {i.get('path')}", lambda i, p: {"scene": str(i.get("path") or "")}),
+               shelf=shelf, aliases=["ouvrir", "open", "projet", "scene"] + (["nouveau", "mesh"] if mesh_new else []),
+               doc_fr=f"Ouvre un projet {label}" + (", ou en cree un depuis un mesh" if mesh_new else "")
+                      + ". Refuse si le projet courant a des modifications non enregistrees, sauf discard_changes.",
+               doc_en=f"Opens a {label} project" + (", or creates one from a mesh" if mesh_new else "")
+                      + ". Refused when the current project has unsaved changes, unless discard_changes.")
+    def _open(ctx, inputs, params):
+        mesh = ""
+        if mesh_new and inputs.get("mesh") not in (None, ""):
+            mesh = dc.path_input(ctx, inputs.get("mesh"), "mesh")
+        path = ""
+        if not mesh:
+            raw = inputs.get("path")
+            if raw in (None, ""):
+                raise NodeError(f"{prefix}OpenScene : path" + (" ou mesh" if mesh_new else "") + " attendu")
+            text = str(raw)
+            # A Mari project is a name in its cache, not a path.
+            path = text if (soft == "mari" and not text.lower().endswith(".mra")) else dc.path_input(ctx, raw, "path")
+        resp = _verb(ctx, inputs, soft, {"action": "open", "path": path, "mesh": mesh,
+                                         "discard": bool(params.get("discard_changes"))}, f"ouverture {label}")
+        return {"scene": str(resp.get("project") or "")}
+
+    @flow_node(f"dcc.{prefix}_save_scene", f"{prefix}SaveScene", icon="Save", inputs=[dc.EXEC, session_port],
+               outputs=[dc.THEN, dc.ERR, port("path", "path", "Projet enregistre", "Saved project")],
+               session=soft, live_only=True, effect=True,
+               simulate=dc.sim(lambda i, p: "sauverait le projet en place", lambda i, p: {"path": ""}),
+               shelf=shelf + 1, aliases=["enregistrer", "save"],
+               doc_fr=f"Enregistre le projet {label} en place.", doc_en=f"Saves the {label} project in place.")
+    def _save(ctx, inputs, params):
+        resp = _verb(ctx, inputs, soft, {"action": "save"}, f"enregistrement {label}")
+        return {"path": str(resp.get("project") or "")}
+
+    as_params = [port("increment", "bool", "Ajoute _vNNN (version suivante libre)", "Adds _vNNN (next free version)",
+                      False, default=False, wirable=False), _OVERWRITE]
+    if not save_as_copy_only:
+        as_params.insert(0, port("copy", "bool", "Copie : le projet ouvert garde son nom",
+                                 "Copy: the open project keeps its name", False, default=False, wirable=False))
+
+    @flow_node(f"dcc.{prefix}_save_as", f"{prefix}SaveAs", icon="SaveAll",
+               inputs=[dc.EXEC, session_port, port("path", "path", save_as_doc[0], save_as_doc[1], save_as_example,
+                                                   required=True)],
+               outputs=[dc.THEN, dc.ERR, port("path", "path", "Fichier enregistre", "Saved file")],
+               params=as_params, session=soft, live_only=True, effect=True, destructive=_D_OVERWRITE,
+               simulate=dc.sim(lambda i, p: f"enregistrerait sous {i.get('path')}",
+                               lambda i, p: {"path": str(i.get("path") or "")}, "path"),
+               shelf=shelf + 2, aliases=["enregistrer sous", "save as", "version", "copie"],
+               doc_fr=save_as_doc[0] + " (increment : version suivante libre).",
+               doc_en=save_as_doc[1] + " (increment: next free version).")
+    def _save_as(ctx, inputs, params):
+        path = dc.path_input(ctx, inputs.get("path"), "path")
+        if not path.lower().endswith(save_as_ext):
+            raise NodeError(f"{prefix}SaveAs : extension attendue {', '.join(save_as_ext)}", code="E_PARAM_INVALID")
+        if params.get("increment"):
+            path = _increment(path)
+        _exists_guard(path, bool(params.get("overwrite")))
+        resp = _verb(ctx, inputs, soft, {"action": "save_as", "path": path, "copy": bool(params.get("copy"))},
+                     f"enregistrement {label}", timeout=4 * 3600.0)
+        return {"path": str(resp.get("project") or path)}
+
+    if import_kinds:
+        @flow_node(f"dcc.{prefix}_import", f"{prefix}Import", icon="FileInput",
+                   inputs=[dc.EXEC, session_port, port("path", "path", "Fichier a importer", "File to import",
+                                                       import_example, required=True)],
+                   outputs=[dc.THEN, dc.ERR],
+                   params=[port("kind", "str", import_doc[0], import_doc[1], import_kinds[0], default=import_kinds[0],
+                                choices=list(import_kinds), wirable=False)],
+                   session=soft, live_only=True, effect=True,
+                   simulate=dc.sim(lambda i, p: f"importerait {i.get('path')} ({p.get('kind') or import_kinds[0]})",
+                                   None, "path"),
+                   shelf=shelf + 3, aliases=["importer", "import", "mesh", "retake"],
+                   doc_fr=f"Importe un fichier dans {label} : " + import_doc[0] + ".",
+                   doc_en=f"Imports a file into {label}: " + import_doc[1] + ".")
+        def _import(ctx, inputs, params):
+            path = dc.path_input(ctx, inputs.get("path"), "path")
+            if not Path(path).exists():
+                raise NodeError(f"fichier introuvable : {path}")
+            _verb(ctx, inputs, soft, {"action": "import", "kind": str(params.get("kind") or import_kinds[0]),
+                                      "path": path}, f"import {label}")
+            return {}
+
+    if soft in RUN_SOFTS:
+        run_script_node(soft, prefix, label, session_port, shelf + 4)
+
+
 # == Substance Designer ===========================================================================
 
 _SD = dc.session_port("designer", "Designer")
@@ -716,3 +827,17 @@ def mari_info(ctx, inputs, params):
     resp = _ok(client_for(dc.need_session(ctx, inputs), "mari").info(), "info Mari")
     channels = [c.get("name") if isinstance(c, dict) else str(c) for c in resp.get("channels") or []]
     return {"geo": str(resp.get("geo") or ""), "channels": channels}
+
+
+bridge_verb_nodes("mari", "mari", "Mari", _MARI, 274,
+                  open_doc=("Projet Mari : son nom dans le cache Mari, ou une archive .mra",
+                            "Mari project: its name in the Mari cache, or a .mra archive"),
+                  open_example="chair_tex", mesh_new=True, save_as_ext=(".mra",), save_as_copy_only=True,
+                  save_as_doc=("Archive le projet Mari en .mra (le projet reste dans le cache, toujours une copie)",
+                               "Archives the Mari project as .mra (the project stays in the cache, always a copy)"),
+                  save_as_example="$FLUX/PROJ/chair_tex.mra", import_kinds=["image", "object", "version"],
+                  import_doc=("image = dans l'Image Manager ; object = nouvel objet ; version = nouvelle version de "
+                              "geometrie de l'objet courant (retake)",
+                              "image = into the Image Manager; object = new object; version = new geometry version "
+                              "of the current object (retake)"),
+                  import_example="$FLUX/PROJ/chair_mod.obj")

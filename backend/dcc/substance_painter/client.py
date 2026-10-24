@@ -38,6 +38,11 @@ class SubstancePainterClient:
         """Ask Painter to export project textures with *config*; returns {ok, files}."""
         return _send({"action": "export", "config": config}, **self._at)
 
+    def verb(self, payload: dict, timeout: float = 600.0) -> dict:
+        """Flows "bridge+" verbs (open, save, save_as, import, run; P6b step 9). The bridge
+        answers "unknown action" until it is reinstalled."""
+        return _send(dict(payload), timeout=timeout, **self._at)
+
     # Flows verbs (P6b step 9): the bridge answers "unknown action" until it is reinstalled.
     def open_project(self, path: str = "", mesh: str = "", discard: bool = False) -> dict:
         """Open a .spp, or create a project from *mesh*."""
