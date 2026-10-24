@@ -13,6 +13,7 @@ from core.paths import (
     get_mentions_path, get_mentions_read_path, get_project_chat_path, get_users_dir,
 )
 from core.repository_factory import get_repository
+from features.accounts.aliases import load_aliases, resolve_user, same_user
 from features.activity.history import append_events
 from features.activity.read_state import is_read, load_read_ids, mark_read
 
@@ -96,7 +97,9 @@ def get_messages(
     chat_path = path or resolve_chat_path(project)
     messages = get_repository().read_log(_CHAT_COLLECTION, str(chat_path))
     messages.sort(key=lambda m: (m.get("date", ""), m.get("time", "")))
-    return messages[-limit:]
+    table = load_aliases()
+    return [{**m, "user": resolve_user(m.get("user"), table)} if "user" in m else m
+            for m in messages[-limit:]]
 
 
 def get_user_list() -> list[str]:
@@ -126,11 +129,16 @@ def _record_mentions(
     raw = parse_pings(text)
     if not raw:
         return
+    table = load_aliases()
     users = {u.lower(): u for u in get_user_list()}
+    for old, new in table.items():          # @OLDNAME reaches the artist's current name
+        current = users.get(new.lower())
+        if current:
+            users.setdefault(old.lower(), current)
     targets: list[str] = []
     for name in raw:
         real = users.get(name.lower())
-        if real and real.upper() != (from_user or "").upper() and real not in targets:
+        if real and not same_user(real, from_user, table) and real not in targets:
             targets.append(real)
     if not targets:
         return
@@ -163,6 +171,13 @@ def _mentions_read_path(path: Path | None) -> Path:
     return p.with_name(f"{p.stem}_read.json")
 
 
+def _shown_mention(m: dict, read_ids, table: dict[str, str]) -> dict:
+    """Copy of mention *m* with current names and the read flag overlaid."""
+    return {**m, "read": is_read(m, read_ids),
+            "to_user": resolve_user(m.get("to_user"), table),
+            "from_user": resolve_user(m.get("from_user"), table)}
+
+
 def get_mentions(user: str, unread_only: bool = False, path: Path | None = None) -> list[dict]:
     """Return mention entries addressed to *user*, newest first.
 
@@ -170,13 +185,13 @@ def get_mentions(user: str, unread_only: bool = False, path: Path | None = None)
     to_user and the current user never silently drops notifications. Read-status
     is overlaid from the companion set-file (Phase 5).
     """
-    who = (user or "").upper()
+    table = load_aliases()
     mentions = get_repository().read_log(_MENTIONS_COLLECTION, str(path or get_mentions_path()))
     read_ids = load_read_ids(_mentions_read_path(path))
     out = [
-        {**m, "read": is_read(m, read_ids)}
+        _shown_mention(m, read_ids, table)
         for m in mentions
-        if str(m.get("to_user", "")).upper() == who and (not unread_only or not is_read(m, read_ids))
+        if same_user(m.get("to_user"), user, table) and (not unread_only or not is_read(m, read_ids))
     ]
     out.sort(key=lambda m: (m.get("date", ""), m.get("time", "")), reverse=True)
     return out
@@ -201,15 +216,15 @@ def get_mentions_and_unread(
     *sig* (mtime_ns, size) may be passed by the router so the cache reuses the
     stat already taken for the ETag rather than issuing a second one (Phase 4).
     """
-    who = (user or "").upper()
+    table = load_aliases()
     mentions = get_repository().read_log(
         _MENTIONS_COLLECTION, str(path or get_mentions_path()), sig=sig,
     )
     read_ids = load_read_ids(_mentions_read_path(path))
-    mine = [m for m in mentions if str(m.get("to_user", "")).upper() == who]
+    mine = [m for m in mentions if same_user(m.get("to_user"), user, table)]
     unread = sum(1 for m in mine if not is_read(m, read_ids))
     out = [
-        {**m, "read": is_read(m, read_ids)}
+        _shown_mention(m, read_ids, table)
         for m in mine
         if (not unread_only or not is_read(m, read_ids))
     ]
@@ -222,10 +237,10 @@ def mark_mentions_read(user: str, path: Path | None = None) -> bool:
 
     The append-only mentions log is never rewritten.
     """
-    who = (user or "").upper()
+    table = load_aliases()
     mentions = get_repository().read_log(
         _MENTIONS_COLLECTION, str(path or get_mentions_path()), fresh=True,
     )   # fresh: live ids
     live_ids = {str(m.get("id", "")) for m in mentions}
-    mine_ids = {str(m.get("id", "")) for m in mentions if str(m.get("to_user", "")).upper() == who}
+    mine_ids = {str(m.get("id", "")) for m in mentions if same_user(m.get("to_user"), user, table)}
     return mark_read(_mentions_read_path(path), mine_ids, live_ids=live_ids)

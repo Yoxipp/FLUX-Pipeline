@@ -19,6 +19,7 @@ from datetime import date, datetime, timezone
 
 from core.logger import get_logger
 from core.repository_factory import get_repository
+from features.accounts.aliases import same_user
 
 log = get_logger(__name__)
 
@@ -61,7 +62,8 @@ def _dates(start: str, end: str | None) -> tuple[str, str]:
 
 
 def _same(a: str, b: str) -> bool:
-    return (a or "").strip().lower() == (b or "").strip().lower()
+    # Stored names may predate a rename: compare through the alias table.
+    return same_user((a or "").strip(), (b or "").strip())
 
 
 # ── document ─────────────────────────────────────────────────────────────────

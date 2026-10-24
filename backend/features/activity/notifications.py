@@ -13,6 +13,7 @@ Reasons, strongest first: ``followed_shot``, ``favorite``, ``assigned``.
 
 from __future__ import annotations
 
+from features.accounts.aliases import load_aliases, resolve_user
 from features.production.reconcile import parse_publish_event
 
 SHOT_WILDCARD = "*"
@@ -42,10 +43,12 @@ def followed_shots(favorites: list[str], project: str) -> list[tuple[str, str]]:
     return out
 
 
-def assignments(production: dict, user: str) -> set[tuple[str, str]]:
+def assignments(production: dict, user: str, aliases: dict[str, str] | None = None) -> set[tuple[str, str]]:
     """{(ENTITY, TOKEN)} of tasks assigned to *user*: ENTITY = "SEQ/SHOT" or "CLASS/NAME",
-    TOKEN = the task name and each of its TYPE tokens (what a publish file carries)."""
-    who = (user or "").strip().upper()
+    TOKEN = the task name and each of its TYPE tokens (what a publish file carries).
+    Stored assignee names go through the rename alias table."""
+    table = load_aliases() if aliases is None else aliases
+    who = str(resolve_user((user or "").strip(), table)).upper()
     if not who:
         return set()
     seqs = {s.get("id"): str(s.get("name", "")).upper() for s in production.get("sequences", [])}
@@ -56,7 +59,8 @@ def assignments(production: dict, user: str) -> set[tuple[str, str]]:
                  for e in production.get("assets", [])]
     for entity, ent_key in entities:
         mine = {k.split("|")[0].upper() for k, d in (entity.get("task_details") or {}).items()
-                if isinstance(d, dict) and who in {a.strip().upper() for a in str(d.get("assignee") or "").split(",")}}
+                if isinstance(d, dict) and who in {str(resolve_user(a.strip(), table)).upper()
+                                      for a in str(d.get("assignee") or "").split(",")}}
         if not mine:
             continue
         for task in entity.get("tasks") or []:
@@ -108,10 +112,10 @@ def reason_for(event: dict, *, project: str, favorites: list[str],
     return None
 
 
-def _dedupe_key(event: dict) -> tuple:
+def _dedupe_key(event: dict, aliases: dict[str, str] | None = None) -> tuple:
     # A status change or a multi-file update logs several identical lines in the
     # same minute: one notification is enough.
-    return (event.get("user"), event.get("action"), event.get("file"),
+    return (resolve_user(event.get("user"), aliases), event.get("action"), event.get("file"),
             event.get("date"), str(event.get("time", ""))[:5])
 
 
@@ -121,15 +125,19 @@ def personal_feed(events: list[dict], *, project: str, scope: str, favorites: li
     with a reason, "global" keeps every event of the project. Newest first, deduplicated."""
     out: list[dict] = []
     seen: set[tuple] = set()
+    table = load_aliases()
     for event in events:
         if event.get("project") != project:
             continue
-        key = _dedupe_key(event)
+        key = _dedupe_key(event, table)
         if key in seen:
             continue
         seen.add(key)
         reason = reason_for(event, project=project, favorites=favorites, assigned=assigned)
         if scope == "self" and reason is None:
             continue
-        out.append({**event, "reason": reason})
+        shown = {**event, "reason": reason}
+        if "user" in shown:
+            shown["user"] = resolve_user(shown["user"], table)
+        out.append(shown)
     return out

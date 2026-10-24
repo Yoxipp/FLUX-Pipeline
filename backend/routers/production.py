@@ -20,6 +20,7 @@ from core.constants import DEFAULT_TYPE_TOKENS, JSON_MODIF_LOG
 from core.executors import HEAVY
 from core.logger import get_logger
 from core.paths import get_project_path
+from features.accounts.alias_views import alias_etag, resolve_production_doc
 from features.activity.activity_reader import get_all_events
 from features.activity.activity_writer import log_event
 from features.folder_manager.tokens import load_tokens, remove_token
@@ -168,9 +169,13 @@ async def get_production(project: str, request: Request):
             "sequences_on_disk": [],
             "shots_on_disk": [],
         }
+    # A rename changes the shown names without touching production.json.
+    etag = alias_etag(etag)
     if _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
-    return JSONResponse(result, headers={"ETag": etag})
+    # Renamed artists: resolve on a copy (result is shared by scan_cache, never mutate it).
+    shown = {**result, "production": resolve_production_doc(result.get("production"))}
+    return JSONResponse(shown, headers={"ETag": etag})
 
 
 async def _compute_production(project: str) -> dict:
