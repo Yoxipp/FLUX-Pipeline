@@ -37,6 +37,7 @@ export interface PortSpec {
   choiceLabels?: Record<string, { fr: string; en: string }>   // readable menu entries (R1)
   reserved?: string[]     // choices listed but disabled (instance mode farm, V2)
   default?: unknown       // registry default (tooltip, R1)
+  when?: { param: string; in: unknown[] }   // shown only for these values of a param (R1, visibility.ts)
 }
 
 // One node as the editor draws it.
@@ -251,6 +252,7 @@ export interface CatalogPort {
   tokens?:  string | null      // project token section ("CLASS", "NAME", "SEQ"...) offered in a menu
   choice_labels?: Record<string, { fr: string; en: string }> | null   // R1: readable menu entries
   reserved?: string[] | null   // R1: choices shown disabled
+  when?: { param: string; in: unknown[] } | null   // R1: shown only for these values of a param
 }
 
 // True, or {param, equals}: compares the param (or its default).

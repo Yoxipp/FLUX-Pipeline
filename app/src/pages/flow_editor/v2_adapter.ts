@@ -39,6 +39,7 @@ const toPort = (p: CatalogPort, value?: unknown): PortSpec => ({
   choiceLabels: p.choice_labels || undefined,
   reserved: p.reserved || undefined,
   default: p.default ?? undefined,
+  when: p.when || undefined,
 })
 
 function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowViewNode {

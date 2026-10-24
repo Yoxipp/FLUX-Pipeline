@@ -63,6 +63,9 @@ class Port:
     tokens: Optional[str] = None
     choice_labels: Tuple[Tuple[Any, str, str], ...] = ()
     reserved: Tuple[Any, ...] = ()
+    # R1 retake 2: when = (param, values): the port is shown (node, Params) only while that
+    # param (or its default) is one of the values; a link into a hidden port is W_PORT_HIDDEN.
+    when: Optional[Tuple[str, Tuple[Any, ...]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "type": self.type, "doc_fr": self.doc_fr, "doc_en": self.doc_en,
@@ -70,20 +73,37 @@ class Port:
                 "choices": list(self.choices) if self.choices is not None else None,
                 "wirable": self.wirable, "tokens": self.tokens,
                 "choice_labels": {str(v): {"fr": fr, "en": en} for v, fr, en in self.choice_labels} or None,
-                "reserved": [str(v) for v in self.reserved] or None}
+                "reserved": [str(v) for v in self.reserved] or None,
+                "when": {"param": self.when[0], "in": list(self.when[1])} if self.when else None}
 
 
 def port(name: str, type: str, doc_fr: str = "", doc_en: str = "", example: Any = None,
          required: bool = False, default: Any = None, *, choices: Optional[Iterable[Any]] = None,
          wirable: bool = True, tokens: Optional[str] = None,
-         labels: Optional[Dict[Any, Tuple[str, str]]] = None, reserved: Iterable[Any] = ()) -> Port:
+         labels: Optional[Dict[Any, Tuple[str, str]]] = None, reserved: Iterable[Any] = (),
+         when: Optional[Dict[str, Iterable[Any]]] = None) -> Port:
     """A port or param. *choices* keep their declaration order in the menu; *labels* maps a
     choice to (label_fr, label_en); *reserved* choices are listed but cannot be picked."""
     if type == "exec" and not doc_fr:
         doc_fr, doc_en = EXEC_DOCS.get(name, EXEC_DOCS[""])[0], doc_en or EXEC_DOCS.get(name, EXEC_DOCS[""])[1]
     return Port(name, type, doc_fr, doc_en, example, required, default,
                 tuple(choices) if choices is not None else None, bool(wirable), tokens or None,
-                tuple((v, fr, en) for v, (fr, en) in (labels or {}).items()), tuple(reserved))
+                tuple((v, fr, en) for v, (fr, en) in (labels or {}).items()), tuple(reserved),
+                next(((k, tuple(v)) for k, v in (when or {}).items()), None))
+
+
+def port_visible(spec: "NodeSpec", p: Port, params: Dict[str, Any]) -> bool:
+    """Is *p* shown for these params (its ``when`` param, or that param's default)?"""
+    if not p.when:
+        return True
+    name, values = p.when
+    if name in params and params[name] not in (None, ""):
+        value = params[name]
+    else:
+        value = next((q.default for q in (*spec.params, *spec.inputs) if q.name == name), None)
+    if isinstance(value, str) and any(c in value for c in "{$"):
+        return True     # templated: unknown before the run
+    return str(value).strip().lower() in {str(v).lower() for v in values}
 
 
 @dataclass

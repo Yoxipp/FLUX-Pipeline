@@ -54,20 +54,6 @@ export function tokenKeys(tokens: ProjectTokens | null, section: string, cls?: u
   return keys
 }
 
-// TokenPath (data.token_path): params used by each mode. Others are shown greyed.
-const TOKEN_PATH_MODES: Record<string, string[]> = {
-  asset: ['class', 'name', 'type', 'instance'],
-  shot:  ['seq', 'shot', 'task', 'instance'],
-}
-const TOKEN_PATH_PARAMS = new Set(Object.values(TOKEN_PATH_MODES).flat())
-
-// false = the param does not apply to the node's current mode.
-export function paramRelevant(nodeType: string, param: string, mode: unknown): boolean {
-  if (nodeType !== 'data.token_path' || !TOKEN_PATH_PARAMS.has(param)) return true
-  const used = TOKEN_PATH_MODES[String(mode ?? '')]
-  return !used || used.includes(param)
-}
-
 export function TokenField({ value, options, onChange, tip, placeholder, section }: {
   value: unknown
   options: string[]            // empty = no project or no key: plain text field

@@ -24,6 +24,7 @@ import type { FlowViewNode, NodeRunInfo, PortSpec } from '../types'
 import { formatValue, useTr } from '../useTr'
 import { PortHandle, handleId } from './PortHandle'
 import { usePortTooltip } from './PortTooltip'
+import { portVisible } from '../visibility'
 import '../flow_editor.css'
 
 export const NODE_W = 240
@@ -225,7 +226,9 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
   const linked = new Set(data.linked)
   const fam = FAMILY_INFO[node.family]
   const Icon = iconFor(node.icon, node.family)
-  const left = [...(node.hasExec ? [EXEC_IN] : []), ...node.inputs]
+  // Ports hidden by the node's mode are not drawn, unless linked (R1 retake 2).
+  const shownIn = node.inputs.filter(p => portVisible(node, p) || linked.has(handleId('in', p.name)))
+  const left = [...(node.hasExec ? [EXEC_IN] : []), ...shownIn]
   const right = [...(node.hasExec ? [EXEC_OUT] : []), ...node.outputs]
   const rows = Math.max(left.length, right.length)
   const isEvent = node.family === 'event'

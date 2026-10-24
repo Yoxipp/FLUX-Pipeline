@@ -248,19 +248,27 @@ def _token_folders(project: Path, tokens, values) -> Tuple[Path, Path, str]:
                     port("dir", "dir", "Le meme chemin si c'est un dossier existant, sinon vide",
                          "The same path when it is an existing folder, else empty"),
                     port("exists", "bool", "Le chemin existe", "The path exists", True)],
-           params=[port("mode", "str", "asset ou shot", "asset or shot", "asset", default="asset",
-                        choices=TOKEN_PATH_MODES),
-                   port("class", "str", "Classe (token CLASS, asset)", "Class (CLASS token, asset)", "CHAR",
-                        tokens="CLASS"),
+           params=[port("mode", "str", "asset (classe, nom, type) ou shot (sequence, plan, task) : change les "
+                        "entrees du node", "asset (class, name, type) or shot (sequence, shot, task): changes the "
+                        "inputs of the node", "asset", default="asset", choices=TOKEN_PATH_MODES,
+                        labels={"asset": ("Asset (classe, nom, type)", "Asset (class, name, type)"),
+                                "shot": ("Shot (sequence, plan, task)", "Shot (sequence, shot, task)")}),
+                   port("project", "str", "Projet (vide : celui du flow)", "Project (empty: the flow's one)", "DEMO"),
+                   port("class", "str", "Classe de l'asset (token CLASS : CHAR, PROPS...)",
+                        "Asset class (CLASS token: CHAR, PROPS...)", "CHAR", tokens="CLASS", when={"mode": ["asset"]}),
                    port("name", "str", "Nom de l'asset (token NAME)", "Asset name (NAME token)", "HERO",
-                        tokens="NAME"),
-                   port("type", "str", "Type / departement de l'asset (token TYPE)",
-                        "Asset type / department (TYPE token)", "MOD", tokens="TYPE"),
-                   port("task", "str", "Task du plan (token TYPE_SHOT)", "Shot task (TYPE_SHOT token)", "ANIM",
-                        tokens="TYPE_SHOT"),
-                   port("seq", "str", "Sequence (token SEQ)", "Sequence (SEQ token)", "SEQ010", tokens="SEQ"),
+                        tokens="NAME", when={"mode": ["asset"]}),
+                   port("type", "str", "Type / departement de l'asset (token TYPE : MOD, RIG...)",
+                        "Asset type / department (TYPE token: MOD, RIG...)", "MOD", tokens="TYPE",
+                        when={"mode": ["asset"]}),
+                   port("seq", "str", "Sequence (token SEQ)", "Sequence (SEQ token)", "SEQ010", tokens="SEQ",
+                        when={"mode": ["shot"]}),
                    port("shot", "str", "Plan (token SHOT, SEQ010/SHOT010 accepte)",
-                        "Shot (SHOT token, SEQ010/SHOT010 accepted)", "SHOT010", tokens="SHOT"),
+                        "Shot (SHOT token, SEQ010/SHOT010 accepted)", "SHOT010", tokens="SHOT",
+                        when={"mode": ["shot"]}),
+                   port("task", "str", "Task / departement du plan (token TYPE_SHOT : ANIM, LAYOUT...)",
+                        "Shot task / department (TYPE_SHOT token: ANIM, LAYOUT...)", "ANIM",
+                        tokens="TYPE_SHOT", when={"mode": ["shot"]}),
                    port("instance", "str", "Instance (null par defaut)", "Instance (null by default)", "null",
                         default="null", tokens="INSTANCE"),
                    port("level", "str", "publish (dossier du publish), last (fichier LAST) ou entity "
@@ -268,7 +276,7 @@ def _token_folders(project: Path, tokens, values) -> Tuple[Path, Path, str]:
                         "publish (publish folder), last (LAST file) or entity (asset or shot folder)", "publish",
                         default="publish", choices=TOKEN_PATH_LEVELS),
                    port("ext", "str", "Format du LAST (level last ; vide : le premier trouve)",
-                        "Format of the LAST (level last; empty: the first found)", "usd")],
+                        "Format of the LAST (level last; empty: the first found)", "usd", when={"level": ["last"]})],
            shelf=19, aliases=["tokens", "chemin tokens", "publish path", "chemin publish", "dossier publish"],
            doc_fr="Compose un chemin du projet avec les tokens (classe, nom, type, sequence, plan...), comme le "
                   "Publisher : dossier du publish, fichier LAST ou dossier de l'entite. Lecture.",
@@ -277,10 +285,10 @@ def _token_folders(project: Path, tokens, values) -> Tuple[Path, Path, str]:
 def token_path(ctx, inputs, params):
     from features.folder_manager import tokens as token_store
 
+    from flux_flows.nodes.flux import _project
+
     values = {**params, **inputs}
-    project = (ctx.context or {}).get("project_path")
-    if not project:
-        raise NodeError("TokenPath : pas de projet, lance le flow dans un projet")
+    _name, project = _project(ctx, values.get("project"))
     for name, allowed in (("mode", TOKEN_PATH_MODES), ("level", TOKEN_PATH_LEVELS)):
         got = str(values.get(name) or allowed[0]).strip().lower()
         if got not in allowed:

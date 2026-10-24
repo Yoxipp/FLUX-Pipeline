@@ -132,6 +132,7 @@ _WHY = {
     "W_ISOLATED_NODE": ("aucun effet", "no effect"),
     "W_LICENCE": ("ADR 0007 : FLUX ne prend aucune licence lui-meme", "ADR 0007: FLUX itself takes no licence"),
     "W_SHIPPED_CHANGED": ("reprise de l'ADR 0039", "from ADR 0039"),
+    "W_PORT_HIDDEN": ("valeur ignoree dans ce mode", "value ignored in this mode"),
     "W_PAGE_LINK_BROKEN": ("la page n'est pas ouverte a ce moment-la", "the page is not open at that moment"),
 }
 
@@ -399,6 +400,17 @@ def _check_nodes(net: _Net, issues: List[Issue], env: Env) -> None:
                     issues.append(_issue("E_PARAM_INVALID", nid, f"{net.name(nid)} : motif `{pname}` : {bad}",
                                          f"{net.name(nid)}: pattern `{pname}` is malformed", port=pname))
         _check_node_rules(net, nid, node, issues)
+        # A link into a port hidden by the node's mode (R1 retake 2): kept, but said.
+        for port in ports.values():
+            if port.when and (nid, port.name) in net.data_in and not registry.port_visible(spec, port, node.params):
+                param = port.when[0]
+                shown = node.params.get(param) or next((q.default for q in spec.params if q.name == param), "")
+                issues.append(_issue(
+                    "W_PORT_HIDDEN", nid,
+                    f"{net.name(nid)} : `{port.name}` ne sert pas quand {param} = {shown} : retire le lien ou "
+                    f"change `{param}`",
+                    f"{net.name(nid)}: `{port.name}` is not used when {param} = {shown}: remove the link or "
+                    f"change `{param}`", port=port.name))
         # Required inputs and params.
         for port in ports.values():
             if not port.required or port.type == "exec" or (nid, port.name) in net.data_in:

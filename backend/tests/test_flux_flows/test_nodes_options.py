@@ -373,3 +373,59 @@ class TokenPathTest(_FsCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenPathModeTest(_FsCase):
+    """R1 retake 2: TokenPath shows its inputs by mode, takes an optional project, and an
+    old flow (every param set, links into the other mode) still loads and runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.tokens = mock.patch("features.folder_manager.tokens.load_tokens", return_value=TOKENS)
+        self.tokens.start()
+
+    def tearDown(self):
+        self.tokens.stop()
+        super().tearDown()
+
+    def test_ports_visible_by_mode(self):
+        spec = _spec("data.token_path")
+        shown = lambda params: {p.name for p in spec.params if registry.port_visible(spec, p, params)}
+        asset, shot = shown({}), shown({"mode": "shot"})
+        self.assertTrue({"class", "name", "type", "project", "instance"} <= asset)
+        self.assertFalse({"seq", "shot", "task", "ext"} & asset)
+        self.assertTrue({"seq", "shot", "task", "project"} <= shot)
+        self.assertFalse({"class", "name", "type"} & shot)
+        self.assertIn("ext", shown({"level": "last"}))
+        self.assertIn("class", shown({"mode": "${mode}"}))     # templated: everything shown
+        when = {p["name"]: p["when"] for p in spec.to_dict()["params"]}
+        self.assertEqual(when["seq"], {"param": "mode", "in": ["shot"]})
+        self.assertIsNone(when["mode"])
+
+    def test_project_param(self):
+        other = self.root / "DOSSIER_PROJETS" / "OTHER"
+        other.mkdir(parents=True)
+        with mock.patch("core.paths.get_project_path", return_value=other):
+            out = self.call("data.token_path", {}, {"project": "OTHER", "class": "CHAR", "name": "HERO", "type": "MOD"})
+        self.assertEqual(Path(out["path"]), other / "assets" / "chara" / "HERO" / "modeling" / "null")
+        out = self.call("data.token_path", {}, {"class": "CHAR", "name": "HERO", "type": "MOD"})
+        self.assertTrue(Path(out["path"]).is_relative_to(self.project))
+
+    def test_old_flow_with_every_param_still_runs(self):
+        params = {"mode": "shot", "class": "CHAR", "name": "HERO", "type": "MOD",
+                  "seq": "SEQ010", "shot": "SHOT010", "task": "ANIM"}
+        out = self.call("data.token_path", {}, params)
+        self.assertEqual(Path(out["path"]), self.project / "shot" / "SEQ010" / "SHOT010" / "anim" / "null")
+        f = flow({"ev": ("event.manual", {}), "t": ("data.token_path", params)}, [])
+        self.assertEqual([i for i in validate(f) if i.level == "error"], [])
+
+    def test_link_into_a_hidden_port_is_a_warning(self):
+        f = flow({"ev": ("event.manual", {}), "v": ("data.value", {"type": "str", "value": "CHAR"}),
+                  "t": ("data.token_path", {"mode": "shot", "seq": "SEQ010", "shot": "SHOT010", "task": "ANIM"})},
+                 ["v.value->t.class"])
+        hidden = [i for i in validate(f) if i.code == "W_PORT_HIDDEN"]
+        self.assertEqual([(i.node, i.port) for i in hidden], [("t", "class")])
+        self.assertIn("retire le lien", hidden[0].message_fr)
+        f = flow({"ev": ("event.manual", {}), "v": ("data.value", {"type": "str", "value": "CHAR"}),
+                  "t": ("data.token_path", {"name": "HERO", "type": "MOD"})}, ["v.value->t.class"])
+        self.assertFalse([i for i in validate(f) if i.code == "W_PORT_HIDDEN"])

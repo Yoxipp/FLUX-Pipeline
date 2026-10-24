@@ -8,7 +8,8 @@
 // localStorage); a param with choices is a menu in catalogue order (data.value type falls
 // back to a local list until the catalogue sends choices); constant params (wirable false,
 // node.constants) are listed with the inputs in spec order; a param with tokens is a
-// TokenField (project token menu + free text); TokenPath params unused by its mode are greyed.
+// TokenField (project token menu + free text). R1: params hidden by the node's mode (Port.when,
+// visibility.ts) are left out; a linked one stays, greyed.
 // P7: an event.button offers the buttons of the TOOL pages as its button_id menu and shows
 // the pages that launch it ("page : Daily render"), or that none does.
 
@@ -20,7 +21,8 @@ import { FAMILY_INFO } from './families'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
 import { PortHelp } from './nodes/PortTooltip'
 import { portColor } from './portTypes'
-import { TokenField, paramRelevant, tokenKeys, useProjectTokens, type ProjectTokens } from './TokenField'
+import { TokenField, tokenKeys, useProjectTokens, type ProjectTokens } from './TokenField'
+import { portVisible } from './visibility'
 import type { FlowViewNode, PageButton, PortSpec } from './types'
 import { formatValue, useTr } from './useTr'
 
@@ -182,14 +184,14 @@ function NodeParams({ node, params, editable, edits, flowName }: { node: FlowVie
   const fam = FAMILY_INFO[node.family]
   const canEdit = editable && !!node.spec
   const { project } = useProject()
-  const ports = paramPorts(node)
+  // Params hidden by the node's mode are left out, unless linked (then greyed, W_PORT_HIDDEN).
+  const ports = paramPorts(node).filter(p => portVisible(node, p) || p.wiredFrom)
   const needsTokens = ports.some(p => p.tokens)
   const tokens = useProjectTokens(needsTokens ? project : null)
   const valueOf = (name: string) => {
     const p = ports.find(x => x.name === name)
     return params[name] !== undefined ? params[name] : p?.value
   }
-  const mode = valueOf('mode')
   const isButton = node.type === 'event.button'
   const pageButtons = usePageButtons(isButton, project)
   const buttonChoices = (name: string): unknown[] | undefined => {
@@ -228,7 +230,7 @@ function NodeParams({ node, params, editable, edits, flowName }: { node: FlowVie
             <ParamRow key={p.name} p={p} editable={canEdit} raw={params[p.name]}
                       choices={p.choices ?? buttonChoices(p.name) ?? FALLBACK_CHOICES[node.type]?.[p.name]}
                       tokens={tokens} tokenOptions={p.tokens ? tokenKeys(tokens, p.tokens, valueOf('class')) : []}
-                      muted={!paramRelevant(node.type, p.name, mode)}
+                      muted={!portVisible(node, p)}
                       onChange={v => edits.onParam(node.id, p.name, v)} />
           ))}
       {isButton && <PageButtonInfo buttons={pageButtons} flowName={flowName} buttonId={String(valueOf('button_id') ?? '')} />}
