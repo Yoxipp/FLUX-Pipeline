@@ -26,7 +26,7 @@ class Types(unittest.TestCase):
             ("path", "str"): "implicit", ("publish", "any"): "implicit", ("list[path]", "any"): "implicit",
             ("list[dir]", "list[path]"): "implicit", ("list[int]", "list[any]"): "implicit",
             ("session[maya]", "session[*]"): "implicit", ("pattern", "str"): "implicit",
-            ("dcc_node", "str"): "implicit",
+            ("dcc_node", "str"): "implicit", ("publish", "dict"): "implicit",
         }
         for (src, dst), status in cases.items():
             with self.subTest(src=src, dst=dst):

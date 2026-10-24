@@ -22,7 +22,7 @@ _IMPLICIT: Dict[str, Tuple[str, ...]] = {
     "path": ("str",),
     "dir": ("path", "str"),
     "dict": ("any",),
-    "publish": ("any",),
+    "publish": ("dict", "any"),   # a publish is a dict at run time (R1 audit F12, 2026-10-25)
     "dcc_node": ("str",),
     "pattern": ("str",),
 }

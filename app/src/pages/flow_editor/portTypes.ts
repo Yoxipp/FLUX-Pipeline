@@ -16,7 +16,7 @@ export const IMPLICIT: Record<string, string[]> = {
   path: ['str'],
   dir: ['path', 'str'],
   dict: ['any'],
-  publish: ['any'],
+  publish: ['dict', 'any'],
   dcc_node: ['str'],
   pattern: ['str'],
 }
