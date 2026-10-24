@@ -734,7 +734,8 @@ function Editor({ rights }: { rights: FlowRights }) {
         <ParamsPane
           selected={selected} params={(selected && doc?.nodes[selected.id]?.params) || {}}
           editable={!saveBlocked} edits={nodeEdits} flowName={doc?.name}
-          iface={{ inputs: (doc?.interface?.inputs ?? []).map(x => x.id), outputs: (doc?.interface?.outputs ?? []).map(x => x.id) }}
+          iface={{ inputs: (doc?.interface?.inputs ?? []).map(x => x.id), outputs: (doc?.interface?.outputs ?? []).map(x => x.id),
+                   variables: (doc?.variables ?? []).map(v => v.name) }}
           flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} onPlaceNode={placeNode} onSelectNode={selectNode} />}
         />
       </div>

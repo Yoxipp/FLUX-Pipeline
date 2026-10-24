@@ -161,6 +161,36 @@ export interface NodeEdits {
 // as soon as the node is selected; a link to a port the page lost stays, W_PAGE_LINK_BROKEN.
 type PagePortsParam = { outputs: Record<string, string>; labels: Record<string, string> }
 
+const PAGE_DATA_NODES = ['event.page_data', 'flux.page_data_read', 'flux.page_data_write']
+
+// Collections of a page (PageData, PageDataRead, PageDataWrite menus).
+function usePageCollections(page: string, project: string | null | undefined): string[] {
+  const [ids, setIds] = useState<string[]>([])
+  useEffect(() => {
+    if (!page) { setIds([]); return }
+    let alive = true
+    flowsApi.getPage(page, { project: project || undefined })
+      .then(r => { if (alive) setIds((r.page.data ?? []).map(d => d.id)) })
+      .catch(() => { if (alive) setIds([]) })
+    return () => { alive = false }
+  }, [page, project])
+  return ids
+}
+
+// Flows a FlowCall may call (not itself, not the legacy v1 ones).
+function useFlowNames(active: boolean, project: string | null | undefined, self?: string): string[] {
+  const [names, setNames] = useState<string[]>([])
+  useEffect(() => {
+    if (!active) return
+    let alive = true
+    flowsApi.list(project || undefined)
+      .then(l => { if (alive) setNames([...new Set(l.filter(f => !f.shadowed && !f.legacy && f.name !== self).map(f => f.name))]) })
+      .catch(() => { if (alive) setNames([]) })
+    return () => { alive = false }
+  }, [active, project, self])
+  return names
+}
+
 function usePageIds(active: boolean, project: string | null | undefined): string[] {
   const [ids, setIds] = useState<string[]>([])
   useEffect(() => {
@@ -314,7 +344,7 @@ function InterfaceNote({ node }: { node: FlowViewNode }) {
   return <div style={{ fontSize: 11, margin: '6px 0 8px', color: 'var(--ink-3)', lineHeight: 1.45 }}>{text}</div>
 }
 
-function NodeParams({ node, params, editable, edits, flowName, iface }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; flowName?: string; iface?: { inputs: string[]; outputs: string[] } }) {
+function NodeParams({ node, params, editable, edits, flowName, iface }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; flowName?: string; iface?: { inputs: string[]; outputs: string[]; variables?: string[] } }) {
   const { tr } = useTr()
   const fam = FAMILY_INFO[node.family]
   const canEdit = editable && !!node.spec
@@ -328,11 +358,22 @@ function NodeParams({ node, params, editable, edits, flowName, iface }: { node: 
     return params[name] !== undefined ? params[name] : p?.value
   }
   const isPageReader = node.type === 'event.page_inputs'
-  const pageIds = usePageIds(isPageReader, project)
-  const pageChoices = (name: string): unknown[] | undefined =>
-    isPageReader && name === 'page' && pageIds.length ? pageIds : undefined
+  // R1 audit P2.6: menus instead of free ids (pages, collections, flows, variables).
+  const readsPage = isPageReader || PAGE_DATA_NODES.includes(node.type)
+  const pageIds = usePageIds(readsPage, project)
+  const collections = usePageCollections(PAGE_DATA_NODES.includes(node.type) ? String(valueOf('page') ?? '') : '', project)
+  const flowNames = useFlowNames(node.type === 'subflow.flow_call', project, flowName)
+  const pageChoices = (name: string): unknown[] | undefined => {
+    if (readsPage && name === 'page' && pageIds.length) return pageIds
+    if (name === 'collection' && collections.length) return collections
+    if (name === 'flow' && flowNames.length) return flowNames
+    return undefined
+  }
   // FlowInput / FlowOutput: the ids declared in the flow interface (R1 retake 8).
   const ifaceChoices = (name: string): unknown[] | undefined => {
+    if (name === 'name' && (node.type === 'data.get_variable' || node.type === 'data.set_variable')) {
+      return iface?.variables?.length ? iface.variables : undefined
+    }
     if (name !== 'id' || !iface) return undefined
     const ids = node.type === 'data.flow_input' ? iface.inputs : node.type === 'subflow.flow_output' ? iface.outputs : undefined
     return ids && ids.length ? ids : undefined
@@ -386,7 +427,7 @@ function NodeParams({ node, params, editable, edits, flowName, iface }: { node: 
 export function ParamsPane({ selected, params, editable, edits, flowPart, flowName, iface }: {
   flowName?: string                        // name of the open flow (InputsPageReader: create its page)
   selected: FlowViewNode | null
-  iface?: { inputs: string[]; outputs: string[] }   // interface ids (FlowInput / FlowOutput id menus)
+  iface?: { inputs: string[]; outputs: string[]; variables?: string[] }   // interface ids (FlowInput / FlowOutput id menus)
   params: Record<string, unknown>          // params of the selected node in the document
   editable: boolean
   edits: NodeEdits
