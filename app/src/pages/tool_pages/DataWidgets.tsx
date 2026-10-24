@@ -401,7 +401,8 @@ function FlowOutput({ widget: w, project }: DataWidgetProps) {
   useEffect(() => {
     const src = w.source!
     let alive = true
-    flowsApi.listRuns({ flow: src.flow, status: 'ok', limit: 1, project }).then(async list => {
+    // Real runs only (T1): a dry run's outputs are simulated.
+    flowsApi.listRuns({ flow: src.flow, status: 'ok', mode: 'real', limit: 1, project }).then(async list => {
       if (!list[0]) { if (alive) setRun(null); return }
       const rec = await flowsApi.getRun(list[0].run_id, project)
       const outputs = rec.outputs ?? {}
