@@ -119,6 +119,22 @@ class Click(unittest.TestCase):
         last = self.client.get("/flows/runs", params={"flow": "daily_render", "event": "daily_render/render"}).json()
         self.assertEqual(len(last), 1)
 
+    def test_run_and_dry_run_can_play_a_click(self) -> None:
+        # T1: Run / dry run of a page flow test any button with values, not only the first with the defaults.
+        doc = _flow(button="clean")
+        store.increment_flow(self.roots, "team", doc["name"], user="ADAM", flow=parse_flow(doc))
+        team_td = rights.rights_from_data("ADAM", {rights.TEAM_TD_KEY: True})
+        self.enterContext(mock.patch.object(rights, "current_rights", side_effect=lambda: team_td))
+        for extra in ({"dry_run": True}, {"draft": doc}):
+            r = self.client.post("/flows/daily_render/run",
+                                 json={"button": "clean", "values": {"dest_folder": "D:/y"}, **extra})
+            self.assertEqual(r.status_code, 200, r.text)
+            rec = self._wait(r.json()["run_id"])
+            self.assertEqual((rec["status"], rec["outputs"]["dir"]), ("ok", "D:/y"), rec)
+            self.assertEqual(rec["trigger"]["page_button"], "daily_render/clean")
+        r = self.client.post("/flows/daily_render/run", json={"button": "nope", "dry_run": True})
+        self.assertEqual(r.status_code, 400)
+
     def test_another_start_reads_the_page_defaults(self) -> None:
         self._active("team", _flow())
         r = self.client.post("/flows/daily_render/run", json={"event": "m"})

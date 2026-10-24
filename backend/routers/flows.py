@@ -1037,6 +1037,22 @@ class RunBody(BaseModel):
     draft: Optional[dict[str, Any]] = None    # editor document: runs without creating a version (A7)
     base_revision: Optional[int] = None       # revision the draft was loaded from (kept in the record)
     version: Optional[int] = None             # dry run of a frozen version (activation dialog)
+    button: Optional[str] = None              # page flow: run as a click on this button, with values (T1)
+
+
+def _page_click(flow: Flow, event: Optional[str], button: str,
+                values: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """(start node, payload) of a Run / dry run that plays a click on a page button: the
+    branch of any button, with the field values given (T1: else only the first button with
+    the page defaults could be tested). 400 when no InputsPageReader has that button."""
+    for nid, node in sorted(flow.nodes.items()):
+        if node.type != page_inputs.PAGE_NODE or (event is not None and nid != event):
+            continue
+        outputs = (node.params.get("ports") or {}).get("outputs") or {}
+        if outputs.get(button) == "exec":
+            return nid, {"page": str(node.params.get("page") or ""), "button": button, "values": values}
+    raise HTTPException(status_code=400, detail={
+        "message": f"Aucun InputsPageReader de ce flow n'a de bouton `{button}`"})
 
 
 @router.post("/{name}/run")
@@ -1074,9 +1090,12 @@ async def run(name: str, body: RunBody) -> dict[str, Any]:
         version = state["active_version"]
         flow = (await _call(store.read_flow, roots, scope, name, version))["flow"]
     folder = runs.runs_dir(scope, project=body.project, user=current["user"])
+    event, payload = body.event, None
+    if body.button:
+        event, payload = _page_click(flow, body.event, body.button, body.values)
     new_run = engine.Run(flow, scope=scope, project=body.project, user=current["user"], mode=mode,
-                         draft=draft, version=version, base_revision=base_revision, event=body.event,
-                         values=body.values, folder=folder)
+                         draft=draft, version=version, base_revision=base_revision, event=event,
+                         values=body.values, payload=payload, folder=folder)
     record = await engine.manager().submit(new_run)
     if mode == "dry" and version and scope != "shipped" and new_run.task is not None:
         _note_dry_run(new_run, Path(roots[scope]), name, version)
