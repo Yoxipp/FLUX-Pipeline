@@ -54,6 +54,8 @@ from flux_flows.page_inputs import PAGE_NODE
 
 log = logging.getLogger("flux.flows.engine")
 
+SET_VARIABLE = "data.set_variable"
+
 DEFAULT_TIMEOUT_S = 120.0
 DCC_TIMEOUT_S = 600.0
 MAX_RUNNING = 4
@@ -508,8 +510,9 @@ class Run:
             if self.mode == "dry" and p.type.startswith("session[") and got.get(p.name) is None:
                 continue
             # A FlowOutput may give back an empty value it received (nothing found, a skipped
-            # Instance in a dry run); an unlinked one is E_REQUIRED_EMPTY at validation.
-            if spec.type == FLOW_OUTPUT and (nid, p.name) in self._data_in:
+            # Instance in a dry run); a SetVariable may store one (T1: StrJoin of no issue = "",
+            # the variable type still checks it). An unlinked one is E_REQUIRED_EMPTY at validation.
+            if spec.type in (FLOW_OUTPUT, SET_VARIABLE) and (nid, p.name) in self._data_in:
                 continue
             if p.required and got.get(p.name) in (None, ""):
                 raise NodeError(f"{spec.label} attend `{p.name}` : relie un lien ou saisis une valeur")
