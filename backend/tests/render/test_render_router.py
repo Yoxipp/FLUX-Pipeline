@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from routers import render
+from tests.render.studio_fixture import write_env
 
 
 class RenderRouter(unittest.TestCase):
@@ -35,8 +36,10 @@ class RenderRouter(unittest.TestCase):
             mock.patch("core.paths.get_project_render_path", return_value=self.render_json),
             mock.patch.object(render.config, "get_current_user", return_value="adam"),
             mock.patch.object(render.farm_paths, "_unc_of_drive", return_value=None),
-            # Hermetic: never reach the school machine's real Tractor client and engine.
-            mock.patch.object(render.team_settings, "TRACTOR_PYTHON_CANDIDATES", ()),
+            # Hermetic: never reach the machine's real Tractor client and engine.
+            # Hermetic: no studio environment, and the active user may do everything (roles have their own tests).
+            mock.patch.object(render.studio_env, "environment_file", return_value=write_env(self.tmp)),
+            mock.patch.object(render.project_roles, "require"),
             mock.patch.dict("os.environ", {"TRACTOR_ENGINE": ""}),
         ]
         for p in patches:

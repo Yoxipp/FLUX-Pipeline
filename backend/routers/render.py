@@ -2,7 +2,9 @@
 #
 # The Tractor API is never imported here: features.render.tractor_bridge runs the external
 # Python 2.7 bridge. Rendered images never go through this API (the UI opens the folder).
-# Until the school phase 0 is done, render.json keeps dry_run = true: .alf + .json are written, nothing is spooled.
+# render.json dry_run = true (opt-in simulation): .alf + .json are written, nothing is spooled. Default is the real farm.
+# Studio-specific values (engine, blade paths, tags, rooms) come from the studio environment file
+# (features.render.studio_env, linked from CONFIG/studio.json), never from this code.
 
 from __future__ import annotations
 
@@ -17,8 +19,9 @@ from pydantic import BaseModel
 
 from core import config
 from core.logger import get_logger
-from features.render import (exit_codes, farm_limits, farm_paths, farm_targets, freeze, job_builder, team_settings,
-                             tractor_bridge)
+from features.render import (exit_codes, farm_limits, farm_paths, farm_targets, freeze, job_builder, studio_env,
+                             team_settings, tractor_bridge)
+from features.roles import project_roles
 from utils import project_utils
 
 log = get_logger(__name__)
@@ -42,6 +45,14 @@ def _bridge_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=502, detail=str(exc))
 
 
+def _require(project: str, action: str) -> None:
+    """Project role check (lead / supervisor for these actions): HTTP 403 with the readable reason."""
+    try:
+        project_roles.require(project, action)
+    except project_roles.RoleError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
 # ── settings ────────────────────────────────────────────────────────────────
 
 @router.get("/settings")
@@ -49,19 +60,21 @@ def get_settings(project: str):
     _ensure_project(project)
     settings = team_settings.effective_settings(project)
     shares = farm_limits.fetch_shares(settings["engine"])
+    tag, default_share = settings["render_tag"], settings["default_share"]
     # Teams of the farm (engine limits.config, read only): Tractor shares the farm between them.
     return {"settings": settings, "warning": team_settings.priority_warning(settings), "user": _user(),
-            "farm_teams": farm_limits.teams(shares),
-            # {team: {nominal, cap}} of FLUX's commands (husk), "default" = every other project. None = unknown.
-            "farm_shares": (shares or {}).get(farm_limits.RENDER_TAG),
-            "team_warning": farm_limits.team_warning(settings["tractor_project"], shares)}
+            "farm_teams": farm_limits.teams(shares, tag, default_share),
+            # {team: {nominal, cap}} of FLUX's commands (render tag), default share = every other project. None = unknown.
+            "farm_shares": (shares or {}).get(tag),
+            "default_share": default_share,
+            "team_warning": farm_limits.team_warning(settings["tractor_project"], shares, tag, default_share)}
 
 
-# ── environment: the school's farm config (locked screen, 2026-10-23) ──
+# ── farm environment: the engine's limits.config (locked screen, 2026-10-23) ──
+# Role lead or supervisor on the project (project_roles "farm_env") + the "Understand" phrase.
 
 class EnvUnlock(BaseModel):
     phrase: str = ""
-    password: str = ""
 
 
 class EnvShares(EnvUnlock):
@@ -72,8 +85,9 @@ class EnvShares(EnvUnlock):
 def env_state(project: str, body: EnvUnlock):
     """Shares as the engine serves them, and whether the configured folder holds that same file."""
     _ensure_project(project)
+    _require(project, "farm_env")
     try:
-        farm_limits.check_unlock(body.phrase, body.password)
+        farm_limits.check_unlock(body.phrase)
     except farm_limits.LimitsError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     settings = team_settings.effective_settings(project)
@@ -94,12 +108,13 @@ def env_state(project: str, body: EnvUnlock):
 @router.put("/env/shares")
 def env_shares(project: str, body: EnvShares):
     _ensure_project(project)
+    _require(project, "farm_env")
     settings = team_settings.effective_settings(project)
     if settings["dry_run"] is True:
         raise HTTPException(status_code=400, detail="Mode simulation : la config de la farm n'est jamais modifiee")
     try:
         out = farm_limits.write_shares(settings["engine_config_dir"], settings["engine"], body.teams,
-                                       body.phrase, body.password)
+                                       body.phrase, settings["default_share"])
     except farm_limits.LimitsError as exc:
         raise HTTPException(status_code=403 if "verrouilles" in str(exc) else 400, detail=str(exc))
     except OSError as exc:
@@ -111,8 +126,9 @@ def env_shares(project: str, body: EnvShares):
 @router.post("/env/reload")
 def env_reload(project: str, body: EnvUnlock):
     _ensure_project(project)
+    _require(project, "farm_env")
     try:
-        farm_limits.check_unlock(body.phrase, body.password)
+        farm_limits.check_unlock(body.phrase)
     except farm_limits.LimitsError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     settings = team_settings.effective_settings(project)
@@ -163,6 +179,7 @@ def put_last(project: str, last: dict):
 @router.put("/settings")
 def put_settings(project: str, patch: dict):
     _ensure_project(project)
+    _require(project, "render_settings")
     try:
         team_settings.write_settings(project, patch)
     except ValueError as exc:
@@ -247,12 +264,12 @@ _snapshot: dict = {}
 
 def _farm_snapshot(settings: dict, user: str) -> dict:
     """Classified blades, counts and rooms. Cached a few seconds: one engine query per poll at most."""
-    key = settings.get("engine") or ""
+    key = (settings.get("engine") or "") + "|" + (settings.get("room_pattern") or "")
     cached = _snapshot.get(key)
     if cached and time.time() - cached["at"] < _SNAPSHOT_TTL:
         return cached["data"]
     raw = tractor_bridge.blades(settings, user)
-    blades = farm_targets.classify(raw.get("blades", []))
+    blades = farm_targets.classify(raw.get("blades", []), room_pattern=settings.get("room_pattern") or "")
     data = {"blades": blades, "counts": farm_targets.counts(blades), "rooms": farm_targets.rooms(blades),
             "active_by_project": raw.get("active_by_project", {}), "dry_run": raw.get("dry_run", False)}
     _snapshot[key] = {"at": time.time(), "data": data}
@@ -326,6 +343,9 @@ def _submit(body: SubmitBody, user: str) -> dict:
         raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un rendu sur la farm")
     do_freeze = settings["freeze_by_default"] if body.freeze is None else body.freeze
     renderer = body.renderer or settings["renderer"]
+    if not renderer:
+        raise HTTPException(status_code=400, detail="Choisir un moteur de rendu (karma ou renderman) : "
+                                                    "aucun par defaut dans les reglages ni l'environnement du studio")
     freeze_when = body.freeze_when or settings["freeze_when"]
     if freeze_when not in team_settings.FREEZE_WHEN:
         raise HTTPException(status_code=400, detail=f"freeze_when inconnu : {freeze_when}")
@@ -373,6 +393,13 @@ def _submit(body: SubmitBody, user: str) -> dict:
         raise HTTPException(status_code=400, detail="Priorite entre 1 et 10000")
     if body.denoise and renderer != "renderman":
         raise HTTPException(status_code=400, detail="Denoise apres rendu : RenderMan seulement (Karma : denoiser dans ses reglages)")
+    try:
+        if body.denoise:
+            team_settings.require_denoise(settings)
+        if at_start:
+            team_settings.require_houdini(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     service, maxactive, own_cap, notes = _targeting(body, settings, renderer, user)
     if body.denoise and render_settings:
         # ADR 0060: the generated render layer has the beauty only, not RenderMan's denoise AOVs.
@@ -387,7 +414,7 @@ def _submit(body: SubmitBody, user: str) -> dict:
         freeze_at_start = {
             "freeze_source": render_usd,
             "freeze_script": _farm(script, "Le script de gel", simulate),
-            "freeze_python": team_settings.BLADE_TRACTOR_PYTHON,
+            "freeze_python": settings["blade_tractor_python"],
             "freeze_houdini": settings["houdini_path"],
         }
         render_usd = _farm(out_dir / "_job" / f"{name}_frozen.usda", "Le dossier de rendu", simulate)
@@ -400,6 +427,8 @@ def _submit(body: SubmitBody, user: str) -> dict:
         **freeze_at_start,
         denoise=body.denoise,
         denoise_exe=settings["denoise_path"],
+        denoise_tag=settings["denoise_tag"],
+        forbid_drive_letters=settings["forbid_drive_letters"],
         denoise_crossframe=settings["denoise_crossframe"] if body.denoise_crossframe is None else body.denoise_crossframe,
         output_pattern=_farm(out_dir / f"{name}.$F4.exr", "Le dossier de rendu", simulate),
         frame_start=start,
@@ -488,6 +517,10 @@ def _denoise_sequence(body: DenoiseBody, user: str) -> dict:
     if not simulate and user in tractor_bridge.ANONYMOUS_USERS:
         raise HTTPException(status_code=400, detail="Connecte-toi a FLUX (utilisateur) avant de lancer un denoise sur la farm")
     try:
+        team_settings.require_denoise(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
         seq = image_sequence.find(body.path)
     except image_sequence.SequenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -524,6 +557,8 @@ def _denoise_sequence(body: DenoiseBody, user: str) -> dict:
         envkeys=settings["envkeys"],
         denoise_only=True,
         denoise_exe=settings["denoise_path"],
+        denoise_tag=settings["denoise_tag"],
+        forbid_drive_letters=settings["forbid_drive_letters"],
         denoise_crossframe=settings["denoise_crossframe"] if body.crossframe is None else body.crossframe,
         metadata={"flux_project": body.project, "entity": stem, "user": user, "kind": "denoise",
                   "output": _farm(out, "Le dossier denoised", simulate)},
@@ -759,3 +794,74 @@ def _trace(project: str, jid: int, user: str) -> dict:
 @router.get("/jobs/{jid}/trace")
 async def job_trace(jid: int, project: str):
     return await asyncio.to_thread(_trace, project, jid, _user())
+
+
+# ── studio environment: the link in CONFIG/studio.json and the file it points to (ADR 0063) ──
+# Role lead or supervisor ("project_settings") to change anything. Reading is open to the project.
+
+class StudioEnvBody(BaseModel):
+    name: Optional[str] = None
+    farm: Optional[dict] = None
+
+
+class StudioEnvLink(BaseModel):
+    link: str = ""
+    create: bool = False  # create the file (empty environment) when the link points to nothing yet
+
+
+def _studio_env_state() -> dict:
+    from core import studio_config
+
+    link = studio_config.read_studio()["environment"]
+    path = studio_config.environment_path()
+    env = studio_env.read_environment(path) if path else studio_env.read_environment(None)
+    try:
+        exists = bool(path and path.is_file())
+    except OSError:
+        exists = False
+    return {"link": link, "path": str(path) if path else "", "exists": exists, "name": env["name"],
+            "values": env["farm"], "defaults": studio_env.FARM_DEFAULTS}
+
+
+@router.get("/studio-env")
+def get_studio_env(project: str):
+    _ensure_project(project)
+    return _studio_env_state()
+
+
+@router.put("/studio-env")
+def put_studio_env(project: str, body: StudioEnvBody):
+    _ensure_project(project)
+    _require(project, "project_settings")
+    patch = {k: v for k, v in (("name", body.name), ("farm", body.farm)) if v is not None}
+    try:
+        studio_env.write_environment(patch)
+    except studio_env.StudioEnvError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    log.warning("Studio environment changed by %s (%s)", _user(), project)
+    _snapshot.clear()
+    return _studio_env_state()
+
+
+@router.put("/studio-env/link")
+def put_studio_env_link(project: str, body: StudioEnvLink):
+    from core import studio_config
+    from core.json_manager import write_json
+
+    _ensure_project(project)
+    _require(project, "project_settings")
+    try:
+        target = studio_config.resolve_link(body.link)
+        if target is not None and not target.is_file():
+            if not body.create:
+                raise HTTPException(status_code=400, detail=f"Fichier d'environnement introuvable : {target}")
+            if not write_json(target, studio_env.DEFAULTS):
+                raise HTTPException(status_code=400, detail=f"Creation impossible : {target}")
+        studio_config.write_studio({"environment": body.link})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=f"Dossier FLUX_ROOT non configure : {exc}")
+    log.warning("Studio environment link changed by %s (%s)", _user(), project)
+    _snapshot.clear()
+    return _studio_env_state()

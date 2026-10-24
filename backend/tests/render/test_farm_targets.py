@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from features.render import farm_targets as ft
 from features.render import team_settings
 from routers import render
+from tests.render.studio_fixture import write_env
 
 NOW = datetime(2026, 10, 23, 11, 0, 0)
 FRESH = "2026-10-23 10:58:00.1+02"
@@ -34,13 +35,18 @@ class BladeStates(unittest.TestCase):
 
     def test_counts_and_rooms(self):
         rows = ft.classify([blade("ROOM1701"), blade("ROOM1702", nimby="x"), blade("ROOM2601", beat=OLD),
-                            blade("ROOM17PROF", busy={"jid": 1, "project": "CEB"}), blade("WIN-ABC")], NOW)
+                            blade("ROOM17PROF", busy={"jid": 1, "project": "CEB"}), blade("WIN-ABC")], NOW, r"^([A-Za-z]+)(\d{2})[A-Za-z0-9]+$")
         c = ft.counts(rows)
         self.assertEqual((c["free"], c["nimby"], c["busy"], c["offline"], c["alive"]), (2, 1, 1, 1, 4))
         rooms = ft.rooms(rows)
         self.assertEqual(rooms["ROOM17"], ["ROOM1701", "ROOM1702", "ROOM17PROF"])
         self.assertNotIn("ROOM26", rooms)  # offline only
         self.assertEqual(rooms[ft.OTHER_GROUP], ["WIN-ABC"])
+
+    def test_no_room_pattern_means_no_rooms(self):
+        rows = ft.classify([blade("ROOM1701"), blade("WIN-ABC")], NOW)
+        self.assertEqual([r["room"] for r in rows], ["", ""])
+        self.assertEqual(ft.rooms(rows), {})
 
 
 class ServiceExpression(unittest.TestCase):
@@ -123,7 +129,9 @@ class RouterTargeting(unittest.TestCase):
             mock.patch("core.paths.get_project_render_path", return_value=self.render_json),
             mock.patch.object(render.config, "get_current_user", return_value="adam"),
             mock.patch.object(render.farm_paths, "_unc_of_drive", return_value=None),
-            mock.patch.object(render.team_settings, "TRACTOR_PYTHON_CANDIDATES", ()),
+            # Hermetic: no studio environment, and the active user may do everything (roles have their own tests).
+            mock.patch.object(render.studio_env, "environment_file", return_value=write_env(self.tmp)),
+            mock.patch.object(render.project_roles, "require"),
             mock.patch.dict("os.environ", {"TRACTOR_ENGINE": ""}),
             mock.patch.object(render, "_farm_snapshot", return_value=SNAP),
         ]
@@ -234,15 +242,15 @@ class FarmTeams(RouterTargeting):
 
     def test_env_locked_and_never_in_simulation(self):
         for path in ("/render/env/state", "/render/env/reload"):
-            self.assertEqual(self.client.post(path, params={"project": "P"}, json={"phrase": "Understand", "password": "x"}).status_code, 403)
+            self.assertEqual(self.client.post(path, params={"project": "P"}, json={"phrase": "nope"}).status_code, 403)
         teams = {"default": {"nominal": 0.1, "cap": 0.1}}
         with mock.patch.object(render.farm_limits, "write_shares") as writer:
             r = self.client.put("/render/env/shares", params={"project": "P"},
-                                json={"phrase": "Understand", "password": "root", "teams": teams})
+                                json={"phrase": "Understand", "teams": teams})
         self.assertEqual(r.status_code, 400)  # setUp: simulation
         writer.assert_not_called()
         with mock.patch.object(render.farm_limits, "engine_text", return_value=None):
-            r = self.client.post("/render/env/state", params={"project": "P"}, json={"phrase": "Understand", "password": "root"})
+            r = self.client.post("/render/env/state", params={"project": "P"}, json={"phrase": "Understand"})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertFalse(r.json()["folder_ok"])
 

@@ -60,6 +60,12 @@ class WorkProfilesRouteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(main.app)
 
+    def setUp(self):
+        # Role gates are tested in tests/roles; here the active user may edit the project.
+        p = mock.patch("features.roles.project_roles.require", return_value=None)
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_round_trip_and_404(self):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "PROJ").mkdir()

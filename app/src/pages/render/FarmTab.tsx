@@ -19,7 +19,7 @@ export function FarmTab({ farm, project, shares }: {
   const byRoom = useMemo(() => {
     const out: Record<string, Record<RenderBladeState, number>> = {}
     for (const b of farm?.blades ?? []) {
-      if (b.state === 'offline') continue
+      if (b.state === 'offline' || !b.room) continue   // no room_pattern in the studio environment: no rooms
       const r = (out[b.room] ??= { free: 0, busy: 0, nimby: 0, offline: 0 })
       r[b.state] += 1
     }
@@ -58,8 +58,8 @@ export function FarmTab({ farm, project, shares }: {
             <Clock size={12} />{farm.schedule.enabled ? `${farm.schedule.start}-${farm.schedule.end}` : '24/24'}
           </span>
         </div>
-        <div style={hint}>{tr("Part de la farm : celle de l'equipe dans limits.config (ecole), Tractor equilibre lui-meme.",
-          "Farm share: the team's in limits.config (school), Tractor balances by itself.")}</div>
+        <div style={hint}>{tr("Part de la farm : celle de l'equipe dans limits.config, Tractor equilibre lui-meme.",
+          "Farm share: the team's in limits.config, Tractor balances by itself.")}</div>
       </Section>
 
       <Section title={tr('Par equipe (projet Tractor)', 'Per team (Tractor project)')}>
@@ -76,7 +76,7 @@ export function FarmTab({ farm, project, shares }: {
         })}
       </Section>
 
-      <Section title={tr('Par salle', 'Per room')}>
+      {byRoom.length > 0 && <Section title={tr('Par salle', 'Per room')}>
         {byRoom.map(([room, n]) => {
           const total = n.free + n.busy + n.nimby
           return (
@@ -96,7 +96,7 @@ export function FarmTab({ farm, project, shares }: {
           {showList ? tr('Masquer les machines', 'Hide machines') : tr('Voir les machines', 'Show machines')}
         </button>
         {showList && <MachinePicker blades={farm.blades} selected={[]} onChange={() => undefined} hideOffline={false} readOnly />}
-      </Section>
+      </Section>}
     </div>
   )
 }

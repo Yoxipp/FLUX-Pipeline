@@ -40,7 +40,7 @@ def _tq(req):
     import tractor.api.query as tq  # noqa: Tractor's Python only
 
     engine = req.get("engine") or ""
-    # Login account (school 2026-10-22: only "root" logs in, as tq does), not the job owner.
+    # Login account (studio environment engine_user, else the FLUX user), not the job owner.
     params = {"user": req.get("login") or req.get("user") or ""}
     if engine:
         host, _, port = engine.partition(":")

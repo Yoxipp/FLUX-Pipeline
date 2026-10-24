@@ -1,7 +1,7 @@
 // LaunchTab.tsx: submit a shot or a published USD to Tractor.
 // Default view = what / frames / renderer / Launch. "Where" (machines) and "When" are folded with a
 // one-line summary; team-wide settings live in the Advanced tab. How much of the farm a team gets is
-// the school's Shares (engine limits.config), not a FLUX setting.
+// the engine's Shares (limits.config), not a FLUX setting.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -44,7 +44,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
   const [usdPath, setUsdPath] = useState('')
   const [frameStart, setFrameStart] = useState('')
   const [frameEnd, setFrameEnd] = useState('')
-  const [renderer, setRenderer] = useState<'karma' | 'renderman'>(settings?.renderer ?? 'karma')
+  const [renderer, setRenderer] = useState<'karma' | 'renderman' | ''>(settings?.renderer ?? '')
   const [freeze, setFreeze] = useState(settings?.freeze_by_default ?? true)
   const [freezeWhen, setFreezeWhen] = useState<RenderFreezeWhen>(settings?.freeze_when ?? 'start')
   const [startAt, setStartAt] = useState('')   // "YYYY-MM-DDTHH:MM", empty = now
@@ -175,7 +175,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     if (!restored.current) return
     const [, shot] = shotKey.split('/')
     const form: RenderLastForm = {
-      source, seq, shot: shot ?? '', usd_path: usdPath, renderer, freeze, limit_job: limitJob,
+      source, seq, shot: shot ?? '', usd_path: usdPath, renderer: renderer as 'karma' | 'renderman', freeze, limit_job: limitJob,
       share_percent: sharePct, share_of: shareOf, target: targetMode, hosts, groups, freeze_when: freezeWhen,
       denoise, denoise_crossframe: denoiseCross,
     }
@@ -185,17 +185,17 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
     denoise, denoiseCross])
 
   const targetEmpty = targetMode === 'pick' && pickedCount === 0
-  const canSubmit = !submitting && !targetEmpty && (source === 'shot' ? !!shotKey : !!usdPath.trim())
+  const canSubmit = !submitting && !targetEmpty && !!renderer && (source === 'shot' ? !!shotKey : !!usdPath.trim())
   const submit = async () => {
     if (!canSubmit) return
-    const body: Parameters<typeof api.renderSubmit>[0] = { project, renderer, freeze, priority }
+    const body: Parameters<typeof api.renderSubmit>[0] = { project, renderer: renderer as 'karma' | 'renderman', freeze, priority }
     if (denoise && renderer === 'renderman') { body.denoise = true; body.denoise_crossframe = denoiseCross }
     if (source === 'shot') { const [seq, shot] = shotKey.split('/'); body.seq = seq; body.shot = shot }
     else body.usd_path = usdPath.trim()
     if (frameStart !== '') body.frame_start = Number(frameStart)
     if (frameEnd !== '') body.frame_end = Number(frameEnd)
     if (startAt) { body.start_at = startAt; body.freeze_when = freezeWhen }
-    body.share_percent = 0   // never a FLUX cap per job: the school's Shares share the farm
+    body.share_percent = 0   // never a FLUX cap per job: the engine's Shares share the farm
     if (targetMode === 'pick') { body.hosts = hosts; body.groups = groups }
     setSubmitting(true)
     try {
@@ -273,7 +273,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         </Row>
         <Row label={tr('Moteur', 'Renderer')}>
           <Select value={renderer} onValueChange={v => setRenderer(v as 'karma' | 'renderman')}>
-            <SelectTrigger style={sel} />
+            <SelectTrigger style={sel}>{!renderer && <span style={{ color: 'var(--ink-3)' }}>{tr('Choisir', 'Pick')}</span>}</SelectTrigger>
             <SelectContent>
               <SelectItem value="karma">Karma</SelectItem>
               <SelectItem value="renderman">RenderMan</SelectItem>
@@ -287,7 +287,7 @@ export function LaunchTab({ project, settings, shots, farm, onSubmitted }: {
         </Row>
       </div>
 
-      {/* How much of the farm: the school's Shares (limits.config) decide, not FLUX (2026-10-23). */}
+      {/* How much of the farm: the engine's Shares (limits.config) decide, not FLUX (2026-10-23). */}
       <Fold title={tr('Ou', 'Where')} summary={whereSummary} open={whereOpen} onToggle={() => setWhereOpen(o => !o)}>
         <Row label={tr('Machines', 'Machines')}>
           <Toggle value={targetMode} onChange={id => setTargetMode(id as 'any' | 'pick')}

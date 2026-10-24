@@ -7,8 +7,8 @@ Both v1 renderers go through husk on a published USD:
   * Karma      -> husk --renderer BRAY_HdKarma
   * RenderMan  -> husk --renderer HdPrmanLoaderRendererPlugin (RenderMan for Houdini)
 
-Every path written in the job must be UNC or relative: jobs run under a
-service account that has no drive letters (ECOLE_ENV.md).
+Paths written in the job must be UNC or relative when the studio environment sets
+forbid_drive_letters (jobs then run under a service account without drive letters).
 """
 from __future__ import annotations
 
@@ -65,13 +65,15 @@ class RenderJobSpec:
     # into <output dir>/denoised. The frames need RenderMan's denoise AOVs (set in Houdini).
     denoise: bool = False
     denoise_exe: str = ""            # denoise_batch on the blades (local path, drive letter allowed)
+    denoise_tag: str = ""            # Tractor limit tag of the denoise commands (studio environment), "" = no -tags
+    forbid_drive_letters: bool = False  # studio rule: refuse drive letter paths (not in simulation)
     denoise_crossframe: bool = True  # -cf: reads the neighbour frames, better in animation
     # Denoise an already rendered sequence (output_pattern = that sequence, $F<n> = frame padding): no husk task.
     denoise_only: bool = False
 
 
 def after_clause(start_after: str) -> str:
-    """Alfred '-after {month day hour:minute}' value (format to confirm at school, phase 0)."""
+    """Alfred '-after {month day hour:minute}' value (format validated on a real farm)."""
     try:
         when = datetime.strptime(start_after[:16], "%Y-%m-%dT%H:%M")
     except ValueError:
@@ -127,8 +129,6 @@ def husk_command(spec: RenderJobSpec, first: int, last: int) -> List[str]:
     ]
 
 
-# Tractor limit tag of the school for denoise commands (limits.config "Denoise" Shares).
-DENOISE_TAG = "Denoise"
 DENOISE_DIR = "denoised"
 _FRAME_TOKEN = re.compile(r"\$F(\d)")  # husk frame token, $F4 = 4 digits
 
@@ -147,6 +147,8 @@ def freeze_command(spec: RenderJobSpec) -> List[str]:
 
 
 def validate_spec(spec: RenderJobSpec, strict: bool = True) -> RenderJobSpec:
+    # Drive letters are refused only when the studio asks for it (and not in simulation).
+    strict = strict and spec.forbid_drive_letters
     if spec.renderer not in RENDERER_DELEGATES:
         raise JobValidationError(f"unknown renderer '{spec.renderer}' (expected: {', '.join(RENDERER_DELEGATES)})")
     if spec.denoise_only:
@@ -257,11 +259,12 @@ def to_alf(spec: RenderJobSpec, strict: bool = True) -> str:
 
 
 def _denoise_tasks(spec: RenderJobSpec, service: str, pad: str) -> List[str]:
-    """One denoise_batch task per chunk, tagged with the school's Denoise limit."""
+    """One denoise_batch task per chunk, tagged with the studio's denoise limit when it has one."""
+    tags = f" -tags {_tcl(spec.denoise_tag)}" if spec.denoise_tag else ""
     lines = []
     for first, last in chunk_frames(spec.frame_start, spec.frame_end, spec.chunk_size, spec.frame_step):
         lines.append(f"{pad}Task -title {_tcl(f'denoise {first}-{last}')} -cmds {{")
-        lines.append(f"{pad}    RemoteCmd {_tcl_cmd(denoise_command(spec, first, last))}{service} -tags {_tcl(DENOISE_TAG)}")
+        lines.append(f"{pad}    RemoteCmd {_tcl_cmd(denoise_command(spec, first, last))}{service}{tags}")
         lines.append(f"{pad}}}")
     return lines
 

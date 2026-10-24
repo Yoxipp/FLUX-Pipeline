@@ -1,12 +1,15 @@
 """Farm Shares from the engine's limits.config (read; written only by the locked environment screen).
 
-The school sets the teams and their share of the farm once a year in limits.config (Tractor Limits,
+The studio sets the teams and their share of the farm in limits.config (Tractor Limits,
 "Shares" per limit tag: nominal = fair share, cap = max part of the farm). Tractor balances the
 teams itself at each dispatch, nothing killed. A job whose Tractor project is not one of the
-Shares falls in "default" (cap 0.1 at school on 2026-10-23): FLUX only warns about that.
+Shares falls in the default share: FLUX only warns about that.
+
+The tag of FLUX's commands and the name of the default share come from the studio environment
+(studio_env render_tag / default_share); the constants below are the neutral fallbacks.
 
 The engine serves its config files over HTTP (as it does for the blades):
-http://<engine>/Tractor/config?file=limits.config (read at school on 2026-10-23).
+http://<engine>/Tractor/config?file=limits.config (read on a real engine on 2026-10-23).
 """
 from __future__ import annotations
 
@@ -81,7 +84,7 @@ def fetch_shares(engine: str) -> Optional[Dict[str, Dict[str, dict]]]:
             return hit["shares"]
     shares = None
     try:
-        with urllib.request.urlopen(url, timeout=_TIMEOUT_S) as resp:  # read only GET on the school engine
+        with urllib.request.urlopen(url, timeout=_TIMEOUT_S) as resp:  # read only GET on the engine
             shares = parse_shares(resp.read().decode("utf-8", errors="replace")) or None
     except (OSError, ValueError):
         shares = None
@@ -90,16 +93,17 @@ def fetch_shares(engine: str) -> Optional[Dict[str, Dict[str, dict]]]:
     return shares
 
 
-def teams(shares: Optional[Dict[str, Dict[str, dict]]], tag: str = RENDER_TAG) -> list:
-    """Team names of the render tag (the Shares of FLUX's commands), 'default' excluded."""
-    return sorted(t for t in ((shares or {}).get(tag) or {}) if t != DEFAULT_SHARE)
+def teams(shares: Optional[Dict[str, Dict[str, dict]]], tag: str = RENDER_TAG,
+          default_share: str = DEFAULT_SHARE) -> list:
+    """Team names of the render tag (the Shares of FLUX's commands), the default share excluded."""
+    return sorted(t for t in ((shares or {}).get(tag) or {}) if t != default_share)
 
 
-# ── environment screen: edit the Shares (2026-10-23, locked by "Understand" + password) ──
-# The password is in this open source code: a guard against mistakes, not a security.
+# ── farm screen: edit the Shares (2026-10-23, locked by the "Understand" phrase) ──
+# Who may open it is decided by the router (project role lead or supervisor). The phrase is a guard
+# against mistakes, not a security.
 
 ENV_PHRASE = "Understand"
-ENV_PASSWORD = "root"
 LIMITS_FILE = "limits.config"
 _TEAM = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
@@ -108,13 +112,13 @@ class LimitsError(ValueError):
     """Readable French message: nothing was written."""
 
 
-def check_unlock(phrase: str, password: str) -> None:
-    if phrase != ENV_PHRASE or password != ENV_PASSWORD:
-        raise LimitsError("Reglages de l'environnement verrouilles : phrase ou mot de passe incorrect")
+def check_unlock(phrase: str) -> None:
+    if phrase != ENV_PHRASE:
+        raise LimitsError("Reglages de la farm verrouilles : phrase incorrecte")
 
 
-def check_teams(teams: Dict[str, dict]) -> Dict[str, dict]:
-    """{team: {"nominal": 0..1, "cap": 0..1}} with 'default' kept. Raises LimitsError."""
+def check_teams(teams: Dict[str, dict], default_share: str = DEFAULT_SHARE) -> Dict[str, dict]:
+    """{team: {"nominal": 0..1, "cap": 0..1}} with the default share kept. Raises LimitsError."""
     if not isinstance(teams, dict) or not teams:
         raise LimitsError("Aucune equipe")
     out: Dict[str, dict] = {}
@@ -127,8 +131,8 @@ def check_teams(teams: Dict[str, dict]) -> Dict[str, dict]:
         if cap is None or not 0 < cap <= 1:
             raise LimitsError(f"{name} : plafond entre 1 et 100 %")
         out[str(name)] = {"nominal": nominal, "cap": cap}
-    if DEFAULT_SHARE not in out:
-        raise LimitsError(f"La part '{DEFAULT_SHARE}' est obligatoire (jobs des equipes inconnues)")
+    if default_share not in out:
+        raise LimitsError(f"La part '{default_share}' est obligatoire (jobs des equipes inconnues)")
     return out
 
 
@@ -169,10 +173,10 @@ def _fmt(x: float) -> str:
     return format(x, "g")
 
 
-def apply_shares(text: str, teams: Dict[str, dict]) -> str:
+def apply_shares(text: str, teams: Dict[str, dict], default_share: str = DEFAULT_SHARE) -> str:
     """Same file with every active Shares block replaced by these teams. Comments and every other
     rule kept as they are; checked by parsing both versions before anything is written."""
-    teams = check_teams(teams)
+    teams = check_teams(teams, default_share)
     nl = "\r\n" if "\r\n" in text else "\n"
     blocks = _share_blocks(text)
     if not blocks:
@@ -181,7 +185,7 @@ def apply_shares(text: str, teams: Dict[str, dict]) -> str:
     for start, end in blocks:
         line_start = text.rfind("\n", 0, start) + 1
         indent = re.match(r"[ \t]*", text[line_start:start]).group(0)
-        names = [t for t in teams if t != DEFAULT_SHARE] + [DEFAULT_SHARE]
+        names = [t for t in teams if t != default_share] + [default_share]
         rows = [f'{indent}\t"{t}": {{"nominal": {_fmt(teams[t]["nominal"])}, "cap": {_fmt(teams[t]["cap"])}}}'
                 for t in names]
         out.append(text[last:start])
@@ -243,19 +247,20 @@ def engine_text(engine: str) -> Optional[str]:
         return None
 
 
-def write_shares(config_dir: str, engine: str, teams: Dict[str, dict], phrase: str, password: str) -> dict:
+def write_shares(config_dir: str, engine: str, teams: Dict[str, dict], phrase: str,
+                 default_share: str = DEFAULT_SHARE) -> dict:
     """Write the new Shares into the engine's limits.config (backup first). Raises LimitsError.
 
     Refused unless the file in that folder is the one the engine serves (wrong folder = never written).
     """
-    check_unlock(phrase, password)
+    check_unlock(phrase)
     path, text = read_local(config_dir)
     served = engine_text(engine)
     if served is None:
         raise LimitsError("Moteur injoignable : impossible de verifier que ce dossier est le sien, rien n'est ecrit")
     if not same_text(served, text):
         raise LimitsError(f"{path} n'est pas le {LIMITS_FILE} que sert le moteur : mauvais dossier, rien n'est ecrit")
-    new = apply_shares(text, teams)
+    new = apply_shares(text, teams, default_share)
     backup = path.with_name(f"{LIMITS_FILE}.flux_{time.strftime('%Y%m%d_%H%M%S')}.bak")
     shutil.copy2(path, backup)
     tmp = path.with_name(f".{LIMITS_FILE}.flux_tmp")
@@ -266,17 +271,18 @@ def write_shares(config_dir: str, engine: str, teams: Dict[str, dict], phrase: s
     return {"path": str(path), "backup": str(backup), "shares": parse_shares(new)}
 
 
-def team_warning(team: str, shares: Optional[Dict[str, Dict[str, dict]]], tag: str = RENDER_TAG) -> Optional[str]:
+def team_warning(team: str, shares: Optional[Dict[str, Dict[str, dict]]], tag: str = RENDER_TAG,
+                 default_share: str = DEFAULT_SHARE) -> Optional[str]:
     """Warning when the team is not one of the Shares of FLUX's commands. None = fine or unknown."""
     by_team = (shares or {}).get(tag)
     if not by_team or team in by_team:
         return None
-    names = teams(shares, tag)
+    names = teams(shares, tag, default_share)
     close = next((n for n in names if n.lower() == (team or "").lower()), None)
     if close:
         return (f"Equipe sur la farm '{team}' : la farm attend '{close}' (majuscules comprises). "
-                f"Sinon les rendus passent dans '{DEFAULT_SHARE}'.")
-    cap = (by_team.get(DEFAULT_SHARE) or {}).get("cap")
+                f"Sinon les rendus passent dans '{default_share}'.")
+    cap = (by_team.get(default_share) or {}).get("cap")
     limit = f", plafonnee a {round(cap * 100)} % de la farm" if cap is not None else ""
     return (f"Equipe sur la farm '{team}' inconnue de la farm (limits.config : {', '.join(names)}). "
-            f"Les rendus passent dans la part '{DEFAULT_SHARE}'{limit}.")
+            f"Les rendus passent dans la part '{default_share}'{limit}.")
