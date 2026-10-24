@@ -28,6 +28,9 @@ P4 : `POST /validate {flow, scope, project?}` -> `{issues, valid}` (statique, n'
 (`valid` dans `state.json`, enregistrer avec erreurs reste permis) et refusent en 409 `{code: E_DESTRUCTIVE_UNCONFIRMED, issues}`
 un node `!` ajoute sans figurer dans `confirmed_destructive` ; `revert` revalide ; `activate` refuse une version figee en
 erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouve une erreur.
+P7 (pages TOOL, ADR 0066) : `GET /pages` -> `{pages, templates, can_edit}`, `POST /pages/validate`, `GET /pages/{id}`
+(`scope` absent = project > team, `scope=shipped` = un modele), `PUT /pages/{id} {scope, page, base_rev, force}` et
+`DELETE /pages/{id}` (Team TD), `GET /pages/{id}/history`. Statiques (avant `/{name}`) ; WS `page_changed` apres une ecriture.
 P5 : `GET /host` (detenteur du verrou, surveillants de ce poste), `POST /events/scene_opened {soft, scene, port?, pid?}`
 (script cote logiciel), `GET /{name}/activation` (3 voyants : erreurs, avertissements `acked`, `dry_run`) ; `activate
 {scope, acked}` exige 0 erreur, avertissements lus et essai a blanc reussi sur `current` (409 `{gate}` sinon), note le dernier

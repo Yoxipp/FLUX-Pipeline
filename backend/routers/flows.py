@@ -31,8 +31,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import (engine, events, locations, migrate_v1, patterns, resolver, rights, runs, scheduler, store,
-                        validate)
+from flux_flows import (engine, events, locations, migrate_v1, page_store, pages, patterns, resolver, rights, runs,
+                        scheduler, store, validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
@@ -335,6 +335,111 @@ async def flows_websocket(websocket: WebSocket) -> None:
     finally:
         read_task.cancel()
         events.unsubscribe(sub)
+
+
+# -- TOOL pages (04_PAGES_TOOL, ADR 0066) -------------------------------------
+# Static, so declared before /{name}. Everyone reads and lists; creating, editing and
+# deleting a page needs the Team TD box (rights.ADMIN, 01 §7). Running a page button
+# is POST /flows/{flow}/run (everyone, active flow only).
+
+def _page_roots(project: Optional[str]) -> dict:
+    try:
+        return locations.page_roots(project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+
+def _parse_page(doc: dict[str, Any], page_id: Optional[str] = None) -> pages.Page:
+    try:
+        page = pages.parse_page(doc)
+    except pages.PageSchemaError as exc:
+        raise HTTPException(status_code=422, detail={"message": str(exc)}) from exc
+    if page_id is not None and page.id != page_id:
+        raise HTTPException(status_code=400, detail={"message": f"id {page.id} different de l'adresse {page_id}"})
+    return page
+
+
+def _page_issues(page: pages.Page, scope: Optional[str], user: Optional[str],
+                 project: Optional[str]) -> list[dict[str, Any]]:
+    env = pages.PageEnv(scope=scope, flow_lookup=page_store.flow_lookup(_roots(user, project)))
+    return [i.to_dict() for i in pages.validate_page(page, env)]
+
+
+@router.get("/pages")
+async def list_pages(project: Optional[str] = None) -> dict[str, Any]:
+    """Pages of team and project (TOOL), the shipped templates and whether the user may edit."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _page_roots(project)
+    listed = await _call(page_store.list_pages, roots)
+    templates = await _call(page_store.list_templates, roots)
+    return {"pages": listed, "templates": templates,
+            "can_edit": {scope: rights.allowed(current, rights.ADMIN, scope) for scope in pages.SCOPES}}
+
+
+class PageValidateBody(BaseModel):
+    page: dict[str, Any]
+    scope: Optional[str] = None
+    project: Optional[str] = None
+
+
+@router.post("/pages/validate")
+async def validate_page(body: PageValidateBody) -> dict[str, Any]:
+    """P_* issues of a page being edited (debounced by the page editor, 04 §5)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    page = _parse_page(body.page)
+    issues = await asyncio.to_thread(_page_issues, page, body.scope, current["user"], body.project)
+    return {"issues": issues}
+
+
+@router.get("/pages/{page_id}")
+async def get_page(page_id: str, scope: Optional[str] = None, project: Optional[str] = None) -> dict[str, Any]:
+    """A page (without scope: the winning one, project > team; scope=shipped: a template)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _page_roots(project)
+    if scope is None:
+        scope = await _call(page_store.resolve, roots, page_id)
+        if scope is None:
+            raise HTTPException(status_code=404, detail={"message": f"page {page_id} introuvable"})
+    got = await _call(page_store.read_page, roots, scope, page_id)
+    issues = await asyncio.to_thread(_page_issues, got["page"], scope, current["user"], project)
+    return {"id": page_id, "scope": scope, "rev": got["rev"], "page": pages.to_document(got["page"]),
+            "issues": issues, "can_edit": scope in pages.SCOPES and rights.allowed(current, rights.ADMIN, scope)}
+
+
+class PageSaveBody(BaseModel):
+    scope: str
+    project: Optional[str] = None
+    page: dict[str, Any]
+    base_rev: Optional[str] = None    # rev read by the editor; None = a new page
+    force: bool = False
+
+
+@router.put("/pages/{page_id}")
+async def save_page(page_id: str, body: PageSaveBody) -> dict[str, Any]:
+    """Save a page (Team TD). Saving with errors is allowed: the page is shown invalid."""
+    current = await _require(rights.ADMIN, body.scope if body.scope in pages.SCOPES else "team")
+    page = _parse_page(body.page, page_id)
+    roots = _page_roots(body.project)
+    saved = await _call(page_store.save_page, roots, body.scope, page, user=current["user"] or "",
+                        base_rev=body.base_rev, force=body.force)
+    issues = await asyncio.to_thread(_page_issues, page, body.scope, current["user"], body.project)
+    events.emit({"type": "page_changed", "page": page_id, "scope": body.scope, "project": body.project,
+                 "rev": saved["rev"], "by": current["user"]})
+    return {**saved, "issues": issues}
+
+
+@router.delete("/pages/{page_id}")
+async def delete_page(page_id: str, scope: str, project: Optional[str] = None) -> dict[str, Any]:
+    current = await _require(rights.ADMIN, scope if scope in pages.SCOPES else "team")
+    done = await _call(page_store.delete_page, _page_roots(project), scope, page_id, user=current["user"] or "")
+    events.emit({"type": "page_changed", "page": page_id, "scope": scope, "project": project,
+                 "rev": None, "by": current["user"]})
+    return done
+
+
+@router.get("/pages/{page_id}/history")
+async def get_page_history(page_id: str, scope: str, project: Optional[str] = None) -> list[dict[str, Any]]:
+    return await _call(page_store.list_history, _page_roots(project), scope, page_id)
 
 
 # -- CRUD (after every static route) ------------------------------------------
