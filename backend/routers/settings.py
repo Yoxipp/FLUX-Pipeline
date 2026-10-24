@@ -73,6 +73,8 @@ async def init_first_launch(req: InitRequest) -> dict:
     """First-launch setup: scaffold FLUX root structure, persist workspace + username."""
     # Artist names are always stored/displayed in FULL UPPERCASE (frontend + backend).
     username = req.username.strip().upper()
+    if not user_utils.is_valid_user_name(username):
+        raise HTTPException(status_code=400, detail=f"Nom d'artiste invalide : {username}")
 
     def _scaffold():
         root = Path(req.workspace)
@@ -132,6 +134,8 @@ async def update_settings(req: SettingsUpdate) -> dict:
     if req.username:
         # Artist names are always stored/displayed in FULL UPPERCASE (frontend + backend).
         new_user = req.username.strip().upper()
+        if not user_utils.is_valid_user_name(new_user):
+            raise HTTPException(status_code=400, detail=f"Nom d'artiste invalide : {new_user}")
         # set_current_user crée le dossier FLUX_ROOT/USER/<name>/ en plus de persister
         await loop.run_in_executor(None, lambda: user_utils.set_current_user(new_user))
         await loop.run_in_executor(None, lambda: set_config_username(new_user))
