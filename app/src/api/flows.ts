@@ -2,9 +2,9 @@
 // P0: read-only, on top of the v1 action routes. P1 adds the /flows routes, P2 the runs.
 // The TD boxes themselves (flows_td, flows_team_td) are written through /settings/user-data.
 
-import { api, apiCall } from './client'
+import { api, apiCall, BASE_URL } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageButton, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RenamePlan, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
+import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageButton, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RenamePlan, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -115,4 +115,14 @@ export const flowsApi = {
     apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/rename`, { scope, old, new: next, ...opts }),
   renameParam: (flow: string, old: string, next: string, opts: { apply?: boolean; project?: string } = {}): Promise<RenamePlan> =>
     apiCall('POST', '/flows/pages/rename_param', { flow, old, new: next, ...opts }),
+  // Page data (ADR 0066): records merged from every author's journal; etag = nothing moved since.
+  pageData: (page: string, collection: string, opts: { project?: string; etag?: string } = {}): Promise<PageDataRead> =>
+    apiCall('GET', `/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}${qs(opts)}`),
+  writePageData: (page: string, collection: string, ops: PageDataOp[], project?: string): Promise<{ rids: string[]; etag: string }> =>
+    apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}`, { ops, project }),
+  // The backend copies the picked local file (bytes never go through the API, ADR 0005).
+  addPageImage: (page: string, collection: string, path: string, project?: string): Promise<{ image: string }> =>
+    apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}/media`, { path, project }),
+  pageImageUrl: (page: string, collection: string, image: string, project?: string): string =>
+    `${BASE_URL}/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}/media/${encodeURIComponent(image.replace(/^media\//, ''))}${qs({ project })}`,
 }

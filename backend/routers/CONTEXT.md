@@ -34,6 +34,8 @@ P7 (pages TOOL, ADR 0066) : `GET /pages` -> `{pages, templates, can_edit}`, `POS
 Liens (etape 2) : `GET /pages/links`, `GET /pages/buttons`, `POST /pages/link_button {flow, button_id}` (droits d'ecriture du flow),
 `POST /pages/rename_param {flow, old, new, apply}` (pages Team TD), `POST /pages/{id}/rename {scope, old, new, apply}` (page + flow).
 La validation d'un flow recoit les liens des pages (`W_PAGE_LINK_BROKEN`) ; celle d'une page ajoute `P_BUTTON_ORPHAN`.
+Donnees (etape 3) : `GET /pages/{id}/data/{collection}?etag=` -> `{records, etag}` ou `{unchanged}`, `POST .../data/{collection} {ops}`
+(tous, ou Team TD si `write: team_td` ; WS `page_data`), `POST .../media {path}` (copie d'un fichier local), `GET .../media/{name}` (affichage).
 P5 : `GET /host` (detenteur du verrou, surveillants de ce poste), `POST /events/scene_opened {soft, scene, port?, pid?}`
 (script cote logiciel), `GET /{name}/activation` (3 voyants : erreurs, avertissements `acked`, `dry_run`) ; `activate
 {scope, acked}` exige 0 erreur, avertissements lus et essai a blanc reussi sur `current` (409 `{gate}` sinon), note le dernier

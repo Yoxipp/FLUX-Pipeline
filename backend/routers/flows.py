@@ -31,8 +31,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import (engine, events, locations, migrate_v1, page_links, page_store, pages, patterns, resolver,
-                        rights, runs, scheduler, store, validate)
+from flux_flows import (engine, events, locations, migrate_v1, page_data, page_links, page_store, pages, patterns,
+                        resolver, rights, runs, scheduler, store, validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
@@ -542,6 +542,83 @@ async def rename_widget(page_id: str, body: RenameWidgetBody) -> dict[str, Any]:
     events.emit({"type": "page_changed", "page": page_id, "scope": body.scope, "project": body.project,
                  "rev": done["page"]["rev"], "by": current["user"]})
     return done
+
+
+# -- page data (ADR 0066 n°3): one journal per author, merged on read ------------
+
+def _page_and_spec(page_id: str, collection: str, project: Optional[str]):
+    roots = _page_roots(project)
+    scope = page_store.resolve(roots, page_id)
+    if scope is None:
+        raise FlowStoreError(f"page {page_id} introuvable", 404)
+    page = page_store.read_page(roots, scope, page_id)["page"]
+    spec = page_data.spec_of(page, collection)
+    return page_data.collection_dir(roots, scope, page_id, spec), spec
+
+
+@router.get("/pages/{page_id}/data/{collection}")
+async def get_page_data(page_id: str, collection: str, project: Optional[str] = None,
+                        etag: Optional[str] = None) -> dict[str, Any]:
+    """Records of a collection; with the etag the reader has: {unchanged: true} when nothing moved."""
+    def work() -> dict[str, Any]:
+        folder, spec = _page_and_spec(page_id, collection, project)
+        return {**page_data.read_records(folder, etag), "write": spec.write}
+
+    return await _call(work)
+
+
+class PageDataBody(BaseModel):
+    project: Optional[str] = None
+    ops: list[dict[str, Any]]
+
+
+@router.post("/pages/{page_id}/data/{collection}")
+async def post_page_data(page_id: str, collection: str, body: PageDataBody) -> dict[str, Any]:
+    """put / del operations, appended to the journal of the local user (everyone, or Team TD
+    when the collection says write: team_td)."""
+    current = await asyncio.to_thread(rights.current_rights)
+
+    def work() -> dict[str, Any]:
+        folder, spec = _page_and_spec(page_id, collection, body.project)
+        if not page_data.can_write(spec, current):
+            raise rights.FlowRightsError("team_td")
+        return page_data.write_ops(folder, spec, body.ops, user=current["user"] or "")
+
+    done = await _call(work)
+    events.emit({"type": "page_data", "page": page_id, "collection": collection, "project": body.project,
+                 "etag": done["etag"], "by": current["user"]})
+    return done
+
+
+class PageMediaBody(BaseModel):
+    project: Optional[str] = None
+    path: str                       # a local file the user picked (copied, never uploaded: ADR 0005)
+
+
+@router.post("/pages/{page_id}/data/{collection}/media")
+async def post_page_media(page_id: str, collection: str, body: PageMediaBody) -> dict[str, Any]:
+    current = await asyncio.to_thread(rights.current_rights)
+
+    def work() -> dict[str, Any]:
+        folder, spec = _page_and_spec(page_id, collection, body.project)
+        if not page_data.can_write(spec, current):
+            raise rights.FlowRightsError("team_td")
+        return {"image": page_data.add_image(folder, body.path)}
+
+    return await _call(work)
+
+
+@router.get("/pages/{page_id}/data/{collection}/media/{name}")
+async def get_page_media(page_id: str, collection: str, name: str, project: Optional[str] = None):
+    """An image of a collection, for <img src> (display only, like production/ref)."""
+    from fastapi.responses import FileResponse
+
+    def work() -> Path:
+        folder, _ = _page_and_spec(page_id, collection, project)
+        return page_data.media_file(folder, name)
+
+    path = await _call(work)
+    return FileResponse(path, media_type=page_data.media_type(name))
 
 
 @router.get("/pages/{page_id}/history")

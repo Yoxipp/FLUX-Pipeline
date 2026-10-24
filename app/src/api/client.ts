@@ -26,7 +26,7 @@ import type {
   ZBrushPublishResult,
 } from '../types'
 
-const BASE_URL = 'http://127.0.0.1:8765'
+export const BASE_URL = 'http://127.0.0.1:8765'
 
 export interface WorkspacesInfo {
   active: string | null

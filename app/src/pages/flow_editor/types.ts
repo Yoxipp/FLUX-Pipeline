@@ -453,3 +453,19 @@ export interface PageLink {
 }
 export interface PageButton { page: string; page_label: string; scope: PageScope; widget: string; label: string; flow: string; button_id: string }
 export interface RenamePlan { files: { kind: 'page' | 'flow'; scope: string; id: string; path?: string; next_version?: number; widgets?: string[] }[] }
+
+// Page data (ADR 0066 n°3): a record = its fields + who / when (merged from every journal).
+export interface PageRecord {
+  rid:         string
+  _created_by: string
+  _created_at: string | null
+  _by:         string
+  _at:         string | null
+  [field: string]: unknown
+}
+export type PageDataRead =
+  | { etag: string; unchanged: true; write?: 'all' | 'team_td' }
+  | { etag: string; unchanged: false; records: PageRecord[]; write: 'all' | 'team_td' }
+export type PageDataOp =
+  | { op: 'put'; rid?: string; fields: Record<string, unknown> }
+  | { op: 'del'; rid: string }
