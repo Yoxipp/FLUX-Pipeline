@@ -64,14 +64,14 @@ class PagesRouter(unittest.TestCase):
         self.boxes = {"flows_team_td": True}
         saved = self.client.put("/flows/pages/daily_render", json={"scope": "team", "page": _page()})
         self.assertEqual(saved.status_code, 200)
-        self.assertIn("P_FLOW_NOT_FOUND", [i["code"] for i in saved.json()["issues"]])
+        self.assertEqual(saved.json()["issues"], [])
         self.boxes = {}
         listed = self.client.get("/flows/pages").json()
         self.assertEqual([p["id"] for p in listed["pages"]], ["daily_render"])
         self.assertEqual(listed["can_edit"], {"team": False, "project": False})
         got = self.client.get("/flows/pages/daily_render").json()
         self.assertEqual((got["scope"], got["rev"], got["can_edit"]), ("team", saved.json()["rev"], False))
-        self.assertEqual(got["page"]["layout"][1]["row"][0]["on_click"]["button_id"], "render")
+        self.assertNotIn("on_click", got["page"]["layout"][1]["row"][0])   # ADR 0068: dropped
         self.assertEqual(self.client.delete("/flows/pages/daily_render", params={"scope": "team"}).status_code, 403)
 
     def test_conflict_and_schema_errors(self) -> None:
@@ -84,12 +84,6 @@ class PagesRouter(unittest.TestCase):
         self.assertEqual(bad.status_code, 422)
         other = self.client.put("/flows/pages/other_page", json={"scope": "team", "page": _page()})
         self.assertEqual(other.status_code, 400)
-
-    def test_validate_sees_the_flows(self) -> None:
-        self.boxes = {"flows_team_td": True}
-        self.client.put("/flows/daily_render", json={"flow": _flow(), "scope": "team"})
-        r = self.client.post("/flows/pages/validate", json={"page": _page(), "scope": "team"})
-        self.assertEqual([i["code"] for i in r.json()["issues"]], ["P_FLOW_INACTIVE"])
 
     def test_templates_are_listed_apart(self) -> None:
         listed = self.client.get("/flows/pages").json()

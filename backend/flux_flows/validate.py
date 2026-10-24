@@ -45,7 +45,8 @@ BLOCKS = {FOREACH_BEGIN: FOREACH_END, FOR_BEGIN: FOR_END, WHILE_BEGIN: WHILE_END
 ENDS = {end: begin for begin, end in BLOCKS.items()}
 FLOW_CALL = "subflow.flow_call"
 LEGACY = "flux.legacy_command"
-DYNAMIC = (FLOW_CALL, LEGACY)         # ports declared in params.ports (+ any name for FlowCall)
+PAGE_NODE = "event.page_inputs"
+DYNAMIC = (FLOW_CALL, LEGACY, PAGE_NODE)   # ports declared in params.ports (+ any name for FlowCall)
 LOOP_RISKY = ("action.delete", "action.move")
 INSTANCE_RE = re.compile(r"^session\.[a-z0-9]+_instance$")
 _LIST_RE = re.compile(r"^list\[(.+)\]$")
@@ -87,6 +88,7 @@ class Env:
     tested: Optional[Iterable[str]] = None         # node ids the dry run of this version simulated
     shipped_changed: bool = False                  # team copy older than the shipped flow
     page_links: Optional[List[Dict[str, Any]]] = None   # links of the TOOL pages to this flow (P7, page_links)
+    page_lookup: Optional[Callable[[str], Any]] = None   # page id -> Page or None (Page node, ADR 0068)
 
 
 def default_env(project: Optional[str] = None, **extra: Any) -> Env:
@@ -134,6 +136,7 @@ _WHY = {
     "W_SHIPPED_CHANGED": ("reprise de l'ADR 0039", "from ADR 0039"),
     "W_PORT_HIDDEN": ("valeur ignoree dans ce mode", "value ignored in this mode"),
     "W_PAGE_LINK_BROKEN": ("la page n'est pas ouverte a ce moment-la", "the page is not open at that moment"),
+    "E_PAGE_NOT_FOUND": ("aucun clic ne peut lancer ce flow", "no click can start this flow"),
 }
 
 
@@ -697,7 +700,8 @@ def _check_flow_structure(net: _Net, issues: List[Issue], sound: Dict[str, Tuple
 
     for (dst, dport), link in net.data_in.items():
         src, _ = _split(link.from_)
-        if not net.runs_in_chain(src):
+        if not net.runs_in_chain(src) or net.nodes[src].type == PAGE_NODE:
+            # ADR 0068: an InputsPageReader that did not start the run gives the page defaults.
             continue
         for reader in sorted(chain_readers(dst, {dst})):
             if reader == src or reader not in reached:
@@ -819,6 +823,27 @@ def _check_destructive(flow: Flow, issues: List[Issue], env: Env) -> None:
 
 # -- entry points --------------------------------------------------------------------
 
+def _check_pages(flow: Flow, issues: List[Issue], env: Env) -> None:
+    """Page nodes (ADR 0068): the page exists, and every linked button or field is still in it."""
+    from flux_flows import page_inputs
+
+    for nid, node in page_inputs.page_nodes(flow):
+        page_id = str(node.params.get("page") or "")
+        if not page_id:
+            continue      # E_REQUIRED_EMPTY
+        page = env.page_lookup(page_id)
+        if page is None:
+            issues.append(_issue("E_PAGE_NOT_FOUND", nid, f"Page {nid} : la page TOOL `{page_id}` n'existe pas",
+                                 f"Page {nid}: the TOOL page `{page_id}` does not exist", port="page"))
+            continue
+        for port, _reason in page_inputs.broken_links(flow, nid, page):
+            issues.append(_issue("W_PAGE_LINK_BROKEN", nid,
+                                 f"Page {nid} : `{port}` n'est plus dans la page {page.label or page_id} : "
+                                 "rafraichis les ports (selectionne le node) et refais le lien",
+                                 f"Page {nid}: `{port}` is no longer in the page {page.label or page_id}: "
+                                 "refresh the ports (select the node) and link again", port=port))
+
+
 def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
     """Every issue of *flow*, errors first, then by node."""
     env = env or Env()
@@ -844,6 +869,8 @@ def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
             for issue in sub:
                 issue.message_fr, issue.message_en = f"[{nid}] {issue.message_fr}", f"[{nid}] {issue.message_en}"
             issues += sub
+    if env.page_lookup is not None:
+        _check_pages(flow, issues, env)
     if env.page_links:
         from flux_flows import page_links
 

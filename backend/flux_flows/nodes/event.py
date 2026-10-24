@@ -26,9 +26,10 @@ def _payload(ctx, inputs, params):
 @flow_node("event.button", "Button", icon="MousePointerClick", outputs=[_THEN, _VALUES],
            params=[port("button_id", "str", "Bouton de page qui lance ce flow", "Page button that starts this flow",
                         "daily_render")],
-           shelf=1, aliases=["bouton", "page", "start"],
-           doc_fr="Part quand on clique le bouton d'une page TOOL, ou avec Run dans l'editeur.",
-           doc_en="Starts when a TOOL page button is clicked, or with Run in the editor.")
+           aliases=["bouton"],
+           doc_fr="Ancien depart de page (ADR 0068) : remplace par InputsPageReader. Ne part plus que par Run dans "
+                  "l'editeur.",
+           doc_en="Old page start (ADR 0068): replaced by InputsPageReader. Only starts with Run in the editor.")
 async def button(ctx, inputs, params):
     return _payload(ctx, inputs, params)
 

@@ -31,7 +31,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import (engine, events, locations, migrate_v1, page_data, page_links, page_store, pages, patterns,
+from flux_flows import (engine, events, locations, migrate_v1, page_data, page_inputs, page_links, page_store, pages,
+                        patterns,
                         resolver, rights, runs, scheduler, store, validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
@@ -208,7 +209,8 @@ def _validation_env(roots: dict, scope: str, name: str, project: Optional[str]) 
     tested = done.get("nodes_simulated") if done.get("version") == state.get("current") else None
     return validate.default_env(project if scope == "project" else None, flow_loader=loader, tested=tested,
                                 shipped_changed=store.shipped_changed(roots, scope, name),
-                                page_links=_links_to(name, project))
+                                page_links=_links_to(name, project),
+                                page_lookup=lambda page_id: page_inputs.load_page(page_id, project))
 
 
 def _links_to(name: str, project: Optional[str]) -> list[dict[str, Any]]:
@@ -373,16 +375,7 @@ def _page_issues(page: pages.Page, scope: Optional[str], user: Optional[str],
                  project: Optional[str]) -> list[dict[str, Any]]:
     lookup = page_store.flow_lookup(_roots(user, project))
     found = pages.validate_page(page, pages.PageEnv(scope=scope, flow_lookup=lookup))
-    others = [l for l in page_links.all_links(_page_roots(project)) if l["page"] != page.id]
-    found += page_links.orphan_issues(page, lookup, others)
     return [i.to_dict() for i in found]
-
-
-def _flow_validator(user: Optional[str], project: Optional[str]):
-    """valid for state.json when a page operation writes a flow (same rule as a save)."""
-    def check(scope: str, flow: Flow) -> bool:
-        return not validate.errors(_issues(_roots(user, project), scope, flow, project))
-    return check
 
 
 @router.get("/pages")
@@ -417,55 +410,55 @@ async def get_page_links(project: Optional[str] = None) -> dict[str, Any]:
     return await _call(page_links.index, _page_roots(project))
 
 
-@router.get("/pages/buttons")
-async def get_page_buttons(project: Optional[str] = None) -> list[dict[str, Any]]:
-    """Every page button, for the "Bouton" list of the event.button node."""
-    return await _call(page_links.buttons, _page_roots(project))
+# -- InputsPageReader (ADR 0068): the flow picks its page ------------------------
+
+@router.get("/pages/{page_id}/ports")
+async def get_page_ports(page_id: str, project: Optional[str] = None) -> dict[str, Any]:
+    """params.ports of an InputsPageReader node on this page (buttons, fields) and its defaults."""
+    page = await _call(page_inputs.load_page, page_id, project)
+    if page is None:
+        raise HTTPException(status_code=404, detail={"message": f"page {page_id} introuvable"})
+    return {**page_inputs.ports_of(page), "defaults": page_inputs.defaults_of(page), "label": page.label}
 
 
-class LinkButtonBody(BaseModel):
-    flow: str
-    button_id: str
+@router.get("/pages/{page_id}/flows")
+async def get_page_flows(page_id: str, project: Optional[str] = None) -> dict[str, Any]:
+    """Who uses this page: ``listeners`` {button: [active flows a click runs]} and ``uses``
+    (every flow with an InputsPageReader on it, active or not)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _roots(current["user"], project)
+    return {"listeners": await _call(page_inputs.listeners, roots, page_id),
+            "uses": await _call(page_inputs.uses, roots, page_id)}
+
+
+class PageClickBody(BaseModel):
+    button: str
+    values: dict[str, Any] = {}
     project: Optional[str] = None
 
 
-@router.post("/pages/link_button")
-async def link_button(body: LinkButtonBody) -> dict[str, Any]:
-    """"Au clic": the flow gets an event.button node with this button_id (a new frozen
-    version), or keeps the one it has. Flow rights required (Team TD for team / project)."""
+@router.post("/pages/{page_id}/click")
+async def click_page(page_id: str, body: PageClickBody) -> dict[str, Any]:
+    """A page button: every active flow listening to it runs its active version (409 when none)."""
     current = await asyncio.to_thread(rights.current_rights)
     roots = _roots(current["user"], body.project)
-    scope = await _call(store.resolve, roots, body.flow)
-    if scope is None:
-        raise HTTPException(status_code=404, detail={"message": f"flow {body.flow} introuvable"})
-    await _require(rights.WRITE, scope)
-    done = await _call(page_links.ensure_button_node, roots, body.flow, body.button_id,
-                       user=current["user"] or "", validator=_flow_validator(current["user"], body.project))
-    if done["created"]:
-        events.emit({"type": "flow_changed", "flow": body.flow, "scope": done["scope"], "project": body.project,
-                     "version": done["version"], "revision": done["revision"], "by": current["user"]})
-    return done
-
-
-class RenameParamBody(BaseModel):
-    flow: str
-    old: str
-    new: str
-    apply: bool = False
-    project: Optional[str] = None
-
-
-@router.post("/pages/rename_param")
-async def rename_param(body: RenameParamBody) -> dict[str, Any]:
-    """Renaming an interface param in the flow editor: plan (the pages that change) or
-    apply (every bind.param follows). The editor saves the flow itself."""
-    current = await asyncio.to_thread(rights.current_rights)
-    roots = _page_roots(body.project)
-    if not body.apply:
-        return await _call(page_links.plan_param_rename, roots, body.flow, body.old, body.new)
-    return await _call(page_links.apply_param_rename, roots, body.flow, body.old, body.new,
-                       user=current["user"] or "",
-                       scopes_allowed=lambda sc: rights.allowed(current, rights.ADMIN, sc))
+    targets = (await _call(page_inputs.listeners, roots, page_id)).get(body.button) or []
+    if not targets:
+        raise HTTPException(status_code=409, detail={
+            "message": "Aucun flow actif ne reagit a ce bouton : un TD pose un InputsPageReader sur cette page, "
+                       "relie le bouton et active le flow"})
+    payload = {"page": page_id, "button": body.button, "values": body.values}
+    out = []
+    for t in targets:
+        flow = (await _call(store.read_flow, roots, t["scope"], t["flow"], t["version"]))["flow"]
+        folder = runs.runs_dir(t["scope"], project=body.project, user=current["user"])
+        new_run = engine.Run(flow, scope=t["scope"], project=body.project, user=current["user"],
+                             version=t["version"], event=t["node"], values=body.values, payload=payload,
+                             folder=folder)
+        record = await engine.manager().submit(new_run)
+        out.append({"flow": t["flow"], "scope": t["scope"], "run_id": record["run_id"], "status": record["status"],
+                    "error": record.get("error")})
+    return {"runs": out}
 
 
 @router.get("/pages/publish_panel/{soft}")
@@ -483,6 +476,7 @@ async def get_publish_panel(soft: str, project: Optional[str] = None) -> dict[st
         lookup = page_store.flow_lookup(_roots(current["user"], project))
         page, issues = pages.generated_publish_page(soft, ext.manifest.label, lookup(pages.publish_flow_name(soft)))
         return {"soft": soft, "flow": pages.publish_flow_name(soft), "page": pages.to_document(page),
+                "target": {"flow": pages.publish_flow_name(soft), "event": pages.PUBLISH_BUTTON},
                 "issues": [i.to_dict() for i in issues]}
 
     return await _call(work)
@@ -531,37 +525,6 @@ async def delete_page(page_id: str, scope: str, project: Optional[str] = None) -
     done = await _call(page_store.delete_page, _page_roots(project), scope, page_id, user=current["user"] or "")
     events.emit({"type": "page_changed", "page": page_id, "scope": scope, "project": project,
                  "rev": None, "by": current["user"]})
-    return done
-
-
-class RenameWidgetBody(BaseModel):
-    scope: str
-    old: str
-    new: str
-    apply: bool = False
-    base_rev: Optional[str] = None
-    project: Optional[str] = None
-
-
-@router.post("/pages/{page_id}/rename")
-async def rename_widget(page_id: str, body: RenameWidgetBody) -> dict[str, Any]:
-    """Rename a widget id: plan = the files that change ("2 fichiers seront modifies"),
-    apply = flow first (new version), then the page. Refused without the rights of every file."""
-    current = await _require(rights.ADMIN, body.scope if body.scope in pages.SCOPES else "team")
-    flow_roots = _roots(current["user"], body.project)
-    roots = _page_roots(body.project)
-    plan = await _call(page_links.plan_widget_rename, roots, flow_roots, body.scope, page_id, body.old, body.new)
-    for f in plan["flows"]:
-        if not rights.allowed(current, rights.WRITE, f["scope"]):
-            raise HTTPException(status_code=403, detail={
-                "message": f"Case requise pour modifier le flow {f['id']}", "required": rights.required(rights.WRITE, f["scope"])})
-    if not body.apply:
-        return plan
-    done = await _call(page_links.apply_widget_rename, roots, flow_roots, body.scope, page_id, body.old, body.new,
-                       user=current["user"] or "", base_rev=body.base_rev,
-                       validator=_flow_validator(current["user"], body.project))
-    events.emit({"type": "page_changed", "page": page_id, "scope": body.scope, "project": body.project,
-                 "rev": done["page"]["rev"], "by": current["user"]})
     return done
 
 

@@ -125,40 +125,21 @@ class Validation(unittest.TestCase):
         team["layout"][2]["row"].append({"id": "l1", "kind": "label"})
         self.assertIn("P_BOARD_ROW", _codes(team))
 
-    def test_button_links(self) -> None:
-        doc = _daily()
-        del doc["layout"][0]["children"][1]["row"][0]["on_click"]
-        self.assertIn("P_BUTTON_NO_FLOW", _codes(doc))
-        self.assertIn("P_FLOW_NOT_FOUND", _codes(_daily(), PageEnv("team", lambda n: None)))
-        self.assertIn("P_BUTTON_MISSING_IN_FLOW", _codes(_daily(), PageEnv("team", lambda n: _flow(button="go"))))
-        inactive = _flow()
-        inactive.active = False
-        self.assertIn("P_FLOW_INACTIVE", _codes(_daily(), PageEnv("team", lambda n: inactive)))
-        broken = _flow()
-        broken.valid = False
-        self.assertIn("P_FLOW_INVALID", _codes(_daily(), PageEnv("team", lambda n: broken)))
+    def test_old_flow_links_are_dropped(self) -> None:
+        # ADR 0068: on_click and bind of older files are read then dropped; no link check left.
+        page = pages.parse_page(_daily())
+        text = pages.dump_page(page)
+        self.assertNotIn("on_click", text)
+        self.assertNotIn("bind", text)
+        self.assertEqual(_codes(_daily(), PageEnv("team", lambda n: None)), [])
 
-    def test_scope_mismatch(self) -> None:
-        info = _flow()
+    def test_scope_mismatch_of_a_source(self) -> None:
+        info = _flow(outputs=[{"id": "files", "type": "list[str]"}])
         info.scope = "project"
-        self.assertIn("P_SCOPE_MISMATCH", _codes(_daily(), PageEnv("team", lambda n: info)))
-        self.assertNotIn("P_SCOPE_MISMATCH", _codes(_daily(), PageEnv("project", lambda n: info)))
-
-    def test_params(self) -> None:
-        env = PageEnv("team", lambda n: _flow([{"id": "out_dir", "type": "dir", "default": "x"}]))
-        issues = pages.validate_page(pages.parse_page(_daily()), env)
-        miss = next(i for i in issues if i.code == "P_PARAM_NOT_FOUND")
-        self.assertIn("out_dir", miss.message_fr)
-        self.assertIn("P_PARAM_UNBOUND", [i.code for i in issues])
-        env = PageEnv("team", lambda n: _flow([{"id": "dest_folder", "type": "int", "default": 1}]))
-        self.assertIn("P_TYPE_MISMATCH", _codes(_daily(), env))
-        env = PageEnv("team", lambda n: _flow([{"id": "dest_folder", "type": "dir", "default": "x"},
-                                               {"id": "count", "type": "int"}]))
-        self.assertIn("P_REQUIRED_UNBOUND", _codes(_daily(), env))
-
-    def test_safe_conversions_pass(self) -> None:
-        env = PageEnv("team", lambda n: _flow([{"id": "dest_folder", "type": "str", "default": "x"}]))
-        self.assertEqual(_codes(_daily(), env), [])
+        doc = _daily()
+        doc["layout"].append({"row": [{"id": "files", "kind": "table", "source": {"flow": "daily_render", "output": "files"}}]})
+        self.assertIn("P_SCOPE_MISMATCH", _codes(doc, PageEnv("team", lambda n: info)))
+        self.assertNotIn("P_SCOPE_MISMATCH", _codes(doc, PageEnv("project", lambda n: info)))
 
     def test_no_button(self) -> None:
         doc = _daily()

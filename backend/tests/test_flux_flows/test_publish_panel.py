@@ -37,7 +37,6 @@ class Generated(unittest.TestCase):
         self.assertEqual([(w.id, w.kind) for w in widgets],
                          [("name", "text"), ("format", "select"), ("frames", "int"), ("publish_request", "button")])
         self.assertEqual([o.value for o in widgets[1].options], ["max", "fbx"])
-        self.assertEqual(widgets[3].on_click.flow, "publish_max3d")
         self.assertEqual(issues, [])
         self.assertEqual([i.code for i in pages.validate_page(page) if i.level == "error"], [])
 

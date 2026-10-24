@@ -42,7 +42,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from flux_flows import events, resolver, runs
+from flux_flows import events, page_inputs, resolver, runs
 from flux_flows.model import SUBNET_TYPE, Flow
 from flux_flows.nodes import registry
 from flux_flows.nodes.contract import EXEC_KEY, NodeContext, NodeError
@@ -50,6 +50,7 @@ from flux_flows.nodes.data import cast_literal
 from flux_flows.nodes.operator import (BLOCK_ENDS, BREAK_LOOP, CONDITION_KEY, FOR_BEGIN, FOREACH_BEGIN,
                                        ITEMS_KEY, LIMIT_KEY, SEQUENCE_KEY, WHILE_BEGIN)
 from flux_flows.nodes.subflow import FLOW_CALL, FLOW_OUTPUT
+from flux_flows.page_inputs import PAGE_NODE
 
 log = logging.getLogger("flux.flows.engine")
 
@@ -59,7 +60,7 @@ MAX_RUNNING = 4
 MAX_QUEUE = 20
 PUSH_TICK_S = 0.1          # node_state / link_value grouped: 10 pushes per second per run at most
 WRITE_EVERY_S = 1.0        # record rewritten once per second at most
-START_EVENTS = ("event.manual", "event.button", "event.publish_request")
+START_EVENTS = ("event.manual", "event.page_inputs", "event.button", "event.publish_request")
 DRY_LIMITS_FR = ("Essai a blanc : apres un effet simule, les lectures voient le disque reel ; "
                  "l'essai estime, il ne garantit pas.")
 
@@ -178,6 +179,9 @@ class Run:
                                       trigger={"event": self.event_id, "values": self.values,
                                                # P7: the page button_id (or event type) the run was asked with
                                                **({"button": event} if event and event != self.event_id else {}),
+                                               # ADR 0068: "<page>/<button>" of a page click
+                                               **({"page_button": f"{payload['page']}/{payload['button']}"}
+                                                  if payload and payload.get("page") and payload.get("button") else {}),
                                                **({"payload": {k: runs.preview(v) for k, v in self.payload.items()}}
                                                   if self.payload else {})})
         self.context = base_context(user, project, flow.name, self.run_id)
@@ -528,11 +532,23 @@ class Run:
             self._note_dep(frames, False)
             return outs
         node, spec = self._spec(snode)
+        if node.type == PAGE_NODE:
+            # ADR 0068: a Page node that did not start this run gives the page defaults.
+            return await self._page_defaults(snode, node)
         if spec.family == "event":
             raise NodeError(f"{reader} lit l'evenement {snode}, qui n'a pas declenche ce run")
         if snode in self._exec_targets:
             raise NodeError(f"{reader} lit {snode}, qui n'est pas execute avant lui (donnee lue avant d'etre produite)")
         return await self._eval_pure(snode, node, spec)
+
+    async def _page_defaults(self, nid: str, node) -> Dict[str, Any]:
+        memo = self._memo.get(nid)
+        if memo is not None:
+            return memo[2]
+        page = await asyncio.to_thread(page_inputs.load_page, str(node.params.get("page") or ""), self.project)
+        outs = page_inputs.node_outputs(node, page, {})
+        self._memo[nid] = ((), None, outs)
+        return outs
 
     async def _eval_pure(self, nid: str, node, spec) -> Dict[str, Any]:
         if node.bypass:

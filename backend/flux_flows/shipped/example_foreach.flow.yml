@@ -1,7 +1,7 @@
 flux_flow: 2
 name: example_foreach
 label: "Exemple : boucle et notification"
-description: "Exemple P2 (02_NODES section 12, avec les nodes de P2) : deux departs, une boucle ForEach sur une liste, une variable, un If et un toast. Aucun effet sur le disque."
+description: "Exemple P2 (02_NODES section 12, avec les nodes de P2) : un depart, une boucle ForEach sur une liste, une variable, un If et un toast. Aucun effet sur le disque."
 run_policy: skip_if_running
 interface:
   - {id: notify, type: bool, label: "Notifier a la fin", default: true}
@@ -9,7 +9,6 @@ variables:
   - {name: last, type: str}
 nodes:
   n1: {type: event.manual, pos: [0, 0], params: {}}
-  n2: {type: event.button, pos: [0, 160], params: {button_id: example}}
   n3: {type: data.value, pos: [320, 160], params: {type: list, value: [shot_010, shot_020, shot_030]}}
   n4: {type: operator.foreach_begin, pos: [640, 0], params: {mode: sequential}}
   n5: {type: data.set_variable, pos: [960, 0], params: {name: last}}
@@ -21,7 +20,6 @@ nodes:
 links:
   - {from: n1.then, to: n4.exec}
   - {from: n10.value, to: n9.text}
-  - {from: n2.then, to: n4.exec}
   - {from: n3.value, to: n4.list}
   - {from: n4.item, to: n5.value}
   - {from: n4.item, to: n6.collect}

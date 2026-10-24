@@ -9,6 +9,6 @@ layout:
   - folder: {id: copie, label: Copie, mode: plain}
     children:
       - row:
-          - {id: dest_folder, kind: dir, label: Dossier, default: "$FLUX/DAILY", remember: user, bind: {flow: example_daily_render, param: dest_folder}}
+          - {id: dest_folder, kind: dir, label: Dossier, default: "$FLUX/DAILY", remember: user}
       - row:
-          - {id: daily_render, kind: button, label: "Lancer maintenant", on_click: {flow: example_daily_render, button_id: daily_render}}
+          - {id: daily_render, kind: button, label: "Lancer maintenant"}

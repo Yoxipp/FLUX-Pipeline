@@ -40,7 +40,7 @@ DATA_KINDS = ("feed", "table", "cards", "calendar", "members", "board")
 KINDS = FORM_KINDS + DECOR_KINDS + DATA_KINDS
 VALUE_KINDS = tuple(k for k in FORM_KINDS if k != "button")
 KIND_PROPS: Dict[str, Tuple[str, ...]] = {
-    "button": ("icon", "confirm", "on_click"),
+    "button": ("icon", "confirm"),
     "float": ("min", "max", "step", "unit"),
     "int": ("min", "max", "step"),
     "text": ("multiline", "placeholder", "max_len"),
@@ -59,7 +59,7 @@ KIND_PROPS: Dict[str, Tuple[str, ...]] = {
     "board": ("source", "height"),
 }
 COMMON_PROPS = ("id", "kind", "label", "tooltip", "w")
-VALUE_PROPS = ("default", "remember", "bind")
+VALUE_PROPS = ("default", "remember")
 
 # Value type a form widget sends, and the interface types it may feed (04 §3, B3:
 # identity or a safe conversion: int -> float, path -> str, dir -> path).
@@ -108,16 +108,6 @@ class Option(_Strict):
     label: str = ""
 
 
-class Bind(_Strict):
-    flow: str
-    param: str
-
-
-class OnClick(_Strict):
-    flow: str
-    button_id: str
-
-
 class Source(_Strict):
     data: Optional[str] = None                 # a collection of this page
     flow: Optional[str] = None                 # the last run of a flow ...
@@ -142,11 +132,9 @@ class Widget(_Strict):
     w: Optional[float] = None
     default: Any = None
     remember: Optional[Literal["user", "none"]] = None
-    bind: Optional[Bind] = None
     # button
     icon: Optional[str] = None
     confirm: Optional[str] = None
-    on_click: Optional[OnClick] = None
     # numbers
     min: Optional[float] = None
     max: Optional[float] = None
@@ -322,12 +310,32 @@ def parse_page(data: Any) -> Page:
     """Validate a decoded page document. ``scope`` is dropped."""
     if not isinstance(data, dict):
         raise PageSchemaError("une page est un document YAML de type map")
+    data = _strip_flow_links(data)
     try:
         page = Page.model_validate(data)
     except ValidationError as exc:
         raise PageSchemaError(_format_error(exc)) from None
     page.scope = None
     return page
+
+
+def _strip_flow_links(data: Dict[str, Any]) -> Dict[str, Any]:
+    """ADR 0068: a page no longer points to flows. on_click and bind of older files are
+    dropped (gone at the next save); the flow picks its page with an InputsPageReader."""
+    def walk(items: Any) -> Any:
+        if not isinstance(items, list):
+            return items
+        out = []
+        for item in items:
+            if isinstance(item, dict) and "children" in item:
+                item = {**item, "children": walk(item["children"])}
+            elif isinstance(item, dict) and isinstance(item.get("row"), list):
+                item = {**item, "row": [{k: v for k, v in w.items() if k not in ("on_click", "bind")}
+                                        if isinstance(w, dict) else w for w in item["row"]]}
+            out.append(item)
+        return out
+
+    return {**data, "layout": walk(data.get("layout"))} if "layout" in data else data
 
 
 def load_page_text(text: str) -> Page:
@@ -439,14 +447,7 @@ ERROR, WARNING = "error", "warning"
 _WHY = {
     "P_ID_INVALID": ("les liens passent par les ids", "links go through ids"),
     "P_ID_DUPLICATE": ("un id designe un seul widget", "an id names one widget"),
-    "P_BUTTON_NO_FLOW": ("le bouton ne fait rien", "the button does nothing"),
     "P_FLOW_NOT_FOUND": ("rien a lancer", "nothing to run"),
-    "P_BUTTON_MISSING_IN_FLOW": ("le flow ne reagit pas a ce bouton", "the flow does not react to this button"),
-    "P_BUTTON_ORPHAN": ("le flow ne se lance que depuis l'editeur", "the flow only starts from the editor"),
-    "P_PARAM_NOT_FOUND": ("la valeur n'arriverait nulle part", "the value would go nowhere"),
-    "P_TYPE_MISMATCH": ("pas de conversion sourde", "no silent conversion"),
-    "P_REQUIRED_UNBOUND": ("le flow echouerait", "the flow would fail"),
-    "P_PARAM_UNBOUND": ("la valeur par defaut sera utilisee", "the default value will be used"),
     "P_FLOW_INACTIVE": ("un bouton ne lance qu'un flow actif (A7)", "a button only runs an active flow (A7)"),
     "P_FLOW_INVALID": ("le moteur refuserait le run", "the engine would refuse the run"),
     "P_SCOPE_MISMATCH": ("les autres postes ne voient pas ce flow", "other computers do not see this flow"),
@@ -483,8 +484,7 @@ class PageIssue:
 
 
 def _issue(code: str, widget: Optional[str], fr: str, en: str, fix: Optional[Dict[str, Any]] = None) -> PageIssue:
-    level = WARNING if code in ("P_BUTTON_ORPHAN", "P_PARAM_UNBOUND", "P_FLOW_INACTIVE", "P_NO_BUTTON",
-                                "P_DATA_UNUSED") else ERROR
+    level = WARNING if code in ("P_FLOW_INACTIVE", "P_NO_BUTTON", "P_DATA_UNUSED") else ERROR
     why_fr, why_en = _WHY[code]
     return PageIssue(level, code, widget, fr, en, why_fr, why_en, fix)
 
@@ -598,100 +598,18 @@ def _check_flow_ref(env: PageEnv, wid: str, name: str, issues: List[PageIssue]) 
     return info
 
 
-def _buttons_of(flow: Flow) -> List[str]:
-    from flux_flows.model import iter_nodes
-
-    return [str(n.params.get("button_id")) for _, n in iter_nodes(flow)
-            if n.type == "event.button" and n.params.get("button_id")]
-
-
 def _check_buttons(page: Page, env: PageEnv, issues: List[PageIssue]) -> None:
+    """Form checks. Which flows a button starts is read from the flows (ADR 0068)."""
     widgets = list(iter_widgets(page))
-    buttons = [w for w in widgets if w.kind == "button"]
     has_data = any(w.kind in DATA_KINDS for w in widgets)
-    if not buttons and any(w.kind in VALUE_KINDS for w in widgets) and not has_data:
+    if not any(w.kind == "button" for w in widgets) and any(w.kind in VALUE_KINDS for w in widgets) and not has_data:
         issues.append(_issue("P_NO_BUTTON", None, "Cette page n'a aucun bouton : les champs ne declenchent rien.",
                              "This page has no button: the fields trigger nothing.", {"kind": "add_button", "args": {}}))
-    flows_seen: Dict[str, Optional[FlowInfo]] = {}
-    for b in buttons:
-        if b.on_click is None:
-            issues.append(_issue("P_BUTTON_NO_FLOW", b.id,
-                                 f"Le bouton \"{b.label or b.id}\" ne lance aucun flow : choisis un flow dans \"Au clic\".",
-                                 f"The button \"{b.label or b.id}\" runs no flow: pick one in \"On click\".",
-                                 {"kind": "pick_flow", "args": {"widget": b.id}}))
-            continue
-        name = b.on_click.flow
-        info = _check_flow_ref(env, b.id, name, issues)
-        flows_seen[name] = info
-        if info is None:
-            continue
-        if b.on_click.button_id not in _buttons_of(info.flow):
-            issues.append(_issue("P_BUTTON_MISSING_IN_FLOW", b.id,
-                                 f"Le flow `{name}` n'a pas de node Bouton `{b.on_click.button_id}` : la page ne peut pas le declencher.",
-                                 f"The flow `{name}` has no Button node `{b.on_click.button_id}`: the page cannot trigger it.",
-                                 {"kind": "add_button_node", "args": {"flow": name, "button_id": b.on_click.button_id}}))
-        if info.valid is False:
-            issues.append(_issue("P_FLOW_INVALID", b.id,
-                                 f"Le flow `{name}` est invalide : le bouton ne peut pas le lancer.",
-                                 f"The flow `{name}` is invalid: the button cannot run it.",
-                                 {"kind": "open_flow", "args": {"flow": name}}))
-        elif not info.active:
-            issues.append(_issue("P_FLOW_INACTIVE", b.id,
-                                 f"Le flow `{name}` n'est pas actif : le bouton restera grise.",
-                                 f"The flow `{name}` is not active: the button stays greyed out.",
-                                 {"kind": "activate_flow", "args": {"flow": name}}))
-    # Fields bound to the flows of the buttons.
     for w in widgets:
-        if w.kind not in VALUE_KINDS:
-            continue
         if w.kind == "select" and not w.options:
             issues.append(_issue("P_OPTIONS_EMPTY", w.id, f"La liste de choix \"{w.label or w.id}\" n'a aucune option.",
                                  f"The choice list \"{w.label or w.id}\" has no option.",
                                  {"kind": "add_option", "args": {"widget": w.id}}))
-        if w.bind is None:
-            continue
-        name = w.bind.flow
-        info = flows_seen[name] if name in flows_seen else _check_flow_ref(env, w.id, name, issues)
-        flows_seen.setdefault(name, info)
-        if info is None:
-            continue
-        params = {i.id: i for i in info.flow.interface.inputs}
-        param = params.get(w.bind.param)
-        if param is None:
-            guess = _closest(w.bind.param, list(params))
-            fr = f"Le flow `{name}` n'expose pas de parametre `{w.bind.param}`. Disponibles : " \
-                 f"{', '.join(f'`{p}`' for p in params) or 'aucun'}." + (f" Tu voulais `{guess}` ?" if guess else "")
-            en = f"The flow `{name}` exposes no parameter `{w.bind.param}`." + (f" Did you mean `{guess}`?" if guess else "")
-            issues.append(_issue("P_PARAM_NOT_FOUND", w.id, fr, en,
-                                 {"kind": "bind", "args": {"widget": w.id, "param": guess}} if guess else None))
-            continue
-        if param.type not in FEEDS[w.kind]:
-            want = KIND_FOR_TYPE.get(param.type)
-            fr = f"Le champ `{w.id}` ({w.kind}) ne peut pas alimenter `{param.id}` ({param.type})" + \
-                 (f" : utilise un champ {want}." if want else " : ce parametre se branche dans le flow, pas dans une page.")
-            en = f"The field `{w.id}` ({w.kind}) cannot feed `{param.id}` ({param.type})."
-            issues.append(_issue("P_TYPE_MISMATCH", w.id, fr, en,
-                                 {"kind": "set_kind", "args": {"widget": w.id, "kind": want}} if want else None))
-    # Interface inputs of the launched flows that no field fills.
-    bound = {(w.bind.flow, w.bind.param) for w in widgets if w.kind in VALUE_KINDS and w.bind}
-    for b in buttons:
-        if b.on_click is None or flows_seen.get(b.on_click.flow) is None:
-            continue
-        name = b.on_click.flow
-        for param in flows_seen[name].flow.interface.inputs:
-            if (name, param.id) in bound or param.type not in KIND_FOR_TYPE:
-                continue
-            bound.add((name, param.id))
-            if param.default is None:
-                issues.append(_issue("P_REQUIRED_UNBOUND", b.id,
-                                     f"`{param.id}` est obligatoire, sans valeur par defaut et sans champ dans cette page.",
-                                     f"`{param.id}` is required, has no default and no field in this page.",
-                                     {"kind": "add_bound_field", "args": {"flow": name, "param": param.id}}))
-            else:
-                issues.append(_issue("P_PARAM_UNBOUND", b.id,
-                                     f"`{param.id}` n'a pas de champ dans cette page : la valeur par defaut sera utilisee.",
-                                     f"`{param.id}` has no field in this page: the default value will be used.",
-                                     {"kind": "add_bound_field", "args": {"flow": name, "param": param.id}}))
 
 
 def _field_check(w: Widget, spec: DataSpec, prop: str, types: Tuple[str, ...], issues: List[PageIssue],
@@ -820,15 +738,15 @@ def generated_publish_page(soft: str, label: str, info: Optional[FlowInfo]) -> T
             kind = KIND_FOR_TYPE.get(inp.type)
             if kind is None or not FIELD_ID_RE.match(inp.id) or inp.id == PUBLISH_BUTTON:
                 continue
-            widget: Dict[str, Any] = {"id": inp.id, "kind": kind, "label": inp.label or inp.id,
-                                      "bind": {"flow": flow_name, "param": inp.id}}
+            widget: Dict[str, Any] = {"id": inp.id, "kind": kind, "label": inp.label or inp.id}
             if inp.default is not None:
                 widget["default"] = inp.default
             if kind == "select":
                 widget["options"] = [{"value": str(o), "label": str(o)} for o in (inp.options or [])]
             rows.append(LayoutItem.model_validate({"row": [widget]}))
-    button = Widget.model_validate({"id": PUBLISH_BUTTON, "kind": "button", "label": "Publier", "icon": "send",
-                                    "on_click": {"flow": flow_name, "button_id": PUBLISH_BUTTON}})
+    # Not a page (ADR 0068 n°7): the router gives the target (flow publish_<soft>, event
+    # publish_request) next to the page; every field id is an interface input id.
+    button = Widget.model_validate({"id": PUBLISH_BUTTON, "kind": "button", "label": "Publier", "icon": "send"})
     rows.append(LayoutItem(row=[button]))
     page = Page(page=PAGE_FORMAT, id=flow_name if NAME_RE.match(flow_name) else "publish_extension",
                 label=f"Publish {label}", icon="send", layout=rows)

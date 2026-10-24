@@ -183,7 +183,7 @@ def purge(folder: Optional[Path], flow: str, *, keep_real: int = KEEP_REAL, keep
 
 def trigger_matches(record: Dict[str, Any], event: str) -> bool:
     trigger = record.get("trigger") or {}
-    return event in (trigger.get("event"), trigger.get("button"))
+    return event in (trigger.get("event"), trigger.get("button"), trigger.get("page_button"))
 
 
 def list_runs(folders: Iterable[Optional[Path]], *, flow: Optional[str] = None, status: Optional[str] = None,
