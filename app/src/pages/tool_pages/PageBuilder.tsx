@@ -49,7 +49,9 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
   const [from, setFrom] = useState('')          // '' | tpl:<id> | copy:<scope>/<id>
   const [busy, setBusy] = useState(false)
   const taken = useMemo(() => new Set(pages.map(p => p.id)), [pages])
-  const shownId = idEdited ? id : suggestId(label || 'page', taken).replace(/^w_/, 'p_')
+  // From a template: its own id while free (the template flows find the page by it, e.g. page: team).
+  const tplId = from.startsWith('tpl:') ? from.slice(4) : ''
+  const shownId = idEdited ? id : tplId && !taken.has(tplId) && !label ? tplId : suggestId(label || 'page', taken).replace(/^w_/, 'p_')
 
   const create = async () => {
     if (!PAGE_ID_RE.test(shownId)) { toast.error(tr('Id invalide : minuscules, chiffres et _, 2 a 41 caracteres', 'Invalid id: lowercase, digits and _, 2 to 41 characters')); return }
