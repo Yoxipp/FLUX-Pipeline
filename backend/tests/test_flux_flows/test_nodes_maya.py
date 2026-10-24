@@ -50,15 +50,16 @@ class MayaNodes(unittest.TestCase):
 
     def test_open_save_save_as(self) -> None:
         self.cmds.modified = True
-        rec, _ = self.run_node("dcc.may_open_scene", inputs={"path": "/p/b.ma"})
+        scene = (self.tmp / "b.ma").as_posix()                  # drive-absolute on Windows
+        rec, _ = self.run_node("dcc.may_open_scene", inputs={"path": scene})
         self.assertIn("non enregistree", rec["nodes"]["n"]["error"])
-        rec, value = self.run_node("dcc.may_open_scene", {"discard_changes": True}, {"path": "/p/b.ma"}, "scene")
-        self.assertEqual(value, "/p/b.ma")
+        rec, value = self.run_node("dcc.may_open_scene", {"discard_changes": True}, {"path": scene}, "scene")
+        self.assertEqual(value, scene)
         rec, value = self.run_node("dcc.may_save_scene", out="path")
-        self.assertEqual((rec["status"], value), ("ok", "/p/b.ma"))
+        self.assertEqual((rec["status"], value), ("ok", scene))
         target = str(self.tmp / "c.mb").replace("\\", "/")
         rec, value = self.run_node("dcc.may_save_as", {"copy": True}, {"path": target}, "path")
-        self.assertEqual((value, self.cmds.scene), (target, "/p/b.ma"))
+        self.assertEqual((value, self.cmds.scene), (target, scene))
         export_call = [c for c in self.cmds.calls if c[2].get("exportAll")][0]
         self.assertEqual(export_call[2]["type"], "mayaBinary")
         rec, _ = self.run_node("dcc.may_save_as", inputs={"path": str(self.tmp / "c.obj")})
@@ -112,18 +113,19 @@ class MayaNodes(unittest.TestCase):
     def test_playblast_is_live_only(self) -> None:
         from flux_flows import validate
 
+        movie = (self.tmp / "a.mov").as_posix()
         flow = h.flow({"ev": "event.manual", "inst": ("session.may_instance", {"mode": "headless"}),
-                       "pb": ("dcc.may_playblast", {"path": "/p/a.mov"})},
+                       "pb": ("dcc.may_playblast", {"path": movie})},
                       ["ev.then->inst.exec", "inst.then->pb.exec", "inst.session->pb.session"])
         codes = {(i.code, i.node) for i in validate.validate(flow, validate.Env())}
         self.assertIn(("E_LIVE_ONLY", "pb"), codes)
         with mock.patch("flux_flows.nodes.dcc_maya.maya_module_call",
-                        return_value={"ok": True, "file": "/p/a.mov"}) as call:
+                        return_value={"ok": True, "file": movie}) as call:
             rec, value = self.run_node("dcc.may_playblast", {"frame_range": "1-10", "size": "640x360"},
-                                       {"path": "/p/a.mov"}, "file")
-        self.assertEqual(value, "/p/a.mov")
+                                       {"path": movie}, "file")
+        self.assertEqual(value, movie)
         self.assertEqual(call.call_args.args[1:3], ("maya_playblast", "run_playblast"))
-        rec, _ = self.run_node("dcc.may_playblast", {"size": "big"}, {"path": "/p/a.mov"})
+        rec, _ = self.run_node("dcc.may_playblast", {"size": "big"}, {"path": movie})
         self.assertIn("size invalide", rec["nodes"]["n"]["error"])
 
 

@@ -117,25 +117,26 @@ class Worker(unittest.TestCase):
 
     def test_run_headless_and_batch(self) -> None:
         h.reset()
+        a, bad, c = ((self.tmp / n).as_posix() for n in ("a.hip", "bad.hip", "c.hip"))   # drive-absolute on Windows
         script = self.tmp / "job.py"
         script.write_text("result = {'scene': hou.hipFile.path(), 'n': args['n']}\n"
                           "if 'bad' in hou.hipFile.path():\n    raise RuntimeError('bad scene')\n", encoding="utf-8")
         flow = h.flow({"ev": "event.manual",
-                       "one": ("action.run_headless", {"script": str(script), "scene": "/p/a.hip", "args": {"n": 3}}),
+                       "one": ("action.run_headless", {"script": str(script), "scene": a, "args": {"n": 3}}),
                        "rec": "action.t_record"},
                       ["ev.then->one.exec", "one.then->rec.exec", "one.result->rec.value"])
         with self._patched_start():
             rec = h.run_flow(flow, checked=False)
-            self.assertEqual(h.CALLS[-1][1], {"scene": "/p/a.hip", "n": 3})
+            self.assertEqual(h.CALLS[-1][1], {"scene": a, "n": 3})
             batch = h.flow({"ev": "event.manual",
-                            "b": ("action.batch", {"script": str(script), "scenes": ["/p/a.hip", "/p/bad.hip", "/p/c.hip"],
+                            "b": ("action.batch", {"script": str(script), "scenes": [a, bad, c],
                                                    "args": {"n": 1}, "on_item_error": "continue"}),
                             "rec": "action.t_record"},
                            ["ev.then->b.exec", "b.then->rec.exec", "b.failed->rec.value"])
             rec = h.run_flow(batch, checked=False)
             self.assertEqual((rec["status"], h.CALLS[-1][1]), ("ok", 1))
             stop = h.flow({"ev": "event.manual",
-                           "b": ("action.batch", {"script": str(script), "scenes": ["/p/bad.hip", "/p/c.hip"]})},
+                           "b": ("action.batch", {"script": str(script), "scenes": [bad, c]})},
                           ["ev.then->b.exec"])
             rec = h.run_flow(stop, checked=False)
         self.assertIn("arret a la premiere erreur", rec["nodes"]["b"]["error"])
