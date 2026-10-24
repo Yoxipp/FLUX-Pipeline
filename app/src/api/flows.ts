@@ -115,6 +115,9 @@ export const flowsApi = {
     apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/rename`, { scope, old, new: next, ...opts }),
   renameParam: (flow: string, old: string, next: string, opts: { apply?: boolean; project?: string } = {}): Promise<RenamePlan> =>
     apiCall('POST', '/flows/pages/rename_param', { flow, old, new: next, ...opts }),
+  // Generated Publisher panel of an extension software (04 §7): interface of its flow publish_<soft>.
+  publishPanel: (soft: string, project?: string): Promise<{ soft: string; flow: string; page: PageDoc; issues: PageIssue[] }> =>
+    apiCall('GET', `/flows/pages/publish_panel/${encodeURIComponent(soft)}${qs({ project })}`),
   // Page data (ADR 0066): records merged from every author's journal; etag = nothing moved since.
   pageData: (page: string, collection: string, opts: { project?: string; etag?: string } = {}): Promise<PageDataRead> =>
     apiCall('GET', `/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}${qs(opts)}`),

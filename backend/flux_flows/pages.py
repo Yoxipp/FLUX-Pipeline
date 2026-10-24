@@ -86,7 +86,7 @@ DATA_SOURCE_KINDS = {"feed": "records", "table": "records", "cards": "records", 
                      "board": "board"}
 
 # Static routes of /flows/pages: a page cannot take one of these ids.
-RESERVED_IDS = frozenset("validate links buttons link_button rename_param templates data media".split())
+RESERVED_IDS = frozenset("validate links buttons link_button rename_param publish_panel templates data media".split())
 PAGE_ICONS = frozenset(
     "wrench film camera clapperboard folder box package layers image brush palette calendar "
     "message-square users kanban layout-dashboard list-checks rocket send bell star zap".split()
@@ -797,4 +797,63 @@ def validate_page(page: Page, env: Optional[PageEnv] = None) -> List[PageIssue]:
 
 def errors(issues: List[PageIssue]) -> List[PageIssue]:
     return [i for i in issues if i.level == ERROR]
+
+
+# -- generated Publisher panel (04 §7) ----------------------------------------
+
+PUBLISH_BUTTON = "publish_request"
+
+
+def publish_flow_name(soft: str) -> str:
+    return f"publish_{soft}"
+
+
+def generated_publish_page(soft: str, label: str, info: Optional[FlowInfo]) -> Tuple[Page, List[PageIssue]]:
+    """The panel of an extension software: one field per interface input of its flow
+    publish_<soft> (order of the interface; link-only inputs such as a session are left
+    out), then a Publier button that sends event publish_request (A7: active flow only)."""
+    flow_name = publish_flow_name(soft)
+    rows: List[LayoutItem] = []
+    issues: List[PageIssue] = []
+    if info is not None:
+        for inp in info.flow.interface.inputs:
+            kind = KIND_FOR_TYPE.get(inp.type)
+            if kind is None or not FIELD_ID_RE.match(inp.id) or inp.id == PUBLISH_BUTTON:
+                continue
+            widget: Dict[str, Any] = {"id": inp.id, "kind": kind, "label": inp.label or inp.id,
+                                      "bind": {"flow": flow_name, "param": inp.id}}
+            if inp.default is not None:
+                widget["default"] = inp.default
+            if kind == "select":
+                widget["options"] = [{"value": str(o), "label": str(o)} for o in (inp.options or [])]
+            rows.append(LayoutItem.model_validate({"row": [widget]}))
+    button = Widget.model_validate({"id": PUBLISH_BUTTON, "kind": "button", "label": "Publier", "icon": "send",
+                                    "on_click": {"flow": flow_name, "button_id": PUBLISH_BUTTON}})
+    rows.append(LayoutItem(row=[button]))
+    page = Page(page=PAGE_FORMAT, id=flow_name if NAME_RE.match(flow_name) else "publish_extension",
+                label=f"Publish {label}", icon="send", layout=rows)
+    if info is None:
+        issues.append(_issue("P_FLOW_NOT_FOUND", PUBLISH_BUTTON,
+                             f"Le flow `{flow_name}` n'existe pas : un TD le cree (PublishRequest > {label}Instance > "
+                             f"{label}Publish) dans les flows d'equipe.",
+                             f"The flow `{flow_name}` does not exist: a TD creates it in the team flows."))
+        return page, issues
+    from flux_flows.model import iter_nodes
+
+    if not any(n.type == "event.publish_request" for _, n in iter_nodes(info.flow)):
+        issues.append(_issue("P_PUBLISH_NO_EVENT", PUBLISH_BUTTON,
+                             f"Le flow `{flow_name}` n'a pas de node `publish_request` : le panneau ne peut rien lancer.",
+                             f"The flow `{flow_name}` has no `publish_request` node: the panel cannot run anything.",
+                             {"kind": "open_flow", "args": {"flow": flow_name}}))
+    elif info.valid is False:
+        issues.append(_issue("P_FLOW_INVALID", PUBLISH_BUTTON,
+                             f"Le flow `{flow_name}` est invalide : le bouton ne peut pas le lancer.",
+                             f"The flow `{flow_name}` is invalid: the button cannot run it.",
+                             {"kind": "open_flow", "args": {"flow": flow_name}}))
+    elif not info.active:
+        issues.append(_issue("P_FLOW_INACTIVE", PUBLISH_BUTTON,
+                             f"Le flow `{flow_name}` n'est pas actif : le bouton Publier reste grise.",
+                             f"The flow `{flow_name}` is not active: the Publish button stays greyed out.",
+                             {"kind": "activate_flow", "args": {"flow": flow_name}}))
+    return page, issues
 

@@ -24,6 +24,8 @@ import { useProject } from '../ProjectContext'
 import { useWorkProfile } from '../WorkProfileContext'
 import { useEnabledDccs } from '../hooks/useEnabledDccs'
 import { SOFTWARE } from '../lib/dccs'
+import { flowsApi } from '../api/flows'
+import { GeneratedPublishPanel } from './tool_pages/GeneratedPublishPanel'
 import { TextureMapTable, mapParams as buildMapParams } from './publisher/TextureMapTable'
 import { PublishDestination } from './publisher/PublishDestination'
 import type { MapOpts } from './publisher/TextureMapTable'
@@ -693,6 +695,13 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
   const { isEnabled: isDccEnabled } = useEnabledDccs()
   const dccPicked = useRef(readSession(PUB + 'dcc') !== undefined)
   const changeDcc = useCallback((name: string) => { dccPicked.current = true; setDcc(name) }, [])
+  // P7: softwares added as extension bridges (P6c), each with a generated panel.
+  const [extSofts, setExtSofts] = useState<{ soft: string; label: string }[]>([])
+  useEffect(() => {
+    flowsApi.bridges().then(r => setExtSofts(r.bridges.filter(b => b.ok && b.manifest).map(b => ({ soft: b.soft, label: b.manifest!.label }))
+      .filter(e => !SOFTWARE.some(x => x.name === e.label)))).catch(() => setExtSofts([]))
+  }, [])
+  const extSoft = extSofts.find(e => e.label === dcc)
   const dccEnabled = useCallback((name: string) => {
     const key = SOFTWARE.find(x => x.name === name)?.key
     return !key || isDccEnabled(key)
@@ -2031,12 +2040,14 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
 
       {/* Toolbar: software (expand picker), project, connection. No page title (ADR 0044). */}
       <div className="page-toolbar">
-        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} />
+        <SoftwareSelector active={dcc} onChange={changeDcc} isVisible={dccEnabled} extra={extSofts.map(e => e.label)} />
         <ProjectPicker />
         <div style={{ flex: 1 }} />
         {connectionPill}
       </div>
 
+      {/* P7 (04 §7): a software added as an extension gets its generated panel, the rest stays as is. */}
+      {extSoft ? <GeneratedPublishPanel soft={extSoft.soft} label={extSoft.label} project={project || undefined} /> : <>
       <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* ── Left: Composer + source + description ── */}
@@ -2954,6 +2965,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           {publishing ? tr('Publication…', 'Publishing…') : 'Publish'}
         </Btn>
       </div>
+      </>}
 
       {/* Instance picker: several Maya / Houdini are open */}
       {instancePick && (

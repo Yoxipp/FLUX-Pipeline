@@ -468,6 +468,26 @@ async def rename_param(body: RenameParamBody) -> dict[str, Any]:
                        scopes_allowed=lambda sc: rights.allowed(current, rights.ADMIN, sc))
 
 
+@router.get("/pages/publish_panel/{soft}")
+async def get_publish_panel(soft: str, project: Optional[str] = None) -> dict[str, Any]:
+    """Generated Publisher panel of an extension software (04 §7): fields from the interface
+    of its flow publish_<soft>, a Publier button (event publish_request), its issues."""
+    from flux_flows.bridges import extension
+
+    current = await asyncio.to_thread(rights.current_rights)
+
+    def work() -> dict[str, Any]:
+        ext = extension.get(soft)
+        if ext is None or ext.manifest is None:
+            raise FlowStoreError(f"logiciel d'extension {soft} inconnu", 404)
+        lookup = page_store.flow_lookup(_roots(current["user"], project))
+        page, issues = pages.generated_publish_page(soft, ext.manifest.label, lookup(pages.publish_flow_name(soft)))
+        return {"soft": soft, "flow": pages.publish_flow_name(soft), "page": pages.to_document(page),
+                "issues": [i.to_dict() for i in issues]}
+
+    return await _call(work)
+
+
 @router.get("/pages/{page_id}")
 async def get_page(page_id: str, scope: Optional[str] = None, project: Optional[str] = None) -> dict[str, Any]:
     """A page (without scope: the winning one, project > team; scope=shipped: a template)."""

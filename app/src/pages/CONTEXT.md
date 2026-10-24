@@ -238,3 +238,7 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   (`PageRenderer preview`). Store generique de l'editeur de flows (undo / redo), validation en direct 300 ms, Ctrl+S,
   Fermer = enregistrer puis quitter. Reducers purs dans `builder.ts`. Pas de glisser-deposer dans l'arbre (fleches) :
   a ajouter si the maintainer le demande.
+* `GeneratedPublishPanel.tsx` (04 §7) : panneau Publisher d'un logiciel ajoute en extension (P6c) : `Publisher.tsx` ajoute
+  les bridges valides au `SoftwareSelector` (`extra`) et, pour eux seulement, remplace le Composer et la barre du bas
+  par ce panneau (une seule branche). Champs = interface du flow `publish_<soft>` (`GET /flows/pages/publish_panel/<soft>`),
+  Publier = `event: publish_request` (flow actif). Destination et note de publish : en P8 (ils dependent du Composer).
