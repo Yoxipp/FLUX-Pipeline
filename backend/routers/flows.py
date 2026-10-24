@@ -31,8 +31,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import (engine, events, locations, migrate_v1, page_store, pages, patterns, resolver, rights, runs,
-                        scheduler, store, validate)
+from flux_flows import (engine, events, locations, migrate_v1, page_links, page_store, pages, patterns, resolver,
+                        rights, runs, scheduler, store, validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
@@ -207,7 +207,16 @@ def _validation_env(roots: dict, scope: str, name: str, project: Optional[str]) 
     done = state.get("dry_run_ok") or {}
     tested = done.get("nodes_simulated") if done.get("version") == state.get("current") else None
     return validate.default_env(project if scope == "project" else None, flow_loader=loader, tested=tested,
-                                shipped_changed=store.shipped_changed(roots, scope, name))
+                                shipped_changed=store.shipped_changed(roots, scope, name),
+                                page_links=_links_to(name, project))
+
+
+def _links_to(name: str, project: Optional[str]) -> list[dict[str, Any]]:
+    """Links of the TOOL pages to the flow *name* (W_PAGE_LINK_BROKEN, P7)."""
+    try:
+        return [l for l in page_links.all_links(locations.page_roots(project)) if l["flow"] == name]
+    except (ValueError, OSError):
+        return []
 
 
 def _issues(roots: dict, scope: str, flow: Flow, project: Optional[str]) -> list[validate.Issue]:
@@ -361,8 +370,18 @@ def _parse_page(doc: dict[str, Any], page_id: Optional[str] = None) -> pages.Pag
 
 def _page_issues(page: pages.Page, scope: Optional[str], user: Optional[str],
                  project: Optional[str]) -> list[dict[str, Any]]:
-    env = pages.PageEnv(scope=scope, flow_lookup=page_store.flow_lookup(_roots(user, project)))
-    return [i.to_dict() for i in pages.validate_page(page, env)]
+    lookup = page_store.flow_lookup(_roots(user, project))
+    found = pages.validate_page(page, pages.PageEnv(scope=scope, flow_lookup=lookup))
+    others = [l for l in page_links.all_links(_page_roots(project)) if l["page"] != page.id]
+    found += page_links.orphan_issues(page, lookup, others)
+    return [i.to_dict() for i in found]
+
+
+def _flow_validator(user: Optional[str], project: Optional[str]):
+    """valid for state.json when a page operation writes a flow (same rule as a save)."""
+    def check(scope: str, flow: Flow) -> bool:
+        return not validate.errors(_issues(_roots(user, project), scope, flow, project))
+    return check
 
 
 @router.get("/pages")
@@ -389,6 +408,63 @@ async def validate_page(body: PageValidateBody) -> dict[str, Any]:
     page = _parse_page(body.page)
     issues = await asyncio.to_thread(_page_issues, page, body.scope, current["user"], body.project)
     return {"issues": issues}
+
+
+@router.get("/pages/links")
+async def get_page_links(project: Optional[str] = None) -> dict[str, Any]:
+    """Reverse index {flow: [{page, scope, widget, kind, role, button_id | param | output}]} (04 §4)."""
+    return await _call(page_links.index, _page_roots(project))
+
+
+@router.get("/pages/buttons")
+async def get_page_buttons(project: Optional[str] = None) -> list[dict[str, Any]]:
+    """Every page button, for the "Bouton" list of the event.button node."""
+    return await _call(page_links.buttons, _page_roots(project))
+
+
+class LinkButtonBody(BaseModel):
+    flow: str
+    button_id: str
+    project: Optional[str] = None
+
+
+@router.post("/pages/link_button")
+async def link_button(body: LinkButtonBody) -> dict[str, Any]:
+    """"Au clic": the flow gets an event.button node with this button_id (a new frozen
+    version), or keeps the one it has. Flow rights required (Team TD for team / project)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _roots(current["user"], body.project)
+    scope = await _call(store.resolve, roots, body.flow)
+    if scope is None:
+        raise HTTPException(status_code=404, detail={"message": f"flow {body.flow} introuvable"})
+    await _require(rights.WRITE, scope)
+    done = await _call(page_links.ensure_button_node, roots, body.flow, body.button_id,
+                       user=current["user"] or "", validator=_flow_validator(current["user"], body.project))
+    if done["created"]:
+        events.emit({"type": "flow_changed", "flow": body.flow, "scope": done["scope"], "project": body.project,
+                     "version": done["version"], "revision": done["revision"], "by": current["user"]})
+    return done
+
+
+class RenameParamBody(BaseModel):
+    flow: str
+    old: str
+    new: str
+    apply: bool = False
+    project: Optional[str] = None
+
+
+@router.post("/pages/rename_param")
+async def rename_param(body: RenameParamBody) -> dict[str, Any]:
+    """Renaming an interface param in the flow editor: plan (the pages that change) or
+    apply (every bind.param follows). The editor saves the flow itself."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _page_roots(body.project)
+    if not body.apply:
+        return await _call(page_links.plan_param_rename, roots, body.flow, body.old, body.new)
+    return await _call(page_links.apply_param_rename, roots, body.flow, body.old, body.new,
+                       user=current["user"] or "",
+                       scopes_allowed=lambda sc: rights.allowed(current, rights.ADMIN, sc))
 
 
 @router.get("/pages/{page_id}")
@@ -434,6 +510,37 @@ async def delete_page(page_id: str, scope: str, project: Optional[str] = None) -
     done = await _call(page_store.delete_page, _page_roots(project), scope, page_id, user=current["user"] or "")
     events.emit({"type": "page_changed", "page": page_id, "scope": scope, "project": project,
                  "rev": None, "by": current["user"]})
+    return done
+
+
+class RenameWidgetBody(BaseModel):
+    scope: str
+    old: str
+    new: str
+    apply: bool = False
+    base_rev: Optional[str] = None
+    project: Optional[str] = None
+
+
+@router.post("/pages/{page_id}/rename")
+async def rename_widget(page_id: str, body: RenameWidgetBody) -> dict[str, Any]:
+    """Rename a widget id: plan = the files that change ("2 fichiers seront modifies"),
+    apply = flow first (new version), then the page. Refused without the rights of every file."""
+    current = await _require(rights.ADMIN, body.scope if body.scope in pages.SCOPES else "team")
+    flow_roots = _roots(current["user"], body.project)
+    roots = _page_roots(body.project)
+    plan = await _call(page_links.plan_widget_rename, roots, flow_roots, body.scope, page_id, body.old, body.new)
+    for f in plan["flows"]:
+        if not rights.allowed(current, rights.WRITE, f["scope"]):
+            raise HTTPException(status_code=403, detail={
+                "message": f"Case requise pour modifier le flow {f['id']}", "required": rights.required(rights.WRITE, f["scope"])})
+    if not body.apply:
+        return plan
+    done = await _call(page_links.apply_widget_rename, roots, flow_roots, body.scope, page_id, body.old, body.new,
+                       user=current["user"] or "", base_rev=body.base_rev,
+                       validator=_flow_validator(current["user"], body.project))
+    events.emit({"type": "page_changed", "page": page_id, "scope": body.scope, "project": body.project,
+                 "rev": done["page"]["rev"], "by": current["user"]})
     return done
 
 

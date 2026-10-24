@@ -32,6 +32,7 @@ import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '../../api/client'
 import { flowsApi } from '../../api/flows'
+import { renamedInputs } from '../tool_pages/links'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
 import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
@@ -260,6 +261,26 @@ function Editor({ rights }: { rights: FlowRights }) {
   const specs = useMemo<SpecIndex>(() => Object.fromEntries((catalog ?? []).filter(e => e.spec).map(e => [e.type, e.spec!])), [catalog])
   const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope, specs }) : null, [doc, loaded, saveBlocked, specs])
 
+  // P7 (04 §4): an interface input renamed in the flow -> the fields of the TOOL pages bound
+  // to it follow, after a "N fichiers seront modifies" confirmation (the flow is already saved).
+  const followRenames = useCallback(async (flow: string, renames: { old: string; next: string }[]) => {
+    for (const { old, next } of renames) {
+      try {
+        const plan = await flowsApi.renameParam(flow, old, next, { project: project || undefined })
+        if (!plan.files.length) continue
+        const names = plan.files.map(f => `pages/${f.id}.yml`).join(', ')
+        const ok = window.confirm(tr(
+          `${plan.files.length} fichier(s) de page seront modifies pour suivre ${old} -> ${next} : ${names}. Continuer ?`,
+          `${plan.files.length} page file(s) will change to follow ${old} -> ${next}: ${names}. Continue?`))
+        if (!ok) { toast.warning(tr(`Pages non modifiees : leur champ ${old} est casse`, `Pages unchanged: their field ${old} is broken`)); continue }
+        await flowsApi.renameParam(flow, old, next, { apply: true, project: project || undefined })
+        toast.success(tr(`Pages mises a jour (${old} -> ${next})`, `Pages updated (${old} -> ${next})`))
+      } catch (err) {
+        toast.error((err as HttpError).message)
+      }
+    }
+  }, [project, tr])
+
   // Save core (03 §6), used by Ctrl+S, Save and increment, quit (closeGuard, flow switch).
   // Resolves true when the document is saved (or there was nothing to save), false when it
   // stays open: cancelled slider, conflict, error. Saving with errors is allowed (00 §11).
@@ -290,7 +311,9 @@ function Editor({ rights }: { rights: FlowRights }) {
         : tr(`Flow ${loaded.name} enregistre`, `Flow ${loaded.name} saved`)
       if (errors) toast.warning(tr(`${what}, invalide (${errors} erreur(s)), non activable`, `${what}, invalid (${errors} error(s)), cannot be activated`))
       else if (!opts.quiet || kind === 'increment') toast.success(what)
+      const renames = renamedInputs(s.saved as FlowDoc | null, sent)
       saved(sent, r.state)
+      if (renames.length) void followRenames(loaded.name, renames)
       return true
     } catch (err) {
       const e = err as HttpError
@@ -307,7 +330,7 @@ function Editor({ rights }: { rights: FlowRights }) {
       toast.error(e.message)
       return false
     }
-  }, [loaded, saveBlocked, project, specs, saved, store, askDestructive, tr])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loaded, saveBlocked, project, specs, saved, store, askDestructive, followRenames, tr])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useCallback(() => { void saveDoc('save') }, [saveDoc])
   const increment = useCallback(() => { void saveDoc('increment') }, [saveDoc])
@@ -721,7 +744,7 @@ function Editor({ rights }: { rights: FlowRights }) {
             />}
         <ParamsPane
           selected={selected} params={(selected && doc?.nodes[selected.id]?.params) || {}}
-          editable={!saveBlocked} edits={nodeEdits}
+          editable={!saveBlocked} edits={nodeEdits} flowName={doc?.name}
           flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} />}
         />
       </div>

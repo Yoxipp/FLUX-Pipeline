@@ -107,6 +107,16 @@ def base_context(user: Optional[str], project: Optional[str], flow: str, run_id:
             "date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H-%M-%S"), "flow": flow, "run_id": run_id}
 
 
+def start_node_for(flow: Flow, event: str) -> Optional[str]:
+    """Node id started by *event* when it is not a node id: the button_id of an
+    event.button (a page button, 04 §4), else an event type (publish_request, 04 §7)."""
+    tops = sorted(flow.nodes.items())
+    for nid, node in tops:
+        if node.type == "event.button" and str(node.params.get("button_id") or "") == event:
+            return nid
+    return next((nid for nid, node in tops if node.type == f"event.{event}"), None)
+
+
 def precheck(flow: Flow, event: Optional[str], mode: str = "real",
              project: Optional[str] = None) -> Tuple[Optional[str], List[Dict[str, Any]]]:
     """(start event id, blocking issues): the validation of 01 §8 (P4). A type mismatch
@@ -117,6 +127,8 @@ def precheck(flow: Flow, event: Optional[str], mode: str = "real",
     issues: List[Dict[str, Any]] = [i.to_dict() for i in validate.errors(found, dry_run=mode == "dry")
                                     if i.code != "E_NO_EVENT"]
     event_ids = [nid for nid, n in flow.nodes.items() if n.type.startswith("event.")]
+    if event is not None and event not in event_ids:
+        event = start_node_for(flow, event) or event
     if event is not None:
         if event not in event_ids:
             issues.append({"level": "error", "code": "E_NO_EVENT", "node": event, "port": None,

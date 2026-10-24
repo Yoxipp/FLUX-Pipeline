@@ -86,6 +86,7 @@ class Env:
     flow_loader: Optional[Callable[[str], Optional[Flow]]] = None   # name -> Flow (FlowCall cycles)
     tested: Optional[Iterable[str]] = None         # node ids the dry run of this version simulated
     shipped_changed: bool = False                  # team copy older than the shipped flow
+    page_links: Optional[List[Dict[str, Any]]] = None   # links of the TOOL pages to this flow (P7, page_links)
 
 
 def default_env(project: Optional[str] = None, **extra: Any) -> Env:
@@ -131,6 +132,7 @@ _WHY = {
     "W_ISOLATED_NODE": ("aucun effet", "no effect"),
     "W_LICENCE": ("ADR 0007 : FLUX ne prend aucune licence lui-meme", "ADR 0007: FLUX itself takes no licence"),
     "W_SHIPPED_CHANGED": ("reprise de l'ADR 0039", "from ADR 0039"),
+    "W_PAGE_LINK_BROKEN": ("la page n'est pas ouverte a ce moment-la", "the page is not open at that moment"),
 }
 
 
@@ -818,6 +820,15 @@ def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
             for issue in sub:
                 issue.message_fr, issue.message_en = f"[{nid}] {issue.message_fr}", f"[{nid}] {issue.message_en}"
             issues += sub
+    if env.page_links:
+        from flux_flows import page_links
+
+        for broken in page_links.broken_by(flow, env.page_links):
+            issues.append(_issue("W_PAGE_LINK_BROKEN", None,
+                                 f"Ce changement casse la page {broken['page_label']} ({broken['label']} : "
+                                 f"{broken['reason_fr']})",
+                                 f"This change breaks the page {broken['page_label']} ({broken['label']}: "
+                                 f"{broken['reason_en']})"))
     if env.shipped_changed:
         issues.append(_issue("W_SHIPPED_CHANGED", None, "Le flow livre a change depuis ta copie",
                              "The shipped flow changed since your copy"))

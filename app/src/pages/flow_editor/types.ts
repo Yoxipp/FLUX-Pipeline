@@ -367,3 +367,89 @@ export type FlowsWsMessage =
   | { type: 'log'; run_id: string; flow: string; node: string; level: string; text: string }
   | { type: 'notify'; run_id: string; flow: string; node: string; level: 'info' | 'warn' | 'error'; text: string; path: string | null }
   | { type: 'run_finished'; run_id: string; flow: string; status: RunStatus; duration_ms: number | null; error: string | null; mode: 'real' | 'dry' }
+
+// -- TOOL pages (P7, 04_PAGES_TOOL, ADR 0066) ---------------------------------------
+// Same keys as the page YAML (backend flux_flows/pages.py is the truth).
+
+export type PageScope = 'team' | 'project' | 'shipped'
+export type PageFormKind = 'button' | 'float' | 'int' | 'text' | 'path' | 'dir' | 'toggle' | 'select' | 'list'
+export type PageDecorKind = 'separator' | 'label'
+export type PageDataKind = 'feed' | 'table' | 'cards' | 'calendar' | 'members' | 'board'
+export type PageWidgetKind = PageFormKind | PageDecorKind | PageDataKind
+export type PageFieldType = 'str' | 'text' | 'int' | 'float' | 'bool' | 'date' | 'datetime' | 'user' | 'select' | 'image' | 'path'
+
+export interface PageOption { value: string; label?: string }
+export interface PageSource { data?: string; flow?: string; output?: string; builtin?: 'users' }
+
+export interface PageWidget {
+  id:        string
+  kind:      PageWidgetKind
+  label?:    string
+  tooltip?:  string
+  w?:        number
+  default?:  unknown
+  remember?: 'user' | 'none'
+  bind?:     { flow: string; param: string }
+  icon?:     string
+  confirm?:  string
+  on_click?: { flow: string; button_id: string }
+  min?: number; max?: number; step?: number; unit?: string
+  multiline?: boolean; placeholder?: string; max_len?: number
+  mode?: 'open' | 'save'; filters?: string[]
+  options?: PageOption[]; item?: 'str'; text?: string
+  source?: PageSource
+  field?: string; group_by?: string; columns?: string[]; editable?: boolean
+  title?: string; date?: string; end?: string; height?: number
+}
+
+export interface PageFolder { id: string; label?: string; mode?: 'plain' | 'tabs' | 'collapsible' }
+export type PageLayoutItem =
+  | { folder: PageFolder; children: PageLayoutItem[] }
+  | { row: PageWidget[] }
+
+export interface PageDataField { id: string; type: PageFieldType; label?: string; options?: PageOption[]; required?: boolean }
+export interface PageDataSpec {
+  id:      string
+  label?:  string
+  kind?:   'records' | 'board'
+  per?:    'project' | 'team'
+  write?:  'all' | 'team_td'
+  fields?: PageDataField[]
+}
+
+export interface PageDoc {
+  page:         1
+  id:           string
+  label?:       string
+  icon?:        string
+  description?: string
+  data:         PageDataSpec[]
+  layout:       PageLayoutItem[]
+}
+
+export interface PageIssue {
+  level:      'error' | 'warning'
+  code:       string
+  widget:     string | null
+  message_fr: string
+  message_en: string
+  why_fr:     string
+  why_en:     string
+  fix:        { kind: string; args: Record<string, unknown> } | null
+}
+
+export interface PageListItem {
+  id: string; scope: PageScope; rev: string; error: string | null
+  label: string; icon: string; description: string; shadowed?: boolean
+}
+export interface PageList { pages: PageListItem[]; templates: PageListItem[]; can_edit: Record<'team' | 'project', boolean> }
+export interface PageRead { id: string; scope: PageScope; rev: string; page: PageDoc; issues: PageIssue[]; can_edit: boolean }
+
+export type PageLinkRole = 'button' | 'bind' | 'source'
+export interface PageLink {
+  page: string; page_label: string; scope: PageScope; shadowed: boolean
+  widget: string; label: string; kind: PageWidgetKind; role: PageLinkRole
+  button_id?: string; param?: string; output?: string
+}
+export interface PageButton { page: string; page_label: string; scope: PageScope; widget: string; label: string; flow: string; button_id: string }
+export interface RenamePlan { files: { kind: 'page' | 'flow'; scope: string; id: string; path?: string; next_version?: number; widgets?: string[] }[] }

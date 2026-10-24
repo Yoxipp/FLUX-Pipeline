@@ -86,7 +86,7 @@ DATA_SOURCE_KINDS = {"feed": "records", "table": "records", "cards": "records", 
                      "board": "board"}
 
 # Static routes of /flows/pages: a page cannot take one of these ids.
-RESERVED_IDS = frozenset("validate links templates data media".split())
+RESERVED_IDS = frozenset("validate links buttons link_button rename_param templates data media".split())
 PAGE_ICONS = frozenset(
     "wrench film camera clapperboard folder box package layers image brush palette calendar "
     "message-square users kanban layout-dashboard list-checks rocket send bell star zap".split()

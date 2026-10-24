@@ -4,7 +4,7 @@
 
 import { api, apiCall } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
+import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageButton, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RenamePlan, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -95,4 +95,24 @@ export const flowsApi = {
     apiCall<RunRecord>('GET', `/flows/runs/${encodeURIComponent(runId)}${qs({ project })}`),
   cancelRun: (runId: string, project?: string): Promise<{ status: string }> =>
     apiCall('POST', `/flows/runs/${encodeURIComponent(runId)}/cancel${qs({ project })}`),
+
+  // TOOL pages (P7). Reads for everyone; save, delete, rename need the Team TD box.
+  listPages: (project?: string): Promise<PageList> => apiCall('GET', `/flows/pages${qs({ project })}`),
+  getPage: (id: string, opts: { scope?: PageScope; project?: string } = {}): Promise<PageRead> =>
+    apiCall('GET', `/flows/pages/${encodeURIComponent(id)}${qs(opts)}`),
+  savePage: (page: PageDoc, scope: PageScope, opts: { project?: string; base_rev?: string | null; force?: boolean } = {}): Promise<{ rev: string; changed: boolean; issues: PageIssue[] }> =>
+    apiCall('PUT', `/flows/pages/${encodeURIComponent(page.id)}`, { page, scope, ...opts }),
+  deletePage: (id: string, scope: PageScope, project?: string): Promise<{ trash: string }> =>
+    apiCall('DELETE', `/flows/pages/${encodeURIComponent(id)}${qs({ scope, project })}`),
+  validatePage: (page: PageDoc, scope: PageScope, project?: string): Promise<{ issues: PageIssue[] }> =>
+    apiCall('POST', '/flows/pages/validate', { page, scope, project }),
+  pageLinks: (project?: string): Promise<Record<string, PageLink[]>> =>
+    apiCall('GET', `/flows/pages/links${qs({ project })}`),
+  pageButtons: (project?: string): Promise<PageButton[]> => apiCall('GET', `/flows/pages/buttons${qs({ project })}`),
+  linkButton: (flow: string, button_id: string, project?: string): Promise<{ flow: string; scope: FlowScope; node: string; created: boolean; version: number | null }> =>
+    apiCall('POST', '/flows/pages/link_button', { flow, button_id, project }),
+  renameWidget: (page: string, scope: PageScope, old: string, next: string, opts: { apply?: boolean; base_rev?: string; project?: string } = {}): Promise<RenamePlan> =>
+    apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/rename`, { scope, old, new: next, ...opts }),
+  renameParam: (flow: string, old: string, next: string, opts: { apply?: boolean; project?: string } = {}): Promise<RenamePlan> =>
+    apiCall('POST', '/flows/pages/rename_param', { flow, old, new: next, ...opts }),
 }

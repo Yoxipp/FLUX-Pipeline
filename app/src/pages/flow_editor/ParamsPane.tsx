@@ -9,14 +9,17 @@
 // back to a local list until the catalogue sends choices); constant params (wirable false,
 // node.constants) are listed with the inputs in spec order; a param with tokens is a
 // TokenField (project token menu + free text); TokenPath params unused by its mode are greyed.
+// P7: an event.button offers the buttons of the TOOL pages as its button_id menu and shows
+// the pages that launch it ("page : Daily render"), or that none does.
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { flowsApi } from '../../api/flows'
 import { ParamWidget, type ParamKind } from '../../components/shared/ParamWidget'
 import { useProject } from '../../ProjectContext'
 import { FAMILY_INFO } from './families'
 import { portColor } from './portTypes'
 import { TokenField, paramRelevant, tokenKeys, useProjectTokens, type ProjectTokens } from './TokenField'
-import type { FlowViewNode, PortSpec } from './types'
+import type { FlowViewNode, PageButton, PortSpec } from './types'
 import { formatValue, useTr } from './useTr'
 
 export const PARAMS_W = 320          // default width; the viewer can drag it
@@ -141,7 +144,31 @@ export interface NodeEdits {
   onFields: (id: string, patch: { label?: string; bypass?: boolean }) => void
 }
 
-function NodeParams({ node, params, editable, edits }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits }) {
+// Buttons of the TOOL pages, read once per selected event.button (pages are few).
+function usePageButtons(active: boolean, project: string | null | undefined): PageButton[] {
+  const [buttons, setButtons] = useState<PageButton[]>([])
+  useEffect(() => {
+    if (!active) return
+    let alive = true
+    flowsApi.pageButtons(project || undefined).then(b => { if (alive) setButtons(b) }).catch(() => { if (alive) setButtons([]) })
+    return () => { alive = false }
+  }, [active, project])
+  return buttons
+}
+
+function PageButtonInfo({ buttons, flowName, buttonId }: { buttons: PageButton[]; flowName?: string; buttonId: string }) {
+  const { tr } = useTr()
+  const shown = buttons.filter(b => b.flow === flowName && b.button_id === buttonId)
+  return (
+    <div style={{ fontSize: 11, margin: '2px 0 8px 0', color: shown.length ? 'var(--ink-3)' : 'var(--ink-4)' }}>
+      {shown.length
+        ? shown.map(b => <span key={`${b.scope}/${b.page}/${b.widget}`} className="tag" style={{ marginRight: 4 }}>{tr('page', 'page')} : {b.page_label} / {b.label}</span>)
+        : tr('Aucune page ne montre ce bouton : le flow ne se lance que depuis l\'editeur.', 'No page shows this button: the flow only starts from the editor.')}
+    </div>
+  )
+}
+
+function NodeParams({ node, params, editable, edits, flowName }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; flowName?: string }) {
   const { tr } = useTr()
   const fam = FAMILY_INFO[node.family]
   const canEdit = editable && !!node.spec
@@ -154,6 +181,14 @@ function NodeParams({ node, params, editable, edits }: { node: FlowViewNode; par
     return params[name] !== undefined ? params[name] : p?.value
   }
   const mode = valueOf('mode')
+  const isButton = node.type === 'event.button'
+  const pageButtons = usePageButtons(isButton, project)
+  const buttonChoices = (name: string): unknown[] | undefined => {
+    if (!isButton || name !== 'button_id' || !pageButtons.length) return undefined
+    // This flow's buttons first, then the others (a page may point to another flow).
+    const mine = pageButtons.filter(b => b.flow === flowName).map(b => b.button_id)
+    return [...new Set([...mine, ...pageButtons.map(b => b.button_id)])]
+  }
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -182,17 +217,19 @@ function NodeParams({ node, params, editable, edits }: { node: FlowViewNode; par
         ? <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>{tr('Ce node n\'a pas de parametre.', 'This node has no parameter.')}</div>
         : ports.map(p => (
             <ParamRow key={p.name} p={p} editable={canEdit} raw={params[p.name]}
-                      choices={p.choices ?? FALLBACK_CHOICES[node.type]?.[p.name]}
+                      choices={p.choices ?? buttonChoices(p.name) ?? FALLBACK_CHOICES[node.type]?.[p.name]}
                       tokens={tokens} tokenOptions={p.tokens ? tokenKeys(tokens, p.tokens, valueOf('class')) : []}
                       muted={!paramRelevant(node.type, p.name, mode)}
                       onChange={v => edits.onParam(node.id, p.name, v)} />
           ))}
+      {isButton && <PageButtonInfo buttons={pageButtons} flowName={flowName} buttonId={String(valueOf('button_id') ?? '')} />}
     </>
   )
 }
 
-export function ParamsPane({ selected, params, editable, edits, flowPart }: {
+export function ParamsPane({ selected, params, editable, edits, flowPart, flowName }: {
   selected: FlowViewNode | null
+  flowName?: string                        // name of the open flow (page buttons of an event.button)
   params: Record<string, unknown>          // params of the selected node in the document
   editable: boolean
   edits: NodeEdits
@@ -243,7 +280,7 @@ export function ParamsPane({ selected, params, editable, edits, flowPart }: {
            style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5,
                     background: dragging ? 'var(--accent)' : 'transparent', opacity: dragging ? 0.5 : 1, touchAction: 'none' }} />
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '10px 12px' }}>
-        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} /> : flowPart}
+        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} flowName={flowName} /> : flowPart}
       </div>
     </aside>
   )
