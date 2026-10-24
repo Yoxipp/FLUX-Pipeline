@@ -170,7 +170,7 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       </button>
       {activation && (
         <button type="button" className={`flow-tool${activation.active ? ' on' : ''}`} onClick={activation.onOpen}
-                title={tr('Activer : 0 erreur, avertissements lus, essai a blanc reussi', 'Activate: 0 error, warnings read, dry run passed')}>
+                title={tr('Activer : une version figee (Enregistrer et incrementer), 0 erreur, avertissements lus, essai a blanc reussi', 'Activate: a frozen version (Save and increment), 0 error, warnings read, dry run passed')}>
           <Power size={13} /> {activation.active ? tr('Actif', 'Active') : tr('Activer', 'Activate')}
         </button>
       )}

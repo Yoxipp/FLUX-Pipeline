@@ -149,10 +149,10 @@ def _filter(name, fr, en, example):
                            "File types (scene, usd, cache, texture, image, video, capture...)", "usd"),
                    _filter("name", "Motif sur le nom du fichier", "Pattern on the file name", "*_model_*")],
            shelf=5, aliases=["publish", "apres publish", "after publish", "publie"],
-           doc_fr="Part apres chaque publish reussi sur ce poste (tous les logiciels). Les filtres (mode, task, "
+           doc_fr="Part apres chaque publish reussi sur ce poste, si FLUX y est ouvert (tous les logiciels). Les filtres (mode, task, "
                   "asset, plan, projet, logiciel, type, nom) choisissent les publishs qui le declenchent ; vide = tout. "
                   "Un publish filtre ne cree aucun run. Le logiciel est deduit de l'extension.",
-           doc_en="Starts after each successful publish on this workstation (every soft). The filters (mode, task, "
+           doc_en="Starts after each successful publish on this workstation, if FLUX is open there (every soft). The filters (mode, task, "
                   "asset, shot, project, soft, type, name) pick the publishes that fire it; empty = all. A filtered "
                   "publish creates no run. The soft comes from the extension.")
 async def on_publish(ctx, inputs, params):
