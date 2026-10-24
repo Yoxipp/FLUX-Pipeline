@@ -22,6 +22,11 @@
 # new_file: first scan = baseline (seen files kept in runs/<flow>/seen_<node>.json), one
 # run per new file, size stable on 2 scans (wait_stable). when: the pure subgraph of
 # ``condition`` is evaluated each tick; fires on false -> true, first value = baseline.
+# page_data (P7, ADR 0066 n°6): the journals of a page collection (every author, every machine)
+# read when their etag moves; first read = baseline (runs/<flow>/seen_<node>.json), then one run
+# per record added (or changed, `on`), MAX_PAGE_FIRES per read. A team flow on a collection
+# `per: project` watches that collection in every project; a folder seen for the first time
+# after the baseline is new data (the folder appears with its first record), so it fires.
 
 from __future__ import annotations
 
@@ -46,7 +51,8 @@ SCHEDULE_TICK_S = 15.0
 ON_TIME_S = 120.0          # a slot fired within 2 min of its time is not a catch up
 MIN_EVERY_S = 5.0
 MIN_SCENE_EVERY_S = 2.0
-GLOBAL_EVENTS = ("event.schedule", "event.new_file", "event.when")
+GLOBAL_EVENTS = ("event.schedule", "event.new_file", "event.when", "event.page_data")
+MAX_PAGE_FIRES = 20        # runs started by one page_data read (a big sync never floods the engine)
 SCENE_OPENED = "event.scene_opened"
 SCENE_SOFTS = {"maya": "Maya", "houdini": "Houdini", "nuke": "Nuke"}
 _FALSE = {"0", "false", "no", "off"}
@@ -452,7 +458,7 @@ class Scheduler:
 
     async def _watch(self, w: Watcher) -> None:
         body = {"event.schedule": self._watch_schedule, "event.new_file": self._watch_new_file,
-                "event.when": self._watch_when}[w.kind]
+                "event.when": self._watch_when, "event.page_data": self._watch_page_data}[w.kind]
         try:
             await body(w)
         except asyncio.CancelledError:
@@ -604,6 +610,97 @@ class Scheduler:
             return await self.fire(w.af, w.node, {}, track=True)
         return None
 
+    # -- event.page_data (P7) -------------------------------------------------------------------
+    async def page_data_tick(self, w: Watcher) -> List[Dict[str, Any]]:
+        """One read of the watched collection(s). Returns the records of the runs started."""
+        from flux_flows import page_data
+
+        params = w.af.flow.nodes[w.node].params
+        page, coll = str(params.get("page") or ""), str(params.get("collection") or "")
+        on = str(params.get("on") or "added")
+        sig = f"{page}|{coll}"
+        try:
+            folders = await asyncio.to_thread(page_data_folders, page, coll, w.af.project)
+        except Exception as exc:  # noqa: BLE001 - page missing or broken: noted, tried again
+            w.state["error"] = str(exc)
+            return []
+        w.state.pop("error", None)
+        seen_path = self._seen_path(w)
+        if "pages" not in w.state:
+            stored = None
+            if seen_path is not None:
+                try:
+                    stored = json.loads(seen_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    stored = None
+            if isinstance(stored, dict) and stored.get("sig") == sig and isinstance(stored.get("folders"), dict):
+                w.state["pages"] = stored["folders"]
+            else:                 # first read = baseline, nothing fires
+                base = {}
+                for project, folder in folders:
+                    got = await asyncio.to_thread(page_data.read_records, folder)
+                    base[str(folder)] = {"etag": got["etag"], "project": project,
+                                         "records": {r["rid"]: r.get("_at") for r in got["records"]}}
+                w.state["pages"] = base
+                await self._save_page_seen(seen_path, sig, base)
+                return []
+        known: Dict[str, Any] = w.state["pages"]
+        todo: List[Tuple[Optional[str], Dict[str, Any], str]] = []
+        changed = False
+        for project, folder in folders:
+            key = str(folder)
+            before = known.get(key)
+            tag = await asyncio.to_thread(page_data.etag, folder)
+            if before is not None and before.get("etag") == tag:
+                continue
+            got = await asyncio.to_thread(page_data.read_records, folder)
+            old = (before or {}).get("records") or {}
+            for rec in got["records"]:
+                kind = "added" if rec["rid"] not in old else ("changed" if old[rec["rid"]] != rec.get("_at") else None)
+                if kind and (on == "any" or on == kind):
+                    todo.append((project, rec, kind))
+            known[key] = {"etag": got["etag"], "project": project,
+                          "records": {r["rid"]: r.get("_at") for r in got["records"]}}
+            changed = True
+        if changed:
+            await self._save_page_seen(seen_path, sig, known)
+        if len(todo) > MAX_PAGE_FIRES:
+            log.warning("page_data %s: %d enregistrements, %d runs lances", w.key, len(todo), MAX_PAGE_FIRES)
+        # One run after the other: with run_policy skip_if_running two messages arriving
+        # together would lose the second one.
+        from flux_flows import engine
+
+        started = []
+        for project, rec, kind in todo[:MAX_PAGE_FIRES]:
+            record = await self.fire(w.af, w.node, {"record": rec, "op": kind, "user": rec.get("_by"),
+                                                    "project": project or "", "page": page,
+                                                    "collection": coll}, track=True)
+            started.append(record)
+            w.state["last_fire"] = rec["rid"]
+            if record.get("status") in runs.LIVE_STATUSES:
+                await engine.manager().wait(record["run_id"])
+        return started
+
+    async def _save_page_seen(self, path: Optional[Path], sig: str, folders: Dict[str, Any]) -> None:
+        if path is None:
+            return
+        try:
+            await asyncio.to_thread(_write_json, path, {"sig": sig, "folders": folders})
+        except OSError as exc:
+            log.warning("page data seen not saved (%s): %s", path, exc)
+
+    async def _watch_page_data(self, w: Watcher) -> None:
+        every = _every(w.af.flow.nodes[w.node].params, 10, MIN_EVERY_S)
+        while True:
+            try:
+                await self.page_data_tick(w)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - logged, next read tries again
+                w.state["error"] = str(exc)
+                log.warning("page_data %s: %s", w.key, exc)
+            await asyncio.sleep(every)
+
     async def _watch_when(self, w: Watcher) -> None:
         every = _every(w.af.flow.nodes[w.node].params, 30, MIN_EVERY_S)
         while True:
@@ -689,6 +786,36 @@ class Scheduler:
                                  for af in self.flows],
                 "watchers": [w.info() for w in self.watchers.values()], "over_cap": self.skipped,
                 "max_watchers": self.max_watchers}
+
+
+def page_data_folders(page: str, collection: str, project: Optional[str]) -> List[Tuple[Optional[str], Path]]:
+    """[(project or None, folder)] watched by an event.page_data (sync: call it in a thread).
+    A project flow: its project. A team / perso flow: the team page; a collection `per:
+    project` of it is watched in every project that has the page data folder."""
+    from flux_flows import locations, page_data, page_store
+    from flux_flows.store import FlowStoreError
+
+    if project:
+        folder, _, _ = page_data.locate(page, collection, project)
+        return [(project, folder)]
+    roots = locations.page_roots(None)
+    scope = page_store.resolve(roots, page)
+    if scope is None:
+        raise FlowStoreError(f"page {page} introuvable", 404)
+    spec = page_data.spec_of(page_store.read_page(roots, scope, page)["page"], collection)
+    if spec.per == "team":
+        return [(None, page_data.collection_dir(roots, scope, page, spec))]
+    from core.constants import SETUP_DIR
+    from core.paths import get_projects_dir
+
+    out: List[Tuple[Optional[str], Path]] = []
+    projects = get_projects_dir()
+    if projects.is_dir():
+        for entry in sorted(projects.iterdir()):
+            folder = entry / SETUP_DIR / "pages_data" / page / spec.id
+            if entry.is_dir() and folder.is_dir():
+                out.append((entry.name, folder))
+    return out
 
 
 def _current_user() -> Optional[str]:

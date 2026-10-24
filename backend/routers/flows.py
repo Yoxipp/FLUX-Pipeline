@@ -548,13 +548,9 @@ async def rename_widget(page_id: str, body: RenameWidgetBody) -> dict[str, Any]:
 # -- page data (ADR 0066 n°3): one journal per author, merged on read ------------
 
 def _page_and_spec(page_id: str, collection: str, project: Optional[str]):
-    roots = _page_roots(project)
-    scope = page_store.resolve(roots, page_id)
-    if scope is None:
-        raise FlowStoreError(f"page {page_id} introuvable", 404)
-    page = page_store.read_page(roots, scope, page_id)["page"]
-    spec = page_data.spec_of(page, collection)
-    return page_data.collection_dir(roots, scope, page_id, spec), spec
+    _page_roots(project)   # 400 on a bad project name
+    folder, spec, _ = page_data.locate(page_id, collection, project)
+    return folder, spec
 
 
 @router.get("/pages/{page_id}/data/{collection}")

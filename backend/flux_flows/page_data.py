@@ -301,6 +301,19 @@ def media_type(name: str) -> str:
         Path(name).suffix.lower(), "application/octet-stream")
 
 
+def locate(page_id: str, collection: str, project: Optional[str]):
+    """(folder, spec, page scope) of a collection of the winning page *page_id* (project > team)."""
+    from flux_flows import locations, page_store
+
+    roots = locations.page_roots(project)
+    scope = page_store.resolve(roots, page_id)
+    if scope is None:
+        raise FlowStoreError(f"page {page_id} introuvable", 404)
+    page = page_store.read_page(roots, scope, page_id)["page"]
+    spec = spec_of(page, collection)
+    return collection_dir(roots, scope, page_id, spec), spec, scope
+
+
 def spec_of(page, collection: str) -> DataSpec:
     spec = next((d for d in page.data if d.id == collection), None)
     if spec is None:
