@@ -5,7 +5,7 @@ description: "Session Maya (node livre, verrouille ; decision 24) : se connecte 
 node_type: session.may_instance
 interface:
   inputs:
-    - {id: mode, type: select, label: "Mode", default: live_connect_or_open, options: [live_connect_or_open, live_connect_only, headless, farm]}
+    - {id: mode, type: select, label: "Mode", default: live_connect_or_open, options: [live_connect_or_open, live_connect_only, headless]}
     - {id: pick, type: select, label: "Instance visee", default: active, options: [active, scene, pid]}
     - {id: scene, type: path, label: "Scene (ouverte au lancement, ou cherchee)", default: ""}
     - {id: template, type: path, label: "Headless : scene de depart", default: ""}

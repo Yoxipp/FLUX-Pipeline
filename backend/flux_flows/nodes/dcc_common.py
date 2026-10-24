@@ -1,7 +1,7 @@
 # dcc_common.py — what every DCC node shares (02_NODES §8). P6a.
 #
 #   instance_node(soft)   registers session.<prefix>_instance (<Soft>Instance): modes
-#                         live_connect_or_open (default), live_connect_only, headless, farm (V2)
+#                         live_connect_or_open (default), live_connect_only, headless (farm: ADR 0067, Dispatcher)
 #   need_session()        the session input, a NodeError when there is none
 #   call()                session.run(code) -> `result`, a NodeError on failure
 #   skip_read()           dry run without an open instance: a reader gives empty outputs
@@ -138,7 +138,8 @@ def instance_body(ctx, inputs, params, spec, modes):
 
     mode = str(params.get("mode") or "live_connect_or_open")
     if mode == "farm":
-        raise NodeError("mode farm : reserve a la V2 (Tractor)")
+        raise NodeError("Le mode farm n'existe plus : pour envoyer du travail sur la farm, utilise les nodes Dispatcher "
+                        "(Submit, RenderShot)", code="E_PARAM_INVALID")
     if mode not in modes:
         raise NodeError(f"mode inconnu `{mode}` ({', '.join(modes)})")
     scene = _scene(ctx, inputs)
@@ -195,7 +196,6 @@ def mode_labels(spec, modes) -> dict:
         "live_connect_or_open": ("Se connecter ou ouvrir (defaut)", "Connect or open (default)"),
         "live_connect_only": ("Se connecter seulement", "Connect only"),
         "headless": (f"Sans interface ({worker}, 1 licence)", f"No UI ({worker}, 1 licence)"),
-        "farm": ("Farm (V2, indisponible)", "Farm (V2, unavailable)"),
     }
     return {m: labels[m] for m in modes if m in labels}
 
@@ -238,11 +238,10 @@ def instance_node(soft: str, *, icon: str, shelf: int, headless: bool = True) ->
                        port("state", "str", "live, headless, ou skipped en essai a blanc",
                             "live, headless, or skipped in a dry run", "live")],
               params=[port("mode", "str", "live_connect_or_open : se connecte, sinon ouvre ; live_connect_only ; "
-                                          "headless : sans interface (licence) ; farm : V2",
+                                          "headless : sans interface (licence)",
                            "live_connect_or_open: connect, else open; live_connect_only; headless: no UI "
-                           "(licence); farm: V2", "live_connect_or_open", default="live_connect_or_open",
-                           choices=modes, wirable=False, labels=mode_labels(spec, modes),
-                           reserved=[m for m in modes if m == "farm"]),
+                           "(licence)", "live_connect_or_open", default="live_connect_or_open",
+                           choices=modes, wirable=False, labels=mode_labels(spec, modes)),
                       port("pick", "str", "Quelle instance : active (choisie dans FLUX), scene, pid",
                            "Which instance: active (chosen in FLUX), scene, pid", "active", default="active",
                            choices=PICKS, wirable=False, labels=PICK_LABELS),

@@ -298,15 +298,15 @@ def iter_nodes(flow: Flow) -> Iterator[Tuple[str, Node]]:
 def v1_limit_issues(flow: Flow) -> List[Dict[str, str]]:
     """Values the schema stores for V2 but V1 refuses (01 §2 "Reserve V2").
 
-    ForEach ``mode`` is kept and ignored; an Instance in ``farm`` mode is an
-    error. Consumed by the validation (P4).
+    An Instance in ``farm`` mode is an error (ADR 0067: removed, Dispatcher nodes instead).
+    Consumed by the validation (P4).
     """
     issues = []
     for node_id, node in iter_nodes(flow):
         if node.type.startswith("session.") and node.type.endswith("_instance") \
                 and node.params.get("mode") == "farm":
             issues.append({"code": "E_PARAM_INVALID", "node": node_id,
-                           "message": "le mode farm n'existe pas encore (V2)"})
+                           "message": "le mode farm n'existe plus : utilise les nodes Dispatcher (Submit, RenderShot)"})
     return issues
 
 

@@ -5,7 +5,7 @@ description: "Session Nuke (node livre, verrouille ; decision 24) : se connecte 
 node_type: session.nk_instance
 interface:
   inputs:
-    - {id: mode, type: select, label: "Mode", default: live_connect_or_open, options: ["live_connect_or_open", "live_connect_only", "farm"]}
+    - {id: mode, type: select, label: "Mode", default: live_connect_or_open, options: ["live_connect_or_open", "live_connect_only"]}
     - {id: pick, type: select, label: "Instance visee", default: active, options: ["active", "scene", "pid"]}
     - {id: scene, type: path, label: "Scene (ouverte au lancement, ou cherchee)", default: ""}
     - {id: pid, type: int, label: "Process (pick pid)"}

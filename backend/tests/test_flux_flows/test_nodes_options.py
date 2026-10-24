@@ -94,11 +94,12 @@ class CatalogTest(unittest.TestCase):
 class ChoiceLabelsTest(unittest.TestCase):
     """R1 retake 4: menus keep the declaration order, with readable labels and reserved options."""
 
-    def test_instance_modes_ordered_labelled_farm_reserved(self):
+    def test_instance_modes_ordered_labelled_no_farm(self):
+        # ADR 0067: farm is no longer an Instance mode (Dispatcher nodes instead).
         for node_type in ("session.may_instance", "session.may_instance_core"):
             mode = {p["name"]: p for p in _spec(node_type).to_dict()["params"]}["mode"]
-            self.assertEqual(mode["choices"], ["live_connect_or_open", "live_connect_only", "headless", "farm"])
-            self.assertEqual(mode["reserved"], ["farm"], node_type)
+            self.assertEqual(mode["choices"], ["live_connect_or_open", "live_connect_only", "headless"])
+            self.assertIsNone(mode["reserved"], node_type)
             self.assertIn("defaut", mode["choice_labels"]["live_connect_or_open"]["fr"])
             self.assertIn("mayapy", mode["choice_labels"]["headless"]["fr"])
             self.assertNotEqual(mode["doc_fr"], "Mode", node_type)   # the subflow node takes the core doc

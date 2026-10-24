@@ -88,7 +88,7 @@ class Registry(unittest.TestCase):
                          ("team", "good.py", 2, ["const"]))
         self.assertEqual(node["outputs"][0]["doc_fr"], "la valeur")
         self.assertEqual([e["file"] for e in cat["node_errors"]], ["broken.py"])
-        self.assertEqual(len(cat["families"]), 10)
+        self.assertEqual(len(cat["families"]), 11)
         self.assertTrue(any(t["id"] == "dir" for t in cat["types"]))
         # Unchanged files: no re-import; removed file: its node goes away.
         self.assertEqual(registry.load_team_nodes(self.tmp), cat["node_errors"])

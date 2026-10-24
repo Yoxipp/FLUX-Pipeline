@@ -39,6 +39,7 @@ import time
 import weakref
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from flux_flows import events, resolver, runs
@@ -167,6 +168,8 @@ class Run:
         self.values = dict(values or {})
         # Payload of the event that started the run (scheduler, hooks: 01 §9), read by event nodes.
         self.payload = dict(payload or {})
+        # Jobs of the ForEach loops in mode dispatch, innermost last (ADR 0067).
+        self._dispatch: List[Dict[str, Any]] = []
         self.interrupted: Optional[str] = None   # reason when the scheduler stops the run (lock lost, stop)
         self._cleanups: List[Any] = []          # closed at the end of the run (headless sessions, P6a)
         self.record = runs.new_record(run_id=self.run_id, flow=flow.name, scope=scope, project=project,
@@ -655,6 +658,32 @@ class Run:
             raise NodeError(f"While attend un booleen, recu {value!r} : utilise Compare")
         return value
 
+    def dispatch_batch(self) -> Optional[Dict[str, Any]]:
+        return self._dispatch[-1] if self._dispatch else None
+
+    async def _dispatch_send(self, end: str, batch: Dict[str, Any]) -> str:
+        """Send the job of a dispatch loop (ADR 0067); dry run = described, nothing sent."""
+        tasks = batch["tasks"]
+        if self.mode == "dry":
+            self.record["report"].append({"node": end, "kind": "dispatch",
+                                          "text_fr": f"enverrait un job de {len(tasks)} tache(s) au dispatcher"})
+            return f"dry:{end}"
+        from features.dispatcher import api
+        from features.dispatcher.jobs import DispatchError, DispatchJob
+
+        c = self.context
+        job = DispatchJob(title=str(batch.get("title") or self.flow_name), user=str(c.get("user") or ""),
+                          project=str(c.get("project") or ""), tasks=tasks,
+                          priority=int(batch.get("priority") or 100),
+                          metadata={"flow": self.flow_name, "run": self.run_id})
+        path = c.get("project_path")
+        try:
+            result = await asyncio.to_thread(api.submit, job, Path(path) if path else None)
+        except DispatchError as exc:
+            raise NodeError(str(exc), code="E_DISPATCH") from None
+        self.node_log(end, "info", f"job {result['job_id']} envoye ({result['backend']}, {len(tasks)} tache(s))")
+        return result["job_id"]
+
     async def _loop(self, bid: str, node, outs: Dict[str, Any], got: Dict[str, Any]) -> Optional[str]:
         """ForEach, For and While blocks: body = chain from ``loop`` up to the End."""
         kind = node.type
@@ -671,6 +700,9 @@ class Run:
             self.node_log(bid, "info", f"{len(items)} tour(s)")
         index = 0
         self._loops += 1
+        batch = {"tasks": []} if kind == FOREACH_BEGIN and str(node.params.get("mode") or "") == "dispatch" else None
+        if batch is not None:
+            self._dispatch.append(batch)
         try:
             while True:
                 if kind == WHILE_BEGIN:
@@ -719,11 +751,26 @@ class Run:
                     break
         finally:
             self._loops -= 1
+            if batch is not None:
+                self._dispatch.pop()
+        job_id = ""
+        if batch is not None:
+            if batch["tasks"]:
+                try:
+                    job_id = await self._dispatch_send(end, batch)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._set_state(end, "running")
+                    return self._fail(end, exc, {})
+            else:
+                self.node_log(end, "info", "mode dispatch : aucun Submit dans la boucle, rien a envoyer")
         final = {"count": len(items)} if kind == FOREACH_BEGIN else {"index": index}
         self._exec_out[bid] = (tuple(self._frames), final)
         self._set_state(bid, "ok")
         self._set_state(end, "running")
-        self._exec_out[end] = (tuple(self._frames), {"results": results} if kind == FOREACH_BEGIN else {})
+        self._exec_out[end] = (tuple(self._frames),
+                               {"results": results, "job_id": job_id} if kind == FOREACH_BEGIN else {})
         self._set_state(end, "ok")
         return self._exec_next.get((end, "done"))
 

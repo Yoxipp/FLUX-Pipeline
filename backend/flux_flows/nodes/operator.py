@@ -38,7 +38,8 @@ ITEMS_KEY = "_items"
 CONDITION_KEY = "_condition"
 LIMIT_KEY = "_limit"
 SEQUENCE_KEY = "_sequence"
-LOOP_MODES = ("sequential",)              # ``mode`` of the loop begins (V2 adds work items)
+LOOP_MODES = ("sequential",)              # ``mode`` of For / While (V2 adds work items)
+FOREACH_MODES = ("sequential", "dispatch")  # dispatch: the Submit of the body fill one job (ADR 0067)
 MATCH_ON = ("name", "path")               # operator.list_filter
 SORT_KEYS = ("natural", "name", "date", "size")   # operator.list_sort
 
@@ -51,8 +52,13 @@ SORT_KEYS = ("natural", "name", "date", "size")   # operator.list_sort
                     port("index", "int", "Rang de l'element (0 d'abord)", "Item rank (0 first)", 0),
                     port("count", "int", "Nombre d'elements", "Number of items", 2),
                     port("on_error", "exec")],
-           params=[port("mode", "str", "Reserve V2 (work items)", "Reserved for V2 (work items)", "sequential",
-                        default="sequential", choices=LOOP_MODES),
+           params=[port("mode", "str", "sequential : le corps tourne une fois par element ; dispatch : pareil, mais "
+                        "les Submit du corps remplissent un seul job, envoye a ForEachEnd (une tache par tour)",
+                        "sequential: the body runs once per item; dispatch: the same, but the Submit nodes of the body "
+                        "fill one job, sent at ForEachEnd (one task per turn)", "sequential",
+                        default="sequential", choices=FOREACH_MODES,
+                        labels={"sequential": ("Un tour apres l'autre", "One turn after the other"),
+                                "dispatch": ("Dispatch : un job pour toute la boucle", "Dispatch: one job for the loop")}),
                    port("max_items", "int", "Nombre maximal d'elements", "Maximum number of items", MAX_ITEMS,
                         default=MAX_ITEMS)],
            shelf=30, aliases=["boucle", "loop", "pour chaque"],
@@ -77,6 +83,8 @@ async def foreach_begin(ctx, inputs, params):
                    port("collect", "any", "Valeur gardee a chaque tour", "Value kept at each turn")],
            outputs=[port("done", "exec", "Suite, une fois la boucle finie", "Next, once the loop is done"),
                     port("results", "list[any]", "Valeurs de collect, une par tour", "collect values, one per turn"),
+                    port("job_id", "str", "Mode dispatch : le job envoye (a relier a WaitJob), sinon vide",
+                         "Dispatch mode: the job sent (link it to WaitJob), else empty", "local:1a2b3c4d5e"),
                     port("on_error", "exec")],
            params=[port("begin", "str", "Id du ForEachBegin apparie (pose par l'editeur)",
                         "Id of the paired ForEachBegin (set by the editor)", "n3", required=True)],

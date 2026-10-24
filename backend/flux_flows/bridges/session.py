@@ -29,7 +29,8 @@ from typing import Any, Callable, Dict, List, Optional
 from flux_flows.bridges import primitives, softs
 from flux_flows.bridges.primitives import BridgeError
 
-MODES = ("live_connect_or_open", "live_connect_only", "headless", "farm")
+# ADR 0067: no farm mode (work sent to the farm = Dispatcher nodes).
+MODES = ("live_connect_or_open", "live_connect_only", "headless")
 PICKS = ("active", "scene", "pid")
 DEFAULT_WAIT_S = 60.0
 

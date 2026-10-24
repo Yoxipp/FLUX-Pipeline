@@ -26,7 +26,7 @@ from flux_flows.model import NODE_TYPE_RE
 from flux_flows.types import catalog_types, is_valid_type
 
 FAMILIES: Tuple[str, ...] = (
-    "event", "data", "logic", "operator", "action", "flux", "session", "dcc", "bridge", "subflow",
+    "event", "data", "logic", "operator", "action", "flux", "session", "dcc", "bridge", "dispatcher", "subflow",
 )
 MARKER = "@flow_node"
 BUILTIN_MODULES: Tuple[str, ...] = (
@@ -35,7 +35,7 @@ BUILTIN_MODULES: Tuple[str, ...] = (
     "flux_flows.nodes.subflow", "flux_flows.nodes.bridge", "flux_flows.nodes.dcc_houdini",
     "flux_flows.nodes.dcc_maya", "flux_flows.nodes.headless", "flux_flows.nodes.dcc_publish", "flux_flows.nodes.dcc_softs",
     "flux_flows.nodes.page_nodes",
-    "flux_flows.nodes.dcc_extension",
+    "flux_flows.nodes.dcc_extension", "flux_flows.nodes.dispatcher",
 )
 _TEAM_MODULE_PREFIX = "flux_flows_team_nodes."
 

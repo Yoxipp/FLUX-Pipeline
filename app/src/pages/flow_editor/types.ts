@@ -16,7 +16,7 @@ export interface FlowRights {
 
 export type Family =
   | 'event' | 'data' | 'logic' | 'operator' | 'action'
-  | 'flux' | 'session' | 'dcc' | 'bridge' | 'subflow'
+  | 'flux' | 'session' | 'dcc' | 'bridge' | 'dispatcher' | 'subflow'
 
 // "exec", "any", "bool", "int", "float", "str", "path", "dir", "list[T]", "dict",
 // "session[<soft>]", "publish", "dcc_node", "pattern".

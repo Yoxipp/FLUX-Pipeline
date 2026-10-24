@@ -156,6 +156,9 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   `"choices": [..] | null`, `"wirable": bool`, `"tokens": "CLASS" | null` (section de tokens du projet proposee en menu par
   l'editeur). Un lien vers un param `wirable=False` (constante, ex. `data.path.value`) = E_LINK_INVALID ; une valeur saisie
   hors de `choices` (texte non templatise, comparaison exacte) = E_PARAM_INVALID (remplace le controle propre a Value.type).
+* **Dispatcher (ADR 0067)** : famille `dispatcher` (`nodes/dispatcher.py` : Submit, JobStatus, WaitJob, CancelJob,
+  RenderShot) sur `features/dispatcher` ; ForEach `mode: dispatch` : `ctx.dispatch_batch()` (engine `_dispatch`) recoit les
+  taches des Submit du corps, ForEachEnd envoie un job (`job_id`). Mode `farm` des Instance supprime.
 * **R1 (2026-10-24)** : `port(..., labels={valeur: (fr, en)}, reserved=(..), when={param: (valeurs,)})`, serialises
   `"choice_labels"`, `"reserved"`, `"when": {"param", "in"}`. `labels` = texte du menu (la valeur stockee ne change pas) ;
   `reserved` = option visible mais desactivee (valeur saisie = E_PARAM_INVALID) ; `when` = port montre seulement pour ces

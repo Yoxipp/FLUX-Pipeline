@@ -112,3 +112,9 @@ class NodeContext:
 
     def set_output(self, ident: str, value: Any) -> None:
         self._run.set_output(ident, value)
+
+    # -- dispatcher (ADR 0067) ------------------------------------------------------
+    def dispatch_batch(self) -> Optional[Dict[str, Any]]:
+        """The job of the innermost ForEach in mode dispatch ({"tasks": [...], title?, priority?}),
+        else None. dispatcher.submit adds its tasks there; the engine sends it at ForEachEnd."""
+        return self._run.dispatch_batch()

@@ -826,7 +826,7 @@ def validate(flow: Flow, env: Optional[Env] = None) -> List[Issue]:
     issues: List[Issue] = []
     for item in v1_limit_issues(flow):
         issues.append(_issue("E_PARAM_INVALID", item["node"], _cap(item["message"]),
-                             "Farm mode does not exist yet (V2)", port="mode"))
+                             "Farm mode no longer exists: use the Dispatcher nodes (Submit, RenderShot)", port="mode"))
     top = _Net(flow, flow.nodes, flow.links)
     _check_links(top, issues)
     _check_nodes(top, issues, env)
