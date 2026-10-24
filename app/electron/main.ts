@@ -10,6 +10,8 @@ import {
 } from './python_bridge'
 import { promptUpdateAtLaunch } from './updater'
 import { displayVersion } from './version'
+import { DEV_ORIGIN } from './csp'
+import { installWebContentsGuards, mayReceiveToken, withDevCsp } from './security'
 import { spawn } from 'child_process'
 
 // The terminal that launched FLUX can go away (window closed, concurrently stopped)
@@ -128,7 +130,7 @@ async function createWindow(): Promise<void> {
   // Load the renderer. In dev the Vite server may not be up yet, so retry the
   // URL until it answers instead of blocking startup on a fixed port wait.
   if (!app.isPackaged) {
-    const url = 'http://localhost:5173'
+    const url = DEV_ORIGIN
     const deadline = Date.now() + 30_000
     const tryLoad = () => {
       win?.loadURL(url).catch(() => {
@@ -229,7 +231,7 @@ function createDetachedWindow(route: string): void {
     child.on('closed', () => { if (singleWindows.get(routePath) === child) singleWindows.delete(routePath) })
   }
   if (!app.isPackaged) {
-    child.loadURL(`http://localhost:5173/?detached=1#${route}`).catch((err) =>
+    child.loadURL(`${DEV_ORIGIN}/?detached=1#${route}`).catch((err) =>
       console.error('[Electron] detached loadURL failed:', err))
   } else {
     child.loadFile(path.join(__dirname, '../dist/index.html'), { query: { detached: '1' }, hash: route })
@@ -383,6 +385,10 @@ app.whenReady().then(async () => {
   // Windows: group under the FLUX identity so the taskbar shows our icon.
   if (process.platform === 'win32') app.setAppUserModelId('com.flux.pipeline')
 
+  // Security R2: navigation / window.open guards on every webContents (main, detached,
+  // splash), registered before any window exists. See security.ts.
+  installWebContentsGuards()
+
   // Newer installer in <FLUX_ROOT>/FLUX_UPDATE: offer the update before anything
   // starts (the splash is always-on-top and would hide the prompt). Accepted: the
   // installer is running, quit without starting the backend.
@@ -398,17 +404,31 @@ app.whenReady().then(async () => {
   // it (fetch, img/video src, WebSocket). Added here, below the renderer, so it
   // never triggers a CORS preflight. A 403 drops the cached token so the next
   // request refetches it (backend restarted with a new token).
+  // Security R2: only requests issued by the app's own page get the token
+  // (mayReceiveToken); a foreign page or frame reaches the backend without it.
   const backendFilter = { urls: [
     'http://127.0.0.1:8765/*', 'ws://127.0.0.1:8765/*',
     'http://localhost:8765/*', 'ws://localhost:8765/*',
   ] }
   session.defaultSession.webRequest.onBeforeSendHeaders(backendFilter, (details, callback) => {
+    if (!mayReceiveToken(details)) {
+      callback({ requestHeaders: details.requestHeaders })
+      return
+    }
     getApiToken().then((token) => {
       if (token) details.requestHeaders['X-Flux-Token'] = token
       callback({ requestHeaders: details.requestHeaders })
     })
   })
-  session.defaultSession.webRequest.onHeadersReceived(backendFilter, (details, callback) => {
+  // A session keeps ONE onHeadersReceived listener: the dev CSP for the Vite document
+  // (R2, see csp.ts) shares it with the backend 403 watch through a merged filter.
+  const headersFilter = { urls: app.isPackaged ? backendFilter.urls : [...backendFilter.urls, `${DEV_ORIGIN}/*`] }
+  session.defaultSession.webRequest.onHeadersReceived(headersFilter, (details, callback) => {
+    const cspHeaders = withDevCsp(details)
+    if (cspHeaders) {
+      callback({ responseHeaders: cspHeaders })
+      return
+    }
     if (details.statusCode === 403) invalidateApiToken()
     callback({})
   })
