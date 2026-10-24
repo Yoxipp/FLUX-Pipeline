@@ -62,7 +62,7 @@ class Registry(unittest.TestCase):
     def test_bridge_plus_verbs_are_not_nodes(self) -> None:
         from flux_flows.nodes import registry
 
-        for prefix in ("sd", "zb", "mvd"):   # sp, mari: done in P6b step 9
+        for prefix in ("sd", "mvd"):   # sp, mari, zb: done in P6b step 9
             for verb in ("open_scene", "save_scene", "save_as", "run_script"):
                 self.assertIsNone(registry.get_node(f"dcc.{prefix}_{verb}"), f"{prefix}_{verb}")
         self.assertIsNotNone(registry.get_node("dcc.nk_run_script"))

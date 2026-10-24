@@ -90,6 +90,11 @@ class ZBrushClient:
     # Low-level
     # ------------------------------------------------------------------
 
+    def verb(self, payload: dict, timeout: float = 600.0) -> dict:
+        """Flows "bridge+" verbs (open, save, save_as, import, run; P6b step 9). Served only
+        while ZBrush waits for FLUX (Export FLUX clicked); "Unknown action" = old bridge."""
+        return self._send(dict(payload), timeout=timeout)
+
     def _send(self, payload: dict, timeout: float = 10.0) -> dict:
         """Send a JSON command and receive the JSON response (newline-framed)."""
         return send_json_line(self.host, self.port, payload, timeout,

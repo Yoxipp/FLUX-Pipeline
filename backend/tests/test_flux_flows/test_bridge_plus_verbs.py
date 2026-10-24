@@ -22,8 +22,9 @@ from tests.test_flux_flows.test_nodes_softs import run_node
 setUpModule = h.setUpModule        # noqa: N816
 tearDownModule = h.tearDownModule  # noqa: N816
 
-# soft -> (prefix, save_as extension, import kind or None, has run)
-TCP_SOFTS = {"mari": ("mari", ".mra", "version", True)}
+# soft -> (prefix, open extension (None = new project from a mesh), save_as extension, import kind or None)
+TCP_SOFTS = {"mari": ("mari", None, ".mra", "version"),
+             "zbrush": ("zb", ".zpr", ".zpr", "mesh")}
 
 
 def _handler(requests):
@@ -34,7 +35,7 @@ def _handler(requests):
             return {"status": "ok", "version": "test"}
         if action in ("open", "save", "save_as"):
             return {"status": "ok", "project": req.get("path") or "chair"}
-        if action == "import":
+        if action in ("import", "stop", "cancel"):
             return {"status": "ok"}
         if action == "run":
             from dcc.bridge_secret import get_secret
@@ -64,14 +65,16 @@ class Nodes(unittest.TestCase):
         return [r for r in self.requests if r.get("action") == action][-1]
 
     def test_open_save_save_as_import_run(self) -> None:
-        for soft, (prefix, ext, kind, has_run) in TCP_SOFTS.items():
+        for soft, (prefix, open_ext, ext, kind) in TCP_SOFTS.items():
             with self.subTest(soft=soft):
                 mesh = self.tmp / "chair.obj"
                 mesh.write_text("x", encoding="utf-8")
-                rec, _ = run_node(soft, f"dcc.{prefix}_open_scene", self.srv.port, {"discard_changes": True},
-                                  {"mesh": str(mesh)})
+                source = {"mesh": str(mesh)} if open_ext is None else {"path": str(self.tmp / f"chair{open_ext}")}
+                rec, _ = run_node(soft, f"dcc.{prefix}_open_scene", self.srv.port, {"discard_changes": True}, source)
                 self.assertEqual(rec["status"], "ok", rec.get("error"))
-                self.assertEqual((Path(self._last("open")["mesh"]), self._last("open")["discard"]), (mesh, True))
+                req = self._last("open")
+                self.assertEqual((Path(req["mesh"] or req["path"]), req["discard"]),
+                                 (Path(list(source.values())[0]), True))
                 rec, _ = run_node(soft, f"dcc.{prefix}_save_scene", self.srv.port)
                 self.assertEqual(rec["status"], "ok", rec.get("error"))
                 target = self.tmp / f"chair{ext}"
@@ -85,10 +88,18 @@ class Nodes(unittest.TestCase):
                     rec, _ = run_node(soft, f"dcc.{prefix}_import", self.srv.port, {"kind": kind}, {"path": str(mesh)})
                     self.assertEqual(rec["status"], "ok", rec.get("error"))
                     self.assertEqual(self._last("import")["kind"], kind)
-                if has_run:
-                    rec, value = run_node(soft, f"dcc.{prefix}_run_script", self.srv.port, inputs={"code": "result = 7"},
-                                          out="result")
-                    self.assertEqual((rec["status"], value), ("ok", 7), rec.get("error"))
+                rec, value = run_node(soft, f"dcc.{prefix}_run_script", self.srv.port, inputs={"code": "result = 7"},
+                                      out="result")
+                self.assertEqual((rec["status"], value), ("ok", 7), rec.get("error"))
+
+    def test_zbrush_is_released_at_the_end_of_the_run_not_between_verbs(self) -> None:
+        rec, _ = run_node("zbrush", "dcc.zb_save_scene", self.srv.port)
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        actions = [r.get("action") for r in self.requests if r.get("action") != "ping"]
+        self.assertEqual(actions[-2:], ["save", "stop"])
+        self.requests.clear()
+        rec, _ = run_node("zbrush", "dcc.zb_run_script", self.srv.port, inputs={"code": "result = 7"})
+        self.assertIn("stop", [r.get("action") for r in self.requests])
 
     def test_mari_opens_a_project_by_name(self) -> None:
         rec, _ = run_node("mari", "dcc.mari_open_scene", self.srv.port, inputs={"path": "chair_tex"})
@@ -194,6 +205,89 @@ class MariScript(_FakeModules):
 
     def test_run_needs_the_secret(self) -> None:
         self.check_run("mari.projects.current().name()", "chair_tex")
+
+
+def _load_zbrush_plugin(zbc) -> dict:
+    """The plugin binds its socket and registers its UI at import: its source is run without
+    the module-level try blocks (except the zbrush import), as tests/zbrush does."""
+    import ast
+
+    src = Path(__file__).resolve().parents[2] / "dcc" / "zbrush" / "zbrush_bridge_plugin.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tries = [n for n in tree.body if isinstance(n, ast.Try)]
+    body = [n for n in tree.body if not isinstance(n, ast.Try) or n is tries[0]]
+    ns = {"__name__": "zb_plugin_test", "__file__": str(src)}
+    zbrush = types.ModuleType("zbrush")
+    zbrush.commands = zbc
+    with mock.patch.dict(sys.modules, {"zbrush": zbrush, "zbrush.commands": zbc}):
+        exec(compile(ast.Module(body=body, type_ignores=[]), str(src), "exec"), ns)
+    ns["_log"] = ns["_diag"] = lambda msg: None
+    return ns
+
+
+class ZBrushScript(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_zb_script_"))
+        calls = self.calls = []
+        state = {"next": "", "last": ""}
+        tmp = self.tmp
+
+        def press(button):
+            calls.append((button, state["next"]))
+            if button in ("File:Save As", "Tool:Save"):
+                Path(state["next"]).write_text("x", encoding="utf-8")
+            if button in ("File:Save As", "File:Open"):
+                state["last"] = state["next"]
+
+        zbc = types.ModuleType("zbrush.commands")
+        zbc.set_next_filename = lambda p: state.update(next=p)
+        zbc.press = press
+        zbc.get_last_used_filename = lambda: state["last"]
+        zbc.get_active_tool_index = lambda: 0
+        zbc.get_tool_path = lambda i: str(tmp / "artist.ztl")
+        zbc.set_tool_path = lambda i, p: state.update(next=p)
+        zbc.update = lambda redraw_ui=True: None
+        self.ns = _load_zbrush_plugin(zbc)
+        self.ns["_ZBRUSH_AVAILABLE"] = True
+        self.state = state
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_open_needs_discard_for_a_project_and_save_needs_a_project(self) -> None:
+        d = self.ns["_dispatch"]
+        zpr = self.tmp / "head_v004.zpr"
+        zpr.write_text("x", encoding="utf-8")
+        self.assertEqual(d({"action": "open", "path": str(zpr)})["status"], "error")
+        self.assertEqual(self.calls, [])
+        self.assertIn("zbSaveAs", d({"action": "save"})["msg"])
+        self.assertEqual(d({"action": "open", "path": str(zpr), "discard": True})["status"], "ok")
+        self.assertEqual(self.calls[-1], ("File:Open", str(zpr)))
+        self.assertEqual(d({"action": "save"})["status"], "ok")
+        self.assertEqual(self.calls[-1][0], "File:Save As")
+
+    def test_save_as_project_or_tool_and_imports(self) -> None:
+        d = self.ns["_dispatch"]
+        zpr, ztl = str(self.tmp / "out" / "head.zpr"), str(self.tmp / "out" / "head.ztl")
+        self.assertEqual(d({"action": "save_as", "path": zpr, "copy": True})["status"], "error")
+        self.assertEqual(d({"action": "save_as", "path": zpr})["status"], "ok")
+        self.assertEqual(d({"action": "save_as", "path": ztl})["status"], "ok")
+        self.assertEqual(self.calls[-1][0], "Tool:Save")
+        mesh = self.tmp / "retopo.obj"
+        mesh.write_text("x", encoding="utf-8")
+        self.assertEqual(d({"action": "import", "kind": "mesh", "path": str(mesh)})["status"], "ok")
+        self.assertEqual(self.calls[-1], ("Tool:Import", str(mesh)))
+        self.assertEqual(d({"action": "import", "kind": "tool", "path": str(mesh)})["status"], "ok")
+        self.assertEqual(self.calls[-1][0], "Tool:Load")
+
+    def test_run_needs_the_secret(self) -> None:
+        d = self.ns["_dispatch"]
+        self.ns["_secret"] = lambda: ""
+        self.assertFalse(d({"action": "run", "code": "result = 1", "secret": ""})["ok"])
+        self.ns["_secret"] = lambda: "s3cret"
+        self.assertFalse(d({"action": "run", "code": "result = 1", "secret": "bad"})["ok"])
+        resp = d({"action": "run", "code": "result = zbc.get_active_tool_index()", "secret": "s3cret"})
+        self.assertEqual((resp["ok"], resp["result"]), (True, 0))
 
 
 if __name__ == "__main__":

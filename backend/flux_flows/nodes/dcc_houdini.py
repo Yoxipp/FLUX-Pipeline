@@ -156,8 +156,9 @@ def _script_code(ctx, inputs) -> str:
     return f"args = {dc.literal(args)}\n" + code
 
 
-def run_script_node(soft: str, prefix: str, label: str, session_port: Any, shelf: int) -> None:
-    """dcc.<prefix>_run_script for *soft* (Houdini and Maya share it)."""
+def run_script_node(soft: str, prefix: str, label: str, session_port: Any, shelf: int, before: Any = None) -> None:
+    """dcc.<prefix>_run_script for *soft* (Houdini and Maya share it). *before(ctx, session)*
+    runs first (ZBrush: release it at the end of the run)."""
 
     def simulate(ctx, inputs, params):
         shown = str(inputs.get("script") or inputs.get("code") or "")[:200]
@@ -183,6 +184,8 @@ def run_script_node(soft: str, prefix: str, label: str, session_port: Any, shelf
                       "a value. Free code: destructive by caution.")
     def _run_script(ctx, inputs, params):
         s = dc.need_session(ctx, inputs)
+        if before is not None:
+            before(ctx, s)
         resp = s.run(_script_code(ctx, inputs), float(params.get("timeout_s") or 600))
         if not resp.get("ok"):
             raise NodeError(str(resp.get("error") or "le script a echoue"))

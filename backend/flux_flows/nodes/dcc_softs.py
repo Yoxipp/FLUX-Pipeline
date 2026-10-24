@@ -70,7 +70,7 @@ def client_for(session, soft: str):
 def _ok(resp: Any, what: str) -> Dict[str, Any]:
     if not isinstance(resp, dict) or not (resp.get("ok") or resp.get("status") == "ok"):
         msg = str((resp or {}).get("error") or (resp or {}).get("msg") or "echec")
-        if msg.startswith("unknown action"):
+        if msg.lower().startswith("unknown action"):
             msg = "bridge trop ancien pour ce node : reinstalle le bridge depuis FLUX puis relance le logiciel"
         raise NodeError(f"{what} : {msg}")
     return resp
@@ -443,7 +443,20 @@ run_script_node("painter", "sp", "Substance Painter", _SP, 238)
 # its own nodes above (first one done, validated live 2026-10-24).
 
 def _verb(ctx, inputs, soft: str, payload: Dict[str, Any], what: str, timeout: float = 1800.0) -> Dict[str, Any]:
-    return _ok(client_for(dc.need_session(ctx, inputs), soft).verb(payload, timeout), what)
+    client = client_for(dc.need_session(ctx, inputs), soft)
+    if soft != "zbrush":
+        return _ok(client.verb(payload, timeout), what)
+    # ZBrush stays frozen between the verbs of one run (open then save...): released at the
+    # end of the run, and right away on error.
+    zbrush_released(ctx, client)
+    try:
+        return _ok(client.verb(payload, timeout), what)
+    except Exception:
+        try:
+            client.release(timeout=2.0)
+        except Exception:  # noqa: BLE001 - the run's cleanup tries again
+            pass
+        raise
 
 
 def bridge_verb_nodes(soft: str, prefix: str, label: str, session_port: Any, shelf: int, *,
@@ -546,7 +559,8 @@ def bridge_verb_nodes(soft: str, prefix: str, label: str, session_port: Any, she
             return {}
 
     if soft in RUN_SOFTS:
-        run_script_node(soft, prefix, label, session_port, shelf + 4)
+        before = (lambda ctx, s: zbrush_released(ctx, client_for(s, soft))) if soft == "zbrush" else None
+        run_script_node(soft, prefix, label, session_port, shelf + 4, before=before)
 
 
 # == Substance Designer ===========================================================================
@@ -841,3 +855,19 @@ bridge_verb_nodes("mari", "mari", "Mari", _MARI, 274,
                               "image = into the Image Manager; object = new object; version = new geometry version "
                               "of the current object (retake)"),
                   import_example="$FLUX/PROJ/chair_mod.obj")
+
+
+bridge_verb_nodes("zbrush", "zb", "ZBrush", _ZB, 264,
+                  open_doc=("Projet .zpr (remplace la scene, demande discard_changes) ou tool .ztl (ajoute un tool). "
+                            "ZBrush doit attendre FLUX (Export FLUX clique)",
+                            "Project .zpr (replaces the scene, needs discard_changes) or tool .ztl (adds a tool). "
+                            "ZBrush must wait for FLUX (Export FLUX clicked)"),
+                  open_example="$FLUX/PROJ/head_sculpt_v004.zpr", mesh_new=False, save_as_ext=(".zpr", ".ztl"),
+                  save_as_doc=("Enregistre le projet (.zpr) ou le tool actif (.ztl, toujours une copie)",
+                               "Saves the project (.zpr) or the active tool (.ztl, always a copy)"),
+                  save_as_example="$FLUX/PROJ/head_sculpt.zpr", import_kinds=["mesh", "tool"],
+                  import_doc=("mesh = dans le tool actif (Tool:Import, obj / fbx) ; tool = un .ztl charge comme "
+                              "nouveau tool",
+                              "mesh = into the active tool (Tool:Import, obj / fbx); tool = a .ztl loaded as a new "
+                              "tool"),
+                  import_example="$FLUX/PROJ/head_retopo.obj")

@@ -151,7 +151,7 @@ class TcpJsonSession(Session):
 
 
 # Softs whose bridge got the `run` action ("bridge+", P6b step 9, gated by the machine secret).
-RUN_SOFTS = {"painter", "mari"}
+RUN_SOFTS = {"painter", "mari", "zbrush"}
 
 
 class ClientSession(Session):
