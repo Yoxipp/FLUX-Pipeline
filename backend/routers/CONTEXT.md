@@ -31,9 +31,11 @@ erreur (409 `{gate}`) ; le run est refuse (409 `refused`) si la validation trouv
 P7 (pages TOOL, ADR 0066) : `GET /pages` -> `{pages, templates, can_edit}`, `POST /pages/validate`, `GET /pages/{id}`
 (`scope` absent = project > team, `scope=shipped` = un modele), `PUT /pages/{id} {scope, page, base_rev, force}` et
 `DELETE /pages/{id}` (Team TD), `GET /pages/{id}/history`. Statiques (avant `/{name}`) ; WS `page_changed` apres une ecriture.
-Liens (etape 2) : `GET /pages/links`, `GET /pages/buttons`, `POST /pages/link_button {flow, button_id}` (droits d'ecriture du flow),
-`POST /pages/rename_param {flow, old, new, apply}` (pages Team TD), `POST /pages/{id}/rename {scope, old, new, apply}` (page + flow).
-La validation d'un flow recoit les liens des pages (`W_PAGE_LINK_BROKEN`) ; celle d'une page ajoute `P_BUTTON_ORPHAN`.
+Liens (ADR 0068, le flow choisit sa page) : `GET /pages/{id}/ports` (ports et defauts d'un InputsPageReader),
+`GET /pages/{id}/flows` (`listeners` : flows actifs qu'un clic lance, `uses` : flows qui lisent la page),
+`POST /pages/{id}/click {button, values}` (tout le monde ; chaque flow actif qui ecoute ce bouton tourne, 409 si aucun).
+`GET /pages/links` ne liste plus que les widgets de donnees `source.flow`. La validation d'un flow recoit `page_lookup`
+(`E_PAGE_NOT_FOUND`, `W_PAGE_LINK_BROKEN`). Le panneau Publisher genere rend aussi sa `target` (flow, evenement).
 Donnees (etape 3) : `GET /pages/{id}/data/{collection}?etag=` -> `{records, etag}` ou `{unchanged}`, `POST .../data/{collection} {ops}`
 (tous, ou Team TD si `write: team_td` ; WS `page_data`), `POST .../media {path}` (copie d'un fichier local), `GET .../media/{name}` (affichage).
 P5 : `GET /host` (detenteur du verrou, surveillants de ce poste), `POST /events/scene_opened {soft, scene, port?, pid?}`

@@ -208,10 +208,11 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
 
 ## Pages TOOL (`tool_pages/`, chantier Flows P7, ADR 0066)
 
-* `links.ts` : fonctions pures (pas de runner front : verifiees a la lecture et en live) : `renamedInputs` (parametres
-  d'interface renommes entre l'enregistre et l'envoye, l'editeur de flows propose ensuite de suivre dans les pages),
-  `widgetsOf`, `initialValue`, `coerce`, `runValues` (champs lies au flow du bouton), `blockedWidgets` (raison de grisage
-  depuis les `P_*`, `P_FLOW_INACTIVE` grise aussi), `ago`, `seconds`.
+* `links.ts` : fonctions pures (pas de runner front : verifiees a la lecture et en live) : `widgetsOf`, `initialValue`,
+  `coerce`, `runValues` (tous les champs par id, ADR 0068), `blockedWidgets` (raison de grisage depuis les `P_*`,
+  `P_FLOW_INACTIVE` grise aussi), `ago`, `seconds`. `PageRenderer` grise un bouton qu'aucun flow actif n'ecoute
+  (`GET /flows/pages/{id}/flows`) et clique par `POST /flows/pages/{id}/click` ; le panneau Publisher genere passe sa
+  `target`.
 * `PageRenderer.tsx` : rendu d'une page (dossiers `plain | tabs | collapsible`, lignes en grille a poids `w`, champs via
   `ParamWidget`, vrais `<button>`). Clic = `POST /flows/{flow}/run {event: button_id, values}` (version active) ; etat du
   dernier run par bouton (`GET /flows/runs?flow&event&limit=1`, rafraichi sur `run_finished` du WS) ; en cours = "Stop"
@@ -233,8 +234,8 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   vide / modele `shipped/pages/` / copie d'une page) : 4 colonnes Palette (Formulaire, Decor, Donnees ; un widget de
   donnees cree sa collection par defaut s'il n'y en a pas : un Fil marche du premier coup) | Arbre (dossiers > lignes >
   widgets, pastille ok / erreur, monter / descendre / gauche / droite / sortir de la ligne, collections, Problemes) |
-  Proprietes (`PageProps.tsx` : id avec renommage propage pour un bouton lie, "Au clic" = `POST /flows/pages/link_button`
-  apres confirmation de la nouvelle version, "Lie a" filtre par type, props par kind, champs des collections) | Apercu
+  Proprietes (`PageProps.tsx` : id (renommer un widget qu'un flow utilise previent), "Lance" / "Lu par" en lecture (flows
+  dont l'InputsPageReader utilise le widget, Ouvrir), props par kind, champs des collections) | Apercu
   (`PageRenderer preview`). Store generique de l'editeur de flows (undo / redo), validation en direct 300 ms, Ctrl+S,
   Fermer = enregistrer puis quitter. Reducers purs dans `builder.ts`. Pas de glisser-deposer dans l'arbre (fleches) :
   a ajouter si the maintainer le demande.
