@@ -150,14 +150,31 @@ class TcpJsonSession(Session):
                                         raise_on_error=False)
 
 
+def _painter_client(port: Optional[int]):
+    from dcc.substance_painter.client import SubstancePainterClient
+
+    return SubstancePainterClient(port=port)
+
+
+# Softs whose bridge got the `run` action ("bridge+", P6b step 9, gated by the machine secret).
+_RUN_CLIENTS = {"painter": _painter_client}
+
+
 class ClientSession(Session):
-    """Bridges without code execution (Painter, Designer, Mari, ZBrush, Marvelous): the nodes
-    call their client on this port; run() is refused (a "bridge+" verb, not invented, A17)."""
+    """Bridges driven through their client (Painter, Designer, Mari, ZBrush, Marvelous): the
+    nodes call their client on this port; run() goes through the bridge's `run` action where
+    it exists (_RUN_CLIENTS), else it is refused (a "bridge+" verb, not invented, A17)."""
 
     def __init__(self, soft: str, port: Optional[int], *, pid: Optional[int] = None) -> None:
         self.soft, self.port, self.pid = soft, int(port) if port else None, pid
 
     def run(self, code: str, timeout: float = 600.0) -> Dict[str, Any]:
+        make = _RUN_CLIENTS.get(self.soft)
+        if make is not None:
+            resp = make(self.port).run(code, timeout)
+            if isinstance(resp, dict) and not resp.get("ok") and not resp.get("error"):
+                resp = {**resp, "error": resp.get("msg") or "le logiciel a refuse le code"}
+            return resp
         return {"ok": False, "error": f"{softs.get(self.soft).label} n'execute pas de code (commande a ajouter "
                                       "au bridge, a etudier)"}
 

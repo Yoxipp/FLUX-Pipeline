@@ -8,7 +8,9 @@
 #   Nuke       TcpJsonSession ({"cmd": "run"}): scene verbs, script, export (temporary Write),
 #              import (Read), render (an existing Write), find nodes. Code runs in Nuke with
 #              exec(code, {"nuke"}, locals): no comprehension over a local name.
-#   Painter    export (build_export_config + client.export), info
+#   Painter    export (build_export_config + client.export), info ; "bridge+" (P6b step 9):
+#              open (.spp or new project from a mesh), save, save_as, import (mesh reload or
+#              project resource), run_script (bridge `run`, gated by the machine secret)
 #   Designer   export, info, sdCook (sbscooker next to Designer.exe, hub side, session optional)
 #   Marvelous  file mailbox: export, import, info
 #   ZBrush     export ztl / obj / fbx, mesh info; ZBrush is ALWAYS released (stop) after an
@@ -67,7 +69,10 @@ def client_for(session, soft: str):
 
 def _ok(resp: Any, what: str) -> Dict[str, Any]:
     if not isinstance(resp, dict) or not (resp.get("ok") or resp.get("status") == "ok"):
-        raise NodeError(f"{what} : {(resp or {}).get('error') or (resp or {}).get('msg') or 'echec'}")
+        msg = str((resp or {}).get("error") or (resp or {}).get("msg") or "echec")
+        if msg.startswith("unknown action"):
+            msg = "bridge trop ancien pour ce node : reinstalle le bridge depuis FLUX puis relance le logiciel"
+        raise NodeError(f"{what} : {msg}")
     return resp
 
 
@@ -328,6 +333,109 @@ def sp_info(ctx, inputs, params):
     resp = _ok(client_for(dc.need_session(ctx, inputs), "painter").info(), "info Painter")
     sets = [t.get("name") if isinstance(t, dict) else str(t) for t in resp.get("texture_sets") or []]
     return {"info": resp, "texture_sets": sets}
+
+
+@flow_node("dcc.sp_open_scene", "spOpenScene", icon="FolderOpen",
+           inputs=[dc.EXEC, _SP, port("path", "path", "Projet a ouvrir (.spp)", "Project to open (.spp)",
+                                      "$FLUX/PROJ/chair_tex_v003.spp"),
+                   port("mesh", "path", "Mesh d'un nouveau projet (ignore path)", "Mesh of a new project (path ignored)",
+                        "$FLUX/PROJ/chair_mod.fbx")],
+           outputs=[dc.THEN, dc.ERR, port("scene", "path", "Projet ouvert (vide si nouveau)", "Opened project")],
+           params=[port("discard_changes", "bool", "Perdre les modifications non enregistrees", "Drop unsaved changes",
+                        False, default=False, wirable=False)],
+           session="painter", live_only=True, effect=True, destructive={"param": "discard_changes", "equals": True},
+           simulate=dc.sim(lambda i, p: f"creerait un projet depuis {i.get('mesh')}" if i.get("mesh")
+                           else f"ouvrirait {i.get('path')}", lambda i, p: {"scene": str(i.get("path") or "")}),
+           shelf=234, aliases=["ouvrir", "open", "projet", "spp", "nouveau", "mesh"],
+           doc_fr="Ouvre un projet Painter, ou en cree un depuis un mesh. Refuse si le projet courant a des "
+                  "modifications non enregistrees, sauf discard_changes.",
+           doc_en="Opens a Painter project, or creates one from a mesh. Refused when the current project has unsaved "
+                  "changes, unless discard_changes.")
+def sp_open_scene(ctx, inputs, params):
+    s = dc.need_session(ctx, inputs)
+    mesh = dc.path_input(ctx, inputs.get("mesh"), "mesh") if inputs.get("mesh") not in (None, "") else ""
+    path = "" if mesh else dc.path_input(ctx, inputs.get("path"), "path")
+    resp = _ok(client_for(s, "painter").open_project(path=path, mesh=mesh,
+                                                     discard=bool(params.get("discard_changes"))), "ouverture Painter")
+    return {"scene": str(resp.get("project") or "")}
+
+
+@flow_node("dcc.sp_save_scene", "spSaveScene", icon="Save",
+           inputs=[dc.EXEC, _SP],
+           outputs=[dc.THEN, dc.ERR, port("path", "path", "Projet enregistre", "Saved project")],
+           session="painter", live_only=True, effect=True,
+           simulate=dc.sim(lambda i, p: "sauverait le projet en place", lambda i, p: {"path": ""}),
+           shelf=235, aliases=["enregistrer", "save"],
+           doc_fr="Enregistre le projet Painter en place (un projet jamais enregistre demande spSaveAs).",
+           doc_en="Saves the Painter project in place (a never saved project needs spSaveAs).")
+def sp_save_scene(ctx, inputs, params):
+    resp = _ok(client_for(dc.need_session(ctx, inputs), "painter").save(), "enregistrement Painter")
+    return {"path": str(resp.get("project") or "")}
+
+
+@flow_node("dcc.sp_save_as", "spSaveAs", icon="SaveAll",
+           inputs=[dc.EXEC, _SP, port("path", "path", "Nouveau nom du projet (.spp)", "New project name (.spp)",
+                                      "$FLUX/PROJ/chair_tex.spp", required=True)],
+           outputs=[dc.THEN, dc.ERR, port("path", "path", "Projet enregistre", "Saved project")],
+           params=[port("copy", "bool", "Copie : le projet ouvert garde son nom", "Copy: the open project keeps its name",
+                        False, default=False, wirable=False),
+                   port("increment", "bool", "Ajoute _vNNN (version suivante libre)", "Adds _vNNN (next free version)",
+                        False, default=False, wirable=False), _OVERWRITE],
+           session="painter", live_only=True, effect=True, destructive=_D_OVERWRITE,
+           simulate=dc.sim(lambda i, p: f"enregistrerait sous {i.get('path')}", lambda i, p: {"path": str(i.get("path") or "")},
+                           "path"),
+           shelf=236, aliases=["enregistrer sous", "save as", "version", "copie"],
+           doc_fr="Enregistre le projet sous un autre nom (copy : le projet ouvert garde son nom ; increment : version "
+                  "suivante libre).",
+           doc_en="Saves the project under another name (copy: the open project keeps its name; increment: next free "
+                  "version).")
+def sp_save_as(ctx, inputs, params):
+    s = dc.need_session(ctx, inputs)
+    path = dc.path_input(ctx, inputs.get("path"), "path")
+    if not path.lower().endswith(".spp"):
+        raise NodeError("spSaveAs : un projet Painter finit par .spp", code="E_PARAM_INVALID")
+    if params.get("increment"):
+        path = _increment(path)
+    _exists_guard(path, bool(params.get("overwrite")))
+    resp = _ok(client_for(s, "painter").save_as(path, copy=bool(params.get("copy"))), "enregistrement Painter")
+    return {"path": str(resp.get("project") or path)}
+
+
+SP_USAGES = ["texture", "alpha", "environment", "smart_material", "smart_mask", "material", "brush", "filter",
+             "generator"]
+
+
+@flow_node("dcc.sp_import", "spImport", icon="FileInput",
+           inputs=[dc.EXEC, _SP, port("path", "path", "Fichier a importer", "File to import",
+                                      "$FLUX/PROJ/chair_mod.fbx", required=True)],
+           outputs=[dc.THEN, dc.ERR, port("url", "str", "Ressource ajoutee (vide pour un mesh)",
+                                          "Added resource (empty for a mesh)")],
+           params=[port("kind", "str", "mesh = remplace le mesh du projet ; resource = ajoute a l'etagere du projet",
+                        "mesh = replaces the project mesh; resource = adds to the project shelf", "resource",
+                        default="resource", choices=["resource", "mesh"], wirable=False),
+                   port("usage", "str", "Type de ressource (texture, alpha, smart_material...)",
+                        "Resource type (texture, alpha, smart_material...)", "texture", default="texture",
+                        choices=SP_USAGES, wirable=False)],
+           session="painter", live_only=True, effect=True,
+           simulate=dc.sim(lambda i, p: (f"remplacerait le mesh par {i.get('path')}" if p.get("kind") == "mesh"
+                                         else f"importerait {i.get('path')} ({p.get('usage') or 'texture'})"),
+                           lambda i, p: {"url": ""}, "path"),
+           shelf=237, aliases=["importer", "import", "mesh", "texture", "ressource", "retake"],
+           doc_fr="Importe dans le projet Painter ouvert : remplace le mesh (retake modelisation) ou ajoute une "
+                  "ressource (texture, smart material...) a l'etagere du projet.",
+           doc_en="Imports into the open Painter project: replaces the mesh (modeling retake) or adds a resource "
+                  "(texture, smart material...) to the project shelf.")
+def sp_import(ctx, inputs, params):
+    s = dc.need_session(ctx, inputs)
+    path = dc.path_input(ctx, inputs.get("path"), "path")
+    if not Path(path).exists():
+        raise NodeError(f"fichier introuvable : {path}")
+    resp = _ok(client_for(s, "painter").import_file(path, kind=str(params.get("kind") or "resource"),
+                                                    usage=str(params.get("usage") or "texture")), "import Painter")
+    return {"url": str(resp.get("url") or "")}
+
+
+run_script_node("painter", "sp", "Substance Painter", _SP, 238)
 
 
 # == Substance Designer ===========================================================================

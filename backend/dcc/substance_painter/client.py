@@ -38,5 +38,27 @@ class SubstancePainterClient:
         """Ask Painter to export project textures with *config*; returns {ok, files}."""
         return _send({"action": "export", "config": config}, **self._at)
 
+    # Flows verbs (P6b step 9): the bridge answers "unknown action" until it is reinstalled.
+    def open_project(self, path: str = "", mesh: str = "", discard: bool = False) -> dict:
+        """Open a .spp, or create a project from *mesh*."""
+        return _send({"action": "open", "path": path, "mesh": mesh, "discard": discard}, timeout=900.0, **self._at)
+
+    def save(self) -> dict:
+        return _send({"action": "save"}, timeout=600.0, **self._at)
+
+    def save_as(self, path: str, copy: bool = False) -> dict:
+        return _send({"action": "save_as", "path": path, "copy": copy}, timeout=600.0, **self._at)
+
+    def import_file(self, path: str, kind: str = "resource", usage: str = "texture") -> dict:
+        """kind mesh = reload the project mesh; resource = add to the project shelf."""
+        return _send({"action": "import", "kind": kind, "path": path, "usage": usage}, timeout=900.0, **self._at)
+
+    def run(self, code: str, timeout: float = 600.0) -> dict:
+        """Free Python in Painter, gated by the machine secret (dcc/bridge_secret.py)."""
+        from dcc.bridge_secret import get_secret
+
+        return _send({"action": "run", "code": code, "secret": get_secret(), "timeout": timeout},
+                     timeout=timeout + 10.0, **self._at)
+
 
 substance_client = SubstancePainterClient()
