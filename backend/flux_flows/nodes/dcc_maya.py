@@ -368,7 +368,7 @@ def may_playblast(ctx, inputs, params):
            outputs=[dc.THEN_OPT, port("nodes", "list[dcc_node]", "Nodes trouves (chemins complets)", "Nodes found (full paths)"),
                     port("count", "int", "Nombre", "Count", 4)],
            params=[port("pattern", "pattern", "Motif sur le nom court", "Pattern on the short name", "*_geo ^tmp*",
-                        required=True),
+                        required=True, default="*"),
                    port("type", "str", "Type Maya (mesh, transform, joint...), vide = tous", "Maya type, empty = all",
                         "transform")],
            session="maya", shelf=199, aliases=["chercher", "find", "ls", "nodes"],

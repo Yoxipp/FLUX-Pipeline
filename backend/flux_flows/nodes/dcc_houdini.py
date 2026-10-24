@@ -294,7 +294,7 @@ def _find(ctx, inputs, params) -> List[str]:
 
 _FIND_PARAMS = [port("root", "str", "Reseau de depart", "Starting network", "/obj", default="/"),
                 port("pattern", "pattern", "Motif sur le nom des nodes", "Pattern on node names", "*_OUT ^tmp*",
-                     required=True),
+                     required=True, default="*"),
                 port("type", "pattern", "Motif sur le type (geo, rop_geometry...)", "Pattern on the type", "rop_*")]
 
 

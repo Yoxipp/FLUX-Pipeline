@@ -29,19 +29,24 @@ _IMPLICIT: Dict[str, Tuple[str, ...]] = {
 
 # (source, target) -> (fr, en, fix). Bases: "list" for any list[T], "session" for session[x].
 _ADVICE: Dict[Tuple[str, str], Tuple[str, str, Optional[str]]] = {
-    ("any", "*"): ("le type any est inconnu a la sortie : precise le type du node source (parametre as) ou ajoute un node de conversion",
-                   "the any type is unknown at the output: set the source node type (as parameter) or add a conversion node", None),
+    ("any", "*"): ("la sortie est de type any (connu seulement au run) : choisis le type de la source (Value : reglage type) "
+                   "ou passe par un node de conversion (Path, Template, Compare)",
+                   "the output is of type any (only known at run time): set the source type (Value: type setting) or go "
+                   "through a conversion node (Path, Template, Compare)", None),
     ("int", "bool"): ("un nombre n'est pas un booleen : utilise Compare", "a number is not a boolean: use Compare", None),
     ("float", "bool"): ("un nombre n'est pas un booleen : utilise Compare", "a number is not a boolean: use Compare", None),
     ("float", "int"): ("perte des decimales : utilise Math (round)", "decimals would be lost: use Math (round)", None),
     ("str", "path"): ("un texte n'est pas un chemin : passe par un node Path", "a text is not a path: go through a Path node", None),
     ("str", "dir"): ("un texte n'est pas un chemin : passe par un node Path", "a text is not a path: go through a Path node", None),
-    ("int", "str"): ("utilise Template ou String (format)", "use Template or String (format)", None),
-    ("float", "str"): ("utilise Template ou String (format)", "use Template or String (format)", None),
-    ("path", "dir"): ("un chemin peut etre un fichier : utilise Path (parent)", "a path can be a file: use Path (parent)", None),
+    ("int", "str"): ("utilise Template ou StrFormat", "use Template or StrFormat", None),
+    ("float", "str"): ("utilise Template ou StrFormat", "use Template or StrFormat", None),
+    ("path", "dir"): ("un chemin peut etre un fichier : prends la sortie parent de PathSplit",
+                      "a path can be a file: take the parent output of PathSplit", None),
     ("dict", "*"): ("utilise JsonValue pour lire une cle", "use JsonValue to read a key", None),
     ("publish", "path"): ("un publish est un enregistrement : lis son chemin avec PublishFields",
                           "a publish is a record: read its path with PublishFields", None),
+    ("publish", "*"): ("un publish est un enregistrement : lis ses champs avec PublishFields ou PublishInfos",
+                       "a publish is a record: read its fields with PublishFields or PublishInfos", None),
     ("str", "dcc_node"): ("un texte n'est pas un node : utilise houFindNode / mayFindNodes",
                           "a text is not a node: use houFindNode / mayFindNodes", None),
     ("str", "pattern"): ("un texte libre n'est pas verifie comme motif : saisis-le dans le champ du node",
@@ -131,7 +136,7 @@ def can_connect(src: str, dst: str) -> Connection:
             return _incompatible(src, dst, "mets un ForEach", "add a ForEach", "insert_foreach")
         return _incompatible(src, dst, "mets un ForEach", "add a ForEach")
     if db == "list" and _LIST_RE.match(dst).group(1) == src:
-        return _incompatible(src, dst, "ajoute un node List (append)", "add a List (append) node")
+        return _incompatible(src, dst, "ajoute un node ListAppend", "add a ListAppend node")
     if _scalar_reaches(sb, db):
         return Connection("implicit")
     advice = _ADVICE.get((sb, db)) or _ADVICE.get((sb, "*"))

@@ -366,8 +366,8 @@ def _match_key(item: Any, on: str) -> str:
            inputs=[port("list", "list[any]", "Liste", "List", ["a.abc", "b_tmp.abc"], required=True)],
            outputs=[port("items", "list[any]", "Elements retenus", "Kept items", ["a.abc"]),
                     port("rejected", "list[any]", "Elements ecartes", "Rejected items", ["b_tmp.abc"])],
-           params=[port("pattern", "pattern", "Motif facon Houdini", "Houdini style pattern", "*.abc ^*_tmp*",
-                        required=True),
+           params=[port("pattern", "pattern", "Motif facon Houdini (* = tout, ^ exclut)", "Houdini style pattern "
+                        "(* = all, ^ excludes)", "*.abc ^*_tmp*", required=True, default="*"),
                    port("match_on", "str", "name (nom) ou path (chemin entier)", "name or path (whole path)",
                         "name", default="name", choices=MATCH_ON)],
            shelf=69, aliases=["filtrer", "filter", "motif"],

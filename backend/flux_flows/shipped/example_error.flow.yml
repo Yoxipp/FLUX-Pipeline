@@ -16,3 +16,5 @@ links:
   - {from: n1.then, to: n3.exec}
   - {from: n2.value, to: n3.value}
   - {from: n3.then, to: n4.exec}
+notes:
+  - {id: k1, pos: [0, 320], text: "Ce flow echoue expres : FlowInput donne le texte douze, SetVariable attend un entier.\nRun : SetVariable passe en rouge avec le message ; ouvre son (i) pour voir la valeur recue.\nPour gerer l'erreur, relie la sortie on_error de SetVariable a un autre node."}

@@ -45,7 +45,9 @@ export function IssuesPanel({ issues, state, labels, canFix, onZoom, onFix, onCl
               <Icon size={13} strokeWidth={2} color={err ? 'var(--err)' : 'var(--warn)'} style={{ flexShrink: 0, marginTop: 1 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: 'var(--ink)' }}>
-                  {i.node && <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{labels[i.node] ?? i.node} </span>}
+                  {i.node && !(lang === 'en' ? i.message_en : i.message_fr).startsWith(labels[i.node] ?? i.node) && (
+                    <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{labels[i.node] ?? i.node} </span>
+                  )}
                   {lang === 'en' ? i.message_en : i.message_fr}
                 </div>
                 <div style={{ color: 'var(--ink-4)' }}>{lang === 'en' ? i.why_en : i.why_fr}</div>

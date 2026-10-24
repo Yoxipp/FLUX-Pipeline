@@ -16,7 +16,7 @@ nodes:
   n6: {type: operator.foreach_end, pos: [1280, 0], params: {begin: n4}}
   n7: {type: logic.if, pos: [1600, 0], params: {}}
   n8: {type: data.flow_input, pos: [1280, 200], params: {id: notify}}
-  n9: {type: flux.notify, pos: [1920, 0], params: {text: "Exemple fini : 3 shots parcourus", level: info, where: toast}}
+  n9: {type: flux.notify, pos: [1920, 0], params: {level: info, where: toast}}
   n10: {type: data.get_variable, pos: [1600, 200], params: {name: last}}
 links:
   - {from: n1.then, to: n4.exec}
@@ -32,3 +32,5 @@ links:
   - {from: n8.value, to: n7.condition}
 notes:
   - {id: k1, pos: [0, 320], text: "Run : les nodes passent en cours puis fini, un toast s'affiche.\nEssai : le toast est simule (rapport dans Runs)."}
+  - {id: k2, pos: [640, 320], text: "Boucle : ForEachBegin donne chaque element (item) ; ce qui est relie entre Begin et End tourne une fois par element.\nSetVariable garde le dernier shot ; GetVariable le relit apres la boucle pour le texte du toast."}
+  - {id: k3, pos: [1600, 320], text: "If : la case de l'interface notify (FlowInput) decide si le toast part."}

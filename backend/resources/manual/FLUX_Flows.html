@@ -634,7 +634,7 @@ th { background:var(--soft); color:#fff; }
 <h1>FLUX</h1>
 <p>Le pipeline : Production, publishs, activite, USD, textures.</p>
 <div class="node" id="n-flux.notify" data-find="flux.notify notify" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>Notify</b><code>flux.notify</code></div>
-<p>Affiche un message dans FLUX (toast) et / ou le poste dans le fil Activite du projet, avec un niveau info, avertissement ou erreur. <code>path</code> lie un fichier ou dossier au message.</p>
+<p>Affiche un message dans FLUX (toast) et / ou le poste dans le fil Activite du projet, avec un niveau info, avertissement ou erreur. <code>path</code> lie un fichier ou dossier au message. Le toast n'apparait que dans les fenetres FLUX du poste qui execute le flow ; pour prevenir l'equipe, choisis <code>where: activity</code> ou <code>both</code>. Pour mettre des valeurs dans le texte (nom d'asset, version...), relie un Template.</p>
 <ul><li>Entrees : <code>exec</code>, <code>text</code> (obligatoire), <code>path</code>. Sorties : <code>then</code>, <code>on_error</code>.</li><li>Reglages : <code>level</code> (info, warn, error), <code>where</code> (toast, activity, both).</li></ul>
 <p class="ex">Exemple : fin d'un flow de daily : <code>Notify (&quot;Daily copie&quot;, where: both, path: dossier du jour)</code>.</p></div>
 <div class="node" id="n-flux.legacy_command" data-find="flux.legacy_command legacycommand" style="--fam:oklch(66% 0.085 195)"><div class="node-h"><b>LegacyCommand</b><code>flux.legacy_command</code></div>

@@ -705,7 +705,8 @@ def _simulate_wait(ctx, inputs, params):
 
 
 @flow_node("action.wait", "Wait", icon="Hourglass",
-           inputs=[_EXEC, port("seconds", "float", "Duree en secondes", "Duration in seconds", 5, required=True)],
+           inputs=[_EXEC, port("seconds", "float", "Duree en secondes", "Duration in seconds", 5, required=True,
+                               default=5)],
            outputs=list(_EXITS),
            effect=True, simulate=_simulate_wait, shelf=59, aliases=["attendre", "pause", "sleep", "delai"],
            doc_fr="Attend un certain temps avant la suite (s'arrete tout de suite si le run est annule).",

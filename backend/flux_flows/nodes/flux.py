@@ -70,9 +70,12 @@ def _simulate_notify(ctx, inputs, params):
                         choices=NOTIFY_LEVELS),
                    port("where", "str", "toast, activity ou both", "toast, activity or both", "toast",
                         default="toast", choices=NOTIFY_WHERE)],
-           effect=True, simulate=_simulate_notify, shelf=40, aliases=["toast", "message", "alerte"],
-           doc_fr="Affiche un message dans FLUX (toast) et / ou le poste dans le fil Activite du projet.",
-           doc_en="Shows a message in FLUX (toast) and / or posts it in the project Activity feed.")
+           effect=True, simulate=_simulate_notify, shelf=40,
+           aliases=["toast", "message", "alerte", "notification", "prevenir", "envoyer", "notifier"],
+           doc_fr="Affiche un message dans FLUX (toast, seulement dans les fenetres FLUX du poste qui execute) et / "
+                  "ou le poste dans le fil Activite du projet (vu par toute l'equipe : where activity ou both).",
+           doc_en="Shows a message in FLUX (toast, only in the FLUX windows of the executing workstation) and / or "
+                  "posts it in the project Activity feed (seen by the whole team: where activity or both).")
 def notify(ctx, inputs, params):
     text, level, where, path = _notify_args(inputs, params)
     if where in ("toast", "both"):
