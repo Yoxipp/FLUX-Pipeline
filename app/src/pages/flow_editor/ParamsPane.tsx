@@ -17,6 +17,8 @@ import { flowsApi } from '../../api/flows'
 import { ParamWidget, type ParamKind } from '../../components/shared/ParamWidget'
 import { useProject } from '../../ProjectContext'
 import { FAMILY_INFO } from './families'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/shared/ui'
+import { PortHelp } from './nodes/PortTooltip'
 import { portColor } from './portTypes'
 import { TokenField, paramRelevant, tokenKeys, useProjectTokens, type ProjectTokens } from './TokenField'
 import type { FlowViewNode, PageButton, PortSpec } from './types'
@@ -62,13 +64,19 @@ export function storedValue(type: string, raw: unknown): unknown {
   return raw
 }
 
+// Hovering a label shows what the param is for (registry doc, values, default, example; R1).
 function Label({ p }: { p: PortSpec }) {
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-2)', minWidth: 0 }}>
-      <span style={{ width: 7, height: 7, borderRadius: 2, background: portColor(p.type), flexShrink: 0 }} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${p.name} : ${p.type}`}>{p.name}</span>
-      {p.required && <span style={{ color: 'var(--accent)' }}>*</span>}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-2)', minWidth: 0, cursor: 'help' }}>
+          <span style={{ width: 7, height: 7, borderRadius: 2, background: portColor(p.type), flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', borderBottom: '1px dotted var(--rule-3)' }}>{p.name}</span>
+          {p.required && <span style={{ color: 'var(--accent)' }}>*</span>}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="left" style={{ maxWidth: 320 }}><PortHelp port={p} /></TooltipContent>
+    </Tooltip>
   )
 }
 

@@ -79,6 +79,8 @@ def port(name: str, type: str, doc_fr: str = "", doc_en: str = "", example: Any 
          labels: Optional[Dict[Any, Tuple[str, str]]] = None, reserved: Iterable[Any] = ()) -> Port:
     """A port or param. *choices* keep their declaration order in the menu; *labels* maps a
     choice to (label_fr, label_en); *reserved* choices are listed but cannot be picked."""
+    if type == "exec" and not doc_fr:
+        doc_fr, doc_en = EXEC_DOCS.get(name, EXEC_DOCS[""])[0], doc_en or EXEC_DOCS.get(name, EXEC_DOCS[""])[1]
     return Port(name, type, doc_fr, doc_en, example, required, default,
                 tuple(choices) if choices is not None else None, bool(wirable), tokens or None,
                 tuple((v, fr, en) for v, (fr, en) in (labels or {}).items()), tuple(reserved))
@@ -144,6 +146,21 @@ _REGISTRY: Dict[str, NodeSpec] = {}
 _LOCK = threading.RLock()
 # Set while a team file is imported, so its nodes are tagged with it.
 _LOADING: Dict[str, str] = {}
+
+
+# R1 retake 6: tooltip of an exec port declared without a doc, by its usual name.
+EXEC_DOCS: Dict[str, Tuple[str, str]] = {
+    "exec": ("Quand ce node s'execute : relie la sortie then du node d'avant",
+             "When this node runs: link the then output of the node before"),
+    "then": ("Suite du flow : le node relie ici s'execute ensuite", "Next step: the node linked here runs next"),
+    "on_error": ("Si ce node echoue : le node relie ici s'execute au lieu d'arreter le run",
+                 "When this node fails: the node linked here runs instead of stopping the run"),
+    "loop": ("Corps de la boucle : execute une fois par tour", "Loop body: runs once per turn"),
+    "done": ("Apres la boucle : execute une fois tous les tours finis", "After the loop: runs once every turn is done"),
+    "else": ("Si la condition est fausse", "When the condition is false"),
+    "default": ("Si aucun cas ne correspond", "When no case matches"),
+    "": ("Ordre d'execution : relie a un autre port d'execution", "Execution order: link to another execution port"),
+}
 
 
 def _check_ports(node_type: str, kind: str, ports: Iterable[Port]) -> List[Port]:

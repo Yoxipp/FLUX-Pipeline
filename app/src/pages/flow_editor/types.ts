@@ -36,6 +36,7 @@ export interface PortSpec {
   tokens?:  string        // project token section offered in a menu (CLASS, NAME, SEQ...)
   choiceLabels?: Record<string, { fr: string; en: string }>   // readable menu entries (R1)
   reserved?: string[]     // choices listed but disabled (instance mode farm, V2)
+  default?: unknown       // registry default (tooltip, R1)
 }
 
 // One node as the editor draws it.

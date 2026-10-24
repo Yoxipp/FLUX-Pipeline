@@ -23,6 +23,7 @@ import { portColor } from '../portTypes'
 import type { FlowViewNode, NodeRunInfo, PortSpec } from '../types'
 import { formatValue, useTr } from '../useTr'
 import { PortHandle, handleId } from './PortHandle'
+import { usePortTooltip } from './PortTooltip'
 import '../flow_editor.css'
 
 export const NODE_W = 240
@@ -41,12 +42,16 @@ const EXEC_IN: PortSpec = { name: 'exec', type: 'exec' }
 const EXEC_OUT: PortSpec = { name: 'then', type: 'exec' }
 
 function Row({ left, right, linked, faulty }: { left?: PortSpec; right?: PortSpec; linked: Set<string>; faulty: Set<string> }) {
+  // The port names show the same tooltip as their dot (R1 retake 6).
+  const { show, hide } = usePortTooltip()
+  const hover = (port: PortSpec, side: 'in' | 'out') => (e: React.MouseEvent<HTMLSpanElement>) =>
+    show({ port, side, rect: e.currentTarget.getBoundingClientRect() })
   return (
     <div style={{ position: 'relative', height: ROW_H, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', fontSize: 11 }}>
       {left && <PortHandle port={left} side="in" linked={linked.has(handleId('in', left.name))} faulty={faulty.has(left.name)} />}
-      {left && <span style={{ color: 'var(--ink-2)', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left.name}</span>}
+      {left && <span onMouseEnter={hover(left, 'in')} onMouseLeave={hide} style={{ color: 'var(--ink-2)', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{left.name}</span>}
       {!left && <span style={{ flex: 1 }} />}
-      {right && <span style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{right.name}</span>}
+      {right && <span onMouseEnter={hover(right, 'out')} onMouseLeave={hide} style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{right.name}</span>}
       {right && <PortHandle port={right} side="out" linked={linked.has(handleId('out', right.name))} faulty={faulty.has(right.name)} />}
     </div>
   )

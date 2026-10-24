@@ -60,3 +60,30 @@ class NodesDoc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# R1 retake 6: the tooltip of a param or port label is its registry doc (doc_fr / doc_en,
+# plus type, choices, default and example added by the editor). Every FLUX port and param
+# must have one. Exceptions are listed here explicitly, to be emptied.
+DOC_EXCEPTIONS: set = set()
+
+
+class PortsDoc(unittest.TestCase):
+    def test_every_port_and_param_has_a_doc(self) -> None:
+        registry.ensure_builtin()
+        missing, total = [], 0
+        for spec in registry.all_nodes():
+            if spec.source != "flux":
+                continue
+            for kind, ports in (("in", spec.inputs), ("out", spec.outputs), ("param", spec.params)):
+                for p in ports:
+                    total += 1
+                    key = f"{spec.type}:{kind}:{p.name}"
+                    if key not in DOC_EXCEPTIONS and not (p.doc_fr.strip() and p.doc_en.strip()):
+                        missing.append(key)
+        self.assertGreater(total, 1000)
+        self.assertEqual(missing, [], "add doc_fr / doc_en to these ports (registry port())")
+
+    def test_exec_ports_get_a_default_doc(self) -> None:
+        then = next(p for p in registry.get_node("flux.notify").outputs if p.name == "then")
+        self.assertIn("Suite", then.doc_fr)
