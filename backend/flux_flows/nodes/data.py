@@ -102,12 +102,16 @@ async def set_variable(ctx, inputs, params):
 
 
 @flow_node("data.flow_input", "FlowInput", icon="LogIn",
-           outputs=[port("value", "any", "Valeur du parametre expose", "Value of the exposed parameter")],
-           params=[port("id", "str", "Parametre de l'interface du flow", "Flow interface parameter", "dest_folder",
-                        required=True)],
-           shelf=13, aliases=["parametre", "interface", "entree"],
-           doc_fr="Valeur d'un parametre expose du flow (saisi dans la page, sinon son defaut).",
-           doc_en="Value of an exposed flow parameter (typed in the page, else its default).")
+           outputs=[port("value", "any", "La valeur remplie pour cette entree (sinon son defaut dans l'interface)",
+                         "The value filled in for this input (else its interface default)")],
+           params=[port("id", "str", "Quelle entree de l'interface du flow lire (menu : les entrees declarees dans le "
+                        "panneau du flow, rien de selectionne)", "Which flow interface input to read (menu: the inputs "
+                        "declared in the flow panel, nothing selected)", "dest_folder", required=True)],
+           shelf=13, aliases=["parametre", "interface", "entree", "input", "formulaire"],
+           doc_fr="Un parametre que l'utilisateur remplit avant de lancer le flow (formulaire du Run, champ d'une page "
+                  "TOOL, ou valeur passee par le FlowCall qui appelle ce flow). Le node donne cette valeur au graphe.",
+           doc_en="A parameter the user fills in before starting the flow (Run form, field of a TOOL page, or value "
+                  "passed by the FlowCall that calls this flow). The node hands that value to the graph.")
 async def flow_input(ctx, inputs, params):
     ident = params.get("id") or ""
     if ident not in ctx.interface:

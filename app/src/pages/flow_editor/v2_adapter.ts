@@ -56,6 +56,20 @@ function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowV
   spec.inputs.filter(p => p.type !== 'exec').forEach(add)
   spec.params.forEach(add)
   const outputs = [...spec.outputs.filter(p => p.type === 'exec'), ...spec.outputs.filter(p => p.type !== 'exec')].map(p => toPort(p))
+  // R1 retake 9: a FlowCall shows the interface of the called flow (params.ports, filled by
+  // the Params pane from that flow): one input per interface input, one output per output.
+  if (node.type === 'subflow.flow_call') {
+    const ports = (params.ports ?? {}) as Ports
+    for (const [name, type] of Object.entries(ports.inputs ?? {})) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      inputs.push({ name, type, value: params[name], doc_fr: 'Entree du flow appele', doc_en: 'Input of the called flow' })
+    }
+    for (const [name, type] of Object.entries(ports.outputs ?? {})) {
+      if (outputs.some(o => o.name === name)) continue
+      outputs.push({ name, type, doc_fr: 'Sortie du flow appele (son FlowOutput)', doc_en: 'Output of the called flow (its FlowOutput)' })
+    }
+  }
   const meta: Record<string, string> = { type: node.type }
   if (node.label) meta.step = node.label
   if (node.bypass) meta.bypass = 'true'

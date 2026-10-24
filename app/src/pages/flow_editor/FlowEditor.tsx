@@ -523,6 +523,18 @@ function Editor({ rights }: { rights: FlowRights }) {
   const onSelect = useCallback((ids: string[]) => setSelection(cur =>
     ids.length === cur.size && ids.every(id => cur.has(id)) ? cur : new Set(ids)), [])
   const selectNode = useCallback((id: string) => onSelect([id]), [onSelect])
+  // R1 retake 9: the flow panel places a FlowInput / FlowOutput, left of the graph, selected.
+  const placeNode = useCallback((type: string, params: Record<string, unknown>) => {
+    if (saveBlocked) { toast.info(saveBlocked); return }
+    const d = docOf(store.get())
+    if (!d) return
+    const nodes = Object.values(d.nodes ?? {})
+    const x = nodes.length ? Math.min(...nodes.map(n => n.pos?.[0] ?? 0)) - 320 : 0
+    const y = nodes.length ? Math.max(...nodes.map(n => n.pos?.[1] ?? 0)) + 160 : 0
+    const id = nextNodeId(d)
+    store.apply(cur => addNode(cur, id, { type, pos: [x, y], params }))
+    setSelection(new Set([id]))
+  }, [saveBlocked, store])
 
   const edit = useMemo<EditActions>(() => ({
     onMove: positions => store.apply(d => moveNodes(d, positions)),
@@ -745,7 +757,8 @@ function Editor({ rights }: { rights: FlowRights }) {
         <ParamsPane
           selected={selected} params={(selected && doc?.nodes[selected.id]?.params) || {}}
           editable={!saveBlocked} edits={nodeEdits} flowName={doc?.name}
-          flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} />}
+          iface={{ inputs: (doc?.interface?.inputs ?? []).map(x => x.id), outputs: (doc?.interface?.outputs ?? []).map(x => x.id) }}
+          flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} onPlaceNode={placeNode} onSelectNode={selectNode} />}
         />
       </div>
       {issuesOpen && loaded && (

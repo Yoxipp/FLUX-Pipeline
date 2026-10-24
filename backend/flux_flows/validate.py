@@ -472,8 +472,10 @@ def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> N
         ident = str(params.get("id") or "")
         if ident and ident not in net.iface_types:
             issues.append(_issue("E_PARAM_INVALID", nid,
-                                 f"Le parametre `{ident}` n'est pas dans l'interface du flow",
-                                 f"Parameter `{ident}` is not in the flow interface", port="id"))
+                                 f"L'entree `{ident}` n'est pas dans l'interface du flow : ajoute-la (panneau du "
+                                 f"flow, rien de selectionne) ou choisis une entree existante",
+                                 f"Input `{ident}` is not in the flow interface: add it (flow panel, nothing "
+                                 f"selected) or pick an existing input", port="id"))
     if node.type in ("data.get_variable", "data.set_variable"):
         name = str(params.get("name") or "")
         if name and name not in net.var_types:
@@ -482,8 +484,11 @@ def _check_node_rules(net: _Net, nid: str, node: Node, issues: List[Issue]) -> N
     if node.type == "subflow.flow_output":
         ident = str(params.get("id") or "")
         if ident and ident not in {o.id for o in net.flow.interface.outputs}:
-            issues.append(_issue("E_PARAM_INVALID", nid, f"La sortie `{ident}` n'est pas dans interface.outputs",
-                                 f"Output `{ident}` is not in interface.outputs", port="id"))
+            issues.append(_issue("E_PARAM_INVALID", nid,
+                                 f"La sortie `{ident}` n'est pas dans l'interface du flow : ajoute-la (panneau du "
+                                 f"flow, Sorties) ou choisis une sortie existante",
+                                 f"Output `{ident}` is not in the flow interface: add it (flow panel, Outputs) or "
+                                 f"pick an existing output", port="id"))
 
 
 def _absolute(text: str) -> bool:

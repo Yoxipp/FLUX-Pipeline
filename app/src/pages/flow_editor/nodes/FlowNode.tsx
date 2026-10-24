@@ -294,6 +294,15 @@ function FlowNodeView({ data, selected }: NodeProps<FlowRfNode>) {
             </span>
           )}
         </div>
+        {(node.type === 'data.flow_input' || node.type === 'subflow.flow_output') && (
+          <div title={node.type === 'data.flow_input'
+                 ? tr('Entree du flow lue ici (interface du flow)', 'Flow input read here (flow interface)')
+                 : tr('Sortie du flow remplie ici (interface du flow)', 'Flow output filled here (flow interface)')}
+               style={{ padding: '4px 10px', fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)', color: 'var(--ink)',
+                        borderBottom: '1px solid var(--rule)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {String([...node.inputs, ...(node.constants ?? [])].find(p => p.name === 'id')?.value ?? '') || tr('(choisis un id)', '(pick an id)')}
+          </div>
+        )}
         {failed && (
           <div
             title={received ? tr(`Valeurs recues :\n${received}`, `Values received:\n${received}`) : undefined}

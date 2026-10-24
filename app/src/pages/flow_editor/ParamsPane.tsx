@@ -179,7 +179,69 @@ function PageButtonInfo({ buttons, flowName, buttonId }: { buttons: PageButton[]
   )
 }
 
-function NodeParams({ node, params, editable, edits, flowName }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; flowName?: string }) {
+// R1 retake 9: a FlowCall reads the interface of the called flow and stores it in
+// params.ports (its dynamic ports, also read by validate.py). Empty ports are filled at once;
+// a changed interface offers an update.
+type CallPorts = { inputs: Record<string, string>; outputs: Record<string, string> }
+
+function FlowCallPorts({ params, editable, onPorts }: {
+  params: Record<string, unknown>; editable: boolean; onPorts: (p: CallPorts) => void
+}) {
+  const { tr } = useTr()
+  const { project } = useProject()
+  const name = String(params.flow ?? '')
+  const [found, setFound] = useState<CallPorts | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!name) { setFound(null); setError(''); return }
+    let alive = true
+    flowsApi.get(name, { project: project || undefined }).then(r => {
+      if (!alive) return
+      const iface = r.flow.interface ?? { inputs: [], outputs: [] }
+      setFound({
+        inputs: Object.fromEntries((iface.inputs ?? []).map(i => [i.id, i.type === 'select' ? 'str' : i.type])),
+        outputs: Object.fromEntries((iface.outputs ?? []).map(o => [o.id, o.type])),
+      })
+      setError('')
+    }).catch(e => { if (alive) { setFound(null); setError(String(e?.message ?? e)) } })
+    return () => { alive = false }
+  }, [name, project])
+  const stored = (params.ports ?? { inputs: {}, outputs: {} }) as CallPorts
+  const same = found && JSON.stringify(found) === JSON.stringify({ inputs: stored.inputs ?? {}, outputs: stored.outputs ?? {} })
+  const empty = !Object.keys(stored.inputs ?? {}).length && !Object.keys(stored.outputs ?? {}).length
+  useEffect(() => {
+    if (found && empty && editable && (Object.keys(found.inputs).length || Object.keys(found.outputs).length)) onPorts(found)
+  }, [found, empty, editable, onPorts])
+  if (!name) return <div style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0' }}>{tr('Choisis le flow appele : ses entrees et sorties deviendront les ports du node.', 'Pick the called flow: its inputs and outputs become the ports of the node.')}</div>
+  const list = (rec: Record<string, string>) => Object.entries(rec).map(([k, t]) => `${k} (${t})`).join(', ') || tr('aucune', 'none')
+  return (
+    <div style={{ fontSize: 11, margin: '6px 0 8px', color: 'var(--ink-3)', lineHeight: 1.45 }}>
+      {error && <div style={{ color: 'var(--warn)' }}>{tr(`Flow ${name} illisible : ${error}`, `Cannot read flow ${name}: ${error}`)}</div>}
+      <div>{tr('Entrees du flow appele', 'Inputs of the called flow')} : {list(stored.inputs ?? {})}</div>
+      <div>{tr('Sorties du flow appele', 'Outputs of the called flow')} : {list(stored.outputs ?? {})}</div>
+      {found && !same && (
+        <button type="button" className="flow-tool" disabled={!editable} onClick={() => onPorts(found)}
+                style={{ width: 'auto', padding: '0 6px', marginTop: 4, fontSize: 11 }}>
+          {tr(`Mettre a jour les ports (${Object.keys(found.inputs).length} entrees, ${Object.keys(found.outputs).length} sorties)`,
+              `Update the ports (${Object.keys(found.inputs).length} inputs, ${Object.keys(found.outputs).length} outputs)`)}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// R1 retake 8: what a FlowInput / FlowOutput is tied to, under its params.
+function InterfaceNote({ node }: { node: FlowViewNode }) {
+  const { tr } = useTr()
+  const text = node.type === 'data.flow_input'
+    ? tr('Cette entree est remplie avant le lancement : formulaire du Run, champ d\'une page TOOL qui lance ce flow, ou valeur passee par un FlowCall. Liste des entrees : panneau du flow (clic dans le vide).',
+         'This input is filled in before the start: Run form, field of a TOOL page that starts this flow, or value passed by a FlowCall. List of inputs: flow panel (click on empty space).')
+    : tr('Cette valeur sort sur le port du meme nom du FlowCall qui appelle ce flow. Liste des sorties : panneau du flow (clic dans le vide).',
+         'This value comes out on the port of the same name of the FlowCall that calls this flow. List of outputs: flow panel (click on empty space).')
+  return <div style={{ fontSize: 11, margin: '6px 0 8px', color: 'var(--ink-3)', lineHeight: 1.45 }}>{text}</div>
+}
+
+function NodeParams({ node, params, editable, edits, flowName, iface }: { node: FlowViewNode; params: Record<string, unknown>; editable: boolean; edits: NodeEdits; flowName?: string; iface?: { inputs: string[]; outputs: string[] } }) {
   const { tr } = useTr()
   const fam = FAMILY_INFO[node.family]
   const canEdit = editable && !!node.spec
@@ -200,6 +262,15 @@ function NodeParams({ node, params, editable, edits, flowName }: { node: FlowVie
     const mine = pageButtons.filter(b => b.flow === flowName).map(b => b.button_id)
     return [...new Set([...mine, ...pageButtons.map(b => b.button_id)])]
   }
+  // FlowInput / FlowOutput: the ids declared in the flow interface (R1 retake 8).
+  const ifaceChoices = (name: string): unknown[] | undefined => {
+    if (name !== 'id' || !iface) return undefined
+    const ids = node.type === 'data.flow_input' ? iface.inputs : node.type === 'subflow.flow_output' ? iface.outputs : undefined
+    return ids && ids.length ? ids : undefined
+  }
+  const isInterface = node.type === 'data.flow_input' || node.type === 'subflow.flow_output'
+  const onParam = edits.onParam
+  const onPorts = useCallback((p: CallPorts) => onParam(node.id, 'ports', p), [onParam, node.id])
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -228,18 +299,23 @@ function NodeParams({ node, params, editable, edits, flowName }: { node: FlowVie
         ? <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>{tr('Ce node n\'a pas de parametre.', 'This node has no parameter.')}</div>
         : ports.map(p => (
             <ParamRow key={p.name} p={p} editable={canEdit} raw={params[p.name]}
-                      choices={p.choices ?? buttonChoices(p.name) ?? FALLBACK_CHOICES[node.type]?.[p.name]}
+                      choices={p.choices ?? buttonChoices(p.name) ?? ifaceChoices(p.name) ?? FALLBACK_CHOICES[node.type]?.[p.name]}
                       tokens={tokens} tokenOptions={p.tokens ? tokenKeys(tokens, p.tokens, valueOf('class')) : []}
                       muted={!portVisible(node, p)}
                       onChange={v => edits.onParam(node.id, p.name, v)} />
           ))}
       {isButton && <PageButtonInfo buttons={pageButtons} flowName={flowName} buttonId={String(valueOf('button_id') ?? '')} />}
+      {isInterface && <InterfaceNote node={node} />}
+      {node.type === 'subflow.flow_call' && (
+        <FlowCallPorts params={params} editable={canEdit} onPorts={onPorts} />
+      )}
     </>
   )
 }
 
-export function ParamsPane({ selected, params, editable, edits, flowPart, flowName }: {
+export function ParamsPane({ selected, params, editable, edits, flowPart, flowName, iface }: {
   selected: FlowViewNode | null
+  iface?: { inputs: string[]; outputs: string[] }   // interface ids (FlowInput / FlowOutput id menus)
   flowName?: string                        // name of the open flow (page buttons of an event.button)
   params: Record<string, unknown>          // params of the selected node in the document
   editable: boolean
@@ -291,7 +367,7 @@ export function ParamsPane({ selected, params, editable, edits, flowPart, flowNa
            style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5,
                     background: dragging ? 'var(--accent)' : 'transparent', opacity: dragging ? 0.5 : 1, touchAction: 'none' }} />
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '10px 12px' }}>
-        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} flowName={flowName} /> : flowPart}
+        {selected ? <NodeParams node={selected} params={params} editable={editable} edits={edits} flowName={flowName} iface={iface} /> : flowPart}
       </div>
     </aside>
   )
