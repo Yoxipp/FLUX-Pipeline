@@ -30,6 +30,10 @@ hidden = (
        "uvicorn.protocols.http.auto", "uvicorn.lifespan.on"]
     + pxr_hidden
     + oiio_hidden
+    # The Flows node modules are imported by name (flux_flows/nodes/registry.py BUILTIN_MODULES)
+    # and the dispatcher lazily from them (ADR 0067): invisible to the static analysis.
+    + collect_submodules("flux_flows.nodes")
+    + collect_submodules("features.dispatcher")
 )
 
 # Non-Python files the backend reads next to its own modules (Path(__file__)...).
