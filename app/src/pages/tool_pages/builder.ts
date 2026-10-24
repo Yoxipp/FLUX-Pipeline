@@ -206,14 +206,13 @@ export function updateFolder(doc: PageDoc, id: string, patch: Partial<PageFolder
     ? { folder: { ...it.folder, ...patch }, children: it.children } : it))
 }
 
-// Local rename (not linked to a flow): the widget and the on_click.button_id that followed it.
+// Rename a widget or folder id in the document (ADR 0068: no flow follows, the page editor warns).
 export function renameLocal(doc: PageDoc, old: string, next: string): PageDoc {
   return withLayout(doc, mapItems(doc.layout, it => {
     if ('folder' in it) return it.folder.id === old ? { folder: { ...it.folder, id: next }, children: it.children } : it
     if (!it.row.some(w => w.id === old)) return it
     return { row: it.row.map(w => w.id !== old ? w : {
       ...w, id: next,
-      ...(w.kind === 'button' && w.on_click?.button_id === old ? { on_click: { ...w.on_click, button_id: next } } : {}),
     }) }
   }))
 }

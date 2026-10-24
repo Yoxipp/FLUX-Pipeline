@@ -37,6 +37,7 @@ export interface PortSpec {
   choiceLabels?: Record<string, { fr: string; en: string }>   // readable menu entries (R1)
   reserved?: string[]     // choices listed but disabled (instance mode farm, V2)
   default?: unknown       // registry default (tooltip, R1)
+  label?:   string        // shown instead of the name on the node (InputsPageReader: page labels)
   when?: { param: string; in: unknown[] }   // shown only for these values of a param (R1, visibility.ts)
 }
 
@@ -399,10 +400,8 @@ export interface PageWidget {
   w?:        number
   default?:  unknown
   remember?: 'user' | 'none'
-  bind?:     { flow: string; param: string }
   icon?:     string
   confirm?:  string
-  on_click?: { flow: string; button_id: string }
   min?: number; max?: number; step?: number; unit?: string
   multiline?: boolean; placeholder?: string; max_len?: number
   mode?: 'open' | 'save'; filters?: string[]
@@ -455,14 +454,21 @@ export interface PageListItem {
 export interface PageList { pages: PageListItem[]; templates: PageListItem[]; can_edit: Record<'team' | 'project', boolean> }
 export interface PageRead { id: string; scope: PageScope; rev: string; page: PageDoc; issues: PageIssue[]; can_edit: boolean }
 
-export type PageLinkRole = 'button' | 'bind' | 'source'
+// The only page -> flow link left (ADR 0068): a data widget reading a flow output.
+export type PageLinkRole = 'source'
 export interface PageLink {
   page: string; page_label: string; scope: PageScope; shadowed: boolean
-  widget: string; label: string; kind: PageWidgetKind; role: PageLinkRole
-  button_id?: string; param?: string; output?: string
+  widget: string; label: string; kind: PageWidgetKind; role: PageLinkRole; output?: string
 }
-export interface PageButton { page: string; page_label: string; scope: PageScope; widget: string; label: string; flow: string; button_id: string }
-export interface RenamePlan { files: { kind: 'page' | 'flow'; scope: string; id: string; path?: string; next_version?: number; widgets?: string[] }[] }
+
+// InputsPageReader (ADR 0068): params.ports of the node, read from its page.
+export interface PagePorts { outputs: Record<string, string>; labels: Record<string, string>; defaults: Record<string, unknown>; label: string }
+export interface PageListener { flow: string; scope: FlowScope; version: number; node: string }
+export interface PageUse { flow: string; scope: FlowScope; label: string; active: boolean; node: string; buttons: string[]; fields: string[] }
+export interface PageFlows { listeners: Record<string, PageListener[]>; uses: PageUse[] }
+export interface PageClickRun { flow: string; scope: FlowScope; run_id: string; status: string; error?: string | null }
+// Generated Publisher panel: not a page, its button runs this flow event with every field.
+export interface PageTarget { flow: string; event: string }
 
 // Page data (ADR 0066 n°3): a record = its fields + who / when (merged from every journal).
 export interface PageRecord {

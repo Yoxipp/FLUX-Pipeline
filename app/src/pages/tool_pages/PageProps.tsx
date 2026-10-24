@@ -1,24 +1,18 @@
 // PageProps.tsx — the Properties column of the page editor (04_PAGES_TOOL §5): the selected
-// widget, folder or data collection. "Au clic" picks a flow and adds (or takes) its
-// event.button node with button_id = the widget id (a new frozen version of the flow,
-// confirmed first); "Lie a" binds a field to a param of the flow interface (only the
-// compatible ones are offered). Renaming a linked button goes through the backend (page +
-// flow in one operation, "N fichiers seront modifies").
+// widget, folder or data collection. ADR 0068: the page knows no flow; a button or a field
+// shows, read only, the flows whose InputsPageReader uses it ("Lance par" / "Lu par", from
+// GET /flows/pages/{id}/flows), with a link to open each flow.
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { flowsApi } from '../../api/flows'
-import type { FlowListItem, InterfaceInput, InterfaceOutput, PageDataField, PageDataSpec, PageDoc, PageFieldType, PageFolder, PageScope, PageWidget } from '../flow_editor/types'
+import type { FlowListItem, InterfaceInput, InterfaceOutput, PageDataField, PageDataSpec, PageDoc, PageFieldType, PageFolder, PageScope, PageUse, PageWidget } from '../flow_editor/types'
 import { useTr } from '../flow_editor/useTr'
 import { ID_RE } from './builder'
 import { PAGE_ICONS } from './icons'
 import { isDataKind, isValueKind } from './links'
 
 export const propInput: CSSProperties = { flex: 1, minWidth: 0, height: 24, padding: '0 6px', border: '1px solid var(--rule-2)', background: 'var(--bg-deep)', borderRadius: 5, fontSize: 12, color: 'var(--ink)' }
-const FEEDS: Record<string, string[]> = {
-  float: ['float'], int: ['int', 'float'], text: ['str', 'pattern'], path: ['path', 'str'], dir: ['dir', 'path', 'str'],
-  toggle: ['bool'], select: ['select', 'str'], list: ['list[str]'],
-}
 const FIELD_TYPES: PageFieldType[] = ['str', 'text', 'int', 'float', 'bool', 'date', 'datetime', 'user', 'select', 'image', 'path']
 
 export function PropRow({ label, children, tip }: { label: string; children: ReactNode; tip?: string }) {
@@ -90,11 +84,36 @@ function OptionsEditor({ options, onChange }: { options: { value: string; label?
 
 // -- widget -----------------------------------------------------------------------------------
 
-export function WidgetProps({ doc, w, scope, project, flows, onPatch, onRename, onLinkButton, onOpenFlow }: {
-  doc: PageDoc; w: PageWidget; scope: PageScope; project?: string; flows: FlowListItem[]
+// Flows whose InputsPageReader uses this widget (a linked button or field), read only.
+function UsedBy({ w, uses, onOpenFlow }: { w: PageWidget; uses: PageUse[]; onOpenFlow: (flow: string) => void }) {
+  const { tr } = useTr()
+  const mine = uses.filter(u => (w.kind === 'button' ? u.buttons : u.fields).includes(w.id))
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div className="cap" style={{ margin: '10px 0 4px' }}>{w.kind === 'button' ? tr('Lance', 'Starts') : tr('Lu par', 'Read by')}</div>
+      {mine.length === 0
+        ? <div className="tp-note" style={{ color: 'var(--ink-4)' }}>
+            {w.kind === 'button'
+              ? tr('Aucun flow : dans un flow, pose un InputsPageReader sur cette page et relie ce bouton.',
+                   'No flow: in a flow, place an InputsPageReader on this page and link this button.')
+              : tr('Aucun flow ne lit ce champ.', 'No flow reads this field.')}
+          </div>
+        : mine.map(u => (
+          <div key={`${u.scope}/${u.flow}`} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+            <span className="tag">{u.label}</span>
+            <span className="tp-note" style={{ color: u.active ? 'var(--ok)' : 'var(--ink-4)' }}>{u.active ? tr('actif', 'active') : tr('inactif', 'inactive')}</span>
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn ghost sm" onClick={() => onOpenFlow(u.flow)}><ExternalLink size={11} /> {tr('Ouvrir', 'Open')}</button>
+          </div>
+        ))}
+    </div>
+  )
+}
+
+export function WidgetProps({ doc, w, scope, project, flows, uses, onPatch, onRename, onOpenFlow }: {
+  doc: PageDoc; w: PageWidget; scope: PageScope; project?: string; flows: FlowListItem[]; uses: PageUse[]
   onPatch: (patch: Partial<PageWidget>, key: string) => void
   onRename: (next: string) => void
-  onLinkButton: (flow: string) => void
   onOpenFlow: (flow: string) => void
 }) {
   const { tr } = useTr()
@@ -102,7 +121,7 @@ export function WidgetProps({ doc, w, scope, project, flows, onPatch, onRename, 
   useEffect(() => setIdDraft(w.id), [w.id])
   const okFlows = useMemo(() => allowedFlows(flows, scope), [flows, scope])
   const flowOptions = okFlows.map(f => ({ value: f.name, label: `${f.label || f.name}${f.active ? '' : tr(' (inactif)', ' (inactive)')}` }))
-  const iface = useFlowInterface(w.bind?.flow ?? w.source?.flow, project)
+  const iface = useFlowInterface(w.source?.flow, project)
   const spec = doc.data.find(d => d.id === w.source?.data)
   const fieldOpts = (types?: string[]) => (spec?.fields ?? []).filter(f => !types || types.includes(f.type)).map(f => ({ value: f.id, label: f.label || f.id }))
   const idBad = !ID_RE.test(idDraft)
@@ -121,15 +140,7 @@ export function WidgetProps({ doc, w, scope, project, flows, onPatch, onRename, 
       </PropRow>
 
       {w.kind === 'button' && <>
-        <div className="cap" style={{ margin: '10px 0 4px' }}>{tr('Au clic', 'On click')}</div>
-        <PropRow label={tr('Flow', 'Flow')}>
-          <Pick value={w.on_click?.flow} options={flowOptions} empty={tr('(aucun)', '(none)')}
-                onChange={v => v ? onLinkButton(v) : onPatch({ on_click: undefined }, `w:${w.id}:click`)} />
-        </PropRow>
-        {w.on_click && <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-          <span className="tag">{w.on_click.flow} / {w.on_click.button_id}</span>
-          <button type="button" className="btn ghost sm" onClick={() => onOpenFlow(w.on_click!.flow)}><ExternalLink size={11} /> {tr('Ouvrir dans l\'editeur', 'Open in the editor')}</button>
-        </div>}
+        <UsedBy w={w} uses={uses} onOpenFlow={onOpenFlow} />
         <PropRow label={tr('Icone', 'Icon')}><Pick value={w.icon} options={Object.keys(PAGE_ICONS).map(k => ({ value: k, label: k }))} empty="" onChange={v => onPatch({ icon: v }, `w:${w.id}:icon`)} /></PropRow>
         <PropRow label={tr('Confirmer', 'Confirm')} tip={tr('Question posee avant de lancer (vide = aucune)', 'Question asked before running (empty = none)')}>
           <Text value={w.confirm} onChange={v => onPatch({ confirm: v }, `w:${w.id}:confirm`)} />
@@ -137,16 +148,7 @@ export function WidgetProps({ doc, w, scope, project, flows, onPatch, onRename, 
       </>}
 
       {isValueKind(w.kind) && <>
-        <div className="cap" style={{ margin: '10px 0 4px' }}>{tr('Lie a', 'Bound to')}</div>
-        <PropRow label={tr('Flow', 'Flow')}>
-          <Pick value={w.bind?.flow} options={flowOptions} empty={tr('(aucun)', '(none)')}
-                onChange={v => onPatch({ bind: v ? { flow: v, param: w.bind?.param ?? '' } : undefined }, `w:${w.id}:bind`)} />
-        </PropRow>
-        {w.bind && <PropRow label={tr('Parametre', 'Parameter')}>
-          <Pick value={w.bind.param || undefined} empty=""
-                options={(iface?.inputs ?? []).filter(i => FEEDS[w.kind]?.includes(i.type)).map(i => ({ value: i.id, label: `${i.label || i.id} (${i.type})` }))}
-                onChange={v => onPatch({ bind: { flow: w.bind!.flow, param: v ?? '' } }, `w:${w.id}:param`)} />
-        </PropRow>}
+        <UsedBy w={w} uses={uses} onOpenFlow={onOpenFlow} />
         <PropRow label={tr('Defaut', 'Default')}><Text value={w.default === undefined ? '' : String(w.default)} onChange={v => onPatch({ default: v === '' ? undefined : v }, `w:${w.id}:default`)} /></PropRow>
         <PropRow label={tr('Se souvenir', 'Remember')} tip={tr('Garde la derniere saisie de chaque artiste', 'Keeps the last entry of each artist')}>
           <Flag value={w.remember === 'user'} onChange={v => onPatch({ remember: v ? 'user' : undefined }, `w:${w.id}:remember`)} />

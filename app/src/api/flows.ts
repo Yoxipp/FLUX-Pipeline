@@ -4,7 +4,7 @@
 
 import { api, apiCall, BASE_URL } from './client'
 import type { ActionCatalog, ActionGraph } from '../types'
-import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageButton, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RenamePlan, RunRecord, RunStatus, RunSummary, SaveResult, VersionList } from '../pages/flow_editor/types'
+import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RunRecord, RunStatus, RunSummary, SaveResult, VersionList, PagePorts, PageFlows, PageClickRun, PageTarget } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -108,15 +108,15 @@ export const flowsApi = {
     apiCall('POST', '/flows/pages/validate', { page, scope, project }),
   pageLinks: (project?: string): Promise<Record<string, PageLink[]>> =>
     apiCall('GET', `/flows/pages/links${qs({ project })}`),
-  pageButtons: (project?: string): Promise<PageButton[]> => apiCall('GET', `/flows/pages/buttons${qs({ project })}`),
-  linkButton: (flow: string, button_id: string, project?: string): Promise<{ flow: string; scope: FlowScope; node: string; created: boolean; version: number | null }> =>
-    apiCall('POST', '/flows/pages/link_button', { flow, button_id, project }),
-  renameWidget: (page: string, scope: PageScope, old: string, next: string, opts: { apply?: boolean; base_rev?: string; project?: string } = {}): Promise<RenamePlan> =>
-    apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/rename`, { scope, old, new: next, ...opts }),
-  renameParam: (flow: string, old: string, next: string, opts: { apply?: boolean; project?: string } = {}): Promise<RenamePlan> =>
-    apiCall('POST', '/flows/pages/rename_param', { flow, old, new: next, ...opts }),
+  // InputsPageReader (ADR 0068): the flow picks its page. Ports of the node, who listens, a click.
+  pagePorts: (page: string, project?: string): Promise<PagePorts> =>
+    apiCall('GET', `/flows/pages/${encodeURIComponent(page)}/ports${qs({ project })}`),
+  pageFlows: (page: string, project?: string): Promise<PageFlows> =>
+    apiCall('GET', `/flows/pages/${encodeURIComponent(page)}/flows${qs({ project })}`),
+  clickPage: (page: string, body: { button: string; values: Record<string, unknown>; project?: string }): Promise<{ runs: PageClickRun[] }> =>
+    apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/click`, body),
   // Generated Publisher panel of an extension software (04 §7): interface of its flow publish_<soft>.
-  publishPanel: (soft: string, project?: string): Promise<{ soft: string; flow: string; page: PageDoc; issues: PageIssue[] }> =>
+  publishPanel: (soft: string, project?: string): Promise<{ soft: string; flow: string; page: PageDoc; issues: PageIssue[]; target: PageTarget }> =>
     apiCall('GET', `/flows/pages/publish_panel/${encodeURIComponent(soft)}${qs({ project })}`),
   // Page data (ADR 0066): records merged from every author's journal; etag = nothing moved since.
   pageData: (page: string, collection: string, opts: { project?: string; etag?: string } = {}): Promise<PageDataRead> =>

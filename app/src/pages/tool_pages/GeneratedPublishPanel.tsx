@@ -11,13 +11,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { flowsApi } from '../../api/flows'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
-import type { FlowsWsMessage, PageDoc, PageIssue } from '../flow_editor/types'
+import type { FlowsWsMessage, PageDoc, PageIssue, PageTarget } from '../flow_editor/types'
 import { useTr } from '../flow_editor/useTr'
 import { PageRenderer } from './PageRenderer'
 
 export function GeneratedPublishPanel({ soft, label, project }: { soft: string; label: string; project?: string }) {
   const { tr } = useTr()
-  const [panel, setPanel] = useState<{ flow: string; page: PageDoc; issues: PageIssue[] } | null>(null)
+  const [panel, setPanel] = useState<{ flow: string; page: PageDoc; issues: PageIssue[]; target: PageTarget } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -49,7 +49,7 @@ export function GeneratedPublishPanel({ soft, label, project }: { soft: string; 
             `Panel generated from the interface of the flow publish_${soft}: a TD edits it in the flow editor.`)}
       </div>
       {error && <div className="tp-note" style={{ color: 'var(--err)' }}>{error}</div>}
-      {panel && <PageRenderer page={panel.page} issues={panel.issues} project={project} />}
+      {panel && <PageRenderer page={panel.page} issues={panel.issues} project={project} target={panel.target} />}
     </div>
   )
 }

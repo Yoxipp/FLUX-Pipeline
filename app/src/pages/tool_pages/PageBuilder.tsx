@@ -13,7 +13,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns2, Database, FolderPl
 import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
 import { useProject } from '../../ProjectContext'
-import type { FlowListItem, PageDoc, PageIssue, PageLayoutItem, PageListItem, PageScope, PageWidget, PageWidgetKind } from '../flow_editor/types'
+import type { FlowListItem, PageDoc, PageIssue, PageLayoutItem, PageListItem, PageScope, PageUse, PageWidget, PageWidgetKind } from '../flow_editor/types'
 import { createDocStore, docOf, isDirty, useStore } from '../flow_editor/store'
 import { useTr } from '../flow_editor/useTr'
 import {
@@ -99,7 +99,7 @@ function NewPage({ project, canTeam, canProject, templates, pages }: { project?:
 
 // -- tree -------------------------------------------------------------------------------------
 
-function Tree({ items, sel, setSel, bad, depth = 0 }: { items: PageLayoutItem[]; sel: Sel; setSel: (s: Sel) => void; bad: Record<string, 'error' | 'warning'>; depth?: number }) {
+function Tree({ items, sel, setSel, bad, usedIds, depth = 0 }: { items: PageLayoutItem[]; sel: Sel; setSel: (s: Sel) => void; bad: Record<string, 'error' | 'warning'>; usedIds: Set<string>; depth?: number }) {
   const { tr, lang } = useTr()
   return (
     <>
@@ -107,12 +107,12 @@ function Tree({ items, sel, setSel, bad, depth = 0 }: { items: PageLayoutItem[];
         ? <div key={it.folder.id}>
             <Line depth={depth} on={sel?.kind === 'folder' && sel.id === it.folder.id} onClick={() => setSel({ kind: 'folder', id: it.folder.id })}
                   icon={<FolderPlus size={12} />} id={it.folder.id} label={`${it.folder.label || ''}${it.folder.mode && it.folder.mode !== 'plain' ? ` (${it.folder.mode === 'tabs' ? tr('onglet', 'tab') : tr('repliable', 'collapsible')})` : ''}`} state={bad[it.folder.id]} />
-            <Tree items={it.children} sel={sel} setSel={setSel} bad={bad} depth={depth + 1} />
+            <Tree items={it.children} sel={sel} setSel={setSel} bad={bad} usedIds={usedIds} depth={depth + 1} />
           </div>
         : <div key={`r${k}-${it.row[0]?.id}`} style={{ borderLeft: it.row.length > 1 ? '2px solid var(--rule-2)' : undefined, marginLeft: depth * 12 }}>
             {it.row.map(w => <Line key={w.id} depth={0} on={sel?.kind === 'widget' && sel.id === w.id} onClick={() => setSel({ kind: 'widget', id: w.id })}
                                    icon={<span className="cap" style={{ fontSize: 9.5 }}>{kindLabel(w.kind, lang).slice(0, 3)}</span>} id={w.id} label={w.label ?? w.text ?? ''} state={bad[w.id]}
-                                   linked={!!(w.on_click || w.bind || w.source?.flow)} />)}
+                                   linked={!!w.source?.flow || usedIds.has(w.id)} />)}
           </div>)}
     </>
   )
@@ -142,6 +142,8 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
   const [issues, setIssues] = useState<PageIssue[]>([])
   const [sel, setSel] = useState<Sel>({ kind: 'page' })
   const [flows, setFlows] = useState<FlowListItem[]>([])
+  const [uses, setUses] = useState<PageUse[]>([])   // flows whose InputsPageReader reads this page (ADR 0068)
+  const usedIds = useMemo(() => new Set(uses.flatMap(u => [...u.buttons, ...u.fields])), [uses])
   const [tab, setTab] = useState<'widgets' | 'templates'>('widgets')
   const [templates, setTemplates] = useState<PageListItem[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -155,6 +157,7 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
   useEffect(() => { load() }, [load])
   useEffect(() => {
     flowsApi.list(proj).then(setFlows).catch(() => setFlows([]))
+    flowsApi.pageFlows(pageId, proj).then(f => setUses(f.uses)).catch(() => setUses([]))
     flowsApi.listPages(proj).then(l => setTemplates(l.templates)).catch(() => setTemplates([]))
   }, [proj])
 
@@ -226,39 +229,17 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
   const folder = doc && sel?.kind === 'folder' ? findFolder(doc, sel.id) : undefined
   const spec = doc && sel?.kind === 'data' ? doc.data.find(d => d.id === sel.id) : undefined
 
-  // A linked button keeps its flow in step (page + flow in one backend operation);
-  // anything else is renamed in the document.
+  // ADR 0068: renaming a widget a flow uses breaks that link (the flow shows W_PAGE_LINK_BROKEN):
+  // say which flows first.
   const rename = async (w: PageWidget, next: string) => {
     if (!doc) return
     if (takenIds(doc).has(next)) { toast.error(tr(`L'id ${next} existe deja`, `The id ${next} already exists`)); return }
-    const linked = w.kind === 'button' && w.on_click?.button_id === w.id
-    if (!linked) { apply(d => renameLocal(d, w.id, next)); setSel({ kind: 'widget', id: next }); return }
-    if (dirty && !(await save())) return
-    try {
-      const plan = await flowsApi.renameWidget(pageId, scope, w.id, next, { project: proj })
-      const files = plan.files.map(f => f.kind === 'flow' ? `flows/${f.id} (v${f.next_version})` : `pages/${f.id}.yml`)
-      if (!window.confirm(tr(`${files.length} fichier(s) seront modifies : ${files.join(', ')}. Renommer ?`, `${files.length} file(s) will change: ${files.join(', ')}. Rename?`))) return
-      await flowsApi.renameWidget(pageId, scope, w.id, next, { apply: true, project: proj, base_rev: rev ?? undefined })
-      if (plan.files.some(f => f.kind === 'flow')) toast.info(tr('Le flow a une nouvelle version : active-la pour que le bouton marche', 'The flow has a new version: activate it so the button works'))
-      load()
-      setSel({ kind: 'widget', id: next })
-    } catch (err) { toast.error((err as Error).message) }
+    const users = uses.filter(u => u.buttons.includes(w.id) || u.fields.includes(w.id)).map(u => u.label)
+    if (users.length && !window.confirm(tr(`${users.join(', ')} utilise(nt) ${w.id} : le lien sera a refaire dans le flow. Renommer ?`,
+                                           `${users.join(', ')} use(s) ${w.id}: the link must be redone in the flow. Rename?`))) return
+    apply(d => renameLocal(d, w.id, next))
+    setSel({ kind: 'widget', id: next })
   }
-
-  // "Au clic": the flow gets its event.button node (new version, confirmed), then the page points to it.
-  const linkButton = async (w: PageWidget, flow: string) => {
-    const info = flows.find(f => f.name === flow)
-    const next = (info?.current ?? 0) + 1
-    if (!window.confirm(tr(`Le flow ${flow} recoit un node Bouton "${w.id}" si il ne l'a pas encore (cree la version v${String(next).padStart(3, '0')}). Continuer ?`,
-                           `The flow ${flow} gets a Button node "${w.id}" if it has none yet (creates version v${String(next).padStart(3, '0')}). Continue?`))) return
-    try {
-      const r = await flowsApi.linkButton(flow, w.id, proj)
-      apply(d => updateWidget(d, w.id, { on_click: { flow, button_id: w.id } }))
-      toast.success(r.created ? tr(`Node Bouton ajoute a ${flow} (v${r.version})`, `Button node added to ${flow} (v${r.version})`) : tr(`${flow} a deja ce bouton`, `${flow} already has this button`))
-      flowsApi.list(proj).then(setFlows).catch(() => { /* list kept */ })
-    } catch (err) { toast.error((err as Error).message) }
-  }
-
   const remove = () => {
     if (sel?.kind === 'widget' || sel?.kind === 'folder') { const id = sel.id; apply(d => removeItem(d, id)); setSel({ kind: 'page' }) }
     else if (sel?.kind === 'data') { const id = sel.id; apply(d => removeData(d, id)); setSel({ kind: 'page' }) }
@@ -329,7 +310,7 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
             <button type="button" className="btn ghost sm" title={tr('Supprimer', 'Delete')} onClick={remove}><Trash2 size={12} /></button>
           </div>
           <div onClick={() => setSel({ kind: 'page' })} className={`nav${sel?.kind === 'page' ? ' active' : ''}`} style={{ fontSize: 12 }}>{tr('Page', 'Page')}</div>
-          <Tree items={doc.layout} sel={sel} setSel={setSel} bad={bad} />
+          <Tree items={doc.layout} sel={sel} setSel={setSel} bad={bad} usedIds={usedIds} />
           <div className="cap" style={{ margin: '12px 0 4px' }}>{tr('Donnees', 'Data')}</div>
           {doc.data.map(d => (
             <div key={d.id} onClick={() => setSel({ kind: 'data', id: d.id })} className={`nav${sel?.kind === 'data' && sel.id === d.id ? ' active' : ''}`} style={{ fontSize: 12, gap: 6 }}>
@@ -359,10 +340,9 @@ function Editor({ pageId, scope }: { pageId: string; scope: PageScope }) {
             </PropRow>
             <PropRow label={tr('Description', 'Description')}><input value={doc.description ?? ''} onChange={e => { const v = e.target.value; apply(d => ({ ...d, description: v || undefined }), 'page:desc') }} style={propInput} /></PropRow>
           </>}
-          {widget && <WidgetProps key={widget.id} doc={doc} w={widget} scope={scope} project={proj} flows={flows}
+          {widget && <WidgetProps key={widget.id} doc={doc} w={widget} scope={scope} project={proj} flows={flows} uses={uses}
                                   onPatch={(p, key) => apply(d => updateWidget(d, widget.id, p), key)}
                                   onRename={next => { void rename(widget, next) }}
-                                  onLinkButton={flow => { void linkButton(widget, flow) }}
                                   onOpenFlow={flow => { if (window.electronAPI?.detachPage) window.electronAPI.detachPage(`/action-graph?flow=${encodeURIComponent(flow)}`); else navigate(`/action-graph?flow=${encodeURIComponent(flow)}`) }} />}
           {folder && <FolderProps key={folder.id} f={folder} onPatch={(p, key) => apply(d => updateFolder(d, folder.id, p), key)}
                                   onRename={next => { if (takenIds(doc).has(next)) toast.error(tr('Id deja pris', 'Id already taken')); else { apply(d => renameLocal(d, folder.id, next)); setSel({ kind: 'folder', id: next }) } }} />}

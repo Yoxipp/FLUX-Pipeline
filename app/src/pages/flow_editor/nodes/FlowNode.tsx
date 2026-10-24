@@ -92,7 +92,7 @@ function ValueLine({ port, set, run }: { port: PortSpec; set?: string; run?: str
     <div style={{ display: 'grid', gridTemplateColumns: '10px 96px 1fr', columnGap: 6, alignItems: 'start', fontSize: 11, padding: '3px 0' }}>
       <span style={{ width: 8, height: 8, borderRadius: 2, marginTop: 3, background: portColor(port.type) }} />
       <span style={{ minWidth: 0 }}>
-        <span style={{ display: 'block', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={port.name}>{port.name}</span>
+        <span style={{ display: 'block', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={port.name}>{port.label ?? port.name}</span>
         <span style={{ display: 'block', color: 'var(--ink-4)', fontSize: 10 }}>{port.type}</span>
       </span>
       <span style={{ minWidth: 0, wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>

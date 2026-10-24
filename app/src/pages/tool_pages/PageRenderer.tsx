@@ -3,9 +3,10 @@
 // editor), real <button>s for page buttons (Btn is a div). One renderer for the TOOL tab,
 // the page editor preview and the generated Publisher panel (04 §7).
 //
-// A button runs the ACTIVE version of its flow: POST /flows/{flow}/run {event: button_id,
-// values} with the fields bound to that flow (A7). The last run of each button comes from
-// GET /flows/runs?flow&event&limit=1, refreshed on the WS run messages (no polling).
+// A button runs the ACTIVE flows that listen to it with an InputsPageReader (ADR 0068):
+// POST /flows/pages/{id}/click {button, values} with every field of the page. A button no
+// active flow listens to is greyed with the reason. The last run of each button comes from
+// GET /flows/runs?event=<page>/<button>&limit=1, refreshed on the WS run messages (no polling).
 // Field values are local state; `remember: user` keeps the last entry per artist in the
 // user data (flux.pages.remember), nothing is written in the page or the flow.
 // preview: buttons are inert ("lancerait ..."), a click on a widget selects it (editor).
@@ -18,7 +19,7 @@ import { flowsApi } from '../../api/flows'
 import { ParamWidget, type ParamKind } from '../../components/shared/ParamWidget'
 import { SecTitle } from '../../components/shared/ui'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
-import type { FlowsWsMessage, PageDoc, PageFolder, PageIssue, PageLayoutItem, PageWidget, RunSummary } from '../flow_editor/types'
+import type { FlowsWsMessage, PageDoc, PageFolder, PageIssue, PageLayoutItem, PageListener, PageTarget, PageWidget, RunSummary } from '../flow_editor/types'
 import { useTr } from '../flow_editor/useTr'
 import { ago, blockedWidgets, initialValue, isDataKind, runValues, seconds, widgetsOf } from './links'
 import './tool_pages.css'
@@ -37,6 +38,7 @@ export interface PageRendererProps {
   onSelect?: (id: string) => void
   renderData?: (w: PageWidget) => ReactNode  // data widgets (DataWidgets.tsx)
   extraActions?: ReactNode                   // e.g. the Publisher destination block
+  target?: PageTarget                        // generated Publisher panel: the flow event its button runs
 }
 
 const KIND_OF: Record<string, ParamKind> = {
@@ -46,43 +48,51 @@ const KIND_OF: Record<string, ParamKind> = {
 interface ButtonRun { last: RunSummary | null; pending: string | null; error: string | null; preview: string | null }
 
 // -- last run per button --------------------------------------------------------------------
+// ADR 0068: a page button runs every ACTIVE flow whose InputsPageReader listens to it
+// (GET /flows/pages/{id}/flows); its last run is found by the event "<page>/<button>".
+// The generated Publisher panel has a target instead (flow publish_<soft>, publish_request).
 
-function useButtonRuns(page: PageDoc, project: string | undefined, enabled: boolean) {
-  const buttons = useMemo(() => widgetsOf(page).filter(w => w.kind === 'button' && w.on_click), [page])
+function useButtonRuns(page: PageDoc, project: string | undefined, enabled: boolean, target?: PageTarget) {
+  const buttons = useMemo(() => widgetsOf(page).filter(w => w.kind === 'button'), [page])
   const [runs, setRuns] = useState<Record<string, ButtonRun>>({})
+  const [listeners, setListeners] = useState<Record<string, PageListener[]> | null>(null)
   const pending = useRef<Record<string, string>>({})   // run_id -> widget id
 
-  const refresh = useCallback((flow?: string) => {
+  const loadListeners = useCallback(() => {
+    if (target) return
+    flowsApi.pageFlows(page.id, project).then(f => setListeners(f.listeners)).catch(() => setListeners(null))
+  }, [page.id, project, target])
+  useEffect(() => { loadListeners() }, [loadListeners])
+
+  const refresh = useCallback(() => {
     if (!enabled) return
     for (const b of buttons) {
-      if (!b.on_click || (flow && b.on_click.flow !== flow)) continue
-      flowsApi.listRuns({ flow: b.on_click.flow, event: b.on_click.button_id, limit: 1, project })
+      const query = target ? { flow: target.flow, event: target.event } : { event: `${page.id}/${b.id}` }
+      flowsApi.listRuns({ ...query, limit: 1, project })
         .then(list => setRuns(r => ({ ...r, [b.id]: { ...EMPTY_RUN, ...r[b.id], last: list[0] ?? null } })))
         .catch(() => { /* backend down: the state stays as it was */ })
     }
-  }, [buttons, project, enabled])
+  }, [buttons, page.id, project, enabled, target])
 
   useEffect(() => { refresh() }, [refresh])
 
   const onMessage = useCallback((msg: FlowsWsMessage) => {
-    if (msg.type !== 'run_finished' && msg.type !== 'run_started') return
-    if (!buttons.some(b => b.on_click?.flow === msg.flow)) return
-    if (msg.type === 'run_finished') {
-      const wid = pending.current[msg.run_id]
-      if (wid) {
-        delete pending.current[msg.run_id]
-        setRuns(r => ({ ...r, [wid]: { ...EMPTY_RUN, ...r[wid], pending: null } }))
-      }
-      refresh(msg.flow)
+    if (msg.type === 'activation' || msg.type === 'flow_changed') { loadListeners(); return }
+    if (msg.type !== 'run_finished') return
+    const wid = pending.current[msg.run_id]
+    if (wid) {
+      delete pending.current[msg.run_id]
+      if (!Object.values(pending.current).includes(wid)) setRuns(r => ({ ...r, [wid]: { ...EMPTY_RUN, ...r[wid], pending: null } }))
     }
-  }, [buttons, refresh])
+    refresh()
+  }, [refresh, loadListeners])
   useFlowsWs(onMessage, refresh)
 
-  const mark = useCallback((wid: string, patch: Partial<ButtonRun>, runId?: string) => {
-    if (runId) pending.current[runId] = wid
+  const mark = useCallback((wid: string, patch: Partial<ButtonRun>, runIds: string[] = []) => {
+    for (const id of runIds) pending.current[id] = wid
     setRuns(r => ({ ...r, [wid]: { ...EMPTY_RUN, ...r[wid], ...patch } }))
   }, [])
-  return { runs, mark, refresh }
+  return { runs, mark, refresh, listeners }
 }
 
 // -- widgets --------------------------------------------------------------------------------
@@ -255,13 +265,22 @@ function Items({ items, ctx }: { items: PageLayoutItem[]; ctx: Ctx }) {
 
 // -- page -----------------------------------------------------------------------------------
 
-export function PageRenderer({ page, issues = [], project, preview = false, selected, onSelect, renderData, extraActions }: PageRendererProps) {
+export function PageRenderer({ page, issues = [], project, preview = false, selected, onSelect, renderData, extraActions, target }: PageRendererProps) {
   const { tr, lang } = useTr()
   const widgets = useMemo(() => widgetsOf(page), [page])
   const [remembered, setRemembered] = useState<Record<string, unknown> | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
-  const { runs, mark } = useButtonRuns(page, project, !preview)
-  const blocked = useMemo(() => blockedWidgets(issues, lang), [issues, lang])
+  const { runs, mark, listeners } = useButtonRuns(page, project, !preview, target)
+  const blocked = useMemo(() => {
+    const out = blockedWidgets(issues, lang)
+    if (target || !listeners || preview) return out
+    for (const w of widgets) {
+      if (w.kind === 'button' && !out[w.id] && !(listeners[w.id]?.length)) {
+        out[w.id] = tr('Aucun flow actif ne reagit a ce bouton', 'No active flow reacts to this button')
+      }
+    }
+    return out
+  }, [issues, lang, target, listeners, preview, widgets, tr])
 
   // Remembered entries of this artist (remember: user), read once per page.
   useEffect(() => {
@@ -282,11 +301,12 @@ export function PageRenderer({ page, issues = [], project, preview = false, sele
   const setValue = useCallback((id: string, v: unknown) => setValues(old => ({ ...old, [id]: v })), [])
 
   const click = useCallback(async (w: PageWidget) => {
-    if (!w.on_click) return
-    const vals = runValues(page, w.on_click.flow, values)
+    const vals = runValues(page, values)
     if (preview) {
-      mark(w.id, { preview: tr(`lancerait ${w.on_click.flow}, evenement ${w.on_click.button_id}, valeurs ${JSON.stringify(vals)}`,
-                              `would run ${w.on_click.flow}, event ${w.on_click.button_id}, values ${JSON.stringify(vals)}`) })
+      const names = target ? [target.flow] : (listeners?.[w.id] ?? []).map(l => l.flow)
+      mark(w.id, { preview: names.length
+        ? tr(`lancerait ${names.join(', ')}, valeurs ${JSON.stringify(vals)}`, `would run ${names.join(', ')}, values ${JSON.stringify(vals)}`)
+        : tr('aucun flow actif ne reagit a ce bouton', 'no active flow reacts to this button') })
       return
     }
     if (w.confirm && !window.confirm(w.confirm)) return
@@ -300,14 +320,23 @@ export function PageRenderer({ page, issues = [], project, preview = false, sele
     }
     mark(w.id, { error: null, preview: null })
     try {
-      const r = await flowsApi.run(w.on_click.flow, { event: w.on_click.button_id, values: vals, project })
-      mark(w.id, { pending: r.run_id }, r.run_id)
+      if (target) {
+        const r = await flowsApi.run(target.flow, { event: target.event, values: vals, project })
+        mark(w.id, { pending: r.run_id }, [r.run_id])
+      } else {
+        const r = await flowsApi.clickPage(page.id, { button: w.id, values: vals, project })
+        const started = r.runs.filter(x => x.status === 'queued' || x.status === 'running')
+        const refused = r.runs.filter(x => !started.includes(x))
+        mark(w.id, { pending: started[0]?.run_id ?? null,
+                     error: refused.length ? refused.map(x => `${x.flow} : ${x.error ?? x.status}`).join(' ; ') : null },
+             started.map(x => x.run_id))
+      }
     } catch (err) {
       const e = err as HttpError
       const msg = e.detail?.status === 'skipped' ? tr('Deja en cours', 'Already running') : e.message
       mark(w.id, { error: msg, pending: null })
     }
-  }, [page, values, preview, project, widgets, mark, tr])
+  }, [page, values, preview, project, widgets, mark, tr, target, listeners])
 
   const stop = useCallback((runId: string) => {
     flowsApi.cancelRun(runId, project).catch(err => toast.error((err as Error).message))

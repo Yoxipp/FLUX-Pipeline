@@ -1,27 +1,8 @@
-// links.ts — pure helpers of the page <-> flow links (04_PAGES_TOOL §4). No React, no fetch:
-// the logic is checked by reading and in live (no front test runner, P7).
+// links.ts — pure helpers of the TOOL pages (04_PAGES_TOOL, ADR 0068: the flow picks its page
+// with an InputsPageReader, the page knows no flow). No React, no fetch: the logic is checked
+// by reading and in live (no front test runner, P7).
 
-import type { FlowDoc, PageDoc, PageIssue, PageLayoutItem, PageWidget } from '../flow_editor/types'
-
-export interface ParamRename { old: string; next: string }
-
-// Interface inputs renamed between the saved document and the one being saved: same
-// slot, same type, another id, and neither id on the other side (an add + remove is
-// not a rename). The pages bound to `old` follow (POST /flows/pages/rename_param).
-export function renamedInputs(before: FlowDoc | null | undefined, after: FlowDoc): ParamRename[] {
-  const was = before?.interface?.inputs ?? []
-  const now = after.interface?.inputs ?? []
-  const wasIds = new Set(was.map(i => i.id))
-  const nowIds = new Set(now.map(i => i.id))
-  const out: ParamRename[] = []
-  was.forEach((input, k) => {
-    const next = now[k]
-    if (next && next.id !== input.id && next.type === input.type && !nowIds.has(input.id) && !wasIds.has(next.id)) {
-      out.push({ old: input.id, next: next.id })
-    }
-  })
-  return out
-}
+import type { PageDoc, PageIssue, PageLayoutItem, PageWidget } from '../flow_editor/types'
 
 // -- page walking and run values (PageRenderer, PageBuilder) -------------------------------
 
@@ -59,13 +40,14 @@ export function coerce(w: PageWidget, value: unknown): unknown {
   return value === undefined || value === null ? '' : String(value)
 }
 
-// `values` of the run a button launches: the fields bound to ITS flow (04 §4).
-export function runValues(page: PageDoc, flow: string, values: Record<string, unknown>): Record<string, unknown> {
+// `values` of a click: every field of the page by its id (ADR 0068: the InputsPageReader
+// outputs, and the interface inputs of the same id).
+export function runValues(page: PageDoc, values: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const w of widgetsOf(page)) {
-    if (!isValueKind(w.kind) || !w.bind || w.bind.flow !== flow) continue
+    if (!isValueKind(w.kind)) continue
     const v = coerce(w, values[w.id])
-    if (v !== null && v !== '') out[w.bind.param] = v
+    if (v !== null && v !== '') out[w.id] = v
   }
   return out
 }

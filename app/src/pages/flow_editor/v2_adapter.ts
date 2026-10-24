@@ -70,6 +70,19 @@ function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowV
       outputs.push({ name, type, doc_fr: 'Sortie du flow appele (son FlowOutput)', doc_en: 'Output of the called flow (its FlowOutput)' })
     }
   }
+  // ADR 0068: an InputsPageReader shows the buttons (exec) and fields of its page (params.ports,
+  // filled by the Params pane from the page), labelled like the page.
+  if (node.type === 'event.page_inputs') {
+    const ports = (params.ports ?? {}) as { outputs?: Record<string, string>; labels?: Record<string, string> }
+    for (const [name, type] of Object.entries(ports.outputs ?? {})) {
+      if (outputs.some(o => o.name === name)) continue
+      const label = ports.labels?.[name] ?? name
+      const out = { name, type, label, doc_fr: type === 'exec' ? `Bouton "${label}" de la page` : `Champ "${label}" de la page`,
+                    doc_en: type === 'exec' ? `Page button "${label}"` : `Page field "${label}"` }
+      if (type === 'exec') outputs.splice(outputs.filter(o => o.type === 'exec').length, 0, out)
+      else outputs.push(out)
+    }
+  }
   const meta: Record<string, string> = { type: node.type }
   if (node.label) meta.step = node.label
   if (node.bypass) meta.bypass = 'true'
