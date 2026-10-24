@@ -27,7 +27,7 @@ ZBrush, Mari (voir "Autres logiciels"). P6c (2026-10-23) : bridges d'extension, 
 | `events.py` | Bus interne thread-safe, feuille stdlib (01 §1) : `subscribe` / `emit`, file bornee par abonne. P5 : ecouteurs locaux `listen` / `signal` (jamais vers le WS) et `publish_done` (appele par `log_publish`, switch `FLUX_FLOWS_HOOKS`, ne leve jamais). |
 | `scheduler.py` | P5 : tache de fond (lifespan), election, relecture des flows actifs, surveillants `schedule` / `new_file` / `when` / `scene_opened`, ecoute de `publish_done`. Voir plus bas. |
 | `hosts.py` | P5 : verrou `CONFIG/extensions/runs/host.lock` entre postes (`HostLock.tick` toutes les 20 s). |
-| `hooks.py` | P5 : `event.on_publish` : publish -> enregistrement `publish` (soft / type deduits), filtres, flows qui le veulent. |
+| `hooks.py` | P5 : `event.on_publish` : publish -> enregistrement `publish` (soft / type deduits) + `infos` (R1 : `flux.publish_infos`, tokens du nom FLUX), filtres (soft, type, name ; R1 : mode, task, class, asset, seq, shot, project) evalues avant tout run, flows qui le veulent. |
 | `bridges/` | P6a : `softs.py` (registre des logiciels), `primitives.py` (transports qui enveloppent les clients `dcc/`), `session.py` (valeur `session[<soft>]`, `connect_live`), `headless.py` (worker `hython` / `mayapy`). |
 | `dcc_nodes.py` | P6a : nodes DCC livres en sous-flows verrouilles (`shipped/dcc/<soft>/*.flow.yml`, `node_type`) et leurs copies d'equipe. |
 | `locations.py` | Dossier de chaque portee ; `roots_for(user, project)` construit le dict `{portee: dossier ou None}` du store (nom de projet = un nom de dossier, jamais un chemin). |
@@ -156,6 +156,12 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   `"choices": [..] | null`, `"wirable": bool`, `"tokens": "CLASS" | null` (section de tokens du projet proposee en menu par
   l'editeur). Un lien vers un param `wirable=False` (constante, ex. `data.path.value`) = E_LINK_INVALID ; une valeur saisie
   hors de `choices` (texte non templatise, comparaison exacte) = E_PARAM_INVALID (remplace le controle propre a Value.type).
+* **R1 (2026-10-24)** : `port(..., labels={valeur: (fr, en)}, reserved=(..), when={param: (valeurs,)})`, serialises
+  `"choice_labels"`, `"reserved"`, `"when": {"param", "in"}`. `labels` = texte du menu (la valeur stockee ne change pas) ;
+  `reserved` = option visible mais desactivee (valeur saisie = E_PARAM_INVALID) ; `when` = port montre seulement pour ces
+  valeurs du param (`registry.port_visible`), un lien vers un port masque = W_PORT_HIDDEN (rien n'est supprime). Un port
+  `exec` sans doc recoit celle de `registry.EXEC_DOCS`. Un node DCC (sous-flow) herite doc / labels / reserved du param de
+  meme nom de son core. Tout port FLUX doit avoir `doc_fr` et `doc_en` (`test_nodes_doc.PortsDoc`) : c'est le tooltip.
   Un param promu (relie) arrive dans `inputs`, pas dans `params` : les nodes recents lisent `{**params, **inputs}`
   (`action._values`). `data.token_path` reproduit la resolution de dossier de `resolve_publish_path` sans toucher
   publish_core (layout plat : `level: last` = fichier `<base>_LAST.<ext>`, pas de dossier LAST).
