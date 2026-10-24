@@ -733,6 +733,8 @@ class Run:
             self.record["status"] = status
             self.record["error"] = error
             self.record["ended"] = runs.now_iso()
+            if self._outputs:   # flow_output values, read by the page widgets fed by this flow (P7)
+                self.record["outputs"] = {k: runs.output_value(v) for k, v in self._outputs.items()}
             if self._t0:
                 self.record["duration_ms"] = int((time.monotonic() - self._t0) * 1000)
             self._dirty = True

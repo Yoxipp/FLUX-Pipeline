@@ -217,3 +217,10 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   dernier run par bouton (`GET /flows/runs?flow&event&limit=1`, rafraichi sur `run_finished` du WS) ; en cours = "Stop"
   (annule le run) ; `remember: user` dans les donnees utilisateur (`flux.pages.remember`) ; `preview` (editeur) : boutons
   inertes ("lancerait ..."), clic = selection. Widgets de donnees via `renderData`.
+* `DataWidgets.tsx` (ADR 0066 n°2) : `feed` (fil + saisie, Entree envoie, canaux par `group_by`, supprimer son message),
+  `table` (`columns`, `editable` : double clic = formulaire), `cards` (kanban par `group_by`, glisser entre colonnes),
+  `calendar` (mois, champ `date` / `end`, double clic sur un jour = ajouter), `members` (comptes FLUX), et une source
+  `{flow, output}` = sortie du dernier run ok (`outputs` du record de run). Donnees par `hooks/usePages.ts`
+  (`usePageData` : etag toutes les 5 s tant que monte + WS `page_data` ; `usePageList`).
+* `BoardWidget.tsx` (ADR 0066 n°1) : board facon Miro dans sa ligne : notes, cartes, images (copiees par le backend),
+  liens, couleurs a plat, pan (glisser le fond), zoom a la molette, "Tout voir", Suppr. Vue par spectateur, jamais ecrite.

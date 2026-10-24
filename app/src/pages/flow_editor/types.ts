@@ -353,6 +353,7 @@ export interface RunRecord extends RunSummary {
   links:           Record<string, { value: string; count: number }>
   report:          { node: string | null; kind: string; text_fr: string; path?: string | null }[]
   nodes_simulated: string[]
+  outputs?:        Record<string, unknown>   // flow_output values (P7: page widgets fed by this flow)
 }
 
 // Messages of WS /flows/ws.

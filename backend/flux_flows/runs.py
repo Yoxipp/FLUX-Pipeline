@@ -84,6 +84,19 @@ def preview(value: Any, limit: int = PREVIEW_CHARS) -> str:
     return text if len(text) <= limit else text[: max(0, limit - 3)] + "..."
 
 
+MAX_OUTPUT_BYTES = 64 * 1024
+
+
+def output_value(value: Any) -> Any:
+    """A flow output kept in the record (P7: shown by a page widget): the JSON value itself
+    when it is small, else its preview text."""
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return preview(value)
+    return json.loads(text) if len(text) <= MAX_OUTPUT_BYTES else preview(value)
+
+
 def clip_value(value: Any) -> str:
     """Link value kept in the record: 1 KB at most."""
     return preview(value, MAX_VALUE_BYTES)
