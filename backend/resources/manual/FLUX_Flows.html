@@ -544,8 +544,8 @@ th { background:var(--soft); color:#fff; }
 <ul><li>Entrees : <code>list</code>, <code>item</code>. Sortie : <code>items</code>.</li></ul>
 <p class="ex">Exemple : ajouter le dossier <code>LAST</code> a la liste des dossiers a zipper.</p></div>
 <div class="node" id="n-operator.path_join" data-find="operator.path_join pathjoin" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>PathJoin</b><code>operator.path_join</code></div>
-<p>Joint un dossier de depart et jusqu'a 3 morceaux relatifs.</p>
-<ul><li>Entrees : <code>base</code>, <code>a</code>, <code>b</code>, <code>c</code>. Sortie : <code>path</code>.</li></ul>
+<p>Joint un dossier de depart et jusqu'a 3 morceaux relatifs. <code>dir</code> donne le meme chemin comme dossier, pour un node qui attend un dossier (ZipFolder, ListFiles, NewFile).</p>
+<ul><li>Entrees : <code>base</code>, <code>a</code>, <code>b</code>, <code>c</code>. Sorties : <code>path</code>, <code>dir</code>.</li></ul>
 <p class="ex">Exemple : <code>PathJoin (FlowInput dest_folder, DateNow.date)</code> &gt; <code>MakeDir</code> : un dossier par jour.</p></div>
 <div class="node" id="n-operator.path_split" data-find="operator.path_split pathsplit" style="--fam:oklch(66% 0.085 225)"><div class="node-h"><b>PathSplit</b><code>operator.path_split</code></div>
 <p>Decoupe un chemin : dossier parent, nom complet, nom sans extension, extension.</p>
