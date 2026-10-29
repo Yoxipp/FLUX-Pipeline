@@ -433,6 +433,11 @@ def copy_flow(roots: Mapping[str, Optional[Path]], name: str, from_scope: str, t
     copy to team; Enregistrer sous elsewhere). Refused if the target exists."""
     src = read_flow(roots, from_scope, name)
     flow = src["flow"].model_copy(update={"name": _check_name(new_name or name)})
+    if from_scope == "shipped" and name.startswith(EXAMPLE_PREFIX):
+        # Dupliquer an example (ADR 0069): a normal flow, its label and text no longer say "Exemple".
+        label = re.sub(r"^\s*Exemple\s*:\s*", "", flow.label or "")
+        desc = (flow.description or "").split(" Exemple livre :")[0].strip()
+        flow = flow.model_copy(update={"label": label[:1].upper() + label[1:], "description": desc})
     # Unlock: remember which shipped content the copy started from (W_SHIPPED_CHANGED, P4).
     extra = {"shipped_hash": shipped_hash(src["text"])} if from_scope == "shipped" and flow.name == name else None
     state = save_flow(roots, to_scope, flow, user=user, note=f"copie de {from_scope}/{name}", extra_state=extra)

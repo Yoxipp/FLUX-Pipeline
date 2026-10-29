@@ -111,6 +111,8 @@ class ExamplesRoutes(unittest.TestCase):
         self.assertEqual(page_store.resolve(pages_root, "daily_render"), "project")
         listed = {(f["scope"], f["name"]): f["category"] for f in self.client.get("/flows").json()}
         self.assertEqual(listed[("project", "daily_render")], "project")          # a normal flow now
+        label = self.client.get("/flows/daily_render", params={"project": "PROJ"}).json()["flow"]["label"]
+        self.assertFalse(label.lower().startswith("exemple"), label)
         r = self.client.post("/flows/example_daily_render/copy",
                              json={"from_scope": "shipped", "to_scope": "project", "project": "PROJ",
                                    "new_name": "daily_two"})
