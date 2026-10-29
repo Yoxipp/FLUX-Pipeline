@@ -1561,6 +1561,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           user:           settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → Nuke`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Photoshop') {
         if (!bridgeStatus.connected) {
           toast.error(tr('Photoshop non connecté : ouvre Photoshop (photoshop-python-api requis)', 'Photoshop not connected: open Photoshop (photoshop-python-api required)'))

@@ -6,6 +6,7 @@ run_policy: queue
 interface:
   inputs:
     - {id: "name", type: "str", label: "Nom FLUX du publish", default: ""}
+    - {id: "node", type: "dcc_node", label: "Node a ecrire (vide = selection)"}
     - {id: "format", type: "str", label: "Extension (.exr, .png, .mov...)", default: ".exr"}
     - {id: "frame_range", type: "str", label: "Plage (caches, anim) : 1001-1050", default: ""}
     - {id: "sequence", type: "bool", label: "Une image par frame", default: false}
@@ -32,6 +33,7 @@ nodes:
   in_options: {type: data.flow_input, pos: [320, 1120], params: {id: options}}
   out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
   out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+  in_node: {type: data.flow_input, pos: [320, 1240], params: {id: node}}
 links:
   - {from: ev.then, to: inst.exec}
   - {from: inst.then, to: pub.exec}
@@ -51,5 +53,6 @@ links:
   - {from: pub.files, to: out_files.value}
   - {from: out_files.then, to: out_warnings.exec}
   - {from: pub.warnings, to: out_warnings.value}
+  - {from: in_node.value, to: pub.node}
 notes:
-  - {id: k1, pos: [0, 1160], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et nkPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}
+  - {id: k1, pos: [0, 1360], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et nkPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

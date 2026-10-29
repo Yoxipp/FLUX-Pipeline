@@ -534,7 +534,7 @@ export const api = {
     description?:   string
     user?:          string
   }) =>
-    apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean }>(
+    apiCall<{ ok: boolean; path: string; version: number; version_str: string; is_sequence: boolean; warnings?: string[] }>(
       'POST', '/dcc/nuke/publish', payload),
 
   // Photoshop — save the active document into the FLUX layout over COM.

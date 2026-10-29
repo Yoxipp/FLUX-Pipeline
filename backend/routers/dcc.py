@@ -1975,14 +1975,70 @@ class NukePublishRequest(BaseModel):
     user:          str | None = None
 
 
+async def _soft_flow_publish(soft: str, project: str, values: dict, user: str,
+                             error) -> tuple[dict | None, str]:
+    """Publish through the flow publish_<soft> (P8, ADR 0070), for the softs without a v1
+    engine (Nuke, Painter, Designer, Mari, Marvelous, ZBrush). (outputs of the flow, "") when
+    the core published, (None, warning) when the run failed before its core (the route then
+    publishes by v1). A refusal is a 409 with the team's message, a failure after the core a
+    503 with error(message): never a second publish. None values are left to the flow."""
+    from flux_flows.publish_runner import run_publish
+
+    out = await run_publish(soft, project=project, user=user,
+                            values={k: v for k, v in values.items() if v is not None})
+    if out.status == "fallback":
+        return None, out.warning()
+    if out.status == "refused":
+        raise HTTPException(status_code=409, detail=out.message)
+    if out.status != "ok":
+        raise HTTPException(status_code=503, detail=error(out.message))
+    return out.outputs, ""
+
+
+def _flow_files(outputs: dict) -> list[str]:
+    return [str(p) for p in outputs.get("files") or []]
+
+
+def _flow_warnings(outputs: dict) -> list[str]:
+    return [str(w) for w in outputs.get("warnings") or []]
+
+
+def _with_warnings(result: dict, warnings: list[str]) -> dict:
+    """The v1 result, with the fallback warning of a v2 project in front of its own."""
+    if not warnings:
+        return result
+    return {**result, "warnings": [*warnings, *(result.get("warnings") or [])]}
+
+
 @router.post("/nuke/publish")
 async def nuke_publish_write(req: NukePublishRequest) -> dict:
     """Publish from Nuke like Houdini: build a Write on the selected node with the
     requested options, render it into the FLUX layout (Write outputs direct-to-dest)."""
     from core import config
     from dcc.nuke.nuke_publish import publish_from_nuke
+    from features.folder_manager.naming_validator import format_version
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_nuke, same response shape.
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "nuke"):
+        got, fallback = await _soft_flow_publish("nuke", req.project_name, {
+            "name": req.filename, "node": req.node_name or "", "format": req.extension,
+            "options": req.export_options or {}, "sequence": req.is_sequence,
+            "frame_range": " ".join(str(v) for v in req.frame_range) if req.frame_range else "",
+            "colorspace": req.colorspace or "", "description": req.description or "",
+        }, user, lambda msg: f"Publish Nuke (flow) échoué : {msg}")
+        if got is not None:
+            version = got.get("version")
+            res: dict = {"ok": True, "path": str(got.get("path") or ""), "version": version,
+                         "version_str": format_version(int(version)) if version else "",
+                         "is_sequence": req.is_sequence}
+            if _flow_warnings(got):
+                res["warnings"] = _flow_warnings(got)
+            return res
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -1994,7 +2050,7 @@ async def nuke_publish_write(req: NukePublishRequest) -> dict:
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Nuke publish failed"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 # ── Photoshop endpoints (V6 B6) ──────────────────────────────────────────────
