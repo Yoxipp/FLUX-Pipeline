@@ -283,6 +283,7 @@ export interface ZBrushPublishResult {
   path:        string
   version:     number
   version_str: string
+  warnings?:   string[]
 }
 
 // ── Production Tab ───────────────────────────────────────────────────────────

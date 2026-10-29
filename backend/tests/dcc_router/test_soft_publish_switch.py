@@ -177,5 +177,28 @@ class MarvelousPublishSwitch(_SoftSwitch, unittest.TestCase):
     v2_result = v1_result
 
 
+class ZBrushPublishSwitch(_SoftSwitch, unittest.TestCase):
+    route, soft = "/dcc/zbrush/publish", "zbrush"
+    v1_target = "dcc.zbrush.zbrush_export.publish_zbrush"
+    body = {"project_name": "PROJ", "filename": "CHAR_SCULPT_head_null", "extension": ".ztl",
+            "export_options": {"subdiv": 2}, "description": "d", "user": "ADAM"}
+    v1_result = {"ok": True, "path": "D:/p/CHAR_SCULPT_head_null_LAST.ztl", "version": 5, "version_str": "v005"}
+    flow_outputs = {"path": "D:/p/CHAR_SCULPT_head_null_LAST.ztl", "version": 5,
+                    "files": ["D:/p/CHAR_SCULPT_head_null_LAST.ztl"], "warnings": []}
+    flow_values = {"name": "CHAR_SCULPT_head_null", "format": ".ztl", "options": {"subdiv": 2}, "description": "d"}
+    v2_result = v1_result
+
+    def test_v2_keep_local_copies_the_publish(self) -> None:
+        src = self.tmp / "PROJ" / "CHAR_SCULPT_head_null_LAST.ztl"
+        src.write_bytes(b"ztl")
+        local = self.tmp / "local"
+        local.mkdir()
+        self.run_publish.return_value = Outcome("ok", {"path": str(src), "version": 5})
+        with mock.patch("flux_flows.switch.flows_publish_enabled", return_value=True):
+            r = self.client.post(self.route, json={**self.body, "keep_local": True, "local_dir": str(local)})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((local / src.name).read_bytes(), b"ztl")
+
+
 if __name__ == "__main__":
     unittest.main()

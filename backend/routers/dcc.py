@@ -1867,6 +1867,28 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
     if not project_path.exists():
         raise HTTPException(status_code=400, detail=f"Projet introuvable : {req.project_name}")
 
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_zbrush, same response shape.
+    from flux_flows.switch import flows_publish_enabled
+
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "zbrush"):
+        got, fallback = await _soft_flow_publish("zbrush", req.project_name, {
+            "name": req.filename, "format": req.extension, "options": req.export_options or {},
+            "description": req.description or "",
+        }, user, lambda msg: f"Publish ZBrush (flow) échoué : {msg}")
+        if got is not None:
+            from features.folder_manager.naming_validator import format_version
+
+            path, version = str(got.get("path") or ""), got.get("version")
+            if req.keep_local and req.local_dir and path:
+                _zbrush_keep_local(path, req.local_dir)
+            res: dict = {"ok": True, "path": path, "version": version,
+                         "version_str": format_version(int(version)) if version else ""}
+            if _flow_warnings(got):
+                res["warnings"] = _flow_warnings(got)
+            return res
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -1885,7 +1907,23 @@ async def zbrush_publish(req: ZBrushPublishRequest) -> dict:
 
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
-    return result
+    return _with_warnings(result, warnings)
+
+
+def _zbrush_keep_local(dest_path: str, local: str) -> None:
+    """keep_local of a ZBrush publish by flow: the copy publish_zbrush makes in v1."""
+    import shutil
+    from pathlib import Path as _Path
+
+    dest, local_dir = _Path(dest_path), _Path(local)
+
+    if not local_dir.is_dir():
+        return
+    try:
+        shutil.copy2(dest, local_dir / dest.name)
+        log.info("Keep-local copy: %s", local_dir / dest.name)
+    except OSError as exc:
+        log.warning("Keep-local copy failed: %s", exc)
 
 
 @router.post("/zbrush/cancel")

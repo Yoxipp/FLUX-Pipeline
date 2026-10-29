@@ -1537,6 +1537,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           user:           settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → ZBrush`)
+        res.warnings?.forEach(w => toast.warning(w))
         setZbrushConnected(false)
         setZbrushVersion(null)
         window.electronAPI?.windowMinimize()
