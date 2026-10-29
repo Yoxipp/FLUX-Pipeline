@@ -1,0 +1,20 @@
+page: 1
+id: livraison_plan
+label: "Livraison plan"
+icon: package
+scope: shipped
+description: "Prepare un plan pour le rendu ou un autre poste : stage USD aplati en un seul fichier, ou zip du dossier USD du plan (flow livraison_plan). N'ecrase rien."
+data: []
+layout:
+  - folder: {id: plan, label: Plan, mode: plain}
+    children:
+      - row:
+          - {id: shot, kind: text, label: Plan, tooltip: "SEQUENCE_PLAN, comme le dossier shot/<SEQUENCE>/<PLAN>", remember: user, placeholder: "ex : SEQ010_SH020"}
+          - {id: dest, kind: dir, label: "Dossier de livraison", tooltip: "Relatif au projet (LIVRAISON = <projet>/LIVRAISON), ou un chemin absolu / $FLUX/...", w: 2, default: LIVRAISON}
+      - row:
+          - {id: aplatir, kind: button, label: "Aplatir le stage (usdc)", tooltip: "Un seul .usdc avec toutes les couches et references du plan", icon: layers}
+          - {id: zipper, kind: button, label: "Zipper le dossier USD", tooltip: "Zip du dossier shot/<SEQ>/<SHOT>/usd (versions et LAST)", icon: package}
+  - folder: {id: aide, label: Aide, mode: collapsible}
+    children:
+      - row:
+          - {id: aide_txt, kind: label, text: "Les fichiers vont dans <Dossier de livraison>/<plan>_<date>.usdc ou .zip. Le journal livraisons.txt du meme dossier garde une ligne par livraison."}

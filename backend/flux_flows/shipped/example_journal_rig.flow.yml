@@ -1,0 +1,27 @@
+flux_flow: 2
+name: example_journal_rig
+label: "Exemple : journal des rigs"
+description: "Apres chaque publish de rig d'asset : une ligne dans _flux_flows/journal_rig.txt et un message dans l'Activite pour l'equipe d'anim. Exemple livre : clic droit > Dupliquer dans Fichier > Ouvrir pour l'utiliser dans ton projet."
+run_policy: queue
+nodes:
+  pub: {type: event.on_publish, pos: [0, 160], params: {mode: asset, task: RIG}}
+  ctx: {type: data.context, pos: [0, 400], params: {}}
+  fichier: {type: operator.path_join, pos: [320, 400], params: {a: "_flux_flows", b: journal_rig.txt}}
+  ligne: {type: data.template, pos: [320, 560], params: {text: "{date:%Y-%m-%d %H:%M} | {asset} {instance} v{version} | {user} | {soft} | {file}"}}
+  journal: {type: action.write_text, pos: [640, 160], params: {mode: append}}
+  champs: {type: flux.publish_fields, pos: [640, 400], params: {}}
+  message: {type: data.template, pos: [640, 560], params: {text: "Nouveau rig : {asset} {instance} v{version} par {user}, a mettre a jour dans les scenes d'anim"}}
+  activite: {type: flux.log_activity, pos: [960, 160], params: {action: update}}
+links:
+  - {from: champs.dir, to: activite.folder}
+  - {from: ctx.project_path, to: fichier.base}
+  - {from: fichier.path, to: journal.path}
+  - {from: journal.then, to: activite.exec}
+  - {from: ligne.text, to: journal.text}
+  - {from: message.text, to: activite.text}
+  - {from: pub.infos, to: ligne.values}
+  - {from: pub.infos, to: message.values}
+  - {from: pub.publish, to: champs.publish}
+  - {from: pub.then, to: journal.exec}
+notes:
+  - {id: k1, pos: [0, 720], text: "Part apres un publish de rig d'asset fait sur ce poste (tous logiciels).\nJournal : _flux_flows/journal_rig.txt, une ligne par publish.\nInoffensif : ajoute une ligne et un message, ne touche pas au publish."}

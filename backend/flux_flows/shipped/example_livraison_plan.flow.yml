@@ -1,0 +1,79 @@
+flux_flow: 2
+name: example_livraison_plan
+label: "Exemple : livraison d'un plan"
+description: "Page livraison_plan : stage USD du plan aplati en un .usdc (signale les references introuvables) ou zip du dossier usd du plan, journal livraisons.txt, message dans l'Activite. Exemple livre : clic droit > Dupliquer dans Fichier > Ouvrir pour l'utiliser dans ton projet."
+run_policy: skip_if_running
+variables:
+  - {name: manque, type: str, default: ""}
+nodes:
+  page: {type: event.page_inputs, pos: [0, 200], params: {page: livraison_plan, ports: {outputs: {shot: str, dest: dir, aplatir: exec, zipper: exec}, labels: {shot: Plan, dest: "Dossier de livraison", aplatir: "Aplatir le stage (usdc)", zipper: "Zipper le dossier USD"}}}}
+  ctx: {type: data.context, pos: [0, 520], params: {}}
+  slash: {type: operator.str_replace, pos: [320, 520], params: {find: "_", with: "/"}}
+  usd_dir: {type: operator.path_join, pos: [640, 520], params: {a: shot, c: usd}}
+  last_name: {type: data.template, pos: [320, 680], params: {text: "{shot}_LAST.usda"}}
+  stage: {type: operator.path_join, pos: [960, 600], params: {}}
+  usdc_name: {type: data.template, pos: [320, 840], params: {text: "{shot}_{date:%Y%m%d_%H%M}.usdc"}}
+  zip_name: {type: data.template, pos: [320, 1000], params: {text: "{shot}_{date:%Y%m%d_%H%M}.zip"}}
+  usdc_dest: {type: operator.path_join, pos: [640, 840], params: {}}
+  zip_dest: {type: operator.path_join, pos: [640, 1000], params: {}}
+  aplatir: {type: flux.usd_flatten, pos: [1280, 80], params: {overwrite: false}}
+  zipper: {type: action.zip_folder, pos: [1280, 320], params: {overwrite: false}}
+  ligne_a: {type: data.template, pos: [1280, -120], params: {text: "{date:%Y-%m-%d %H:%M} {user} aplati {shot}"}}
+  ligne_z: {type: data.template, pos: [1280, 520], params: {text: "{date:%Y-%m-%d %H:%M} {user} zippe {shot}"}}
+  journal_a: {type: action.write_text, pos: [1600, 80], params: {mode: append, name: livraisons.txt}}
+  journal_z: {type: action.write_text, pos: [1600, 320], params: {mode: append, name: livraisons.txt}}
+  notify_a: {type: flux.notify, pos: [1920, 80], params: {text: "Stage aplati pret pour la livraison", level: info, where: both}}
+  complet: {type: logic.if, pos: [1600, -120], params: {}}
+  liste_manque: {type: operator.str_join, pos: [1600, -440], params: {sep: " ; "}}
+  set_manque: {type: data.set_variable, pos: [1920, -280], params: {name: manque}}
+  ligne_inc: {type: data.template, pos: [1920, -440], params: {text: "{date:%Y-%m-%d %H:%M} {user} aplati {shot} INCOMPLET (manque : ${manque})"}}
+  journal_inc: {type: action.write_text, pos: [2240, -280], params: {mode: append, name: livraisons.txt}}
+  texte_inc: {type: data.template, pos: [2240, -440], params: {text: "Stage {shot} aplati SANS ces references introuvables : ${manque}"}}
+  notify_inc: {type: flux.notify, pos: [2560, -280], params: {level: warn, where: both}}
+  notify_z: {type: flux.notify, pos: [1920, 320], params: {text: "Dossier USD du plan zippe pour la livraison", level: info, where: both}}
+links:
+  - {from: aplatir.complete, to: complet.condition}
+  - {from: aplatir.missing, to: liste_manque.items}
+  - {from: aplatir.path, to: notify_a.path}
+  - {from: aplatir.path, to: notify_inc.path}
+  - {from: aplatir.then, to: complet.exec}
+  - {from: complet.else, to: set_manque.exec}
+  - {from: complet.then, to: journal_a.exec}
+  - {from: ctx.project_path, to: usd_dir.base}
+  - {from: journal_a.then, to: notify_a.exec}
+  - {from: journal_inc.then, to: notify_inc.exec}
+  - {from: journal_z.then, to: notify_z.exec}
+  - {from: last_name.text, to: stage.a}
+  - {from: ligne_a.text, to: journal_a.text}
+  - {from: ligne_inc.text, to: journal_inc.text}
+  - {from: ligne_z.text, to: journal_z.text}
+  - {from: liste_manque.text, to: set_manque.value}
+  - {from: page.aplatir, to: aplatir.exec}
+  - {from: page.dest, to: journal_a.dir}
+  - {from: page.dest, to: journal_inc.dir}
+  - {from: page.dest, to: journal_z.dir}
+  - {from: page.dest, to: usdc_dest.base}
+  - {from: page.dest, to: zip_dest.base}
+  - {from: page.shot, to: slash.text}
+  - {from: page.values, to: last_name.values}
+  - {from: page.values, to: ligne_a.values}
+  - {from: page.values, to: ligne_inc.values}
+  - {from: page.values, to: ligne_z.values}
+  - {from: page.values, to: texte_inc.values}
+  - {from: page.values, to: usdc_name.values}
+  - {from: page.values, to: zip_name.values}
+  - {from: page.zipper, to: zipper.exec}
+  - {from: set_manque.then, to: journal_inc.exec}
+  - {from: slash.text, to: usd_dir.b}
+  - {from: stage.path, to: aplatir.source}
+  - {from: texte_inc.text, to: notify_inc.text}
+  - {from: usd_dir.dir, to: zipper.folder}
+  - {from: usd_dir.path, to: stage.base}
+  - {from: usdc_dest.path, to: aplatir.dest}
+  - {from: usdc_name.text, to: usdc_dest.a}
+  - {from: zip_dest.path, to: zipper.dest}
+  - {from: zip_name.text, to: zip_dest.a}
+  - {from: zipper.then, to: journal_z.exec}
+  - {from: zipper.zip, to: notify_z.path}
+notes:
+  - {id: k1, pos: [0, 1160], text: "Page livraison_plan : Plan (SEQ001_SHOT00x) + Dossier de livraison.\nAplatir -> UsdFlatten du LAST du plan ; Zipper -> ZipFolder de shot/SEQ/SHOT/usd.\nNoms dates a la minute : jamais d'ecrasement."}
