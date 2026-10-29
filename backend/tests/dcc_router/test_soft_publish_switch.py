@@ -162,5 +162,20 @@ class MariPublishSwitch(_SoftSwitch, unittest.TestCase):
     v2_result = v1_result
 
 
+class MarvelousPublishSwitch(_SoftSwitch, unittest.TestCase):
+    route, soft = "/dcc/marvelous/bridge/publish", "marvelous"
+    v1_target = "dcc.marvelous.marvelous_export.publish_marvelous"
+    body = {"project_name": "PROJ", "target_name": "CHAR_CLOTH_dress_null", "file_format": "abc",
+            "options": {"garment": True, "scale": 1}, "with_zprj": True, "description": None, "user": "ADAM"}
+    v1_result = {"ok": True, "published": ["D:/p/CHAR_CLOTH_dress_null_v003.abc", "D:/p/CHAR_CLOTH_dress_null_v003.zprj"],
+                 "warnings": []}
+    flow_outputs = {"path": "D:/p/CHAR_CLOTH_dress_null_v003.abc", "version": 3,
+                    "files": ["D:/p/CHAR_CLOTH_dress_null_v003.abc", "D:/p/CHAR_CLOTH_dress_null_v003.zprj"],
+                    "warnings": []}
+    flow_values = {"name": "CHAR_CLOTH_dress_null", "format": "abc", "options": {"garment": True, "scale": 1},
+                   "with_zprj": True, "description": ""}
+    v2_result = v1_result
+
+
 if __name__ == "__main__":
     unittest.main()

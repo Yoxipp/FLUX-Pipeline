@@ -2487,8 +2487,20 @@ async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
     """Export the open Marvelous project through the bridge and publish it."""
     from core import config
     from dcc.marvelous.marvelous_export import publish_marvelous
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_marvelous, same response shape.
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "marvelous"):
+        got, fallback = await _soft_flow_publish("marvelous", req.project_name, {
+            "name": req.target_name, "format": req.file_format, "options": req.options,
+            "with_zprj": req.with_zprj, "description": req.description or "",
+        }, user, lambda msg: _bridge_error(msg, "Marvelous publish failed", _marvelous_autostart, "Marvelous"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2500,7 +2512,7 @@ async def marvelous_bridge_publish(req: MarvelousBridgePublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_bridge_error(
             result.get("error"), "Marvelous publish failed", _marvelous_autostart, "Marvelous"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 class MarvelousImportRequest(BaseModel):
