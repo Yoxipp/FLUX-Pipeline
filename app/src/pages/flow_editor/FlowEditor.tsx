@@ -49,6 +49,7 @@ import { VersionsDialog } from './VersionsDialog'
 import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
 import { DestructiveDialog } from './DestructiveDialog'
 import { ActivationDialog } from './ActivationDialog'
+import { PageRunDialog, pageStarts, type PageClick } from './PageRunDialog'
 import { BridgesDialog } from './BridgesDialog'
 import { DccBanner } from './DccBanner'
 import { destructiveAdded } from './destructive'
@@ -427,11 +428,12 @@ function Editor({ rights }: { rights: FlowRights }) {
 
   const wsUp = useFlowsWs(onWs, onWsReconnect)
 
-  const launch = useCallback((dry: boolean) => {
+  const launch = useCallback((dry: boolean, click?: PageClick) => {
     if (!loaded || !doc) return
-    const opts = dry
+    const base = dry
       ? { scope: loaded.scope, project: project || undefined, dry_run: true }
       : { scope: loaded.scope, project: project || undefined, draft: doc, base_revision: loaded.state.revision }
+    const opts = click ? { ...base, event: click.event, button: click.button, values: click.values } : base
     flowsApi.run(loaded.name, opts)
       .then(r => { setLiveRun({ id: r.run_id, running: true }); showLive(r.run_id) })
       .catch((e: HttpError) => {
@@ -440,6 +442,14 @@ function Editor({ rights }: { rights: FlowRights }) {
         if (e.detail?.status) setRunsKey(k => k + 1)
       })
   }, [loaded, doc, project, showLive])
+
+  // A page flow (InputsPageReader with buttons): Run / Essai ask which button and the field values (T1).
+  const starts = useMemo(() => pageStarts(doc), [doc])
+  const [pageRun, setPageRun] = useState<{ dry: boolean } | null>(null)
+  const startRun = useCallback((dry: boolean) => {
+    if (starts.length) setPageRun({ dry })
+    else launch(dry)
+  }, [starts, launch])
 
   const stop = useCallback(() => {
     if (!liveRun) return
@@ -673,7 +683,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         }}
         run={{
           running, runBlocked, dryBlocked, runsOpen,
-          onRun: () => launch(false), onDry: () => launch(true), onStop: stop,
+          onRun: () => startRun(false), onDry: () => startRun(true), onStop: stop,
           onToggleRuns: () => setRunsOpen(v => !v),
         }}
         problems={{
@@ -788,6 +798,7 @@ function Editor({ rights }: { rights: FlowRights }) {
       {loaded && (
         <ActivationDialog
           open={activationOpen} name={loaded.name} scope={loaded.scope} project={project || undefined} dirty={dirty}
+          starts={starts}
           blocked={loaded.scope === 'shipped' ? tr('Flow livre : Deverrouiller (copie equipe) pour l\'activer', 'Shipped flow: Unlock (team copy) to activate it')
             : loaded.legacy ? tr('Flow legacy : publish v1 jusqu\'a P8', 'Legacy flow: v1 publish until P8')
             : !rights.can[loaded.scope]?.write ? (loaded.scope === 'perso' ? tr('Case TD requise', 'TD box required') : tr('Case Team TD requise', 'Team TD box required'))
@@ -796,6 +807,8 @@ function Editor({ rights }: { rights: FlowRights }) {
           onChanged={state => setLoaded(l => l ? { ...l, state: { ...l.state, ...state } } : l)}
         />
       )}
+      <PageRunDialog request={pageRun} starts={starts} project={project || undefined}
+                     onLaunch={launch} onClose={() => setPageRun(null)} />
       <ConflictDialog
         conflict={conflictInfo} onClose={() => setConflictInfo(null)}
         onTheirs={() => {

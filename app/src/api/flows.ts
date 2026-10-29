@@ -18,6 +18,7 @@ export interface RunOpts {
   draft?: FlowDoc            // the open document, no version created (TD)
   base_revision?: number
   version?: number           // dry run of a frozen version (activation dialog)
+  button?: string            // page flow: played as a click on this button, values = its fields (T1)
 }
 
 // confirmed_destructive: ids of the `!` nodes validated with the slider (409 E_DESTRUCTIVE_UNCONFIRMED otherwise).

@@ -5,6 +5,7 @@
 // node it is a SlideToConfirm (an active flow runs unattended). Rights: perso = TD, team /
 // project = Team TD, else greyed with the reason. Deactivate when the flow is active.
 // GET /flows/{name}/activation is the truth; the dry run is POST /run {dry_run, version}.
+// A page flow picks the button whose branch the dry run plays (page defaults as values, T1).
 
 import { useCallback, useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -13,6 +14,7 @@ import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
 import { SlideToConfirm } from '../../components/shared/SlideToConfirm'
 import { Btn } from '../../components/shared/ui'
+import type { PageStart } from './PageRunDialog'
 import type { ActivationGate, FlowScope, FlowState, RunRecord } from './types'
 import { useTr } from './useTr'
 
@@ -23,13 +25,14 @@ function Dot({ ok, warn }: { ok: boolean; warn?: boolean }) {
   return warn ? <TriangleAlert size={14} color="var(--warn)" style={{ flexShrink: 0 }} /> : <CircleX size={14} color="var(--err)" style={{ flexShrink: 0 }} />
 }
 
-export function ActivationDialog({ open, name, scope, project, blocked, dirty, onClose, onChanged }: {
+export function ActivationDialog({ open, name, scope, project, blocked, dirty, starts = [], onClose, onChanged }: {
   open: boolean
   name: string
   scope: FlowScope
   project?: string
   blocked?: string                 // why the user cannot (de)activate (rights, shipped, legacy)
   dirty: boolean
+  starts?: PageStart[]             // InputsPageReader nodes with buttons of the open document
   onClose: () => void
   onChanged: (state: FlowState) => void
 }) {
@@ -39,6 +42,7 @@ export function ActivationDialog({ open, name, scope, project, blocked, dirty, o
   const [dry, setDry] = useState<RunRecord | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pick, setPick] = useState('')     // `${node}|${button}` played by the dry run of a page flow
 
   const load = useCallback(() => {
     flowsApi.activation(name, scope, project)
@@ -47,6 +51,9 @@ export function ActivationDialog({ open, name, scope, project, blocked, dirty, o
   }, [name, scope, project])
 
   useEffect(() => { if (open) { setGate(null); setDry(null); setRead({}); load() } }, [open, load])
+  useEffect(() => {
+    if (open) setPick(starts[0] ? `${starts[0].node}|${starts[0].buttons[0].id}` : '')
+  }, [open, starts])
 
   const key = (w: { code: string; node: string | null; port: string | null }) => `${w.code}|${w.node ?? ''}|${w.port ?? ''}`
   const allRead = !!gate && gate.warnings.every(w => w.acked || read[key(w)])
@@ -56,7 +63,9 @@ export function ActivationDialog({ open, name, scope, project, blocked, dirty, o
     if (!gate) return
     setBusy(true)
     try {
-      const { run_id } = await flowsApi.run(name, { scope, project, dry_run: true, version: gate.version })
+      const [event, button] = pick ? pick.split('|') : []
+      const { run_id } = await flowsApi.run(name, { scope, project, dry_run: true, version: gate.version,
+                                                     ...(button ? { event, button } : {}) })
       let rec: RunRecord | null = null
       for (let i = 0; i < 600; i++) {
         rec = await flowsApi.getRun(run_id, project)
@@ -76,7 +85,7 @@ export function ActivationDialog({ open, name, scope, project, blocked, dirty, o
     } finally {
       setBusy(false)
     }
-  }, [gate, name, scope, project])
+  }, [gate, name, scope, project, pick])
 
   const activate = useCallback(() => {
     if (!gate) return
@@ -153,6 +162,15 @@ export function ActivationDialog({ open, name, scope, project, blocked, dirty, o
                         : gate.dry_run.version ? tr(`Essai perime (${v3(gate.dry_run.version)}) : relance sur ${v3(gate.version)}`, `Stale dry run (${v3(gate.dry_run.version)}): run it on ${v3(gate.version)}`)
                         : tr('Essai a blanc a faire', 'Dry run to do')}
                     </span>
+                    {starts.length > 0 && (
+                      <select className="flow-dialog-input" style={{ width: 'auto', maxWidth: 170, marginTop: 0 }} value={pick}
+                              title={tr('Bouton de la page joue par l\'essai (valeurs par defaut de la page)', 'Page button played by the dry run (page default values)')}
+                              onChange={e => setPick(e.target.value)}>
+                        {starts.map(s => s.buttons.map(b => (
+                          <option key={`${s.node}|${b.id}`} value={`${s.node}|${b.id}`}>{starts.length > 1 ? `${s.page} > ` : ''}{b.label}</option>
+                        )))}
+                      </select>
+                    )}
                     <Btn sm ghost disabled={busy || !gate.version || gate.legacy} onClick={dryRun}>
                       <FlaskConical size={12} /> {busy ? tr('Essai...', 'Running...') : tr('Lancer l\'essai', 'Run the dry run')}
                     </Btn>
