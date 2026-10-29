@@ -1469,6 +1469,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           port:         readActiveInstancePort('Maya') ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → Maya`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'Houdini') {
         if (!houdiniConnected) {
           toast.error(tr('Houdini non connecté : lance le serveur FLUX dans Houdini', 'Houdini not connected: start the FLUX server in Houdini'))

@@ -436,7 +436,7 @@ export const api = {
     user?:        string
     port?:        number
   }) =>
-    apiCall<{ ok: boolean; version_str: string; dest: string }>('POST', '/dcc/maya/publish', payload),
+    apiCall<{ ok: boolean; version_str: string; dest: string; warnings?: string[] }>('POST', '/dcc/maya/publish', payload),
 
   exportMayaLightUsd: (payload: {
     project_name: string

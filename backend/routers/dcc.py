@@ -1569,6 +1569,38 @@ async def maya_export_usd_look(req: MayaLookExportRequest) -> dict:
         await loop.run_in_executor(None, lambda: _shutil.rmtree(work_dir, ignore_errors=True))
 
 
+async def _maya_flow_publish(req: MayaPublishRequest, ext: str, user: str,
+                             version_str: str) -> tuple[dict | None, str]:
+    """Publish through the flow publish_maya (P8). (v1 response, "") when the flow published,
+    (None, warning) when it failed before its core (the route publishes by v1). A refusal is
+    a 409 with the team's message, a failure after the core a 503: never a second publish."""
+    from features.folder_manager.naming_validator import format_version
+    from flux_flows.publish_runner import run_publish
+
+    target_port = await _maya_target(req.port)
+    is_anim = bool(ext in MAYA_ANIM_EXTS and req.frame_range and len(req.frame_range) >= 2)
+    values = {
+        "name": req.filename, "format": ext, "scope": "scene" if req.scope == "scene" else "selection",
+        "description": req.description,
+        # Text "start end step": the step stays a float (n°12); empty when not animated, like v1.
+        "frame_range": " ".join(str(v) for v in req.frame_range) if is_anim else "",
+        "options": req.export_options or {}, "port": target_port,
+    }
+    out = await run_publish("maya", project=req.project_name, values=values, user=user)
+    if out.status == "fallback":
+        return None, out.warning()
+    if out.status == "refused":
+        raise HTTPException(status_code=409, detail=out.message)
+    if out.status != "ok":
+        raise HTTPException(status_code=503, detail=f"Publish Maya (flow) échoué : {out.message}")
+    version = out.outputs.get("version")
+    res: dict = {"ok": True, "version_str": format_version(int(version)) if version else version_str,
+                 "dest": str(out.outputs.get("path") or "")}
+    if out.outputs.get("warnings"):
+        res["warnings"] = [str(w) for w in out.outputs["warnings"]]
+    return res, ""
+
+
 @router.post("/maya/publish")
 async def maya_publish(req: MayaPublishRequest) -> dict:
     """Maya publish workflow.
@@ -1610,6 +1642,17 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
     else:
         version_str = "001"
 
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_maya, same response shape.
+    # A run that fails before the core falls back to the path below, with a warning.
+    from flux_flows.switch import flows_publish_enabled
+
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "maya"):
+        flow_res, fallback = await _maya_flow_publish(req, ext, user, version_str)
+        if flow_res is not None:
+            return flow_res
+        warnings.append(fallback)
+
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape. The runner drives the SAME
     # run_publish_export over the commandPort and reuses copy_publish, so both
@@ -1641,7 +1684,7 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         )
         if dest is None:
             raise HTTPException(status_code=503, detail="Publish Maya (moteur) échoué")
-        return {"ok": True, "version_str": version_str, "dest": str(dest)}
+        return {"ok": True, "version_str": version_str, "dest": str(dest), **({"warnings": warnings} if warnings else {})}
 
     # Build temp export path
     tmp_dir = await loop.run_in_executor(None, lambda: tempfile.mkdtemp(prefix="flux_maya_pub_"))
@@ -1746,7 +1789,8 @@ async def maya_publish(req: MayaPublishRequest) -> dict:
         if pub_result is None:
             raise HTTPException(status_code=500, detail="publish_core a échoué")
 
-        return {"ok": True, "version_str": version_str, "dest": str(pub_result)}
+        return {"ok": True, "version_str": version_str, "dest": str(pub_result),
+                **({"warnings": warnings} if warnings else {})}
     finally:
         await loop.run_in_executor(None, lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
 
