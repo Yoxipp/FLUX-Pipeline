@@ -141,7 +141,7 @@ class PageNodes(unittest.TestCase):
 
         roots = {"shipped": loc.shipped_dir() / "pages", "team": None, "project": None}
         ids = sorted(t["id"] for t in page_store.list_templates(roots))
-        self.assertEqual(ids, ["board", "daily_render", "team"])
+        self.assertEqual(ids, ["annonces", "board", "controle_usd", "daily_render", "livraison_plan", "team"])   # + T1 examples (ADR 0069)
         for tid in ids:
             got = page_store.read_page(roots, "shipped", tid)
             self.assertEqual([i.code for i in pages.validate_page(got["page"]) if i.level == "error"], [], tid)
