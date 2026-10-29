@@ -67,7 +67,7 @@ export function Production() {
         onEdit={() => setDialog('edit')} onNew={openCreate} onSettings={() => setPendingSpec({ task: 'SETTINGS' })}
         onOpenEntity={openEntity}
         onOpenDetail={(sel, task, subtask) => { setSelection(sel); setPendingSpec({ task: task.name, subtask }) }} />}
-      settingsPane={<ProductionSettings key={`${project}:${mode}`} state={prod.state} setState={prod.setState} mode={mode} />}
+      settingsPane={<ProductionSettings key={`${project}:${mode}`} project={project} state={prod.state} setState={prod.setState} mode={mode} />}
       entityView={id => {
         const asset = prod.state.assets.find(a => a.id === id)
         const shot = prod.state.shots.find(a => a.id === id)

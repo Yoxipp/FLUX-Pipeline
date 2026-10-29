@@ -59,6 +59,11 @@ PROJECT_SCHEMA: dict = {
             "properties": {"painter_presets": {"type": "array", "items": {"type": "string"},
                                                "title": "Presets d'export Painter"}},
         },
+        # Publish path of the project (ADR 0070, flux_flows/switch.py): absent = v1. Temporary,
+        # removed once v2 (publish by the shipped flows) is validated. No default written in
+        # default_project_config(): existing project.json files are not rewritten for it.
+        "publish_engine": {"enum": ["v1", "v2"], "default": "v1",
+                           "title": "Publish (v1 = chemin actuel, v2 = flows)"},
         # Work profiles shared by the project (role presets, see sanitize_work_profiles).
         "ui": {
             "type": "object", "x-flux-hidden": True,
