@@ -122,6 +122,12 @@ et ses paquets, les logiciels, les projets / FLUX_ROOT, le code perso des script
 * En prod, `python_bridge.ts` spawn `process.resourcesPath/backend/flux_backend.exe` avec `FLUX_PORT=8765`, puis lit le
   jeton API sur `GET /auth/token` (S1) et le passe au renderer.
 
+## Retour arriere du publish
+
+Un publish qui casse apres P8 (projet en v2, publish par les flows) : procedure dans
+[PUBLISH_ROLLBACK.md](PUBLISH_ROLLBACK.md) (repasser le projet en v1, bridges, `FLUX_LEGACY_PUBLISH`, revert par
+logiciel, installeur d'avant P8). Garder l'installeur actuel de cote avant un build qui change le publish.
+
 ## Erreurs connues
 
 ### Backend packagé qui ne demarre pas (`ModuleNotFoundError: uvicorn`), pris pour un blocage antivirus

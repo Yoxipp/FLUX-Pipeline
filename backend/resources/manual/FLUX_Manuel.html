@@ -640,6 +640,8 @@ th { background:var(--soft); color:#fff; }
 <tr><td>Chemins accentués dans Maya</td><td>Limite de l'import USD Maya</td><td>Garder l'import aplati (défaut).</td></tr>
 <tr><td>Export Mari très long</td><td>Channel lourd</td><td>Le statut affiche la progression ; arrêt après 20 min sans progrès avec l'endroit du blocage.</td></tr>
 <tr><td>Un shot archivé réapparaît</td><td>Ancien comportement</td><td>Corrigé : l'archive retire aussi les tokens.</td></tr>
+<tr><td>Publish en échec depuis le passage du projet en v2 (publish par les flows)</td><td>Flow <code>publish_&lt;logiciel&gt;</code> ou bridge</td><td>Production → Settings → Paramètres avancés du projet → Publish en <b>v1</b>, republier (sans redémarrer). Si ça ne remarche pas : relancer le logiciel, puis Paramètres → User → Logiciels → Installer tous les bridges. Procédure complète : <code>docs/development/PUBLISH_ROLLBACK.md</code>.</td></tr>
+<tr><td>« publie par l'ancien chemin : ... »</td><td>Le flow n'a pas pu démarrer (aucune instance, copie d'équipe invalide)</td><td>Le publish est fait (v1). Corriger le flow ou ouvrir le logiciel ; ne pas republier pour voir.</td></tr>
 </table>
 </section>
 
