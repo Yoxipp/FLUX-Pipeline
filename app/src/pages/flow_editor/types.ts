@@ -107,7 +107,7 @@ export interface FlowVariable { name: string; type: string; default?: unknown }
 
 // interface of a flow (01 §2): the values asked at run time (form, event payload) and the
 // outputs a sub-flow returns. Input types: INTERFACE_TYPES of model.py.
-export const INTERFACE_TYPES = ['bool', 'int', 'float', 'str', 'path', 'dir', 'pattern', 'list[str]', 'select'] as const
+export const INTERFACE_TYPES = ['bool', 'int', 'float', 'str', 'path', 'dir', 'pattern', 'list[str]', 'select', 'dict'] as const
 export interface InterfaceInput  { id: string; type: string; label?: string; default?: unknown; options?: unknown[] }
 export interface InterfaceOutput { id: string; type: string; label?: string }
 export interface FlowInterface   { inputs: InterfaceInput[]; outputs: InterfaceOutput[] }

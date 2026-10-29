@@ -10,6 +10,10 @@
 # cooks in the instance chosen in FLUX (its singleton client), so a session on another
 # Houdini instance is refused instead of publishing from the wrong scene.
 # The dry run computes the destination (resolve_publish_path, read only) and the next version.
+# P8 (ADR 0070): a run started by flux_flows/publish_runner.py carries a probe dict in its
+# context; each core calls core_starting() right before the Publisher function, so the runner
+# knows a failure came before the core (fallback to v1) or after (never: no double publish).
+# No engine timeout for the cores (engine._timeout, n°1): the soft client's own timeout stays.
 
 from __future__ import annotations
 
@@ -25,6 +29,39 @@ _DESCRIPTION = port("description", "str", "Description du publish (journal)", "P
                     "retopo finie", default="")
 _FRAMES = port("frame_range", "str", "Plage (caches, anim) : 1001-1050", "Range (caches, anim): 1001-1050", "1001-1050")
 _PROJECT = port("project", "str", "Projet (vide = celui du flow)", "Project (empty = the flow's)", "MYPROJ")
+
+
+PROBE_KEY = "publish_probe"       # run context key: shared dict {core_started, refused}
+REFUSED_CODE = "E_PUBLISH_REFUSED"
+
+
+def core_starting(ctx) -> None:
+    """Right before the Publisher function: a refused publish stops, else the core is marked started."""
+    probe = (ctx.context or {}).get(PROBE_KEY)
+    if not isinstance(probe, dict):
+        return
+    if probe.get("refused"):
+        raise NodeError(str(probe["refused"]), code=REFUSED_CODE)
+    probe["core_started"] = True
+
+
+def _user(ctx) -> str:
+    """User of the run, else the FLUX user, else unknown (same as the v1 routes, n°5)."""
+    user = str((ctx.context or {}).get("user") or "").strip()
+    if user:
+        return user
+    try:
+        from core import config
+
+        return str(config.get_current_user() or "").strip() or "unknown"
+    except Exception:  # noqa: BLE001 - no FLUX config (tests, first launch)
+        return "unknown"
+
+
+def _logger(ctx):
+    from flux_flows.nodes.flux import _CtxLogger
+
+    return _CtxLogger(ctx)
 
 
 def _project(ctx, params) -> Tuple[str, Path]:
@@ -59,13 +96,29 @@ def next_version(project_path: Path, name: str, ext: str) -> Tuple[Optional[Path
     return folder, (max(nums) + 1 if nums else 1)
 
 
-def _result(path: Path, ext: str, user: str) -> Dict[str, Any]:
+def _result(path: Path, ext: str, user: str, planned: int = 0) -> Dict[str, Any]:
     from flux_flows.nodes.flux import publish_record
 
     _folder, version = next_version_of_existing(path, ext)
+    version = version or planned or None
     record = publish_record(path, user=user)
     record["version"] = version
-    return {"publish": record, "path": str(path), "version": version}
+    return {"publish": record, "path": str(path), "version": version, "files": [str(path)], "warnings": []}
+
+
+def version_of(path: Any) -> Optional[int]:
+    """Version of a published file: its own _vNNN, else the highest vNNN next to it (n°6)."""
+    if not path:
+        return None
+    p = Path(str(path))
+    m = re.search(r"_v(\d+)", p.name, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    try:
+        _folder, found = next_version_of_existing(p, "".join(p.suffixes))
+    except OSError:
+        return None
+    return found or None
 
 
 def next_version_of_existing(path: Path, ext: str) -> Tuple[Path, int]:
@@ -80,7 +133,7 @@ def next_version_of_existing(path: Path, ext: str) -> Tuple[Path, int]:
 def _sim(soft: str):
     def simulate(ctx, inputs, params):
         name = str(inputs.get("name") or (inputs.get("node") or "").rsplit("/", 1)[-1] or "")
-        empty = {"publish": None, "path": "", "version": 0}
+        empty = {"publish": None, "path": "", "version": 0, "files": [], "warnings": []}
         if inputs.get("session") is None:
             return {"lines": [{"kind": "skip", "text_fr": dc.SKIPPED_FR}], "outputs": empty}
         try:
@@ -95,13 +148,17 @@ def _sim(soft: str):
         target = folder / f"{name}_v{version:03d}{ext}"
         return {"lines": [{"kind": "publish", "text_fr": f"publierait {name} v{version:03d} ({soft})",
                            "path": str(target)}],
-                "outputs": {"publish": None, "path": str(target), "version": version}}
+                "outputs": {"publish": None, "path": str(target), "version": version, "files": [str(target)],
+                            "warnings": []}}
     return simulate
 
 
 _OUTS = [dc.THEN, dc.ERR, port("publish", "publish", "Le publish (PublishFields pour le lire)", "The publish"),
          port("path", "path", "Fichier LAST publie", "Published LAST file"),
-         port("version", "int", "Version ecrite", "Written version", 3)]
+         port("version", "int", "Version ecrite", "Written version", 3),
+         port("files", "list[path]", "Tous les fichiers publies", "Every published file"),
+         port("warnings", "list[str]", "Avertissements du publish (rendus au Publisher)",
+              "Publish warnings (shown in the Publisher)")]
 
 
 @flow_node("dcc.may_publish_core", "mayPublishCore", icon="PackagePlus", internal=True,
@@ -113,7 +170,9 @@ _OUTS = [dc.THEN, dc.ERR, port("publish", "publish", "Le publish (PublishFields 
                    port("scope", "str", "scene ou selection", "scene or selection", "scene", default="scene",
                         choices=("scene", "selection")),
                    _DESCRIPTION, _FRAMES,
-                   port("options", "dict", "Options d'export du Publisher", "Publisher export options", {}), _PROJECT],
+                   port("options", "dict", "Options d'export du Publisher", "Publisher export options", {}),
+                   port("port", "int", "Port Maya vise (0 = celui de la session)", "Target Maya port (0 = the "
+                        "session's)", 7001, default=0), _PROJECT],
            session="maya", live_only=True, effect=True, simulate=_sim("maya"), shelf=202,
            aliases=["publier", "publish", "version", "last"],
            doc_fr="Publie la scene ou la selection de Maya exactement comme le Publisher (vNNN immuable + LAST, "
@@ -129,15 +188,35 @@ def may_publish(ctx, inputs, params):
     name = dc.text_param(ctx, inputs.get("name"), "name")
     ext = _ext(params.get("format"))
     project, project_path = _project(ctx, params)
-    fr = dc.frame_range(params.get("frame_range"))
-    user = str((ctx.context or {}).get("user") or "")
+    fr = maya_frame_range(params.get("frame_range"))
+    user = _user(ctx)
+    target = int(params.get("port") or 0) or int(s.port)   # n°14: the instance the Publisher targets
+    _folder, planned = next_version(project_path, name, ext)
+    core_starting(ctx)
     dest = run_maya_publish_action(base_name=name, extension=ext, scope=str(params.get("scope") or "scene"),
                                    project_path=project_path, description=str(params.get("description") or ""),
-                                   user=user, project_name=project, port=int(s.port),
-                                   frame_range=list(fr[:2]) if fr else None, options=params.get("options") or None)
+                                   user=user, project_name=project, port=target, frame_range=fr,
+                                   options=params.get("options") or None, logger=_logger(ctx))
     if dest is None:
         raise NodeError("publish Maya echoue (voir le journal FLUX)")
-    return _result(Path(dest), ext, user)
+    return _result(Path(dest), ext, user, planned)
+
+
+def maya_frame_range(value: Any) -> Optional[list]:
+    """[start, end, step] for Maya, the step kept as a float (0.5 = sub frames, n°12); empty = None."""
+    if value in (None, "", []):
+        return None
+    parts = list(value) if isinstance(value, (list, tuple)) else \
+        str(value).replace(",", " ").replace("-", " ").split()
+    try:
+        nums = [float(p) for p in parts]
+    except (TypeError, ValueError):
+        raise NodeError(f"frame_range invalide `{value}` (ex. 1001-1050)") from None
+    if len(nums) == 2:
+        nums.append(1.0)
+    if len(nums) != 3 or nums[2] <= 0:
+        raise NodeError(f"frame_range invalide `{value}` (ex. 1001-1050)")
+    return [int(nums[0]), int(nums[1]), nums[2]]
 
 
 @flow_node("dcc.hou_publish_core", "houPublishCore", icon="PackagePlus", internal=True,
@@ -152,6 +231,10 @@ def may_publish(ctx, inputs, params):
                    port("sequence", "bool", "Une image par frame (sequence)", "One file per frame (sequence)", False,
                         default=False),
                    port("options", "dict", "Parms du ROP (comme le Publisher)", "ROP parms (like the Publisher)", {}),
+                   port("frame_padding", "int", "Chiffres du numero de frame (sequence)", "Frame number digits "
+                        "(sequence)", 4, default=4),
+                   port("attr_filter", "dict", "Filtre d'attributs {mode: keep|remove, names: [...]}",
+                        "Attribute filter {mode: keep|remove, names: [...]}", {}),
                    _PROJECT],
            session="houdini", live_only=True, effect=True, simulate=_sim("houdini"), shelf=184,
            aliases=["publier", "publish", "version", "last", "rop"],
@@ -174,24 +257,31 @@ def hou_publish(ctx, inputs, params):
         raise NodeError(f"houPublish publie dans le Houdini choisi dans FLUX (port {active}), pas :{s.port} : "
                         "choisis cette instance dans FLUX ou utilise pick active")
     node = str(inputs.get("node") or "") or None
-    name = str(inputs.get("name") or "").strip() or (node.rsplit("/", 1)[-1] if node else "")
-    if not name:
-        raise NodeError("houPublish attend `name` ou `node`")
+    name = str(inputs.get("name") or "").strip()
+    if not name:   # n°11: required, like in the Publisher
+        raise NodeError("houPublish attend `name` : le nom FLUX du publish (tokens, sans version)")
     ext = _ext(params.get("format"))
     project, project_path = _project(ctx, params)
     fr = dc.frame_range(params.get("frame_range"))
-    user = str((ctx.context or {}).get("user") or "")
+    user = _user(ctx)
+    padding = params.get("frame_padding")
+    core_starting(ctx)
     got = run_houdini_publish_action(base_name=name, extension=ext, project_path=project_path,
                                      description=str(params.get("description") or ""), user=user, project_name=project,
                                      rop_node_path=node, is_sequence=bool(params.get("sequence")),
-                                     frame_range=list(fr) if fr else None, options=params.get("options") or None)
+                                     frame_range=list(fr) if fr else None,
+                                     frame_padding=int(padding) if padding not in (None, "") else None,
+                                     options=params.get("options") or None,
+                                     attr_filter=params.get("attr_filter") or None, logger=_logger(ctx))
     if not got or not got.get("ok"):
         raise NodeError("publish Houdini echoue (voir le journal FLUX)")
     from flux_flows.nodes.flux import publish_record
 
     record = publish_record(got["path"], user=user)
-    record["version"] = got.get("version")
-    return {"publish": record, "path": str(got["path"]), "version": got.get("version") or 0}
+    version = got.get("version") or version_of(got["path"])
+    record["version"] = version
+    return {"publish": record, "path": str(got["path"]), "version": version, "files": [str(got["path"])],
+            "warnings": [str(w) for w in got.get("warnings") or []]}
 
 
 # -- P6b: Nuke, Painter, Designer, Marvelous, ZBrush, Mari (01 §13 table) --------------------
@@ -219,11 +309,14 @@ def _from_result(res: Any, user: str) -> Dict[str, Any]:
     paths = [str(p) for p in (res.get("published") or [])]
     path = str(res.get("path") or (paths[0] if paths else ""))
     record = publish_record(path, user=user) if path else None
-    version = res.get("version")
+    try:   # n°6: the function's version, else the record's, else the file's; never 0 (None = unknown)
+        version = int(res.get("version") or (record or {}).get("version") or 0) or version_of(path)
+    except (TypeError, ValueError):
+        version = version_of(path)
     if record is not None:
-        record["version"] = version if version is not None else record.get("version")
-    return {"publish": record, "path": path, "version": int(version or (record or {}).get("version") or 0),
-            "files": paths or ([path] if path else [])}
+        record["version"] = version
+    return {"publish": record, "path": path, "version": version, "files": paths or ([path] if path else []),
+            "warnings": [str(w) for w in res.get("warnings") or []]}
 
 
 def _texture_tokens(inputs, params) -> Dict[str, Any]:
@@ -237,22 +330,18 @@ def _texture_tokens(inputs, params) -> Dict[str, Any]:
 _TEX_IN = [port("class", "str", "Token CLASS", "CLASS token", "PROP", required=True),
            port("task", "str", "Token TYPE (tache)", "TYPE token (task)", "TEXTURE", required=True),
            port("name", "str", "Token NAME", "NAME token", "chair", required=True)]
-_TEX_OUTS = _OUTS + [port("files", "list[path]", "Tous les fichiers publies", "Every published file")]
+_TEX_OUTS = _OUTS
 
 
 def _sim_soft(label: str):
     def simulate(ctx, inputs, params):
         if inputs.get("session") is None:
             return {"lines": [{"kind": "skip", "text_fr": dc.SKIPPED_FR}],
-                    "outputs": {"publish": None, "path": "", "version": 0, "files": []}}
+                    "outputs": {"publish": None, "path": "", "version": 0, "files": [], "warnings": []}}
         name = inputs.get("name") or ""
         return {"lines": [{"kind": "publish", "text_fr": f"publierait {name} depuis {label} (vNNN + LAST)"}],
-                "outputs": {"publish": None, "path": "", "version": 0, "files": []}}
+                "outputs": {"publish": None, "path": "", "version": 0, "files": [], "warnings": []}}
     return simulate
-
-
-def _user(ctx) -> str:
-    return str((ctx.context or {}).get("user") or "unknown")
 
 
 @flow_node("dcc.nk_publish_core", "nkPublishCore", icon="PackagePlus", internal=True,
@@ -273,6 +362,7 @@ def nk_publish(ctx, inputs, params):
     _base_port_only(s, "nuke", "nk")
     project, _path = _project(ctx, params)
     fr = dc.frame_range(params.get("frame_range"))
+    core_starting(ctx)
     res = publish_from_nuke(project, dc.text_param(ctx, inputs.get("name"), "name"), _ext(params.get("format")),
                             options=params.get("options") or None, is_sequence=bool(params.get("sequence")),
                             frame_range=(fr[0], fr[1]) if fr else None, node_name=str(inputs.get("node") or "") or None,
@@ -302,6 +392,7 @@ def sp_publish(ctx, inputs, params):
     s = dc.need_session(ctx, inputs)
     _base_port_only(s, "painter", "sp")
     project, _path = _project(ctx, params)
+    core_starting(ctx)
     res = publish_painter(project, **_texture_tokens(inputs, params),
                           preset=str(params.get("preset") or "PBR Metallic Roughness"),
                           file_format=str(params.get("format") or "png"), bit_depth=str(params.get("bit_depth") or "8"),
@@ -331,6 +422,7 @@ def sd_publish(ctx, inputs, params):
     s = dc.need_session(ctx, inputs)
     _base_port_only(s, "designer", "sd")
     project, _path = _project(ctx, params)
+    core_starting(ctx)
     res = publish_designer(project, **_texture_tokens(inputs, params), file_format=str(params.get("format") or "png"),
                            size=params.get("size") or None, bit_depth=str(params.get("bit_depth") or "") or None,
                            maps=params.get("maps", True) is not False, sbsar=bool(params.get("sbsar")),
@@ -356,6 +448,7 @@ def mvd_publish(ctx, inputs, params):
     s = dc.need_session(ctx, inputs)
     _base_port_only(s, "marvelous", "mvd")
     project, _path = _project(ctx, params)
+    core_starting(ctx)
     res = publish_marvelous(project, dc.text_param(ctx, inputs.get("name"), "name"),
                             file_format=str(params.get("format") or "abc"), options=params.get("options") or None,
                             with_zprj=bool(params.get("with_zprj")), description=str(params.get("description") or ""),
@@ -380,6 +473,7 @@ def zb_publish(ctx, inputs, params):
     _base_port_only(s, "zbrush", "zb")
     project, project_path = _project(ctx, params)
     ctx.add_cleanup(lambda: zbrush_client.release(timeout=2.0))
+    core_starting(ctx)
     try:
         res = publish_zbrush(project_path, dc.text_param(ctx, inputs.get("name"), "name"), _ext(params.get("format")),
                              params.get("options") or {}, str(params.get("description") or ""), _user(ctx),
@@ -409,6 +503,7 @@ def mari_publish(ctx, inputs, params):
     s = dc.need_session(ctx, inputs)
     _base_port_only(s, "mari", "mari")
     project, _path = _project(ctx, params)
+    core_starting(ctx)
     res = publish_mari(project, **_texture_tokens(inputs, params), file_format=str(params.get("format") or "tif"),
                        conform_tx=bool(params.get("conform_tx")), description=str(params.get("description") or ""),
                        user=_user(ctx), channels=params.get("channels") or None, **(params.get("extra") or {}))

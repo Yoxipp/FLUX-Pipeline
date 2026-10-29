@@ -1,34 +1,59 @@
 flux_flow: 2
 name: publish_houdini
 label: "Publish Houdini"
-description: "Flow de publish Houdini (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish) -> houPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher n'est pas encore bascule dessus (P8) : on le lance a la main avec Run."
+description: "Flow de publish Houdini (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish, flux.refuse_publish) -> houPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher le lance quand le projet est en publish v2 (Parametres avances du projet, ADR 0070) ; sinon Run a la main."
 run_policy: queue
 interface:
   inputs:
-    - {id: name, type: str, label: "Nom FLUX (vide = nom du node)", default: ""}
+    - {id: name, type: str, label: "Nom FLUX (tokens, sans version)", default: ""}
     - {id: node, type: str, label: "ROP ou node (vide = selection)", default: ""}
     - {id: format, type: select, label: "Format", default: ".abc", options: [".abc", ".bgeo.sc", ".usd", ".vdb", ".fbx", ".obj", ".hip"]}
     - {id: description, type: str, label: "Description", default: ""}
     - {id: frame_range, type: str, label: "Plage", default: ""}
     - {id: sequence, type: bool, label: "Sequence (un fichier par frame)", default: false}
+    - {id: frame_padding, type: int, label: "Chiffres du numero de frame", default: 4}
+    - {id: options, type: dict, label: "Parms du ROP (Publisher)"}
+    - {id: attr_filter, type: dict, label: "Filtre d'attributs"}
   outputs:
     - {id: path, type: path, label: "Fichier LAST publie"}
     - {id: version, type: int, label: "Version ecrite"}
+    - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+    - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
 nodes:
   ev: {type: event.publish_request, pos: [0, 160], params: {soft: houdini}}
   inst: {type: session.hou_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
-  seq: {type: data.flow_input, pos: [320, 400], params: {id: sequence}}
-  pub: {type: dcc.hou_publish, pos: [640, 160], params: {name: "${name}", node: "${node}", format: "${format}", description: "${description}", frame_range: "${frame_range}"}}
+  in_name: {type: data.flow_input, pos: [320, 400], params: {id: name}}
+  in_format: {type: data.flow_input, pos: [320, 640], params: {id: format}}
+  in_description: {type: data.flow_input, pos: [320, 760], params: {id: description}}
+  in_frame_range: {type: data.flow_input, pos: [320, 880], params: {id: frame_range}}
+  in_sequence: {type: data.flow_input, pos: [320, 1000], params: {id: sequence}}
+  in_frame_padding: {type: data.flow_input, pos: [320, 1120], params: {id: frame_padding}}
+  in_options: {type: data.flow_input, pos: [320, 1240], params: {id: options}}
+  in_attr_filter: {type: data.flow_input, pos: [320, 1360], params: {id: attr_filter}}
+  pub: {type: dcc.hou_publish, pos: [640, 160], params: {node: "${node}"}}
   out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
   out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+  out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
 links:
   - {from: ev.then, to: inst.exec}
   - {from: inst.then, to: pub.exec}
   - {from: inst.session, to: pub.session}
-  - {from: seq.value, to: pub.sequence}
+  - {from: in_name.value, to: pub.name}
+  - {from: in_format.value, to: pub.format}
+  - {from: in_description.value, to: pub.description}
+  - {from: in_frame_range.value, to: pub.frame_range}
+  - {from: in_sequence.value, to: pub.sequence}
+  - {from: in_frame_padding.value, to: pub.frame_padding}
+  - {from: in_options.value, to: pub.options}
+  - {from: in_attr_filter.value, to: pub.attr_filter}
   - {from: pub.then, to: out_path.exec}
   - {from: pub.path, to: out_path.value}
   - {from: out_path.then, to: out_version.exec}
   - {from: pub.version, to: out_version.value}
+  - {from: out_version.then, to: out_files.exec}
+  - {from: pub.files, to: out_files.value}
+  - {from: out_files.then, to: out_warnings.exec}
+  - {from: pub.warnings, to: out_warnings.value}
 notes:
-  - {id: k1, pos: [0, 560], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et houPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}
+  - {id: k1, pos: [0, 1520], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et houPublish (If + RefusePublish : le message est montre tel quel dans le Publisher).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

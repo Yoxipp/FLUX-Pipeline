@@ -79,7 +79,7 @@ class PublishBlackBox(unittest.TestCase):
         self.assertTrue(seen["thread"].startswith("flux-flows"), seen["thread"])
         self.assertEqual((seen["base_name"], seen["extension"], seen["port"], seen["description"], seen["user"]),
                          ("CHAR_MODEL_chair_null", ".ma", srv.port, "retopo", "ADAM"))
-        self.assertEqual(outputs, {"path": str(last), "version": 3})
+        self.assertEqual(outputs, {"path": str(last), "version": 3, "files": [str(last)], "warnings": []})
 
     def test_houdini_session_on_another_instance_is_refused(self) -> None:
         hou = FakeHou()
@@ -88,14 +88,15 @@ class PublishBlackBox(unittest.TestCase):
                 mock.patch("core.dcc_instances.check_active", return_value=srv.port), \
                 mock.patch("flux_actions.runner.run_houdini_publish_action") as runner:
             with mock.patch("core.dcc_instances.resolve_port", side_effect=[srv.port, srv.port + 1]):
-                rec, _ = self._run(_shipped("publish_houdini"), {"node": "/out/cache", "format": ".abc"})
+                rec, _ = self._run(_shipped("publish_houdini"), {"name": "cache", "node": "/out/cache",
+                                                                 "format": ".abc"})
             runner.assert_not_called()
             self.assertIn("publie dans le Houdini choisi", rec["nodes"]["pub"]["error"])
             runner.return_value = {"ok": True, "path": str(self.project / "publish" / "FX_cache_LAST.abc"),
                                    "version": 7}
             with mock.patch("core.dcc_instances.resolve_port", return_value=srv.port):
-                rec, outputs = self._run(_shipped("publish_houdini"), {"node": "/out/cache", "format": "abc",
-                                                                       "sequence": False})
+                rec, outputs = self._run(_shipped("publish_houdini"), {"name": "cache", "node": "/out/cache",
+                                                                       "format": "abc", "sequence": False})
         self.assertEqual(rec["status"], "ok", rec.get("error"))
         kwargs = runner.call_args.kwargs
         self.assertEqual((kwargs["base_name"], kwargs["extension"], kwargs["rop_node_path"]), ("cache", ".abc", "/out/cache"))

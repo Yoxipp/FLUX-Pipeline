@@ -11,9 +11,12 @@ interface:
     - {id: "sequence", type: "bool", label: "Une image par frame", default: false}
     - {id: "description", type: "str", label: "Description du publish (journal)", default: ""}
     - {id: "colorspace", type: "str", label: "Espace couleur du Write (vide = defaut FLUX)", default: ""}
+    - {id: options, type: dict, label: "Options du Publisher (export, knobs...)"}
   outputs:
     - {id: path, type: path, label: "Fichier publie"}
     - {id: version, type: int, label: "Version ecrite"}
+    - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+    - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
 nodes:
   ev: {type: event.publish_request, pos: [0, 160], params: {soft: nuke}}
   inst: {type: session.nk_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
@@ -26,6 +29,9 @@ nodes:
   pub: {type: dcc.nk_publish, pos: [640, 160]}
   out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
   out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  in_options: {type: data.flow_input, pos: [320, 1120], params: {id: options}}
+  out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+  out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
 links:
   - {from: ev.then, to: inst.exec}
   - {from: inst.then, to: pub.exec}
@@ -40,5 +46,10 @@ links:
   - {from: pub.path, to: out_path.value}
   - {from: out_path.then, to: out_version.exec}
   - {from: pub.version, to: out_version.value}
+  - {from: in_options.value, to: pub.options}
+  - {from: out_version.then, to: out_files.exec}
+  - {from: pub.files, to: out_files.value}
+  - {from: out_files.then, to: out_warnings.exec}
+  - {from: pub.warnings, to: out_warnings.value}
 notes:
   - {id: k1, pos: [0, 1160], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et nkPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

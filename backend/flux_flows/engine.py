@@ -18,7 +18,8 @@
 # value that came through a link is never resolved again (01 §11).
 # Errors: on_error linked = error_handled (``error`` output, the flow follows it),
 # else the run stops in ``error``. Timeouts: ``params.timeout_s``, 120 s (600 s for
-# session / dcc nodes); a thread cannot be killed: abandoned, result ignored.
+# session / dcc nodes, none for the dcc publish cores); a thread cannot be killed: abandoned,
+# result ignored.
 # Cancel: ``cancelled`` flag between nodes + CancelledError on the current await.
 #
 # Admission (RunManager): run_policy skip_if_running / queue (FIFO, 20 max per
@@ -58,6 +59,7 @@ SET_VARIABLE = "data.set_variable"
 
 DEFAULT_TIMEOUT_S = 120.0
 DCC_TIMEOUT_S = 600.0
+PUBLISH_CORE_SUFFIX = "_publish_core"    # dcc.<p>_publish_core: no engine timeout (P8 n°1)
 MAX_RUNNING = 4
 MAX_QUEUE = 20
 PUSH_TICK_S = 0.1          # node_state / link_value grouped: 10 pushes per second per run at most
@@ -458,6 +460,8 @@ class Run:
             pass
         if spec.type == FLOW_CALL or spec.subflow:
             return None     # the called flow's nodes have their own timeouts
+        if spec.type.startswith("dcc.") and spec.type.endswith(PUBLISH_CORE_SUFFIX):
+            return None     # P8 n°1: like v1, only the soft client's own timeout (a long cache cooks)
         return DCC_TIMEOUT_S if spec.family in ("session", "dcc") else DEFAULT_TIMEOUT_S
 
     async def _invoke(self, nid: str, node, spec, inputs: Dict[str, Any],

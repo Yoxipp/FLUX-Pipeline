@@ -227,7 +227,17 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   `run_houdini_publish_action` dans le pool (asyncio.run dedans), Live seulement ; Houdini refuse une session sur une autre
   instance que celle choisie dans FLUX (le runner cuit dans le singleton). Essai : destination (`resolve_publish_path`,
   lecture) + version suivante. Flows livres `publish_maya` / `publish_houdini` (`event.publish_request` -> Instance
-  `live_connect_only` -> publish -> `FlowOutput`), Publisher non bascule (P8).
+  `live_connect_only` -> publish -> `FlowOutput`).
+* **Bascule P8 (ADR 0070)** : `switch.py` (`publish_engine` v1 / v2 du `project.json`, lu a chaque publish) ;
+  `publish_runner.py` `run_publish(soft, project, values, user)` lance `publish_<soft>` (version active d'une copie, sinon
+  son fichier de travail, sinon le livre) et rend un `Outcome` : `ok` (sorties `path`, `version`, `files`, `warnings`),
+  `refused` (`flux.refuse_publish`, message tel quel, jamais de repli), `fallback` (echec AVANT le coeur : la route publie
+  en v1 + `warning()`), `error` (APRES le coeur : jamais v1). Avant / apres = sonde `dcc_publish.PROBE_KEY` du contexte
+  du run, posee par `core_starting()` juste avant la fonction du Publisher. Coeurs : pas de timeout moteur (n°1), logger
+  du run (n°3), utilisateur du run sinon FLUX sinon unknown (n°5), version jamais 0 (n°6, `None` = inconnue), sortie
+  `warnings` (n°8), `name` Houdini obligatoire (n°11), plage Maya complete pas flottant (n°12), `port` Maya (n°14),
+  entree `options: dict` des flows (n°4 ; Painter / Designer / Mari : `extra`). Type d'interface `dict` (aucun widget de
+  page). Les routes `/dcc/<soft>/publish` l'appellent aux etapes 4 a 6 de P8.
 * **Nodes livres verrouilles** (`dcc_nodes.py`, decisions 18 / 19) : `HoudiniInstance`, `MayaInstance`, `houPublish`,
   `mayPublish` = flows `shipped/dcc/<soft>/*.flow.yml` avec `node_type` ; spec du catalogue tiree de l'interface (entrees
   `select` = reglages a choix, constantes), drapeaux du coeur Python `<type>_core` (`internal`, hors Tab / Shelf). Le moteur

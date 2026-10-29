@@ -1,6 +1,7 @@
 # P8 step 1 (2026-10-29, PUBLISH_PARITE §4 n°15): the arguments each shipped publish subflow
 # hands to the Publisher function it wraps (Nuke, Painter, Designer, Mari, ZBrush, Marvelous),
-# pinned on the code BEFORE the switch. Fake bridges only, the publish functions are mocked.
+# pinned on the code BEFORE the switch, turned to the P8 decisions at step 3 (n°4, 6, 8).
+# Fake bridges only, the publish functions are mocked.
 
 from __future__ import annotations
 
@@ -58,8 +59,8 @@ class PublishCoreArguments(unittest.TestCase):
                                   "frame_range": "1001-1010", "sequence": True, "description": "d",
                                   "options": {"compression": "zip"}, "colorspace": "ACEScg"})
         self.assertEqual(seen["args"], ("PROJ", "SEQ010_SH010_COMP_main", ".exr"))
-        # Gap n°4: nk_publish.flow.yml has no `options` input, the Write knobs are dropped (P8 step 3).
-        self.assertEqual(seen["kwargs"], {"options": None, "is_sequence": True,
+        # n°4 (P8 step 3): the Write knobs reach the function.
+        self.assertEqual(seen["kwargs"], {"options": {"compression": "zip"}, "is_sequence": True,
                                           "frame_range": (1001, 1010), "node_name": "Write1", "description": "d",
                                           "user": "ADAM", "colorspace": "ACEScg"})
         self.assertEqual(value, 7)
@@ -114,8 +115,9 @@ class PublishCoreArguments(unittest.TestCase):
         seen, _ = self._call("zbrush", "dcc.zb_publish", "dcc.zbrush.zbrush_export.publish_zbrush",
                              {"name": "CHAR_SCULPT_head_null", "format": "obj", "options": {"subdiv": 2},
                               "description": "d"})
-        # Gap n°4: zb_publish.flow.yml has no `options` input, they are dropped (P8 step 3).
-        self.assertEqual(seen["args"], (self.tmp / "PROJ", "CHAR_SCULPT_head_null", ".obj", {}, "d", "ADAM"))
+        # n°4 (P8 step 3): the export options reach the function.
+        self.assertEqual(seen["args"], (self.tmp / "PROJ", "CHAR_SCULPT_head_null", ".obj", {"subdiv": 2}, "d",
+                                        "ADAM"))
         self.assertEqual(seen["kwargs"], {"project_name": "PROJ"})
 
     def test_marvelous(self) -> None:
@@ -123,8 +125,8 @@ class PublishCoreArguments(unittest.TestCase):
                                  {"name": "CHAR_CLOTH_dress_null", "format": "usd", "options": {"thickness": True},
                                   "with_zprj": True, "description": "d"})
         self.assertEqual(seen["args"], ("PROJ", "CHAR_CLOTH_dress_null"))
-        # Gap n°4: mvd_publish.flow.yml has no `options` input, they are dropped (P8 step 3).
-        self.assertEqual(seen["kwargs"], {"file_format": "usd", "options": None, "with_zprj": True,
+        # n°4 (P8 step 3): the export options reach the function.
+        self.assertEqual(seen["kwargs"], {"file_format": "usd", "options": {"thickness": True}, "with_zprj": True,
                                           "description": "d", "user": "ADAM"})
         self.assertEqual(value, 7)
 
@@ -143,12 +145,40 @@ class PublishCoreArguments(unittest.TestCase):
         self.assertEqual(rec["status"], "error")
         self.assertIn("pas de garment", str(rec.get("error")) + str(rec["nodes"]["n"].get("error")))
 
-    def test_version_zero_when_the_function_gives_none(self) -> None:
-        # Current gap (PUBLISH_PARITE n°6): no version from publish_* and none in the record -> 0.
+    def test_version_never_zero(self) -> None:
+        # n°6 (P8 step 3): no version from publish_* -> the file's own vNNN, else its siblings', else None.
+        _seen, value = self._call("mari", "dcc.mari_publish", "dcc.mari.mari_export.publish_mari",
+                                  {"class": "PROP", "task": "TEXTURE", "name": "chair"},
+                                  result={"ok": True, "published": [str(self.tmp / "PROP_TEXTURE_chair_v004.tif")]})
+        self.assertEqual(value, 4)
+        (self.tmp / "PROP_TEXTURE_rock_v002.tif").write_text("x")
+        (self.tmp / "PROP_TEXTURE_rock_v003.tif").write_text("x")
+        _seen, value = self._call("mari", "dcc.mari_publish", "dcc.mari.mari_export.publish_mari",
+                                  {"class": "PROP", "task": "TEXTURE", "name": "rock"},
+                                  result={"ok": True, "published": [str(self.tmp / "PROP_TEXTURE_rock_LAST.tif")]})
+        self.assertEqual(value, 3)
         _seen, value = self._call("mari", "dcc.mari_publish", "dcc.mari.mari_export.publish_mari",
                                   {"class": "PROP", "task": "TEXTURE", "name": "chair"},
                                   result={"ok": True, "published": [str(self.tmp / "nothing.tif")]})
-        self.assertEqual(value, 0)
+        self.assertIsNone(value)
+
+    def test_options_reach_the_texture_functions(self) -> None:
+        # n°4: the form fields without an input of their own travel in `options` (core `extra`).
+        seen, _ = self._call("painter", "dcc.sp_publish", "dcc.substance_painter.substance_export.publish_painter",
+                             {"class": "PROP", "task": "TEXTURE", "name": "chair", "options": {"padding": "infinite"}})
+        self.assertEqual(seen["kwargs"]["padding"], "infinite")
+
+    def test_warnings_and_files_outputs(self) -> None:
+        # n°8: the warnings of publish_* come out of the node (shown in the Publisher).
+        h.reset()
+        res = {"ok": True, "published": [self.published, str(self.tmp / "y_v007.png")], "version": 7,
+               "warnings": ["map Height vide"]}
+        with mock.patch("dcc.substance_painter.substance_export.publish_painter", return_value=res):
+            rec, warnings = run_node("painter", "dcc.sp_publish", softs.port_range("painter").start,
+                                     inputs={"class": "PROP", "task": "TEXTURE", "name": "chair"}, out="warnings",
+                                     project="PROJ")
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        self.assertEqual(warnings, ["map Height vide"])
 
 
 if __name__ == "__main__":

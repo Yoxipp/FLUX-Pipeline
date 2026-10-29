@@ -1,5 +1,5 @@
 # flux.py — pipeline nodes (02_NODES §7). P2: notify, legacy_command. P3: the rest
-# of the family (find_publishes ... refresh_shot_stage), refuse_publish is P8.
+# of the family (find_publishes ... refresh_shot_stage). P8: refuse_publish.
 #
 # flux.legacy_command runs a v1 command (flux_core public API: get_command,
 # cast_value) with a shim carrying ``.buffer.context``, the only part of the v1
@@ -1137,3 +1137,40 @@ refresh_shot_stage = flow_node(
     effect=True, simulate=_sim_stage, shelf=89, aliases=["stage", "shot stage", "usd plan"],
     doc_fr="Regenere le stage USD du plan depuis un dossier de publish d'un departement de plan.",
     doc_en="Regenerates the shot USD stage from a publish folder of a shot department.")(_body_stage)
+
+
+# -- flux.refuse_publish (P8) -------------------------------------------------------
+# The "before publish" of a team (01 §13): placed before the black box of publish_<soft>,
+# it stops the run with the team's message. publish_runner.py reads the verdict from the
+# probe of the run context (dcc_publish.PROBE_KEY) and hands the message to the Publisher
+# as is; a refusal never falls back to v1. No hook in publish_core.
+
+def _refuse_message(inputs) -> str:
+    text = str(inputs.get("message") or "").strip()
+    if not text:
+        raise NodeError("RefusePublish attend `message` : la raison montree a l'artiste")
+    return text
+
+
+def _simulate_refuse(ctx, inputs, params):
+    return {"lines": [_line("refuse", f"refuserait le publish : {_refuse_message(inputs)}")], "outputs": {}}
+
+
+@flow_node("flux.refuse_publish", "RefusePublish", icon="ShieldX",
+           inputs=[_EXEC, port("message", "str", "Raison montree a l'artiste dans le Publisher",
+                               "Reason shown to the artist in the Publisher", "Le nom ne suit pas la nomenclature",
+                               required=True)],
+           outputs=[], effect=True, simulate=_simulate_refuse, shelf=90,
+           aliases=["refuser", "bloquer", "avant publish", "verification", "refuse"],
+           doc_fr="Arrete le publish avec un message (verdict \"refuse\") : a placer avant le node publish du flow "
+                  "publish_<soft>, derriere un If de verification. Rien n'est publie.",
+           doc_en="Stops the publish with a message (\"refused\" verdict): place it before the publish node of the "
+                  "publish_<soft> flow, behind a check If. Nothing is published.")
+def refuse_publish(ctx, inputs, params):
+    from flux_flows.nodes.dcc_publish import PROBE_KEY, REFUSED_CODE
+
+    message = _refuse_message(inputs)
+    probe = (ctx.context or {}).get(PROBE_KEY)
+    if isinstance(probe, dict) and not probe.get("core_started"):
+        probe["refused"] = message
+    raise NodeError(message, code=REFUSED_CODE)

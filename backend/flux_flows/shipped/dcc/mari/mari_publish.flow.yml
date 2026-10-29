@@ -14,11 +14,13 @@ interface:
     - {id: "channels", type: "list[str]", label: "Channels (vide = tous)"}
     - {id: "conform_tx", type: "bool", label: "Ecrire aussi les .tx", default: false}
     - {id: "description", type: "str", label: "Description du publish (journal)", default: ""}
+    - {id: options, type: dict, label: "Options du Publisher (export, knobs...)"}
   outputs:
     - {id: publish, type: publish, label: "Le publish"}
     - {id: path, type: path, label: "Fichier publie"}
     - {id: version, type: int, label: "Version ecrite"}
     - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
+    - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
 nodes:
   ev: {type: event.manual, pos: [0, 160]}
   in_session: {type: data.flow_input, pos: [0, 320], params: {id: session}}
@@ -35,6 +37,8 @@ nodes:
   out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
   out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
   out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
+  in_options: {type: data.flow_input, pos: [0, 1400], params: {id: options}}
+  out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
 links:
   - {from: ev.then, to: core.exec}
   - {from: in_session.value, to: core.session}
@@ -54,5 +58,8 @@ links:
   - {from: core.version, to: out_version.value}
   - {from: out_version.then, to: out_files.exec}
   - {from: core.files, to: out_files.value}
+  - {from: in_options.value, to: core.extra}
+  - {from: out_files.then, to: out_warnings.exec}
+  - {from: core.warnings, to: out_warnings.value}
 notes:
   - {id: k1, pos: [0, 1440], text: "Node livre avec FLUX : lecture seule. Deverrouiller (Team TD) pour ajouter des verifications avant le publish ; Revenir au defaut supprime la copie."}

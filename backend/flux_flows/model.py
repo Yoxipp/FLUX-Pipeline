@@ -35,7 +35,8 @@ RESERVED_NAMES = frozenset(
 )
 # Flow variable / interface ids that would shadow $FLUX or a context key.
 RESERVED_VARS = frozenset("flux project asset shot seq user date time".split())
-INTERFACE_TYPES = frozenset("bool int float str path dir pattern list[str] select".split())
+# dict (P8 n°4): the Publisher form options of publish_<soft>; no page widget (pages.KIND_FOR_TYPE).
+INTERFACE_TYPES = frozenset("bool int float str path dir pattern list[str] select dict".split())
 # P6a: a DCC node shipped as a locked subflow (node_type) takes a session and DCC nodes
 # from its caller; these inputs are linked, never typed in a page form.
 LINK_ONLY_TYPES = frozenset({"dcc_node", "list[dcc_node]", "publish"})

@@ -154,7 +154,10 @@ class FluxNodesTest(unittest.TestCase):
             self.assertIn("on_error", [p.name for p in spec.outputs], t)
         for t in readers:
             self.assertFalse(_spec(t).effect, t)
-        self.assertIsNone(registry.get_node("flux.refuse_publish"))
+        refuse = _spec("flux.refuse_publish")   # P8: effect, simulated, no exit (the run stops there)
+        self.assertTrue(refuse.effect)
+        self.assertIsNotNone(refuse.simulate)
+        self.assertEqual([p.name for p in refuse.outputs], [])
         self.assertIs(_spec("flux.call_function").destructive, True)
         self.assertEqual(_spec("flux.usd_flatten").destructive, {"param": "overwrite", "equals": True})
         self.assertEqual(_spec("flux.conform_texture").destructive, {"param": "force", "equals": True})
