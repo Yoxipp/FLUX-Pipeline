@@ -183,7 +183,9 @@ class PublishCoreArguments(unittest.TestCase):
     def test_tx_output(self) -> None:
         # P8: the .tx of the conform come out of the texture nodes (the Publisher shows " · .tx").
         tx = str(self.tmp / "x_v007.tx")
-        for soft, node, target in (("painter", "dcc.sp_publish", "dcc.substance_painter.substance_export.publish_painter"),):
+        for soft, node, target in (("painter", "dcc.sp_publish", "dcc.substance_painter.substance_export.publish_painter"),
+                                   ("designer", "dcc.sd_publish",
+                                    "dcc.substance_designer.designer_export.publish_designer")):
             with self.subTest(soft=soft):
                 h.reset()
                 res = {"ok": True, "published": [self.published], "version": 7, "tx": [tx]}

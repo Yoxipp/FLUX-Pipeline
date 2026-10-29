@@ -134,5 +134,20 @@ class PainterPublishSwitch(_SoftSwitch, unittest.TestCase):
     v2_result = v1_result
 
 
+class DesignerPublishSwitch(_SoftSwitch, unittest.TestCase):
+    route, soft = "/dcc/designer/bridge/publish", "designer"
+    v1_target = "dcc.substance_designer.designer_export.publish_designer"
+    body = {**_TOKENS, "graphs": [{"package": "D:/w/chair.sbs", "graph": "chair", "outputs": None}],
+            "file_format": "png", "size": 2048, "bit_depth": None, "sbsar": True, "tx_only": True,
+            "conform_tx": True}
+    v1_result = {"ok": True, "published": _MAPS, "tx": None, "warnings": []}
+    flow_outputs = {"path": _MAPS[0], "version": 2, "files": _MAPS, "warnings": [], "tx": []}
+    flow_values = {"class": "PROP", "task": "TEXTURE", "name": "chair", "instance": "null", "format": "png",
+                   "size": 2048, "maps": True, "sbsar": True, "sbs": False, "conform_tx": True, "description": "d",
+                   "options": {"graphs": [{"package": "D:/w/chair.sbs", "graph": "chair", "outputs": None}],
+                               "tx_only": True}}
+    v2_result = v1_result
+
+
 if __name__ == "__main__":
     unittest.main()

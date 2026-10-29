@@ -413,7 +413,7 @@ def sp_publish(ctx, inputs, params):
 
 @flow_node("dcc.sd_publish_core", "sdPublishCore", icon="PackagePlus", internal=True,
            inputs=[dc.EXEC, dc.session_port("designer", "Designer"), *_TEX_IN],
-           outputs=_TEX_OUTS,
+           outputs=_TX_OUTS,
            params=[port("instance", "str", "Token INSTANCE", "INSTANCE token", "null", default="null"),
                    port("format", "str", "Format des maps", "Map format", "png", default="png"),
                    port("size", "int", "Largeur", "Width", 2048), port("bit_depth", "str", "Profondeur", "Bit depth", "16"),
@@ -438,7 +438,7 @@ def sd_publish(ctx, inputs, params):
                            sbs=bool(params.get("sbs")), conform_tx=bool(params.get("conform_tx")),
                            description=str(params.get("description") or ""), user=_user(ctx),
                            **(params.get("extra") or {}))
-    return _from_result(res, _user(ctx))
+    return _with_tx(_from_result(res, _user(ctx)), res)
 
 
 @flow_node("dcc.mvd_publish_core", "mvdPublishCore", icon="PackagePlus", internal=True,

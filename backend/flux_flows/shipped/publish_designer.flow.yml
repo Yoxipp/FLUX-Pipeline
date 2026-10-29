@@ -23,6 +23,7 @@ interface:
     - {id: version, type: int, label: "Version ecrite"}
     - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
     - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
+    - {id: tx, type: "list[path]", label: "Fichiers .tx ecrits"}
 nodes:
   ev: {type: event.publish_request, pos: [0, 160], params: {soft: designer}}
   inst: {type: session.sd_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
@@ -44,6 +45,7 @@ nodes:
   in_options: {type: data.flow_input, pos: [320, 1840], params: {id: options}}
   out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
   out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+  out_tx: {type: subflow.flow_output, pos: [2240, 160], params: {id: tx}}
 links:
   - {from: ev.then, to: inst.exec}
   - {from: inst.then, to: pub.exec}
@@ -69,5 +71,7 @@ links:
   - {from: pub.files, to: out_files.value}
   - {from: out_files.then, to: out_warnings.exec}
   - {from: pub.warnings, to: out_warnings.value}
+  - {from: out_warnings.then, to: out_tx.exec}
+  - {from: pub.tx, to: out_tx.value}
 notes:
   - {id: k1, pos: [0, 1880], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et sdPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}
