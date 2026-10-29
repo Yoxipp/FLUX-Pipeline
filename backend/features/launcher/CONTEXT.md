@@ -16,5 +16,8 @@ Un chemin perso configure qui n'existe plus est ignore avec un warning (une fois
 `bridges.py` (retake F1) : `install_all_bridges` installe le bridge de chaque DCC detecte (memes `dcc/<soft>/autostart.install`
 que le menu du launcher) + la librairie Photoshop ; resultat par DCC `ok` / `skip` (non detecte) / `error`, jamais d'exception.
 Route `POST /dcc/bridges/install-all`, bouton dans Parametres > User > Logiciels. Tests : `tests/dcc_router/test_install_all_bridges.py`.
+Flows P6c (2026-10-23) : la route ajoute les bridges d'extension valides (`flux_flows/bridges/installer.install_all_entries`,
+cle "<label> (extension)", `skip` si `exe_hints` ne trouve rien, conflit = `error` sans ecrasement). `launch_exe(exe, scene, *, extra, env,
+label)` extrait de `launch_dcc` (comportement inchange) lance l'exe d'une extension. Tests : `tests/launcher_exe`.
 
 Plage de frames au lancement (2026-09-27) : un Maya / Houdini lance **sans scene** demarre sur `DEFAULT_FRAME_START`-`DEFAULT_FRAME_END` (1001-1050, `core/constants.py`). Le launcher ajoute un script en ligne de commande (`maya -script resources/startup/flux_frame_range.mel`, `houdini resources/startup/flux_frame_range.cmd`) et passe la plage via `FLUX_FRAME_START` / `FLUX_FRAME_END`. Rien a installer dans les prefs. Un lancement avec scene (preset, scene de rendu de sequence) garde sa plage. Script absent -> lancement normal + warning.

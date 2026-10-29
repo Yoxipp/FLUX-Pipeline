@@ -185,6 +185,12 @@ class FlowCall(unittest.TestCase):
         self.assertEqual(rec["status"], "ok", rec.get("error"))
         self.assertEqual(h.CALLS, [("cr", 5), ("r", 15)])
 
+    def test_outputs_are_kept_in_the_record(self):
+        # P7: a page widget fed by {flow, output} reads them from the last run.
+        rec = _run_with(self._child(), {})
+        self.assertEqual(rec["status"], "ok", rec.get("error"))
+        self.assertEqual(rec["outputs"], {"y": 10})
+
     def test_linked_input_wins_over_the_default(self):
         f = flow({"n1": "event.manual", "v": ("data.value", {"type": "int", "value": 7}),
                   "c": ("subflow.flow_call", {"flow": "child"}), "r": "action.t_record"},

@@ -10,9 +10,13 @@
 // cannot be saved (reason in the tooltip), Layout arranges the graph (one undo entry).
 // Problems button (errors / warnings of the validation, toggles the dock) and the
 // "invalide" badge (.tag.err) while the document has errors (03 §5).
+// P5: Activer opens ActivationDialog; tag "actif vN", and "vM non activee" when a newer
+// version exists (03 §6: the active version keeps running until the next activation).
+// P6c: Bridges opens BridgesDialog (extension bridges).
 
+import { useState } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert } from 'lucide-react'
+import { ArrowRightLeft, ArrowUpFromLine, ChevronDown, Copy, Pencil, Trash2, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert, Power, Plug } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -26,6 +30,10 @@ export interface FileActions {
   onSaveAs: () => void
   onIncrement: () => void
   onMigrate: () => void
+  // ADR 0069: right click on a flow of Open, and the same operations for the open flow.
+  onFlowMenu: (entry: FlowListEntry, x: number, y: number) => void
+  onManage: (op: 'duplicate' | 'rename' | 'move' | 'delete') => void
+  manageBlocked: (op: 'duplicate' | 'rename' | 'move' | 'delete') => string | null
 }
 
 export interface RunActions {
@@ -39,9 +47,11 @@ export interface RunActions {
   onToggleRuns: () => void
 }
 
+export interface ActivationInfo { active: boolean; activeVersion: number | null; current: number; onOpen: () => void }
+
 export interface ProblemsInfo { errors: number; warnings: number; state: 'idle' | 'checking' | 'ok' | 'down'; open: boolean; onToggle: () => void }
 
-export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions }: {
+export function TopBar({ flows, current, scope, version, legacy, dirty, showPerso, saveBlocked, canMigrate, search, dots, straight, actions, run, problems, activation, trail, onCrumb, onSearch, onToggleDots, onToggleWires, onLayout, onBackdrop, onNote, onVersions, onBridges }: {
   flows: FlowListEntry[]
   current: string
   scope?: FlowScope
@@ -57,6 +67,9 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   actions: FileActions
   run: RunActions
   problems: ProblemsInfo
+  activation?: ActivationInfo
+  trail?: string[]             // flows we entered a DCC node from (breadcrumb, P6a)
+  onCrumb?: (index: number) => void
   onSearch: (s: string) => void
   onToggleDots: () => void
   onToggleWires: () => void
@@ -64,19 +77,22 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
   onBackdrop: () => void
   onNote: () => void
   onVersions: () => void
+  onBridges?: () => void       // P6c: Flows > Bridges (extension bridges)
 }) {
   const { tr } = useTr()
   const groups: { key: FlowCategory; label: string }[] = [
     { key: 'pipe', label: tr('Pipe', 'Pipe') },
     { key: 'project', label: tr('Projet', 'Project') },
     ...(showPerso ? [{ key: 'perso' as const, label: tr('Perso', 'Personal') }] : []),
+    { key: 'examples', label: tr('Exemples (lecture seule : clic droit > Dupliquer)', 'Examples (read only: right click > Duplicate)') },
   ]
+  const [fileOpen, setFileOpen] = useState(false)
   const scopeTag: Record<FlowScope, string> = {
     shipped: tr('livre', 'shipped'), team: tr('equipe', 'team'), project: tr('projet', 'project'), perso: tr('perso', 'personal'),
   }
   return (
     <div style={{ height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>
-      <Menu.Root modal={false}>
+      <Menu.Root modal={false} open={fileOpen} onOpenChange={setFileOpen}>
         <Menu.Trigger asChild>
           <button type="button" className="flow-tool">{tr('Fichier', 'File')} <ChevronDown size={12} /></button>
         </Menu.Trigger>
@@ -95,7 +111,8 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
                         <Menu.Label className="flow-menu-label">{g.label}</Menu.Label>
                         {list.length === 0 && <Menu.Item className="flow-menu-item" disabled>{tr('Aucun flow', 'No flow')}</Menu.Item>}
                         {list.map(f => (
-                          <Menu.Item key={`${f.scope}:${f.name}`} className="flow-menu-item" onSelect={() => actions.onOpen(f)}>
+                          <Menu.Item key={`${f.scope}:${f.name}`} className="flow-menu-item" onSelect={() => actions.onOpen(f)}
+                                     onContextMenu={e => { e.preventDefault(); setFileOpen(false); actions.onFlowMenu(f, e.clientX, e.clientY) }}>
                             {f.name}
                             {g.key === 'pipe' && f.scope === 'team' && <span className="tag">{tr('equipe', 'team')}</span>}
                             {f.name === current && <span className="shortcut">{tr('ouvert', 'open')}</span>}
@@ -113,6 +130,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
             <Menu.Item className="flow-menu-item" disabled={!!saveBlocked} title={saveBlocked} onSelect={actions.onIncrement}>{tr('Enregistrer et incrementer', 'Save and increment')}<span className="shortcut">Alt+Maj+S</span></Menu.Item>
             <Menu.Item className="flow-menu-item" disabled={!current} onSelect={onVersions}><History size={13} /> {tr('Versions…', 'Versions…')}</Menu.Item>
             <Menu.Separator className="flow-menu-sep" />
+            {([['duplicate', <Copy size={13} />, tr('Dupliquer…', 'Duplicate…')], ['rename', <Pencil size={13} />, tr('Renommer…', 'Rename…')],
+               ['move', <ArrowRightLeft size={13} />, tr('Changer de portee…', 'Change scope…')], ['delete', <Trash2 size={13} />, tr('Supprimer…', 'Delete…')]] as const).map(([op, icon, label]) => {
+              const why = current ? actions.manageBlocked(op) : tr('Aucun flow ouvert', 'No open flow')
+              return <Menu.Item key={op} className="flow-menu-item" disabled={!!why} title={why ?? undefined} onSelect={() => actions.onManage(op)}>{icon} {label}</Menu.Item>
+            })}
+            <Menu.Separator className="flow-menu-sep" />
             <Menu.Item className="flow-menu-item" disabled={!canMigrate} title={canMigrate ? undefined : tr('Case Team TD requise', 'Team TD box required')} onSelect={actions.onMigrate}>
               <ArrowUpFromLine size={13} /> {tr('Migrer les actions v1…', 'Migrate v1 actions…')}
             </Menu.Item>
@@ -120,6 +143,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
         </Menu.Portal>
       </Menu.Root>
 
+      {(trail ?? []).map((name, i) => (
+        <span key={`${i}:${name}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+          <button type="button" className="flow-tool" onClick={() => onCrumb?.(i)} title={tr('Remonter (U)', 'Go up (U)')}>{name}</button>
+          <ChevronRight size={12} color="var(--ink-3)" />
+        </span>
+      ))}
       <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)', marginLeft: 4 }}>{current || '…'}</span>
       {scope && <span className="tag">{scopeTag[scope]}</span>}
       {!!version && <span className="tag" style={{ cursor: 'pointer' }} onClick={onVersions} title={tr('Versions et historique', 'Versions and history')}>v{String(version).padStart(3, '0')}</span>}
@@ -127,6 +156,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       {saveBlocked && current && <span className="tag" title={saveBlocked}>{tr('lecture seule', 'read-only')}</span>}
       {problems.errors > 0 && <span className="tag err" title={tr('Enregistrable, mais non activable tant qu\'il reste des erreurs', 'Can be saved, but not activated while errors remain')}>{tr('invalide', 'invalid')}</span>}
       {dirty && !saveBlocked && <span className="tag" title={tr('Ctrl+S pour enregistrer', 'Ctrl+S to save')}>{tr('modifie', 'modified')}</span>}
+      {activation?.active && <span className="tag" title={tr('Version lancee par les evenements', 'Version started by the events')}>{tr('actif', 'active')} v{String(activation.activeVersion ?? 0).padStart(3, '0')}</span>}
+      {activation?.active && activation.current > (activation.activeVersion ?? 0) && (
+        <span className="tag" title={tr('L\'ancienne version tourne jusqu\'a la prochaine activation', 'The old version runs until the next activation')}>
+          v{String(activation.current).padStart(3, '0')} {tr('non activee', 'not activated')}
+        </span>
+      )}
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
       {run.running
@@ -147,6 +182,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       <button type="button" className={`flow-tool${run.runsOpen ? ' on' : ''}`} onClick={run.onToggleRuns} title={tr('Historique des runs', 'Run history')}>
         <ListChecks size={13} /> Runs
       </button>
+      {activation && (
+        <button type="button" className={`flow-tool${activation.active ? ' on' : ''}`} onClick={activation.onOpen}
+                title={tr('Activer : une version figee (Enregistrer et incrementer), 0 erreur, avertissements lus, essai a blanc reussi', 'Activate: a frozen version (Save and increment), 0 error, warnings read, dry run passed')}>
+          <Power size={13} /> {activation.active ? tr('Actif', 'Active') : tr('Activer', 'Activate')}
+        </button>
+      )}
 
       <div style={{ width: 1, height: 20, background: 'var(--rule)', margin: '0 6px' }} />
       <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onLayout} title={saveBlocked ?? tr('Range le graph de gauche a droite (annulable)', 'Arranges the graph left to right (undoable)')}>
@@ -157,6 +198,11 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
       <button type="button" className="flow-tool" disabled={!!saveBlocked} onClick={onNote} title={saveBlocked ?? tr('Note au centre de la vue (N : a la souris)', 'Note at the view centre (N: at the mouse)')}><StickyNote size={13} /> {tr('Note', 'Sticky note')}</button>
 
       <div style={{ flex: 1 }} />
+      {onBridges && (
+        <button type="button" className="flow-tool" onClick={onBridges} title={tr('Bridges d\'extension : logiciels ajoutes sans recompiler FLUX', 'Extension bridges: software added without rebuilding FLUX')}>
+          <Plug size={13} /> Bridges
+        </button>
+      )}
       <button type="button" className={`flow-tool${dots ? ' on' : ''}`} onClick={onToggleDots} title={tr('Points du fond', 'Background dots')}>
         <Grid3x3 size={13} />
       </button>

@@ -22,6 +22,8 @@
 #   <id>.resp           written here:    {status: ok | error, ...}
 # Actions: ping, info, export {exportPath, name, format, options, zprj},
 #          import {path, options}, shutdown.
+# Flows verbs (P6b step 9, 2026-10-24, TO VALIDATE LIVE): open {path .zprj, discard},
+#          save, save_as {path .zprj}, run {code, secret} (machine secret read in APPDATA).
 #
 # NOTE: export_api function names and ImportExportOption fields changed across
 # Marvelous versions; they are looked up defensively and must be verified live.
@@ -543,8 +545,100 @@ def _do_export(config):
     return {'status': 'ok', 'files': files, 'warnings': warnings}
 
 
+# -- Flows verbs (P6b step 9) ------------------------------------------------
+
+
+def _secret():
+    # The machine secret of the run action. Marvelous execs this script (no __file__):
+    # read from %APPDATA%/FluxPipeline/bridge_secret.txt, created by the FLUX install.
+    appdata = os.environ.get('APPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
+    try:
+        with open(os.path.join(appdata, 'FluxPipeline', 'bridge_secret.txt')) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ''
+
+
+def _same(a, b):
+    try:
+        import hmac
+        return hmac.compare_digest(a, b)
+    except Exception:  # noqa: BLE001 - no hmac in this embedded Python
+        return a == b
+
+
+def _verb_args(cmd):
+    # Flows verbs send their fields at the top level; config is accepted too.
+    cfg = dict(cmd.get('config') or {})
+    cfg.update({k: v for k, v in cmd.items() if k not in ('action', 'config')})
+    return cfg
+
+
+def _do_open(cfg):
+    # A .zprj replaces the scene: Marvelous does not tell whether it is modified.
+    path = str(cfg.get('path') or '').replace(chr(92), '/')
+    if not path.lower().endswith('.zprj'):
+        return {'status': 'error', 'msg': 'open : un projet .zprj attendu'}
+    if not cfg.get('discard'):
+        return {'status': 'error', 'msg': 'Marvelous ne dit pas si le projet est modifie : coche discard_changes '
+                                          'pour ouvrir (le travail non enregistre est perdu)'}
+    resp = _do_import({'path': path})
+    if resp.get('status') == 'ok':
+        resp['project'] = path
+    return resp
+
+
+def _save_zprj(path):
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    got = _call_export('zprj', path, {})
+    _diag('save zprj %s: %s' % (path, got))
+    return {'status': 'ok', 'project': path, 'files': got}
+
+
+def _do_save(cfg):
+    _name, path = _project()
+    if not path.lower().endswith('.zprj'):
+        return {'status': 'error', 'msg': 'projet jamais enregistre (ou chemin inconnu) : utilise mvdSaveAs'}
+    return _save_zprj(path.replace(chr(92), '/'))
+
+
+def _do_save_as(cfg):
+    path = str(cfg.get('path') or '').replace(chr(92), '/')
+    if not path.lower().endswith('.zprj'):
+        return {'status': 'error', 'msg': 'save_as : un projet .zprj attendu'}
+    return _save_zprj(path)
+
+
+def _do_run(cfg):
+    import traceback
+    expected = _secret()
+    if not expected or not _same(str(cfg.get('secret') or ''), expected):
+        return {'ok': False, 'status': 'error',
+                'error': 'secret du bridge refuse : reinstalle le bridge Marvelous depuis FLUX'}
+    ns = {'__name__': '__flux_flow__'}
+    for name in ('export_api', 'import_api', 'utility_api', 'pattern_api', 'fabric_api'):
+        ns[name] = _module(name)
+    try:
+        exec(compile(str(cfg.get('code') or ''), '<flux flow>', 'exec'), ns)
+    except Exception as exc:  # noqa: BLE001
+        return {'ok': False, 'status': 'error', 'error': str(exc), 'trace': traceback.format_exc()}
+    result = ns.get('result')
+    try:
+        json.dumps(result)
+    except (TypeError, ValueError):
+        result = repr(result)
+    return {'ok': True, 'status': 'ok', 'result': result, 'trace': ''}
+
+
+_VERBS = {'open': _do_open, 'save': _do_save, 'save_as': _do_save_as, 'run': _do_run}
+
+
 def _dispatch(cmd):
     action = cmd.get('action', '')
+    if action in _VERBS:
+        if not _MD_AVAILABLE:
+            return {'status': 'error', 'msg': 'export_api non disponible (script lance hors de Marvelous ?)'}
+        return _VERBS[action](_verb_args(cmd))
     if action == 'ping':
         return {'status': 'ok', 'version': _version() if _MD_AVAILABLE else 'Marvelous Designer'}
     if action == 'info':

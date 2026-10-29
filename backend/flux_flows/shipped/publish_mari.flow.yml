@@ -1,0 +1,50 @@
+flux_flow: 2
+name: publish_mari
+label: "Publish Mari"
+description: "Flow de publish Mari (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish) -> mariPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher n'est pas encore bascule dessus (P8) : on le lance a la main avec Run."
+run_policy: queue
+interface:
+  inputs:
+    - {id: "class", type: "str", label: "Token CLASS", default: ""}
+    - {id: "task", type: "str", label: "Token TYPE (tache)", default: ""}
+    - {id: "name", type: "str", label: "Token NAME", default: ""}
+    - {id: "instance", type: "str", label: "Token INSTANCE", default: "null"}
+    - {id: "format", type: "str", label: "Format (tif, exr, png)", default: "tif"}
+    - {id: "channels", type: "list[str]", label: "Channels (vide = tous)"}
+    - {id: "conform_tx", type: "bool", label: "Ecrire aussi les .tx", default: false}
+    - {id: "description", type: "str", label: "Description du publish (journal)", default: ""}
+  outputs:
+    - {id: path, type: path, label: "Fichier publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+nodes:
+  ev: {type: event.publish_request, pos: [0, 160], params: {soft: mari}}
+  inst: {type: session.mari_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
+  in_class: {type: data.flow_input, pos: [320, 400], params: {id: class}}
+  in_task: {type: data.flow_input, pos: [320, 520], params: {id: task}}
+  in_name: {type: data.flow_input, pos: [320, 640], params: {id: name}}
+  in_instance: {type: data.flow_input, pos: [320, 760], params: {id: instance}}
+  in_format: {type: data.flow_input, pos: [320, 880], params: {id: format}}
+  in_channels: {type: data.flow_input, pos: [320, 1000], params: {id: channels}}
+  in_conform_tx: {type: data.flow_input, pos: [320, 1120], params: {id: conform_tx}}
+  in_description: {type: data.flow_input, pos: [320, 1240], params: {id: description}}
+  pub: {type: dcc.mari_publish, pos: [640, 160]}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+links:
+  - {from: ev.then, to: inst.exec}
+  - {from: inst.then, to: pub.exec}
+  - {from: inst.session, to: pub.session}
+  - {from: in_class.value, to: pub.class}
+  - {from: in_task.value, to: pub.task}
+  - {from: in_name.value, to: pub.name}
+  - {from: in_instance.value, to: pub.instance}
+  - {from: in_format.value, to: pub.format}
+  - {from: in_channels.value, to: pub.channels}
+  - {from: in_conform_tx.value, to: pub.conform_tx}
+  - {from: in_description.value, to: pub.description}
+  - {from: pub.then, to: out_path.exec}
+  - {from: pub.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: pub.version, to: out_version.value}
+notes:
+  - {id: k1, pos: [0, 1400], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et mariPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

@@ -20,6 +20,11 @@
 // from GET /flows/runs/{id} after a reconnection; Notify nodes show a toast; the Runs dock lists
 // the history and colours the graph with an opened run.
 // Entry needs the TD box (flows_td, 01 §7): without it the route shows "Acces refuse".
+// P5: Activer (ActivationDialog, 03 §5) on the frozen version `current`; WS `activation`
+// of the open flow refreshes its state.
+// P6a (03 §8): double click / Enter on a DCC node shipped as a locked subflow enters it (trail
+// shown as a breadcrumb in the top bar, U goes back up); DccBanner: Deverrouiller (team copy) and
+// Revenir au defaut. The core leaves (spec.internal) are left out of Tab / Shelf / Catalogue.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
@@ -29,7 +34,7 @@ import { api } from '../../api/client'
 import { flowsApi } from '../../api/flows'
 import { useFlowsWs } from '../../hooks/useFlowsWs'
 import { useProject } from '../../ProjectContext'
-import { MigrateDialog, NameDialog, scopeChoices } from './FileDialogs'
+import { MigrateDialog, NameDialog, START_NODE, scopeChoices, type StartKind } from './FileDialogs'
 import { GROUP_PREFIX, NetworkPane, NOTE_PREFIX, type EditActions } from './NetworkPane'
 import { NodePalette } from './NodePalette'
 import { NodeWriterDialog } from './NodeWriterDialog'
@@ -43,6 +48,11 @@ import { IssuesPanel, type CheckState } from './IssuesPanel'
 import { VersionsDialog } from './VersionsDialog'
 import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
 import { DestructiveDialog } from './DestructiveDialog'
+import { ActivationDialog } from './ActivationDialog'
+import { PageRunDialog, pageStarts, type PageClick } from './PageRunDialog'
+import { FlowOpDialogs, FlowOpMenu, opBlocked, type FlowOpRequest, type FlowRef } from './FlowManage'
+import { BridgesDialog } from './BridgesDialog'
+import { DccBanner } from './DccBanner'
 import { destructiveAdded } from './destructive'
 import { registerCloseGuard } from '../../components/shared/closeGuard'
 import { applyFix, autoBegin } from './fixes'
@@ -65,6 +75,7 @@ const DRAFT_PREFIX = 'flux.flow_draft.'
 type ViewPrefs = { dots: boolean; straight: boolean }
 type HttpError = Error & { status?: number; detail?: { by?: string; at?: string; status?: string; code?: string; issues?: RunIssue[] } }
 type RunStates = Record<string, NodeRunInfo>
+type RunLinks = RunRecord['links']   // value per link "a.port->b.port"
 
 function readPrefs(): ViewPrefs {
   try {
@@ -87,6 +98,9 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [wantedVersion, setWantedVersion] = useState<number | undefined>(undefined)   // Voir vNNN (read-only)
   const [reloadKey, setReloadKey] = useState(0)
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [activationOpen, setActivationOpen] = useState(false)
+  const [bridgesOpen, setBridgesOpen] = useState(false)
+  const [trail, setTrail] = useState<{ name: string; scope: FlowScope }[]>([])   // DCC nodes entered
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   // "!" nodes to confirm with the slider before a save; resolve(true) = confirmed.
   const [destructive, setDestructive] = useState<{ ids: string[]; resolve: (ok: boolean) => void } | null>(null)
@@ -112,15 +126,20 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [error, setError] = useState<string | null>(null)
   const [prefs, setPrefs] = useState<ViewPrefs>(readPrefs)
   const [dialog, setDialog] = useState<'new' | 'saveas' | null>(null)
+  // ADR 0069: right-click menu of a flow in Open, and the Dupliquer / Renommer / portee / Supprimer dialogs.
+  const [opMenu, setOpMenu] = useState<{ at: { x: number; y: number }; flow: FlowRef } | null>(null)
+  const [opReq, setOpReq] = useState<FlowOpRequest | null>(null)
   const [migration, setMigration] = useState<MigrateReport | null>(null)
   const [busy, setBusy] = useState(false)
   // Runs: the run launched from this window (live), the node states shown, the Runs dock.
   const [liveRun, setLiveRun] = useState<{ id: string; running: boolean } | null>(null)
   const [runStates, setRunStates] = useState<RunStates>({})
+  const [runLinks, setRunLinks] = useState<RunLinks>({})
   const [runsOpen, setRunsOpen] = useState(false)
   const [openRunId, setOpenRunId] = useState<string | null>(null)
   const [runsKey, setRunsKey] = useState(0)
   const runBuf = useRef<Record<string, RunStates>>({})   // states per run_id, also before POST answers
+  const linkBuf = useRef<Record<string, RunLinks>>({})   // link values per run_id (link_value)
   const liveRef = useRef<string | null>(null)
 
   const refreshList = useCallback(() => {
@@ -241,6 +260,8 @@ function Editor({ rights }: { rights: FlowRights }) {
     return () => { alive = false; clearTimeout(t) }
   }, [doc, loaded?.scope, loaded?.name, project])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Tab, Shelf and Catalogue never offer the core leaves of the DCC nodes (they live inside them).
+  const menuCatalog = useMemo(() => catalog ? catalog.filter(e => !e.spec?.internal) : null, [catalog])
   const specs = useMemo<SpecIndex>(() => Object.fromEntries((catalog ?? []).filter(e => e.spec).map(e => [e.type, e.spec!])), [catalog])
   const view = useMemo(() => doc && loaded ? adaptV2Flow(doc, { readOnly: !!saveBlocked, origin: loaded.scope, specs }) : null, [doc, loaded, saveBlocked, specs])
 
@@ -300,9 +321,22 @@ function Editor({ rights }: { rights: FlowRights }) {
   const quit = useCallback(() => saveDoc('save', { quiet: true }), [saveDoc])
   useEffect(() => registerCloseGuard(quit), [quit])
   const open = useCallback(async (name: string, scope?: FlowScope, version?: number) => {
-    if (!(await quit())) return
+    if (!(await quit())) return false
     switchTo(name, scope, version)
+    return true
   }, [quit, switchTo])
+
+  // Enter a DCC node (its locked subflow, or the team copy), and back up (U, breadcrumb).
+  const enter = useCallback(async (node: { spec?: { subflow?: { name: string; scope: FlowScope } | null } }) => {
+    const sub = node.spec?.subflow
+    if (!sub || !loaded) return
+    const here = { name: loaded.name, scope: loaded.scope }
+    if (await open(sub.name, sub.scope)) setTrail(t => [...t, here])
+  }, [loaded, open])
+  const upTo = useCallback(async (index: number) => {
+    const target = trail[index]
+    if (target && await open(target.name, target.scope)) setTrail(t => t.slice(0, index))
+  }, [trail, open])
 
   const revert = useCallback((version: number) => {
     if (!loaded) return
@@ -317,12 +351,12 @@ function Editor({ rights }: { rights: FlowRights }) {
       .catch((e: Error) => toast.error(e.message))
   }, [loaded, project, switchTo, tr])
 
-  const create = useCallback(async (name: string, scope: FlowScope) => {
-    // Nouveau: an empty flow headed by event.manual. Enregistrer sous: the open document renamed
-    // (a new file: every `!` node is confirmed with the slider, 01 §8).
+  const create = useCallback(async (name: string, scope: FlowScope, start: StartKind = 'manual') => {
+    // Nouveau: an empty flow headed by the start picked in the dialog (ADR 0068 n°5). Enregistrer
+    // sous: the open document renamed (a new file: every `!` node is confirmed with the slider, 01 §8).
     const next: FlowDoc = dialog === 'saveas' && doc
       ? { ...doc, name }
-      : { flux_flow: 2, name, label: name, nodes: { n1: { type: 'event.manual', pos: [0, 0], params: {} } }, links: [] }
+      : { flux_flow: 2, name, label: name, nodes: { n1: { type: START_NODE[start], pos: [0, 0], params: {} } }, links: [] }
     const bang = destructiveAdded(next, null, specs)
     if (bang.length && !(await askDestructive(bang))) return
     flowsApi.save(next, scope, { project: project || undefined, confirmed_destructive: bang })
@@ -343,10 +377,16 @@ function Editor({ rights }: { rights: FlowRights }) {
     liveRef.current = id
     setOpenRunId(null)
     setRunStates({ ...(runBuf.current[id] ?? {}) })
+    setRunLinks({ ...(linkBuf.current[id] ?? {}) })
   }, [])
 
   const onWs = useCallback((msg: FlowsWsMessage) => {
-    if (msg.type === 'hello') return
+    if (msg.type === 'hello' || msg.type === 'host' || msg.type === 'flow_changed') return
+    if (msg.type === 'activation') {
+      setLoaded(l => l && l.name === msg.flow && l.scope === msg.scope
+        ? { ...l, state: { ...l.state, active: msg.active, active_version: msg.version } } : l)
+      return
+    }
     if (msg.type === 'notify') {
       const text = `${msg.flow} : ${msg.text}`
       if (msg.level === 'error') toast.error(text)
@@ -361,11 +401,17 @@ function Editor({ rights }: { rights: FlowRights }) {
       if (msg.run_id === liveRef.current) setRunStates({ ...buf })
       return
     }
+    if (msg.type === 'link_value') {
+      const buf = (linkBuf.current[msg.run_id] ??= {})
+      buf[msg.link] = { value: msg.preview, count: msg.count }
+      if (msg.run_id === liveRef.current) setRunLinks({ ...buf })
+      return
+    }
     if (msg.type === 'run_finished' && msg.run_id === liveRef.current) {
       setLiveRun(r => r && r.id === msg.run_id ? { ...r, running: false } : r)
       setRunsKey(k => k + 1)
       // The record has the values received of a failed node: reread it once.
-      flowsApi.getRun(msg.run_id, project || undefined).then(r => setRunStates(r.nodes)).catch(() => { /* WS states stay */ })
+      flowsApi.getRun(msg.run_id, project || undefined).then(r => { setRunStates(r.nodes); setRunLinks(r.links ?? {}) }).catch(() => { /* WS states stay */ })
       const secs = msg.duration_ms !== null ? ` (${(msg.duration_ms / 1000).toFixed(1)} s)` : ''
       const what = msg.mode === 'dry' ? tr('Essai a blanc', 'Dry run') : 'Run'
       if (msg.status === 'ok') toast.success(tr(`${what} fini${secs}`, `${what} done${secs}`))
@@ -379,17 +425,19 @@ function Editor({ rights }: { rights: FlowRights }) {
     if (!id) return
     flowsApi.getRun(id, project || undefined).then(r => {
       setRunStates(r.nodes)
+      setRunLinks(r.links ?? {})
       setLiveRun(cur => cur && cur.id === id ? { ...cur, running: r.status === 'queued' || r.status === 'running' } : cur)
     }).catch(() => { /* run of a restarted backend: interrupted */ })
   }, [project])
 
   const wsUp = useFlowsWs(onWs, onWsReconnect)
 
-  const launch = useCallback((dry: boolean) => {
+  const launch = useCallback((dry: boolean, click?: PageClick) => {
     if (!loaded || !doc) return
-    const opts = dry
+    const base = dry
       ? { scope: loaded.scope, project: project || undefined, dry_run: true }
       : { scope: loaded.scope, project: project || undefined, draft: doc, base_revision: loaded.state.revision }
+    const opts = click ? { ...base, event: click.event, button: click.button, values: click.values } : base
     flowsApi.run(loaded.name, opts)
       .then(r => { setLiveRun({ id: r.run_id, running: true }); showLive(r.run_id) })
       .catch((e: HttpError) => {
@@ -399,19 +447,27 @@ function Editor({ rights }: { rights: FlowRights }) {
       })
   }, [loaded, doc, project, showLive])
 
+  // A page flow (InputsPageReader with buttons): Run / Essai ask which button and the field values (T1).
+  const starts = useMemo(() => pageStarts(doc), [doc])
+  const [pageRun, setPageRun] = useState<{ dry: boolean } | null>(null)
+  const startRun = useCallback((dry: boolean) => {
+    if (starts.length) setPageRun({ dry })
+    else launch(dry)
+  }, [starts, launch])
+
   const stop = useCallback(() => {
     if (!liveRun) return
     flowsApi.cancelRun(liveRun.id, project || undefined).catch((e: Error) => toast.error(e.message))
   }, [liveRun, project])
 
   const openRecord = useCallback((r: RunRecord | null) => {
-    if (r) setRunStates(r.nodes)
-    else if (liveRef.current) setRunStates({ ...(runBuf.current[liveRef.current] ?? {}) })
-    else setRunStates({})
+    if (r) { setRunStates(r.nodes); setRunLinks(r.links ?? {}) }
+    else if (liveRef.current) { setRunStates({ ...(runBuf.current[liveRef.current] ?? {}) }); setRunLinks({ ...(linkBuf.current[liveRef.current] ?? {}) }) }
+    else { setRunStates({}); setRunLinks({}) }
   }, [])
 
   // A new flow opened: no run states from the previous one.
-  useEffect(() => { liveRef.current = null; setLiveRun(null); setRunStates({}); setOpenRunId(null) }, [loaded?.name, loaded?.scope])
+  useEffect(() => { liveRef.current = null; setLiveRun(null); setRunStates({}); setRunLinks({}); setOpenRunId(null) }, [loaded?.name, loaded?.scope])
 
   const running = !!liveRun?.running
   const runBlocked = !loaded ? tr('Aucun flow ouvert', 'No open flow')
@@ -458,6 +514,18 @@ function Editor({ rights }: { rights: FlowRights }) {
   const onSelect = useCallback((ids: string[]) => setSelection(cur =>
     ids.length === cur.size && ids.every(id => cur.has(id)) ? cur : new Set(ids)), [])
   const selectNode = useCallback((id: string) => onSelect([id]), [onSelect])
+  // R1 retake 9: the flow panel places a FlowInput / FlowOutput, left of the graph, selected.
+  const placeNode = useCallback((type: string, params: Record<string, unknown>) => {
+    if (saveBlocked) { toast.info(saveBlocked); return }
+    const d = docOf(store.get())
+    if (!d) return
+    const nodes = Object.values(d.nodes ?? {})
+    const x = nodes.length ? Math.min(...nodes.map(n => n.pos?.[0] ?? 0)) - 320 : 0
+    const y = nodes.length ? Math.max(...nodes.map(n => n.pos?.[1] ?? 0)) + 160 : 0
+    const id = nextNodeId(d)
+    store.apply(cur => addNode(cur, id, { type, pos: [x, y], params }))
+    setSelection(new Set([id]))
+  }, [saveBlocked, store])
 
   const edit = useMemo<EditActions>(() => ({
     onMove: positions => store.apply(d => moveNodes(d, positions)),
@@ -484,8 +552,19 @@ function Editor({ rights }: { rights: FlowRights }) {
         setSelection(new Set([...Object.keys(block.nodes), ...block.notes.map(n => NOTE_PREFIX + n.id)]))
       }).catch(() => toast.error(tr('Presse-papiers indisponible', 'Clipboard unavailable')))
     },
+    // Alt + drag: a copy of the nodes (and the links between them) with its top-left at `at`.
+    onDuplicate: (ids, at) => {
+      const d = docOf(store.get())
+      const clip = d && copySelection(d, ids)
+      if (!d || !clip) return
+      const block = pasteBlock(d, clip, at)
+      store.apply(cur => insertBlock(cur, block))
+      setSelection(new Set(Object.keys(block.nodes)))
+    },
     onConnect: (from, to) => store.apply(d => connect(d, from, to)),
     onDisconnect: links => store.apply(d => disconnect(d, links)),
+    // A link picked up from its input: moved to `to`, or removed (null). One undo entry.
+    onRelink: (old, to) => store.apply(d => to ? connect(disconnect(d, [old]), old.from, to) : disconnect(d, [old])),
     // One undo entry: the node and, from a link dropped in the void, its link.
     onGroup: () => {
       if (!picked.nodes.length) return
@@ -533,13 +612,26 @@ function Editor({ rights }: { rights: FlowRights }) {
     requestAnimationFrame(() => rf.fitView({ padding: 0.15, duration: 250 }))
   }, [store, rf])
 
-  // Shelf / Catalogue click: the node at the centre of the view.
+  // Shelf / Catalogue click: after the selected node (R1 audit P3.3, 2026-10-25: placed on
+  // its right, its first free exec output linked to the new exec, like stacking Scratch blocks),
+  // else at the centre of the view. Ctrl+Z undoes both.
   const onPick = useCallback((e: CatalogEntry) => {
     if (saveBlocked) { toast.info(saveBlocked); return }
+    const d = docOf(store.get())
+    const sel = selected && d?.nodes[selected.id] ? selected : null
+    if (sel && d && e.spec?.inputs.some(p => p.type === 'exec')) {
+      const taken = new Set(d.links.map(l => l.from))
+      const out = sel.outputs.find(o => o.type === 'exec' && o.name !== 'on_error' && !taken.has(`${sel.id}.${o.name}`))
+      if (out) {
+        const pos = d.nodes[sel.id].pos ?? [0, 0]
+        edit.onAdd(e, [pos[0] + 320, pos[1]], { end: { node: sel.id, port: out.name, side: 'out' }, port: 'exec' })
+        return
+      }
+    }
     const r = document.querySelector('.react-flow')?.getBoundingClientRect()
     const p = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 }
     edit.onAdd(e, [p.x - 120, p.y - 30])
-  }, [saveBlocked, rf, edit])
+  }, [saveBlocked, rf, edit, store, selected])
 
   // Problems panel: a click frames the node (250 ms), selects it, it blinks once.
   const goToNode = useCallback((id: string) => {
@@ -587,15 +679,18 @@ function Editor({ rights }: { rights: FlowRights }) {
         straight={prefs.straight}
         actions={{
           onNew: () => setDialog('new'),
-          onOpen: f => open(f.name, f.scope),
+          onOpen: f => { void open(f.name, f.scope).then(ok => { if (ok) setTrail([]) }) },
           onSave: () => save(),
           onSaveAs: () => setDialog('saveas'),
           onIncrement: () => increment(),
           onMigrate: () => migrate(true),
+          onFlowMenu: (f, x, y) => setOpMenu({ at: { x, y }, flow: { name: f.name, scope: f.scope } }),
+          onManage: op => { if (loaded) setOpReq({ op, flow: { name: loaded.name, scope: loaded.scope } }) },
+          manageBlocked: op => loaded ? opBlocked(op, loaded, rights, tr) : tr('Aucun flow ouvert', 'No open flow'),
         }}
         run={{
           running, runBlocked, dryBlocked, runsOpen,
-          onRun: () => launch(false), onDry: () => launch(true), onStop: stop,
+          onRun: () => startRun(false), onDry: () => startRun(true), onStop: stop,
           onToggleRuns: () => setRunsOpen(v => !v),
         }}
         problems={{
@@ -613,6 +708,13 @@ function Editor({ rights }: { rights: FlowRights }) {
           edit.onNote([p.x, p.y])
         }}
         onVersions={() => setVersionsOpen(true)}
+        onBridges={() => setBridgesOpen(true)}
+        trail={trail.map(t => t.name)}
+        onCrumb={i => { void upTo(i) }}
+        activation={loaded && !loaded.dcc ? {
+          active: loaded.state.active, activeVersion: loaded.state.active_version, current: loaded.state.current,
+          onOpen: () => setActivationOpen(true),
+        } : undefined}
       />
       {loaded && loaded.version !== null && (
         <div className="flow-banner">
@@ -622,15 +724,32 @@ function Editor({ rights }: { rights: FlowRights }) {
           </button>
         </div>
       )}
+      {loaded?.dcc && (
+        <DccBanner
+          name={loaded.name} locked={loaded.dcc.locked} teamCopy={loaded.dcc.team_copy} canUnlock={rights.team_td}
+          onUnlock={() => {
+            flowsApi.unlock(loaded.name, project || undefined)
+              .then(() => { toast.success(tr(`${loaded.name} deverrouille : copie d'equipe creee`, `${loaded.name} unlocked: team copy created`)); refreshList(); loadCatalog(); switchTo(loaded.name, 'team') })
+              .catch((e: Error) => toast.error(e.message))
+          }}
+          onRevert={() => {
+            flowsApi.remove(loaded.name, 'team', project || undefined)
+              .then(() => { toast.success(tr(`${loaded.name} : node livre retabli`, `${loaded.name}: shipped node restored`)); refreshList(); loadCatalog(); switchTo(loaded.name, 'shipped') })
+              .catch((e: Error) => toast.error(e.message))
+          }}
+        />
+      )}
       {loaded?.legacy && (
         <div className="flow-banner">
           {tr('Flow migre des actions v1. Le publish tourne encore sur les actions v1 (jusqu\'a P8) : ce flow ne s\'active pas.',
               'Flow migrated from the v1 actions. Publishing still runs on the v1 actions (until P8): this flow does not activate.')}
         </div>
       )}
-      <ShelfBar catalog={catalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)} />
+      <ShelfBar catalog={menuCatalog} paletteOpen={paletteOpen} onPick={onPick} onTogglePalette={() => setPaletteOpen(v => !v)}
+                flowKey={loaded ? `${loaded.scope}/${loaded.name}` : undefined}
+                startFamily={doc && Object.values(doc.nodes ?? {}).every(n => n.type.startsWith('event.')) ? 'event' : 'flux'} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {paletteOpen && <NodePalette catalog={catalog} errors={nodeErrors} canWriteNode={rights.team_td} onNewNode={() => setWriting(true)}
+        {paletteOpen && <NodePalette catalog={menuCatalog} errors={nodeErrors} canWriteNode={rights.team_td} onNewNode={() => setWriting(true)}
                                      onPick={onPick} onClose={() => setPaletteOpen(false)} />}
         {error
           ? <div style={{ flex: 1, padding: 20, fontSize: 12, color: 'var(--ink-3)' }}>
@@ -639,14 +758,17 @@ function Editor({ rights }: { rights: FlowRights }) {
           : <NetworkPane
               view={view} flowKey={loaded ? `${loaded.scope}:${loaded.name}:${loaded.version ?? ''}` : ''}
               selection={selection} edit={edit}
-              search={search} dots={prefs.dots} straight={prefs.straight} catalog={catalog} runStates={runStates}
+              search={search} dots={prefs.dots} straight={prefs.straight} catalog={menuCatalog} runStates={runStates} runLinks={runLinks}
+              onEnter={n => { void enter(n) }} onUp={trail.length ? () => { void upTo(trail.length - 1) } : undefined}
               issues={issues} flash={flash}
               onSelect={onSelect} onToggleWires={toggleWires}
             />}
         <ParamsPane
           selected={selected} params={(selected && doc?.nodes[selected.id]?.params) || {}}
-          editable={!saveBlocked} edits={nodeEdits}
-          flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} />}
+          editable={!saveBlocked} edits={nodeEdits} flowName={doc?.name}
+          iface={{ inputs: (doc?.interface?.inputs ?? []).map(x => x.id), outputs: (doc?.interface?.outputs ?? []).map(x => x.id),
+                   variables: (doc?.variables ?? []).map(v => v.name) }}
+          flowPart={<FlowParams doc={doc} editable={!saveBlocked} onFields={onFlowFields} onPlaceNode={placeNode} onSelectNode={selectNode} />}
         />
       </div>
       {issuesOpen && loaded && (
@@ -664,6 +786,7 @@ function Editor({ rights }: { rights: FlowRights }) {
         initialName={dialog === 'saveas' && loaded ? `${loaded.name.replace(LEGACY_PREFIX, '')}_copy`.slice(0, 41) : ''}
         initialScope={loaded?.scope === 'shipped' ? 'team' : loaded?.scope}
         choices={choices}
+        askStart={dialog === 'new'}
         onClose={() => setDialog(null)}
         onConfirm={create}
       />
@@ -677,6 +800,22 @@ function Editor({ rights }: { rights: FlowRights }) {
           onRevert={revert} onClose={() => setVersionsOpen(false)}
         />
       )}
+      <BridgesDialog open={bridgesOpen} canCreate={rights.team_td} onClose={() => setBridgesOpen(false)}
+                     onNodes={() => { refreshList(); loadCatalog() }} />
+      {loaded && (
+        <ActivationDialog
+          open={activationOpen} name={loaded.name} scope={loaded.scope} project={project || undefined} dirty={dirty}
+          starts={starts}
+          blocked={loaded.scope === 'shipped' ? tr('Flow livre : Deverrouiller (copie equipe) pour l\'activer', 'Shipped flow: Unlock (team copy) to activate it')
+            : loaded.legacy ? tr('Flow legacy : publish v1 jusqu\'a P8', 'Legacy flow: v1 publish until P8')
+            : !rights.can[loaded.scope]?.write ? (loaded.scope === 'perso' ? tr('Case TD requise', 'TD box required') : tr('Case Team TD requise', 'Team TD box required'))
+            : undefined}
+          onClose={() => setActivationOpen(false)}
+          onChanged={state => setLoaded(l => l ? { ...l, state: { ...l.state, ...state } } : l)}
+        />
+      )}
+      <PageRunDialog request={pageRun} starts={starts} project={project || undefined}
+                     onLaunch={launch} onClose={() => setPageRun(null)} />
       <ConflictDialog
         conflict={conflictInfo} onClose={() => setConflictInfo(null)}
         onTheirs={() => {
@@ -691,6 +830,26 @@ function Editor({ rights }: { rights: FlowRights }) {
       <DestructiveDialog
         nodes={destructiveNodes} params={Object.fromEntries(Object.entries(doc?.nodes ?? {}).map(([id, n]) => [id, n.params ?? {}]))}
         onGoTo={goToNode} onConfirm={() => closeDestructive(true)} onCancel={() => closeDestructive(false)}
+      />
+      <FlowOpMenu at={opMenu?.at ?? null} flow={opMenu?.flow ?? null} rights={rights}
+                  onClose={() => setOpMenu(null)} onPick={op => { if (opMenu) setOpReq({ op, flow: opMenu.flow }) }}
+                  onOpen={() => { if (opMenu) void open(opMenu.flow.name, opMenu.flow.scope).then(ok => { if (ok) setTrail([]) }) }} />
+      <FlowOpDialogs
+        request={opReq} choices={choices} project={project || undefined} dirty={dirty}
+        openFlow={loaded ? { name: loaded.name, scope: loaded.scope } : null}
+        onClose={() => setOpReq(null)}
+        onDone={(next, removedOpen) => {
+          const gone = opReq?.flow
+          setOpReq(null)
+          refreshList()
+          if (next) { setTrail([]); switchTo(next.name, next.scope) }
+          else if (removedOpen) {
+            // The open flow went to the trash: show another one (the first listed, else an example).
+            const other = flows.find(f => !f.shadowed && !(f.name === gone?.name && f.scope === gone?.scope))
+            setTrail([])
+            switchTo(other?.name ?? 'example_daily_render', other?.scope)
+          }
+        }}
       />
       <MigrateDialog report={migration} busy={busy} onClose={() => setMigration(null)} onConfirm={() => migrate(false)} />
     </div>

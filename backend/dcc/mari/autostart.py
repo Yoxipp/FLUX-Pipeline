@@ -144,6 +144,8 @@ def install(exe_path: str | None = None) -> dict:
         try:
             d.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(_PLUGIN_SRC, dest)
+            from dcc.bridge_secret import write_sidecar   # secret of the `run` action
+            write_sidecar(dest)
             _write_init_block(d)
             written.append(str(dest))
         except OSError as exc:              # e.g. a read-only studio MARI_SCRIPT_PATH
@@ -165,6 +167,8 @@ def uninstall(exe_path: str | None = None) -> dict:
         try:
             if f.exists():
                 f.unlink()
+            from dcc.bridge_secret import remove_sidecar
+            remove_sidecar(f)
             if init.is_file():
                 text = init.read_text(encoding="utf-8", errors="replace")
                 if _BLOCK_BEGIN in text:

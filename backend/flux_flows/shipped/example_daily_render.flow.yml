@@ -3,11 +3,8 @@ name: example_daily_render
 label: "Exemple : daily render"
 description: "Exemple P3 (02_NODES section 12, exemple 3, sans le Schedule de P5) : copie les captures Maya et Houdini publiees aujourd'hui dans un dossier date du jour, puis previent l'equipe. Copie sans ecrasement."
 run_policy: skip_if_running
-interface:
-  - {id: dest_folder, type: dir, label: "Dossier des dailies", default: "$FLUX/DAILY"}
 nodes:
-  n2: {type: event.button, pos: [0, 160], params: {button_id: daily_render}}
-  n3: {type: data.flow_input, pos: [0, 320], params: {id: dest_folder}}
+  n2: {type: event.page_inputs, pos: [0, 160], params: {page: daily_render, ports: {outputs: {dest_folder: dir, daily_render: exec}, labels: {dest_folder: Dossier, daily_render: "Lancer maintenant"}}}}
   n4: {type: flux.find_publishes, pos: [320, 160], params: {date: today, soft: "maya houdini", type: capture}}
   n5: {type: operator.date_now, pos: [0, 480], params: {}}
   n6: {type: operator.path_join, pos: [320, 400], params: {}}
@@ -18,8 +15,8 @@ nodes:
   n11: {type: operator.foreach_end, pos: [1600, 160], params: {begin: n8}}
   n12: {type: flux.notify, pos: [1920, 160], params: {text: "Daily copie", level: info, where: both}}
 links:
-  - {from: n2.then, to: n4.exec}
-  - {from: n3.value, to: n6.base}
+  - {from: n2.daily_render, to: n4.exec}
+  - {from: n2.dest_folder, to: n6.base}
   - {from: n5.date, to: n6.a}
   - {from: n6.path, to: n7.path}
   - {from: n4.then, to: n7.exec}
@@ -33,4 +30,5 @@ links:
   - {from: n11.done, to: n12.exec}
   - {from: n7.dir, to: n12.path}
 notes:
-  - {id: k1, pos: [0, 640], text: "Bouton daily_render de la page : copie les captures du jour dans <dest_folder>/<date>.\nUn re-run le meme jour echoue sur les fichiers deja copies (pas d'ecrasement).\nEssai a blanc : liste les copies, n'ecrit rien."}
+  - {id: k1, pos: [0, 640], text: "InputsPageReader : la page daily_render donne son bouton (Lancer maintenant) et son champ Dossier.
+Le bouton copie les captures du jour dans <dest_folder>/<date>.\nUn re-run le meme jour echoue sur les fichiers deja copies (pas d'ecrasement).\nEssai a blanc : liste les copies, n'ecrit rien."}

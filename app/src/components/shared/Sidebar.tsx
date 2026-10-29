@@ -6,7 +6,7 @@ import {
   BookOpen, FolderOpen, Activity,
   ChevronDown, ChevronRight,
   Play, Settings, Loader, Search, Plug, ArrowDownToLine, FilePlus2,
-  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog,
+  ClipboardList, AlertTriangle, Check, X, CalendarDays, Pin, UserRound, RefreshCw, ServerCog, Wrench,
 } from 'lucide-react'
 import type { DccStatusMap, Preset } from '../../types'
 import { api } from '../../api/client'
@@ -15,6 +15,7 @@ import { useVisibleDccs } from '../../hooks/useVisibleDccs'
 import { DCC_STATUS_KEYS, SOFTWARE } from '../../lib/dccs'
 import { useMentions } from '../../hooks/useMentions'
 import { useProject } from '../../ProjectContext'
+import { usePageList } from '../../hooks/usePages'
 import { useI18n } from '../../i18n'
 import { DccLogo } from './DccLogo'
 import * as Menu from '@radix-ui/react-dropdown-menu'
@@ -167,6 +168,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
 
   // New Scene: the active project's presets drive the per-soft menu + button colour.
   const { project: activeProject } = useProject()
+  const { list: toolPages } = usePageList(activeProject)
+  const toolVisible = !!toolPages && (toolPages.pages.some(p => !p.shadowed) || toolPages.can_edit.team || toolPages.can_edit.project)
   const [presets, setPresets] = useState<Preset[]>([])
 
   // Multi-instance (cluster C): which instance each DCC targets. The selector row
@@ -788,6 +791,8 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             from the menu on purpose. It is NOT a replacement for the Publisher. */}
         <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent route="/usd" onClick={() => navigate('/usd')} />
         <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent route="/shelf" onClick={() => navigate('/shelf')} />
+        {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one. */}
+        {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
       </NavGroup>
 
       <NavGroup title="LAUNCHER">

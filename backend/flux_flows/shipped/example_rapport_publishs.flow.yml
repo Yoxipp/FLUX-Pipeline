@@ -1,0 +1,41 @@
+flux_flow: 2
+name: example_rapport_publishs
+label: "Exemple : rapport des publishs de la semaine"
+description: "Chaque lundi a 8 h : les publishs des `jours` derniers jours dans un rapport JSON (_flux_flows/rapports) et leur nombre dans l'Activite. Exemple livre : clic droit > Dupliquer dans Fichier > Ouvrir pour l'utiliser dans ton projet."
+run_policy: skip_if_running
+interface:
+  - {id: jours, type: int, label: "Jours a couvrir", default: 7}
+variables:
+  - {name: "n", type: int, default: 0}
+nodes:
+  sched: {type: event.schedule, pos: [0, 160], params: {days: mon, time: "08:00", missed: skip}}
+  jours: {type: data.flow_input, pos: [0, 400], params: {id: jours}}
+  moins: {type: operator.math, pos: [320, 400], params: {op: sub, a: 0}}
+  maintenant: {type: operator.date_now, pos: [320, 560], params: {}}
+  debut: {type: operator.date_add, pos: [640, 400], params: {}}
+  find: {type: flux.find_publishes, pos: [640, 160], params: {date_to: today}}
+  set_n: {type: data.set_variable, pos: [960, 160], params: {name: "n"}}
+  ctx: {type: data.context, pos: [960, 400], params: {}}
+  nom: {type: data.template, pos: [960, 560], params: {text: "publishs_{date:%Y%m%d_%H%M}.json"}}
+  fichier: {type: operator.path_join, pos: [1280, 400], params: {a: "_flux_flows", b: rapports}}
+  json: {type: action.write_json, pos: [1280, 160], params: {mode: create}}
+  texte: {type: data.template, pos: [1600, 400], params: {text: "Rapport des publishs des ${jours} derniers jours : ${n} publish(s)"}}
+  notify: {type: flux.notify, pos: [1600, 160], params: {level: info, where: both}}
+links:
+  - {from: ctx.project_path, to: fichier.base}
+  - {from: debut.iso, to: find.date}
+  - {from: fichier.path, to: json.path}
+  - {from: find.count, to: set_n.value}
+  - {from: find.items, to: json.data}
+  - {from: find.then, to: set_n.exec}
+  - {from: jours.value, to: moins.b}
+  - {from: json.path, to: notify.path}
+  - {from: json.then, to: notify.exec}
+  - {from: maintenant.iso, to: debut.iso}
+  - {from: moins.as_int, to: debut.days}
+  - {from: nom.text, to: fichier.c}
+  - {from: sched.then, to: find.exec}
+  - {from: set_n.then, to: json.exec}
+  - {from: texte.text, to: notify.text}
+notes:
+  - {id: k1, pos: [0, 720], text: "Lundi 8 h : publishs des `jours` derniers jours (defaut 7) -> rapport JSON + Activite.\nInoffensif : un petit JSON par semaine dans _flux_flows/rapports."}

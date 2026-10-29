@@ -26,3 +26,11 @@ Zone a risque (tous les DCC + projets existants). Le layout par sous-dossier de 
 * `copy_limits.py` : la copie source -> `vNNN` (`write_version`) passe par un plafond de copies simultanees par backend (`FLUX_PUBLISH_MAX_PARALLEL`, defaut 10, les suivantes attendent) et un debit max optionnel par copie (`FLUX_PUBLISH_MAX_MBPS`, 0 = off = `shutil.copy2`). Reglables dans Parametres avances. `GET /publish/queue` = actives / en attente (affiche dans le Publisher).
 * `vNNN -> LAST` reste `shutil.copy2` : mesure sur `\\server` (Python 3.14), 200 Mo en 0,2 s, la copie est faite cote serveur (pas d'aller-retour par le PC). Hardlink teste OK mais non retenu (the maintainer : garder la copie).
 * Le POST `/publish` tourne dans `core/executors.HEAVY` (pool borne), pas dans l'executor par defaut des feeds.
+
+## Flows apres publish (P5, 2026-10-23)
+
+`publish_core.py` n'est pas modifie. `copy_publish` (et chaque exporteur direct) appelle `log_publish`
+(`features/activity/activity_writer.py`), qui emet `flux_flows.events.publish_done` : les flows actifs `OnPublish` du
+poste partent apres le publish (en parallele des hooks USD `after_usd_publish`, qui suivent `log_publish`). Sans flow
+actif = rien ; `FLUX_FLOWS_HOOKS=0` coupe ; une emission qui leve ne change pas le publish. Pas d'`event.before_publish` :
+"avant publish" = nodes avant le node publish d'un flow `publish_<soft>` (P6 / P8). Tests : `tests/publisher/test_publish_hooks.py`.

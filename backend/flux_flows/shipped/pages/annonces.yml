@@ -1,0 +1,20 @@
+page: 1
+id: annonces
+label: "Annonces equipe"
+icon: bell
+scope: shipped
+description: "Une annonce ecrite ici va dans le fil de la page et dans le fil Activite du projet (flow annonce_equipe)."
+data:
+  - {id: annonces, label: Annonces, fields: [{id: text, type: text, label: Annonce, required: true}, {id: priorite, type: select, label: Priorite, options: [{value: info, label: Info}, {value: important, label: Important}]}]}
+layout:
+  - folder: {id: ecrire, label: "Nouvelle annonce", mode: plain}
+    children:
+      - row:
+          - {id: text, kind: text, label: Annonce, w: 3, multiline: true, placeholder: "ex : rendu de la sequence vendredi 18 h, pensez a publier vos LAST"}
+          - {id: priorite, kind: select, label: Priorite, default: info, options: [{value: info, label: Info}, {value: important, label: Important}]}
+      - row:
+          - {id: publier, kind: button, label: "Publier l'annonce", icon: send}
+  - folder: {id: fil, label: "Fil des annonces", mode: plain}
+    children:
+      - row:
+          - {id: fil_annonces, kind: feed, label: Annonces, source: {data: annonces}, group_by: priorite, height: 360}

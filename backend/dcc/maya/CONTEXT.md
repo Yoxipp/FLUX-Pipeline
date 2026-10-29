@@ -12,3 +12,10 @@
 `maya_instances.py` (U2, 2026-09-24) : instances d'un perso dans la scene (noeuds racine / namespaces commencant par NAME, ou imports FLUX de NAME via `flux_source`), numero lu dans le nom (`DINGO_02`, `DINGO2`) sinon premier libre. `GET /dcc/maya/character-instances?name=`. Le Publisher (shot, USD leger) les liste des que le perso est choisi, toutes cochees ; une anim publiee par instance cochee (`SEQ_SHOT_ANIM_DINGO` pour 01, `..._DINGO_02` ensuite), exportee depuis les meshes sous le noeud (`run_light_export(root=...)`).
 
 Presets shot `camera` / `light` (2026-09-27) : `maya_usd_presets.camera_asset` / `light_asset` (nœuds via `maya_usd_light_export._camera_nodes` / `_light_nodes`, donnees `_camera_data` / `_light_data`, bake `_bake`), apercu `maya_usd_preview.list_cameras` / `list_lights`. Scope selection : le nœud, sa shape ou un groupe au-dessus selectionne.
+
+Flows P6a (2026-10-23) : `maya_hub.py` (cote backend) porte la logique hub de `POST /dcc/maya/import` (`import_into_maya`,
+`send=` injectable) et `/update-imports` (`update_imports`, `dry`, `only`, `call=`) ; les routes gardent leurs controles
+et traduisent `MayaHubError` en meme HTTP. `maya_playblast.py` (NOUVEAU, cote Maya, importe depuis la racine backend
+comme `maya_update`) : playblast de la vue active (mov / mp4 H.264, sequence PNG), node `mayPlayblast` Live seulement,
+**non valide en live**. Nodes `may*` : `backend/flux_flows/nodes/dcc_maya.py` (le code passe par la session : commandPort
+en Live, worker `mayapy` en headless). `autostart.py` non modifie.

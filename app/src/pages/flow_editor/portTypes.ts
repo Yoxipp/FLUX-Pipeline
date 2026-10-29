@@ -16,7 +16,7 @@ export const IMPLICIT: Record<string, string[]> = {
   path: ['str'],
   dir: ['path', 'str'],
   dict: ['any'],
-  publish: ['any'],
+  publish: ['dict', 'any'],
   dcc_node: ['str'],
   pattern: ['str'],
 }
@@ -28,11 +28,12 @@ const ADVICE: Record<string, Advice> = {
   'float>int': ['perte des decimales : utilise Math (round)', 'decimals would be lost: use Math (round)'],
   'str>path': ['un texte n\'est pas un chemin : passe par un node Path', 'a text is not a path: go through a Path node'],
   'str>dir': ['un texte n\'est pas un chemin : passe par un node Path', 'a text is not a path: go through a Path node'],
-  'int>str': ['utilise Template ou String (format)', 'use Template or String (format)'],
-  'float>str': ['utilise Template ou String (format)', 'use Template or String (format)'],
-  'path>dir': ['un chemin peut etre un fichier : utilise Path (parent)', 'a path can be a file: use Path (parent)'],
+  'int>str': ['utilise Template ou StrFormat', 'use Template or StrFormat'],
+  'float>str': ['utilise Template ou StrFormat', 'use Template or StrFormat'],
+  'path>dir': ['un chemin peut etre un fichier : prends la sortie dir de PathJoin ou de Path, ou parent de PathSplit pour le dossier d\'un fichier', 'a path can be a file: take the dir output of PathJoin or Path, or parent of PathSplit for the folder of a file'],
   'dict>*': ['utilise JsonValue pour lire une cle', 'use JsonValue to read a key'],
   'publish>path': ['un publish est un enregistrement : lis son chemin avec PublishFields', 'a publish is a record: read its path with PublishFields'],
+  'publish>*': ['un publish est un enregistrement : lis ses champs avec PublishFields ou PublishInfos', 'a publish is a record: read its fields with PublishFields or PublishInfos'],
   'str>dcc_node': ['un texte n\'est pas un node : utilise houFindNode / mayFindNodes', 'a text is not a node: use houFindNode / mayFindNodes'],
   'str>pattern': ['un texte libre n\'est pas verifie comme motif : saisis-le dans le champ du node', 'a free text is not checked as a pattern: type it in the node field'],
 }
@@ -92,13 +93,13 @@ export function canConnect(src: PortType, dst: PortType): Connection {
       ? IMPLICIT_OK : bad(src, dst, 'les elements ne vont pas ensemble', 'the items do not match')
   }
   if (sb === 'list') return bad(src, dst, 'mets un ForEach', 'add a ForEach', LIST_RE.exec(src)![1] === dst ? 'insert_foreach' : null)
-  if (db === 'list' && LIST_RE.exec(dst)![1] === src) return bad(src, dst, 'ajoute un node List (append)', 'add a List (append) node')
+  if (db === 'list' && LIST_RE.exec(dst)![1] === src) return bad(src, dst, 'ajoute un node ListAppend', 'add a ListAppend node')
   if (reaches(sb, db)) return IMPLICIT_OK
   const advice = ADVICE[`${sb}>${db}`] ?? ADVICE[`${sb}>*`]
   if (advice) return bad(src, dst, ...advice)
   if (sb === 'any') return bad(src, dst,
-    'le type any est inconnu a la sortie : precise le type du node source (parametre as) ou ajoute un node de conversion',
-    'the any type is unknown at the output: set the source node type (as parameter) or add a conversion node')
+    'la sortie est de type any (connu seulement au run) : choisis le type de la source (Value : reglage type) ou passe par un node de conversion (Path, Template, Compare)',
+    'the output is of type any (only known at run time): set the source type (Value: type setting) or go through a conversion node (Path, Template, Compare)')
   return bad(src, dst, 'ajoute un node de conversion', 'add a conversion node')
 }
 

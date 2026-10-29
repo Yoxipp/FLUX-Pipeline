@@ -84,7 +84,7 @@ def publish_mari(
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
     t0 = time.monotonic()
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
-                                       variante, description, user, whole_name=True)
+                                       variante, description, user, whole_name=True, soft="mari")
     warnings = [f"Mari : {e}" for e in result.get("errors") or []] + conv_warnings + warnings
     for w in warnings:
         log.warning("Mari publish: %s", w)

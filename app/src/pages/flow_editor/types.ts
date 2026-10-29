@@ -1,5 +1,7 @@
 // types.ts — TS types of the Flows editor (03_EDITEUR §9). P0 holds the view model
 // only; FlowDoc / FlowLink / Issue / RunRecord arrive with the v2 format (P1+).
+// CatalogPort / PortSpec carry choices (menu), wirable (false = constant param, listed in
+// FlowViewNode.constants, never a port) and tokens (project token section menu).
 
 // GET /flows/rights (01 §7): TD / Team TD boxes of the current user. A guard, not security.
 export type FlowScope = 'perso' | 'project' | 'team' | 'shipped'
@@ -14,7 +16,7 @@ export interface FlowRights {
 
 export type Family =
   | 'event' | 'data' | 'logic' | 'operator' | 'action'
-  | 'flux' | 'session' | 'dcc' | 'bridge' | 'subflow'
+  | 'flux' | 'session' | 'dcc' | 'bridge' | 'dispatcher' | 'subflow'
 
 // "exec", "any", "bool", "int", "float", "str", "path", "dir", "list[T]", "dict",
 // "session[<soft>]", "publish", "dcc_node", "pattern".
@@ -29,6 +31,14 @@ export interface PortSpec {
   example?: string
   value?:   unknown       // literal value of an input (shown greyed)
   wiredFrom?: string      // "<node label>.<port>" when the input is linked
+  choices?: unknown[]     // allowed values (menu, catalogue order)
+  wirable?: boolean       // false = constant param: never a port, edited in Params only
+  tokens?:  string        // project token section offered in a menu (CLASS, NAME, SEQ...)
+  choiceLabels?: Record<string, { fr: string; en: string }>   // readable menu entries (R1)
+  reserved?: string[]     // choices listed but disabled (instance mode farm, V2)
+  default?: unknown       // registry default (tooltip, R1)
+  label?:   string        // shown instead of the name on the node (InputsPageReader: page labels)
+  when?: { param: string; in: unknown[] }   // shown only for these values of a param (R1, visibility.ts)
 }
 
 // One node as the editor draws it.
@@ -44,6 +54,7 @@ export interface FlowViewNode {
   hasExec:  boolean       // exec in + then out
   inputs:   PortSpec[]
   outputs:  PortSpec[]
+  constants?: PortSpec[]  // spec params with wirable false: not drawn, edited in Params
   position: { x: number; y: number }
   meta?:    Record<string, string>   // shown in Params (step, module...)
   spec?:    NodeSpec                 // catalogue entry (P4), absent for unknown / legacy types
@@ -75,7 +86,7 @@ export interface FlowView {
 
 // -- v2 format and store (01 §2, §6, §14, ADR 0058) -----------------------------
 
-export type FlowCategory = 'pipe' | 'project' | 'perso'
+export type FlowCategory = 'pipe' | 'project' | 'perso' | 'examples'   // examples: shipped example_* (ADR 0069)
 
 export interface FlowDocNode {
   type:    string
@@ -134,6 +145,61 @@ export interface FlowState {
   revision:       number
   saved_by?:      string | null
   saved_at?:      string | null
+  // P5: dry run passed (activation), warnings read, last Schedule slots.
+  dry_run_ok?:    { version: number; run_id: string; nodes_simulated: string[]; at?: string | null } | null
+  acked?:         { version: number; items: { code: string; node: string | null; port: string | null }[] } | null
+  last_schedule?: Record<string, { slot: string; ran_at: string | null }>
+}
+
+// GET /flows/{name}/activation: the three lines of the activation dialog (03 §5), on `current`.
+export interface ActivationWarning extends Issue { acked: boolean }
+export interface ActivationGate {
+  version:        number
+  active:         boolean
+  active_version: number | null
+  legacy:         boolean
+  errors:         Issue[]
+  warnings:       ActivationWarning[]
+  dry_run:        { ok: boolean; run_id: string | null; version: number | null }
+  destructive:    string[]          // `!` nodes of the version: Activer becomes a SlideToConfirm
+  ready:          boolean
+  reason?:        string
+}
+
+// P6c: an extension bridge (CONFIG/extensions/bridges/<soft>/bridge.yml), GET /flows/bridges.
+export type BridgeInstallState = 'installed' | 'absent' | 'partial' | 'outdated' | 'conflict' | 'error'
+export interface BridgeInfo {
+  soft: string
+  folder: string
+  ok: boolean
+  errors: string[]
+  manifest: {
+    soft: string; label: string; icon: string; prefix: string; exe_hints: string[]
+    port_range: [number, number]; transport: 'tcp_json' | 'file_mailbox' | 'http'; mailbox: string | null
+    install: { target: string; files: string[] }
+  } | null
+  exe: string | null
+  install: { target: string | null; state: BridgeInstallState; files: { name: string; path: string; state: string }[]; error: string | null } | null
+}
+export interface BridgeInstallResult {
+  success: boolean; message: string; target?: string | null; conflicts?: string[]; backups?: string[]
+  removed?: string[]; kept?: string[]; restored?: string[]
+}
+
+// GET /flows/host: who runs the shared active flows (host lock, 01 §9).
+export interface HostHolder { host: string; user: string | null; pid: number; expires: number }
+export interface HostInfo {
+  holder:       HostHolder | null
+  me:           string | null
+  is_holder:    boolean
+  since:        number | null
+  enabled:      boolean
+  running:      boolean
+  idle_reason:  string | null
+  active_flows: { flow: string; scope: FlowScope; project: string | null; version: number }[]
+  watchers:     { flow: string; scope: FlowScope; node: string; kind: string; next?: string; last_fire?: string; error?: string }[]
+  over_cap:     string[]
+  max_watchers: number
 }
 
 // GET /flows entry.
@@ -162,6 +228,7 @@ export interface FlowRead {
   state:    FlowState
   legacy:   boolean
   issues:   { code: string; node?: string; message?: string }[]
+  dcc?:     { node_type: string; locked: boolean; team_copy: boolean } | null   // DCC node flow (P6a, 03 §8)
 }
 
 export interface MigrateReport {
@@ -181,6 +248,12 @@ export interface CatalogPort {
   example:  unknown
   required: boolean
   default:  unknown
+  choices?: unknown[] | null   // allowed values of a choice param, in menu order
+  wirable?: boolean            // absent (old catalogue) = true; false = constant, no link
+  tokens?:  string | null      // project token section ("CLASS", "NAME", "SEQ"...) offered in a menu
+  choice_labels?: Record<string, { fr: string; en: string }> | null   // R1: readable menu entries
+  reserved?: string[] | null   // R1: choices shown disabled
+  when?: { param: string; in: unknown[] } | null   // R1: shown only for these values of a param
 }
 
 // True, or {param, equals}: compares the param (or its default).
@@ -206,6 +279,8 @@ export interface NodeSpec {
   session:     string | null
   live_only:   boolean
   licence:     CondFlag
+  internal?:   boolean          // core leaf of a DCC subflow node: hidden from Tab / Shelf (P6a)
+  subflow?:    { name: string; scope: FlowScope; locked: boolean; shipped: boolean } | null   // DCC node shipped as a locked subflow
 }
 
 export interface FlowCatalog {
@@ -269,7 +344,7 @@ export interface RunSummary {
   draft:       boolean
   mode:        'real' | 'dry'
   status:      RunStatus
-  trigger:     { event: string | null; values?: Record<string, unknown> }
+  trigger:     { event: string | null; button?: string; values?: Record<string, unknown> }
   user:        string | null
   host:        string
   started:     string | null
@@ -286,14 +361,129 @@ export interface RunRecord extends RunSummary {
   links:           Record<string, { value: string; count: number }>
   report:          { node: string | null; kind: string; text_fr: string; path?: string | null }[]
   nodes_simulated: string[]
+  outputs?:        Record<string, unknown>   // flow_output values (P7: page widgets fed by this flow)
 }
 
 // Messages of WS /flows/ws.
 export type FlowsWsMessage =
-  | { type: 'hello'; holder: string | null; me: string; running: RunSummary[] }
+  | { type: 'hello'; holder: HostHolder | null; me: string; since?: number | null; running: RunSummary[] }
+  | { type: 'host'; holder: HostHolder | null; me: string | null; is_holder: boolean; since: number | null }
+  | { type: 'activation'; flow: string; scope: FlowScope; project: string | null; active: boolean; version: number | null; by: string | null }
+  | { type: 'flow_changed'; flow: string; scope: FlowScope; project: string | null; version: number; revision: number; by: string | null }
   | { type: 'run_started'; run_id: string; flow: string; scope: FlowScope; mode: 'real' | 'dry'; user: string | null }
   | { type: 'node_state'; run_id: string; flow: string; node: string; state: NodeRunState; started?: string; ended?: string; error?: string; count?: number }
   | { type: 'link_value'; run_id: string; flow: string; link: string; preview: string; count: number }
   | { type: 'log'; run_id: string; flow: string; node: string; level: string; text: string }
   | { type: 'notify'; run_id: string; flow: string; node: string; level: 'info' | 'warn' | 'error'; text: string; path: string | null }
   | { type: 'run_finished'; run_id: string; flow: string; status: RunStatus; duration_ms: number | null; error: string | null; mode: 'real' | 'dry' }
+  | { type: 'page_changed'; page: string; scope: 'team' | 'project'; project: string | null; rev: string | null; by: string | null }
+  | { type: 'page_data'; page: string; collection: string; project: string | null; etag: string; by: string | null }
+
+// -- TOOL pages (P7, 04_PAGES_TOOL, ADR 0066) ---------------------------------------
+// Same keys as the page YAML (backend flux_flows/pages.py is the truth).
+
+export type PageScope = 'team' | 'project' | 'shipped'
+export type PageFormKind = 'button' | 'float' | 'int' | 'text' | 'path' | 'dir' | 'toggle' | 'select' | 'list'
+export type PageDecorKind = 'separator' | 'label'
+export type PageDataKind = 'feed' | 'table' | 'cards' | 'calendar' | 'members' | 'board'
+export type PageWidgetKind = PageFormKind | PageDecorKind | PageDataKind
+export type PageFieldType = 'str' | 'text' | 'int' | 'float' | 'bool' | 'date' | 'datetime' | 'user' | 'select' | 'image' | 'path'
+
+export interface PageOption { value: string; label?: string }
+export interface PageSource { data?: string; flow?: string; output?: string; builtin?: 'users' }
+
+export interface PageWidget {
+  id:        string
+  kind:      PageWidgetKind
+  label?:    string
+  tooltip?:  string
+  w?:        number
+  default?:  unknown
+  remember?: 'user' | 'none'
+  icon?:     string
+  confirm?:  string
+  min?: number; max?: number; step?: number; unit?: string
+  multiline?: boolean; placeholder?: string; max_len?: number
+  mode?: 'open' | 'save'; filters?: string[]
+  options?: PageOption[]; item?: 'str'; text?: string
+  source?: PageSource
+  field?: string; group_by?: string; columns?: string[]; editable?: boolean
+  title?: string; date?: string; end?: string; height?: number
+}
+
+export interface PageFolder { id: string; label?: string; mode?: 'plain' | 'tabs' | 'collapsible' }
+export type PageLayoutItem =
+  | { folder: PageFolder; children: PageLayoutItem[] }
+  | { row: PageWidget[] }
+
+export interface PageDataField { id: string; type: PageFieldType; label?: string; options?: PageOption[]; required?: boolean }
+export interface PageDataSpec {
+  id:      string
+  label?:  string
+  kind?:   'records' | 'board'
+  per?:    'project' | 'team'
+  write?:  'all' | 'team_td'
+  fields?: PageDataField[]
+}
+
+export interface PageDoc {
+  page:         1
+  id:           string
+  label?:       string
+  icon?:        string
+  description?: string
+  data:         PageDataSpec[]
+  layout:       PageLayoutItem[]
+}
+
+export interface PageIssue {
+  level:      'error' | 'warning'
+  code:       string
+  widget:     string | null
+  message_fr: string
+  message_en: string
+  why_fr:     string
+  why_en:     string
+  fix:        { kind: string; args: Record<string, unknown> } | null
+}
+
+export interface PageListItem {
+  id: string; scope: PageScope; rev: string; error: string | null
+  label: string; icon: string; description: string; shadowed?: boolean
+}
+export interface PageList { pages: PageListItem[]; templates: PageListItem[]; can_edit: Record<'team' | 'project', boolean> }
+export interface PageRead { id: string; scope: PageScope; rev: string; page: PageDoc; issues: PageIssue[]; can_edit: boolean }
+
+// The only page -> flow link left (ADR 0068): a data widget reading a flow output.
+export type PageLinkRole = 'source'
+export interface PageLink {
+  page: string; page_label: string; scope: PageScope; shadowed: boolean
+  widget: string; label: string; kind: PageWidgetKind; role: PageLinkRole; output?: string
+}
+
+// InputsPageReader (ADR 0068): params.ports of the node, read from its page.
+// A TOOL page an example reads, after Dupliquer (ADR 0069): created from the shipped template or already there.
+export interface ExamplePage { page: string; status: 'created' | 'exists' | 'missing' | 'no_right'; scope?: 'team' | 'project' }
+export interface PagePorts { outputs: Record<string, string>; labels: Record<string, string>; defaults: Record<string, unknown>; label: string }
+export interface PageListener { flow: string; scope: FlowScope; version: number; node: string }
+export interface PageUse { flow: string; scope: FlowScope; label: string; active: boolean; node: string; buttons: string[]; fields: string[] }
+export interface PageFlows { listeners: Record<string, PageListener[]>; uses: PageUse[] }
+export interface PageClickRun { flow: string; scope: FlowScope; run_id: string; status: string; error?: string | null }
+// Generated Publisher panel: not a page, its button runs this flow event with every field.
+export interface PageTarget { flow: string; event: string }
+
+// Page data (ADR 0066 n°3): a record = its fields + who / when (merged from every journal).
+export interface PageRecord {
+  rid:         string
+  _created_by: string
+  _created_at: string | null
+  _by:         string
+  _at:         string | null
+  [field: string]: unknown
+}
+export type PageDataRead =
+  | { etag: string; unchanged: true; write?: 'all' | 'team_td' }
+  | { etag: string; unchanged: false; records: PageRecord[]; write: 'all' | 'team_td' }
+export type PageDataOp =
+  | { op: 'put'; rid?: string; fields: Record<string, unknown> }
+  | { op: 'del'; rid: string }

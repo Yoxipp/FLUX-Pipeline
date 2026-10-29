@@ -10,6 +10,8 @@
 // exec input first, inputs, then every param (each param is promotable to an input, 02 §1,
 // like validate.py), outputs with the exec ones first. Unknown types keep the P1 fallback.
 // Also adaptCatalog: NodeSpec -> CatalogEntry for the Shelf, the Tab menu and the palette.
+// Ports carry choices / wirable / tokens. A param with wirable false (constant, e.g. the
+// Path value) is not an input port: it goes to node.constants, edited in Params only.
 
 import { FAMILIES } from './families'
 import { familyOfV1, pascal, prefixOfV1, type CatalogEntry } from './v1_adapter'
@@ -31,17 +33,56 @@ const toPort = (p: CatalogPort, value?: unknown): PortSpec => ({
   name: p.name, type: p.type, required: p.required, doc_fr: p.doc_fr, doc_en: p.doc_en,
   example: p.example === null || p.example === undefined ? undefined : String(p.example),
   value: value !== undefined ? value : p.default ?? undefined,
+  choices: Array.isArray(p.choices) ? p.choices : undefined,
+  wirable: p.wirable === false ? false : undefined,
+  tokens: p.tokens || undefined,
+  choiceLabels: p.choice_labels || undefined,
+  reserved: p.reserved || undefined,
+  default: p.default ?? undefined,
+  when: p.when || undefined,
 })
 
 function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowViewNode {
   const params = node.params ?? {}
   const inputs: PortSpec[] = []
+  const constants: PortSpec[] = []
   const seen = new Set<string>()
-  const add = (p: CatalogPort) => { if (!seen.has(p.name)) { seen.add(p.name); inputs.push(toPort(p, p.type === 'exec' ? undefined : params[p.name])) } }
+  const add = (p: CatalogPort) => {
+    if (seen.has(p.name)) return
+    seen.add(p.name)
+    ;(p.wirable === false ? constants : inputs).push(toPort(p, p.type === 'exec' ? undefined : params[p.name]))
+  }
   spec.inputs.filter(p => p.type === 'exec').forEach(add)
   spec.inputs.filter(p => p.type !== 'exec').forEach(add)
   spec.params.forEach(add)
   const outputs = [...spec.outputs.filter(p => p.type === 'exec'), ...spec.outputs.filter(p => p.type !== 'exec')].map(p => toPort(p))
+  // R1 retake 9: a FlowCall shows the interface of the called flow (params.ports, filled by
+  // the Params pane from that flow): one input per interface input, one output per output.
+  if (node.type === 'subflow.flow_call') {
+    const ports = (params.ports ?? {}) as Ports
+    for (const [name, type] of Object.entries(ports.inputs ?? {})) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      inputs.push({ name, type, value: params[name], doc_fr: 'Entree du flow appele', doc_en: 'Input of the called flow' })
+    }
+    for (const [name, type] of Object.entries(ports.outputs ?? {})) {
+      if (outputs.some(o => o.name === name)) continue
+      outputs.push({ name, type, doc_fr: 'Sortie du flow appele (son FlowOutput)', doc_en: 'Output of the called flow (its FlowOutput)' })
+    }
+  }
+  // ADR 0068: an InputsPageReader shows the buttons (exec) and fields of its page (params.ports,
+  // filled by the Params pane from the page), labelled like the page.
+  if (node.type === 'event.page_inputs') {
+    const ports = (params.ports ?? {}) as { outputs?: Record<string, string>; labels?: Record<string, string> }
+    for (const [name, type] of Object.entries(ports.outputs ?? {})) {
+      if (outputs.some(o => o.name === name)) continue
+      const label = ports.labels?.[name] ?? name
+      const out = { name, type, label, doc_fr: type === 'exec' ? `Bouton "${label}" de la page` : `Champ "${label}" de la page`,
+                    doc_en: type === 'exec' ? `Page button "${label}"` : `Page field "${label}"` }
+      if (type === 'exec') outputs.splice(outputs.filter(o => o.type === 'exec').length, 0, out)
+      else outputs.push(out)
+    }
+  }
   const meta: Record<string, string> = { type: node.type }
   if (node.label) meta.step = node.label
   if (node.bypass) meta.bypass = 'true'
@@ -49,7 +90,7 @@ function specNode(id: string, node: FlowDocNode, spec: SpecIndex[string]): FlowV
     id, type: node.type, label: node.label || spec.label,
     family: (FAMILIES.includes(spec.family) ? spec.family : 'action') as Family,
     icon: spec.icon || undefined, doc_fr: spec.doc_fr, doc_en: spec.doc_en,
-    hasExec: false, inputs, outputs,
+    hasExec: false, inputs, outputs, constants: constants.length ? constants : undefined,
     position: { x: node.pos?.[0] ?? 0, y: node.pos?.[1] ?? 0 }, meta, spec,
     destructive: !node.bypass && flagOn(spec.destructive, spec, params),
   }

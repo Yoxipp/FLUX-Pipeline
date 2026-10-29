@@ -11,6 +11,14 @@
 # destructive node added without being in ``confirmed_destructive`` (409,
 # E_DESTRUCTIVE_UNCONFIRMED); activation refuses a frozen version with errors; the
 # engine refuses a run with errors (a type mismatch only blocks real runs, ADR 0058).
+# P5: GET /flows/host (who runs the shared active flows), POST /flows/events/{kind}
+# (scene_opened sent by a script in the DCC), activation gate (0 error, warnings
+# acknowledged, dry run passed on the frozen version: GET /{name}/activation), WS
+# ``host``, ``activation`` and ``flow_changed``; a dry run of version `current` that ends
+# ``ok`` writes state.json ``dry_run_ok``.
+# P6c: GET /flows/bridges (extension bridges + install state), POST
+# /flows/bridges/{soft}/install | uninstall (this machine, never a silent overwrite),
+# POST /flows/bridges/{soft}/flows (Team TD: its Instance and publish nodes in the team scope).
 
 from __future__ import annotations
 
@@ -23,7 +31,9 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from flux_flows import engine, events, locations, migrate_v1, patterns, resolver, rights, runs, store, validate
+from flux_flows import (engine, events, locations, migrate_v1, page_data, page_inputs, page_links, page_store, pages,
+                        patterns,
+                        resolver, rights, runs, scheduler, store, validate)
 from flux_flows.model import Flow, FlowSchemaError, parse_flow, to_document, v1_limit_issues
 from flux_flows.store import FlowStoreError
 from flux_flows.nodes import registry
@@ -144,6 +154,45 @@ async def post_preview(body: PreviewBody) -> dict[str, Any]:
     return {"result": result, "error": None}
 
 
+# -- host and events (static, before /{name}) ------------------------------------------
+
+@router.get("/host")
+async def get_host() -> dict[str, Any]:
+    """Who runs the shared active flows (host lock, 01 §9) and what this backend watches."""
+    sched = scheduler.get()
+    if sched is None:
+        return {"enabled": scheduler.enabled(), "running": False, "holder": None, "me": socket.gethostname(),
+                "is_holder": False, "since": None, "idle_reason": "planificateur arrete", "active_flows": [],
+                "watchers": [], "over_cap": [], "max_watchers": scheduler.MAX_WATCHERS}
+    return sched.info()
+
+
+class EventBody(BaseModel):
+    soft: str = "maya"
+    scene: str = ""
+    port: Optional[int] = None
+    pid: Optional[int] = None
+
+
+@router.post("/events/{kind}")
+async def post_event(kind: str, body: EventBody) -> dict[str, Any]:
+    """A local event sent by a script in the DCC (proposition of 01 §9): only scene_opened.
+    Starts the active flows of this backend whose SceneOpened node matches the soft."""
+    if kind != "scene_opened":
+        raise HTTPException(status_code=400, detail={"message": f"evenement `{kind}` inconnu (scene_opened)"})
+    if body.soft not in scheduler.SCENE_SOFTS:
+        raise HTTPException(status_code=400, detail={"message": "soft : maya, houdini ou nuke"})
+    sched = scheduler.get()
+    if sched is None:
+        raise HTTPException(status_code=409, detail={"message": "planificateur des flows arrete sur ce poste"})
+    session = {"soft": body.soft, "port": body.port, "pid": body.pid}
+    started = []
+    for w in sched.scene_watchers(body.soft):
+        rec = await sched.fire(w.af, w.node, {"scene": body.scene, "soft": body.soft, "session": session})
+        started.append({"flow": w.af.name, "run_id": rec["run_id"], "status": rec["status"]})
+    return {"started": started}
+
+
 # -- validation (static, before /{name}) ------------------------------------------
 
 def _validation_env(roots: dict, scope: str, name: str, project: Optional[str]) -> validate.Env:
@@ -159,7 +208,17 @@ def _validation_env(roots: dict, scope: str, name: str, project: Optional[str]) 
     done = state.get("dry_run_ok") or {}
     tested = done.get("nodes_simulated") if done.get("version") == state.get("current") else None
     return validate.default_env(project if scope == "project" else None, flow_loader=loader, tested=tested,
-                                shipped_changed=store.shipped_changed(roots, scope, name))
+                                shipped_changed=store.shipped_changed(roots, scope, name),
+                                page_links=_links_to(name, project),
+                                page_lookup=lambda page_id: page_inputs.load_page(page_id, project))
+
+
+def _links_to(name: str, project: Optional[str]) -> list[dict[str, Any]]:
+    """Links of the TOOL pages to the flow *name* (W_PAGE_LINK_BROKEN, P7)."""
+    try:
+        return [l for l in page_links.all_links(locations.page_roots(project)) if l["flow"] == name]
+    except (ValueError, OSError):
+        return []
 
 
 def _issues(roots: dict, scope: str, flow: Flow, project: Optional[str]) -> list[validate.Issue]:
@@ -208,21 +267,22 @@ def _matches(rec: dict[str, Any], **wanted: Optional[str]) -> bool:
 
 @router.get("/runs")
 async def list_runs(flow: Optional[str] = None, scope: Optional[str] = None, project: Optional[str] = None,
-                    status: Optional[str] = None, mode: Optional[str] = None,
+                    status: Optional[str] = None, mode: Optional[str] = None, event: Optional[str] = None,
                     limit: int = 50) -> list[dict[str, Any]]:
     """Run summaries, newest first: records on disk plus this backend's live and recent runs."""
     current = await asyncio.to_thread(rights.current_rights)
     limit = max(1, min(limit, 500))
     try:
         listed = await asyncio.to_thread(runs.list_runs, _run_folders(current["user"], project), flow=flow,
-                                         status=status, mode=mode, scope=scope, limit=limit)
+                                         status=status, mode=mode, scope=scope, event=event, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
     mgr = engine.manager()
     by_id = {r["run_id"]: r for r in listed}
     # Memory wins: a live run is fresher than its last write; a run without folder is only here.
     for rec in [mgr.get(i) for i in list(mgr.live)] + list(mgr.finished.values()):
-        if rec and _matches(rec, flow=flow, status=status, mode=mode, scope=scope):
+        if rec and _matches(rec, flow=flow, status=status, mode=mode, scope=scope) \
+                and (event is None or runs.trigger_matches(rec, event)):
             by_id[rec["run_id"]] = runs.summary(rec)
     return sorted(by_id.values(), key=lambda r: r["run_id"], reverse=True)[:limit]
 
@@ -271,8 +331,10 @@ async def flows_websocket(websocket: WebSocket) -> None:
 
     read_task = asyncio.create_task(reader())
     try:
-        await websocket.send_json({"type": "hello", "holder": None, "me": socket.gethostname(),
-                                   "running": engine.manager().running()})
+        sched = scheduler.get()
+        host = sched.info() if sched is not None else {"holder": None, "since": None}
+        await websocket.send_json({"type": "hello", "holder": host.get("holder"), "me": socket.gethostname(),
+                                   "since": host.get("since"), "running": engine.manager().running()})
         while True:
             get_task = asyncio.create_task(sub.get())
             done, _ = await asyncio.wait({get_task, read_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -287,6 +349,263 @@ async def flows_websocket(websocket: WebSocket) -> None:
         events.unsubscribe(sub)
 
 
+# -- TOOL pages (04_PAGES_TOOL, ADR 0066) -------------------------------------
+# Static, so declared before /{name}. Everyone reads and lists; creating, editing and
+# deleting a page needs the Team TD box (rights.ADMIN, 01 §7). Running a page button
+# is POST /flows/{flow}/run (everyone, active flow only).
+
+def _page_roots(project: Optional[str]) -> dict:
+    try:
+        return locations.page_roots(project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+
+
+def _parse_page(doc: dict[str, Any], page_id: Optional[str] = None) -> pages.Page:
+    try:
+        page = pages.parse_page(doc)
+    except pages.PageSchemaError as exc:
+        raise HTTPException(status_code=422, detail={"message": str(exc)}) from exc
+    if page_id is not None and page.id != page_id:
+        raise HTTPException(status_code=400, detail={"message": f"id {page.id} different de l'adresse {page_id}"})
+    return page
+
+
+def _page_issues(page: pages.Page, scope: Optional[str], user: Optional[str],
+                 project: Optional[str]) -> list[dict[str, Any]]:
+    lookup = page_store.flow_lookup(_roots(user, project))
+    found = pages.validate_page(page, pages.PageEnv(scope=scope, flow_lookup=lookup))
+    return [i.to_dict() for i in found]
+
+
+@router.get("/pages")
+async def list_pages(project: Optional[str] = None) -> dict[str, Any]:
+    """Pages of team and project (TOOL), the shipped templates and whether the user may edit."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _page_roots(project)
+    listed = await _call(page_store.list_pages, roots)
+    templates = await _call(page_store.list_templates, roots)
+    return {"pages": listed, "templates": templates,
+            "can_edit": {scope: rights.allowed(current, rights.ADMIN, scope) for scope in pages.SCOPES}}
+
+
+class PageValidateBody(BaseModel):
+    page: dict[str, Any]
+    scope: Optional[str] = None
+    project: Optional[str] = None
+
+
+@router.post("/pages/validate")
+async def validate_page(body: PageValidateBody) -> dict[str, Any]:
+    """P_* issues of a page being edited (debounced by the page editor, 04 §5)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    page = _parse_page(body.page)
+    issues = await asyncio.to_thread(_page_issues, page, body.scope, current["user"], body.project)
+    return {"issues": issues}
+
+
+@router.get("/pages/links")
+async def get_page_links(project: Optional[str] = None) -> dict[str, Any]:
+    """Reverse index {flow: [{page, scope, widget, kind, role, button_id | param | output}]} (04 §4)."""
+    return await _call(page_links.index, _page_roots(project))
+
+
+# -- InputsPageReader (ADR 0068): the flow picks its page ------------------------
+
+@router.get("/pages/{page_id}/ports")
+async def get_page_ports(page_id: str, project: Optional[str] = None) -> dict[str, Any]:
+    """params.ports of an InputsPageReader node on this page (buttons, fields) and its defaults."""
+    page = await _call(page_inputs.load_page, page_id, project)
+    if page is None:
+        raise HTTPException(status_code=404, detail={"message": f"page {page_id} introuvable"})
+    return {**page_inputs.ports_of(page), "defaults": page_inputs.defaults_of(page), "label": page.label}
+
+
+@router.get("/pages/{page_id}/flows")
+async def get_page_flows(page_id: str, project: Optional[str] = None) -> dict[str, Any]:
+    """Who uses this page: ``listeners`` {button: [active flows a click runs]} and ``uses``
+    (every flow with an InputsPageReader on it, active or not)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _roots(current["user"], project)
+    return {"listeners": await _call(page_inputs.listeners, roots, page_id),
+            "uses": await _call(page_inputs.uses, roots, page_id)}
+
+
+class PageClickBody(BaseModel):
+    button: str
+    values: dict[str, Any] = {}
+    project: Optional[str] = None
+
+
+@router.post("/pages/{page_id}/click")
+async def click_page(page_id: str, body: PageClickBody) -> dict[str, Any]:
+    """A page button: every active flow listening to it runs its active version (409 when none)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _roots(current["user"], body.project)
+    targets = (await _call(page_inputs.listeners, roots, page_id)).get(body.button) or []
+    if not targets:
+        raise HTTPException(status_code=409, detail={
+            "message": "Aucun flow actif ne reagit a ce bouton : un TD pose un InputsPageReader sur cette page, "
+                       "relie le bouton et active le flow"})
+    payload = {"page": page_id, "button": body.button, "values": body.values}
+    out = []
+    for t in targets:
+        flow = (await _call(store.read_flow, roots, t["scope"], t["flow"], t["version"]))["flow"]
+        folder = runs.runs_dir(t["scope"], project=body.project, user=current["user"])
+        new_run = engine.Run(flow, scope=t["scope"], project=body.project, user=current["user"],
+                             version=t["version"], event=t["node"], values=body.values, payload=payload,
+                             folder=folder)
+        record = await engine.manager().submit(new_run)
+        out.append({"flow": t["flow"], "scope": t["scope"], "run_id": record["run_id"], "status": record["status"],
+                    "error": record.get("error")})
+    return {"runs": out}
+
+
+@router.get("/pages/publish_panel/{soft}")
+async def get_publish_panel(soft: str, project: Optional[str] = None) -> dict[str, Any]:
+    """Generated Publisher panel of an extension software (04 §7): fields from the interface
+    of its flow publish_<soft>, a Publier button (event publish_request), its issues."""
+    from flux_flows.bridges import extension
+
+    current = await asyncio.to_thread(rights.current_rights)
+
+    def work() -> dict[str, Any]:
+        ext = extension.get(soft)
+        if ext is None or ext.manifest is None:
+            raise FlowStoreError(f"logiciel d'extension {soft} inconnu", 404)
+        lookup = page_store.flow_lookup(_roots(current["user"], project))
+        page, issues = pages.generated_publish_page(soft, ext.manifest.label, lookup(pages.publish_flow_name(soft)))
+        return {"soft": soft, "flow": pages.publish_flow_name(soft), "page": pages.to_document(page),
+                "target": {"flow": pages.publish_flow_name(soft), "event": pages.PUBLISH_BUTTON},
+                "issues": [i.to_dict() for i in issues]}
+
+    return await _call(work)
+
+
+@router.get("/pages/{page_id}")
+async def get_page(page_id: str, scope: Optional[str] = None, project: Optional[str] = None) -> dict[str, Any]:
+    """A page (without scope: the winning one, project > team; scope=shipped: a template)."""
+    current = await asyncio.to_thread(rights.current_rights)
+    roots = _page_roots(project)
+    if scope is None:
+        scope = await _call(page_store.resolve, roots, page_id)
+        if scope is None:
+            raise HTTPException(status_code=404, detail={"message": f"page {page_id} introuvable"})
+    got = await _call(page_store.read_page, roots, scope, page_id)
+    issues = await asyncio.to_thread(_page_issues, got["page"], scope, current["user"], project)
+    return {"id": page_id, "scope": scope, "rev": got["rev"], "page": pages.to_document(got["page"]),
+            "issues": issues, "can_edit": scope in pages.SCOPES and rights.allowed(current, rights.ADMIN, scope)}
+
+
+class PageSaveBody(BaseModel):
+    scope: str
+    project: Optional[str] = None
+    page: dict[str, Any]
+    base_rev: Optional[str] = None    # rev read by the editor; None = a new page
+    force: bool = False
+
+
+@router.put("/pages/{page_id}")
+async def save_page(page_id: str, body: PageSaveBody) -> dict[str, Any]:
+    """Save a page (Team TD). Saving with errors is allowed: the page is shown invalid."""
+    current = await _require(rights.ADMIN, body.scope if body.scope in pages.SCOPES else "team")
+    page = _parse_page(body.page, page_id)
+    roots = _page_roots(body.project)
+    saved = await _call(page_store.save_page, roots, body.scope, page, user=current["user"] or "",
+                        base_rev=body.base_rev, force=body.force)
+    issues = await asyncio.to_thread(_page_issues, page, body.scope, current["user"], body.project)
+    events.emit({"type": "page_changed", "page": page_id, "scope": body.scope, "project": body.project,
+                 "rev": saved["rev"], "by": current["user"]})
+    return {**saved, "issues": issues}
+
+
+@router.delete("/pages/{page_id}")
+async def delete_page(page_id: str, scope: str, project: Optional[str] = None) -> dict[str, Any]:
+    current = await _require(rights.ADMIN, scope if scope in pages.SCOPES else "team")
+    done = await _call(page_store.delete_page, _page_roots(project), scope, page_id, user=current["user"] or "")
+    events.emit({"type": "page_changed", "page": page_id, "scope": scope, "project": project,
+                 "rev": None, "by": current["user"]})
+    return done
+
+
+# -- page data (ADR 0066 n°3): one journal per author, merged on read ------------
+
+def _page_and_spec(page_id: str, collection: str, project: Optional[str]):
+    _page_roots(project)   # 400 on a bad project name
+    folder, spec, _ = page_data.locate(page_id, collection, project)
+    return folder, spec
+
+
+@router.get("/pages/{page_id}/data/{collection}")
+async def get_page_data(page_id: str, collection: str, project: Optional[str] = None,
+                        etag: Optional[str] = None) -> dict[str, Any]:
+    """Records of a collection; with the etag the reader has: {unchanged: true} when nothing moved."""
+    def work() -> dict[str, Any]:
+        folder, spec = _page_and_spec(page_id, collection, project)
+        return {**page_data.read_records(folder, etag), "write": spec.write}
+
+    return await _call(work)
+
+
+class PageDataBody(BaseModel):
+    project: Optional[str] = None
+    ops: list[dict[str, Any]]
+
+
+@router.post("/pages/{page_id}/data/{collection}")
+async def post_page_data(page_id: str, collection: str, body: PageDataBody) -> dict[str, Any]:
+    """put / del operations, appended to the journal of the local user (everyone, or Team TD
+    when the collection says write: team_td)."""
+    current = await asyncio.to_thread(rights.current_rights)
+
+    def work() -> dict[str, Any]:
+        folder, spec = _page_and_spec(page_id, collection, body.project)
+        if not page_data.can_write(spec, current):
+            raise rights.FlowRightsError("team_td")
+        return page_data.write_ops(folder, spec, body.ops, user=current["user"] or "")
+
+    done = await _call(work)
+    events.emit({"type": "page_data", "page": page_id, "collection": collection, "project": body.project,
+                 "etag": done["etag"], "by": current["user"]})
+    return done
+
+
+class PageMediaBody(BaseModel):
+    project: Optional[str] = None
+    path: str                       # a local file the user picked (copied, never uploaded: ADR 0005)
+
+
+@router.post("/pages/{page_id}/data/{collection}/media")
+async def post_page_media(page_id: str, collection: str, body: PageMediaBody) -> dict[str, Any]:
+    current = await asyncio.to_thread(rights.current_rights)
+
+    def work() -> dict[str, Any]:
+        folder, spec = _page_and_spec(page_id, collection, body.project)
+        if not page_data.can_write(spec, current):
+            raise rights.FlowRightsError("team_td")
+        return {"image": page_data.add_image(folder, body.path)}
+
+    return await _call(work)
+
+
+@router.get("/pages/{page_id}/data/{collection}/media/{name}")
+async def get_page_media(page_id: str, collection: str, name: str, project: Optional[str] = None):
+    """An image of a collection, for <img src> (display only, like production/ref)."""
+    from fastapi.responses import FileResponse
+
+    def work() -> Path:
+        folder, _ = _page_and_spec(page_id, collection, project)
+        return page_data.media_file(folder, name)
+
+    path = await _call(work)
+    return FileResponse(path, media_type=page_data.media_type(name))
+
+
+@router.get("/pages/{page_id}/history")
+async def get_page_history(page_id: str, scope: str, project: Optional[str] = None) -> list[dict[str, Any]]:
+    return await _call(page_store.list_history, _page_roots(project), scope, page_id)
+
+
 # -- CRUD (after every static route) ------------------------------------------
 
 def _roots(user: Optional[str], project: Optional[str]) -> dict:
@@ -296,8 +615,11 @@ def _roots(user: Optional[str], project: Optional[str]) -> dict:
         raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
 
-def _category(scope: str) -> str:
-    # ADR 0058: Ouvrir lists Pipe (shipped + team), Projet, Perso (TDs).
+def _category(scope: str, name: str = "") -> str:
+    # ADR 0058: Ouvrir lists Pipe (shipped + team), Projet, Perso (TDs); ADR 0069: the
+    # shipped example_* flows have their own Exemples category (read only, duplicated to be used).
+    if scope == "shipped" and name.startswith(store.EXAMPLE_PREFIX):
+        return "examples"
     return {"shipped": "pipe", "team": "pipe", "project": "project", "perso": "perso"}[scope]
 
 
@@ -356,12 +678,90 @@ class CopyBody(BaseModel):
     new_name: Optional[str] = None
 
 
+class BridgeInstallBody(BaseModel):
+    exe: Optional[str] = None       # default: found by exe_hints
+    overwrite: bool = False         # replace files FLUX did not write (after a backup)
+
+
+def _bridge(soft: str):
+    from flux_flows.bridges import extension
+
+    ext = next((e for e in extension.load_all() if e.soft == soft), None)
+    if ext is None:
+        raise HTTPException(status_code=404, detail={"message": f"bridge d'extension `{soft}` introuvable"})
+    return ext
+
+
+@router.get("/bridges")
+async def list_bridges() -> dict[str, Any]:
+    """Extension bridges (P6c, CONFIG/extensions/bridges/): manifest, errors, exe found,
+    install state on this machine."""
+    from flux_flows.bridges import extension, installer
+
+    def _do() -> dict[str, Any]:
+        out = []
+        for ext in extension.load_all():
+            row = ext.to_dict()
+            exe = extension.find_exe(ext) if ext.manifest else None
+            row["exe"] = exe
+            row["install"] = installer.status(ext, exe) if ext.ok else None
+            out.append(row)
+        folder = extension.bridges_dir()
+        return {"dir": str(folder) if folder else None, "bridges": out}
+
+    return await asyncio.to_thread(_do)
+
+
+@router.post("/bridges/{soft}/install")
+async def install_bridge(soft: str, body: BridgeInstallBody) -> dict[str, Any]:
+    """Copy the dcc_side script into the soft's folder (this machine). A conflict without
+    ``overwrite`` changes nothing: {success: false, conflicts}."""
+    from flux_flows.bridges import extension, installer
+
+    ext = _bridge(soft)
+    got = await asyncio.to_thread(installer.install, ext, body.exe or extension.find_exe(ext),
+                                  overwrite=body.overwrite)
+    return got
+
+
+@router.post("/bridges/{soft}/uninstall")
+async def uninstall_bridge(soft: str, body: BridgeInstallBody) -> dict[str, Any]:
+    from flux_flows.bridges import extension, installer
+
+    ext = _bridge(soft)
+    return await asyncio.to_thread(installer.uninstall, ext, body.exe or extension.find_exe(ext))
+
+
+class BridgeFlowsBody(BaseModel):
+    scene_ext: str = ".scene"       # extension of the soft's scene (.max): the publish template
+    overwrite: bool = False
+
+
+@router.post("/bridges/{soft}/flows")
+async def create_bridge_flows(soft: str, body: BridgeFlowsBody) -> dict[str, Any]:
+    """Write <prefix>_instance and <prefix>_publish (team nodes) from the bridge (Team TD)."""
+    from flux_flows.bridges import flow_templates
+
+    current = await _require(rights.ADMIN, "team")
+    ext = _bridge(soft)
+    try:
+        done = await _call(flow_templates.create_flows, ext, _roots(current["user"], None),
+                           user=current["user"] or "", scene_ext=body.scene_ext, overwrite=body.overwrite)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
+    for row in done:
+        if row["status"] == "written":
+            events.emit({"type": "flow_changed", "flow": row["name"], "scope": "team", "project": None,
+                         "by": current["user"]})
+    return {"flows": done}
+
+
 @router.get("")
 async def list_flows(project: Optional[str] = None) -> list[dict[str, Any]]:
     """Every flow of every available scope, with its Ouvrir category."""
     current = await asyncio.to_thread(rights.current_rights)
     entries = await _call(store.list_flows, _roots(current["user"], project))
-    return [{**e, "category": _category(e["scope"])} for e in entries]
+    return [{**e, "category": _category(e["scope"], e["name"])} for e in entries]
 
 
 @router.get("/{name}")
@@ -376,9 +776,16 @@ async def get_flow(name: str, scope: Optional[str] = None, project: Optional[str
             raise HTTPException(status_code=404, detail={"message": f"flow {name} introuvable"})
     got = await _call(store.read_flow, roots, scope, name, version)
     flow = got["flow"]
-    return {"scope": scope, "category": _category(scope), "name": name, "version": version,
+    dcc = None
+    if flow.node_type:   # a DCC node shipped as a locked subflow, or its team copy (P6a, 03 §8)
+        from flux_flows import dcc_nodes
+
+        shipped = await asyncio.to_thread(dcc_nodes.shipped_file, name)
+        dcc = {"node_type": flow.node_type, "locked": scope == "shipped",
+               "team_copy": scope == "team" and shipped is not None}
+    return {"scope": scope, "category": _category(scope, name), "name": name, "version": version,
             "flow": to_document(flow), "state": got["state"], "legacy": name.startswith(store.LEGACY_PREFIX),
-            "issues": v1_limit_issues(flow)}
+            "issues": v1_limit_issues(flow), "dcc": dcc}
 
 
 @router.get("/{name}/versions")
@@ -407,6 +814,12 @@ async def _gate_save(roots: dict, scope: str, flow: Flow, confirmed: list[str],
     return await asyncio.to_thread(_issues, roots, scope, flow, project)
 
 
+def _changed(name: str, scope: str, project: Optional[str], state: dict[str, Any], user: Optional[str]) -> None:
+    """WS flow_changed: an early conflict warning for the other editors (01 §10)."""
+    events.emit({"type": "flow_changed", "flow": name, "scope": scope, "project": project,
+                 "version": state.get("current"), "revision": state.get("revision"), "by": user})
+
+
 @router.put("/{name}")
 async def save(name: str, body: SaveBody) -> dict[str, Any]:
     """Enregistrer: overwrite the working file (409 on a revision conflict or an unconfirmed `!`).
@@ -418,6 +831,7 @@ async def save(name: str, body: SaveBody) -> dict[str, Any]:
     valid = not validate.errors(issues)
     state = await _call(store.save_flow, roots, body.scope, flow, user=current["user"] or "",
                         base_revision=body.base_revision, force=body.force, note=body.note, valid=valid)
+    _changed(name, body.scope, body.project, state, current["user"])
     return {"state": state, "issues": _dicts(issues), "valid": valid}
 
 
@@ -433,6 +847,7 @@ async def increment(name: str, body: IncrementBody) -> dict[str, Any]:
         valid = not validate.errors(issues)
     got = await _call(store.increment_flow, roots, body.scope, name, user=current["user"] or "", flow=flow,
                       base_revision=body.base_revision, force=body.force, note=body.note, valid=valid)
+    _changed(name, body.scope, body.project, got["state"], current["user"])
     return {**got, "issues": _dicts(issues), "valid": got["state"].get("valid")}
 
 
@@ -444,32 +859,112 @@ async def revert(name: str, body: RevertBody) -> dict[str, Any]:
     def is_valid(flow: Flow) -> bool:
         return not validate.errors(_issues(roots, body.scope, flow, body.project))
 
-    return await _call(store.revert_flow, roots, body.scope, name, body.to_version,
-                       user=current["user"] or "", validator=is_valid)
+    got = await _call(store.revert_flow, roots, body.scope, name, body.to_version,
+                      user=current["user"] or "", validator=is_valid)
+    _changed(name, body.scope, body.project, got["state"], current["user"])
+    return got
+
+
+def _issue_key(issue: dict[str, Any]) -> tuple:
+    return (issue.get("code"), issue.get("node"), issue.get("port"))
+
+
+def _gate(roots: dict, scope: str, name: str, project: Optional[str]) -> dict[str, Any]:
+    """Activation gate of 01 §8 on the frozen version ``current``: errors, warnings (with
+    ``acked``), dry run. ``ready`` = what the Activer button needs (the acks it sends aside)."""
+    got = store.read_flow(roots, scope, name)
+    state, current = got["state"], got["state"].get("current") or 0
+    out: dict[str, Any] = {"version": current, "active": bool(state.get("active")),
+                           "active_version": state.get("active_version"), "legacy": name.startswith(store.LEGACY_PREFIX),
+                           "errors": [], "warnings": [], "dry_run": {"ok": False, "run_id": None, "version": None},
+                           "destructive": [], "ready": False}
+    if not current:
+        out["reason"] = "aucune version figee : Enregistrer et incrementer d'abord"
+        return out
+    frozen = store.read_flow(roots, scope, name, current)["flow"]
+    issues = _dicts(_issues(roots, scope, frozen, project))
+    ack = state.get("acked") if isinstance(state.get("acked"), dict) else {}
+    acked = {_issue_key(a) for a in ack.get("items") or []} if ack.get("version") == current else set()
+    out["errors"] = [i for i in issues if i["level"] == "error"]
+    out["warnings"] = [{**i, "acked": _issue_key(i) in acked} for i in issues if i["level"] == "warning"]
+    done = state.get("dry_run_ok") or {}
+    out["dry_run"] = {"ok": done.get("version") == current, "run_id": done.get("run_id"),
+                      "version": done.get("version")}
+    out["destructive"] = sorted(nid for nid, node in frozen.nodes.items() if not node.bypass and
+                                (spec := registry.get_node(node.type)) is not None and
+                                registry.flag_on(spec.destructive, spec, node.params))
+    out["ready"] = (not out["legacy"] and not out["errors"] and out["dry_run"]["ok"]
+                    and all(w["acked"] for w in out["warnings"]))
+    return out
+
+
+@router.get("/{name}/activation")
+async def get_activation(name: str, scope: str, project: Optional[str] = None) -> dict[str, Any]:
+    """The three lines of the activation dialog (03 §5) for the frozen version ``current``."""
+    current = await asyncio.to_thread(rights.current_rights)
+    return await _call(_gate, _roots(current["user"], project), scope, name, project)
+
+
+class ActivateBody(ScopeBody):
+    acked: list[dict[str, Any]] = []   # warnings read: {code, node, port}, for the version ``current``
 
 
 @router.post("/{name}/activate")
-async def activate(name: str, body: ScopeBody) -> dict[str, Any]:
-    """Refused for legacy_* flows (the publish runs on v1 until P8), without a frozen version
-    and when the frozen version has errors (409 ``gate``). Warnings and dry run: P5."""
+async def activate(name: str, body: ActivateBody) -> dict[str, Any]:
+    """Activate the frozen version ``current`` (01 §8): refused for legacy_* flows (v1
+    publish until P8), without a frozen version, with errors, with unacknowledged
+    warnings or without a dry run passed on that version (409 ``gate``). The acks sent
+    are kept in state.json for this version. The last elapsed Schedule slot is noted."""
     current = await _require(rights.WRITE, body.scope)
     roots = _roots(current["user"], body.project)
-    state = (await _call(store.read_flow, roots, body.scope, name))["state"]
-    if state.get("current") and not name.startswith(store.LEGACY_PREFIX):
-        frozen = (await _call(store.read_flow, roots, body.scope, name, state["current"]))["flow"]
-        gate = validate.errors(await asyncio.to_thread(_issues, roots, body.scope, frozen, body.project))
-        if gate:
-            raise HTTPException(status_code=409, detail={
-                "message": f"v{state['current']} a {len(gate)} erreur(s) : corrige puis incremente",
-                "gate": _dicts(gate)})
-    return await _call(store.set_active, roots, body.scope, name, True, user=current["user"] or "")
+    if name.startswith(store.LEGACY_PREFIX):
+        raise HTTPException(status_code=409, detail={
+            "message": "un flow legacy_* ne s'active pas : le publish tourne encore sur les actions v1"})
+    gate = await _call(_gate, roots, body.scope, name, body.project)
+    version = gate["version"]
+    if not version:
+        raise HTTPException(status_code=409, detail={"message": gate.get("reason"), "gate": gate})
+    sent = {_issue_key(a) for a in body.acked}
+    missing = [w for w in gate["warnings"] if not w["acked"] and _issue_key(w) not in sent]
+    problems = []
+    if gate["errors"]:
+        problems.append(f"{len(gate['errors'])} erreur(s) : corrige puis incremente")
+    if missing:
+        problems.append(f"{len(missing)} avertissement(s) a lire")
+    if not gate["dry_run"]["ok"]:
+        problems.append(f"essai a blanc a reussir sur v{version}")
+    if problems:
+        raise HTTPException(status_code=409, detail={"message": f"v{version} : " + ", ".join(problems), "gate": gate})
+    root = Path(roots[body.scope])
+    items = [{"code": w["code"], "node": w.get("node"), "port": w.get("port")} for w in gate["warnings"]]
+
+    def finish() -> dict[str, Any]:
+        def ack(state: dict[str, Any]) -> bool:
+            state["acked"] = {"version": version, "items": items}
+            return True
+
+        store.update_state(root, name, ack)
+        state = store.set_active(roots, body.scope, name, True, user=current["user"] or "")
+        frozen = store.read_flow(roots, body.scope, name, state["active_version"])["flow"]
+        scheduler.note_activation(root, name, frozen)
+        return state
+
+    state = await _call(finish)
+    scheduler.request_refresh()
+    events.emit({"type": "activation", "flow": name, "scope": body.scope, "project": body.project,
+                 "active": True, "version": state["active_version"], "by": current["user"]})
+    return state
 
 
 @router.post("/{name}/deactivate")
 async def deactivate(name: str, body: ScopeBody) -> dict[str, Any]:
     current = await _require(rights.WRITE, body.scope)
-    return await _call(store.set_active, _roots(current["user"], body.project), body.scope, name, False,
-                       user=current["user"] or "")
+    state = await _call(store.set_active, _roots(current["user"], body.project), body.scope, name, False,
+                        user=current["user"] or "")
+    scheduler.request_refresh()
+    events.emit({"type": "activation", "flow": name, "scope": body.scope, "project": body.project,
+                 "active": False, "version": state.get("active_version"), "by": current["user"]})
+    return state
 
 
 @router.post("/{name}/copy")
@@ -477,16 +972,114 @@ async def copy(name: str, body: CopyBody) -> dict[str, Any]:
     """Enregistrer sous to another scope / name, or unlock a shipped flow (copy to team, Team TD)."""
     action = rights.ADMIN if body.from_scope == "shipped" and body.to_scope == "team" else rights.WRITE
     current = await _require(action, body.to_scope)
-    return await _call(store.copy_flow, _roots(current["user"], body.project), name, body.from_scope,
-                       body.to_scope, user=current["user"] or "", new_name=body.new_name)
+    from flux_flows import dcc_nodes
+
+    got = await _call(store.copy_flow, _roots(current["user"], body.project), name, body.from_scope,
+                      body.to_scope, user=current["user"] or "", new_name=body.new_name)
+    dcc_nodes.reset_cache()
+    if body.from_scope == "shipped" and name.startswith(store.EXAMPLE_PREFIX):
+        got["pages"] = await asyncio.to_thread(_example_pages, got["name"], body.to_scope, body.project, current)
+    return got
+
+
+def _example_pages(name: str, to_scope: str, project: Optional[str], current: dict[str, Any]) -> list[dict[str, Any]]:
+    """A duplicated example (ADR 0069): each TOOL page its InputsPageReader reads and that
+    the project / team does not have yet is created from the shipped template, so its
+    buttons show in TOOL. Project page for a project or perso flow, team page for a team
+    flow (or without a project). Never overwrites a page; without the right, says so."""
+    roots = _page_roots(project)
+    flow = store.read_flow(_roots(current["user"], project), to_scope, name)["flow"]
+    scope = "team" if to_scope == "team" or not project else "project"
+    out: list[dict[str, Any]] = []
+    for page_id in sorted({str(n.params.get("page") or "") for _, n in page_inputs.page_nodes(flow)} - {""}):
+        if page_store.resolve(roots, page_id) is not None:
+            out.append({"page": page_id, "status": "exists"})
+            continue
+        if roots.get("shipped") is None or not page_store.page_file(Path(roots["shipped"]), page_id).is_file():
+            out.append({"page": page_id, "status": "missing"})
+            continue
+        if not rights.allowed(current, rights.ADMIN, scope):
+            out.append({"page": page_id, "status": "no_right", "scope": scope})
+            continue
+        page = page_store.read_page(roots, "shipped", page_id)["page"]
+        page_store.save_page(roots, scope, page, user=current["user"] or "")
+        events.emit({"type": "page_changed", "page": page_id, "scope": scope, "project": project,
+                     "rev": None, "by": current["user"]})
+        out.append({"page": page_id, "status": "created", "scope": scope})
+    return out
+
+
+class RelocateBody(BaseModel):
+    from_scope: str
+    to_scope: str
+    project: Optional[str] = None
+    new_name: Optional[str] = None
+
+
+@router.post("/{name}/relocate")
+async def relocate(name: str, body: RelocateBody) -> dict[str, Any]:
+    """Rename (same scope) or Changer de portee (ADR 0069): versions and state go along,
+    the flow arrives inactive, the old one goes to the trash. Write rights on both scopes."""
+    await _require(rights.WRITE, body.from_scope)
+    current = await _require(rights.WRITE, body.to_scope)
+    roots = _roots(current["user"], body.project)
+    got = await _call(store.relocate_flow, roots, name, body.from_scope, body.to_scope,
+                      user=current["user"] or "", new_name=body.new_name)
+    scheduler.request_refresh()
+    events.emit({"type": "activation", "flow": name, "scope": body.from_scope, "project": body.project,
+                 "active": False, "version": None, "by": current["user"]})
+    return got
+
+
+@router.post("/{name}/unlock")
+async def unlock(name: str, body: ScopeBody) -> dict[str, Any]:
+    """Deverrouiller a shipped flow or DCC node (decision 19, 03 §8): a team copy of the same
+    name that replaces it for the whole team (Team TD). DELETE of the copy = Revenir au defaut."""
+    from flux_flows import dcc_nodes
+
+    current = await _require(rights.ADMIN, "team")
+    got = await _call(store.copy_flow, _roots(current["user"], body.project), name, "shipped", "team",
+                      user=current["user"] or "")
+    dcc_nodes.reset_cache()
+    events.emit({"type": "flow_changed", "flow": name, "scope": "team", "project": None,
+                 "version": got["state"].get("current"), "revision": got["state"].get("revision"),
+                 "by": current["user"]})
+    return got
 
 
 @router.delete("/{name}")
 async def delete(name: str, scope: str, project: Optional[str] = None) -> dict[str, Any]:
     """To <scope>/_trash/; on a team copy of a shipped flow = Revenir au defaut."""
+    from flux_flows import dcc_nodes
+
     current = await _require(rights.WRITE, scope)
-    return await _call(store.delete_flow, _roots(current["user"], project), scope, name,
-                       user=current["user"] or "")
+    got = await _call(store.delete_flow, _roots(current["user"], project), scope, name,
+                      user=current["user"] or "")
+    dcc_nodes.reset_cache()
+    return got
+
+
+def _note_dry_run(run: engine.Run, root: Path, name: str, version: int) -> None:
+    """When the dry run of *version* ends ``ok``: state.json dry_run_ok (activation, 01 §8)."""
+    def done(_task: asyncio.Task) -> None:
+        if run.record.get("status") != "ok":
+            return
+        note = {"version": version, "run_id": run.run_id, "nodes_simulated": list(run.record["nodes_simulated"]),
+                "at": run.record.get("ended")}
+
+        def change(state: dict[str, Any]) -> bool:
+            state["dry_run_ok"] = note
+            return True
+
+        async def write() -> None:
+            try:
+                await asyncio.to_thread(store.update_state, root, name, change)
+            except OSError:
+                pass
+
+        asyncio.get_running_loop().create_task(write())
+
+    run.task.add_done_callback(done)
 
 
 class RunBody(BaseModel):
@@ -497,6 +1090,23 @@ class RunBody(BaseModel):
     dry_run: bool = False                     # on the saved file, never on a draft (01 §5)
     draft: Optional[dict[str, Any]] = None    # editor document: runs without creating a version (A7)
     base_revision: Optional[int] = None       # revision the draft was loaded from (kept in the record)
+    version: Optional[int] = None             # dry run of a frozen version (activation dialog)
+    button: Optional[str] = None              # page flow: run as a click on this button, with values (T1)
+
+
+def _page_click(flow: Flow, event: Optional[str], button: str,
+                values: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """(start node, payload) of a Run / dry run that plays a click on a page button: the
+    branch of any button, with the field values given (T1: else only the first button with
+    the page defaults could be tested). 400 when no InputsPageReader has that button."""
+    for nid, node in sorted(flow.nodes.items()):
+        if node.type != page_inputs.PAGE_NODE or (event is not None and nid != event):
+            continue
+        outputs = (node.params.get("ports") or {}).get("outputs") or {}
+        if outputs.get(button) == "exec":
+            return nid, {"page": str(node.params.get("page") or ""), "button": button, "values": values}
+    raise HTTPException(status_code=400, detail={
+        "message": f"Aucun InputsPageReader de ce flow n'a de bouton `{button}`"})
 
 
 @router.post("/{name}/run")
@@ -517,8 +1127,16 @@ async def run(name: str, body: RunBody) -> dict[str, Any]:
         flow, draft = _parse(body.draft, name), True
     elif body.dry_run:
         await _require(rights.DRAFT, scope)
-        got = await _call(store.read_flow, roots, scope, name)
+        got = await _call(store.read_flow, roots, scope, name, body.version)
         flow, mode, base_revision = got["flow"], "dry", got["state"].get("revision")
+        current_version = got["state"].get("current") or 0
+        if body.version is not None:
+            version = body.version
+        elif current_version and scope != "shipped":
+            # The saved working file equal to the frozen `current` counts for the activation.
+            frozen = await _call(store.read_flow, roots, scope, name, current_version)
+            if store.dump_flow(frozen["flow"]) == store.dump_flow(flow):
+                version = current_version
     else:
         state = (await _call(store.read_flow, roots, scope, name))["state"]
         if not state.get("active") or not state.get("active_version"):
@@ -526,10 +1144,15 @@ async def run(name: str, body: RunBody) -> dict[str, Any]:
         version = state["active_version"]
         flow = (await _call(store.read_flow, roots, scope, name, version))["flow"]
     folder = runs.runs_dir(scope, project=body.project, user=current["user"])
+    event, payload = body.event, None
+    if body.button:
+        event, payload = _page_click(flow, body.event, body.button, body.values)
     new_run = engine.Run(flow, scope=scope, project=body.project, user=current["user"], mode=mode,
-                         draft=draft, version=version, base_revision=base_revision, event=body.event,
-                         values=body.values, folder=folder)
+                         draft=draft, version=version, base_revision=base_revision, event=event,
+                         values=body.values, payload=payload, folder=folder)
     record = await engine.manager().submit(new_run)
+    if mode == "dry" and version and scope != "shipped" and new_run.task is not None:
+        _note_dry_run(new_run, Path(roots[scope]), name, version)
     if record["status"] in ("refused", "skipped"):
         raise HTTPException(status_code=409, detail={
             "message": record["error"], "run_id": record["run_id"], "status": record["status"],

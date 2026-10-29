@@ -230,6 +230,10 @@ def install_plugin() -> dict:
 
     if installed:
         _save_install_paths(installed)
+        # The machine secret of the bridge's `run` action: read by the bridge from
+        # %APPDATA%/FluxPipeline (no extra file in ZPlugs64, which ZBrush executes).
+        from dcc.bridge_secret import get_secret
+        get_secret()
         return {"ok": True, "path": installed[0], "paths": installed, "error": None}
     return {"ok": False, "path": None, "paths": [], "error": "; ".join(errors) or "No ZBrush install found"}
 

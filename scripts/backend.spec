@@ -30,6 +30,10 @@ hidden = (
        "uvicorn.protocols.http.auto", "uvicorn.lifespan.on"]
     + pxr_hidden
     + oiio_hidden
+    # The Flows node modules are imported by name (flux_flows/nodes/registry.py BUILTIN_MODULES)
+    # and the dispatcher lazily from them (ADR 0067): invisible to the static analysis.
+    + collect_submodules("flux_flows.nodes")
+    + collect_submodules("features.dispatcher")
 )
 
 # Non-Python files the backend reads next to its own modules (Path(__file__)...).
@@ -45,6 +49,8 @@ app_datas = [
      "features/usd_assembler/recipe"),
     (str(ROOT / "backend/dcc/houdini/flux_houdini_server.py"), "dcc/houdini"),
     (str(ROOT / "backend/dcc/mari/mari_bridge.py"), "dcc/mari"),
+    # Flows P6c: dcc_side templates of the extension bridges, copied by the installer.
+    (str(ROOT / "backend/flux_flows/bridges/templates/*_server.py"), "flux_flows/bridges/templates"),
     # Run by Tractor's own Python 2.7 as a subprocess, never imported (ADR 0015).
     (str(ROOT / "backend/features/render/bridge/flux_tractor_bridge.py"),
      "features/render/bridge"),

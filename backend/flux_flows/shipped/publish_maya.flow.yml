@@ -1,0 +1,31 @@
+flux_flow: 2
+name: publish_maya
+label: "Publish Maya"
+description: "Flow de publish Maya (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish) -> mayPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher n'est pas encore bascule dessus (P8) : on le lance a la main avec Run."
+run_policy: queue
+interface:
+  inputs:
+    - {id: name, type: str, label: "Nom FLUX (tokens, sans version)", default: ""}
+    - {id: format, type: select, label: "Format", default: ".ma", options: [".ma", ".mb", ".abc", ".fbx", ".obj", ".usd"]}
+    - {id: scope, type: select, label: "Scene ou selection", default: "scene", options: ["scene", "selection"]}
+    - {id: description, type: str, label: "Description", default: ""}
+    - {id: frame_range, type: str, label: "Plage (caches, anim)", default: ""}
+  outputs:
+    - {id: path, type: path, label: "Fichier LAST publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+nodes:
+  ev: {type: event.publish_request, pos: [0, 160], params: {soft: maya}}
+  inst: {type: session.may_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
+  pub: {type: dcc.may_publish, pos: [640, 160], params: {name: "${name}", format: "${format}", scope: "${scope}", description: "${description}", frame_range: "${frame_range}"}}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+links:
+  - {from: ev.then, to: inst.exec}
+  - {from: inst.then, to: pub.exec}
+  - {from: inst.session, to: pub.session}
+  - {from: pub.then, to: out_path.exec}
+  - {from: pub.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: pub.version, to: out_version.value}
+notes:
+  - {id: k1, pos: [0, 400], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et mayPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

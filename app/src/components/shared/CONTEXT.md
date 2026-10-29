@@ -26,6 +26,8 @@ Composants communs : `Sidebar`, `TitleBar` (tiroir console), `StatusBar` (DCC co
   (le logiciel actif reste affiche). Utilise par Publisher et Shelf Manager.
 * `TitleBar` / Parametres : resume du profil actif (et "modifie"), couleurs de console repliees.
 * `ParamWidget.tsx` (Flows P4, 2026-10-23) : un widget par sorte de parametre (bool, int, float, text, path, dir, list,
+* P7 : `ParamWidget` sert aussi au `PageRenderer` des pages TOOL (`pages/tool_pages/`) ; `SoftwareSelector extra` recoit dans le
+  Publisher les logiciels d'extension (bridges P6c valides), qui ont un panneau genere.
   select, str), extrait de `ActionForm` (comportement identique pour ActionForm : seules bool / int / float / text / path
   y sont mappees, le reste = texte). Utilise par le Params de l'editeur de flows, demain par le PageRenderer (P7).
 * `closeGuard.ts` (Flows P4) : registre de gardes async consultees par `TitleBar` avant `windowClose()` (fenetre detachee,

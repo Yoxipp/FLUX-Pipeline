@@ -26,13 +26,16 @@ from flux_flows.model import NODE_TYPE_RE
 from flux_flows.types import catalog_types, is_valid_type
 
 FAMILIES: Tuple[str, ...] = (
-    "event", "data", "logic", "operator", "action", "flux", "session", "dcc", "bridge", "subflow",
+    "event", "data", "logic", "operator", "action", "flux", "session", "dcc", "bridge", "dispatcher", "subflow",
 )
 MARKER = "@flow_node"
 BUILTIN_MODULES: Tuple[str, ...] = (
     "flux_flows.nodes.event", "flux_flows.nodes.data", "flux_flows.nodes.logic",
     "flux_flows.nodes.operator", "flux_flows.nodes.action", "flux_flows.nodes.flux",
-    "flux_flows.nodes.subflow",
+    "flux_flows.nodes.subflow", "flux_flows.nodes.bridge", "flux_flows.nodes.dcc_houdini",
+    "flux_flows.nodes.dcc_maya", "flux_flows.nodes.headless", "flux_flows.nodes.dcc_publish", "flux_flows.nodes.dcc_softs",
+    "flux_flows.nodes.page_nodes",
+    "flux_flows.nodes.dcc_extension", "flux_flows.nodes.dispatcher",
 )
 _TEAM_MODULE_PREFIX = "flux_flows_team_nodes."
 
@@ -50,15 +53,57 @@ class Port:
     example: Any = None
     required: bool = False
     default: Any = None
+    # Editor hints (params): the allowed values of a choice param, in menu order;
+    # wirable=False = a constant (never promoted to an input, no link into it);
+    # tokens = a project token section (CLASS, NAME, TYPE, SEQ...) offered in a menu.
+    # R1: choice_labels = ((value, label_fr, label_en), ...) readable menu entries;
+    # reserved = choices shown in the menu but disabled (e.g. instance mode farm, V2).
+    choices: Optional[Tuple[Any, ...]] = None
+    wirable: bool = True
+    tokens: Optional[str] = None
+    choice_labels: Tuple[Tuple[Any, str, str], ...] = ()
+    reserved: Tuple[Any, ...] = ()
+    # R1 retake 2: when = (param, values): the port is shown (node, Params) only while that
+    # param (or its default) is one of the values; a link into a hidden port is W_PORT_HIDDEN.
+    when: Optional[Tuple[str, Tuple[Any, ...]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "type": self.type, "doc_fr": self.doc_fr, "doc_en": self.doc_en,
-                "example": self.example, "required": self.required, "default": self.default}
+                "example": self.example, "required": self.required, "default": self.default,
+                "choices": list(self.choices) if self.choices is not None else None,
+                "wirable": self.wirable, "tokens": self.tokens,
+                "choice_labels": {str(v): {"fr": fr, "en": en} for v, fr, en in self.choice_labels} or None,
+                "reserved": [str(v) for v in self.reserved] or None,
+                "when": {"param": self.when[0], "in": list(self.when[1])} if self.when else None}
 
 
 def port(name: str, type: str, doc_fr: str = "", doc_en: str = "", example: Any = None,
-         required: bool = False, default: Any = None) -> Port:
-    return Port(name, type, doc_fr, doc_en, example, required, default)
+         required: bool = False, default: Any = None, *, choices: Optional[Iterable[Any]] = None,
+         wirable: bool = True, tokens: Optional[str] = None,
+         labels: Optional[Dict[Any, Tuple[str, str]]] = None, reserved: Iterable[Any] = (),
+         when: Optional[Dict[str, Iterable[Any]]] = None) -> Port:
+    """A port or param. *choices* keep their declaration order in the menu; *labels* maps a
+    choice to (label_fr, label_en); *reserved* choices are listed but cannot be picked."""
+    if type == "exec" and not doc_fr:
+        doc_fr, doc_en = EXEC_DOCS.get(name, EXEC_DOCS[""])[0], doc_en or EXEC_DOCS.get(name, EXEC_DOCS[""])[1]
+    return Port(name, type, doc_fr, doc_en, example, required, default,
+                tuple(choices) if choices is not None else None, bool(wirable), tokens or None,
+                tuple((v, fr, en) for v, (fr, en) in (labels or {}).items()), tuple(reserved),
+                next(((k, tuple(v)) for k, v in (when or {}).items()), None))
+
+
+def port_visible(spec: "NodeSpec", p: Port, params: Dict[str, Any]) -> bool:
+    """Is *p* shown for these params (its ``when`` param, or that param's default)?"""
+    if not p.when:
+        return True
+    name, values = p.when
+    if name in params and params[name] not in (None, ""):
+        value = params[name]
+    else:
+        value = next((q.default for q in (*spec.params, *spec.inputs) if q.name == name), None)
+    if isinstance(value, str) and any(c in value for c in "{$"):
+        return True     # templated: unknown before the run
+    return str(value).strip().lower() in {str(v).lower() for v in values}
 
 
 @dataclass
@@ -85,6 +130,10 @@ class NodeSpec:
     file: str = ""
     func: Optional[Callable[..., Any]] = None
     simulate: Optional[Callable[..., Any]] = None
+    # P6a: internal = the core leaf of a DCC subflow node, hidden from Tab / Shelf;
+    # subflow = {name, scope, locked, shipped} of a node shipped as a locked subflow (dcc_nodes.py).
+    internal: bool = False
+    subflow: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -94,6 +143,7 @@ class NodeSpec:
             "doc_fr": self.doc_fr, "doc_en": self.doc_en, "destructive": self.destructive,
             "effect": self.effect, "raw": list(self.raw), "source": self.source, "file": self.file,
             "session": self.session, "live_only": self.live_only, "licence": self.licence,
+            "internal": self.internal, "subflow": self.subflow,
         }
 
 
@@ -118,6 +168,21 @@ _LOCK = threading.RLock()
 _LOADING: Dict[str, str] = {}
 
 
+# R1 retake 6: tooltip of an exec port declared without a doc, by its usual name.
+EXEC_DOCS: Dict[str, Tuple[str, str]] = {
+    "exec": ("Quand ce node s'execute : relie la sortie then du node d'avant",
+             "When this node runs: link the then output of the node before"),
+    "then": ("Suite du flow : le node relie ici s'execute ensuite", "Next step: the node linked here runs next"),
+    "on_error": ("Si ce node echoue : le node relie ici s'execute au lieu d'arreter le run",
+                 "When this node fails: the node linked here runs instead of stopping the run"),
+    "loop": ("Corps de la boucle : execute une fois par tour", "Loop body: runs once per turn"),
+    "done": ("Apres la boucle : execute une fois tous les tours finis", "After the loop: runs once every turn is done"),
+    "else": ("Si la condition est fausse", "When the condition is false"),
+    "default": ("Si aucun cas ne correspond", "When no case matches"),
+    "": ("Ordre d'execution : relie a un autre port d'execution", "Execution order: link to another execution port"),
+}
+
+
 def _check_ports(node_type: str, kind: str, ports: Iterable[Port]) -> List[Port]:
     out, names = [], set()
     for p in ports:
@@ -127,6 +192,9 @@ def _check_ports(node_type: str, kind: str, ports: Iterable[Port]) -> List[Port]
             raise NodeDefinitionError(f"{node_type} : {kind} '{p.name}' en double")
         if not is_valid_type(p.type):
             raise NodeDefinitionError(f"{node_type} : {kind} '{p.name}' a un type inconnu '{p.type}'")
+        extra = [v for v, _fr, _en in p.choice_labels] + list(p.reserved)
+        if extra and (p.choices is None or any(v not in p.choices for v in extra)):
+            raise NodeDefinitionError(f"{node_type} : {kind} '{p.name}' : libelle ou option reservee hors choices")
         names.add(p.name)
         out.append(p)
     return out
@@ -137,7 +205,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
               aliases: Iterable[str] = (), doc_fr: str = "", doc_en: str = "", destructive: Any = None,
               effect: bool = False, simulate: Optional[Callable[..., Any]] = None,
               raw: Iterable[str] = (), session: Optional[str] = None, live_only: bool = False,
-              licence: Any = None,
+              licence: Any = None, internal: bool = False,
               ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Declare a node type. The decorated function is its body (run by the engine)."""
     if not NODE_TYPE_RE.match(type):
@@ -153,7 +221,7 @@ def flow_node(type: str, label: str, *, icon: str = "", inputs: Iterable[Port] =
         inputs=_check_ports(type, "entree", inputs), outputs=_check_ports(type, "sortie", outputs),
         params=_check_ports(type, "parametre", params), shelf=shelf, aliases=list(aliases),
         doc_fr=doc_fr, doc_en=doc_en, destructive=destructive, effect=effect, simulate=simulate,
-        raw=tuple(raw), session=session, live_only=bool(live_only), licence=licence,
+        raw=tuple(raw), session=session, live_only=bool(live_only), licence=licence, internal=bool(internal),
     )
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -190,16 +258,32 @@ def ensure_builtin() -> None:
                 importlib.import_module(name)
 
 
-def get_node(node_type: str) -> Optional[NodeSpec]:
+def get_core(node_type: str) -> Optional[NodeSpec]:
+    """A node registered in Python (FLUX or team), never a DCC subflow node."""
     ensure_builtin()
     with _LOCK:
         return _REGISTRY.get(node_type)
 
 
+def get_node(node_type: str) -> Optional[NodeSpec]:
+    """Python nodes first, then the DCC nodes shipped as locked subflows (dcc_nodes.py)."""
+    spec = get_core(node_type)
+    if spec is not None:
+        return spec
+    from flux_flows import dcc_nodes
+
+    return dcc_nodes.get_spec(node_type)
+
+
 def all_nodes() -> List[NodeSpec]:
+    from flux_flows import dcc_nodes
+
     ensure_builtin()
     with _LOCK:
-        return sorted(_REGISTRY.values(), key=lambda s: (FAMILIES.index(s.family), s.type))
+        nodes = dict(_REGISTRY)
+    for node_type, spec in dcc_nodes.specs().items():
+        nodes.setdefault(node_type, spec)
+    return sorted(nodes.values(), key=lambda s: (FAMILIES.index(s.family), s.type))
 
 
 @dataclass

@@ -197,7 +197,7 @@ def publish_painter(
         files, tx_warnings = convert_to_tx(files, "Painter")
     variante = instance.strip().upper() if instance.strip() and instance.strip().lower() != "null" else ""
     published, warnings = publish_maps(files, project_path, project, [class_tok, task_tok, name_tok],
-                                       variante, description, user)
+                                       variante, description, user, soft="painter")
     warnings = tx_warnings + warnings
     for w in warnings:
         log.warning("Painter publish: %s", w)

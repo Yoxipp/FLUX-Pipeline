@@ -1,0 +1,34 @@
+flux_flow: 2
+name: publish_houdini
+label: "Publish Houdini"
+description: "Flow de publish Houdini (01 section 13) : formulaire du Publisher -> nodes d'equipe optionnels (avant publish) -> houPublish (boite noire, meme code que le Publisher) -> FlowOutput. Le Publisher n'est pas encore bascule dessus (P8) : on le lance a la main avec Run."
+run_policy: queue
+interface:
+  inputs:
+    - {id: name, type: str, label: "Nom FLUX (vide = nom du node)", default: ""}
+    - {id: node, type: str, label: "ROP ou node (vide = selection)", default: ""}
+    - {id: format, type: select, label: "Format", default: ".abc", options: [".abc", ".bgeo.sc", ".usd", ".vdb", ".fbx", ".obj", ".hip"]}
+    - {id: description, type: str, label: "Description", default: ""}
+    - {id: frame_range, type: str, label: "Plage", default: ""}
+    - {id: sequence, type: bool, label: "Sequence (un fichier par frame)", default: false}
+  outputs:
+    - {id: path, type: path, label: "Fichier LAST publie"}
+    - {id: version, type: int, label: "Version ecrite"}
+nodes:
+  ev: {type: event.publish_request, pos: [0, 160], params: {soft: houdini}}
+  inst: {type: session.hou_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
+  seq: {type: data.flow_input, pos: [320, 400], params: {id: sequence}}
+  pub: {type: dcc.hou_publish, pos: [640, 160], params: {name: "${name}", node: "${node}", format: "${format}", description: "${description}", frame_range: "${frame_range}"}}
+  out_path: {type: subflow.flow_output, pos: [960, 160], params: {id: path}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+links:
+  - {from: ev.then, to: inst.exec}
+  - {from: inst.then, to: pub.exec}
+  - {from: inst.session, to: pub.session}
+  - {from: seq.value, to: pub.sequence}
+  - {from: pub.then, to: out_path.exec}
+  - {from: pub.path, to: out_path.value}
+  - {from: out_path.then, to: out_version.exec}
+  - {from: pub.version, to: out_version.value}
+notes:
+  - {id: k1, pos: [0, 560], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et houPublish (flux.refuse_publish arrive en P8).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

@@ -11,6 +11,11 @@ Protocol:
   {"action": "ping"}                   -> {"status": "ok", "version": "..."}
   {"action": "info"}                   -> {"status": "ok", "packages": [...], "current": ...}
   {"action": "export", "config": {...}} -> {"status": "ok", "files": [...]}
+  Flows verbs (P6b step 9, 2026-10-24, sd.api per the Adobe docs, TO VALIDATE LIVE):
+  {"action": "open", "path": ".sbs"}                 -> {"status": "ok", "project"} (one more package)
+  {"action": "save"} / {"action": "save_as", "path": ".sbs"} -> the current graph's package
+  {"action": "import", "kind": "bitmap"|"mesh", "path"} -> linked into the current package
+  {"action": "run", "code", "secret"}  -> {"ok": true, "result", "trace"} (machine secret)
 
 config:
   {"exportPath": dir, "graphs": [{"package": file path, "graph": identifier,
@@ -427,8 +432,174 @@ def _read_version() -> str:
         return "Substance Designer"
 
 
+
+
+# ── Flows verbs (P6b step 9) ─────────────────────────────────────────────────
+
+def _secret() -> str:
+    """The machine secret: <script>.json written next to this script at install, else
+    %APPDATA%/FluxPipeline/bridge_secret.txt (a bridge started by exec() has no __file__)."""
+    try:
+        with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8") as fh:
+            value = str(json.load(fh).get("secret") or "")
+            if value:
+                return value
+    except (OSError, ValueError, NameError):
+        pass
+    appdata = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+    try:
+        with open(os.path.join(appdata, "FluxPipeline", "bridge_secret.txt"), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _run_code(cmd: dict, namespace: dict, soft: str) -> dict:
+    """`run`: free Python in the soft, refused without the machine secret."""
+    import hmac
+    import traceback
+
+    expected = _secret()
+    if not expected or not hmac.compare_digest(str(cmd.get("secret") or ""), expected):
+        return {"ok": False, "status": "error",
+                "error": "secret du bridge refuse : reinstalle le bridge %s depuis FLUX" % soft}
+    code = str(cmd.get("code") or "")
+
+    def job():
+        ns = dict(namespace, __name__="__flux_flow__")
+        try:
+            exec(compile(code, "<flux flow>", "exec"), ns)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "status": "error", "error": str(exc), "trace": traceback.format_exc()}
+        result = ns.get("result")
+        try:
+            json.dumps(result)
+        except (TypeError, ValueError):
+            result = repr(result)
+        return {"ok": True, "status": "ok", "result": result, "trace": ""}
+
+    return _on_main_thread(job, timeout=float(cmd.get("timeout") or 600.0))
+
+
+def _verb(fn, timeout: float = 600.0) -> dict:
+    """fn() on the main thread, errors as {"status": "error"}."""
+    def job():
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            _diag("verb failed: %r" % (exc,))
+            return {"status": "error", "msg": str(exc)}
+
+    return _on_main_thread(job, timeout=timeout)
+
+
+def _pkg_mgr():
+    return _app().getPackageMgr()
+
+
+def _current_package():
+    graph = _current_graph()
+    if graph is not None:
+        try:
+            return graph.getPackage()
+        except Exception:  # noqa: BLE001
+            pass
+    pkgs = _user_packages()
+    return pkgs[0] if len(pkgs) == 1 else None
+
+
+def _pkg_path(pkg) -> str:
+    try:
+        return str(pkg.getFilePath() or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _do_open(cmd: dict) -> dict:
+    """Designer holds several packages: open = load one more .sbs (nothing is replaced)."""
+    path = str(cmd.get("path") or "")
+    if not path.lower().endswith(".sbs"):
+        return {"status": "error", "msg": "open : un package .sbs attendu"}
+    if not os.path.isfile(path):
+        return {"status": "error", "msg": "fichier introuvable : %s" % path}
+
+    def fn():
+        mgr = _pkg_mgr()
+        pkg = None
+        find = getattr(mgr, "getUserPackageFromFilePath", None)
+        if find is not None:
+            pkg = find(path)
+        if pkg is None:
+            pkg = mgr.loadUserPackage(path)
+        return {"status": "ok", "project": _pkg_path(pkg) or path}
+
+    return _verb(fn)
+
+
+def _do_save(cmd: dict) -> dict:
+    def fn():
+        pkg = _current_package()
+        if pkg is None:
+            return {"status": "error", "msg": "aucun package courant (ouvre un graphe du package a enregistrer)"}
+        if not _pkg_path(pkg):
+            return {"status": "error", "msg": "package jamais enregistre : utilise sdSaveAs"}
+        _pkg_mgr().savePackage(pkg)
+        return {"status": "ok", "project": _pkg_path(pkg)}
+
+    return _verb(fn)
+
+
+def _do_save_as(cmd: dict) -> dict:
+    """The current package saved as a new .sbs, which becomes its file (no copy mode)."""
+    path = str(cmd.get("path") or "")
+    if not path.lower().endswith(".sbs"):
+        return {"status": "error", "msg": "save_as : un package .sbs attendu"}
+
+    def fn():
+        pkg = _current_package()
+        if pkg is None:
+            return {"status": "error", "msg": "aucun package courant (ouvre un graphe du package a enregistrer)"}
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        _pkg_mgr().savePackageAs(pkg, path)
+        return {"status": "ok", "project": path}
+
+    return _verb(fn)
+
+
+def _do_import(cmd: dict) -> dict:
+    """A bitmap or a mesh linked into the current package (Resources)."""
+    kind, path = str(cmd.get("kind") or "bitmap"), str(cmd.get("path") or "")
+    if not os.path.isfile(path):
+        return {"status": "error", "msg": "fichier introuvable : %s" % path}
+    if kind not in ("bitmap", "mesh"):
+        return {"status": "error", "msg": "import : kind inconnu %s (bitmap, mesh)" % kind}
+
+    def fn():
+        from sd.api.sdresource import EmbedMethod
+
+        pkg = _current_package()
+        if pkg is None:
+            return {"status": "error", "msg": "aucun package courant (ouvre un graphe du package cible)"}
+        if kind == "bitmap":
+            from sd.api.sdresourcebitmap import SDResourceBitmap as _Res
+        else:
+            from sd.api.sdresourcescene import SDResourceScene as _Res
+        _Res.sNewFromFile(pkg, path, EmbedMethod.Linked)
+        return {"status": "ok"}
+
+    return _verb(fn)
+
+
+_VERBS = {"open": _do_open, "save": _do_save, "save_as": _do_save_as, "import": _do_import,
+          "run": lambda cmd: _run_code(cmd, {"sd": _sd, "app": _app()}, "Designer")}
+
+
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
+    if action in _VERBS:
+        if not _SD_AVAILABLE:
+            return {"status": "error", "msg": "sd module not available"}
+        return _VERBS[action](cmd)
     if action == "ping":
         return {"status": "ok", "version": _version()}
     if action == "info":

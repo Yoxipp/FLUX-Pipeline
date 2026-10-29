@@ -20,6 +20,8 @@ import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
 import { ActionPublish } from './pages/ActionPublish'
 import { FlowEditor }    from './pages/flow_editor/FlowEditor'
+import { ToolPage }      from './pages/tool_pages/ToolPage'
+import { PageBuilder }   from './pages/tool_pages/PageBuilder'
 import { LegacyEditor }  from './pages/flow_editor/LegacyEditor'
 import { Activity }      from './pages/Activity'
 import { Projects }      from './pages/Projects'
@@ -163,6 +165,9 @@ function AppShell({ settings }: { settings: Settings }) {
               {/* Flows editor (P0); the old YAML action editor stays reachable until P8. */}
               <Route path="/action-graph" element={<FlowEditor />} />
               <Route path="/action-graph-legacy" element={<LegacyEditor />} />
+              {/* TOOL pages (Flows P7, 04 §6); /tool/:id/edit = the page editor. */}
+              <Route path="/tool" element={<ToolPage />} />
+              <Route path="/tool/:id/edit" element={<PageBuilder />} />
               <Route path="/activity"  element={<Activity />} />
               <Route path="/projects"  element={<Projects />} />
               <Route path="/shelf"     element={<ShelfManager />} />

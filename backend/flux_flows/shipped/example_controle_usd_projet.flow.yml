@@ -1,0 +1,65 @@
+flux_flow: 2
+name: example_controle_usd_projet
+label: "Exemple : controle USD du projet"
+description: "Page controle_usd : UsdCheck sur chaque *_LAST.usd* du projet (hors ARCHIVE et _flux*), une ligne par fichier dans le tableau de la page, rapport JSON dans _flux_flows/controles_usd. Exemple livre : clic droit > Dupliquer dans Fichier > Ouvrir pour l'utiliser dans ton projet."
+run_policy: skip_if_running
+interface:
+  inputs: []
+  outputs:
+    - {id: rapport, type: "list[str]", label: "Une ligne par LAST"}
+variables:
+  - {name: fichier, type: str, default: ""}
+  - {name: "n", type: int, default: 0}
+  - {name: details, type: str, default: ""}
+nodes:
+  page: {type: event.page_inputs, pos: [0, 160], params: {page: controle_usd, ports: {outputs: {controler: exec}, labels: {controler: "Controler les LAST USD"}}}}
+  racine: {type: data.path, pos: [0, 400], params: {value: ".", relative_to: project}}
+  lister: {type: action.list_files, pos: [320, 160], params: {pattern: "*_LAST.usd*", recursive: true, kind: file}}
+  filtrer: {type: operator.list_filter, pos: [320, 400], params: {pattern: "** ^**/ARCHIVE/** ^**/_flux*/**", match_on: path}}
+  trier: {type: operator.list_sort, pos: [320, 560], params: {key: natural}}
+  boucle: {type: operator.foreach_begin, pos: [640, 160], params: {mode: sequential}}
+  check: {type: flux.usd_check, pos: [960, 160], params: {}}
+  relatif: {type: operator.path_relative, pos: [960, 400], params: {}}
+  set_f: {type: data.set_variable, pos: [1280, 160], params: {name: fichier}}
+  set_n: {type: data.set_variable, pos: [1600, 160], params: {name: "n"}}
+  joindre: {type: operator.str_join, pos: [1600, 400], params: {sep: " ; "}}
+  set_d: {type: data.set_variable, pos: [1920, 160], params: {name: details}}
+  ligne: {type: data.template, pos: [1920, 400], params: {text: "${fichier} : ${n} probleme(s) ${details}"}}
+  fin: {type: operator.foreach_end, pos: [2240, 160], params: {begin: boucle}}
+  sortie: {type: subflow.flow_output, pos: [2560, 160], params: {id: rapport}}
+  ctx: {type: data.context, pos: [2240, 560], params: {}}
+  dossier: {type: operator.path_join, pos: [2560, 400], params: {a: "_flux_flows", b: controles_usd}}
+  nom: {type: data.template, pos: [2560, 560], params: {text: "controle_usd_{date:%Y%m%d_%H%M%S}.json"}}
+  json: {type: action.write_json, pos: [2880, 160], params: {mode: create}}
+  notify: {type: flux.notify, pos: [3200, 160], params: {text: "Controle USD du projet fini : resultat dans la page Controle USD", level: info, where: both}}
+links:
+  - {from: boucle.item, to: check.source}
+  - {from: boucle.item, to: relatif.path}
+  - {from: boucle.loop, to: check.exec}
+  - {from: check.count, to: set_n.value}
+  - {from: check.issues, to: joindre.items}
+  - {from: check.then, to: set_f.exec}
+  - {from: ctx.project_path, to: dossier.base}
+  - {from: dossier.dir, to: json.dir}
+  - {from: filtrer.items, to: trier.list}
+  - {from: fin.done, to: sortie.exec}
+  - {from: fin.results, to: json.data}
+  - {from: fin.results, to: sortie.value}
+  - {from: joindre.text, to: set_d.value}
+  - {from: json.path, to: notify.path}
+  - {from: json.then, to: notify.exec}
+  - {from: ligne.text, to: fin.collect}
+  - {from: lister.files, to: filtrer.list}
+  - {from: lister.then, to: boucle.exec}
+  - {from: nom.text, to: json.name}
+  - {from: page.controler, to: lister.exec}
+  - {from: racine.dir, to: lister.folder}
+  - {from: racine.dir, to: relatif.base}
+  - {from: relatif.relative, to: set_f.value}
+  - {from: set_d.then, to: fin.exec}
+  - {from: set_f.then, to: set_n.exec}
+  - {from: set_n.then, to: set_d.exec}
+  - {from: sortie.then, to: json.exec}
+  - {from: trier.items, to: boucle.list}
+notes:
+  - {id: k1, pos: [0, 720], text: "Page controle_usd : bouton Controler les LAST USD, tableau = sortie rapport du dernier run.\nUne ligne par LAST : chemin relatif au projet, nombre de problemes, details.\nLecture seule sur les publishs ; le rapport JSON va dans _flux_flows/controles_usd."}

@@ -197,3 +197,49 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
     de version) : diff par version, Voir (lecture seule, bandeau "Lecture vNNN"), Revenir (cree v(max+1)), historique.
   * L'ancien editeur (`/action-graph-legacy`, `ActionGraph.tsx`) n'est plus dans la TopBar : lien "Ancien editeur" dans
     Parametres avances, carte Actions (YAML), jusqu'a P8.
+  * P5 : `ActivationDialog.tsx` (bouton Activer de la TopBar : 0 erreur, avertissements coches, essai a blanc de `current`
+    lance depuis le dialogue ; `SlideToConfirm` si un node `!`), tags "actif vN" / "vM non activee".
+  * P6a : nodes DCC livres en sous-flows verrouilles (`spec.subflow`) : cadenas (livre) ou icone equipe (copie), double clic
+    ou Entree = entrer, fil d'Ariane dans la TopBar, U = remonter ; `DccBanner.tsx` (Deverrouiller = copie d'equipe,
+    Revenir au defaut apres `SlideToConfirm`). Les coeurs `spec.internal` ne sont ni dans Tab ni dans le Shelf.
+    `icons.ts` liste toutes les icones du registre.
+  * P6c : bouton Bridges de la TopBar -> `BridgesDialog.tsx` (bridges d'extension : erreurs, exe, etat d'installation,
+    Installer / Mettre a jour / Desinstaller sur ce poste, conflit -> "Remplacer (sauvegarde)", Creer les nodes = Team TD).
+
+## Pages TOOL (`tool_pages/`, chantier Flows P7, ADR 0066)
+
+* `links.ts` : fonctions pures (pas de runner front : verifiees a la lecture et en live) : `widgetsOf`, `initialValue`,
+  `coerce`, `runValues` (tous les champs par id, ADR 0068), `blockedWidgets` (raison de grisage depuis les `P_*`,
+  `P_FLOW_INACTIVE` grise aussi), `ago`, `seconds`. `PageRenderer` grise un bouton qu'aucun flow actif n'ecoute
+  (`GET /flows/pages/{id}/flows`) et clique par `POST /flows/pages/{id}/click` ; le panneau Publisher genere passe sa
+  `target`.
+* `PageRenderer.tsx` : rendu d'une page (dossiers `plain | tabs | collapsible`, lignes en grille a poids `w`, champs via
+  `ParamWidget`, vrais `<button>`). Clic = `POST /flows/{flow}/run {event: button_id, values}` (version active) ; etat du
+  dernier run par bouton (`GET /flows/runs?flow&event&limit=1`, rafraichi sur `run_finished` du WS) ; en cours = "Stop"
+  (annule le run) ; `remember: user` dans les donnees utilisateur (`flux.pages.remember`) ; `preview` (editeur) : boutons
+  inertes ("lancerait ..."), clic = selection. Widgets de donnees via `renderData`.
+* `DataWidgets.tsx` (ADR 0066 n°2) : `feed` (fil + saisie, Entree envoie, canaux par `group_by`, supprimer son message),
+  `table` (`columns`, `editable` : double clic = formulaire), `cards` (kanban par `group_by`, glisser entre colonnes),
+  `calendar` (mois, champ `date` / `end`, double clic sur un jour = ajouter), `members` (comptes FLUX), et une source
+  `{flow, output}` = sortie du dernier run ok (`outputs` du record de run). Donnees par `hooks/usePages.ts`
+  (`usePageData` : etag toutes les 5 s tant que monte + WS `page_data` ; `usePageList`).
+* `BoardWidget.tsx` (ADR 0066 n°1) : board facon Miro dans sa ligne : notes, cartes, images (copiees par le backend),
+  liens, couleurs a plat, pan (glisser le fond), zoom a la molette, "Tout voir", Suppr. Vue par spectateur, jamais ecrite.
+* `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
+  au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
+  "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
+  ASSETS (`Sidebar.tsx`) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
+  Dette : chaque `useFlowsWs` ouvre sa propre socket (sidebar, page, widgets) ; un hub partage viendra si ca pese.
+* `PageBuilder.tsx` (route `/tool/:id/edit?scope=`, `new` = dialogue de creation : libelle, id propose, portee, depart
+  vide / modele `shipped/pages/` / copie d'une page) : 4 colonnes Palette (Formulaire, Decor, Donnees ; un widget de
+  donnees cree sa collection par defaut s'il n'y en a pas : un Fil marche du premier coup) | Arbre (dossiers > lignes >
+  widgets, pastille ok / erreur, monter / descendre / gauche / droite / sortir de la ligne, collections, Problemes) |
+  Proprietes (`PageProps.tsx` : id (renommer un widget qu'un flow utilise previent), "Lance" / "Lu par" en lecture (flows
+  dont l'InputsPageReader utilise le widget, Ouvrir), props par kind, champs des collections) | Apercu
+  (`PageRenderer preview`). Store generique de l'editeur de flows (undo / redo), validation en direct 300 ms, Ctrl+S,
+  Fermer = enregistrer puis quitter. Reducers purs dans `builder.ts`. Pas de glisser-deposer dans l'arbre (fleches) :
+  a ajouter si the maintainer le demande.
+* `GeneratedPublishPanel.tsx` (04 §7) : panneau Publisher d'un logiciel ajoute en extension (P6c) : `Publisher.tsx` ajoute
+  les bridges valides au `SoftwareSelector` (`extra`) et, pour eux seulement, remplace le Composer et la barre du bas
+  par ce panneau (une seule branche). Champs = interface du flow `publish_<soft>` (`GET /flows/pages/publish_panel/<soft>`),
+  Publier = `event: publish_request` (flow actif). Destination et note de publish : en P8 (ils dependent du Composer).

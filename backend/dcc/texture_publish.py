@@ -132,7 +132,7 @@ def group_maps(files: list[Path], whole_name: bool = False,
 
 
 def publish_udim_map(tiles: list[tuple[int, Path]], project_path: Path, project: str,
-                     target_name: str, description: str, user: str) -> Path | None:
+                     target_name: str, description: str, user: str, soft: str = "") -> Path | None:
     """Publish every tile of one map as ONE version. Returns the version folder."""
     from features.activity.activity_writer import log_publish
     from features.folder_manager.naming_validator import format_version, get_base_name
@@ -164,7 +164,7 @@ def publish_udim_map(tiles: list[tuple[int, Path]], project_path: Path, project:
     finalize_rendered_version(dest_folder, base, ext, ver, is_sequence=True,
                               pattern=f"{base}_{ver_str}.{UDIM_TOKEN}{ext}", user=user)
     try:
-        log_publish(user, f"{base}_{ver_str}{ext}", project, dest_folder=dest_folder)
+        log_publish(user, f"{base}_{ver_str}{ext}", project, dest_folder=dest_folder, soft=soft)
         append_log(dest_folder, base, ver_str,
                    (description + " " if description else "") + f"({len(tiles)} tuile(s) UDIM)", user)
     except Exception as exc:  # noqa: BLE001 - logging never fails a publish
@@ -210,7 +210,7 @@ def convert_to_tx(files: list[Path], label: str = "") -> tuple[list[Path], list[
 
 def publish_maps(files: list[Path], project_path: Path, project: str, prefix: list[str],
                  variante: str, description: str, user: str,
-                 whole_name: bool = False) -> tuple[list[str], list[str]]:
+                 whole_name: bool = False, soft: str = "") -> tuple[list[str], list[str]]:
     """Publish exported maps under ``<prefix>_<MAP>[_<VARIANTE>]``, one publish per map.
 
     Returns (published paths, warnings). A plain map goes through publish_file; the
@@ -229,14 +229,14 @@ def publish_maps(files: list[Path], project_path: Path, project: str, prefix: li
                 warnings.append(f"{token} : meme tuile exportee deux fois (plusieurs texture sets ?), "
                                 "une seule gardee par tuile")
                 tiles = list({t: (t, f) for t, f in tiles}.values())
-            dest = publish_udim_map(tiles, project_path, project, target, description, user)
+            dest = publish_udim_map(tiles, project_path, project, target, description, user, soft=soft)
             if dest is not None:
                 published.append(str(dest))
         if plain:
             if len(plain) > 1:
                 warnings.append(f"{token} : {len(plain)} fichiers pour la meme map, seul le dernier reste LAST")
             for f in plain:
-                dest = publish_file(f, project_path, description, user, project, target)
+                dest = publish_file(f, project_path, description, user, project, target, soft=soft)
                 if dest is None:
                     log.warning("Map not published (unresolved name): %s", f.name)
                     continue

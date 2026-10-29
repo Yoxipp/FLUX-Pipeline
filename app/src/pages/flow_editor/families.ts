@@ -1,10 +1,10 @@
-// families.ts — the 10 node families of the Flows editor (03_EDITEUR §2, 02_NODES §1).
+// families.ts — the 11 node families of the Flows editor (03_EDITEUR §2, 02_NODES §1).
 // One flat colour (CSS variable --fam-<family>, globals.css) and one lucide icon per family.
 
 import type { Family } from './types'
 
 export const FAMILIES: Family[] = [
-  'event', 'data', 'logic', 'operator', 'action', 'flux', 'session', 'dcc', 'bridge', 'subflow',
+  'event', 'data', 'logic', 'operator', 'action', 'flux', 'session', 'dcc', 'bridge', 'dispatcher', 'subflow',
 ]
 
 export interface FamilyInfo {
@@ -24,6 +24,8 @@ export const FAMILY_INFO: Record<Family, FamilyInfo> = {
   session:  { color: 'var(--fam-session)',  icon: 'Plug',       fr: 'Instances',  en: 'Instances' },
   dcc:      { color: 'var(--fam-dcc)',      icon: 'Cpu',        fr: 'DCC',        en: 'DCC' },
   bridge:   { color: 'var(--fam-bridge)',   icon: 'Cable',      fr: 'Bridges',    en: 'Bridges' },
+  // ADR 0067: work sent to the dispatcher of the pipe (local or farm), never a named farm.
+  dispatcher: { color: 'var(--fam-dispatcher)', icon: 'Rocket', fr: 'Dispatcher', en: 'Dispatcher' },
   subflow:  { color: 'var(--fam-subflow)',  icon: 'Boxes',      fr: 'Sous-flow',  en: 'Subflow' },
 }
 

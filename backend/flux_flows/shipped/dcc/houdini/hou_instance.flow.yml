@@ -1,0 +1,45 @@
+flux_flow: 2
+name: hou_instance
+label: HoudiniInstance
+description: "Session Houdini (node livre, verrouille ; decision 24) : se connecte a l'instance ouverte, sinon ouvre Houdini et attend son bridge ; headless : hython sans interface (une licence pour le run, ferme a la fin). Double clic pour voir dedans ; Deverrouiller = copie d'equipe."
+node_type: session.hou_instance
+interface:
+  inputs:
+    - {id: mode, type: select, label: "Mode", default: live_connect_or_open, options: [live_connect_or_open, live_connect_only, headless]}
+    - {id: pick, type: select, label: "Instance visee", default: active, options: [active, scene, pid]}
+    - {id: scene, type: path, label: "Scene (ouverte au lancement, ou cherchee)", default: ""}
+    - {id: template, type: path, label: "Headless : scene de depart", default: ""}
+    - {id: pid, type: int, label: "Process (pick pid)"}
+    - {id: wait_s, type: float, label: "Attente du bridge (s)", default: 60}
+  outputs:
+    - {id: session, type: "session[houdini]", label: "Session Houdini"}
+    - {id: scene, type: path, label: "Scene ouverte"}
+    - {id: version, type: str, label: "Version du logiciel"}
+    - {id: state, type: str, label: "live, headless ou skipped"}
+nodes:
+  ev: {type: event.manual, pos: [0, 160]}
+  in_scene: {type: data.flow_input, pos: [0, 320], params: {id: scene}}
+  in_template: {type: data.flow_input, pos: [0, 440], params: {id: template}}
+  in_pid: {type: data.flow_input, pos: [0, 560], params: {id: pid}}
+  in_wait: {type: data.flow_input, pos: [0, 680], params: {id: wait_s}}
+  core: {type: session.hou_instance_core, pos: [320, 160], params: {mode: "${mode}", pick: "${pick}"}}
+  out_session: {type: subflow.flow_output, pos: [640, 160], params: {id: session}}
+  out_scene: {type: subflow.flow_output, pos: [960, 160], params: {id: scene}}
+  out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
+  out_state: {type: subflow.flow_output, pos: [1600, 160], params: {id: state}}
+links:
+  - {from: ev.then, to: core.exec}
+  - {from: in_scene.value, to: core.scene}
+  - {from: in_template.value, to: core.template}
+  - {from: in_pid.value, to: core.pid}
+  - {from: in_wait.value, to: core.wait_s}
+  - {from: core.then, to: out_session.exec}
+  - {from: core.session, to: out_session.value}
+  - {from: out_session.then, to: out_scene.exec}
+  - {from: core.scene, to: out_scene.value}
+  - {from: out_scene.then, to: out_version.exec}
+  - {from: core.version, to: out_version.value}
+  - {from: out_version.then, to: out_state.exec}
+  - {from: core.state, to: out_state.value}
+notes:
+  - {id: k1, pos: [0, 840], text: "Node livre avec FLUX : lecture seule. Deverrouiller cree une copie d'equipe qui remplace ce node pour tous ; Revenir au defaut la supprime.\nAvant hou..._core : verifications de l'equipe (ex. notifier avant d'ouvrir un logiciel)."}

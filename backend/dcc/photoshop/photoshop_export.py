@@ -144,7 +144,7 @@ def publish_photoshop(
 
     ver_str = format_version(effective_ver, DEFAULT_PADDING)
     try:
-        log_publish(user, f"{base_name}_{ver_str}{ext}", project, dest_folder=dest_folder)
+        log_publish(user, f"{base_name}_{ver_str}{ext}", project, dest_folder=dest_folder, soft="photoshop")
         append_log(dest_folder, base_name, ver_str, description, user)
     except Exception as exc:  # logging must never fail a publish
         log.warning("Photoshop publish logging failed (non-fatal): %s", exc)

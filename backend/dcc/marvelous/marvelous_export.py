@@ -97,7 +97,7 @@ def publish_marvelous(
     warnings = list(result.get("warnings") or []) + warnings
     published: list[str] = []
     for f in chosen:
-        dest = publish_file(f, project_path, description, user, project, target_name)
+        dest = publish_file(f, project_path, description, user, project, target_name, soft="marvelous")
         if dest is None:
             warnings.append(f"{f.name} non publie (nom FLUX invalide ?)")
             continue

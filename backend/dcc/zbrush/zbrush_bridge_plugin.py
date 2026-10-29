@@ -14,6 +14,14 @@ from the FLUX desktop app and executes them using the zbrush.commands API.
 Protocol (newline-framed JSON):
   Request  : {"action": "export_obj", "path": "C:/out/mesh.obj", "options": {...}}\n
   Response : {"status": "ok"}\n  or  {"status": "error", "msg": "..."}\n
+
+Flows verbs (P6b step 9, 2026-10-24, zbrush.commands per the Maxon SDK, TO VALIDATE LIVE).
+Like every command, only served inside the freeze loop (the artist clicked Export FLUX):
+  {"action": "open", "path": ".zpr"|".ztl", "discard"}      -> {"status": "ok", "project"}
+  {"action": "save"} / {"action": "save_as", "path", "copy"} -> {"status": "ok", "project"}
+  {"action": "import", "kind": "mesh"|"tool", "path"}        -> {"status": "ok"}
+  {"action": "run", "code", "secret"}  -> {"ok": true, "result", "trace"} (machine secret,
+  read from %APPDATA%/FluxPipeline/bridge_secret.txt: no sidecar file in ZPlugs64)
 """
 
 from __future__ import annotations
@@ -175,6 +183,160 @@ def _apply_fbx_options(options: dict) -> None:
 
 # ── Command dispatcher ────────────────────────────────────────────────────────
 
+# The verbs run inside the freeze loop, already on ZBrush's main thread.
+def _on_main_thread(fn, timeout: float = 600.0) -> dict:
+    return fn()
+
+
+_diag = _log
+
+
+# ── Flows verbs (P6b step 9) ─────────────────────────────────────────────────
+
+def _secret() -> str:
+    """The machine secret: <script>.json written next to this script at install, else
+    %APPDATA%/FluxPipeline/bridge_secret.txt (a bridge started by exec() has no __file__)."""
+    try:
+        with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8") as fh:
+            value = str(json.load(fh).get("secret") or "")
+            if value:
+                return value
+    except (OSError, ValueError, NameError):
+        pass
+    appdata = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+    try:
+        with open(os.path.join(appdata, "FluxPipeline", "bridge_secret.txt"), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _run_code(cmd: dict, namespace: dict, soft: str) -> dict:
+    """`run`: free Python in the soft, refused without the machine secret."""
+    import hmac
+    import traceback
+
+    expected = _secret()
+    if not expected or not hmac.compare_digest(str(cmd.get("secret") or ""), expected):
+        return {"ok": False, "status": "error",
+                "error": "secret du bridge refuse : reinstalle le bridge %s depuis FLUX" % soft}
+    code = str(cmd.get("code") or "")
+
+    def job():
+        ns = dict(namespace, __name__="__flux_flow__")
+        try:
+            exec(compile(code, "<flux flow>", "exec"), ns)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "status": "error", "error": str(exc), "trace": traceback.format_exc()}
+        result = ns.get("result")
+        try:
+            json.dumps(result)
+        except (TypeError, ValueError):
+            result = repr(result)
+        return {"ok": True, "status": "ok", "result": result, "trace": ""}
+
+    return _on_main_thread(job, timeout=float(cmd.get("timeout") or 600.0))
+
+
+def _verb(fn, timeout: float = 600.0) -> dict:
+    """fn() on the main thread, errors as {"status": "error"}."""
+    def job():
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            _diag("verb failed: %r" % (exc,))
+            return {"status": "error", "msg": str(exc)}
+
+    return _on_main_thread(job, timeout=timeout)
+
+
+def _zb_press_file(button: str, path: str) -> None:
+    zbc.set_next_filename(path)
+    zbc.press(button)
+
+
+def _do_open(cmd: dict) -> dict:
+    """.zpr = the whole project (File:Open, replaces the scene); .ztl = a tool added (Tool:Load).
+    ZBrush does not tell whether the project is modified: a .zpr needs discard_changes."""
+    global _last_project
+    path, discard = str(cmd.get("path") or ""), bool(cmd.get("discard"))
+    low = path.lower()
+    if not low.endswith((".zpr", ".ztl")):
+        return {"status": "error", "msg": "open : un .zpr (projet) ou un .ztl (tool) attendu"}
+    if not os.path.isfile(path):
+        return {"status": "error", "msg": "fichier introuvable : %s" % path}
+    if low.endswith(".zpr") and not discard:
+        return {"status": "error", "msg": "ZBrush ne dit pas si le projet est modifie : coche discard_changes "
+                                          "pour ouvrir un .zpr (le travail non enregistre est perdu)"}
+
+    def fn():
+        global _last_project
+        if low.endswith(".zpr"):
+            _zb_press_file("File:Open", path)
+            _last_project = path.replace("\\", "/")
+        else:
+            _zb_press_file("Tool:Load", path)
+        return {"status": "ok", "project": path}
+
+    return _verb(fn)
+
+
+def _do_save(cmd: dict) -> dict:
+    def fn():
+        last = _remember_project()
+        if not last.lower().endswith(".zpr"):
+            return {"status": "error", "msg": "projet jamais enregistre : utilise zbSaveAs"}
+        _zb_press_file("File:Save As", last)
+        return {"status": "ok", "project": last}
+
+    return _verb(fn)
+
+
+def _do_save_as(cmd: dict) -> dict:
+    """.zpr = the project (File:Save As, becomes the current project); .ztl = the active tool,
+    always a copy (its path is restored, the artist's next save goes to their own file)."""
+    path, copy = str(cmd.get("path") or ""), bool(cmd.get("copy"))
+    low = path.lower()
+    if not low.endswith((".zpr", ".ztl")):
+        return {"status": "error", "msg": "save_as : un .zpr (projet) ou un .ztl (tool) attendu"}
+    if low.endswith(".zpr") and copy:
+        return {"status": "error", "msg": "save_as : copie d'un .zpr non geree par ZBrush (decoche copy)"}
+
+    def fn():
+        global _last_project
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        if low.endswith(".zpr"):
+            _zb_press_file("File:Save As", path)
+            _last_project = path.replace("\\", "/")
+        else:
+            _save_tool_to(path)
+        resp = _written(path, "ZPR" if low.endswith(".zpr") else "ZTL", wait=15.0)
+        if resp.get("status") == "ok":
+            resp["project"] = path
+        return resp
+
+    return _verb(fn)
+
+
+def _do_import(cmd: dict) -> dict:
+    """mesh = into the active tool (Tool:Import, obj / fbx...); tool = a .ztl loaded as a new tool."""
+    kind, path = str(cmd.get("kind") or "mesh"), str(cmd.get("path") or "")
+    if not os.path.isfile(path):
+        return {"status": "error", "msg": "fichier introuvable : %s" % path}
+    if kind not in ("mesh", "tool"):
+        return {"status": "error", "msg": "import : kind inconnu %s (mesh, tool)" % kind}
+
+    def fn():
+        _zb_press_file("Tool:Import" if kind == "mesh" else "Tool:Load", path)
+        return {"status": "ok"}
+
+    return _verb(fn)
+
+
+_VERBS = {"open": _do_open, "save": _do_save, "save_as": _do_save_as, "import": _do_import,
+          "run": lambda cmd: _run_code(cmd, {"zbc": zbc}, "ZBrush")}
+
+
 def _dispatch(cmd: dict) -> dict:
     action = cmd.get("action", "")
 
@@ -186,6 +348,9 @@ def _dispatch(cmd: dict) -> dict:
 
     if not _ZBRUSH_AVAILABLE:
         return {"status": "error", "msg": "zbrush module not available"}
+
+    if action in _VERBS:
+        return _VERBS[action](cmd)
 
     elif action == "get_mesh_info":
         try:

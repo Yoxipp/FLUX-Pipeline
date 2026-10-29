@@ -90,7 +90,21 @@ async def lifespan(app: FastAPI):
             log.info("[FLUX] DCC auto-update: %s", updated)
     except Exception as exc:  # never block startup on a reconcile hiccup
         log.warning("[FLUX] DCC auto-update skipped: %s", exc)
+    # Flows (P5, 01 §9): the only background task of the backend. Active flows, host
+    # lock between workstations, schedule / new_file / when / scene_opened / on_publish.
+    # FLUX_FLOWS_SCHEDULER=0 turns it off. Electron may kill the sidecar without the
+    # teardown below: the host lock then expires by itself (60 s).
+    try:
+        from flux_flows import scheduler as flows_scheduler
+        flows_scheduler.start()
+    except Exception as exc:  # never block startup on the Flows scheduler
+        log.warning("[FLUX] Flows scheduler skipped: %s", exc)
     yield
+    try:
+        from flux_flows import scheduler as flows_scheduler
+        await flows_scheduler.stop()
+    except Exception as exc:  # never block shutdown on the Flows scheduler
+        log.debug("[FLUX] Flows scheduler stop skipped: %s", exc)
     # Best-effort: release ZBrush if a freeze is active, so a graceful shutdown never
     # leaves it frozen. Electron hard-kills the sidecar on quit (this may not run),
     # so the app-close release also fires from the Electron side before the kill.

@@ -38,6 +38,10 @@ ITEMS_KEY = "_items"
 CONDITION_KEY = "_condition"
 LIMIT_KEY = "_limit"
 SEQUENCE_KEY = "_sequence"
+LOOP_MODES = ("sequential",)              # ``mode`` of For / While (V2 adds work items)
+FOREACH_MODES = ("sequential", "dispatch")  # dispatch: the Submit of the body fill one job (ADR 0067)
+MATCH_ON = ("name", "path")               # operator.list_filter
+SORT_KEYS = ("natural", "name", "date", "size")   # operator.list_sort
 
 
 @flow_node(FOREACH_BEGIN, "ForEachBegin", icon="Repeat1",
@@ -48,8 +52,13 @@ SEQUENCE_KEY = "_sequence"
                     port("index", "int", "Rang de l'element (0 d'abord)", "Item rank (0 first)", 0),
                     port("count", "int", "Nombre d'elements", "Number of items", 2),
                     port("on_error", "exec")],
-           params=[port("mode", "str", "Reserve V2 (work items)", "Reserved for V2 (work items)", "sequential",
-                        default="sequential"),
+           params=[port("mode", "str", "sequential : le corps tourne une fois par element ; dispatch : pareil, mais "
+                        "les Submit du corps remplissent un seul job, envoye a ForEachEnd (une tache par tour)",
+                        "sequential: the body runs once per item; dispatch: the same, but the Submit nodes of the body "
+                        "fill one job, sent at ForEachEnd (one task per turn)", "sequential",
+                        default="sequential", choices=FOREACH_MODES,
+                        labels={"sequential": ("Un tour apres l'autre", "One turn after the other"),
+                                "dispatch": ("Dispatch : un job pour toute la boucle", "Dispatch: one job for the loop")}),
                    port("max_items", "int", "Nombre maximal d'elements", "Maximum number of items", MAX_ITEMS,
                         default=MAX_ITEMS)],
            shelf=30, aliases=["boucle", "loop", "pour chaque"],
@@ -74,6 +83,8 @@ async def foreach_begin(ctx, inputs, params):
                    port("collect", "any", "Valeur gardee a chaque tour", "Value kept at each turn")],
            outputs=[port("done", "exec", "Suite, une fois la boucle finie", "Next, once the loop is done"),
                     port("results", "list[any]", "Valeurs de collect, une par tour", "collect values, one per turn"),
+                    port("job_id", "str", "Mode dispatch : le job envoye (a relier a WaitJob), sinon vide",
+                         "Dispatch mode: the job sent (link it to WaitJob), else empty", "local:1a2b3c4d5e"),
                     port("on_error", "exec")],
            params=[port("begin", "str", "Id du ForEachBegin apparie (pose par l'editeur)",
                         "Id of the paired ForEachBegin (set by the editor)", "n3", required=True)],
@@ -131,7 +142,8 @@ async def sequence(ctx, inputs, params):
                     port("index", "int", "Index courant", "Current index", 1), port("on_error", "exec")],
            params=[port("max_iterations", "int", "Nombre maximal de tours", "Maximum number of turns",
                         MAX_ITERATIONS, default=MAX_ITERATIONS),
-                   port("mode", "str", "Reserve V2", "Reserved for V2", "sequential", default="sequential")],
+                   port("mode", "str", "Reserve V2", "Reserved for V2", "sequential", default="sequential",
+                        choices=LOOP_MODES)],
            shelf=33, aliases=["boucle", "for", "compteur"],
            doc_fr="Execute le corps pour chaque index de start a end inclus.",
            doc_en="Runs the body for each index from start to end included.")
@@ -206,7 +218,8 @@ _UNARY = ("round", "floor", "ceil", "abs")
                    port("b", "float", "Second nombre (operations a deux termes)", "Second number (binary ops)", 2)],
            outputs=[port("result", "float", "Resultat", "Result", 5.0),
                     port("as_int", "int", "Resultat tronque en entier", "Result truncated to an integer", 5)],
-           params=[port("op", "str", ", ".join(_MATH_OPS), ", ".join(_MATH_OPS), "add", default="add")],
+           params=[port("op", "str", ", ".join(_MATH_OPS), ", ".join(_MATH_OPS), "add", default="add",
+                        choices=_MATH_OPS)],
            shelf=60, aliases=["calcul", "addition", "nombre"],
            doc_fr="Calcule a op b (ou op a pour round, floor, ceil, abs).",
            doc_en="Computes a op b (or op a for round, floor, ceil, abs).")
@@ -286,7 +299,7 @@ _CASE_OPS = ("upper", "lower", "title", "strip")
            inputs=[port("text", "str", "Texte", "Text", "jerome", required=True)],
            outputs=[port("text", "str", "Texte transforme", "Changed text", "JEROME")],
            params=[port("op", "str", "upper, lower, title ou strip", "upper, lower, title or strip", "upper",
-                        default="upper")],
+                        default="upper", choices=_CASE_OPS)],
            shelf=65, aliases=["majuscules", "minuscules", "casse"],
            doc_fr="Majuscules, minuscules, titre ou espaces retires.",
            doc_en="Upper case, lower case, title or stripped.")
@@ -361,10 +374,10 @@ def _match_key(item: Any, on: str) -> str:
            inputs=[port("list", "list[any]", "Liste", "List", ["a.abc", "b_tmp.abc"], required=True)],
            outputs=[port("items", "list[any]", "Elements retenus", "Kept items", ["a.abc"]),
                     port("rejected", "list[any]", "Elements ecartes", "Rejected items", ["b_tmp.abc"])],
-           params=[port("pattern", "pattern", "Motif facon Houdini", "Houdini style pattern", "*.abc ^*_tmp*",
-                        required=True),
+           params=[port("pattern", "pattern", "Motif facon Houdini (* = tout, ^ exclut)", "Houdini style pattern "
+                        "(* = all, ^ excludes)", "*.abc ^*_tmp*", required=True, default="*"),
                    port("match_on", "str", "name (nom) ou path (chemin entier)", "name or path (whole path)",
-                        "name", default="name")],
+                        "name", default="name", choices=MATCH_ON)],
            shelf=69, aliases=["filtrer", "filter", "motif"],
            doc_fr="Garde les elements qui correspondent au motif (`*.abc ^*_tmp*`).",
            doc_en="Keeps the items matching the pattern (`*.abc ^*_tmp*`).")
@@ -373,7 +386,7 @@ async def list_filter(ctx, inputs, params):
 
     items = as_list(inputs.get("list"), "list")
     on = params.get("match_on") or "name"
-    if on not in ("name", "path"):
+    if on not in MATCH_ON:
         raise NodeError("match_on : name ou path", code="E_PARAM_INVALID")
     try:
         keep = mask(str(params.get("pattern") or ""), [_match_key(i, on) for i in items])
@@ -398,7 +411,7 @@ def _stat(item: Any, field: str) -> float:
            inputs=[port("list", "list[any]", "Liste", "List", ["b", "a"], required=True)],
            outputs=[port("items", "list[any]", "Liste triee", "Sorted list", ["a", "b"])],
            params=[port("key", "str", "name, date, size ou natural (v2 avant v10)",
-                        "name, date, size or natural (v2 before v10)", "natural", default="natural"),
+                        "name, date, size or natural (v2 before v10)", "natural", default="natural", choices=SORT_KEYS),
                    port("reverse", "bool", "Ordre inverse", "Reverse order", False, default=False)],
            shelf=70, aliases=["trier", "sort", "ordre"],
            doc_fr="Trie par nom, date, taille (fichiers) ou ordre naturel.",
@@ -444,7 +457,9 @@ async def list_append(ctx, inputs, params):
            inputs=[port("base", "path", "Dossier de depart", "Base folder", "$FLUX/DAILY", required=True),
                    port("a", "str", "Morceau 1", "Part 1", "2026-10-23", required=True),
                    port("b", "str", "Morceau 2", "Part 2"), port("c", "str", "Morceau 3", "Part 3")],
-           outputs=[port("path", "path", "Chemin joint", "Joined path", "D:/FLUX/DAILY/2026-10-23")],
+           outputs=[port("path", "path", "Chemin joint", "Joined path", "D:/FLUX/DAILY/2026-10-23"),
+                    port("dir", "dir", "Le meme chemin, comme dossier (ZipFolder, ListFiles, NewFile...)",
+                         "The same path, as a folder (ZipFolder, ListFiles, NewFile...)", "D:/FLUX/DAILY/2026-10-23")],
            shelf=73, aliases=["joindre", "chemin", "join"],
            doc_fr="Joint un dossier et des morceaux de chemin relatifs.", doc_en="Joins a folder and relative parts.")
 async def path_join(ctx, inputs, params):
@@ -457,7 +472,7 @@ async def path_join(ctx, inputs, params):
         if pure.is_absolute() or pure.drive or ".." in pure.parts:
             raise NodeError(f"`{name}` doit etre un morceau relatif, sans `..` : {part!r}")
         path = path / str(part)
-    return {"path": _posix(path)}
+    return {"path": _posix(path), "dir": _posix(path)}
 
 
 @flow_node("operator.path_split", "PathSplit", icon="FolderTree",

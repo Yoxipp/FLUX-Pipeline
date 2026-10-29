@@ -140,6 +140,14 @@ class HoudiniClient:
     # HTTP helpers
     # ------------------------------------------------------------------
 
+    # Public names of the transport (Flows bridge.http_call, 02 §9): same calls,
+    # never raise, {"ok": False, "error"} on failure.
+    def get(self, path: str, timeout: float = 3.0) -> dict:
+        return self._get(path, timeout=timeout)
+
+    def post(self, path: str, data: dict, timeout: float = 10.0) -> dict:
+        return self._post(path, data, timeout=timeout)
+
     def _get(self, path: str, timeout: float = 3.0) -> dict:
         try:
             with urllib.request.urlopen(f"{self.base}{path}", timeout=timeout) as resp:
