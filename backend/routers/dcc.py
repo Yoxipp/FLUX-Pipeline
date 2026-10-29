@@ -2285,8 +2285,24 @@ async def mari_publish(req: MariPublishRequest) -> dict:
     """Export Mari channels and ingest them into FLUX (opt .tx conform)."""
     from core import config
     from dcc.mari.mari_export import publish_mari
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_mari, same response shape
+    # (without "timings", a log line of v1). channel_params / tx_only go in options (core: extra).
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "mari"):
+        got, fallback = await _soft_flow_publish("mari", req.project_name, {
+            "class": req.class_token, "task": req.task_token, "name": req.name_token,
+            "instance": req.instance, "format": req.file_format, "channels": req.channels,
+            "conform_tx": req.conform_tx, "description": req.description or "",
+            "options": {"channel_params": req.channel_params, "tx_only": req.tx_only},
+        }, user, lambda msg: _mari_error(msg, "Mari publish failed"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "tx": [str(p) for p in got.get("tx") or []] or None,
+                    "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2298,7 +2314,7 @@ async def mari_publish(req: MariPublishRequest) -> dict:
     )
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_mari_error(result.get("error"), "Mari publish failed"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 # ── File-based DCC publish (Substance Designer, Marvelous) — Level 1 (V6 B3/B4) ─

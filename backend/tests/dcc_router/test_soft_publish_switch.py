@@ -149,5 +149,18 @@ class DesignerPublishSwitch(_SoftSwitch, unittest.TestCase):
     v2_result = v1_result
 
 
+class MariPublishSwitch(_SoftSwitch, unittest.TestCase):
+    route, soft = "/dcc/mari/publish", "mari"
+    v1_target = "dcc.mari.mari_export.publish_mari"
+    body = {**_TOKENS, "file_format": "exr", "conform_tx": True, "channels": ["diffuse"],
+            "channel_params": {"diffuse": {"bit_depth": "16"}}}
+    v1_result = {"ok": True, "published": _MAPS, "tx": [_MAPS[0][:-4] + ".tx"], "warnings": []}
+    flow_outputs = {"path": _MAPS[0], "version": 2, "files": _MAPS, "warnings": [], "tx": [_MAPS[0][:-4] + ".tx"]}
+    flow_values = {"class": "PROP", "task": "TEXTURE", "name": "chair", "instance": "null", "format": "exr",
+                   "channels": ["diffuse"], "conform_tx": True, "description": "d",
+                   "options": {"channel_params": {"diffuse": {"bit_depth": "16"}}, "tx_only": False}}
+    v2_result = v1_result
+
+
 if __name__ == "__main__":
     unittest.main()

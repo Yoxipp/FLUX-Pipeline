@@ -497,7 +497,7 @@ def zb_publish(ctx, inputs, params):
 
 @flow_node("dcc.mari_publish_core", "mariPublishCore", icon="PackagePlus", internal=True,
            inputs=[dc.EXEC, dc.session_port("mari", "Mari"), *_TEX_IN],
-           outputs=_TEX_OUTS,
+           outputs=_TX_OUTS,
            params=[port("instance", "str", "Token INSTANCE", "INSTANCE token", "null", default="null"),
                    port("format", "str", "Format (tif, exr, png)", "Format", "tif", default="tif"),
                    port("channels", "list[str]", "Channels (vide = tous)", "Channels (empty = all)", []),
@@ -516,4 +516,4 @@ def mari_publish(ctx, inputs, params):
     res = publish_mari(project, **_texture_tokens(inputs, params), file_format=str(params.get("format") or "tif"),
                        conform_tx=bool(params.get("conform_tx")), description=str(params.get("description") or ""),
                        user=_user(ctx), channels=params.get("channels") or None, **(params.get("extra") or {}))
-    return _from_result(res, _user(ctx))
+    return _with_tx(_from_result(res, _user(ctx)), res)

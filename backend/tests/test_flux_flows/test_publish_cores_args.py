@@ -185,7 +185,8 @@ class PublishCoreArguments(unittest.TestCase):
         tx = str(self.tmp / "x_v007.tx")
         for soft, node, target in (("painter", "dcc.sp_publish", "dcc.substance_painter.substance_export.publish_painter"),
                                    ("designer", "dcc.sd_publish",
-                                    "dcc.substance_designer.designer_export.publish_designer")):
+                                    "dcc.substance_designer.designer_export.publish_designer"),
+                                   ("mari", "dcc.mari_publish", "dcc.mari.mari_export.publish_mari")):
             with self.subTest(soft=soft):
                 h.reset()
                 res = {"ok": True, "published": [self.published], "version": 7, "tx": [tx]}
