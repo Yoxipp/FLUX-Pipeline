@@ -41,13 +41,18 @@ export function scopeChoices(rights: FlowRights | null | undefined, project: str
   ]
 }
 
-export function NameDialog({ open, title, initialName, choices, initialScope, askStart, onClose, onConfirm }: {
+export function NameDialog({ open, title, initialName, choices, initialScope, askStart, askName = true, askScope = true,
+  confirmLabel, note, onClose, onConfirm }: {
   open: boolean
   title: string
   initialName: string
   choices: ScopeChoice[]
   initialScope?: FlowScope
   askStart?: boolean                      // Nouveau: how the flow starts
+  askName?: boolean                       // false: Changer de portee (ADR 0069)
+  askScope?: boolean                      // false: Renommer
+  confirmLabel?: string                   // default Creer
+  note?: string                           // one line under the title (what the action does)
   onClose: () => void
   onConfirm: (name: string, scope: FlowScope, start: StartKind) => void
 }) {
@@ -74,6 +79,8 @@ export function NameDialog({ open, title, initialName, choices, initialScope, as
             <Dialog.Title>{title}</Dialog.Title>
             <Dialog.Close aria-label={tr('Fermer', 'Close')}><X size={15} /></Dialog.Close>
           </div>
+          {note && <div className="flow-dialog-hint" style={{ lineHeight: 1.45 }}>{note}</div>}
+          {askName && <>
           <label className="flow-dialog-label">{tr('Nom', 'Name')}</label>
           <input
             autoFocus value={name} onChange={e => setName(e.target.value.toLowerCase())}
@@ -84,6 +91,8 @@ export function NameDialog({ open, title, initialName, choices, initialScope, as
             {tr('Minuscules, chiffres et _ (2 a 41 caracteres, commence par une lettre).',
                 'Lowercase, digits and _ (2 to 41 characters, starts with a letter).')}
           </div>
+          </>}
+          {askScope && <>
           <label className="flow-dialog-label">{tr('Categorie', 'Category')}</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {choices.map(c => (
@@ -95,6 +104,7 @@ export function NameDialog({ open, title, initialName, choices, initialScope, as
               </label>
             ))}
           </div>
+          </>}
           {askStart && <>
             <label className="flow-dialog-label">{tr('Le flow part', 'The flow starts')}</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -109,7 +119,7 @@ export function NameDialog({ open, title, initialName, choices, initialScope, as
           </>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
             <Btn sm ghost onClick={onClose}>{tr('Annuler', 'Cancel')}</Btn>
-            <Btn sm primary disabled={!valid || !scope} onClick={submit}>{tr('Creer', 'Create')}</Btn>
+            <Btn sm primary disabled={!valid || !scope} onClick={submit}>{confirmLabel ?? tr('Creer', 'Create')}</Btn>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

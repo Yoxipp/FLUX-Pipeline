@@ -14,8 +14,9 @@
 // version exists (03 §6: the active version keeps running until the next activation).
 // P6c: Bridges opens BridgesDialog (extension bridges).
 
+import { useState } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpFromLine, ChevronDown, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert, Power, Plug } from 'lucide-react'
+import { ArrowRightLeft, ArrowUpFromLine, ChevronDown, Copy, Pencil, Trash2, ChevronRight, FilePlus, FlaskConical, FolderOpen, Grid3x3, History, ListChecks, Play, Save, Spline, Square, BoxSelect, StickyNote, Boxes, LayoutGrid, CircleX, TriangleAlert, Power, Plug } from 'lucide-react'
 import type { FlowCategory, FlowScope } from './types'
 import { useTr } from './useTr'
 import './flow_editor.css'
@@ -29,6 +30,10 @@ export interface FileActions {
   onSaveAs: () => void
   onIncrement: () => void
   onMigrate: () => void
+  // ADR 0069: right click on a flow of Open, and the same operations for the open flow.
+  onFlowMenu: (entry: FlowListEntry, x: number, y: number) => void
+  onManage: (op: 'duplicate' | 'rename' | 'move' | 'delete') => void
+  manageBlocked: (op: 'duplicate' | 'rename' | 'move' | 'delete') => string | null
 }
 
 export interface RunActions {
@@ -79,13 +84,15 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
     { key: 'pipe', label: tr('Pipe', 'Pipe') },
     { key: 'project', label: tr('Projet', 'Project') },
     ...(showPerso ? [{ key: 'perso' as const, label: tr('Perso', 'Personal') }] : []),
+    { key: 'examples', label: tr('Exemples (lecture seule : clic droit > Dupliquer)', 'Examples (read only: right click > Duplicate)') },
   ]
+  const [fileOpen, setFileOpen] = useState(false)
   const scopeTag: Record<FlowScope, string> = {
     shipped: tr('livre', 'shipped'), team: tr('equipe', 'team'), project: tr('projet', 'project'), perso: tr('perso', 'personal'),
   }
   return (
     <div style={{ height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>
-      <Menu.Root modal={false}>
+      <Menu.Root modal={false} open={fileOpen} onOpenChange={setFileOpen}>
         <Menu.Trigger asChild>
           <button type="button" className="flow-tool">{tr('Fichier', 'File')} <ChevronDown size={12} /></button>
         </Menu.Trigger>
@@ -104,7 +111,8 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
                         <Menu.Label className="flow-menu-label">{g.label}</Menu.Label>
                         {list.length === 0 && <Menu.Item className="flow-menu-item" disabled>{tr('Aucun flow', 'No flow')}</Menu.Item>}
                         {list.map(f => (
-                          <Menu.Item key={`${f.scope}:${f.name}`} className="flow-menu-item" onSelect={() => actions.onOpen(f)}>
+                          <Menu.Item key={`${f.scope}:${f.name}`} className="flow-menu-item" onSelect={() => actions.onOpen(f)}
+                                     onContextMenu={e => { e.preventDefault(); setFileOpen(false); actions.onFlowMenu(f, e.clientX, e.clientY) }}>
                             {f.name}
                             {g.key === 'pipe' && f.scope === 'team' && <span className="tag">{tr('equipe', 'team')}</span>}
                             {f.name === current && <span className="shortcut">{tr('ouvert', 'open')}</span>}
@@ -121,6 +129,12 @@ export function TopBar({ flows, current, scope, version, legacy, dirty, showPers
             <Menu.Item className="flow-menu-item" disabled={!current} onSelect={actions.onSaveAs}>{tr('Enregistrer sous…', 'Save as…')}<span className="shortcut">Ctrl+Maj+S</span></Menu.Item>
             <Menu.Item className="flow-menu-item" disabled={!!saveBlocked} title={saveBlocked} onSelect={actions.onIncrement}>{tr('Enregistrer et incrementer', 'Save and increment')}<span className="shortcut">Alt+Maj+S</span></Menu.Item>
             <Menu.Item className="flow-menu-item" disabled={!current} onSelect={onVersions}><History size={13} /> {tr('Versions…', 'Versions…')}</Menu.Item>
+            <Menu.Separator className="flow-menu-sep" />
+            {([['duplicate', <Copy size={13} />, tr('Dupliquer…', 'Duplicate…')], ['rename', <Pencil size={13} />, tr('Renommer…', 'Rename…')],
+               ['move', <ArrowRightLeft size={13} />, tr('Changer de portee…', 'Change scope…')], ['delete', <Trash2 size={13} />, tr('Supprimer…', 'Delete…')]] as const).map(([op, icon, label]) => {
+              const why = current ? actions.manageBlocked(op) : tr('Aucun flow ouvert', 'No open flow')
+              return <Menu.Item key={op} className="flow-menu-item" disabled={!!why} title={why ?? undefined} onSelect={() => actions.onManage(op)}>{icon} {label}</Menu.Item>
+            })}
             <Menu.Separator className="flow-menu-sep" />
             <Menu.Item className="flow-menu-item" disabled={!canMigrate} title={canMigrate ? undefined : tr('Case Team TD requise', 'Team TD box required')} onSelect={actions.onMigrate}>
               <ArrowUpFromLine size={13} /> {tr('Migrer les actions v1…', 'Migrate v1 actions…')}

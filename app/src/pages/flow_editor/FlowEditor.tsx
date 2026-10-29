@@ -50,6 +50,7 @@ import { ConflictDialog, type ConflictInfo } from './ConflictDialog'
 import { DestructiveDialog } from './DestructiveDialog'
 import { ActivationDialog } from './ActivationDialog'
 import { PageRunDialog, pageStarts, type PageClick } from './PageRunDialog'
+import { FlowOpDialogs, FlowOpMenu, opBlocked, type FlowOpRequest, type FlowRef } from './FlowManage'
 import { BridgesDialog } from './BridgesDialog'
 import { DccBanner } from './DccBanner'
 import { destructiveAdded } from './destructive'
@@ -125,6 +126,9 @@ function Editor({ rights }: { rights: FlowRights }) {
   const [error, setError] = useState<string | null>(null)
   const [prefs, setPrefs] = useState<ViewPrefs>(readPrefs)
   const [dialog, setDialog] = useState<'new' | 'saveas' | null>(null)
+  // ADR 0069: right-click menu of a flow in Open, and the Dupliquer / Renommer / portee / Supprimer dialogs.
+  const [opMenu, setOpMenu] = useState<{ at: { x: number; y: number }; flow: FlowRef } | null>(null)
+  const [opReq, setOpReq] = useState<FlowOpRequest | null>(null)
   const [migration, setMigration] = useState<MigrateReport | null>(null)
   const [busy, setBusy] = useState(false)
   // Runs: the run launched from this window (live), the node states shown, the Runs dock.
@@ -680,6 +684,9 @@ function Editor({ rights }: { rights: FlowRights }) {
           onSaveAs: () => setDialog('saveas'),
           onIncrement: () => increment(),
           onMigrate: () => migrate(true),
+          onFlowMenu: (f, x, y) => setOpMenu({ at: { x, y }, flow: { name: f.name, scope: f.scope } }),
+          onManage: op => { if (loaded) setOpReq({ op, flow: { name: loaded.name, scope: loaded.scope } }) },
+          manageBlocked: op => loaded ? opBlocked(op, loaded, rights, tr) : tr('Aucun flow ouvert', 'No open flow'),
         }}
         run={{
           running, runBlocked, dryBlocked, runsOpen,
@@ -823,6 +830,26 @@ function Editor({ rights }: { rights: FlowRights }) {
       <DestructiveDialog
         nodes={destructiveNodes} params={Object.fromEntries(Object.entries(doc?.nodes ?? {}).map(([id, n]) => [id, n.params ?? {}]))}
         onGoTo={goToNode} onConfirm={() => closeDestructive(true)} onCancel={() => closeDestructive(false)}
+      />
+      <FlowOpMenu at={opMenu?.at ?? null} flow={opMenu?.flow ?? null} rights={rights}
+                  onClose={() => setOpMenu(null)} onPick={op => { if (opMenu) setOpReq({ op, flow: opMenu.flow }) }}
+                  onOpen={() => { if (opMenu) void open(opMenu.flow.name, opMenu.flow.scope).then(ok => { if (ok) setTrail([]) }) }} />
+      <FlowOpDialogs
+        request={opReq} choices={choices} project={project || undefined} dirty={dirty}
+        openFlow={loaded ? { name: loaded.name, scope: loaded.scope } : null}
+        onClose={() => setOpReq(null)}
+        onDone={(next, removedOpen) => {
+          const gone = opReq?.flow
+          setOpReq(null)
+          refreshList()
+          if (next) { setTrail([]); switchTo(next.name, next.scope) }
+          else if (removedOpen) {
+            // The open flow went to the trash: show another one (the first listed, else an example).
+            const other = flows.find(f => !f.shadowed && !(f.name === gone?.name && f.scope === gone?.scope))
+            setTrail([])
+            switchTo(other?.name ?? 'example_daily_render', other?.scope)
+          }
+        }}
       />
       <MigrateDialog report={migration} busy={busy} onClose={() => setMigration(null)} onConfirm={() => migrate(false)} />
     </div>

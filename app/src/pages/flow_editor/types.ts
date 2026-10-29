@@ -86,7 +86,7 @@ export interface FlowView {
 
 // -- v2 format and store (01 §2, §6, §14, ADR 0058) -----------------------------
 
-export type FlowCategory = 'pipe' | 'project' | 'perso'
+export type FlowCategory = 'pipe' | 'project' | 'perso' | 'examples'   // examples: shipped example_* (ADR 0069)
 
 export interface FlowDocNode {
   type:    string
@@ -462,6 +462,8 @@ export interface PageLink {
 }
 
 // InputsPageReader (ADR 0068): params.ports of the node, read from its page.
+// A TOOL page an example reads, after Dupliquer (ADR 0069): created from the shipped template or already there.
+export interface ExamplePage { page: string; status: 'created' | 'exists' | 'missing' | 'no_right'; scope?: 'team' | 'project' }
 export interface PagePorts { outputs: Record<string, string>; labels: Record<string, string>; defaults: Record<string, unknown>; label: string }
 export interface PageListener { flow: string; scope: FlowScope; version: number; node: string }
 export interface PageUse { flow: string; scope: FlowScope; label: string; active: boolean; node: string; buttons: string[]; fields: string[] }
