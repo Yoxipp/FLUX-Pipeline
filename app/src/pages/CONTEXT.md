@@ -3,7 +3,7 @@
 > Reecrit court le 2026-09-16 (V7-05). Ancienne fiche detaillee (mai 2026, en partie perimee) : `docs/archive/context_md_2026-05/app__src__pages.md`.
 > Vue d'ensemble : `docs/architecture/OVERVIEW.md`. Etat, bugs, dette : `docs/notes/CURRENT_STATE.md`.
 
-Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `ActionGraph` (ancien editeur des actions YAML, route `/action-graph-legacy` via `flow_editor/LegacyEditor.tsx`, retire en P8), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
+Pages : `Hub`, `Projects` (Folder Manager, 1630 l. + `folder_manager/`), `Production/`, `Publisher` (1999 l.), `UsdAssembler` (vue Bibliotheque par defaut `usd/UsdLibrary.tsx` : assets, decors ; onglet Shots retire, ADR 0023 ; tri / filtre par tokens de classement `tokens` + `token_keys` de GET /usd/library, `lib/usdTokenSort.ts`, retake 03), `Activity`, `ShelfManager`, `TemplateEditor`, `ActionPublish`, `flow_editor/` (editeur de Flows, route `/action-graph`, voir section plus bas), `FirstLaunch`, `Login` (changer / creer d'utilisateur seulement). `settings/` (ADR 0046, retake 06) : `SettingsPage` /settings onglets User / Projet / Avance (Avance = `AdvancedSettings part="advanced"` + Disque + Editeur de Template, plus dans la sidebar ; `/advanced`, `/disk`, `/templates` redirigent), `UserSettings`, `SettingsDialogs` (confirmations Understand / desinstaller, sorties de TitleBar).
 
 Pages geantes = dette connue, ne pas les decouper sans demande.
 
@@ -195,8 +195,9 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
     = `ConflictDialog.tsx` (voir sa version : le document reste en brouillon local ; enregistrer par-dessus). Brouillon
     `localStorage` `flux.flow_draft.<portee>.<nom>`, propose a la reouverture. `VersionsDialog.tsx` (Fichier > Versions, tag
     de version) : diff par version, Voir (lecture seule, bandeau "Lecture vNNN"), Revenir (cree v(max+1)), historique.
-  * L'ancien editeur (`/action-graph-legacy`, `ActionGraph.tsx`) n'est plus dans la TopBar : lien "Ancien editeur" dans
-    Parametres avances, carte Actions (YAML), jusqu'a P8.
+  * L'ancien editeur des actions YAML (`/action-graph-legacy`, `ActionGraph.tsx`, `LegacyEditor.tsx`) est retire en P8
+    (avec ses appels `getActionGraph*` / `getActionCatalog` / `saveAction` / `resetAction`, ses types et la partie v1 de
+    `v1_adapter.ts`, qui garde les helpers partages). Les routes backend `/actions/*` restent (secours).
   * P5 : `ActivationDialog.tsx` (bouton Activer de la TopBar : 0 erreur, avertissements coches, essai a blanc de `current`
     lance depuis le dialogue ; `SlideToConfirm` si un node `!`), tags "actif vN" / "vM non activee".
   * P6a : nodes DCC livres en sous-flows verrouilles (`spec.subflow`) : cadenas (livre) ou icone equipe (copie), double clic

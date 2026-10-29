@@ -79,7 +79,7 @@ function polylinesCross(p: Pt[], q: Pt[]): boolean {
   return false
 }
 
-// Shortcuts stay off while typing in a field (same guard as ActionGraph.tsx).
+// Shortcuts stay off while typing in a field (same guard as the old P4 editor).
 export const typing = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
 

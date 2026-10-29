@@ -4,8 +4,6 @@ import type {
   ActionFormResponse,
   CalendarItem,
   CalendarPublish,
-  ActionCatalog,
-  ActionGraph,
   ActionPreviewResponse,
   ActivityEvent,
   FollowedShot,
@@ -382,21 +380,7 @@ export const api = {
     target_name?: string
   }) => apiCall<ActionPreviewResponse>('POST', '/actions/publish/preview', payload),
 
-  // Node flow (read-only): the graph of a YAML action, rendered with React Flow.
-  // On demand only (opened from the hidden bench page); never polled.
-  getActionGraphList: () =>
-    apiCall<string[]>('GET', '/actions/graph/list'),
-
-  getActionGraph: (name: string) =>
-    apiCall<ActionGraph>('GET', `/actions/${encodeURIComponent(name)}/graph`),
-
-  // B6 node editor (ADR 0040): catalogue, team copy of an action, team nodes.
-  getActionCatalog: () =>
-    apiCall<ActionCatalog>('GET', '/actions/catalog'),
-  saveAction: (action: Record<string, unknown>) =>
-    apiCall<{ path: string }>('POST', '/actions/save', { action }),
-  resetAction: (name: string) =>
-    apiCall<{ reset: boolean }>('DELETE', `/actions/${encodeURIComponent(name)}/team`),
+  // The old YAML action editor (P4-P8) is gone; the backend /actions/* routes stay as a fallback.
   getNodeTemplate: (name: string) =>
     apiCall<{ code: string }>('GET', `/actions/nodes/template?name=${encodeURIComponent(name)}`),
   saveNode: (name: string, code: string) =>

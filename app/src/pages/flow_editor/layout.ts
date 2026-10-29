@@ -1,7 +1,7 @@
 // layout.ts — the Layout button (03_EDITEUR §4), the only thing that arranges the graph.
 // Layers left to right: rank = longest path over the exec links, then the data links
 // (back links of a loop are ignored); inside a column, nodes are sorted by the barycentre
-// of their sources (2 passes, like layout() in ActionGraph.tsx) and centred vertically.
+// of their sources (2 passes, like the old P4 editor's layout()) and centred vertically.
 // Returns positions; the editor applies them with moveNodes (one undo entry) then frames.
 
 import { nodeOfRef, splitRef, EXEC_IN } from './reducers'

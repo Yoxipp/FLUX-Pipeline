@@ -1,4 +1,4 @@
-// useTr.ts — FR / EN text of the Flows editor (copied from ActionGraph.tsx, removed there in P8).
+// useTr.ts — FR / EN text of the Flows editor (copied from the old P4 editor, removed in P8).
 
 import { useMemo } from 'react'
 import { useI18n } from '../../i18n'

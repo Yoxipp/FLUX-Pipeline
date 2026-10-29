@@ -1,5 +1,5 @@
 // NodeWriterDialog.tsx — write a team Python node (03_EDITEUR §9), taken from the old
-// editor's NodeWriter (ActionGraph.tsx): starts from GET /flows/nodes/template, saved by
+// editor's NodeWriter (old P4 editor, removed in P8): starts from GET /flows/nodes/template, saved by
 // POST /flows/nodes into CONFIG/extensions/nodes/<name>.py (Team TD, shared with the team,
 // reloaded per file without a restart). A load error is shown and the file is kept.
 

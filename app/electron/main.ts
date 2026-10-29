@@ -165,8 +165,8 @@ async function createWindow(): Promise<void> {
 // page. The renderer shows a sidebar-less shell when the URL carries ?detached=1.
 const DETACHABLE_ROUTES = new Set([
   '/', '/publisher', '/projects', '/usd', '/shelf', '/templates', '/production', '/activity', '/disk',
-  // Opened from Parametres avances: Flows editor, and the old YAML action editor until P8.
-  '/action-graph', '/action-graph-legacy',
+  // Opened from Parametres avances: Flows editor (the old YAML action editor was removed in P8).
+  '/action-graph',
   // Tractor farm page, opened from the launcher like a software (single window).
   '/render',
   // TOOL pages (Flows P7): the tab, with ?page=<id> as a deep link.
@@ -174,11 +174,11 @@ const DETACHABLE_ROUTES = new Set([
 ])
 
 // Routes that only ever get one window: a second request focuses the existing one.
-const SINGLE_WINDOW_ROUTES = new Set(['/render', '/action-graph', '/action-graph-legacy'])
+const SINGLE_WINDOW_ROUTES = new Set(['/render', '/action-graph'])
 const singleWindows = new Map<string, BrowserWindow>()
 
 // Routes that need room (node editors): bigger window and minimum size.
-const LARGE_ROUTES = new Set(['/action-graph', '/action-graph-legacy'])
+const LARGE_ROUTES = new Set(['/action-graph'])
 
 // `route` may carry a query for a deep link (/action-graph?flow=publish): only its
 // path is checked against the lists, the whole route goes into the hash.

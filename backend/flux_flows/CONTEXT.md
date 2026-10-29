@@ -1,7 +1,7 @@
 # backend/flux_flows - Flows v2 (format, stockage, droits, migration)
 
 Chantier Flows (ADR 0057, 0058 ; specs `docs/yaml_update_refonte/`). Package neuf : `flux_core` et `flux_actions`
-ne sont pas modifies, le publish tourne encore sur les actions v1 jusqu'a P8. Etat au 2026-10-22 : P1 fait
+ne sont pas modifies ; depuis P8 le publish passe par les flows quand le projet est en v2 (`switch.py`), sinon v1. Etat au 2026-10-22 : P1 fait
 (prompt `docs/yaml_update_refonte/prompts/P1_format_v2_stockage.md`). P2 fait (prompt `P2_moteur_runs.md`) :
 moteur, runs, essai a blanc, WS, 11 types de node. P4 (backend, 2026-10-23) : validation complete (`validate.py`).
 P5 (2026-10-23) : scheduler, verrou entre postes, evenements actifs, activation (voir "Evenements et flows actifs").
@@ -237,7 +237,10 @@ suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/templat
   du run (n°3), utilisateur du run sinon FLUX sinon unknown (n°5), version jamais 0 (n°6, `None` = inconnue), sortie
   `warnings` (n°8), `name` Houdini obligatoire (n°11), plage Maya complete pas flottant (n°12), `port` Maya (n°14),
   entree `options: dict` des flows (n°4 ; Painter / Designer / Mari : `extra`). Type d'interface `dict` (aucun widget de
-  page). Les routes `/dcc/<soft>/publish` l'appellent aux etapes 4 a 6 de P8.
+  page). Les routes `/dcc/<soft>/publish` l'appellent (Maya, Houdini, Nuke, Painter, Designer, Mari, Marvelous, ZBrush ;
+  `routers/CONTEXT.md`). Sorties ajoutees : `rop_node` (houPublish), `tx` (sp / sd / mariPublish) ; entree `node` de
+  `publish_nuke`. Parite v1 / v2 : `tests/test_flux_flows/test_publish_flows.py`. Retour arriere :
+  `docs/development/PUBLISH_ROLLBACK.md`.
 * **Nodes livres verrouilles** (`dcc_nodes.py`, decisions 18 / 19) : `HoudiniInstance`, `MayaInstance`, `houPublish`,
   `mayPublish` = flows `shipped/dcc/<soft>/*.flow.yml` avec `node_type` ; spec du catalogue tiree de l'interface (entrees
   `select` = reglages a choix, constantes), drapeaux du coeur Python `<type>_core` (`internal`, hors Tab / Shelf). Le moteur

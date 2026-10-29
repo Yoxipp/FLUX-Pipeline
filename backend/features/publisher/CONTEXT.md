@@ -33,4 +33,6 @@ Zone a risque (tous les DCC + projets existants). Le layout par sous-dossier de 
 (`features/activity/activity_writer.py`), qui emet `flux_flows.events.publish_done` : les flows actifs `OnPublish` du
 poste partent apres le publish (en parallele des hooks USD `after_usd_publish`, qui suivent `log_publish`). Sans flow
 actif = rien ; `FLUX_FLOWS_HOOKS=0` coupe ; une emission qui leve ne change pas le publish. Pas d'`event.before_publish` :
-"avant publish" = nodes avant le node publish d'un flow `publish_<soft>` (P6 / P8). Tests : `tests/publisher/test_publish_hooks.py`.
+"avant publish" = nodes avant le node publish d'un flow `publish_<soft>` (P6 / P8). Depuis P8 (ADR 0070) les routes
+`/dcc/<soft>/publish` appellent ces fonctions par le flow quand le projet est en v2 ; `publish_core.py` /
+`publish_layout.py` n'ont pas change. Tests : `tests/publisher/test_publish_hooks.py`.

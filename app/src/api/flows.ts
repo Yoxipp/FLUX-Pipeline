@@ -1,9 +1,8 @@
 // flows.ts — API calls of the Flows editor (03_EDITEUR §9).
-// P0: read-only, on top of the v1 action routes. P1 adds the /flows routes, P2 the runs.
+// P1 added the /flows routes, P2 the runs (the P0 read-only v1 action calls left in P8).
 // The TD boxes themselves (flows_td, flows_team_td) are written through /settings/user-data.
 
-import { api, apiCall, BASE_URL } from './client'
-import type { ActionCatalog, ActionGraph } from '../types'
+import { apiCall, BASE_URL } from './client'
 import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RunRecord, RunStatus, RunSummary, SaveResult, VersionList, PagePorts, PageFlows, PageClickRun, PageTarget, ExamplePage } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
@@ -31,9 +30,6 @@ function qs(params: Record<string, string | number | undefined>): string {
 }
 
 export const flowsApi = {
-  listV1Actions: (): Promise<string[]> => api.getActionGraphList(),
-  getV1Action:   (name: string): Promise<ActionGraph> => api.getActionGraph(name),
-  getV1Catalog:  (): Promise<ActionCatalog> => api.getActionCatalog(),
   getRights:     (): Promise<FlowRights> => apiCall<FlowRights>('GET', '/flows/rights'),
   getCatalog:    (): Promise<FlowCatalog> => apiCall<FlowCatalog>('GET', '/flows/catalog'),
   nodeTemplate:  (): Promise<{ filename: string; text: string; folder: string | null }> => apiCall('GET', '/flows/nodes/template'),
