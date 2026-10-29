@@ -33,6 +33,7 @@ from flux_flows.model import NAME_RE, Flow, FlowSchemaError, dump_flow, load_flo
 SUFFIX = ".flow.yml"
 SCOPE_ORDER = ("perso", "project", "team", "shipped")
 LEGACY_PREFIX = "legacy_"
+EXAMPLE_PREFIX = "example_"   # shipped example_*: the Exemples category, duplicated to be used (ADR 0069)
 
 
 class FlowStoreError(ValueError):
@@ -436,6 +437,53 @@ def copy_flow(roots: Mapping[str, Optional[Path]], name: str, from_scope: str, t
     extra = {"shipped_hash": shipped_hash(src["text"])} if from_scope == "shipped" and flow.name == name else None
     state = save_flow(roots, to_scope, flow, user=user, note=f"copie de {from_scope}/{name}", extra_state=extra)
     return {"state": state, "scope": to_scope, "name": flow.name}
+
+
+# State keys that belong to the old place: the activation gate is passed again in the new one.
+_RELOCATE_DROP = ("acked", "dry_run_ok", "shipped_hash")
+
+
+def relocate_flow(roots: Mapping[str, Optional[Path]], name: str, from_scope: str, to_scope: str, *,
+                  user: str, new_name: Optional[str] = None) -> Dict[str, Any]:
+    """Rename (same scope) or move to another scope (ADR 0069): the working file, every
+    frozen version and the state go along, renamed; the flow arrives inactive (rights and
+    triggers differ, the activation gate is passed again there); the old one goes to the
+    trash of its scope. Refused when the target name exists in the target scope."""
+    _require_writable(from_scope)
+    _require_writable(to_scope)
+    src, dst = _root(roots, from_scope), _root(roots, to_scope)
+    new = _check_name(new_name or name)
+    if (from_scope, name) == (to_scope, new):
+        raise FlowStoreError("meme nom et meme portee : rien a changer", 400)
+    if not working_file(src, name).is_file():
+        raise FlowStoreError(f"flow {name} introuvable ({from_scope})", 404)
+    if working_file(dst, new).exists() or flow_folder(dst, new).exists():
+        raise FlowStoreError(f"un flow {new} existe deja ({to_scope})", 409)
+    with _flow_lock(src, name):
+        flow = load_flow_text(working_file(src, name).read_text(encoding="utf-8")).model_copy(update={"name": new})
+        state = read_state(src, name)
+        versions = {n: version_file(src, name, n).read_text(encoding="utf-8") for n in _version_numbers(src, name)}
+        extras = [p for p in flow_folder(src, name).iterdir()
+                  if p.name not in ("versions", "state.json") and not p.name.startswith("state.json.")] \
+            if flow_folder(src, name).is_dir() else []
+    target = flow_folder(dst, new)
+    target.mkdir(parents=True, exist_ok=True)
+    with _flow_lock(dst, new):
+        for number, text in versions.items():
+            frozen = load_flow_text(text).model_copy(update={"name": new})
+            _write_text(version_file(dst, new, number), dump_flow(frozen, scope=to_scope, version=number))
+        for extra in extras:      # watcher memories (seen_<node>.json...) follow the flow
+            (shutil.copytree if extra.is_dir() else shutil.copy2)(extra, target / extra.name)
+        for key in _RELOCATE_DROP:
+            state.pop(key, None)
+        state.update(active=False, active_version=None)
+        state = _write_working(dst, to_scope, flow, state, user)
+    trash = delete_flow(roots, from_scope, name, user=user)["trash"]
+    kind = "rename" if from_scope == to_scope else "move"
+    _history(roots, to_scope, {"kind": kind, "user": user, "flow": new, "from": f"{from_scope}/{name}", "note": ""})
+    if from_scope != to_scope:
+        _history(roots, from_scope, {"kind": kind, "user": user, "flow": name, "to": f"{to_scope}/{new}", "note": ""})
+    return {"state": state, "scope": to_scope, "name": new, "trash": trash}
 
 
 def set_active(roots: Mapping[str, Optional[Path]], scope: str, name: str, active: bool, *,

@@ -615,8 +615,11 @@ def _roots(user: Optional[str], project: Optional[str]) -> dict:
         raise HTTPException(status_code=400, detail={"message": str(exc)}) from exc
 
 
-def _category(scope: str) -> str:
-    # ADR 0058: Ouvrir lists Pipe (shipped + team), Projet, Perso (TDs).
+def _category(scope: str, name: str = "") -> str:
+    # ADR 0058: Ouvrir lists Pipe (shipped + team), Projet, Perso (TDs); ADR 0069: the
+    # shipped example_* flows have their own Exemples category (read only, duplicated to be used).
+    if scope == "shipped" and name.startswith(store.EXAMPLE_PREFIX):
+        return "examples"
     return {"shipped": "pipe", "team": "pipe", "project": "project", "perso": "perso"}[scope]
 
 
@@ -758,7 +761,7 @@ async def list_flows(project: Optional[str] = None) -> list[dict[str, Any]]:
     """Every flow of every available scope, with its Ouvrir category."""
     current = await asyncio.to_thread(rights.current_rights)
     entries = await _call(store.list_flows, _roots(current["user"], project))
-    return [{**e, "category": _category(e["scope"])} for e in entries]
+    return [{**e, "category": _category(e["scope"], e["name"])} for e in entries]
 
 
 @router.get("/{name}")
@@ -780,7 +783,7 @@ async def get_flow(name: str, scope: Optional[str] = None, project: Optional[str
         shipped = await asyncio.to_thread(dcc_nodes.shipped_file, name)
         dcc = {"node_type": flow.node_type, "locked": scope == "shipped",
                "team_copy": scope == "team" and shipped is not None}
-    return {"scope": scope, "category": _category(scope), "name": name, "version": version,
+    return {"scope": scope, "category": _category(scope, name), "name": name, "version": version,
             "flow": to_document(flow), "state": got["state"], "legacy": name.startswith(store.LEGACY_PREFIX),
             "issues": v1_limit_issues(flow), "dcc": dcc}
 
@@ -974,6 +977,57 @@ async def copy(name: str, body: CopyBody) -> dict[str, Any]:
     got = await _call(store.copy_flow, _roots(current["user"], body.project), name, body.from_scope,
                       body.to_scope, user=current["user"] or "", new_name=body.new_name)
     dcc_nodes.reset_cache()
+    if body.from_scope == "shipped" and name.startswith(store.EXAMPLE_PREFIX):
+        got["pages"] = await asyncio.to_thread(_example_pages, got["name"], body.to_scope, body.project, current)
+    return got
+
+
+def _example_pages(name: str, to_scope: str, project: Optional[str], current: dict[str, Any]) -> list[dict[str, Any]]:
+    """A duplicated example (ADR 0069): each TOOL page its InputsPageReader reads and that
+    the project / team does not have yet is created from the shipped template, so its
+    buttons show in TOOL. Project page for a project or perso flow, team page for a team
+    flow (or without a project). Never overwrites a page; without the right, says so."""
+    roots = _page_roots(project)
+    flow = store.read_flow(_roots(current["user"], project), to_scope, name)["flow"]
+    scope = "team" if to_scope == "team" or not project else "project"
+    out: list[dict[str, Any]] = []
+    for page_id in sorted({str(n.params.get("page") or "") for _, n in page_inputs.page_nodes(flow)} - {""}):
+        if page_store.resolve(roots, page_id) is not None:
+            out.append({"page": page_id, "status": "exists"})
+            continue
+        if roots.get("shipped") is None or not page_store.page_file(Path(roots["shipped"]), page_id).is_file():
+            out.append({"page": page_id, "status": "missing"})
+            continue
+        if not rights.allowed(current, rights.ADMIN, scope):
+            out.append({"page": page_id, "status": "no_right", "scope": scope})
+            continue
+        page = page_store.read_page(roots, "shipped", page_id)["page"]
+        page_store.save_page(roots, scope, page, user=current["user"] or "")
+        events.emit({"type": "page_changed", "page": page_id, "scope": scope, "project": project,
+                     "rev": None, "by": current["user"]})
+        out.append({"page": page_id, "status": "created", "scope": scope})
+    return out
+
+
+class RelocateBody(BaseModel):
+    from_scope: str
+    to_scope: str
+    project: Optional[str] = None
+    new_name: Optional[str] = None
+
+
+@router.post("/{name}/relocate")
+async def relocate(name: str, body: RelocateBody) -> dict[str, Any]:
+    """Rename (same scope) or Changer de portee (ADR 0069): versions and state go along,
+    the flow arrives inactive, the old one goes to the trash. Write rights on both scopes."""
+    await _require(rights.WRITE, body.from_scope)
+    current = await _require(rights.WRITE, body.to_scope)
+    roots = _roots(current["user"], body.project)
+    got = await _call(store.relocate_flow, roots, name, body.from_scope, body.to_scope,
+                      user=current["user"] or "", new_name=body.new_name)
+    scheduler.request_refresh()
+    events.emit({"type": "activation", "flow": name, "scope": body.from_scope, "project": body.project,
+                 "active": False, "version": None, "by": current["user"]})
     return got
 
 
