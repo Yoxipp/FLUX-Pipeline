@@ -105,7 +105,7 @@ P2 : `GET /runs`, `GET /runs/{run_id}`, `POST /runs/{run_id}/cancel` (TD ou lanc
 aucune version), `dry_run` = fichier enregistre (TD), sinon `active_version` d'un flow actif (409 "flow non actif") ;
 409 aussi si `refused` / `skipped` (`detail.issues`). `button` (T1) : le run joue un clic sur ce bouton d'un
 InputsPageReader du flow, avec `values` comme valeurs des champs (400 si aucun node n'a ce bouton) ; sans lui, un flow de
-page part par son premier bouton avec les defauts de la page. L'editeur ne l'envoie pas encore (pas de choix du bouton).
+page part par son premier bouton avec les defauts de la page. L'editeur l'envoie depuis `PageRunDialog` (Run / Essai : bouton + valeurs) et le dialogue Activer (bouton, defauts).
 P3 : `POST /preview {kind: resolve | pattern, text, names?, variables?, path_field?, scope, project?}` -> `{result, error, code?,
 suggestion?}` (apercu dans l'editeur, ne lance aucun node) ; `GET /nodes/template` (modele de node d'equipe + dossier cible).
 
