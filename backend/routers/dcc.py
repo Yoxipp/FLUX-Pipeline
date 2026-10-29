@@ -891,6 +891,35 @@ async def houdini_export_scene(req: HoudiniSceneExportRequest) -> dict:
     return result
 
 
+async def _houdini_flow_publish(req: HoudiniPublishRequest, user: str) -> tuple[dict | None, str]:
+    """Publish through the flow publish_houdini (P8), same contract as _maya_flow_publish:
+    (v1 response, "") when published, (None, warning) on a failure before the core, 409 on a
+    refusal, 503 on a failure after the core (never a second publish)."""
+    from features.folder_manager.naming_validator import format_version
+    from flux_flows.publish_runner import run_publish
+
+    values = {
+        "name": req.filename, "node": req.rop_node_path or "", "format": req.extension,
+        "description": req.description, "sequence": req.is_sequence, "frame_padding": req.frame_padding,
+        "frame_range": " ".join(str(v) for v in req.frame_range) if req.frame_range else "",
+        "options": req.export_options or {}, "attr_filter": req.attr_filter or {},
+    }
+    out = await run_publish("houdini", project=req.project_name, values=values, user=user)
+    if out.status == "fallback":
+        return None, out.warning()
+    if out.status == "refused":
+        raise HTTPException(status_code=409, detail=out.message)
+    if out.status != "ok":
+        raise HTTPException(status_code=503, detail=f"Publish Houdini (flow) échoué : {out.message}")
+    version = out.outputs.get("version")
+    res: dict = {"ok": True, "path": str(out.outputs.get("path") or ""), "version": version,
+                 "version_str": format_version(int(version)) if version else "",
+                 "rop_node": out.outputs.get("rop_node") or req.rop_node_path or "", "is_sequence": req.is_sequence}
+    if out.outputs.get("warnings"):
+        res["warnings"] = [str(w) for w in out.outputs["warnings"]]
+    return res, ""
+
+
 @router.post("/houdini/publish")
 async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     """Houdini ROP publish workflow.
@@ -912,6 +941,17 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
     frame_range = tuple(req.frame_range) if req.frame_range and len(req.frame_range) == 3 else None  # type: ignore[arg-type]
 
     loop = asyncio.get_running_loop()
+
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_houdini, same response shape.
+    # A run that fails before the core falls back to the paths below, with a warning.
+    from flux_flows.switch import flows_publish_enabled
+
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "houdini"):
+        flow_res, fallback = await _houdini_flow_publish(req, user)
+        if flow_res is not None:
+            return flow_res
+        warnings.append(fallback)
 
     # Engine path (default; FLUX_LEGACY_PUBLISH falls back to legacy). Same UI,
     # same endpoint, same response shape — only the logic underneath changes.
@@ -938,7 +978,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
         )
         if result is None:
             raise HTTPException(status_code=503, detail="Publish failed")
-        return result
+        return {**result, "warnings": warnings} if warnings else result
 
     result = await loop.run_in_executor(
         None,
@@ -959,7 +999,7 @@ async def houdini_publish(req: HoudiniPublishRequest) -> dict:
 
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("error", "Publish failed"))
-    return result
+    return {**result, "warnings": warnings} if warnings else result
 
 
 class HoudiniLightExportRequest(BaseModel):

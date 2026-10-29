@@ -101,6 +101,7 @@ class PublishBlackBox(unittest.TestCase):
         kwargs = runner.call_args.kwargs
         self.assertEqual((kwargs["base_name"], kwargs["extension"], kwargs["rop_node_path"]), ("cache", ".abc", "/out/cache"))
         self.assertEqual(outputs["version"], 7)
+        self.assertEqual(outputs["rop_node"], "/out/cache")   # P8: the route hands it to the Publisher
 
     def test_dry_run_computes_the_destination_and_writes_nothing(self) -> None:
         hou = FakeHou()

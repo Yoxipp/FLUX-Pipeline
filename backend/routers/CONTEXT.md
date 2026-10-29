@@ -15,10 +15,11 @@ Ajouts : `review` (ADR 0047, `features/review/keyframe.py`) : `GET /review/keyfr
 (single-flight), resultat garde 1 s, ETag + 304 ; `main.py` vide ce cache apres toute requete non-GET hors
 `/activity`, `/logs`, `/calendar`. Le calcul tourne dans `core/executors.HEAVY` (pool borne, separe des feeds).
 `GET /publish/queue` : copies de publish actives / en attente (`features/publisher/copy_limits.py`).
-Publish par flow (P8, ADR 0070) : `POST /dcc/maya/publish` passe par `_maya_flow_publish` -> `flux_flows.publish_runner`
+Publish par flow (P8, ADR 0070) : `POST /dcc/maya/publish` et `/dcc/houdini/publish` passent par `_maya_flow_publish` /
+`_houdini_flow_publish` -> `flux_flows.publish_runner`
 quand le projet est en `publish_engine: v2` (`flux_flows/switch.py`), meme forme de reponse ; repli v1 si le run echoue
 avant son coeur (`warnings` dans la reponse), refus = 409 (message de l'equipe), echec apres le coeur = 503, jamais v1.
-Les autres `/dcc/<soft>/publish` suivent aux etapes 5 et 6 de P8.
+Houdini : `rop_node` vient de la sortie du flow. Les autres `/dcc/<soft>/publish` suivent a l'etape 6 de P8.
 
 ## flows.py (2026-10-22, Flows P1)
 

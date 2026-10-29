@@ -225,7 +225,8 @@ def maya_frame_range(value: Any) -> Optional[list]:
                         "FX_SIM_smoke_null"),
                    port("node", "dcc_node", "ROP ou node a publier (vide = selection)", "ROP or node to publish "
                         "(empty = selection)", "/out/smoke_cache")],
-           outputs=_OUTS,
+           outputs=_OUTS + [port("rop_node", "str", "ROP cuit (celui de la selection si node vide)",
+                                 "Cooked ROP (the selected one when node is empty)", "/out/smoke_cache")],
            params=[port("format", "str", "Extension : .bgeo.sc .abc .usd .vdb .hip ...", "Extension", ".abc", default=".abc"),
                    _DESCRIPTION, _FRAMES,
                    port("sequence", "bool", "Une image par frame (sequence)", "One file per frame (sequence)", False,
@@ -281,7 +282,8 @@ def hou_publish(ctx, inputs, params):
     version = got.get("version") or version_of(got["path"])
     record["version"] = version
     return {"publish": record, "path": str(got["path"]), "version": version, "files": [str(got["path"])],
-            "warnings": [str(w) for w in got.get("warnings") or []]}
+            "warnings": [str(w) for w in got.get("warnings") or []],
+            "rop_node": str(got.get("rop_node") or node or "")}
 
 
 # -- P6b: Nuke, Painter, Designer, Marvelous, ZBrush, Mari (01 §13 table) --------------------

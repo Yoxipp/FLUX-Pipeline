@@ -1522,6 +1522,7 @@ function PublisherPage({ onReset }: { onReset: () => void }) {
           user:          settings?.username ?? undefined,
         })
         toast.success(`${versionLabel(res.version_str)} → ${res.rop_node}`)
+        res.warnings?.forEach(w => toast.warning(w))
       } else if (dcc === 'ZBrush') {
         if (!zbrushConnected) {
           toast.error(tr('ZBrush non connecté : active le bridge FLUX dans ZBrush', 'ZBrush not connected: enable the FLUX bridge in ZBrush'))

@@ -19,6 +19,7 @@ interface:
     - {id: version, type: int, label: "Version ecrite"}
     - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
     - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
+    - {id: rop_node, type: str, label: "ROP cuit"}
 nodes:
   ev: {type: event.publish_request, pos: [0, 160], params: {soft: houdini}}
   inst: {type: session.hou_instance, pos: [320, 160], params: {mode: live_connect_only, pick: active}}
@@ -35,6 +36,7 @@ nodes:
   out_version: {type: subflow.flow_output, pos: [1280, 160], params: {id: version}}
   out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
   out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+  out_rop_node: {type: subflow.flow_output, pos: [2240, 160], params: {id: rop_node}}
 links:
   - {from: ev.then, to: inst.exec}
   - {from: inst.then, to: pub.exec}
@@ -55,5 +57,7 @@ links:
   - {from: pub.files, to: out_files.value}
   - {from: out_files.then, to: out_warnings.exec}
   - {from: pub.warnings, to: out_warnings.value}
+  - {from: out_warnings.then, to: out_rop_node.exec}
+  - {from: pub.rop_node, to: out_rop_node.value}
 notes:
   - {id: k1, pos: [0, 1520], text: "Avant publish : placer les verifications de l'equipe entre l'Instance et houPublish (If + RefusePublish : le message est montre tel quel dans le Publisher).\nApres publish : les flows OnPublish partent tout seuls (log_publish)."}

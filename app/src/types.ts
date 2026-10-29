@@ -257,6 +257,7 @@ export interface HoudiniPublishResult {
   version_str: string
   rop_node: string
   is_sequence: boolean
+  warnings?: string[]
 }
 
 export interface HoudiniState {
