@@ -19,7 +19,9 @@ Publish par flow (P8, ADR 0070) : `POST /dcc/maya/publish` et `/dcc/houdini/publ
 `_houdini_flow_publish` -> `flux_flows.publish_runner`
 quand le projet est en `publish_engine: v2` (`flux_flows/switch.py`), meme forme de reponse ; repli v1 si le run echoue
 avant son coeur (`warnings` dans la reponse), refus = 409 (message de l'equipe), echec apres le coeur = 503, jamais v1.
-Houdini : `rop_node` vient de la sortie du flow. Les autres `/dcc/<soft>/publish` suivent a l'etape 6 de P8.
+Houdini : `rop_node` vient de la sortie du flow. Nuke, `/substance/publish` (Painter), `/designer/bridge/publish`,
+`/mari/publish`, `/marvelous/bridge/publish`, `/zbrush/publish` : meme contrat par `_soft_flow_publish` (P8 etape 6) ;
+Photoshop et les ingests de fichier `/designer/publish`, `/marvelous/publish` restent v1.
 
 ## flows.py (2026-10-22, Flows P1)
 
