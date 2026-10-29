@@ -2152,8 +2152,26 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
     """Export Substance Painter maps and ingest them into FLUX (opt .tx conform)."""
     from core import config
     from dcc.substance_painter.substance_export import publish_painter
+    from flux_flows.switch import flows_publish_enabled
 
     user = req.user or config.get_current_user() or "unknown"
+    # P8 (ADR 0070): project in publish v2 -> the flow publish_painter, same response shape.
+    # The fields publish_painter takes beyond the flow inputs go in options (core: extra).
+    warnings: list[str] = []
+    if flows_publish_enabled(req.project_name, "painter"):
+        got, fallback = await _soft_flow_publish("painter", req.project_name, {
+            "class": req.class_token, "task": req.task_token, "name": req.name_token,
+            "instance": req.instance, "preset": req.preset, "format": req.file_format,
+            "bit_depth": req.bit_depth, "size": req.size, "maps": req.maps,
+            "conform_tx": req.conform_tx, "description": req.description or "",
+            "options": {"texture_sets": req.texture_sets, "padding": req.padding, "dilation": req.dilation,
+                        "map_params": req.map_params, "channels": req.channels, "tx_only": req.tx_only},
+        }, user, lambda msg: _bridge_error(msg, "Substance publish failed", _substance_autostart, "Painter"))
+        if got is not None:
+            return {"ok": True, "published": _flow_files(got), "tx": [str(p) for p in got.get("tx") or []] or None,
+                    "warnings": _flow_warnings(got)}
+        warnings.append(fallback)
+
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
@@ -2168,7 +2186,7 @@ async def substance_publish(req: SubstancePublishRequest) -> dict:
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=_bridge_error(
             result.get("error"), "Substance publish failed", _substance_autostart, "Painter"))
-    return result
+    return _with_warnings(result, warnings)
 
 
 @router.get("/texture/formats")

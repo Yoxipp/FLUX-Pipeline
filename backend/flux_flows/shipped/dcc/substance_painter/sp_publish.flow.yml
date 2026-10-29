@@ -24,6 +24,7 @@ interface:
     - {id: version, type: int, label: "Version ecrite"}
     - {id: files, type: "list[path]", label: "Tous les fichiers publies"}
     - {id: warnings, type: "list[str]", label: "Avertissements du publish"}
+    - {id: tx, type: "list[path]", label: "Fichiers .tx ecrits"}
 nodes:
   ev: {type: event.manual, pos: [0, 160]}
   in_session: {type: data.flow_input, pos: [0, 320], params: {id: session}}
@@ -45,6 +46,7 @@ nodes:
   out_files: {type: subflow.flow_output, pos: [1600, 160], params: {id: files}}
   in_options: {type: data.flow_input, pos: [0, 1760], params: {id: options}}
   out_warnings: {type: subflow.flow_output, pos: [1920, 160], params: {id: warnings}}
+  out_tx: {type: subflow.flow_output, pos: [2240, 160], params: {id: tx}}
 links:
   - {from: ev.then, to: core.exec}
   - {from: in_session.value, to: core.session}
@@ -70,5 +72,7 @@ links:
   - {from: in_options.value, to: core.extra}
   - {from: out_files.then, to: out_warnings.exec}
   - {from: core.warnings, to: out_warnings.value}
+  - {from: out_warnings.then, to: out_tx.exec}
+  - {from: core.tx, to: out_tx.value}
 notes:
   - {id: k1, pos: [0, 1800], text: "Node livre avec FLUX : lecture seule. Deverrouiller (Team TD) pour ajouter des verifications avant le publish ; Revenir au defaut supprime la copie."}

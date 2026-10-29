@@ -68,8 +68,7 @@ class _SoftSwitch:
         self.assertEqual((r.status_code, r.json()), (200, self.v2_result), r.text)
         self.v1.assert_not_called()
         args, kwargs = self.run_publish.call_args
-        flow_soft = "painter" if self.soft == "substance" else self.soft
-        self.assertEqual((args, kwargs["project"], kwargs["user"]), ((flow_soft,), "PROJ", "ADAM"))
+        self.assertEqual((args, kwargs["project"], kwargs["user"]), ((self.soft,), "PROJ", "ADAM"))
         self.assertEqual(kwargs["values"], self.flow_values)
 
     def test_v2_warnings_are_given(self) -> None:
@@ -111,6 +110,27 @@ class NukePublishSwitch(_SoftSwitch, unittest.TestCase):
     flow_values = {"name": "SEQ010_SH010_COMP_main", "node": "Merge1", "format": ".exr",
                    "options": {"compression": "zip"}, "sequence": True, "frame_range": "1001 1050",
                    "colorspace": "", "description": ""}
+    v2_result = v1_result
+
+
+_TOKENS = {"project_name": "PROJ", "class_token": "PROP", "task_token": "TEXTURE", "name_token": "chair",
+           "instance": "null", "description": "d", "user": "ADAM"}
+_MAPS = ["D:/p/PROP_TEXTURE_chair_null_BaseColor_v002.png", "D:/p/PROP_TEXTURE_chair_null_Roughness_v002.png"]
+
+
+class PainterPublishSwitch(_SoftSwitch, unittest.TestCase):
+    route, soft = "/dcc/substance/publish", "painter"
+    v1_target = "dcc.substance_painter.substance_export.publish_painter"
+    body = {**_TOKENS, "file_format": "png", "bit_depth": "16", "conform_tx": True, "texture_sets": ["chair"],
+            "maps": ["BaseColor"], "map_params": {"BaseColor": {"bit_depth": "8"}}}
+    v1_result = {"ok": True, "published": _MAPS, "tx": [_MAPS[0][:-4] + ".tx"], "warnings": ["Height vide"]}
+    flow_outputs = {"path": _MAPS[0], "version": 2, "files": _MAPS, "warnings": ["Height vide"],
+                    "tx": [_MAPS[0][:-4] + ".tx"]}
+    flow_values = {"class": "PROP", "task": "TEXTURE", "name": "chair", "instance": "null",
+                   "preset": "PBR Metallic Roughness", "format": "png", "bit_depth": "16", "maps": ["BaseColor"],
+                   "conform_tx": True, "description": "d",
+                   "options": {"texture_sets": ["chair"], "padding": "infinite", "dilation": 16,
+                               "map_params": {"BaseColor": {"bit_depth": "8"}}, "channels": None, "tx_only": False}}
     v2_result = v1_result
 
 

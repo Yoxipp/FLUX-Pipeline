@@ -180,6 +180,20 @@ class PublishCoreArguments(unittest.TestCase):
         self.assertEqual(rec["status"], "ok", rec.get("error"))
         self.assertEqual(warnings, ["map Height vide"])
 
+    def test_tx_output(self) -> None:
+        # P8: the .tx of the conform come out of the texture nodes (the Publisher shows " · .tx").
+        tx = str(self.tmp / "x_v007.tx")
+        for soft, node, target in (("painter", "dcc.sp_publish", "dcc.substance_painter.substance_export.publish_painter"),):
+            with self.subTest(soft=soft):
+                h.reset()
+                res = {"ok": True, "published": [self.published], "version": 7, "tx": [tx]}
+                with mock.patch(target, return_value=res):
+                    rec, got = run_node(soft, node, softs.port_range(soft).start,
+                                        inputs={"class": "PROP", "task": "TEXTURE", "name": "chair"}, out="tx",
+                                        project="PROJ")
+                self.assertEqual(rec["status"], "ok", rec.get("error"))
+                self.assertEqual(got, [tx])
+
 
 if __name__ == "__main__":
     unittest.main()

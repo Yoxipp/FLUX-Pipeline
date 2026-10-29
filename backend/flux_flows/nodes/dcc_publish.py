@@ -333,6 +333,13 @@ _TEX_IN = [port("class", "str", "Token CLASS", "CLASS token", "PROP", required=T
            port("task", "str", "Token TYPE (tache)", "TYPE token (task)", "TEXTURE", required=True),
            port("name", "str", "Token NAME", "NAME token", "chair", required=True)]
 _TEX_OUTS = _OUTS
+# Painter / Designer / Mari: the .tx written by the conform (P8: the Publisher shows " · .tx").
+_TX_OUTS = _OUTS + [port("tx", "list[path]", "Fichiers .tx ecrits (conform)", "Written .tx files (conform)")]
+
+
+def _with_tx(out: Dict[str, Any], res: Any) -> Dict[str, Any]:
+    out["tx"] = [str(p) for p in (res or {}).get("tx") or []]
+    return out
 
 
 def _sim_soft(label: str):
@@ -375,7 +382,7 @@ def nk_publish(ctx, inputs, params):
 
 @flow_node("dcc.sp_publish_core", "spPublishCore", icon="PackagePlus", internal=True,
            inputs=[dc.EXEC, dc.session_port("painter", "Painter"), *_TEX_IN],
-           outputs=_TEX_OUTS,
+           outputs=_TX_OUTS,
            params=[port("instance", "str", "Token INSTANCE", "INSTANCE token", "null", default="null"),
                    port("preset", "str", "Preset d'export", "Export preset", "PBR Metallic Roughness",
                         default="PBR Metallic Roughness"),
@@ -401,7 +408,7 @@ def sp_publish(ctx, inputs, params):
                           conform_tx=bool(params.get("conform_tx")), description=str(params.get("description") or ""),
                           user=_user(ctx), size=params.get("size") or None, maps=params.get("maps") or None,
                           **(params.get("extra") or {}))
-    return _from_result(res, _user(ctx))
+    return _with_tx(_from_result(res, _user(ctx)), res)
 
 
 @flow_node("dcc.sd_publish_core", "sdPublishCore", icon="PackagePlus", internal=True,
