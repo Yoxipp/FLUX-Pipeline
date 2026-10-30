@@ -4,6 +4,7 @@
 #   P/<id>.yml                       the page (one file, no numbered versions)
 #   P/_history/<id>_<stamp>.yml      the previous file, copied before each overwrite (last 20)
 #   P/_trash/<id>_<stamp>.yml        deleted pages
+#   P/_trash/<id>_<stamp>_data/      their shared data (pages_data/<id>/ of that base)
 # shipped/pages/ holds the read-only templates (menu "Modele"), never listed in TOOL.
 #
 # rev = hash of the file text. A save sends the rev it loaded: another write since
@@ -15,6 +16,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import socket
 from contextlib import contextmanager
 from datetime import datetime
@@ -221,7 +223,58 @@ def save_page(roots: Mapping[str, Optional[Path]], scope: str, page: Page, *, us
     return {"rev": rev_of(text), "changed": True}
 
 
+def _collections(page: Optional[Page], per: Optional[str] = None) -> Optional[set]:
+    """Collection ids a page declares (None = unreadable page: claims everything)."""
+    if page is None:
+        return None
+    return {d.id for d in page.data if per is None or d.per == per}
+
+
+def _data_moves(roots: Mapping[str, Optional[Path]], scope: str, page_id: str,
+                page: Optional[Page]) -> List[tuple]:
+    """(source, trash target) pairs for the shared data of a page being deleted.
+
+    Data lives in <base>/pages_data/<id>/ (page_data.data_base): a project page uses the
+    project base, a team page the team base (`per: team`) and the open project's base
+    (`per: project`). A project page and a team page with the same id share the project
+    folder: then only the collections the other page does not declare are moved."""
+    targets = ["project"] if scope == "project" else ["team", "project"]
+    other_scope = "team" if scope == "project" else "project"
+    moves = []
+    for target in targets:
+        root = roots.get(target)
+        if root is None:
+            continue
+        folder = Path(root).parent / "pages_data" / page_id
+        if not folder.is_dir():
+            continue
+        other = roots.get(other_scope) if target == "project" else None
+        other_file = page_file(Path(other), page_id) if other is not None else None
+        if other_file is None or not other_file.is_file():
+            moves.append((folder, None, target))
+            continue
+        kept = _collections(_read(other_file)["page"], "project" if other_scope == "team" else None)
+        mine = _collections(page, "project" if scope == "team" else None)
+        if kept is None or mine is None:
+            continue                                   # unreadable: keep the shared data as is
+        for sub in sorted(mine - kept):
+            if (folder / sub).is_dir():
+                moves.append((folder / sub, sub, target))
+    return moves
+
+
+def _free(path: Path) -> Path:
+    n, out = 1, path
+    while out.exists():
+        n += 1
+        out = path.with_name(f"{path.name}_{n}")
+    return out
+
+
 def delete_page(roots: Mapping[str, Optional[Path]], scope: str, page_id: str, *, user: str) -> Dict[str, Any]:
+    """Move the page to <scope>/_trash/<id>_<stamp>.yml and its shared data (board, chat,
+    tables) to <pages>/_trash/<id>_<stamp>_data/ of each base it used: a page recreated
+    with the same id starts empty, nothing is erased."""
     _require_writable(scope)
     root = _root(roots, scope)
     with _lock(root, page_id):
@@ -229,11 +282,23 @@ def delete_page(roots: Mapping[str, Optional[Path]], scope: str, page_id: str, *
         if not path.is_file():
             raise FlowStoreError(f"page {page_id} introuvable ({scope})", 404)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        moved: List[tuple] = []
+        try:
+            for source, sub, target in _data_moves(roots, scope, page_id, _read(path)["page"]):
+                dest = Path(roots[target]) / "_trash" / f"{page_id}_{stamp}_data"
+                dest = _free(dest / sub if sub else dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(dest))
+                moved.append((dest, source))
+        except OSError as exc:                         # a file still open: undo, keep the page
+            for dest, source in reversed(moved):
+                shutil.move(str(dest), str(source))
+            raise FlowStoreError(f"donnees de la page {page_id} occupees, reessaie ({exc})", 409) from exc
         trash = root / "_trash" / f"{page_id}_{stamp}{SUFFIX}"
         trash.parent.mkdir(parents=True, exist_ok=True)
         path.replace(trash)
     _history(roots, scope, "page_delete", page_id, user)
-    return {"trash": str(trash)}
+    return {"trash": str(trash), "data_trash": [str(dest) for dest, _ in moved]}
 
 
 def list_history(roots: Mapping[str, Optional[Path]], scope: str, page_id: str) -> List[Dict[str, Any]]:
