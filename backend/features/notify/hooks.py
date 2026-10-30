@@ -35,16 +35,17 @@ def _background(fn, *args) -> None:
 # ── mentions / calendar ───────────────────────────────────────────────────────
 
 def mention_event(from_user: str, targets: list[str], project: str, kind: str = "mention",
-                  detail: str = "", entity: str = "") -> dict:
+                  detail: str = "", entity: str = "", text: str = "") -> dict:
     return make_event(kind, project, from_user, entity or ("chat" if kind == "mention" else ""),
-                      detail, targets)
+                      detail, targets, text=text)
 
 
 def on_mentions(from_user: str, targets: list[str], project: str | None, kind: str = "mention",
-                detail: str = "", entity: str = "") -> None:
+                detail: str = "", entity: str = "", text: str = "") -> None:
     if not targets or not project:
         return
-    _background(lambda: dispatch.enqueue(mention_event(from_user, list(targets), project, kind, detail, entity)))
+    _background(lambda: dispatch.enqueue(
+        mention_event(from_user, list(targets), project, kind, detail, entity, text)))
 
 
 # ── production (tasks / retakes) ──────────────────────────────────────────────

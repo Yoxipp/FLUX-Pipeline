@@ -8,11 +8,11 @@ par defaut, URL remplacable). Un relais absent ou en erreur ne bloque jamais une
 
 | Fichier | Role |
 |---|---|
-| `events.py` | Format d'evenement stable (`type`, `project`, `author`, `entity`, `detail`, `recipients`, `at`), texte minimal, resume, diff de `production.json` (tache assignee, nouveau retake). Pur, sans I/O. |
+| `events.py` | Format d'evenement stable (`type`, `project`, `author`, `entity`, `detail`, `recipients`, `at`, `text`), texte, resume, diff de `production.json` (tache assignee, nouveau retake). Pur, sans I/O. |
 | `hooks.py` | Les seuls points d'entree appeles ailleurs : `on_mentions` (`chat_manager._record_mentions`, aussi les pings du calendrier), `on_production` (`routers/production.put_production`), `on_publish` (`activity_writer.log_publish`). Rendent la main tout de suite (thread), ne levent jamais. |
 | `dispatch.py` | `enqueue` (alias resolus, auteur retire, delai selon le type), `flush` (un message par personne et par passage), quota ntfy, worker a la demande, `send_test`. `FLUX_NOTIFY=0` coupe tout. |
 | `outbox.py` | File locale `%APPDATA%/FluxPipeline/notify_queue.jsonl` (un fichier par poste), ecriture atomique, backoff 30 s a 1 h, abandon apres 24 h. La cible (webhook, sujet) est relue a l'envoi. |
-| `store.py` | Reglages projet `_flux_setup/collab.json` (webhook, serveur ntfy, delai, nom du projet) et personne `User.json` `notify` (canal, Discord ID, sujet). Sorties publiques masquees. |
+| `store.py` | Reglages projet `_flux_setup/collab.json` (webhook, serveur ntfy, delai, nom du projet, `include_text`) et personne `User.json` `notify` (canal, Discord ID, sujet). Sorties publiques masquees. |
 | `relay_secrets.py` | Masquage `****` + 4 caracteres, sujet aleatoire, `redact`. |
 | `channels/` | `discord.py`, `ntfy.py` : HTTP stdlib (`urllib`), `SendResult` (ok, status, retry_after, permanent). |
 
@@ -21,7 +21,9 @@ Front : `app/src/api/notify.ts`, `app/src/pages/settings/NotifySettings.tsx` (Pa
 
 ## Regles
 
-* Contenu : type + entite + auteur. Jamais de chemin, jamais le texte du chat, pas de titre de calendrier, nom du projet seulement si coche.
+* Contenu : type + entite + auteur, plus le message du chat (mention) ou le titre du calendrier si `include_text` (defaut actif,
+  ADR 0072), sur une ligne, 300 caracteres max. Jamais de chemin. Nom du projet seulement si coche.
+  Webhook = salon partage : le message est lu par tout le salon. Version privee (bot) : ADR 0073, proposee.
 * Immediat : mention, tache, retake. Regroupe (delai du projet, 5 min par defaut) : publish, calendrier.
 * Destinataires d'un publish = filtre du fil personnel (ADR 0045, `notifications.reason_for`), seulement les comptes qui ont un canal.
 * Quota ntfy.sh 250 / jour par IP : compteur local `notify_counter.json` ; a partir de 200 tout est regroupe, a 250 attente du lendemain.

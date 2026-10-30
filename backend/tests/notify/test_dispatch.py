@@ -170,14 +170,24 @@ class PublishRecipientsTests(unittest.TestCase):
 
 
 class MentionHookTests(unittest.TestCase):
-    def test_chat_mentions_reach_notify_without_the_text(self):
+    def _record(self, *args, **kwargs):
         from features.activity import chat_manager
         with mock.patch.object(chat_manager, "get_user_list", return_value=["LEA", "ADAM"]), \
              mock.patch.object(chat_manager, "load_aliases", return_value={}), \
              mock.patch.object(chat_manager, "append_events", return_value=True), \
              mock.patch.object(hooks, "on_mentions") as on_mentions:
-            chat_manager._record_mentions("ADAM", "m1", "@lea secret plan @adam", "2026-10-30", "10:00", "PROJ")
-        on_mentions.assert_called_once_with("ADAM", ["LEA"], "PROJ", "mention", "", "")
+            chat_manager._record_mentions(*args, **kwargs)
+        return on_mentions
+
+    def test_chat_mentions_carry_the_message(self):
+        on_mentions = self._record("ADAM", "m1", "@lea secret plan @adam", "2026-10-30", "10:00", "PROJ")
+        on_mentions.assert_called_once_with("ADAM", ["LEA"], "PROJ", "mention", "", "", "@lea secret plan @adam")
+
+    def test_calendar_ping_carries_the_title_not_the_ping_text(self):
+        on_mentions = self._record("ADAM", "c1", "@lea te propose : Review (2026-11-02)", "2026-10-30", "10:00",
+                                   "PROJ", notify_kind="calendar", notify_detail="proposal",
+                                   notify_entity="2026-11-02", notify_text="Review")
+        on_mentions.assert_called_once_with("ADAM", ["LEA"], "PROJ", "calendar", "proposal", "2026-11-02", "Review")
 
 
 class StoreTests(unittest.TestCase):

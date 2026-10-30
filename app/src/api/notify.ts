@@ -28,6 +28,7 @@ export interface NotifyProjectSettings {
   ntfy_server: string
   digest_minutes: number
   include_project: boolean
+  include_text: boolean      // chat message / calendar title in the text (ADR 0072)
 }
 
 export interface NotifyProject {

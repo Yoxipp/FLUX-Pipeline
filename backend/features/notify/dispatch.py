@@ -116,7 +116,8 @@ def _send_group(project: str, who: str, items: list[dict], now: float) -> str:
     if not store.has_channel(prefs, cfg):
         return "no_channel"
     events = sorted((i["event"] for i in items), key=lambda e: e.get("at", 0))
-    text = format_digest(events, cfg.get("include_project", False))
+    text = format_digest(events, cfg.get("include_project", False),
+                         include_text=cfg.get("include_text", True))
     channel = prefs["channel"]
     if channel == "ntfy":
         count = ntfy_count()

@@ -2,7 +2,7 @@
 # (User.json "notify"). Plain JSON so a flow can read them later (ADR 0062).
 #
 # collab.json: {"schema_version": 1, "notify": {"discord_webhook", "ntfy_server",
-#               "digest_minutes", "include_project"}, "updated_by", "updated_at"}
+#               "digest_minutes", "include_project", "include_text"}, "updated_by", "updated_at"}
 #   Edited by a lead / supervisor only (role "project_settings"), rarely: one document
 #   is acceptable here, like roles.json.
 # User.json "notify": {"channel": none | discord | ntfy, "discord_id", "ntfy_topic"}
@@ -26,7 +26,7 @@ CHANNELS = ("none", "discord", "ntfy")
 DIGEST_MIN, DIGEST_MAX = 1, 120
 
 PROJECT_DEFAULTS = {"discord_webhook": "", "ntfy_server": DEFAULT_SERVER, "digest_minutes": 5,
-                    "include_project": False}
+                    "include_project": False, "include_text": True}     # include_text: ADR 0072
 USER_DEFAULTS = {"channel": "none", "discord_id": "", "ntfy_topic": ""}
 
 
@@ -44,6 +44,7 @@ def read_project(project: str) -> dict:
         cfg.update({k: stored[k] for k in PROJECT_DEFAULTS if k in stored})
     cfg["digest_minutes"] = _clamp_minutes(cfg.get("digest_minutes"))
     cfg["include_project"] = bool(cfg.get("include_project"))
+    cfg["include_text"] = bool(cfg.get("include_text"))
     cfg["ntfy_server"] = str(cfg.get("ntfy_server") or DEFAULT_SERVER).rstrip("/")
     return cfg
 
@@ -67,7 +68,7 @@ def write_project(project: str, patch: dict, by: str) -> dict:
                 raise ValueError("Le serveur ntfy doit etre une URL http(s)")
         elif key == "digest_minutes":
             value = _clamp_minutes(value)
-        elif key == "include_project":
+        elif key in ("include_project", "include_text"):
             value = bool(value)
         cfg[key] = value
     doc = {"schema_version": SCHEMA_VERSION, "notify": cfg, "updated_by": by,

@@ -68,9 +68,29 @@ class TextTests(unittest.TestCase):
         self.assertEqual(format_text(e), "Retake SQ010/SH010 ANIM par TOM")
         self.assertEqual(format_text(e, include_project=True), "[PROJ] Retake SQ010/SH010 ANIM par TOM")
 
-    def test_mention_never_carries_the_chat_text(self):
-        e = make_event("mention", "PROJ", "TOM", "chat", "", ["LEA"])
+    def test_mention_text_only_when_allowed(self):
+        e = make_event("mention", "PROJ", "TOM", "chat", "", ["LEA"], text="@lea tu\npeux checker ?")
         self.assertEqual(format_text(e), "Mention par TOM dans le chat")
+        self.assertEqual(format_text(e, include_text=True), "TOM dans le chat : @lea tu peux checker ?")
+
+    def test_mention_without_text_keeps_the_short_form(self):
+        e = make_event("mention", "PROJ", "TOM", "chat", "", ["LEA"])
+        self.assertEqual(format_text(e, include_text=True), "Mention par TOM dans le chat")
+
+    def test_calendar_title_and_span(self):
+        e = make_event("calendar", "PROJ", "TOM", "2026-11-02", "proposal", ["LEA"], text="Review anim")
+        self.assertEqual(format_text(e, include_text=True), "TOM te propose un creneau : Review anim (2026-11-02)")
+        self.assertEqual(format_text(e), "TOM te propose un creneau (2026-11-02)")
+
+    def test_long_text_is_clipped(self):
+        e = make_event("mention", "PROJ", "TOM", "chat", "", ["LEA"], text="x" * 1000)
+        self.assertEqual(len(e["text"]), 300)
+        self.assertTrue(e["text"].endswith("..."))
+
+    def test_digest_passes_include_text(self):
+        events = [make_event("mention", "P", "TOM", "chat", "", ["LEA"], text=f"msg {i}") for i in range(2)]
+        self.assertIn("TOM dans le chat : msg 1", format_digest(events, include_text=True))
+        self.assertNotIn("msg 1", format_digest(events))
 
     def test_digest_counts_overflow(self):
         events = [make_event("publish", "P", "TOM", f"SQ/SH{i:03d}", "ANIM") for i in range(20)]

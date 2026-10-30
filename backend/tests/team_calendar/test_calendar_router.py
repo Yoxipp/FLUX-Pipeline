@@ -37,7 +37,7 @@ class CalendarRouter(unittest.TestCase):
         item = r.json()["item"]
         self.assertEqual(item["status"], "proposed")
         self.assertEqual(self.pings[-1][:2], ("adam", "milo"))
-        self.assertEqual(self.pings[-1][3:], ("proposal", "2026-10-05"))   # phone notify: no title
+        self.assertEqual(self.pings[-1][3:], ("proposal", "2026-10-05", "Anim"))   # title: ADR 0072 include_text
 
         r = self.client.post(f"/calendar/P/items/{item['id']}/respond", json={"action": "accept"})
         self.assertEqual(r.status_code, 403)          # adam cannot answer for milo

@@ -121,13 +121,15 @@ def parse_pings(message: str) -> list[str]:
 def _record_mentions(
     from_user: str, msg_id: str, text: str, date: str, time: str, project: str | None = None,
     *, notify_kind: str = "mention", notify_detail: str = "", notify_entity: str = "",
+    notify_text: str | None = None,
 ) -> None:
     """Persist an unread mention entry for each valid @name in *text*.
 
     Resolves each @name against the real user list (case-insensitive) so a typo
     doesn't spam a phantom user, and skips self-mentions. The same targets get a
-    phone notification (features.notify, *notify_kind* "calendar" for calendar pings);
-    the text itself never leaves FLUX.
+    phone notification (features.notify, *notify_kind* "calendar" for calendar pings)
+    carrying *notify_text* (default: the message), shown only when the project allows
+    it (include_text, ADR 0072).
     """
     raw = parse_pings(text)
     if not raw:
@@ -166,7 +168,8 @@ def _record_mentions(
         log.error("Failed to write chatMentions.json at %s", mpath)
     try:
         from features.notify import hooks as notify_hooks
-        notify_hooks.on_mentions(from_user, targets, project, notify_kind, notify_detail, notify_entity)
+        notify_hooks.on_mentions(from_user, targets, project, notify_kind, notify_detail, notify_entity,
+                                 text if notify_text is None else notify_text)
     except Exception as exc:  # noqa: BLE001 - a phone notification never fails a message
         log.warning("Notify for mentions skipped: %s", exc)
 

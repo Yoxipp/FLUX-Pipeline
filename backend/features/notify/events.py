@@ -2,9 +2,11 @@
 #
 # Stable format (the future Flows event.notify node plugs here, ADR 0062):
 #   {"type": mention | task | retake | calendar | publish, "project": str,
-#    "author": str, "entity": str, "detail": str, "recipients": [str], "at": float}
+#    "author": str, "entity": str, "detail": str, "recipients": [str], "at": float,
+#    "text": str}
 # entity = "SEQ/SHOT", "CLASS/NAME", "chat" or a date span; detail = task name,
-# calendar answer... Never a path, never the chat text (ADR 0062, audit R5).
+# calendar answer... text = the chat message or the calendar title, shown only when
+# the project allows it (include_text, ADR 0072). Never a path.
 
 from __future__ import annotations
 
@@ -12,33 +14,45 @@ import time
 
 EVENT_TYPES = ("mention", "task", "retake", "calendar", "publish")
 IMMEDIATE = frozenset({"mention", "task", "retake"})    # 2026-10-30, the rest is grouped
+TEXT_MAX = 300      # one event's text in a notification (a digest holds up to 15)
 
 _CALENDAR_WORDS = {"proposal": "te propose un creneau", "accept": "a accepte ton creneau",
                    "postpone": "a decale ton creneau", "decline": "a refuse ton creneau"}
 
 
 def make_event(type_: str, project: str, author: str, entity: str = "", detail: str = "",
-               recipients: list[str] | tuple[str, ...] = (), at: float | None = None) -> dict:
+               recipients: list[str] | tuple[str, ...] = (), at: float | None = None,
+               text: str = "") -> dict:
     if type_ not in EVENT_TYPES:
         raise ValueError(f"unknown notify event type: {type_}")
     return {"type": type_, "project": project or "", "author": (author or "").upper(),
             "entity": entity or "", "detail": detail or "", "recipients": list(recipients),
-            "at": time.time() if at is None else at}
+            "at": time.time() if at is None else at, "text": _clip(text)}
 
 
-def format_text(event: dict, include_project: bool = False) -> str:
-    """One line: type + entity + author. Example: 'Retake SQ010/SH010 ANIM par TOM'."""
+def _clip(text: str) -> str:
+    text = " ".join(str(text or "").split())     # one line: a digest stays readable
+    return text if len(text) <= TEXT_MAX else text[: TEXT_MAX - 3] + "..."
+
+
+def format_text(event: dict, include_project: bool = False, include_text: bool = False) -> str:
+    """One line: type + entity + author, plus the message / calendar title when
+    *include_text*. Example: 'Retake SQ010/SH010 ANIM par TOM'."""
     kind, who = event.get("type"), event.get("author") or "?"
     entity, detail = event.get("entity", ""), event.get("detail", "")
+    body = event.get("text", "") if include_text else ""
     if kind == "mention":
-        text = f"Mention par {who} dans le chat"
+        text = f"{who} dans le chat : {body}" if body else f"Mention par {who} dans le chat"
     elif kind == "retake":
         text = f"Retake {entity} {detail} par {who}".replace("  ", " ")
     elif kind == "task":
         text = f"Tache {entity} {detail} assignee par {who}".replace("  ", " ")
     elif kind == "calendar":
-        text = f"{who} {_CALENDAR_WORDS.get(detail, 'calendrier')} ({entity})" if entity \
-            else f"{who} {_CALENDAR_WORDS.get(detail, 'calendrier')}"
+        text = f"{who} {_CALENDAR_WORDS.get(detail, 'calendrier')}"
+        if body:
+            text += f" : {body}"
+        if entity:
+            text += f" ({entity})"
     elif kind == "publish":
         text = f"Publish {entity} {detail} par {who}".replace("  ", " ")
     else:
@@ -48,12 +62,13 @@ def format_text(event: dict, include_project: bool = False) -> str:
     return text
 
 
-def format_digest(events: list[dict], include_project: bool = False, max_lines: int = 15) -> str:
+def format_digest(events: list[dict], include_project: bool = False, max_lines: int = 15,
+                  include_text: bool = False) -> str:
     """Several events for one person in one message; the overflow is counted."""
     if len(events) == 1:
-        return format_text(events[0], include_project)
+        return format_text(events[0], include_project, include_text)
     lines = [f"{len(events)} notifications FLUX"]
-    lines += [f"- {format_text(e, include_project)}" for e in events[:max_lines]]
+    lines += [f"- {format_text(e, include_project, include_text)}" for e in events[:max_lines]]
     if len(events) > max_lines:
         lines.append(f"- et {len(events) - max_lines} autres")
     return "\n".join(lines)

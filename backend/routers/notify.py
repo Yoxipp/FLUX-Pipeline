@@ -87,6 +87,7 @@ class ProjectPatch(BaseModel):
     ntfy_server: str | None = None
     digest_minutes: int | None = None
     include_project: bool | None = None
+    include_text: bool | None = None
 
 
 def _without_channel(cfg: dict) -> list[str]:

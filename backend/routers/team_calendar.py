@@ -31,15 +31,17 @@ def _user() -> str:
     return config.get_current_user() or "unknown"
 
 
-def _ping(project: str, from_user: str, to_user: str, text: str, detail: str = "", span: str = "") -> None:
+def _ping(project: str, from_user: str, to_user: str, text: str, detail: str = "", span: str = "",
+          title: str = "") -> None:
     """Best-effort @mention so the person sees it in their mentions (never fails a save).
-    *detail* (proposal | accept | postpone | decline) and *span* go to the phone
-    notification instead of the text (no calendar title outside FLUX, ADR 0062)."""
+    *detail* (proposal | accept | postpone | decline), *span* and *title* make the phone
+    notification (the title only when the project allows it, ADR 0072)."""
     try:
         from features.activity.chat_manager import _now, _record_mentions
         d, t = _now()
         _record_mentions(from_user, f"cal_{uuid.uuid4().hex[:8]}", f"@{to_user} {text}", d, t, project,
-                         notify_kind="calendar", notify_detail=detail, notify_entity=span)
+                         notify_kind="calendar", notify_detail=detail, notify_entity=span,
+                         notify_text=title)
     except Exception as exc:  # noqa: BLE001
         log.warning("Calendar ping to %s failed: %s", to_user, exc)
 
@@ -108,7 +110,7 @@ async def create_item(project: str, req: CreateRequest) -> dict:
         d, by, req.title, req.owner or by, req.start, req.end or None, req.note, req.link))
     if item["status"] == "proposed":
         _ping(project, by, item["owner"], f"te propose : {item['title']} ({_span(item)}), a valider dans le Calendrier",
-              "proposal", _span(item))
+              "proposal", _span(item), item["title"])
     return {"item": item}
 
 
@@ -126,7 +128,7 @@ async def respond(project: str, item_id: str, req: RespondRequest) -> dict:
     words = {"accept": "a accepte", "postpone": "a decale puis accepte", "decline": "a refuse"}
     if item.get("created_by") and not same_user(item["created_by"], by):
         _ping(project, by, item["created_by"], f"{words.get(req.action, req.action)} : {item['title']} ({_span(item)})",
-              req.action, _span(item))
+              req.action, _span(item), item["title"])
     return {"item": item}
 
 
