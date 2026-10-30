@@ -241,6 +241,10 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   l'explorateur (`electronAPI.pathForFile`), copiees par le backend ; cartes FLUX (`board/FluxCard.tsx` : ref seule, relue
   dans `GET /production/<projet>` toutes les 30 s, statuts `taskStatus`, dernier publish, liens Production `openFavorite` /
   Folder Manager `openPath`) ; modeles livres (`flowsApi.boardTemplates`, inseres comme un collage).
+  Lot C (ADR 0075) : commentaires et reactions (un enregistrement par auteur, pastilles sous l'objet, panneau auteur /
+  dates / reactions / fil de commentaires, @nom notifie), supprimer un objet emporte ses commentaires et reactions,
+  minuteur partage (`timer`, `ends_at`), export PNG / PDF (`board/exportBoard.ts` : redessine depuis les donnees,
+  PDF ecrit a la main, enregistre par `electronAPI.saveBytes`, sinon telechargement).
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
