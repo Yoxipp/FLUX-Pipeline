@@ -249,6 +249,14 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   raccourcis ecoutes sur tout le widget (Suppr marche apres un clic sur une couleur, sauf dans un champ texte), ordre en
   4 actions (un cran / tout devant / derriere, icone carre + 1 ou 2 fleches), points du fond masquables (par poste),
   double clic sur un objet = editer (un cadre : son nom), meme sous la capture du pointeur (`lastDown`).
+* `ChatWidget.tsx` (ADR 0077) : widget officiel `chat` de la page Team = le chat d'equipe du projet (le meme que l'accueil,
+  `api/team.ts`) par canaux (general + canaux d'un lead, archives), fils, reactions (une par auteur), messages epingles
+  (lead), fichiers joints copies par le backend (bouton ou depot de l'explorateur), autocompletion @nom, non lus par
+  canal (localStorage). Appels par lien : lien permanent du canal (lead) ouvert par `electronAPI.openExternal` (https
+  seulement), "Nouvelle reunion" = lien Jitsi genere ou page Meet / Teams ouverte puis lien colle, poste dans le canal,
+  "Prevenir l'equipe" = notification telephone a tous. Rejoindre passe le statut a "en reunion". `Members` affiche la
+  presence (pastille, statut choisi par l'artiste) ; `hooks/usePresenceHeartbeat.ts` (monte dans `App.tsx`) reecrit le
+  fichier de presence de l'artiste toutes les 60 s.
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
