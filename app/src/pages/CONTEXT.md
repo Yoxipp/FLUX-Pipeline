@@ -271,7 +271,7 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe
-  ASSETS (`Sidebar.tsx`) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
+  PIPELINE sous Activite (`Sidebar.tsx`, 2026-10-30) : visible des qu'une page existe, ou pour un Team TD (sinon personne ne peut creer la premiere).
   Dette : chaque `useFlowsWs` ouvre sa propre socket (sidebar, page, widgets) ; un hub partage viendra si ca pese.
   ADR 0078 : les pages `for_me: false` (cle `access` de la page) vont sous "Other tools" repliable (`flux.tool.others_open`),
   les autres sous "Tes tools" ; filtre seulement. `PageAccess.tsx` : choix tout le monde / roles / departements / personnes,

@@ -785,6 +785,9 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
         {/* Team chat of the project, channels on the left (built-in, 2026-10-30, ADR 0077). */}
         <NavItem icon={MessagesSquare} label={t('nav.team')}           active={pathname === '/team'}      indent route="/team" onClick={() => navigate('/team')} />
         <NavItem icon={Activity}       label={t('nav.activity')}       active={pathname === '/activity'}  indent notif={unreadCount} route="/activity" onClick={() => navigate('/activity')} />
+        {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one.
+            Under Activity in PIPELINE (2026-10-30). */}
+        {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
       </NavGroup>
 
       <NavGroup title="ASSETS">
@@ -793,8 +796,6 @@ export function Sidebar({ dccStatus, unreadCount }: Props) {
             from the menu on purpose. It is NOT a replacement for the Publisher. */}
         <NavItem icon={Layers}     label={t('nav.usd')}  active={pathname === '/usd'}       indent route="/usd" onClick={() => navigate('/usd')} />
         <NavItem icon={BookOpen}       label={t('nav.shelfManager')}   active={pathname === '/shelf'}     indent route="/shelf" onClick={() => navigate('/shelf')} />
-        {/* P7 (04 §6): TOOL shows once a page exists, or for a Team TD who can create the first one. */}
-        {toolVisible && <NavItem icon={Wrench} label={t('nav.tool')} active={pathname === '/tool' || pathname.startsWith('/tool/')} indent route="/tool" onClick={() => navigate('/tool')} />}
       </NavGroup>
 
       <NavGroup title="LAUNCHER">
