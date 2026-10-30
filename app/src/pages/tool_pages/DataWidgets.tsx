@@ -389,9 +389,10 @@ function Members({ widget: w }: DataWidgetProps) {
   const online = users?.filter(u => people[u.toUpperCase()]?.online).length ?? 0
   const sorted = users ? [...users].sort((a, b) => Number(!!people[b.toUpperCase()]?.online) - Number(!!people[a.toUpperCase()]?.online)) : null
   return (
-    <div style={box}>
+    // Capped like the feed: a big team scrolls inside the widget instead of stretching the page.
+    <div style={{ ...box, display: 'flex', flexDirection: 'column', maxHeight: w.height ?? 380 }}>
       <Title w={w} right={users && <span className="cap">{online} / {users.length} {tr('en ligne', 'online')}</span>} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 8, flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {users === null && <span className="tp-note" style={{ color: 'var(--ink-4)' }}>{tr('Chargement...', 'Loading...')}</span>}
         {sorted?.map(u => {
           const p = people[u.toUpperCase()]
