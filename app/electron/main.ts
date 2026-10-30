@@ -326,6 +326,14 @@ ipcMain.handle('shell:openPath', (_event, filePath: string) => {
   shell.openPath(filePath)
 })
 
+// Team page call links (ADR 0077): opened in the system browser, https only (no file:,
+// javascript: or custom protocol from a link typed in the shared chat).
+ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+  if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url) || url.length > 500) return false
+  await shell.openExternal(url)
+  return true
+})
+
 // Board paste (ADR 0074): the clipboard image written as a temp PNG, its path returned, so the
 // backend copies a file and the bytes never go through the API (ADR 0005). Older pastes go.
 const PASTE_PREFIX = 'flux_board_paste_'

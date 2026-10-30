@@ -385,7 +385,7 @@ export type FlowsWsMessage =
 export type PageScope = 'team' | 'project' | 'shipped'
 export type PageFormKind = 'button' | 'float' | 'int' | 'text' | 'path' | 'dir' | 'toggle' | 'select' | 'list'
 export type PageDecorKind = 'separator' | 'label'
-export type PageDataKind = 'feed' | 'table' | 'cards' | 'calendar' | 'members' | 'board'
+export type PageDataKind = 'feed' | 'table' | 'cards' | 'calendar' | 'members' | 'board' | 'chat'
 export type PageWidgetKind = PageFormKind | PageDecorKind | PageDataKind
 export type PageFieldType = 'str' | 'text' | 'int' | 'float' | 'bool' | 'date' | 'datetime' | 'user' | 'select' | 'image' | 'path'
 

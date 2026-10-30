@@ -8,7 +8,7 @@ import type { PageDoc, PageIssue, PageLayoutItem, PageWidget } from '../flow_edi
 
 
 export const FORM_VALUE_KINDS = ['float', 'int', 'text', 'path', 'dir', 'toggle', 'select', 'list'] as const
-export const DATA_KINDS = ['feed', 'table', 'cards', 'calendar', 'members', 'board'] as const
+export const DATA_KINDS = ['feed', 'table', 'cards', 'calendar', 'members', 'board', 'chat'] as const
 
 export function isValueKind(kind: string): boolean { return (FORM_VALUE_KINDS as readonly string[]).includes(kind) }
 export function isDataKind(kind: string): boolean { return (DATA_KINDS as readonly string[]).includes(kind) }

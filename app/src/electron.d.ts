@@ -6,6 +6,7 @@ declare global {
       openFolder: () => Promise<string | null>
       openFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
       saveClipboardImage?: () => Promise<string | null>
+      openExternal?: (url: string) => Promise<boolean>
       pathForFile?: (file: File) => string
       saveBytes?: (defaultName: string, filters: { name: string; extensions: string[] }[], data: Uint8Array) => Promise<string | null>
       openFiles: (filters?: { name: string; extensions: string[] }[]) => Promise<string[]>

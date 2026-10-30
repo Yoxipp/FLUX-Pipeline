@@ -172,7 +172,7 @@ export function WidgetProps({ doc, w, scope, project, flows, uses, onPatch, onRe
       {w.kind === 'select' && <OptionsEditor options={w.options ?? []} onChange={o => onPatch({ options: o }, `w:${w.id}:options`)} />}
       {w.kind === 'label' && <PropRow label={tr('Texte', 'Text')}><Text value={w.text} onChange={v => onPatch({ text: v }, `w:${w.id}:text`)} /></PropRow>}
 
-      {isDataKind(w.kind) && w.kind !== 'members' && <>
+      {isDataKind(w.kind) && w.kind !== 'members' && w.kind !== 'chat' && <>
         <div className="cap" style={{ margin: '10px 0 4px' }}>{tr('Source', 'Source')}</div>
         <PropRow label={tr('Donnees', 'Data')}>
           <Pick value={w.source?.data ?? (w.source?.flow ? '__flow' : undefined)}

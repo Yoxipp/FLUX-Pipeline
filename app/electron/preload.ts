@@ -39,6 +39,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Launches "Uninstall FLUX.exe" and quits FLUX (Settings > Desinstaller FLUX).
   uninstallFlux: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('app:uninstall'),
+  // https links only (Team call links, ADR 0077), opened in the system browser.
+  openExternal: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke('shell:openExternal', url),
+
   openPath: (filePath: string): Promise<void> =>
     ipcRenderer.invoke('shell:openPath', filePath),
 

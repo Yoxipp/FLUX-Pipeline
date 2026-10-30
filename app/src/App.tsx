@@ -15,6 +15,7 @@ import { useDccStatus }  from './hooks/useDccStatus'
 import { useActivity }   from './hooks/useActivity'
 import { FeedsProvider, useActivityFeed, useMentionsFeed } from './hooks/useFeeds'
 import { useSettings }   from './hooks/useSettings'
+import { usePresenceHeartbeat } from './hooks/usePresenceHeartbeat'
 import { Hub }           from './pages/Hub'
 import { PageErrorBoundary } from './components/shared/PageErrorBoundary'
 import { Publisher }     from './pages/Publisher'
@@ -251,6 +252,8 @@ function BackendDownScreen() {
 
 export function App() {
   const { settings, loading } = useSettings()
+  // Team presence (ADR 0077): this artist's own file, rewritten every minute while FLUX runs.
+  usePresenceHeartbeat(!!settings?.username)
 
   // Apply theme CSS vars from settings
   useEffect(() => {

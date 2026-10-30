@@ -41,7 +41,7 @@ const LABELS: Record<PageWidgetKind, [string, string]> = {
   path: ['Fichier', 'File'], dir: ['Dossier', 'Folder'], toggle: ['Option', 'Option'], select: ['Choix', 'Choice'],
   list: ['Liste', 'List'], separator: ['Separateur', 'Separator'], label: ['Texte fixe', 'Static text'],
   feed: ['Fil', 'Feed'], table: ['Tableau', 'Table'], cards: ['Cartes', 'Cards'], calendar: ['Calendrier', 'Calendar'],
-  members: ['Membres', 'Members'], board: ['Board', 'Board'],
+  members: ['Membres', 'Members'], board: ['Board', 'Board'], chat: ['Chat d’equipe', 'Team chat'],
 }
 
 export function kindLabel(kind: PageWidgetKind, lang: string): string {
@@ -71,7 +71,7 @@ export function newWidget(kind: PageWidgetKind, doc: PageDoc, lang: string): { w
   const widget: PageWidget = { id: suggestId(label, takenIds(doc)), kind, label }
   if (kind === 'select') widget.options = [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]
   if (kind === 'label') { widget.text = label; delete widget.label }
-  if (kind === 'members') return { widget, data: null }
+  if (kind === 'members' || kind === 'chat') return { widget, data: null }   // builtin sources (users, team chat)
   let data: PageDataSpec | null = null
   if (['feed', 'table', 'cards', 'calendar', 'board'].includes(kind)) {
     const fit = doc.data.find(d => (kind === 'board') === (d.kind === 'board'))

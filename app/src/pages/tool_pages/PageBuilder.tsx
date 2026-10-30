@@ -30,7 +30,7 @@ type HttpError = Error & { status?: number; detail?: { by?: string; rev?: string
 const PALETTE: PageWidgetKind[][] = [
   ['button', 'text', 'int', 'float', 'toggle', 'select', 'list', 'path', 'dir'],
   ['separator', 'label'],
-  ['feed', 'table', 'cards', 'calendar', 'members', 'board'],
+  ['feed', 'table', 'cards', 'calendar', 'members', 'board', 'chat'],
 ]
 
 type Sel = { kind: 'widget'; id: string } | { kind: 'folder'; id: string } | { kind: 'data'; id: string } | { kind: 'page' } | null
