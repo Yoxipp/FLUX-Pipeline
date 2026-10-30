@@ -1,0 +1,14 @@
+board: 1
+id: retro
+label: Retro
+label_en: Retrospective
+description: "Trois colonnes : ce qui a marche, a ameliorer, actions."
+description_en: "Three columns: went well, to improve, actions."
+items:
+  - {key: "title", type: "text", x: 0, y: -80, w: 900, h: 50, z: 2, font_size: 32, bold: true, text: "Retro", text_en: "Retrospective"}
+  - {key: "good", type: "frame", x: 0, y: 0, w: 360, h: 560, z: -10, color: "green", text: "Ce qui a marche", text_en: "Went well"}
+  - {key: "good_n", type: "note", x: 24, y: 48, w: 180, h: 110, z: 1, color: "yellow", text: "", text_en: ""}
+  - {key: "better", type: "frame", x: 400, y: 0, w: 360, h: 560, z: -10, color: "orange", text: "A ameliorer", text_en: "To improve"}
+  - {key: "better_n", type: "note", x: 424, y: 48, w: 180, h: 110, z: 1, color: "yellow", text: "", text_en: ""}
+  - {key: "actions", type: "frame", x: 800, y: 0, w: 360, h: 560, z: -10, color: "blue", text: "Actions", text_en: "Actions"}
+  - {key: "actions_n", type: "note", x: 824, y: 48, w: 180, h: 110, z: 1, color: "yellow", text: "", text_en: ""}

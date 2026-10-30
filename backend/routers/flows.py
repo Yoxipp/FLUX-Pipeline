@@ -536,6 +536,14 @@ def _page_and_spec(page_id: str, collection: str, project: Optional[str]):
     return folder, spec
 
 
+@router.get("/board_templates")
+async def get_board_templates() -> dict[str, Any]:
+    """Board templates shipped with FLUX (ADR 0074): objects with local keys, inserted like a paste."""
+    from flux_flows import board_templates
+
+    return {"templates": await asyncio.to_thread(board_templates.list_templates)}
+
+
 @router.get("/pages/{page_id}/data/{collection}")
 async def get_page_data(page_id: str, collection: str, project: Optional[str] = None,
                         etag: Optional[str] = None) -> dict[str, Any]:

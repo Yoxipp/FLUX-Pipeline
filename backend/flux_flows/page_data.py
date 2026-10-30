@@ -49,11 +49,16 @@ MAX_RECORDS = 20_000
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 MAX_IMAGE = 20 * 1024 * 1024
 COMPACT_BYTES = 256 * 1024
-BOARD_TYPES = ("card", "note", "image", "link", "shape", "text")
+BOARD_TYPES = ("card", "note", "image", "link", "shape", "text", "frame", "ink", "flux")
 BOARD_TYPED = {"x": "float", "y": "float", "w": "float", "h": "float", "z": "float", "text": "text", "color": "str",
                "image": "image", "from": "str", "to": "str", "type": "str", "shape": "str", "stroke": "str",
                "font_size": "float", "bold": "bool", "label": "text", "dash": "str", "arrow_start": "bool",
-               "arrow_end": "bool", "group": "str", "locked": "bool"}
+               "arrow_end": "bool", "group": "str", "locked": "bool", "points": "str", "stroke_width": "float",
+               "highlight": "bool", "ref": "str"}
+POINTS_RE = re.compile(r"^-?\d+(\.\d+)?,-?\d+(\.\d+)?( -?\d+(\.\d+)?,-?\d+(\.\d+)?)*$")
+# A FLUX card names an entity, never copies it: asset:<class>/<name>, shot:<seq>/<shot>,
+# publish:asset:<class>/<name>/<task> or publish:shot:<seq>/<shot>/<task>.
+REF_RE = re.compile(r"^(asset|shot|publish:asset|publish:shot):[^/\n]{1,120}/[^/\n]{1,120}(/[^/\n]{1,120})?$")
 BOARD_CHOICES = {"type": BOARD_TYPES, "shape": ("rect", "round", "ellipse", "diamond"),
                  "dash": ("solid", "dashed", "dotted")}
 
@@ -159,6 +164,15 @@ def check_fields(spec: DataSpec, fields: Dict[str, Any]) -> Dict[str, Any]:
                 raise FlowStoreError(f"{name} `{out[name]}` inconnu ({', '.join(allowed)})", 422)
             if name == "font_size" and out[name] is not None and not 6 <= out[name] <= 200:
                 raise FlowStoreError("font_size : entre 6 et 200", 422)
+            if name == "stroke_width" and out[name] is not None and not 0.5 <= out[name] <= 80:
+                raise FlowStoreError("stroke_width : entre 0.5 et 80", 422)
+            if name == "points" and out[name] and not POINTS_RE.match(out[name]):
+                raise FlowStoreError("points : 'x,y x,y ...'", 422)
+            if name == "ref" and out[name]:
+                ref = out[name]
+                ok = REF_RE.match(ref) and (ref.startswith("publish:") == (ref.count("/") == 2))
+                if not ok:
+                    raise FlowStoreError("ref : asset:<classe>/<nom>, shot:<seq>/<shot> ou publish:<...>/<tache>", 422)
         return out
     known = {f.id: f for f in spec.fields}
     for name, value in fields.items():

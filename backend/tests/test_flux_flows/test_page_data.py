@@ -208,6 +208,53 @@ class BoardV2(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.folder.iterdir() if p.suffix == ".jsonl"), ["ADAM.jsonl"])
 
 
+class BoardV3(unittest.TestCase):
+    """P3 lot B (2026-10-30): frames, free drawing, FLUX cards, shipped templates (ADR 0074)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="flux_board_v3_"))
+        self.folder = self.tmp / "wall"
+        self.board = _page().data[1]
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _put(self, fields):
+        return page_data.write_ops(self.folder, self.board, [{"op": "put", "fields": fields}], user="ADAM")["rids"][0]
+
+    def test_frame_ink_and_flux_card(self) -> None:
+        self._put({"type": "frame", "x": 0, "y": 0, "w": 400, "h": 300, "text": "Plan 1"})
+        self._put({"type": "ink", "x": 10, "y": 10, "points": "0,0 4.5,-2 10,8", "stroke_width": 3, "highlight": True})
+        for ref in ("asset:CHAR/bob", "shot:SEQ010/SH020", "publish:asset:CHAR/bob/RIG", "publish:shot:SEQ010/SH020/ANIM"):
+            self._put({"type": "flux", "x": 0, "y": 0, "ref": ref})
+        self.assertEqual(len(page_data.read_records(self.folder)["records"]), 6)
+        for bad in ({"points": "0,0 x"}, {"stroke_width": 200}, {"ref": "asset:a/b/c"}, {"ref": "publish:asset:a/b"},
+                    {"ref": "task:a/b"}, {"type": "sticker"}):
+            with self.assertRaises(FlowStoreError):
+                self._put({"type": "ink", "x": 0, "y": 0, **bad})
+
+    def test_shipped_templates_are_valid(self) -> None:
+        from flux_flows import board_templates
+
+        got = {t["id"]: t for t in board_templates.list_templates()}
+        self.assertEqual(sorted(got), ["moodboard", "planning", "retro", "storyboard"])
+        for tpl in got.values():
+            self.assertTrue(tpl["label_en"] and tpl["description"])
+            keys = {i["key"] for i in tpl["items"]}
+            self.assertEqual(len(keys), len(tpl["items"]))
+        self.assertEqual(sum(1 for i in got["storyboard"]["items"] if i.get("type") == "link"), 5)
+
+    def test_bad_template(self) -> None:
+        from flux_flows import board_templates
+
+        for data in ({"items": []}, {"board": 1, "items": [{"type": "note"}]},
+                     {"board": 1, "items": [{"key": "a", "type": "note"}, {"key": "a", "type": "note"}]},
+                     {"board": 1, "items": [{"key": "l", "type": "link", "from": "a", "to": "b"}]},
+                     {"board": 1, "items": [{"key": "a", "type": "note", "style": {}}]}):
+            with self.assertRaises(FlowStoreError):
+                board_templates.parse_template(data)
+
+
 class DataRouter(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="flux_page_data_router_"))
@@ -231,6 +278,11 @@ class DataRouter(unittest.TestCase):
 
     def _save(self, page: pages.Page) -> None:
         page_store.save_page(locations.page_roots("demo"), "team", page, user="ADAM")
+
+    def test_board_templates_route(self) -> None:
+        r = self.client.get("/flows/board_templates")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json()["templates"]), 4)
 
     def test_artist_posts_and_reads(self) -> None:
         self._save(_page())

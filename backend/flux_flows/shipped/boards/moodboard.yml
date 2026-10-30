@@ -1,0 +1,14 @@
+board: 1
+id: moodboard
+label: Moodboard
+label_en: Moodboard
+description: "Trois cadres (ambiance, couleurs, references) a remplir d'images collees."
+description_en: "Three frames (mood, colours, references) to fill with pasted images."
+items:
+  - {key: "title", type: "text", x: 0, y: -80, w: 900, h: 50, z: 2, font_size: 32, bold: true, text: "Moodboard", text_en: "Moodboard"}
+  - {key: "mood", type: "frame", x: 0, y: 0, w: 480, h: 420, z: -10, color: "purple", text: "Ambiance", text_en: "Mood"}
+  - {key: "mood_n", type: "note", x: 24, y: 48, w: 180, h: 110, z: 1, color: "yellow", text: "Colle des images ici (Ctrl+V)", text_en: "Paste images here (Ctrl+V)"}
+  - {key: "colors", type: "frame", x: 520, y: 0, w: 480, h: 420, z: -10, color: "orange", text: "Couleurs", text_en: "Colours"}
+  - {key: "colors_n", type: "note", x: 544, y: 48, w: 180, h: 110, z: 1, color: "yellow", text: "Colle des images ici (Ctrl+V)", text_en: "Paste images here (Ctrl+V)"}
+  - {key: "refs", type: "frame", x: 1040, y: 0, w: 480, h: 420, z: -10, color: "blue", text: "References", text_en: "References"}
+  - {key: "refs_n", type: "note", x: 1064, y: 48, w: 180, h: 110, z: 1, color: "yellow", text: "Colle des images ici (Ctrl+V)", text_en: "Paste images here (Ctrl+V)"}

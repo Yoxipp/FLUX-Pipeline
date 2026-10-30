@@ -80,10 +80,12 @@ KIND_FOR_TYPE = {"float": "float", "int": "int", "bool": "toggle", "str": "text"
 # Data collections (ADR 0066 n°3).
 FIELD_TYPES = ("str", "text", "int", "float", "bool", "date", "datetime", "user", "select", "image", "path")
 DATE_TYPES = ("date", "datetime")
-# Board schema v2 (ADR 0071): flat fields only, so the per field merge never loses a style change.
-BOARD_SCHEMA = 2
+# Board schema (ADR 0071, 0074): flat fields only, so the per field merge never loses a style change.
+# v3 adds frames, free drawing (points relative to x / y) and FLUX cards (ref only, read live).
+BOARD_SCHEMA = 3
 BOARD_FIELDS = ("type", "x", "y", "w", "h", "z", "text", "color", "image", "from", "to",
-                "shape", "stroke", "font_size", "bold", "label", "dash", "arrow_start", "arrow_end", "group", "locked")
+                "shape", "stroke", "font_size", "bold", "label", "dash", "arrow_start", "arrow_end", "group", "locked",
+                "points", "stroke_width", "highlight", "ref")
 BUILTIN_SOURCES = ("users",)
 DATA_SOURCE_KINDS = {"feed": "records", "table": "records", "cards": "records", "calendar": "records",
                      "board": "board"}
