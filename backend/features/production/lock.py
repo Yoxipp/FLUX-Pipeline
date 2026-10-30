@@ -115,9 +115,11 @@ def _guard(production: dict, previous: dict, key: str, is_locked, restored: list
                     kept[k] = e[k]
                 else:
                     kept.pop(k, None)
-            if e != kept:
-                items[idx] = kept
+            # The lock itself is not compared: the client shows it with renamed artists
+            # resolved (locked.by, ADR 0079), and only set_lock may change it anyway.
+            if {k: v for k, v in e.items() if k != LOCK_KEY} != {k: v for k, v in kept.items() if k != LOCK_KEY}:
                 restored.append(old.get("name") or str(old.get("id")))
+            items[idx] = kept
         else:
             # Lock state follows the stored one (none for a new or unlocked record).
             if old is not None and old.get(LOCK_KEY):
