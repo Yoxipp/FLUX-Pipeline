@@ -39,7 +39,8 @@ function Text({ text, users }: { text: string; users: Set<string> }) {
         ? <b key={`${i}-${j}`} style={{ color: 'var(--accent)' }}>{bit}</b> : <span key={`${i}-${j}`}>{bit}</span>))}</>
 }
 
-export function ChatWidget({ widget: w, project, preview }: DataWidgetProps) {
+// fill: the built-in Team page (/team) shows it at the full height of the window.
+export function ChatWidget({ widget: w, project, preview, fill }: DataWidgetProps & { fill?: boolean }) {
   const { tr } = useTr()
   const [messages, setMessages] = useState<TeamMessage[]>([])
   const [users, setUsers] = useState<string[]>([])
@@ -178,9 +179,10 @@ export function ChatWidget({ widget: w, project, preview }: DataWidgetProps) {
   if (preview) return <div className="tp-note" style={{ padding: 12 }}>{tr('Apercu : le chat d’equipe du projet s’affiche ici.', 'Preview: the project team chat shows here.')}</div>
 
   const root = thread ? messages.find(m => m.id === thread) : undefined
-  const height = w.height ?? 560
+  const height = fill ? undefined : w.height ?? 560
   return (
-    <div style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', display: 'flex', height, overflow: 'hidden', position: 'relative' }}>
+    <div style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', display: 'flex', height, overflow: 'hidden', position: 'relative',
+                  ...(fill ? { flex: 1, minHeight: 0 } : {}) }}>
       {/* channels */}
       <div style={{ width: 170, flex: 'none', borderRight: '1px solid var(--rule)', display: 'flex', flexDirection: 'column', background: 'var(--paper-2)' }}>
         <div className="cap" style={{ padding: '8px 10px 4px' }}>{w.label || tr('Canaux', 'Channels')}</div>
