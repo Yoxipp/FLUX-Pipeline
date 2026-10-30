@@ -12,24 +12,32 @@
 // background = new note, double click an object = edit its text.
 // Keys: Ctrl+Z / Ctrl+Y undo / redo (own ops only), Ctrl+C / X / V / D, Ctrl+A, Suppr,
 // Ctrl+G / Ctrl+Shift+G group, Ctrl+L lock, Ctrl+] / Ctrl+[ order, Ctrl+F search, Shift+1 fit.
+// v3 (ADR 0074): pen / highlighter / eraser tools (a stroke is written on release, the eraser
+// removes whole strokes), frames (moving one moves what is inside, presentation in reading
+// order), images pasted (Ctrl+V of a screenshot) or dropped from the explorer (copied by the
+// backend from a file path), FLUX cards (FluxCard.tsx) and shipped board templates.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as RPointerEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  Bold, BringToFront, Circle, Copy, Diamond, Group, Hand, ImagePlus, Link2, Lock, LockOpen, Magnet, Map as MapIcon, Maximize,
-  Minus, MousePointer2, MoveLeft, MoveRight, Plus, Redo2, Search, SendToBack, Square, Squircle, StickyNote, Trash2, Type,
-  Undo2, Ungroup, RectangleHorizontal,
+  Bold, BringToFront, ChevronLeft, ChevronRight, Circle, Clapperboard, Copy, Diamond, Eraser, Frame, Group, Hand, Highlighter, ImagePlus,
+  LayoutTemplate, Link2, Lock, LockOpen, Magnet, Map as MapIcon, Maximize, Minus, MousePointer2, MoveLeft, MoveRight, PenLine, Play, Plus,
+  Redo2, Search, SendToBack, Square, Squircle, StickyNote, Trash2, Type, Undo2, Ungroup, RectangleHorizontal, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
 import { usePageData } from '../../hooks/usePages'
-import type { PageDataOp } from '../flow_editor/types'
+import { useSettings } from '../../hooks/useSettings'
+import type { BoardTemplate, PageDataOp } from '../flow_editor/types'
+import { expandFluxPath } from '../Production/util'
 import { useTr } from '../flow_editor/useTr'
 import type { DataWidgetProps } from './DataWidgets'
 import { BoardItem, BoardLink, type Corner, type ItemHandlers } from './board/BoardItem'
 import { BoardMinimap } from './board/BoardMinimap'
+import { FluxBoardContext, FluxPicker, resolveRef, useBoardProduction, type FluxBoardData } from './board/FluxCard'
 import {
-  CLIP_TAG, FILLS, FONT_SIZES, GRID, SIZE, STROKES, bounds, dims, fieldsOf, fontOf, intersects, inversePut, newGroupId,
-  parseClip, restoreOp, type Box, type ClipData, type Item, type Shape,
+  CLIP_TAG, FILLS, FONT_SIZES, GRID, SIZE, STROKES, bounds, dims, fieldsOf, fontOf, inkFields, inkHit, inside, intersects, inversePut,
+  newGroupId, parseClip, readingOrder, restoreOp, type Box, type ClipData, type Item, type Pt, type Shape,
 } from './board/model'
 import { useBoardHistory } from './board/useBoardHistory'
 
@@ -43,6 +51,10 @@ type Drag =
   | { kind: 'marquee'; bx: number; by: number; add: string[] }
   | { kind: 'move'; sx: number; sy: number; start: Record<string, Box>; others: Box[]; moved: boolean; click: string; shift: boolean }
   | { kind: 'resize'; rid: string; corner: Corner; sx: number; sy: number; start: Box; ratio: boolean }
+  | { kind: 'draw'; pts: Pt[] }
+  | { kind: 'erase' }
+type Tool = 'select' | 'hand' | 'pen' | 'highlighter' | 'eraser'
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i
 type Guide = { x?: number; y?: number }
 
 const fail = (err: unknown) => toast.error((err as Error).message)
@@ -53,7 +65,7 @@ const snapTo = (v: number) => Math.round(v / GRID) * GRID
 interface LayerProps {
   visible: Item[]; links: Item[]; byId: Map<string, Item>; boxOf: (it: Item) => Box
   selSet: Set<string>; matchSet: Set<string>; singleCard: string | null; editing: string | null
-  linkFrom: string | null | 'armed'; canEdit: boolean; media: (it: Item) => string | undefined
+  linkFrom: string | null | 'armed'; canEdit: boolean; media: (it: Item) => string | undefined; faded: Set<string>
   placeholder: string; handlers: ItemHandlers; onLinkDown: (e: RPointerEvent, rid: string) => void
 }
 const BoardLayer = memo(function BoardLayer(p: LayerProps) {
@@ -70,7 +82,7 @@ const BoardLayer = memo(function BoardLayer(p: LayerProps) {
       return <BoardItem key={it.rid} it={it} x={b.x} y={b.y} w={b.w} h={b.h} selected={p.selSet.has(it.rid)}
                         handles={p.singleCard === it.rid} editing={p.editing === it.rid} linkSource={p.linkFrom === it.rid}
                         match={p.matchSet.has(it.rid)} canEdit={p.canEdit} mediaUrl={it.type === 'image' ? p.media(it) : undefined}
-                        placeholder={p.placeholder} on={p.handlers} />
+                        placeholder={p.placeholder} on={p.handlers} faded={p.faded.has(it.rid)} />
     })}
   </>
 })
@@ -90,7 +102,20 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const [ghost, setGhost] = useState<Record<string, Box>>({})
   const [marquee, setMarquee] = useState<Box | null>(null)
   const [guides, setGuides] = useState<Guide[]>([])
-  const [hand, setHand] = useState(false)
+  const [tool, setTool] = useState<Tool>('select')
+  const hand = tool === 'hand'
+  const drawing = tool === 'pen' || tool === 'highlighter' || tool === 'eraser'
+  const [penColor, setPenColor] = useState('ink')
+  const [draft, setDraft] = useState<Pt[] | null>(null)
+  const [erasing, setErasing] = useState<Set<string>>(() => new Set())
+  const [present, setPresent] = useState<number | null>(null)
+  const [fluxPicker, setFluxPicker] = useState(false)
+  const [templates, setTemplates] = useState<BoardTemplate[] | null>(null)
+  const [showTemplates, setShowTemplates] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const { settings } = useSettings()
+  const { lang } = useTr()
   const [space, setSpace] = useState(false)
   const [panning, setPanning] = useState(false)
   const [snap, setSnap] = useState(true)
@@ -107,7 +132,10 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const items = data.records as Item[]
   const byId = useMemo(() => new Map(items.map(it => [it.rid, it])), [items])
   // Back to front: z, then creation order (a stable sort keeps the journal order).
-  const cards = useMemo(() => items.filter(it => it.type !== 'link').sort((a, b) => (a.z ?? 0) - (b.z ?? 0)), [items])
+  // Frames always behind the rest.
+  const cards = useMemo(() => items.filter(it => it.type !== 'link')
+    .sort((a, b) => (a.type === 'frame' ? 0 : 1) - (b.type === 'frame' ? 0 : 1) || (a.z ?? 0) - (b.z ?? 0)), [items])
+  const frames = useMemo(() => readingOrder(cards.filter(c => c.type === 'frame')), [cards])
   const links = useMemo(() => items.filter(it => it.type === 'link'), [items])
   const selSet = useMemo(() => new Set(selection), [selection])
   const boxOf = useCallback((it: Item) => ghost[it.rid] ?? dims(it), [ghost])
@@ -163,12 +191,12 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     setView(v => ({ ...v, x: size.w / 2 - (b.x + b.w / 2) * v.z, y: size.h / 2 - (b.y + b.h / 2) * v.z }))
   }, [size])
 
-  const fit = useCallback(() => {
-    const all = bounds(cards.map(dims))
+  const fitBox = useCallback((all: Box | null, maxZ = 1.5) => {
     if (!all) { setView({ x: 40, y: 40, z: 1 }); return }
-    const z = Math.max(ZOOM_MIN, Math.min(1.5, Math.min((size.w - 60) / (all.w || 1), (size.h - 60) / (all.h || 1))))
+    const z = Math.max(ZOOM_MIN, Math.min(maxZ, Math.min((size.w - 60) / (all.w || 1), (size.h - 60) / (all.h || 1))))
     setView({ z, x: size.w / 2 - (all.x + all.w / 2) * z, y: size.h / 2 - (all.y + all.h / 2) * z })
-  }, [cards, size])
+  }, [size])
+  const fit = useCallback(() => fitBox(bounds(cards.map(dims))), [cards, fitBox])
   const fitted = useRef(false)
   useEffect(() => { if (!fitted.current && data.loaded && cards.length && size.w > 0) { fitted.current = true; fit() } }, [data.loaded, cards.length, fit, size.w])
 
@@ -204,7 +232,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
       pushCreated(rids, [fields])
       if (!rids[0]) return
       setSelection([rids[0]])
-      if (fields.type !== 'image' && fields.type !== 'link') setEditing(rids[0])
+      if (!['image', 'link', 'ink', 'flux'].includes(String(fields.type))) setEditing(rids[0])
     }).catch(fail)
   }, [createRaw, pushCreated])
 
@@ -216,7 +244,11 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
 
   const addImage = async () => {
     const path = await window.electronAPI?.openFile([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }])
-    if (!path) return
+    if (path) await addImageFrom(path)
+  }
+
+  // The backend COPIES the file into the board's media (ADR 0005); *at* = centre in board units.
+  const addImageFrom = async (path: string, at?: { x: number; y: number }) => {
     try {
       const { image } = await flowsApi.addPageImage(page.id, collection, path, project)
       // Box from the real ratio, longest side 320.
@@ -228,8 +260,22 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
       })
       const k = 320 / Math.max(nw, nh)
       const ow = Math.round(nw * k), oh = Math.round(nh * k)
-      add({ type: 'image', image, ...middle(ow, oh), w: ow, h: oh, z: topZ() })
+      const pos = at ? { x: Math.round(at.x - ow / 2), y: Math.round(at.y - oh / 2) } : middle(ow, oh)
+      add({ type: 'image', image, ...pos, w: ow, h: oh, z: topZ() })
     } catch (err) { fail(err) }
+  }
+
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    const files = [...e.dataTransfer.files]
+    if (!files.length) return
+    e.preventDefault()
+    if (!canEdit) return
+    const toPath = window.electronAPI?.pathForFile
+    if (!toPath) { toast.info(tr('Deposer un fichier : seulement dans FLUX (Electron).', 'Dropping a file: only in the FLUX app.')); return }
+    const p0 = toBoard(e.clientX, e.clientY)
+    const images = files.filter(f => IMAGE_EXT.test(f.name))
+    if (images.length < files.length) toast.info(tr('Seules les images sont acceptees (png, jpg, gif, webp).', 'Only images are accepted (png, jpg, gif, webp).'))
+    images.forEach((f, i) => { const path = toPath(f); if (path) void addImageFrom(path, { x: p0.x + i * 40, y: p0.y + i * 40 }) })
   }
 
   const remove = useCallback((rids: string[]) => {
@@ -288,11 +334,64 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const paste = async () => {
     let text = ''
     try { text = await navigator.clipboard.readText() } catch { /* no clipboard access: internal copy */ }
-    const c = (text && parseClip(text)) || (!text ? clip.current : null)
-    if (c) { await pasteItems(c, 'middle'); return }
+    const fromBoard = text ? parseClip(text) : null
+    if (fromBoard) { await pasteItems(fromBoard, 'middle'); return }
+    // A screenshot: Electron writes it as a temp file, the backend copies it (ADR 0074 n°2).
+    if (!text.trim() && canEdit) {
+      const img = await window.electronAPI?.saveClipboardImage?.().catch(() => null)
+      if (img) { await addImageFrom(img); return }
+    }
+    if (!text && clip.current) { await pasteItems(clip.current, 'middle'); return }
     // Plain text: a note with it.
     if (text.trim() && canEdit) addAtMiddle('note', { color: 'yellow', text: text.slice(0, 10_000) })
   }
+
+  // -- templates and FLUX cards ------------------------------------------------
+  const openTemplates = () => {
+    setShowTemplates(s => !s)
+    if (!templates) flowsApi.boardTemplates().then(r => setTemplates(r.templates)).catch(fail)
+  }
+  // A template goes in like a paste: new rids, links re-pointed from the keys, one undo.
+  const insertTemplate = (t: BoardTemplate) => {
+    setShowTemplates(false)
+    const list = t.items.map(({ key, text_en, ...f }) =>
+      ({ ...f, rid: key, ...(lang === 'en' && typeof text_en === 'string' ? { text: text_en } : {}) })) as unknown as Item[]
+    void pasteItems({ [CLIP_TAG]: 2, page: page.id, collection, items: list }, 'middle')
+  }
+
+  const hasFlux = useMemo(() => cards.some(c => c.type === 'flux'), [cards])
+  const production = useBoardProduction(project, hasFlux || fluxPicker)
+  const workspace = settings?.workspace
+  const fluxCtx = useMemo<FluxBoardData>(() => ({
+    project, payload: production,
+    resolve: ref => resolveRef(production?.production, production?.publishes_by_task ?? {}, ref),
+    open: t => navigate('/production', { state: { openFavorite: { project, class: t.group, name: t.name, task: 'ENTITY' } } }),
+    reveal: t => { if (t.publish?.dest_folder) navigate('/projects', { state: { openPath: expandFluxPath(t.publish.dest_folder, workspace) } }) },
+  }), [project, production, navigate, workspace])
+  const addFlux = (ref: string) => { setFluxPicker(false); addAtMiddle('flux', { ref, text: null }) }
+
+  // -- presentation (frames in reading order, nothing written) ----------------
+  const startPresent = () => {
+    if (!frames.length) { toast.info(tr('Aucun cadre a presenter.', 'No frame to present.')); return }
+    setSelection([]); setEditing(null)
+    setPresent(0)
+    root.current?.requestFullscreen?.().catch(() => undefined)
+  }
+  const stopPresent = useCallback(() => {
+    setPresent(null)
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined)
+  }, [])
+  useEffect(() => {
+    const onFs = () => { if (!document.fullscreenElement) setPresent(null) }
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+  useEffect(() => {
+    if (present === null) return
+    const f = frames[Math.min(present, frames.length - 1)]
+    if (f) fitBox(dims(f), 4)
+    surface.current?.focus()
+  }, [present, frames, fitBox])
 
   const duplicate = () => { if (selCards.length) void pasteItems(clipOf(selCards.map(c => c.rid)), { dx: 24, dy: 24 }) }
 
@@ -340,12 +439,26 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     capture(e)
   }
 
+  // Eraser: every stroke under the pointer fades, then goes (whole strokes, ADR 0074 n°4).
+  const eraseAt = (x: number, y: number) => {
+    const tol = 6 / view.z
+    const hits = visible.filter(c => c.type === 'ink' && !c.locked && !erasing.has(c.rid) && inkHit(c, x, y, tol))
+    if (hits.length) setErasing(s => new Set([...s, ...hits.map(h => h.rid)]))
+  }
+
   const onSurfaceDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (editing) return
     if (e.button === 1 || e.button === 2 || hand || space) { e.preventDefault(); panStart(e); return }
     if (e.button !== 0) return
     if (linkFrom) { setLinkFrom(null); return }
     const p = toBoard(e.clientX, e.clientY)
+    if (drawing && canEdit && present === null) {
+      setSelection([])
+      if (tool === 'eraser') { drag.current = { kind: 'erase' }; eraseAt(p.x, p.y) }
+      else { drag.current = { kind: 'draw', pts: [[p.x, p.y]] }; setDraft([[p.x, p.y]]) }
+      capture(e)
+      return
+    }
     const add = e.shiftKey ? selection : []
     if (!e.shiftKey) setSelection([])
     drag.current = { kind: 'marquee', bx: p.x, by: p.y, add }
@@ -353,7 +466,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   }
 
   const onItemDown = (e: RPointerEvent, rid: string) => {
-    if (e.button !== 0 || hand || space || editing === rid) return   // the surface pans
+    if (e.button !== 0 || hand || space || drawing || editing === rid) return   // the surface pans or draws
     e.stopPropagation()
     const it = byId.get(rid)
     if (!it) return
@@ -375,6 +488,11 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     if (it.type === 'link' || !canEdit) { surface.current?.focus(); return }
     const start: Record<string, Box> = {}
     for (const r of sel) { const c = byId.get(r); if (c && c.type !== 'link' && !c.locked) start[r] = dims(c) }
+    // A frame carries what lies entirely inside it.
+    for (const r of Object.keys(start)) {
+      if (byId.get(r)?.type !== 'frame') continue
+      for (const c of cards) if (!start[c.rid] && c.type !== 'frame' && !c.locked && inside(dims(c), start[r])) start[c.rid] = dims(c)
+    }
     const others = visible.filter(c => !start[c.rid]).map(dims)
     drag.current = { kind: 'move', sx: e.clientX, sy: e.clientY, start, others, moved: false, click: rid, shift: false }
     capture(e)
@@ -413,6 +531,14 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     const d = drag.current
     if (!d) return
     if (d.kind === 'pan') { setView(v => ({ ...v, x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy })); return }
+    if (d.kind === 'draw') {
+      const p = toBoard(e.clientX, e.clientY), last = d.pts[d.pts.length - 1]
+      if (Math.hypot(p.x - last[0], p.y - last[1]) * view.z < 2) return
+      d.pts.push([p.x, p.y])
+      setDraft([...d.pts])
+      return
+    }
+    if (d.kind === 'erase') { const p = toBoard(e.clientX, e.clientY); eraseAt(p.x, p.y); return }
     if (d.kind === 'marquee') {
       const p = toBoard(e.clientX, e.clientY)
       setMarquee({ x: Math.min(p.x, d.bx), y: Math.min(p.y, d.by), w: Math.abs(p.x - d.bx), h: Math.abs(p.y - d.by) })
@@ -456,11 +582,25 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     setPanning(false)
     setGuides([])
     if (!d) return
+    if (d.kind === 'draw') {
+      setDraft(null)
+      const hl = tool === 'highlighter'
+      const f = inkFields(d.pts, 0.8 / view.z)
+      if (f) add({ type: 'ink', ...f, z: topZ(), stroke: penColor, stroke_width: hl ? 16 : 3, highlight: hl || null })
+      return
+    }
+    if (d.kind === 'erase') {
+      const rids = [...erasing]
+      setErasing(new Set())
+      if (rids.length) remove(rids)
+      return
+    }
     if (d.kind === 'marquee') {
       const m = marquee
       setMarquee(null)
       if (m && m.w + m.h > 2) {
-        const hits = cards.filter(c => intersects(dims(c), m)).map(c => c.rid)
+        // A frame only when the rectangle holds all of it (else every selection inside a frame takes it).
+        const hits = cards.filter(c => c.type === 'frame' ? inside(dims(c), m) : intersects(dims(c), m)).map(c => c.rid)
         setSelection([...new Set([...d.add, ...withGroups(hits)])])
       }
       return
@@ -478,6 +618,14 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (editing || (e.target as HTMLElement) !== surface.current) return
     const ctrl = e.ctrlKey || e.metaKey, k = e.key.toLowerCase()
+    if (present !== null) {
+      e.preventDefault()
+      if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) setPresent(i => Math.min((i ?? 0) + 1, frames.length - 1))
+      else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) setPresent(i => Math.max((i ?? 0) - 1, 0))
+      else if (e.key === 'Escape') stopPresent()
+      return
+    }
+    if (e.key === 'Escape' && tool !== 'select') { setTool('select'); return }
     if (e.key === ' ') { e.preventDefault(); setSpace(true); return }
     if (e.key === 'Escape') { setSelection([]); setLinkFrom(null); return }
     if (e.shiftKey && e.code === 'Digit1') { e.preventDefault(); fit(); return }
@@ -513,7 +661,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const onLinkDown = useCallback((e: RPointerEvent, rid: string) => latest.current.onItemDown(e, rid), [])
 
   // -- render ----------------------------------------------------------------
-  const tool = (title: string, onClick: () => void, icon: React.ReactNode, on = false, disabled = false) => (
+  const btn = (title: string, onClick: () => void, icon: React.ReactNode, on = false, disabled = false) => (
     <button type="button" className="btn ghost sm" title={title} onClick={onClick} disabled={disabled}
             style={{ background: on ? 'var(--paper-2)' : undefined, padding: '2px 6px', opacity: disabled ? 0.4 : undefined }}>{icon}</button>
   )
@@ -527,29 +675,46 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const sep = <span style={{ width: 1, height: 16, background: 'var(--rule)', margin: '0 4px' }} />
   const one = <T,>(list: Item[], pick: (i: Item) => T) => list.length && list.every(i => pick(i) === pick(list[0])) ? pick(list[0]) : undefined
   const singleLink = selLinks.length === 1 ? selLinks[0] : undefined
-  const singleCard = selCards.length === 1 && selection.length === 1 && !selCards[0].locked && canEdit ? selCards[0].rid : null
+  const singleCard = selCards.length === 1 && selection.length === 1 && !selCards[0].locked && selCards[0].type !== 'ink' && canEdit
+    ? selCards[0].rid : null
   const placeholder = tr('Double clic pour ecrire', 'Double click to write')
   const media = useCallback((it: Item) => it.image ? flowsApi.pageImageUrl(page.id, collection, it.image, project) : undefined,
                             [page.id, collection, project])
 
+  const presenting = present !== null
+  const current = presenting ? frames[Math.min(present, frames.length - 1)] : undefined
   return (
-    <div style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', overflow: 'hidden' }}>
+    <FluxBoardContext.Provider value={fluxCtx}>
+    <div ref={root} style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', overflow: 'hidden',
+                             ...(presenting ? { display: 'flex', flexDirection: 'column', height: '100%' } : {}) }}>
+      {!presenting && <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '6px 8px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap' }}>
         {w.label && <span style={{ fontSize: 12.5, fontWeight: 600, marginRight: 8 }}>{w.label}</span>}
-        {tool(tr('Selection', 'Select'), () => setHand(false), <MousePointer2 size={13} />, !hand)}
-        {tool(tr('Main (deplacer la vue, ou Espace)', 'Hand (pan, or Space)'), () => setHand(true), <Hand size={13} />, hand)}
+        {btn(tr('Selection', 'Select'), () => setTool('select'), <MousePointer2 size={13} />, tool === 'select')}
+        {btn(tr('Main (deplacer la vue, ou Espace)', 'Hand (pan, or Space)'), () => setTool('hand'), <Hand size={13} />, hand)}
         {canEdit && <>
           {sep}
-          {tool(tr('Note', 'Note'), () => addAtMiddle('note', { color: 'yellow' }), <StickyNote size={13} />)}
-          {tool(tr('Carte', 'Card'), () => addAtMiddle('card', { color: 'white' }), <Square size={13} />)}
-          {tool(tr('Texte', 'Text'), () => addAtMiddle('text'), <Type size={13} />)}
-          {tool(tr('Forme', 'Shape'), () => addAtMiddle('shape', { shape: 'rect', color: 'white', stroke: 'ink' }), <RectangleHorizontal size={13} />)}
-          {window.electronAPI && tool(tr('Image (copiee dans le board)', 'Image (copied into the board)'), () => { void addImage() }, <ImagePlus size={13} />)}
-          {tool(linkFrom ? tr('Clique l\'objet d\'arrivee', 'Click the target object') : tr('Lier deux objets', 'Link two objects'),
+          {btn(tr('Note', 'Note'), () => addAtMiddle('note', { color: 'yellow' }), <StickyNote size={13} />)}
+          {btn(tr('Carte', 'Card'), () => addAtMiddle('card', { color: 'white' }), <Square size={13} />)}
+          {btn(tr('Texte', 'Text'), () => addAtMiddle('text'), <Type size={13} />)}
+          {btn(tr('Forme', 'Shape'), () => addAtMiddle('shape', { shape: 'rect', color: 'white', stroke: 'ink' }), <RectangleHorizontal size={13} />)}
+          {window.electronAPI && btn(tr('Image (copiee dans le board)', 'Image (copied into the board)'), () => { void addImage() }, <ImagePlus size={13} />)}
+          {btn(linkFrom ? tr('Clique l\'objet d\'arrivee', 'Click the target object') : tr('Lier deux objets', 'Link two objects'),
                 () => setLinkFrom(l => l ? null : 'armed'), <Link2 size={13} />, !!linkFrom)}
+          {btn(tr('Cadre', 'Frame'), () => addAtMiddle('frame', { color: 'grey', text: `${tr('Cadre', 'Frame')} ${frames.length + 1}`, z: 0 }), <Frame size={13} />)}
+          {btn(tr('Carte FLUX (asset, shot, publish)', 'FLUX card (asset, shot, publish)'),
+                () => { if (!project) toast.info(tr('Ouvre un projet pour poser une carte FLUX.', 'Open a project to drop a FLUX card.')); else setFluxPicker(s => !s) },
+                <Clapperboard size={13} />, fluxPicker)}
+          {btn(tr('Modeles de board', 'Board templates'), openTemplates, <LayoutTemplate size={13} />, showTemplates)}
           {sep}
-          {tool(tr('Annuler (Ctrl+Z, tes actions seulement)', 'Undo (Ctrl+Z, your own actions only)'), () => { history.undo().catch(fail) }, <Undo2 size={13} />, false, !history.canUndo)}
-          {tool(tr('Retablir (Ctrl+Y)', 'Redo (Ctrl+Y)'), () => { history.redo().catch(fail) }, <Redo2 size={13} />, false, !history.canRedo)}
+          {btn(tr('Stylo', 'Pen'), () => setTool(t => t === 'pen' ? 'select' : 'pen'), <PenLine size={13} />, tool === 'pen')}
+          {btn(tr('Surligneur', 'Highlighter'), () => { setTool(t => t === 'highlighter' ? 'select' : 'highlighter'); setPenColor(c => c === 'ink' ? 'yellow' : c) },
+                <Highlighter size={13} />, tool === 'highlighter')}
+          {btn(tr('Gomme (efface les traits entiers)', 'Eraser (removes whole strokes)'), () => setTool(t => t === 'eraser' ? 'select' : 'eraser'),
+                <Eraser size={13} />, tool === 'eraser')}
+          {sep}
+          {btn(tr('Annuler (Ctrl+Z, tes actions seulement)', 'Undo (Ctrl+Z, your own actions only)'), () => { history.undo().catch(fail) }, <Undo2 size={13} />, false, !history.canUndo)}
+          {btn(tr('Retablir (Ctrl+Y)', 'Redo (Ctrl+Y)'), () => { history.redo().catch(fail) }, <Redo2 size={13} />, false, !history.canRedo)}
         </>}
         <span style={{ flex: 1 }} />
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--rule-2)', borderRadius: 5, padding: '0 6px', height: 24, background: 'var(--bg-deep)' }}>
@@ -560,13 +725,22 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
                  style={{ width: 110, border: 'none', outline: 'none', background: 'transparent', color: 'var(--ink)', fontSize: 12 }} />
           {query && <span className="cap" style={{ color: 'var(--ink-4)' }}>{matches.length ? `${Math.max(hit, 0) + 1}/${matches.length}` : '0'}</span>}
         </span>
-        {tool(tr('Magnetisme (grille et alignement ; Alt pour l\'ignorer)', 'Snapping (grid and alignment; Alt to skip)'), () => setSnap(s => !s), <Magnet size={13} />, snap)}
-        {tool(tr('Mini-carte', 'Minimap'), () => setShowMap(s => !s), <MapIcon size={13} />, showMap)}
-        {tool(tr('Zoom arriere', 'Zoom out'), () => setView(v => ({ ...v, z: Math.max(ZOOM_MIN, v.z / 1.2) })), <Minus size={13} />)}
+        {btn(tr('Magnetisme (grille et alignement ; Alt pour l\'ignorer)', 'Snapping (grid and alignment; Alt to skip)'), () => setSnap(s => !s), <Magnet size={13} />, snap)}
+        {btn(tr('Mini-carte', 'Minimap'), () => setShowMap(s => !s), <MapIcon size={13} />, showMap)}
+        {btn(tr('Zoom arriere', 'Zoom out'), () => setView(v => ({ ...v, z: Math.max(ZOOM_MIN, v.z / 1.2) })), <Minus size={13} />)}
         <span className="cap" style={{ minWidth: 38, textAlign: 'center' }}>{Math.round(view.z * 100)} %</span>
-        {tool(tr('Zoom avant', 'Zoom in'), () => setView(v => ({ ...v, z: Math.min(ZOOM_MAX, v.z * 1.2) })), <Plus size={13} />)}
-        {tool(tr('Tout voir (Maj+1)', 'Fit (Shift+1)'), fit, <Maximize size={13} />)}
+        {btn(tr('Zoom avant', 'Zoom in'), () => setView(v => ({ ...v, z: Math.min(ZOOM_MAX, v.z * 1.2) })), <Plus size={13} />)}
+        {btn(tr('Tout voir (Maj+1)', 'Fit (Shift+1)'), fit, <Maximize size={13} />)}
+        {btn(tr('Presenter les cadres', 'Present the frames'), startPresent, <Play size={13} />, false, !frames.length)}
       </div>
+
+      {canEdit && (tool === 'pen' || tool === 'highlighter') && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+          <span className="cap" style={{ marginRight: 6 }}>{tool === 'pen' ? tr('Stylo', 'Pen') : tr('Surligneur', 'Highlighter')}</span>
+          {Object.entries(STROKES).filter(([k]) => k !== 'none').map(([k, css]) => swatch(k, css, penColor === k, () => setPenColor(k), true))}
+          <span className="cap" style={{ marginLeft: 8, color: 'var(--ink-4)' }}>{tr('Echap pour sortir', 'Esc to leave')}</span>
+        </div>
+      )}
 
       {canEdit && selection.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap', background: 'var(--paper-2)' }}>
@@ -576,15 +750,15 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
             {sep}
             {Object.entries(STROKES).map(([k, css]) => swatch(k, css, one(selCards, i => i.stroke) === k, () => style({ stroke: k }), true))}
             {sep}
-            {tool(tr('Texte plus petit', 'Smaller text'), () => fontStep(-1), <span style={{ fontSize: 10 }}>A-</span>)}
+            {btn(tr('Texte plus petit', 'Smaller text'), () => fontStep(-1), <span style={{ fontSize: 10 }}>A-</span>)}
             <span className="cap" style={{ minWidth: 20, textAlign: 'center' }}>{one(selCards, fontOf) ?? '-'}</span>
-            {tool(tr('Texte plus grand', 'Bigger text'), () => fontStep(1), <span style={{ fontSize: 13 }}>A+</span>)}
-            {tool(tr('Gras', 'Bold'), () => style({ bold: one(selCards, i => !!i.bold) ? null : true }), <Bold size={13} />, !!one(selCards, i => !!i.bold))}
+            {btn(tr('Texte plus grand', 'Bigger text'), () => fontStep(1), <span style={{ fontSize: 13 }}>A+</span>)}
+            {btn(tr('Gras', 'Bold'), () => style({ bold: one(selCards, i => !!i.bold) ? null : true }), <Bold size={13} />, !!one(selCards, i => !!i.bold))}
             {selCards.some(c => c.type === 'shape') && <>
               {sep}
               {([['rect', <Square size={13} key="r" />], ['round', <Squircle size={13} key="o" />], ['ellipse', <Circle size={13} key="e" />],
                  ['diamond', <Diamond size={13} key="d" />]] as [Shape, React.ReactNode][]).map(([s, icon]) =>
-                <span key={s}>{tool(s, () => update(selCards.filter(c => c.type === 'shape').map(c => ({ rid: c.rid, fields: { shape: s } }))), icon,
+                <span key={s}>{btn(s, () => update(selCards.filter(c => c.type === 'shape').map(c => ({ rid: c.rid, fields: { shape: s } }))), icon,
                                     one(selCards.filter(c => c.type === 'shape'), i => i.shape ?? 'rect') === s)}</span>)}
             </>}
             {sep}
@@ -593,13 +767,13 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
             {Object.entries(STROKES).filter(([k]) => k !== 'none').map(([k, css]) => swatch(k, css, one(selLinks, i => i.stroke) === k, () => style({ stroke: k }, 'links'), true))}
             {sep}
             {(['solid', 'dashed', 'dotted'] as const).map(d => (
-              <span key={d}>{tool(d, () => style({ dash: d }, 'links'),
+              <span key={d}>{btn(d, () => style({ dash: d }, 'links'),
                 <svg width={18} height={8}><line x1={1} y1={4} x2={17} y2={4} stroke="currentColor" strokeWidth={1.5}
                                                  strokeDasharray={d === 'dashed' ? '5 3' : d === 'dotted' ? '1.5 2.5' : undefined} /></svg>,
                 (one(selLinks, i => i.dash ?? 'solid')) === d)}</span>
             ))}
-            {tool(tr('Fleche au debut', 'Arrow at start'), () => style({ arrow_start: one(selLinks, i => !!i.arrow_start) ? null : true }, 'links'), <MoveLeft size={13} />, !!one(selLinks, i => !!i.arrow_start))}
-            {tool(tr('Fleche a la fin', 'Arrow at end'), () => style({ arrow_end: one(selLinks, i => !!i.arrow_end) ? null : true }, 'links'), <MoveRight size={13} />, !!one(selLinks, i => !!i.arrow_end))}
+            {btn(tr('Fleche au debut', 'Arrow at start'), () => style({ arrow_start: one(selLinks, i => !!i.arrow_start) ? null : true }, 'links'), <MoveLeft size={13} />, !!one(selLinks, i => !!i.arrow_start))}
+            {btn(tr('Fleche a la fin', 'Arrow at end'), () => style({ arrow_end: one(selLinks, i => !!i.arrow_end) ? null : true }, 'links'), <MoveRight size={13} />, !!one(selLinks, i => !!i.arrow_end))}
             {singleLink && <input key={singleLink.rid} ref={labelRef} defaultValue={singleLink.label ?? ''} placeholder={tr('Libelle', 'Label')}
                                   onBlur={e => { if (e.target.value !== (singleLink.label ?? '')) update([{ rid: singleLink.rid, fields: { label: e.target.value || null } }]) }}
                                   onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
@@ -607,32 +781,40 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
             {sep}
           </>}
           {selCards.length > 0 && <>
-            {tool(tr('Devant (Ctrl+])', 'Bring to front (Ctrl+])'), () => order(true), <BringToFront size={13} />)}
-            {tool(tr('Derriere (Ctrl+[)', 'Send to back (Ctrl+[)'), () => order(false), <SendToBack size={13} />)}
+            {btn(tr('Devant (Ctrl+])', 'Bring to front (Ctrl+])'), () => order(true), <BringToFront size={13} />)}
+            {btn(tr('Derriere (Ctrl+[)', 'Send to back (Ctrl+[)'), () => order(false), <SendToBack size={13} />)}
             {selCards.some(c => c.group)
-              ? tool(tr('Degrouper (Ctrl+Maj+G)', 'Ungroup (Ctrl+Shift+G)'), () => group(false), <Ungroup size={13} />)
-              : tool(tr('Grouper (Ctrl+G)', 'Group (Ctrl+G)'), () => group(true), <Group size={13} />, false, selCards.length < 2)}
-            {tool(selCards.every(c => c.locked) ? tr('Deverrouiller (Ctrl+L)', 'Unlock (Ctrl+L)') : tr('Verrouiller (Ctrl+L)', 'Lock (Ctrl+L)'), lock,
+              ? btn(tr('Degrouper (Ctrl+Maj+G)', 'Ungroup (Ctrl+Shift+G)'), () => group(false), <Ungroup size={13} />)
+              : btn(tr('Grouper (Ctrl+G)', 'Group (Ctrl+G)'), () => group(true), <Group size={13} />, false, selCards.length < 2)}
+            {btn(selCards.every(c => c.locked) ? tr('Deverrouiller (Ctrl+L)', 'Unlock (Ctrl+L)') : tr('Verrouiller (Ctrl+L)', 'Lock (Ctrl+L)'), lock,
                   selCards.every(c => c.locked) ? <LockOpen size={13} /> : <Lock size={13} />, selCards.every(c => c.locked))}
-            {tool(tr('Dupliquer (Ctrl+D)', 'Duplicate (Ctrl+D)'), duplicate, <Copy size={13} />)}
+            {btn(tr('Dupliquer (Ctrl+D)', 'Duplicate (Ctrl+D)'), duplicate, <Copy size={13} />)}
           </>}
-          {tool(tr('Supprimer (Suppr)', 'Delete (Del)'), () => remove(selection), <Trash2 size={13} />)}
+          {btn(tr('Supprimer (Suppr)', 'Delete (Del)'), () => remove(selection), <Trash2 size={13} />)}
         </div>
       )}
+
+      </>}
 
       <div ref={surface} tabIndex={0} onKeyDown={onKey} onKeyUp={e => { if (e.key === ' ') setSpace(false) }}
            onBlur={() => setSpace(false)} onContextMenu={e => e.preventDefault()}
            onPointerDown={onSurfaceDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-           onDoubleClick={e => { if (canEdit && e.target === e.currentTarget) { const p = toBoard(e.clientX, e.clientY); add({ type: 'note', color: 'yellow', text: '', x: Math.round(p.x - 90), y: Math.round(p.y - 60), z: topZ() }) } }}
-           style={{ position: 'relative', height, overflow: 'hidden', outline: 'none', touchAction: 'none',
-                    cursor: linkFrom ? 'crosshair' : panning ? 'grabbing' : hand || space ? 'grab' : 'default',
+           onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }} onDrop={onDrop}
+           onDoubleClick={e => { if (canEdit && !drawing && !presenting && e.target === e.currentTarget) { const p = toBoard(e.clientX, e.clientY); add({ type: 'note', color: 'yellow', text: '', x: Math.round(p.x - 90), y: Math.round(p.y - 60), z: topZ() }) } }}
+           style={{ position: 'relative', height: presenting ? undefined : height, flex: presenting ? 1 : undefined,
+                    overflow: 'hidden', outline: 'none', touchAction: 'none',
+                    cursor: linkFrom || drawing ? 'crosshair' : panning ? 'grabbing' : hand || space ? 'grab' : 'default',
                     backgroundColor: 'var(--bg-deep)',
                     backgroundImage: 'radial-gradient(var(--rule) 1px, transparent 1px)',
                     backgroundSize: `${24 * view.z}px ${24 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
         <div style={{ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, pointerEvents: 'none' }}>
           <BoardLayer visible={visible} links={visibleLinks} byId={byId} boxOf={boxOf} selSet={selSet} matchSet={matchSet}
                       singleCard={singleCard} editing={editing} linkFrom={linkFrom} canEdit={canEdit} media={media}
-                      placeholder={placeholder} handlers={handlers} onLinkDown={onLinkDown} />
+                      placeholder={placeholder} handlers={handlers} onLinkDown={onLinkDown} faded={erasing} />
+          {draft && draft.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
+            <polyline points={draft.map(q => `${q[0]},${q[1]}`).join(' ')} fill="none" stroke={STROKES[penColor] ?? STROKES.ink}
+                      strokeWidth={tool === 'highlighter' ? 16 : 3} strokeLinecap="round" strokeLinejoin="round" opacity={tool === 'highlighter' ? 0.4 : 1} />
+          </svg>}
           {guides.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
             {guides.map((g, i) => g.x !== undefined
               ? <line key={i} x1={g.x} x2={g.x} y1={viewport.y} y2={viewport.y + viewport.h} stroke="var(--accent)" strokeWidth={1 / view.z} strokeDasharray={`${4 / view.z} ${3 / view.z}`} />
@@ -641,7 +823,35 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
           {marquee && <div style={{ position: 'absolute', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h, zIndex: 4,
                                     border: `${1 / view.z}px solid var(--accent)`, background: 'oklch(60% 0.12 245 / 0.08)' }} />}
         </div>
-        {showMap && cards.length > 0 && <BoardMinimap boxes={boxes} viewport={viewport} onCenter={(x, y) => centreOn({ x, y, w: 0, h: 0 })} />}
+        {presenting && current && (
+          <div style={{ position: 'absolute', left: '50%', bottom: 14, transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, zIndex: 6,
+                        padding: '4px 8px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, boxShadow: '0 2px 6px oklch(0% 0 0 / 0.2)' }}>
+            {btn(tr('Precedent', 'Previous'), () => setPresent(i => Math.max((i ?? 0) - 1, 0)), <ChevronLeft size={14} />, false, present === 0)}
+            <span className="cap" style={{ minWidth: 120, textAlign: 'center' }}>{(present ?? 0) + 1} / {frames.length} · {current.text || tr('Cadre', 'Frame')}</span>
+            {btn(tr('Suivant', 'Next'), () => setPresent(i => Math.min((i ?? 0) + 1, frames.length - 1)), <ChevronRight size={14} />, false, present === frames.length - 1)}
+            {btn(tr('Quitter (Echap)', 'Leave (Esc)'), stopPresent, <X size={14} />)}
+          </div>
+        )}
+        {fluxPicker && <FluxPicker payload={production} onPick={addFlux} onClose={() => setFluxPicker(false)} />}
+        {showTemplates && (
+          <div onPointerDown={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}
+               style={{ position: 'absolute', left: 10, top: 10, width: 280, zIndex: 8, background: 'var(--paper)', border: '1px solid var(--rule)',
+                        borderRadius: 8, boxShadow: '0 4px 14px oklch(0% 0 0 / 0.2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '6px 8px', borderBottom: '1px solid var(--rule)' }}>
+              <span className="cap">{tr('Inserer un modele au centre', 'Insert a template in the middle')}</span>
+              <span style={{ flex: 1 }} />
+              {btn(tr('Fermer', 'Close'), () => setShowTemplates(false), <X size={13} />)}
+            </div>
+            {!templates ? <div className="tp-note" style={{ padding: 10 }}>{tr('Chargement...', 'Loading...')}</div>
+              : templates.map(t => (
+                <div key={t.id} onClick={() => insertTemplate(t)} style={{ padding: '6px 10px', cursor: 'pointer', borderTop: '1px solid var(--rule)' }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{lang === 'en' ? t.label_en : t.label}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{lang === 'en' ? t.description_en : t.description}</div>
+                </div>
+              ))}
+          </div>
+        )}
+        {showMap && !presenting && cards.length > 0 && <BoardMinimap boxes={boxes} viewport={viewport} onCenter={(x, y) => centreOn({ x, y, w: 0, h: 0 })} />}
         {data.error && <div className="tp-note" style={{ position: 'absolute', left: 10, bottom: 8, color: preview ? undefined : 'var(--err)' }}>
           {preview ? tr('Apercu : enregistre la page pour lire ses donnees.', 'Preview: save the page to read its data.') : data.error}</div>}
         {data.loaded && !cards.length && !data.error && (
@@ -651,5 +861,6 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
         )}
       </div>
     </div>
+    </FluxBoardContext.Provider>
   )
 }

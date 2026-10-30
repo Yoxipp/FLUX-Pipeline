@@ -3,7 +3,7 @@
 // The TD boxes themselves (flows_td, flows_team_td) are written through /settings/user-data.
 
 import { apiCall, BASE_URL } from './client'
-import type { ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RunRecord, RunStatus, RunSummary, SaveResult, VersionList, PagePorts, PageFlows, PageClickRun, PageTarget, ExamplePage } from '../pages/flow_editor/types'
+import type { BoardTemplate, ActivationGate, BridgeInfo, BridgeInstallResult, FlowCatalog, HostInfo, FlowDoc, FlowListItem, FlowRead, FlowRights, FlowScope, FlowState, Issue, MigrateReport, PageDataOp, PageDataRead, PageDoc, PageIssue, PageLink, PageList, PageRead, PageScope, RunRecord, RunStatus, RunSummary, SaveResult, VersionList, PagePorts, PageFlows, PageClickRun, PageTarget, ExamplePage } from '../pages/flow_editor/types'
 
 // Fired after a TD box changes so open views (Advanced, editor) re-read the rights.
 export const FLOW_RIGHTS_EVENT = 'flux:flows-rights'
@@ -127,6 +127,8 @@ export const flowsApi = {
   // The backend copies the picked local file (bytes never go through the API, ADR 0005).
   addPageImage: (page: string, collection: string, path: string, project?: string): Promise<{ image: string }> =>
     apiCall('POST', `/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}/media`, { path, project }),
+  // Board templates shipped with FLUX (ADR 0074): objects with local keys, inserted like a paste.
+  boardTemplates: (): Promise<{ templates: BoardTemplate[] }> => apiCall('GET', '/flows/board_templates'),
   pageImageUrl: (page: string, collection: string, image: string, project?: string): string =>
     `${BASE_URL}/flows/pages/${encodeURIComponent(page)}/data/${encodeURIComponent(collection)}/media/${encodeURIComponent(image.replace(/^media\//, ''))}${qs({ project })}`,
 }

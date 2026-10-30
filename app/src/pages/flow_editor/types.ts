@@ -484,6 +484,10 @@ export interface PageRecord {
 export type PageDataRead =
   | { etag: string; unchanged: true; write?: 'all' | 'team_td' }
   | { etag: string; unchanged: false; records: PageRecord[]; write: 'all' | 'team_td' }
+export interface BoardTemplate {
+  id: string; label: string; label_en: string; description: string; description_en: string
+  items: Array<Record<string, unknown> & { key: string; text_en?: string }>
+}
 export type PageDataOp =
   | { op: 'put'; rid?: string; fields: Record<string, unknown>; restore?: boolean }
   | { op: 'del'; rid: string }

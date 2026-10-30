@@ -1,9 +1,10 @@
-// model.ts — board v2 data helpers (ADR 0071): item type, palette, geometry, ops for the
-// undo stack and the clipboard. Flat fields only (one field = one value, per field merge).
+// model.ts — board data helpers (ADR 0071, v3 ADR 0074): item type, palette, geometry, ops for
+// the undo stack and the clipboard, free drawing points, frame reading order. Flat fields only
+// (one field = one value, per field merge).
 
 import type { PageDataOp, PageRecord } from '../../flow_editor/types'
 
-export type ItemType = 'note' | 'card' | 'image' | 'link' | 'shape' | 'text'
+export type ItemType = 'note' | 'card' | 'image' | 'link' | 'shape' | 'text' | 'frame' | 'ink' | 'flux'
 export type Shape = 'rect' | 'round' | 'ellipse' | 'diamond'
 
 export type Item = PageRecord & {
@@ -12,6 +13,7 @@ export type Item = PageRecord & {
   shape?: Shape; stroke?: string; font_size?: number; bold?: boolean
   label?: string; dash?: 'solid' | 'dashed' | 'dotted'; arrow_start?: boolean; arrow_end?: boolean
   group?: string; locked?: boolean
+  points?: string; stroke_width?: number; highlight?: boolean; ref?: string
 }
 export interface Box { x: number; y: number; w: number; h: number }
 
@@ -24,13 +26,14 @@ export const FILLS: Record<string, string> = {
 export const STROKES: Record<string, string> = {
   ink: 'oklch(30% 0.02 250)', grey: 'oklch(60% 0.01 250)', blue: 'oklch(55% 0.12 245)',
   green: 'oklch(55% 0.11 150)', red: 'oklch(55% 0.15 25)', orange: 'oklch(65% 0.13 60)',
-  purple: 'oklch(52% 0.12 300)', none: 'transparent',
+  purple: 'oklch(52% 0.12 300)', yellow: 'oklch(82% 0.15 95)', none: 'transparent',
 }
 export const FONT_SIZES = [10, 12, 13, 14, 16, 18, 24, 32, 48, 64]
 export const SIZE: Record<ItemType, [number, number]> = {
   note: [180, 120], card: [220, 90], image: [240, 180], shape: [160, 100], text: [200, 40], link: [0, 0],
+  frame: [480, 360], ink: [1, 1], flux: [240, 104],
 }
-export const DEFAULT_FONT: Record<ItemType, number> = { note: 13, card: 13, image: 13, shape: 14, text: 16, link: 12 }
+export const DEFAULT_FONT: Record<ItemType, number> = { note: 13, card: 13, image: 13, shape: 14, text: 16, link: 12, frame: 13, ink: 13, flux: 12 }
 export const GRID = 8
 export const CLIP_TAG = 'flux_board'
 
@@ -40,7 +43,8 @@ export const dims = (it: Item): Box => {
   const [dw, dh] = SIZE[typeOf(it)]
   return { x: num(it.x, 0), y: num(it.y, 0), w: num(it.w, dw), h: num(it.h, dh) }
 }
-export const fillOf = (it: Item) => FILLS[it.color ?? ''] ?? FILLS[it.type === 'card' || it.type === 'shape' ? 'white' : it.type === 'text' ? 'none' : 'yellow']
+export const fillOf = (it: Item) => FILLS[it.color ?? ''] ?? FILLS[it.type === 'card' || it.type === 'shape' || it.type === 'flux' ? 'white'
+  : it.type === 'text' || it.type === 'ink' ? 'none' : it.type === 'frame' ? 'grey' : 'yellow']
 export const strokeOf = (it: Item, d = 'grey') => STROKES[it.stroke ?? d] ?? STROKES[d]
 export const fontOf = (it: Item) => num(it.font_size, DEFAULT_FONT[typeOf(it)])
 
@@ -89,3 +93,64 @@ export function parseClip(text: string): ClipData | null {
     return d && d[CLIP_TAG] === 2 && Array.isArray(d.items) ? d as ClipData : null
   } catch { return null }
 }
+
+// -- free drawing (points relative to x / y, "x,y x,y") -----------------------
+export const MAX_POINTS = 2000
+export type Pt = [number, number]
+export function parsePoints(s: string | undefined): Pt[] {
+  if (!s) return []
+  return s.split(' ').map(p => p.split(',').map(Number) as Pt).filter(p => p.length === 2 && p.every(Number.isFinite))
+}
+// Ramer-Douglas-Peucker: drop the points closer than *eps* to the line of their neighbours.
+export function simplify(pts: Pt[], eps: number): Pt[] {
+  if (pts.length < 3) return pts
+  const [a, b] = [pts[0], pts[pts.length - 1]]
+  let far = 0, at = 0
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = segDist(pts[i], a, b)
+    if (d > far) { far = d; at = i }
+  }
+  if (far <= eps) return [a, b]
+  return [...simplify(pts.slice(0, at + 1), eps).slice(0, -1), ...simplify(pts.slice(at), eps)]
+}
+export function segDist(p: Pt, a: Pt, b: Pt) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+}
+// The record of a stroke drawn in board coordinates: box + points relative to its corner.
+export function inkFields(pts: Pt[], eps: number): Record<string, unknown> | null {
+  let s = simplify(pts, eps)
+  if (s.length > MAX_POINTS) s = s.filter((_, i) => i % Math.ceil(s.length / MAX_POINTS) === 0)
+  if (s.length < 2) s = [s[0], [s[0][0] + 0.5, s[0][1] + 0.5]]
+  const x0 = Math.min(...s.map(p => p[0])), y0 = Math.min(...s.map(p => p[1]))
+  const x1 = Math.max(...s.map(p => p[0])), y1 = Math.max(...s.map(p => p[1]))
+  const r = (v: number) => Math.round(v * 10) / 10
+  return { x: r(x0), y: r(y0), w: r(Math.max(1, x1 - x0)), h: r(Math.max(1, y1 - y0)),
+           points: s.map(p => `${r(p[0] - x0)},${r(p[1] - y0)}`).join(' ') }
+}
+// Does the stroke pass within *tol* of (px, py)? (board coordinates)
+export function inkHit(it: Item, px: number, py: number, tol: number) {
+  const b = dims(it), pts = parsePoints(it.points)
+  const t = tol + (it.stroke_width ?? 3) / 2
+  if (px < b.x - t || py < b.y - t || px > b.x + b.w + t || py > b.y + b.h + t) return false
+  const p: Pt = [px - b.x, py - b.y]
+  for (let i = 1; i < pts.length; i++) if (segDist(p, pts[i - 1], pts[i]) <= t) return true
+  return pts.length === 1 && Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]) <= t
+}
+
+// -- frames --------------------------------------------------------------------
+// Reading order: rows (a frame starts a new row when its top is below half the row height),
+// then left to right. Nothing to set: a storyboard laid out in rows reads by itself.
+export function readingOrder(frames: Item[]): Item[] {
+  const boxes = frames.map(f => ({ f, b: dims(f) })).sort((a, b) => a.b.y - b.b.y)
+  const rows: { y: number; h: number; items: typeof boxes }[] = []
+  for (const e of boxes) {
+    const row = rows[rows.length - 1]
+    if (row && e.b.y < row.y + row.h / 2) row.items.push(e)
+    else rows.push({ y: e.b.y, h: e.b.h, items: [e] })
+  }
+  return rows.flatMap(r => r.items.sort((a, b) => a.b.x - b.b.x).map(e => e.f))
+}
+export const inside = (inner: Box, outer: Box) =>
+  inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h
