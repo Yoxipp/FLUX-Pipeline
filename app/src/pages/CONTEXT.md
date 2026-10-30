@@ -245,6 +245,10 @@ Specs : `docs/yaml_update_refonte/03_EDITEUR.md` (disposition, familles, ports, 
   dates / reactions / fil de commentaires, @nom notifie), supprimer un objet emporte ses commentaires et reactions,
   minuteur partage (`timer`, `ends_at`), export PNG / PDF (`board/exportBoard.ts` : redessine depuis les donnees,
   PDF ecrit a la main, enregistre par `electronAPI.saveBytes`, sinon telechargement).
+  Retours du mainteneur (2026-10-30) : barre de selection et barre du stylo flottantes sur le board (plus de decalage),
+  raccourcis ecoutes sur tout le widget (Suppr marche apres un clic sur une couleur, sauf dans un champ texte), ordre en
+  4 actions (un cran / tout devant / derriere, icone carre + 1 ou 2 fleches), points du fond masquables (par poste),
+  double clic sur un objet = editer (un cadre : son nom), meme sous la capture du pointeur (`lastDown`).
 * `ToolPage.tsx` (route `/tool?page=<id>`, detachable) : rail des pages par portee (masque avec une seule page, recherche
   au-dela de 8), derniere page par artiste (`flux.tool.last`), en-tete (icone `icons.ts`, tag de portee, "Editer" et
   "Nouvelle" pour un Team TD), relecture sur WS `page_changed` / `activation` / `flow_changed`. Entree `TOOL` du groupe

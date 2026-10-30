@@ -22,9 +22,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as RPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bold, BringToFront, ChevronLeft, Download, MessageSquare, Timer, ChevronRight, Circle, Clapperboard, Copy, Diamond, Eraser, Frame, Group, Hand, Highlighter, ImagePlus,
+  Bold, ChevronLeft, Download, Grid3x3, MessageSquare, Timer, ChevronRight, Circle, Clapperboard, Copy, Diamond, Eraser, Frame, Group, Hand, Highlighter, ImagePlus,
   LayoutTemplate, Link2, Lock, LockOpen, Magnet, Map as MapIcon, Maximize, Minus, MousePointer2, MoveLeft, MoveRight, PenLine, Play, Plus,
-  Redo2, Search, SendToBack, Square, Squircle, StickyNote, Trash2, Type, Undo2, Ungroup, RectangleHorizontal, X,
+  Redo2, Search, Square, Squircle, StickyNote, Trash2, Type, Undo2, Ungroup, RectangleHorizontal, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { flowsApi } from '../../api/flows'
@@ -61,6 +61,19 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i
 type Guide = { x?: number; y?: number }
 
 const fail = (err: unknown) => toast.error((err as Error).message)
+
+// Order icons: a square with one arrow (one step) or two (all the way), up = forward.
+function OrderIcon({ up = false, double = false }: { up?: boolean; double?: boolean }) {
+  const head = (y: number) => up ? `M10.5 ${y + 2} L12.5 ${y} L14.5 ${y + 2}` : `M10.5 ${y - 2} L12.5 ${y} L14.5 ${y - 2}`
+  return (
+    <svg width={16} height={14} viewBox="0 0 16 14" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+      <rect x={1} y={3} width={8} height={8} rx={1} />
+      <path d={up ? 'M12.5 12 V2' : 'M12.5 2 V12'} />
+      <path d={head(up ? 2 : 12)} />
+      {double && <path d={head(up ? 5.5 : 8.5)} />}
+    </svg>
+  )
+}
 const snapTo = (v: number) => Math.round(v / GRID) * GRID
 
 // Objects and links in view. Memoised: its props do not change while panning (the culling
@@ -124,6 +137,9 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const [panning, setPanning] = useState(false)
   const [snap, setSnap] = useState(true)
   const [showMap, setShowMap] = useState(true)
+  // Dotted background: a per viewer choice kept on this machine (never written in the board).
+  const [dots, setDots] = useState(() => { try { return localStorage.getItem('flux.board.dots') !== '0' } catch { return true } })
+  const toggleDots = () => setDots(d => { try { localStorage.setItem('flux.board.dots', d ? '0' : '1') } catch { /* private mode */ } return !d })
   const [query, setQuery] = useState('')
   const [hit, setHit] = useState(-1)
   const surface = useRef<HTMLDivElement>(null)
@@ -131,6 +147,9 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const labelRef = useRef<HTMLInputElement>(null)
   const drag = useRef<Drag | null>(null)
   const clip = useRef<ClipData | null>(null)
+  // The object under the last press: with the pointer captured by the surface (drag), the
+  // double click lands on the surface, not on the object, so we remember which one it was.
+  const lastDown = useRef<{ rid: string; t: number } | null>(null)
 
   // -- derived ---------------------------------------------------------------
   const items = data.records as Item[]
@@ -511,6 +530,23 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     const base = front ? topZ() : cards.reduce((m, c) => Math.min(m, c.z ?? 0), 0) - sel.length
     update(sel.map((c, i) => ({ rid: c.rid, fields: { z: base + i } })))
   }
+  // One step: just above (below) the next object the selection overlaps, in drawing order.
+  const orderStep = (up: boolean) => {
+    if (!selCards.length) return
+    const block = bounds(selCards.map(dims))!
+    const idx = selCards.map(c => cards.indexOf(c)).filter(i => i >= 0)
+    const tier = (c: Item) => c.type === 'frame'
+    const sameTier = (c: Item) => tier(c) === tier(selCards[0])
+    const range = up ? cards.slice(Math.max(...idx) + 1) : cards.slice(0, Math.min(...idx)).reverse()
+    const target = range.find(c => !selSet.has(c.rid) && sameTier(c) && intersects(dims(c), block))
+    if (!target) { toast.info(up ? tr('Deja devant les objets voisins.', 'Already above its neighbours.') : tr('Deja derriere les objets voisins.', 'Already below its neighbours.')); return }
+    const tz = target.z ?? 0
+    const beyond = cards.filter(c => !selSet.has(c.rid) && sameTier(c) && (up ? (c.z ?? 0) > tz : (c.z ?? 0) < tz)).map(c => c.z ?? 0)
+    const next = beyond.length ? (up ? Math.min(...beyond) : Math.max(...beyond)) : tz + (up ? 1 : -1)
+    const sel = [...selCards].sort((a, b) => (a.z ?? 0) - (b.z ?? 0))
+    const gap = (next - tz) / (sel.length + 1)
+    update(sel.map((c, i) => ({ rid: c.rid, fields: { z: tz + gap * (i + 1) } })))
+  }
   const group = (on: boolean) => {
     if (on && selCards.length < 2) return
     const g = on ? newGroupId() : null
@@ -556,7 +592,8 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   }
 
   const onSurfaceDown = (e: RPointerEvent<HTMLDivElement>) => {
-    if (editing) return
+    lastDown.current = null
+    if (editing) { setEditing(null); return }   // the textarea commits on blur
     if (e.button === 1 || e.button === 2 || hand || space) { e.preventDefault(); panStart(e); return }
     if (e.button !== 0) return
     if (linkFrom) { setLinkFrom(null); return }
@@ -575,6 +612,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   }
 
   const onItemDown = (e: RPointerEvent, rid: string) => {
+    if (e.button === 0) lastDown.current = { rid, t: Date.now() }
     if (e.button !== 0 || hand || space || drawing || editing === rid) return   // the surface pans or draws
     e.stopPropagation()
     const it = byId.get(rid)
@@ -725,7 +763,9 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
 
   // -- keys ------------------------------------------------------------------
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (editing || (e.target as HTMLElement) !== surface.current) return
+    // The whole widget listens (a click on a swatch or a button keeps Suppr working); text fields keep their keys.
+    const target = e.target as HTMLElement
+    if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
     const ctrl = e.ctrlKey || e.metaKey, k = e.key.toLowerCase()
     if (present !== null) {
       e.preventDefault()
@@ -749,7 +789,12 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
     if (ctrl && k === 'd') { e.preventDefault(); duplicate(); return }
     if (ctrl && k === 'g') { e.preventDefault(); group(!e.shiftKey); return }
     if (ctrl && k === 'l') { e.preventDefault(); lock(); return }
-    if (ctrl && (e.key === ']' || e.key === '[')) { e.preventDefault(); order(e.key === ']'); return }
+    if (ctrl && (e.key === ']' || e.key === '[' || e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+      e.preventDefault()
+      const up = e.key === ']' || e.code === 'BracketRight'
+      if (e.shiftKey) order(up); else orderStep(up)
+      return
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selection.length) { e.preventDefault(); remove(selection); return }
     if (e.key === 'Enter' && selCards.length === 1 && selCards[0].type !== 'image') { e.preventDefault(); setEditing(selCards[0].rid) }
   }
@@ -796,7 +841,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
   const current = presenting ? frames[Math.min(present, frames.length - 1)] : undefined
   return (
     <FluxBoardContext.Provider value={fluxCtx}>
-    <div ref={root} style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', overflow: 'hidden',
+    <div ref={root} onKeyDown={onKey} onKeyUp={e => { if (e.key === ' ') setSpace(false) }} style={{ border: '1px solid var(--rule)', borderRadius: 8, background: 'var(--paper)', overflow: 'hidden',
                              ...(presenting ? { display: 'flex', flexDirection: 'column', height: '100%' } : {}) }}>
       {!presenting && <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '6px 8px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap' }}>
@@ -838,6 +883,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
         </span>
         {btn(tr('Magnetisme (grille et alignement ; Alt pour l\'ignorer)', 'Snapping (grid and alignment; Alt to skip)'), () => setSnap(s => !s), <Magnet size={13} />, snap)}
         {btn(tr('Mini-carte', 'Minimap'), () => setShowMap(s => !s), <MapIcon size={13} />, showMap)}
+        {btn(tr('Points du fond', 'Background dots'), toggleDots, <Grid3x3 size={13} />, dots)}
         {btn(tr('Zoom arriere', 'Zoom out'), () => setView(v => ({ ...v, z: Math.max(ZOOM_MIN, v.z / 1.2) })), <Minus size={13} />)}
         <span className="cap" style={{ minWidth: 38, textAlign: 'center' }}>{Math.round(view.z * 100)} %</span>
         {btn(tr('Zoom avant', 'Zoom in'), () => setView(v => ({ ...v, z: Math.min(ZOOM_MAX, v.z * 1.2) })), <Plus size={13} />)}
@@ -855,8 +901,47 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
           : canEdit && btn(tr('Minuteur partage', 'Shared timer'), () => setShowTimer(s => !s), <Timer size={13} />, showTimer)}
       </div>
 
+
+      </>}
+
+      <div ref={surface} tabIndex={0}
+           onBlur={() => setSpace(false)} onContextMenu={e => e.preventDefault()}
+           onPointerDown={onSurfaceDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+           onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }} onDrop={onDrop}
+           onDoubleClick={e => {
+             const hit = lastDown.current
+             if (hit && Date.now() - hit.t < 700) { handlers.double(hit.rid); return }   // an object: edit its text (a frame: its name)
+             if (canEdit && !drawing && !presenting && e.target === e.currentTarget) { const p = toBoard(e.clientX, e.clientY); add({ type: 'note', color: 'yellow', text: '', x: Math.round(p.x - 90), y: Math.round(p.y - 60), z: topZ() }) } }}
+           style={{ position: 'relative', height: presenting ? undefined : height, flex: presenting ? 1 : undefined,
+                    overflow: 'hidden', outline: 'none', touchAction: 'none',
+                    cursor: linkFrom || drawing ? 'crosshair' : panning ? 'grabbing' : hand || space ? 'grab' : 'default',
+                    backgroundColor: 'var(--bg-deep)',
+                    backgroundImage: dots ? 'radial-gradient(var(--rule) 1px, transparent 1px)' : 'none',
+                    backgroundSize: `${24 * view.z}px ${24 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, pointerEvents: 'none' }}>
+          <BoardLayer visible={visible} links={visibleLinks} byId={byId} boxOf={boxOf} selSet={selSet} matchSet={matchSet}
+                      singleCard={singleCard} editing={editing} linkFrom={linkFrom} canEdit={canEdit} media={media}
+                      placeholder={placeholder} handlers={handlers} onLinkDown={onLinkDown} faded={erasing} badgeOf={badgeOf} />
+          {draft && draft.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
+            <polyline points={draft.map(q => `${q[0]},${q[1]}`).join(' ')} fill="none" stroke={STROKES[penColor] ?? STROKES.ink}
+                      strokeWidth={tool === 'highlighter' ? 16 : 3} strokeLinecap="round" strokeLinejoin="round" opacity={tool === 'highlighter' ? 0.4 : 1} />
+          </svg>}
+          {guides.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
+            {guides.map((g, i) => g.x !== undefined
+              ? <line key={i} x1={g.x} x2={g.x} y1={viewport.y} y2={viewport.y + viewport.h} stroke="var(--accent)" strokeWidth={1 / view.z} strokeDasharray={`${4 / view.z} ${3 / view.z}`} />
+              : <line key={i} y1={g.y} y2={g.y} x1={viewport.x} x2={viewport.x + viewport.w} stroke="var(--accent)" strokeWidth={1 / view.z} strokeDasharray={`${4 / view.z} ${3 / view.z}`} />)}
+          </svg>}
+          {marquee && <div style={{ position: 'absolute', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h, zIndex: 4,
+                                    border: `${1 / view.z}px solid var(--accent)`, background: 'oklch(60% 0.12 245 / 0.08)' }} />}
+        </div>
+        {!presenting && (
+          // Over the board, not above it: selecting never pushes the board down.
+          <div onPointerDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}
+               style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 6, maxWidth: 'calc(100% - 20px)',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto', display: 'contents' }}>
       {canEdit && (tool === 'pen' || tool === 'highlighter') && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.18)' }}>
           <span className="cap" style={{ marginRight: 6 }}>{tool === 'pen' ? tr('Stylo', 'Pen') : tr('Surligneur', 'Highlighter')}</span>
           {Object.entries(STROKES).filter(([k]) => k !== 'none').map(([k, css]) => swatch(k, css, penColor === k, () => setPenColor(k), true))}
           <span className="cap" style={{ marginLeft: 8, color: 'var(--ink-4)' }}>{tr('Echap pour sortir', 'Esc to leave')}</span>
@@ -864,7 +949,7 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
       )}
 
       {canEdit && selection.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', borderBottom: '1px solid var(--rule)', flexWrap: 'wrap', background: 'var(--paper-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', flexWrap: 'wrap', justifyContent: 'center', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8, boxShadow: '0 2px 8px oklch(0% 0 0 / 0.18)' }}>
           <span className="cap" style={{ marginRight: 6 }}>{selection.length} {tr('selectionne(s)', 'selected')}</span>
           {selCards.length > 0 && <>
             {Object.entries(FILLS).map(([k, css]) => swatch(k, css, one(selCards, i => i.color) === k, () => style({ color: k })))}
@@ -902,8 +987,10 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
             {sep}
           </>}
           {selCards.length > 0 && <>
-            {btn(tr('Devant (Ctrl+])', 'Bring to front (Ctrl+])'), () => order(true), <BringToFront size={13} />)}
-            {btn(tr('Derriere (Ctrl+[)', 'Send to back (Ctrl+[)'), () => order(false), <SendToBack size={13} />)}
+            {btn(tr('Avancer d\u2019un cran (Ctrl+])', 'Bring forward (Ctrl+])'), () => orderStep(true), <OrderIcon up />)}
+            {btn(tr('Reculer d\u2019un cran (Ctrl+[)', 'Send backward (Ctrl+[)'), () => orderStep(false), <OrderIcon />)}
+            {btn(tr('Tout devant (Ctrl+Maj+])', 'Bring to front (Ctrl+Shift+])'), () => order(true), <OrderIcon up double />)}
+            {btn(tr('Tout derriere (Ctrl+Maj+[)', 'Send to back (Ctrl+Shift+[)'), () => order(false), <OrderIcon double />)}
             {selCards.some(c => c.group)
               ? btn(tr('Degrouper (Ctrl+Maj+G)', 'Ungroup (Ctrl+Shift+G)'), () => group(false), <Ungroup size={13} />)
               : btn(tr('Grouper (Ctrl+G)', 'Group (Ctrl+G)'), () => group(true), <Group size={13} />, false, selCards.length < 2)}
@@ -916,36 +1003,9 @@ export function BoardWidget({ page, widget: w, project, preview }: DataWidgetPro
           {btn(tr('Supprimer (Suppr)', 'Delete (Del)'), () => remove(selection), <Trash2 size={13} />)}
         </div>
       )}
-
-      </>}
-
-      <div ref={surface} tabIndex={0} onKeyDown={onKey} onKeyUp={e => { if (e.key === ' ') setSpace(false) }}
-           onBlur={() => setSpace(false)} onContextMenu={e => e.preventDefault()}
-           onPointerDown={onSurfaceDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-           onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }} onDrop={onDrop}
-           onDoubleClick={e => { if (canEdit && !drawing && !presenting && e.target === e.currentTarget) { const p = toBoard(e.clientX, e.clientY); add({ type: 'note', color: 'yellow', text: '', x: Math.round(p.x - 90), y: Math.round(p.y - 60), z: topZ() }) } }}
-           style={{ position: 'relative', height: presenting ? undefined : height, flex: presenting ? 1 : undefined,
-                    overflow: 'hidden', outline: 'none', touchAction: 'none',
-                    cursor: linkFrom || drawing ? 'crosshair' : panning ? 'grabbing' : hand || space ? 'grab' : 'default',
-                    backgroundColor: 'var(--bg-deep)',
-                    backgroundImage: 'radial-gradient(var(--rule) 1px, transparent 1px)',
-                    backgroundSize: `${24 * view.z}px ${24 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
-        <div style={{ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, pointerEvents: 'none' }}>
-          <BoardLayer visible={visible} links={visibleLinks} byId={byId} boxOf={boxOf} selSet={selSet} matchSet={matchSet}
-                      singleCard={singleCard} editing={editing} linkFrom={linkFrom} canEdit={canEdit} media={media}
-                      placeholder={placeholder} handlers={handlers} onLinkDown={onLinkDown} faded={erasing} badgeOf={badgeOf} />
-          {draft && draft.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
-            <polyline points={draft.map(q => `${q[0]},${q[1]}`).join(' ')} fill="none" stroke={STROKES[penColor] ?? STROKES.ink}
-                      strokeWidth={tool === 'highlighter' ? 16 : 3} strokeLinecap="round" strokeLinejoin="round" opacity={tool === 'highlighter' ? 0.4 : 1} />
-          </svg>}
-          {guides.length > 0 && <svg style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', zIndex: 3 }} width={1} height={1}>
-            {guides.map((g, i) => g.x !== undefined
-              ? <line key={i} x1={g.x} x2={g.x} y1={viewport.y} y2={viewport.y + viewport.h} stroke="var(--accent)" strokeWidth={1 / view.z} strokeDasharray={`${4 / view.z} ${3 / view.z}`} />
-              : <line key={i} y1={g.y} y2={g.y} x1={viewport.x} x2={viewport.x + viewport.w} stroke="var(--accent)" strokeWidth={1 / view.z} strokeDasharray={`${4 / view.z} ${3 / view.z}`} />)}
-          </svg>}
-          {marquee && <div style={{ position: 'absolute', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h, zIndex: 4,
-                                    border: `${1 / view.z}px solid var(--accent)`, background: 'oklch(60% 0.12 245 / 0.08)' }} />}
-        </div>
+            </div>
+          </div>
+        )}
         {presenting && current && (
           <div style={{ position: 'absolute', left: '50%', bottom: 14, transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, zIndex: 6,
                         padding: '4px 8px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, boxShadow: '0 2px 6px oklch(0% 0 0 / 0.2)' }}>
